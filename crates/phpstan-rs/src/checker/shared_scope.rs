@@ -19,6 +19,9 @@ use crate::registry::summaries::{BodySummary, Place, Step};
 pub(crate) struct SharedScope {
     /// The scope is a file's top level, where every variable is a global.
     pub(crate) top_level: bool,
+    /// The scope is a closure's or an arrow function's, which may be bound
+    /// to any class's scope.
+    pub(crate) closure: bool,
     /// The variables `global` binds, each to the global of its name.
     pub(crate) globals: FxHashSet<Name>,
     /// A `global` statement binds a variable whose name is computed.
@@ -131,6 +134,7 @@ impl Scan {
         }
         SharedScope {
             top_level,
+            closure: false,
             globals: self.globals,
             any_global: self.any_global,
             statics: self.statics,

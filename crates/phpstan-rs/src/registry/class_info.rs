@@ -62,6 +62,9 @@ pub struct PropertyReflection {
     // access.
     pub(in crate::registry) tag_read_only: bool,
     pub(in crate::registry) tag_write_only: bool,
+    // Declared only by a `@property` tag: no such property exists, and an
+    // access runs `__get`, `__set`, `__isset` or `__unset`.
+    pub(in crate::registry) from_tag: bool,
     // `public`/`private`/`protected`. A magic `@property` tag and an
     // enum's built-in `name`/`value` are always `Visibility::Public` -
     // real PHP has no way to declare either any other way.
@@ -212,6 +215,10 @@ impl PropertyReflection {
 
     pub fn tag_write_only(&self) -> bool {
         self.tag_write_only
+    }
+
+    pub fn from_tag(&self) -> bool {
+        self.from_tag
     }
 
     pub fn write_visibility(&self) -> Visibility {
@@ -1173,6 +1180,7 @@ impl ClassReflection {
                             && doc_ty.as_ref().is_some_and(|d| d.readonly),
                         tag_read_only: false,
                         tag_write_only: false,
+                        from_tag: false,
                         set_ty,
                         is_virtual,
                         visibility: p.visibility,
@@ -1277,6 +1285,7 @@ impl ClassReflection {
                             && doc_readonly,
                         tag_read_only: false,
                         tag_write_only: false,
+                        from_tag: false,
                         set_ty,
                         is_virtual,
                         visibility: p
@@ -1343,6 +1352,7 @@ impl ClassReflection {
                         readonly_by_phpdoc: false,
                         tag_read_only: tag.readable && !tag.writable,
                         tag_write_only: tag.writable && !tag.readable,
+                        from_tag: true,
                         set_ty: None,
                         is_virtual: false,
                         visibility: Visibility::Public,
@@ -1931,6 +1941,7 @@ impl ClassReflection {
                 readonly_by_phpdoc: false,
                 tag_read_only: false,
                 tag_write_only: false,
+                from_tag: false,
                 set_ty: None,
                 is_virtual: false,
                 visibility: Visibility::Public,
@@ -1997,6 +2008,7 @@ impl ClassReflection {
                     readonly_by_phpdoc: false,
                     tag_read_only: false,
                     tag_write_only: false,
+                    from_tag: false,
                     set_ty: None,
                     is_virtual: false,
                     visibility: Visibility::Public,

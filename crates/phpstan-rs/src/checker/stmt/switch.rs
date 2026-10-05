@@ -12,7 +12,7 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) -> Completion {
-        self.check_expr(subject, locals, label);
+        let subject_ty = self.check_expr(subject, locals, label);
         if self.settings.extras.check_switch_missing_default
             && !cases.iter().any(|c| c.test.is_none())
         {
@@ -62,9 +62,7 @@ impl<'a> Checker<'a> {
         let mut narrowed_locals = locals.clone();
         let mut previous_terminates = true;
         let mut exit_states: Vec<Locals> = Vec::new();
-        if !cases.iter().any(|c| c.test.is_none()) {
-            exit_states.push(locals.clone());
-        }
+        let mut unmatched = (!cases.iter().any(|c| c.test.is_none())).then(|| locals.clone());
         let case_count = cases.len();
         // How each case body's last statement completes, for the switch's
         // own completion.
@@ -89,7 +87,17 @@ impl<'a> Checker<'a> {
         self.loop_continue_states.push(Vec::new());
         for (i, case) in cases.iter().enumerate() {
             if let Some(t) = &case.test {
-                self.check_expr(t, locals, label);
+                let test_ty = self.check_expr(t, locals, label);
+                // Each case's test is compared loosely with the subject on
+                // the way past it.
+                for state in std::iter::once(&mut narrowed_locals).chain(unmatched.as_mut()) {
+                    self.binary_string_conversions(
+                        &BinOp::Eq,
+                        (subject, &subject_ty),
+                        (t, &test_ty),
+                        state,
+                    );
+                }
             }
             let mut direct = narrowed_locals.clone();
             // A `case` compares loosely (`case 0:` also runs for `'0'`).
@@ -122,6 +130,9 @@ impl<'a> Checker<'a> {
         }
         self.loop_break_states.pop();
         self.loop_continue_states.pop();
+        if let Some(unmatched) = unmatched {
+            exit_states.insert(0, unmatched);
+        }
         // If no path reaches past the switch (every case
         // return/throw/continues, and a `default:` exists), the
         // code after it is dead - leave `locals` alone rather

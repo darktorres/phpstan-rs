@@ -91,6 +91,7 @@ canonical_struct!(PropertyReflection {
     readonly_by_phpdoc,
     tag_read_only,
     tag_write_only,
+    from_tag,
     visibility,
     write_visibility,
     implicit_protected_set,

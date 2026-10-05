@@ -945,6 +945,12 @@ impl<'a> Checker<'a> {
                     // object argument - see
                     // `check_implicit_tostring_usage`'s doc comment.
                     self.check_implicit_tostring_usage(&ty, e.span);
+                    self.forget_what_an_operation_may_change(
+                        &ty,
+                        crate::checker::call_effects::is_this(e),
+                        crate::registry::summaries::Operation::String,
+                        locals,
+                    );
                 }
             }
             StmtKind::Block(stmts)
@@ -1050,7 +1056,13 @@ impl<'a> Checker<'a> {
                         // `global ${expr};` imports a variable whose name
                         // is only known at runtime.
                         GlobalVar::Dynamic(e) => {
-                            self.check_expr(e, locals, label);
+                            let ty = self.check_expr(e, locals, label);
+                            self.forget_what_an_operation_may_change(
+                                &ty,
+                                crate::checker::call_effects::is_this(e),
+                                crate::registry::summaries::Operation::String,
+                                locals,
+                            );
                             continue;
                         }
                     };

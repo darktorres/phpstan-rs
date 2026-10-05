@@ -35,13 +35,13 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use syntax::ast::{ClassKind, QualifiedName, ResolvedName};
+use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
 
 use crate::registry::bodies::BodySource;
 use crate::registry::summaries::{
-    ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, ClosureFacts, Made, PairTarget,
-    Place, Receiver, Root, Step, WriteFacts,
+    Access, ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, ClosureFacts, Made,
+    Operation, Origin, PairTarget, Place, Receiver, Root, Step, WriteFacts,
 };
 use crate::registry::{ClassReflection, FunctionReflection, NameSet, Registry, is_non_overridable};
 use types::Type;
@@ -550,6 +550,9 @@ enum Passing<'c> {
 /// arguments as its own: `__call` and `__callStatic` take another method's
 /// as an array.
 fn passes_arguments(callee: &Callee, key: &DeclKey) -> bool {
+    if matches!(callee, Callee::Implicit { .. }) {
+        return false;
+    }
     if key.member != "__call" && key.member != "__callstatic" {
         return true;
     }
@@ -572,6 +575,52 @@ fn function_named(registry: &Registry, text: &str) -> Vec<(DeclKey, Transfer)> {
     match registry.lookup_function_with_name(text.trim_start_matches('\\')) {
         Some((declared, _)) => vec![(function_key(declared), Transfer::Static)],
         None => Vec::new(),
+    }
+}
+
+/// The magic method PHP calls for `access` to a property it runs one for.
+fn property_magic_method(access: Access) -> &'static str {
+    match access {
+        Access::Read => "__get",
+        Access::Write => "__set",
+        Access::Isset => "__isset",
+        Access::Unset => "__unset",
+    }
+}
+
+/// The method PHP calls on an `ArrayAccess` for `access` to an element.
+fn element_method(access: Access) -> &'static str {
+    match access {
+        Access::Read => "offsetGet",
+        Access::Write => "offsetSet",
+        Access::Isset => "offsetExists",
+        Access::Unset => "offsetUnset",
+    }
+}
+
+/// Every method PHP may call for `operation` on an object of some class.
+fn implicit_method_names(operation: &Operation) -> Vec<&'static str> {
+    match operation {
+        Operation::Property(_, access) => vec![property_magic_method(*access)],
+        Operation::Element(access) => vec![element_method(*access)],
+        Operation::String => vec!["__toString"],
+        Operation::Clone { with: false } => vec!["__clone"],
+        Operation::Clone { with: true } => vec!["__clone", "__set"],
+        Operation::Iterate { keys } => {
+            let mut methods = vec!["getIterator", "rewind", "valid", "current", "next"];
+            if *keys {
+                methods.push("key");
+            }
+            methods
+        }
+    }
+}
+
+/// Adds `key`, run with its own `$this` what `transfer` says, to `out`
+/// once.
+fn push_target(out: &mut Vec<(DeclKey, Transfer)>, key: DeclKey, transfer: Transfer) {
+    if !out.iter().any(|(k, t)| *k == key && *t == transfer) {
+        out.push((key, transfer));
     }
 }
 
@@ -774,6 +823,38 @@ impl Registry {
             return method_key(&call_owner, "__call");
         }
         method_key(owner, method)
+    }
+
+    /// Whether an access to the property `prop` (a computed one when `None`)
+    /// of an object of `class`, from code of the class `scope`, runs a
+    /// magic method: no property of the name is declared, or only a
+    /// `@property` tag, a static one or one the scope cannot see declares
+    /// it. A closure (`rebindable`) may be bound to any class's scope, so
+    /// it sees only a public one for certain.
+    fn property_magic(
+        &self,
+        class: &str,
+        prop: Option<&Name>,
+        scope: Option<&str>,
+        rebindable: bool,
+    ) -> bool {
+        let Some(prop) = prop else {
+            return true;
+        };
+        let Some((owner, declared)) = self.lookup_property_with_owner(class, prop) else {
+            return true;
+        };
+        if declared.from_tag() || declared.is_static() {
+            return true;
+        }
+        match declared.visibility() {
+            Visibility::Public => false,
+            _ if rebindable => true,
+            Visibility::Protected => !scope.is_some_and(|scope| {
+                self.is_subclass_of(scope, &owner) || self.is_subclass_of(&owner, scope)
+            }),
+            Visibility::Private => !scope.is_some_and(|scope| scope.eq_ignore_ascii_case(&owner)),
+        }
     }
 
     /// The name the builtin table knows the builtin `key` by: its own, or,
@@ -1184,7 +1265,7 @@ pub(crate) fn object_classes(ty: &Type) -> Option<Vec<Name>> {
 }
 
 /// The object a value may be.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Holder {
     /// An object of one of the classes, or of a descendant of one.
     Classes(Vec<Name>),
@@ -1195,12 +1276,57 @@ pub(crate) enum Holder {
     Unknown,
 }
 
+impl Holder {
+    /// The object a value either holder describes may be.
+    fn join(self, other: Holder) -> Holder {
+        match (self, other) {
+            (Holder::Classes(none), other) | (other, Holder::Classes(none)) if none.is_empty() => {
+                other
+            }
+            (Holder::Unknown | Holder::Made(None), _)
+            | (_, Holder::Unknown | Holder::Made(None)) => Holder::Unknown,
+            (Holder::Made(Some(mut a)), Holder::Made(Some(b))) => {
+                a.extend(b);
+                Holder::Made(Some(sorted_classes(a)))
+            }
+            (
+                Holder::Classes(mut a) | Holder::Made(Some(mut a)),
+                Holder::Classes(b) | Holder::Made(Some(b)),
+            ) => {
+                a.extend(b);
+                Holder::Classes(sorted_classes(a))
+            }
+        }
+    }
+}
+
+/// `classes` in one order, each once, as PHP compares class names.
+fn sorted_classes(mut classes: Vec<Name>) -> Vec<Name> {
+    classes.sort_unstable_by(|a, b| a.lower().cmp(b.lower()));
+    classes.dedup_by(|a, b| a.eq_ignore_case(b));
+    classes
+}
+
 /// The holder of a value of type `ty`.
 pub(crate) fn holder_of(ty: &Type) -> Holder {
     match object_classes(ty) {
         Some(classes) => Holder::Classes(classes),
         None => Holder::Unknown,
     }
+}
+
+/// The holder of a value of the type `ty` declared on a member of `owner`,
+/// reached through an object of `class`.
+fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &str) -> Holder {
+    let mut ty = ty.bind_static(class).bind_self(owner);
+    if let Some(parent) = registry
+        .classes
+        .get(owner)
+        .and_then(|info| info.extends().first())
+    {
+        ty = ty.bind_parent(parent);
+    }
+    holder_of(&ty)
 }
 
 /// The variable `place` is, with no step from it.
@@ -1227,6 +1353,12 @@ pub(crate) trait CallContext {
     /// declaration's body, the argument of a parameter it never writes;
     /// `false` when it may be other code.
     fn runs_written(&self, written: Written<'_>, transfer: &Transfer) -> bool;
+    /// The object an operation's operand, a value from `on` (from anywhere
+    /// when `None`), is, and whether it is the caller's own `$this`.
+    fn operand(&self, on: Option<&[Origin]>) -> (Holder, bool);
+    /// Whether the calling code is a closure's, which may be bound to any
+    /// class's scope.
+    fn rebindable(&self) -> bool;
 }
 
 /// What a call may run that its caller may have written.
@@ -1651,7 +1783,170 @@ impl Reach<'_> {
                 }
                 Vec::new()
             }
+            Callee::Implicit { on, operation } => {
+                let (holder, same) = self.ctx.operand(on.as_deref());
+                let mut out = Vec::new();
+                self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
+                out
+            }
         })
+    }
+
+    /// Adds to `out` the declarations PHP runs for `operation` on an object
+    /// `holder` says may be, the caller's own `$this` when `same`, each with
+    /// what its own `$this` is to the caller: by the hierarchy over the
+    /// holder's classes, and every loaded declaration of the methods it may
+    /// run when the class is not known. The iterator an `IteratorAggregate`
+    /// gives is iterated as its declared type says; `iterators` holds those
+    /// already followed. `None` when it may run code not known.
+    fn implicit_targets(
+        &self,
+        holder: &Holder,
+        same: bool,
+        operation: &Operation,
+        out: &mut Vec<(DeclKey, Transfer)>,
+        iterators: &mut Vec<Holder>,
+    ) -> Option<()> {
+        let registry = self.registry;
+        let transfer = |class: Option<&Name>| {
+            if matches!(operation, Operation::Clone { .. }) {
+                // `__clone` and the writes `clone` with properties makes run
+                // on the copy.
+                Transfer::Made
+            } else if same {
+                Transfer::Same
+            } else if matches!(holder, Holder::Made(_)) {
+                Transfer::Made
+            } else {
+                Transfer::Other(class.cloned())
+            }
+        };
+        let (classes, exact) = match holder {
+            Holder::Classes(classes) => (classes, false),
+            Holder::Made(Some(classes)) => (classes, true),
+            Holder::Unknown | Holder::Made(None) => {
+                for method in implicit_method_names(operation) {
+                    if self
+                        .registry
+                        .builtin_methods_running_code()
+                        .contains(&method.to_ascii_lowercase())
+                    {
+                        return None;
+                    }
+                    for class in registry.classes_declaring(method) {
+                        if !self.implicit_methods(class, operation).contains(&method) {
+                            continue;
+                        }
+                        if let Some(key) = self.implicit_method(class, method) {
+                            push_target(out, key, transfer(None));
+                        }
+                    }
+                }
+                return Some(());
+            }
+        };
+        for class in classes {
+            // A property an object of the class has where the scope sees it,
+            // an object of a descendant has there too: a redeclaration only
+            // widens its visibility, and keeps it an instance property.
+            let declared = matches!(operation, Operation::Property(..))
+                && self.implicit_methods(class, operation).is_empty();
+            let below = if exact || declared {
+                Vec::new()
+            } else {
+                registry.subclasses(class)
+            };
+            for candidate in std::iter::once(class).chain(below.iter()) {
+                for method in self.implicit_methods(candidate, operation) {
+                    if let Some(key) = self.implicit_method(candidate, method) {
+                        push_target(out, key, transfer(Some(class)));
+                    }
+                }
+                if !matches!(operation, Operation::Iterate { .. })
+                    || registry.is_subclass_of(candidate, "Iterator")
+                    || !registry.is_subclass_of(candidate, "IteratorAggregate")
+                {
+                    continue;
+                }
+                let given = match registry.lookup_method_with_owner(candidate, "getIterator") {
+                    Some((owner, sig)) => {
+                        declared_holder(registry, sig.return_type(), candidate, &owner)
+                    }
+                    None => Holder::Unknown,
+                };
+                if iterators.contains(&given) {
+                    continue;
+                }
+                iterators.push(given.clone());
+                // An aggregate giving aggregates this deep is iterated as
+                // any object.
+                let given = if iterators.len() > 4 {
+                    Holder::Unknown
+                } else {
+                    given
+                };
+                self.implicit_targets(&given, false, operation, out, iterators)?;
+            }
+        }
+        Some(())
+    }
+
+    /// The methods PHP calls for `operation` on an object of exactly
+    /// `class`.
+    fn implicit_methods(&self, class: &str, operation: &Operation) -> Vec<&'static str> {
+        let registry = self.registry;
+        match operation {
+            Operation::Property(prop, access) => {
+                if registry.property_magic(
+                    class,
+                    prop.as_ref(),
+                    self.ctx.class(),
+                    self.ctx.rebindable(),
+                ) {
+                    vec![property_magic_method(*access)]
+                } else {
+                    Vec::new()
+                }
+            }
+            Operation::Element(access) => {
+                if registry.is_subclass_of(class, "ArrayAccess") {
+                    vec![element_method(*access)]
+                } else {
+                    Vec::new()
+                }
+            }
+            Operation::String => vec!["__toString"],
+            Operation::Clone { with: false } => vec!["__clone"],
+            Operation::Clone { with: true } => vec!["__clone", "__set"],
+            Operation::Iterate { keys } => {
+                if registry.is_subclass_of(class, "Iterator") {
+                    let mut methods = vec!["rewind", "valid", "current", "next"];
+                    if *keys {
+                        methods.push("key");
+                    }
+                    methods
+                } else if registry.is_subclass_of(class, "IteratorAggregate") {
+                    vec!["getIterator"]
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    }
+
+    /// The declaration PHP runs calling `method` on an object of exactly
+    /// `class` itself: none when the class has no body for it, or only a
+    /// `@method` tag or an abstract method declares it.
+    fn implicit_method(&self, class: &str, method: &str) -> Option<DeclKey> {
+        let registry = self.registry;
+        let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
+        let info = registry.classes.get(owner.as_str())?;
+        let abstract_method = info.kind() == ClassKind::Interface
+            || info
+                .abstract_methods()
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(method));
+        (!sig.is_magic && !abstract_method).then(|| method_key(&owner, method))
     }
 
     /// The declaration a call of `method` runs on an object of exactly
@@ -1896,7 +2191,11 @@ impl<'r> Resolve<'r> {
         let mut grew = false;
         loop {
             if lost[at].insert(name) {
-                grew |= levels[at].params.contains_key(name) || levels[at].made.contains_key(name);
+                let level = &levels[at];
+                grew |= level.params.contains_key(name)
+                    || level.made.contains_key(name)
+                    || level.origins.contains_key(name)
+                    || level.base.contains_key(name);
             }
             let Some(closure) = at.checked_sub(1).map(|index| &self.summary.closures[index]) else {
                 return grew;
@@ -1923,29 +2222,44 @@ impl<'r> Resolve<'r> {
     ) -> Vec<Level<'r>> {
         let facts = &self.summary.writes;
         let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
-        let params = sig_params
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| {
-                !p.by_ref
-                    && !facts.reassigned.iter().any(|name| name == p.name.as_ref())
-                    && !lost[0].contains(p.name.as_ref())
-            })
-            .map(|(at, p)| {
-                let at = (!p.variadic).then_some(at as u32);
-                (p.name.as_ref(), Declared::Param { ty: &p.ty, at })
-            })
-            .collect();
-        // A parameter holds the argument until the body writes it.
-        let made = facts
-            .made
-            .iter()
-            .filter_map(|(name, made)| Some((name.as_str(), made.clone()?)))
-            .filter(|(name, _)| {
-                !lost[0].contains(name) && !sig_params.iter().any(|p| p.name.as_ref() == *name)
-            })
-            .collect();
-        let mut levels = vec![self.level(facts, params, made, facts.bindings.iter().collect())];
+        let mut level = self.level(facts, &lost[0], facts.bindings.iter().collect());
+        if !facts.computed {
+            level.params = sig_params
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| {
+                    !p.by_ref
+                        && !facts.reassigned.iter().any(|name| name == p.name.as_ref())
+                        && !lost[0].contains(p.name.as_ref())
+                })
+                .map(|(at, p)| {
+                    let at = (!p.variadic).then_some(at as u32);
+                    (p.name.as_ref(), Declared::Param { ty: &p.ty, at })
+                })
+                .collect();
+            // A parameter holds the argument until the body writes it.
+            level.made = facts
+                .made
+                .iter()
+                .filter_map(|(name, made)| Some((name.as_str(), made.clone()?)))
+                .filter(|(name, _)| {
+                    !lost[0].contains(name) && !sig_params.iter().any(|p| p.name.as_ref() == *name)
+                })
+                .collect();
+            level.base = sig_params
+                .iter()
+                .filter(|p| !lost[0].contains(p.name.as_ref()))
+                .map(|p| {
+                    let held = if p.by_ref {
+                        Holder::Unknown
+                    } else {
+                        holder_of(&p.ty)
+                    };
+                    (p.name.as_ref(), held)
+                })
+                .collect();
+        }
+        let mut levels = vec![level];
         for (index, closure) in self.summary.closures.iter().enumerate() {
             let parent = closure.within.map_or(0, |within| within as usize + 1);
             let level = self.closure_level(closure, &levels[parent], &lost[index + 1]);
@@ -1971,6 +2285,19 @@ impl<'r> Resolve<'r> {
             .map(|p| (p.name.as_str(), Declared::Classes(p.classes.as_deref())))
             .collect();
         let mut made: FxHashMap<&'r str, Made> = FxHashMap::default();
+        let mut base: FxHashMap<&'r str, Holder> = closure
+            .params
+            .iter()
+            .filter(|p| !lost.contains(p.name.as_str()))
+            .map(|p| {
+                let held = if p.untyped {
+                    Holder::Unknown
+                } else {
+                    parent.declared(&Declared::Classes(p.classes.as_deref()))
+                };
+                (p.name.as_str(), held)
+            })
+            .collect();
         let mut bindings: Vec<&'r (Option<Name>, Binding)> = facts.bindings.iter().collect();
         // An arrow function and a first-class callable take every variable
         // but their parameters, so one the code around them holds nothing
@@ -1980,19 +2307,28 @@ impl<'r> Resolve<'r> {
                 .iter()
                 .map(|(name, by_ref)| (name.as_str(), *by_ref))
                 .collect(),
-            None => parent
-                .params
-                .keys()
-                .chain(parent.made.keys())
-                .copied()
-                .filter(|name| !is_param(name))
-                .map(|name| (name, false))
-                .collect(),
+            None => {
+                let mut names: Vec<&'r str> = parent
+                    .params
+                    .keys()
+                    .chain(parent.made.keys())
+                    .chain(parent.origins.keys())
+                    .chain(parent.base.keys())
+                    .copied()
+                    .chain(facts.origins.iter().map(|(name, _)| name.as_str()))
+                    .chain(facts.reassigned.iter().map(Name::as_str))
+                    .filter(|name| !is_param(name))
+                    .collect();
+                names.sort_unstable();
+                names.dedup();
+                names.into_iter().map(|name| (name, false)).collect()
+            }
         };
         for &(name, by_ref) in &captures {
             if lost.contains(name) {
                 continue;
             }
+            base.insert(name, parent.variable_holder(&Name::from(name)));
             if let Some(declared) = parent.params.get(name)
                 && !reassigned(name)
             {
@@ -2032,23 +2368,46 @@ impl<'r> Resolve<'r> {
                 }
             }
         }
-        self.level(facts, params, made, bindings)
+        let mut level = self.level(facts, lost, bindings);
+        level.closure = true;
+        if !facts.computed {
+            level.params = params;
+            level.made = made;
+            level.base = base;
+        }
+        level
     }
 
+    /// The level of a scope whose facts are `facts`, with no variable
+    /// known to hold anything but where its writes say what it holds;
+    /// `lost` names the variables written anything there.
     fn level(
         &self,
         facts: &'r WriteFacts,
-        params: FxHashMap<&'r str, Declared<'r>>,
-        made: FxHashMap<&'r str, Made>,
+        lost: &FxHashSet<&'r str>,
         bindings: Vec<&'r (Option<Name>, Binding)>,
     ) -> Level<'r> {
+        let origins = if facts.computed {
+            FxHashMap::default()
+        } else {
+            facts
+                .origins
+                .iter()
+                .map(|(name, origins)| (name.as_str(), &origins[..]))
+                .filter(|(name, _)| !lost.contains(name))
+                .collect()
+        };
         Level {
             registry: self.registry,
             class: self.class,
             member: self.member,
             facts,
-            params,
-            made,
+            params: FxHashMap::default(),
+            made: FxHashMap::default(),
+            origins,
+            base: FxHashMap::default(),
+            solved: Default::default(),
+            closure: false,
             bindings,
             runs: Default::default(),
             params_run: Default::default(),
@@ -2080,6 +2439,18 @@ struct Level<'r> {
     params: FxHashMap<&'r str, Declared<'r>>,
     // The variables that only ever hold what the body made.
     made: FxHashMap<&'r str, Made>,
+    // The variables whose every value written comes from where the scope
+    // shows, each with where.
+    origins: FxHashMap<&'r str, &'r [Origin]>,
+    // What a variable holds before the scope writes it: a declaration's
+    // parameter its declared type's objects, a closure's parameter or
+    // capture what its declared type or the code that wrote it holds.
+    base: FxHashMap<&'r str, Holder>,
+    // The object each variable of `origins` may hold, found once; filled
+    // while it is found.
+    solved: std::cell::RefCell<Option<FxHashMap<&'r str, Holder>>>,
+    // A closure's scope, which may be bound to any class's.
+    closure: bool,
     // What its variables are bound to: its own bindings and, for a variable
     // a closure takes by reference, those of the code that wrote it.
     bindings: Vec<&'r (Option<Name>, Binding)>,
@@ -2158,6 +2529,28 @@ impl CallContext for Level<'_> {
             .extend(ids.iter().map(|&id| (id, transfer.clone())));
         true
     }
+
+    fn operand(&self, on: Option<&[Origin]>) -> (Holder, bool) {
+        let Some(origins) = on else {
+            return (Holder::Unknown, false);
+        };
+        let mut holder = Holder::Classes(Vec::new());
+        let (mut this, mut other) = (false, false);
+        for origin in origins {
+            let (found, same) = self.origin_holder(origin);
+            if same {
+                this = true;
+            } else if found != Holder::Classes(Vec::new()) {
+                other = true;
+            }
+            holder = holder.join(found);
+        }
+        (holder, this && !other)
+    }
+
+    fn rebindable(&self) -> bool {
+        self.closure
+    }
 }
 
 impl<'r> Level<'r> {
@@ -2224,6 +2617,8 @@ impl<'r> Level<'r> {
         };
         let mut calls: Vec<(DeclKey, Transfer, Option<u32>)> = Vec::new();
         let mut sites: Vec<Site<'r>> = Vec::new();
+        // The declarations run with no call's arguments, each once.
+        let mut siteless: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
         let facts: &'r WriteFacts = self.facts;
         for (call, targets) in facts.calls.iter().zip(reached) {
             let mut site: Option<u32> = None;
@@ -2235,10 +2630,11 @@ impl<'r> Level<'r> {
                     let Some(runs) = reach.builtin_runs(&key, sig, &transfer, call) else {
                         return Classification::anything();
                     };
-                    calls.extend(
-                        runs.into_iter()
-                            .map(|(key, transfer)| (key, transfer, None)),
-                    );
+                    for (key, transfer) in runs {
+                        if siteless.insert((key.clone(), transfer.clone())) {
+                            calls.push((key, transfer, None));
+                        }
+                    }
                     continue;
                 }
                 let at = passes_arguments(&call.callee, &key).then(|| {
@@ -2248,7 +2644,9 @@ impl<'r> Level<'r> {
                         sites.len() as u32 - 1
                     })
                 });
-                calls.push((key, transfer, at));
+                if at.is_some() || siteless.insert((key.clone(), transfer.clone())) {
+                    calls.push((key, transfer, at));
+                }
             }
         }
         let mut own = Effect::nothing();
@@ -2322,7 +2720,10 @@ impl<'r> Level<'r> {
     }
 
     /// The object the variable `name` holds: what the body made, by its
-    /// class; a parameter, by its declared type; anything else not known.
+    /// class; a parameter it never writes, by its declared type; one whose
+    /// every value comes from where the scope shows, by what that holds,
+    /// with what it held before the scope wrote it; anything else not
+    /// known.
     fn variable_holder(&self, name: &Name) -> Holder {
         if let Some(made) = self.made.get(name.as_str()) {
             return match made {
@@ -2333,9 +2734,31 @@ impl<'r> Level<'r> {
                 Made::Closure(_) => Holder::Made(Some(vec![Name::from("Closure")])),
             };
         }
-        match self.params.get(name.as_str()) {
-            Some(Declared::Param { ty, .. }) => holder_of(ty),
-            Some(Declared::Classes(Some(classes))) => {
+        if let Some(declared) = self.params.get(name.as_str()) {
+            return self.declared(declared);
+        }
+        if self.origins.contains_key(name.as_str()) {
+            if self.solved.borrow().is_none() {
+                self.solve();
+            }
+            if let Some(solved) = &*self.solved.borrow() {
+                return solved
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or(Holder::Unknown);
+            }
+        }
+        match self.base.get(name.as_str()) {
+            Some(held) if !self.facts.reassigned.contains(name) => held.clone(),
+            _ => Holder::Unknown,
+        }
+    }
+
+    /// The object a parameter declared as `declared` holds.
+    fn declared(&self, declared: &Declared<'_>) -> Holder {
+        match declared {
+            Declared::Param { ty, .. } => holder_of(ty),
+            Declared::Classes(Some(classes)) => {
                 let mut found = Vec::new();
                 for class in *classes {
                     match named_classes(self.registry, self.class, class) {
@@ -2345,7 +2768,178 @@ impl<'r> Level<'r> {
                 }
                 Holder::Classes(found)
             }
-            Some(Declared::Classes(None)) | None => Holder::Unknown,
+            Declared::Classes(None) => Holder::Unknown,
+        }
+    }
+
+    /// Finds the object each variable of `origins` may hold: what it held
+    /// before the scope wrote it and what each value written may be, taken
+    /// again until none grows. Each starts as no object, and is read as
+    /// found so far while the others are found.
+    fn solve(&self) {
+        let start: FxHashMap<&'r str, Holder> = self
+            .origins
+            .keys()
+            .map(|&name| (name, Holder::Classes(Vec::new())))
+            .collect();
+        *self.solved.borrow_mut() = Some(start);
+        // A holder grows at most to any object; a chain of variables this
+        // long has not settled.
+        for _ in 0..16 {
+            let mut grew = false;
+            for (&name, origins) in &self.origins {
+                let mut held = self
+                    .base
+                    .get(name)
+                    .cloned()
+                    .unwrap_or(Holder::Classes(Vec::new()));
+                for origin in origins.iter() {
+                    held = held.join(self.origin_holder(origin).0);
+                }
+                let held = match held {
+                    Holder::Classes(classes) => Holder::Classes(sorted_classes(classes)),
+                    Holder::Made(Some(classes)) => Holder::Made(Some(sorted_classes(classes))),
+                    other => other,
+                };
+                let mut solved = self.solved.borrow_mut();
+                let Some(solved) = solved.as_mut() else {
+                    unreachable!("filled above");
+                };
+                if solved.get(name) != Some(&held) {
+                    solved.insert(name, held);
+                    grew = true;
+                }
+            }
+            if !grew {
+                return;
+            }
+        }
+        if let Some(solved) = self.solved.borrow_mut().as_mut() {
+            for held in solved.values_mut() {
+                *held = Holder::Unknown;
+            }
+        }
+    }
+
+    /// The object a value from `origin` may be, and whether it is the
+    /// scope's own `$this`.
+    fn origin_holder(&self, origin: &Origin) -> (Holder, bool) {
+        let registry = self.registry;
+        match origin {
+            Origin::NoObject | Origin::Arithmetic | Origin::Closure => {
+                (Holder::Classes(Vec::new()), false)
+            }
+            Origin::Place(place) if matches!(place.root, Root::This) && place.steps.is_empty() => {
+                (self.value_holder(&place.root, &[]), true)
+            }
+            Origin::Place(place) => (self.value_holder(&place.root, &place.steps), false),
+            Origin::Returned(callee) => (self.returned_holder(callee), false),
+            Origin::New(Some(class)) => (
+                Holder::Made(Some(
+                    named_classes(registry, self.class, class).unwrap_or_default(),
+                )),
+                false,
+            ),
+            Origin::New(None) | Origin::Anonymous(None) => (Holder::Made(None), false),
+            Origin::Anonymous(Some(name)) => (Holder::Made(Some(vec![name.clone()])), false),
+            Origin::Caught(classes) => {
+                let mut found = Vec::new();
+                for class in classes.iter() {
+                    match named_classes(registry, self.class, class) {
+                        Some(named) => found.extend(named),
+                        None => return (Holder::Unknown, false),
+                    }
+                }
+                (Holder::Classes(found), false)
+            }
+        }
+    }
+
+    /// The object what a call of `callee` returns may be, by the return
+    /// types its targets declare.
+    fn returned_holder(&self, callee: &Callee) -> Holder {
+        let registry = self.registry;
+        match callee {
+            Callee::Function(name) => match registry.resolve_function(name) {
+                Some((_, sig)) => holder_of(sig.return_type()),
+                // A call to no function throws.
+                None => Holder::Classes(Vec::new()),
+            },
+            Callee::Method {
+                receiver,
+                method: Some(method),
+            } => {
+                let (Holder::Classes(classes) | Holder::Made(Some(classes))) =
+                    self.receiver(receiver).0
+                else {
+                    return Holder::Unknown;
+                };
+                let mut held = Holder::Classes(Vec::new());
+                for class in &classes {
+                    let found = match registry.lookup_method_with_owner(class, method) {
+                        Some((owner, sig)) if !sig.is_magic => {
+                            declared_holder(registry, sig.return_type(), class, &owner)
+                        }
+                        // `__call`, or a method of a class below.
+                        _ => {
+                            let mut found = Holder::Classes(Vec::new());
+                            for key in registry.implementations(class, method) {
+                                let Some((owner, sig)) = key.class.as_deref().and_then(|owner| {
+                                    registry.lookup_method_with_owner(owner, &key.member)
+                                }) else {
+                                    return Holder::Unknown;
+                                };
+                                found = found.join(declared_holder(
+                                    registry,
+                                    sig.return_type(),
+                                    &owner,
+                                    &owner,
+                                ));
+                            }
+                            found
+                        }
+                    };
+                    held = held.join(found);
+                }
+                held
+            }
+            Callee::Static {
+                class: Some(class),
+                method: Some(method),
+            } => {
+                let Some(targets) = named_classes(registry, self.class, class) else {
+                    return Holder::Unknown;
+                };
+                let mut held = Holder::Classes(Vec::new());
+                for target in &targets {
+                    match registry.lookup_method_with_owner(target, method) {
+                        Some((owner, sig)) if !sig.is_magic => {
+                            held = held.join(declared_holder(
+                                registry,
+                                sig.return_type(),
+                                target,
+                                &owner,
+                            ));
+                        }
+                        _ => {
+                            for magic in ["__callStatic", "__call"] {
+                                if let Some((owner, sig)) =
+                                    registry.lookup_method_with_owner(target, magic)
+                                {
+                                    held = held.join(declared_holder(
+                                        registry,
+                                        sig.return_type(),
+                                        target,
+                                        &owner,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                held
+            }
+            _ => Holder::Unknown,
         }
     }
 

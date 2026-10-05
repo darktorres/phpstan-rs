@@ -596,7 +596,12 @@ impl<'a> Checker<'a> {
         // `unset($o[$k])` calls `offsetUnset`; a statement has no
         // expression of its own to throw from, so its throw goes to the
         // enclosing `try` here.
-        self.implicit_array_access_probe(target, &["offsetUnset"], target.span, locals);
+        self.implicit_array_access_probe(
+            target,
+            &[crate::registry::summaries::Access::Unset],
+            target.span,
+            locals,
+        );
         if let Some(Some(thrown)) = self.call_throw_types.remove(&target.span) {
             self.record_throw_state(thrown, locals);
         }

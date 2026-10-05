@@ -1,5 +1,7 @@
+use crate::checker::call_effects::is_this;
 use crate::checker::keys::KeyData;
 use crate::checker::{ExitKind, ExitPoint};
+use crate::registry::summaries::Operation;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use types::UnionAll as _;
@@ -698,6 +700,19 @@ impl<'a> Checker<'a> {
         // next pass's entry as `string|float`, even though each real
         // iteration's `&$val` aliases a different array slot that
         // pass's body never touched.
+        //
+        // An object is iterated by its methods: before the first iteration,
+        // at the start of each, and after each.
+        let iterate = Operation::Iterate {
+            keys: key.is_some(),
+        };
+        let subject_is_this = is_this(subject);
+        self.forget_what_an_operation_may_change(
+            &subject_ty,
+            subject_is_this,
+            iterate.clone(),
+            locals,
+        );
         let entry = locals.clone();
         self.loop_depth += 1;
         // Mirrors real PHPStan's own `ForeachHandler::processStmt`'s
@@ -757,6 +772,12 @@ impl<'a> Checker<'a> {
             label,
             zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
+                this.forget_what_an_operation_may_change(
+                    &subject_ty,
+                    subject_is_this,
+                    iterate.clone(),
+                    pass_locals,
+                );
                 if iteration_throws {
                     this.record_throw_state(
                         Type::object("Throwable".into(), Vec::new()),
@@ -787,6 +808,16 @@ impl<'a> Checker<'a> {
                 this.check_param_out_assignment(value, &element_ty);
                 this.check_by_ref_destructuring(value, &element_ty);
                 this.bind_assignment_target(value, element_ty.clone(), pass_locals);
+                if let Some(k) = key {
+                    this.implicit_array_access_write(k, k.span, pass_locals);
+                }
+                match &value.kind {
+                    ExprKind::Destructure(items, _) => {
+                        this.implicit_destructure(items, &element_ty, value.span, pass_locals);
+                    }
+                    _ if by_ref => this.implicit_reference(value, value.span, pass_locals),
+                    _ => this.implicit_array_access_write(value, value.span, pass_locals),
+                }
                 // Eager propagation: `value` was just bound from
                 // `subject`'s own (dynamic-keyed) element - if `subject`
                 // already carries per-field facts from an earlier by-ref
@@ -865,6 +896,27 @@ impl<'a> Checker<'a> {
                             _ => None,
                         })
                         .collect();
+                }
+                this.forget_what_an_operation_may_change(
+                    &subject_ty,
+                    subject_is_this,
+                    iterate.clone(),
+                    pass_locals,
+                );
+                if let Some(mut continues) =
+                    this.loop_continue_states.last_mut().map(std::mem::take)
+                {
+                    for state in &mut continues {
+                        this.forget_what_an_operation_may_change(
+                            &subject_ty,
+                            subject_is_this,
+                            iterate.clone(),
+                            state,
+                        );
+                    }
+                    if let Some(frame) = this.loop_continue_states.last_mut() {
+                        *frame = continues;
+                    }
                 }
             },
         );

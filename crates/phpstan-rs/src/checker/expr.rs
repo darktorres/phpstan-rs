@@ -1,6 +1,7 @@
 use crate::checker::ExitKind;
 use crate::checker::GotoState;
 use crate::checker::InferQuestion;
+use crate::checker::call_effects::is_this;
 use crate::checker::calls::parameters::Callee;
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
@@ -14,6 +15,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::registry::FunctionReflection;
+use crate::registry::summaries::{Access, Operation};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
@@ -1476,13 +1478,14 @@ impl<'a> Checker<'a> {
                     "on left side of ??",
                     null_probe_verdict,
                 );
-                self.implicit_array_access_probe(l, &["offsetExists", "offsetGet"], e.span, locals);
+                self.implicit_array_access_probe(l, &[Access::Isset, Access::Read], e.span, locals);
                 let r_ty = self.check_expr(r, locals, label);
                 self.widen_coalesce_result(l, r_ty, locals)
             }
             ExprKind::Binary(op, l, r) => {
                 let l_ty = self.check_expr(l, locals, label);
                 let r_ty = self.check_expr(r, locals, label);
+                self.binary_string_conversions(op, (l, &l_ty), (r, &r_ty), locals);
                 let invalid = self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
                 self.check_duplicate_operands(op, l, r);
@@ -1665,6 +1668,12 @@ impl<'a> Checker<'a> {
                 // `check_implicit_tostring_usage`'s doc comment.
                 if cast.kind() == CastKind::String {
                     self.check_implicit_tostring_usage(&inner_ty, e.span);
+                    self.forget_what_an_operation_may_change(
+                        &inner_ty,
+                        is_this(inner),
+                        Operation::String,
+                        locals,
+                    );
                 }
                 if self.settings.strict_rules.check_useless_casts && cast.kind() != CastKind::Void {
                     self.check_useless_cast(&cast_result_type(cast.kind()), &inner_ty, e.span);
@@ -1681,7 +1690,7 @@ impl<'a> Checker<'a> {
                         label,
                         ("isset", "in isset()", null_probe_verdict),
                     );
-                    self.implicit_array_access_probe(operand, &["offsetExists"], e.span, locals);
+                    self.implicit_array_access_probe(operand, &[Access::Isset], e.span, locals);
                 }
                 Type::bool()
             }
@@ -1694,7 +1703,7 @@ impl<'a> Checker<'a> {
                 );
                 self.implicit_array_access_probe(
                     operand,
-                    &["offsetExists", "offsetGet"],
+                    &[Access::Isset, Access::Read],
                     e.span,
                     locals,
                 );
@@ -1706,14 +1715,29 @@ impl<'a> Checker<'a> {
                 let ty = self.check_expr(inner, locals, label);
                 self.check_print_validity(&ty, inner.span);
                 self.check_implicit_tostring_usage(&ty, inner.span);
+                self.forget_what_an_operation_may_change(
+                    &ty,
+                    is_this(inner),
+                    Operation::String,
+                    locals,
+                );
                 Type::int_literal(1)
             }
             // Checked as the call to the `exit`/`die` function it is since
             // PHP 8.4 (`string|int $status = 0`), where the stubs have it.
             ExprKind::Exit(kind, args) => {
                 if let Some(args) = args {
-                    for arg in args {
-                        self.check_expr(&arg.value, locals, label);
+                    for (i, arg) in args.iter().enumerate() {
+                        let ty = self.check_expr(&arg.value, locals, label);
+                        // A status that is not an int is printed.
+                        if i == 0 {
+                            self.forget_what_an_operation_may_change(
+                                &ty,
+                                is_this(&arg.value),
+                                Operation::String,
+                                locals,
+                            );
+                        }
                     }
                     let name = kind.as_str();
                     if let Some(sig) = self.registry.lookup_function(name) {
@@ -1784,6 +1808,12 @@ impl<'a> Checker<'a> {
             }
             ExprKind::YieldFrom(inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
+                self.forget_what_an_operation_may_change(
+                    &inner_ty,
+                    is_this(inner),
+                    Operation::Iterate { keys: true },
+                    locals,
+                );
                 let result_ty = generator_template_param(&inner_ty, self.registry, "TReturn");
                 self.check_yield_from_compatibility(
                     &inner_ty,
@@ -1817,6 +1847,14 @@ impl<'a> Checker<'a> {
                 if let Some(o) = overrides {
                     self.check_expr(o, locals, label);
                 }
+                self.forget_what_an_operation_may_change(
+                    &inner_ty,
+                    is_this(inner),
+                    Operation::Clone {
+                        with: overrides.is_some(),
+                    },
+                    locals,
+                );
                 inner_ty
             }
             ExprKind::Yield(key, value) => {
@@ -1893,7 +1931,14 @@ impl<'a> Checker<'a> {
                 // `$r = &$a[];` legally creates the new element it refers to.
                 let rhs_ty = match &rhs.kind {
                     ExprKind::Index(base, None) if matches!(&e.kind, ExprKind::AssignRef(..)) => {
-                        self.check_expr(base, locals, label);
+                        let base_ty = self.check_expr(base, locals, label);
+                        self.implicit_array_access_call(
+                            &base_ty,
+                            is_this(base),
+                            Access::Read,
+                            e.span,
+                            locals,
+                        );
                         Type::mixed()
                     }
                     _ => self.check_expr(rhs, locals, label),
@@ -1937,13 +1982,16 @@ impl<'a> Checker<'a> {
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
-                if matches!(&e.kind, ExprKind::Assign(..)) {
-                    self.implicit_array_access_write(lhs, e.span, locals);
-                    // Destructuring an `ArrayAccess` object reads each key
-                    // through `offsetGet`.
-                    if matches!(&lhs.kind, ExprKind::Destructure(..)) {
-                        self.implicit_array_access_call(&rhs_ty, "offsetGet", e.span, locals);
+                match &lhs.kind {
+                    _ if matches!(&e.kind, ExprKind::AssignRef(..)) => {
+                        self.implicit_reference(lhs, e.span, locals);
                     }
+                    // Destructuring an `ArrayAccess` object reads each
+                    // key through `offsetGet`.
+                    ExprKind::Destructure(items, _) => {
+                        self.implicit_destructure(items, &rhs_ty, e.span, locals);
+                    }
+                    _ => self.implicit_array_access_write(lhs, e.span, locals),
                 }
                 self.check_self_assignment(lhs, rhs);
                 self.check_property_assignment(lhs, rhs, locals);
@@ -2027,7 +2075,7 @@ impl<'a> Checker<'a> {
                     );
                     self.implicit_array_access_probe(
                         lhs,
-                        &["offsetExists", "offsetGet"],
+                        &[Access::Isset, Access::Read],
                         e.span,
                         locals,
                     );
@@ -2036,6 +2084,7 @@ impl<'a> Checker<'a> {
                     self.check_expr(lhs, locals, label)
                 };
                 let rhs_ty = self.check_expr(rhs, locals, label);
+                self.binary_string_conversions(op, (lhs, &lhs_ty), (rhs, &rhs_ty), locals);
                 self.implicit_array_access_write(lhs, e.span, locals);
                 self.check_offset_assignment(lhs, &rhs_ty, true, locals);
                 if *op != BinOp::Coalesce {
@@ -2172,6 +2221,12 @@ impl<'a> Checker<'a> {
                     }
                     if item.spread {
                         self.check_unpacked_string_keys(&value_ty, item.value.span);
+                        self.forget_what_an_operation_may_change(
+                            &value_ty,
+                            is_this(&item.value),
+                            Operation::Iterate { keys: true },
+                            locals,
+                        );
                     }
                 }
                 self.check_array_literal_duplicate_keys(items, locals);
@@ -2197,7 +2252,13 @@ impl<'a> Checker<'a> {
                             None => self.infer_expr(i, locals),
                         };
                         self.check_array_access_offset(&base_ty, "offsetGet", &key_ty, i.span);
-                        self.implicit_array_access_call(&base_ty, "offsetGet", e.span, locals);
+                        self.implicit_array_access_call(
+                            &base_ty,
+                            is_this(base),
+                            Access::Read,
+                            e.span,
+                            locals,
+                        );
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
                         // without this, `check_expr` (unlike `infer_expr`,
@@ -2767,7 +2828,13 @@ impl<'a> Checker<'a> {
                 // A computed static property name (`Foo::${$e}`/
                 // `Foo::$$e`) has no statically known name to check.
                 let class = self.resolve_static_target_class(target, locals, label);
-                self.check_expr(name, locals, label);
+                let name_ty = self.check_expr(name, locals, label);
+                self.forget_what_an_operation_may_change(
+                    &name_ty,
+                    is_this(name),
+                    Operation::String,
+                    locals,
+                );
                 self.record_dynamic_static_member_escape(target);
                 if self.collect_member_refs
                     && let Some(class) = class
@@ -2784,7 +2851,13 @@ impl<'a> Checker<'a> {
                 self.check_static_member_fetch(e, target, name, true, locals, label)
             }
             ExprKind::DynamicVariable(name_expr) => {
-                self.check_expr(name_expr, locals, label);
+                let name_ty = self.check_expr(name_expr, locals, label);
+                self.forget_what_an_operation_may_change(
+                    &name_ty,
+                    is_this(name_expr),
+                    Operation::String,
+                    locals,
+                );
                 Type::mixed()
             }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
@@ -2952,6 +3025,12 @@ impl<'a> Checker<'a> {
                     );
                     self.record_member_ref(e.span, &owner, prop);
                 }
+                self.forget_what_an_operation_may_change(
+                    &base_ty,
+                    is_this(base),
+                    Operation::Property(Some(prop.name.clone()), Access::Read),
+                    locals,
+                );
                 if locals.may_have_member_narrowing()
                     && let Some(base_key) = locals.find_key(base)
                     && let Some(narrowed) = locals
@@ -2994,7 +3073,19 @@ impl<'a> Checker<'a> {
                 } else {
                     base_ty
                 };
-                self.check_expr(name_expr, locals, label);
+                let name_ty = self.check_expr(name_expr, locals, label);
+                self.forget_what_an_operation_may_change(
+                    &name_ty,
+                    is_this(name_expr),
+                    Operation::String,
+                    locals,
+                );
+                self.forget_what_an_operation_may_change(
+                    &base_ty,
+                    is_this(base),
+                    Operation::Property(None, Access::Read),
+                    locals,
+                );
                 // Whatever the name, a value that can't have properties
                 // can't have this one.
                 self.check_dynamic_member_receiver(&base_ty, *operator, false, e.span);
@@ -3100,6 +3191,12 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     self.check_implicit_tostring_usage(&part_ty, p.span);
+                    self.forget_what_an_operation_may_change(
+                        &part_ty,
+                        is_this(p),
+                        Operation::String,
+                        locals,
+                    );
                     if part_ty.to_string_type(self.registry).is_none() {
                         self.report(
                             format!(
@@ -3665,15 +3762,18 @@ impl<'a> Checker<'a> {
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(body);
                 let enclosing_scope =
-                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
-                        body,
-                        uses,
-                        Some((
-                            self.current_class.as_deref().map(Name::from),
-                            Name::from("{closure}"),
-                        )),
-                        false,
-                    ));
+                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
+                        closure: true,
+                        ..crate::checker::shared_scope::SharedScope::of(
+                            body,
+                            uses,
+                            Some((
+                                self.current_class.as_deref().map(Name::from),
+                                Name::from("{closure}"),
+                            )),
+                            false,
+                        )
+                    });
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`
                 // bails in `ParameterOutAssignedTypeRule`/
@@ -3954,9 +4054,11 @@ impl<'a> Checker<'a> {
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
                 self.check_generator_return_type(declared_return.as_ref(), e.span);
-                let enclosing_scope = self.enter_shared_scope(
-                    crate::checker::shared_scope::SharedScope::of_arrow_function(body),
-                );
+                let enclosing_scope =
+                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
+                        closure: true,
+                        ..crate::checker::shared_scope::SharedScope::of_arrow_function(body)
+                    });
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.leave_shared_scope(enclosing_scope);
                 self.current_function_is_generator = previous_generator_flag;

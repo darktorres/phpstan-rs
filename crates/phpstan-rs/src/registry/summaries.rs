@@ -14,7 +14,9 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
-use syntax::visit::{Visitor, walk_class_def, walk_expr, walk_function_decl, walk_stmt};
+use syntax::visit::{
+    Visitor, walk_arg, walk_catch_clause, walk_class_def, walk_expr, walk_function_decl, walk_stmt,
+};
 
 /// A call a body's purity is conditional on, in the form the body wrote it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -134,14 +136,6 @@ impl Place {
             })
         })
     }
-
-    /// The variable this place is, with no step from it.
-    fn variable(&self) -> Option<&Name> {
-        match (&self.root, &*self.steps) {
-            (Root::Variable(Some(name)), []) => Some(name),
-            _ => None,
-        }
-    }
 }
 
 /// What a variable of a body is bound to.
@@ -231,6 +225,282 @@ pub(crate) enum Callee {
     /// wrote, called where it is written: one of those its summary lists at
     /// these indices.
     Written(Box<[u32]>),
+    /// What PHP runs for an operation on a value, no call written: on a
+    /// value from `on`, or from anywhere when `None`.
+    Implicit {
+        on: Option<Box<[Origin]>>,
+        operation: Operation,
+    },
+}
+
+/// An operation on a value through which PHP may run the value's code.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Operation {
+    /// An access to the property of the name, `None` for a computed one:
+    /// `__get`, `__set`, `__isset` or `__unset` where it is magic.
+    Property(Option<Name>, Access),
+    /// An access to an element: `offsetGet`, `offsetSet`, `offsetExists` or
+    /// `offsetUnset` of an `ArrayAccess`.
+    Element(Access),
+    /// A conversion to a string: `__toString`.
+    String,
+    /// `clone`, with properties given when `with`: `__clone`, and a write
+    /// of each property given.
+    Clone { with: bool },
+    /// A `foreach` over the value, its keys taken when `keys`: an
+    /// `Iterator`'s methods, or an `IteratorAggregate`'s `getIterator` and
+    /// those of the iterator it gives.
+    Iterate { keys: bool },
+}
+
+/// What an access does with a property or an element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Access {
+    Read,
+    Write,
+    /// `isset`, `empty` and `??` testing it.
+    Isset,
+    Unset,
+}
+
+/// Where a value comes from, as the body wrote it: what it is taken to be,
+/// by the declarations, with no flow.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Origin {
+    /// A value that is no object: a literal, a string, a boolean, an array.
+    NoObject,
+    /// What an arithmetic operator gives: a number, or an object of a class
+    /// overloading the operator (`GMP`, `BcMath\Number`).
+    Arithmetic,
+    /// The value at the place.
+    Place(Place),
+    /// What the call returns.
+    Returned(Callee),
+    /// An object `new` made of the class named (`self`, `static` and
+    /// `parent` as written); `None` for a class computed at run time.
+    New(Option<QualifiedName>),
+    /// An object of the anonymous class of this name.
+    Anonymous(Option<Name>),
+    /// A closure, an arrow function or a first-class callable.
+    Closure,
+    /// An exception a `catch` caught, of one of the classes.
+    Caught(Box<[QualifiedName]>),
+}
+
+impl Origin {
+    /// Whether it is the same from any scope: no variable of the scope it is
+    /// written in decides it.
+    fn context_free(&self) -> bool {
+        !matches!(self, Origin::Place(_) | Origin::Returned(_))
+    }
+
+    /// Whether a value from here is no object PHP runs code of for an
+    /// operation.
+    fn runs_nothing(&self) -> bool {
+        matches!(
+            self,
+            Origin::NoObject | Origin::Arithmetic | Origin::Closure
+        )
+    }
+}
+
+/// Where the value `e` evaluates to comes from; `None` when that is not
+/// known.
+fn origins_of(e: &Expr) -> Option<Vec<Origin>> {
+    let e = e.peeled();
+    syntax::stack::guard(|| {
+        Some(match &e.kind {
+            ExprKind::Literal(_)
+            | ExprKind::Interpolated(_)
+            | ExprKind::ArrayLiteral(_)
+            | ExprKind::ClassNameFetch(_)
+            | ExprKind::Isset(_)
+            | ExprKind::Empty(_)
+            | ExprKind::Instanceof(..)
+            | ExprKind::ShellExec(_)
+            | ExprKind::Print(_)
+            | ExprKind::Exit(..)
+            | ExprKind::Throw(_)
+            | ExprKind::Unary(UnaryOp::Not, _) => vec![Origin::NoObject],
+            ExprKind::Unary(_, _) => vec![Origin::Arithmetic],
+            // An object stays itself; anything else becomes a `stdClass`.
+            ExprKind::Cast(CastSpelling::Object, inner) => {
+                let mut out = origins_of(inner)?;
+                out.push(Origin::New(Some(QualifiedName {
+                    written: Name::from("stdClass"),
+                    resolved: ResolvedName::Exact(Name::from("stdClass")),
+                    span: e.span,
+                })));
+                out
+            }
+            ExprKind::Cast(..) => vec![Origin::NoObject],
+            ExprKind::Binary(op, l, r) => match op {
+                BinOp::Coalesce => {
+                    let mut out = origins_of(l)?;
+                    out.extend(origins_of(r)?);
+                    out
+                }
+                BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::Pow
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr => vec![Origin::Arithmetic],
+                BinOp::Pipe => return None,
+                BinOp::Concat
+                | BinOp::Eq
+                | BinOp::Identical
+                | BinOp::NotEq
+                | BinOp::NotIdentical
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::LtEq
+                | BinOp::GtEq
+                | BinOp::Spaceship
+                | BinOp::And
+                | BinOp::Or
+                | BinOp::LogicalAnd
+                | BinOp::LogicalOr
+                | BinOp::LogicalXor => vec![Origin::NoObject],
+            },
+            ExprKind::Assign(_, rhs) | ExprKind::AssignRef(_, rhs) => origins_of(rhs)?,
+            ExprKind::CompoundAssign(op, lhs, rhs) => match op {
+                BinOp::Concat => vec![Origin::NoObject],
+                BinOp::Coalesce => {
+                    let mut out = origins_of(lhs)?;
+                    out.extend(origins_of(rhs)?);
+                    out
+                }
+                _ => vec![Origin::Arithmetic],
+            },
+            ExprKind::Ternary(cond, then, otherwise) => {
+                let mut out = origins_of(then.as_deref().unwrap_or(cond))?;
+                out.extend(origins_of(otherwise)?);
+                out
+            }
+            ExprKind::Match { arms, .. } => {
+                let mut out = Vec::new();
+                for arm in arms {
+                    out.extend(origins_of(&arm.body)?);
+                }
+                out
+            }
+            ExprKind::Clone(inner, _) => origins_of(inner)?,
+            ExprKind::Variable(_)
+            | ExprKind::DynamicVariable(_)
+            | ExprKind::PropertyAccess(..)
+            | ExprKind::DynamicPropertyAccess(..)
+            | ExprKind::Index(..)
+            | ExprKind::StaticPropertyFetch(..)
+            | ExprKind::DynamicStaticPropertyFetch(..) => vec![Origin::Place(Place::of(e)?)],
+            ExprKind::Call(callee, _) => match &callee.kind {
+                ExprKind::Name(name) => vec![Origin::Returned(Callee::Function(name.clone()))],
+                _ => return None,
+            },
+            ExprKind::MethodCall(recv, method, _, _) => vec![Origin::Returned(Callee::Method {
+                receiver: receiver(recv),
+                method: Some(method.name.clone()),
+            })],
+            ExprKind::StaticCall(target, method, _) => vec![Origin::Returned(Callee::Static {
+                class: target.as_name().cloned(),
+                method: Some(method.name.clone()),
+            })],
+            ExprKind::New(callee, _) => vec![Origin::New(match &callee.kind {
+                ExprKind::Name(name) => Some(name.clone()),
+                _ => None,
+            })],
+            ExprKind::NewAnonymousClass(class) => vec![Origin::Anonymous(class.name.clone())],
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
+                vec![Origin::Closure]
+            }
+            ExprKind::Grouping(_)
+            | ExprKind::ErrorSuppress(_)
+            | ExprKind::Destructure(..)
+            | ExprKind::DynamicMethodCall(..)
+            | ExprKind::DynamicStaticCall(..)
+            | ExprKind::ClassConstFetch(..)
+            | ExprKind::DynamicClassConstFetch(..)
+            | ExprKind::Name(_)
+            | ExprKind::Eval(_)
+            | ExprKind::Include(..)
+            | ExprKind::Yield(..)
+            | ExprKind::YieldFrom(_) => return None,
+        })
+    })
+}
+
+/// Where the elements of a value from `origins` come from: an element of
+/// each place; `None` when one is not a place.
+fn element_origins(origins: Vec<Origin>) -> Option<Vec<Origin>> {
+    origins
+        .into_iter()
+        .map(|origin| match origin {
+            Origin::Place(place) => Some(Origin::Place(place.then(Step::Element))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether the value `e` evaluates to may be a string, as an operand of a
+/// loose comparison.
+fn may_be_string(e: &Expr) -> bool {
+    !matches!(
+        &e.peeled().kind,
+        ExprKind::Literal(Literal::Int(_) | Literal::Float(_) | Literal::Bool(_) | Literal::Null)
+            | ExprKind::ArrayLiteral(_)
+            | ExprKind::Isset(_)
+            | ExprKind::Empty(_)
+            | ExprKind::Instanceof(..)
+            | ExprKind::Unary(..)
+            | ExprKind::Cast(
+                CastSpelling::Int
+                    | CastSpelling::Integer
+                    | CastSpelling::Float
+                    | CastSpelling::Real
+                    | CastSpelling::Double
+                    | CastSpelling::Bool
+                    | CastSpelling::Boolean
+                    | CastSpelling::Array
+                    | CastSpelling::Object
+                    | CastSpelling::Unset
+                    | CastSpelling::Void,
+                _
+            )
+            | ExprKind::Binary(
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Mod
+                    | BinOp::Pow
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+                    | BinOp::Eq
+                    | BinOp::Identical
+                    | BinOp::NotEq
+                    | BinOp::NotIdentical
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::LtEq
+                    | BinOp::GtEq
+                    | BinOp::Spaceship
+                    | BinOp::And
+                    | BinOp::Or
+                    | BinOp::LogicalAnd
+                    | BinOp::LogicalOr
+                    | BinOp::LogicalXor,
+                _,
+                _
+            )
+    )
 }
 
 /// Where an argument is passed.
@@ -346,9 +616,17 @@ pub(crate) struct WriteFacts {
     /// one it takes from the code that wrote it holds what that code made
     /// only while the closure writes it nothing else.
     pub(crate) made: Box<[(Name, Option<Made>)]>,
+    /// The variables written whose every value written comes from where
+    /// the body shows, each with where; one written a value not known is
+    /// not listed.
+    pub(crate) origins: Box<[(Name, Box<[Origin]>)]>,
+    /// A variable whose name is computed is written (`$$n = …`,
+    /// `extract()`): any variable may hold anything.
+    pub(crate) computed: bool,
     /// A construct that may write anything: `eval` or `include`.
     pub(crate) anything: bool,
-    /// Every call, in the order the body makes them.
+    /// Every call, in the order the body makes them, and each operation
+    /// through which PHP may run code, once.
     pub(crate) calls: Box<[CallWrites]>,
 }
 
@@ -595,8 +873,14 @@ struct Scope {
     // What each variable written holds: what the body made, or `None` once
     // it is written anything else.
     made: FxHashMap<Name, Option<Made>>,
+    // Where what each variable written holds comes from, or `None` once it
+    // is written a value not known.
+    origins: FxHashMap<Name, Option<Vec<Origin>>>,
+    computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
+    // The operations listed in `calls`, as printed.
+    implicit: FxHashSet<String>,
 }
 
 impl Scope {
@@ -611,11 +895,26 @@ impl Scope {
             .filter(|(_, made)| all_written || made.is_some())
             .collect();
         made.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut origins: Vec<(Name, Box<[Origin]>)> = self
+            .origins
+            .into_iter()
+            .filter_map(|(name, origins)| {
+                let mut seen = FxHashSet::default();
+                let origins: Box<[Origin]> = origins?
+                    .into_iter()
+                    .filter(|origin| seen.insert(syntax::canonical::print(origin)))
+                    .collect();
+                Some((name, origins))
+            })
+            .collect();
+        origins.sort_by(|a, b| a.0.cmp(&b.0));
         WriteFacts {
             reassigned: reassigned.into_boxed_slice(),
             writes: self.writes.into_boxed_slice(),
             bindings: self.bindings.into_boxed_slice(),
             made: made.into_boxed_slice(),
+            origins: origins.into_boxed_slice(),
+            computed: self.computed,
             anything: self.anything,
             calls: self.calls.into_boxed_slice(),
         }
@@ -647,7 +946,16 @@ struct Summarizer {
     // Each closure's index, by the address of its expression.
     ids: FxHashMap<usize, u32>,
     written: Vec<ClosureFacts>,
+    // What an access does with a property or an element, by the address of
+    // its expression, when not only a read (`READ`, `WRITE`, `ISSET`,
+    // `UNSET`).
+    accesses: FxHashMap<usize, u8>,
 }
+
+const READ: u8 = 1;
+const WRITE: u8 = 2;
+const ISSET: u8 = 4;
+const UNSET: u8 = 8;
 
 impl Summarizer {
     fn finish(self) -> BodySummary {
@@ -755,14 +1063,27 @@ impl Summarizer {
         }
     }
 
-    /// A write to `target`: to each target of a destructuring, to the place
-    /// `target` names otherwise. A variable written holds what the body
-    /// made when `made` says what.
-    fn write(&mut self, target: &Expr, made: Option<Made>) {
+    /// A write to `target` of a value from `origins`, not known when
+    /// `None`: to each target of a destructuring, of an element of it, to
+    /// the place `target` names otherwise. A variable written holds what
+    /// the body made when `made` says what.
+    fn write(&mut self, target: &Expr, made: Option<Made>, origins: Option<Vec<Origin>>) {
         if let ExprKind::Destructure(items, _) = &target.peeled().kind {
+            let element = origins.and_then(element_origins);
             for item in items {
-                if let Some(target) = &item.target {
-                    self.write(target, None);
+                let Some(target) = &item.target else {
+                    continue;
+                };
+                match &target.peeled().kind {
+                    // `[&$x] = …`: a reference to the element.
+                    ExprKind::Variable(name) if item.by_ref && **name != *"this" => {
+                        let place = match element.as_deref() {
+                            Some([Origin::Place(place)]) => place.clone(),
+                            _ => Place::value(),
+                        };
+                        self.bind(Some(name.clone()), Binding::Reference(place));
+                    }
+                    _ => self.write(target, None, element.clone()),
                 }
             }
             return;
@@ -770,17 +1091,20 @@ impl Summarizer {
         let Some(place) = Place::of(target) else {
             return;
         };
-        if let Some(name) = place.variable() {
-            self.note_variable(name.clone(), made);
+        match (&place.root, &*place.steps) {
+            (Root::Variable(Some(name)), []) => self.note_variable(name.clone(), made, origins),
+            (Root::Variable(None), []) => self.write_computed(),
+            _ => {}
         }
         self.scope.writes.push(place);
     }
 
     /// That the variable `name` is written what `made` says, or anything
-    /// else when `made` is `None`: in the scope the walk is in, and in those
-    /// sharing it by reference.
-    fn note_variable(&mut self, name: Name, made: Option<Made>) {
-        for scope in self.scopes_sharing(&name) {
+    /// else when `made` is `None`, of a value from `origins`, not known when
+    /// `None`: in the scope the walk is in, and in those sharing it by
+    /// reference.
+    fn note_variable(&mut self, name: Name, made: Option<Made>, origins: Option<Vec<Origin>>) {
+        for (depth, scope) in self.scopes_sharing(&name).into_iter().enumerate() {
             let held = scope
                 .made
                 .entry(name.clone())
@@ -789,14 +1113,139 @@ impl Summarizer {
                 (Some(a), Some(b)) => a.join(b),
                 _ => None,
             };
+            // Where a value a closure writes comes from is the same to the
+            // code around it only where none of the closure's variables
+            // decides it.
+            let origins = origins
+                .as_ref()
+                .filter(|origins| depth == 0 || origins.iter().all(Origin::context_free));
+            let known = scope
+                .origins
+                .entry(name.clone())
+                .or_insert_with(|| Some(Vec::new()));
+            match (known.as_mut(), origins) {
+                (Some(known), Some(origins)) => known.extend(origins.iter().cloned()),
+                _ => *known = None,
+            }
+        }
+    }
+
+    /// A write to a variable whose name is computed: any variable of the
+    /// scope may hold anything, and any it shares by reference with the
+    /// scopes around it.
+    fn write_computed(&mut self) {
+        self.scope.computed = true;
+        let shared: Vec<Name> = self
+            .enclosing
+            .last()
+            .map(|enclosing| enclosing.shared.iter().cloned().collect())
+            .unwrap_or_default();
+        for name in shared {
+            self.note_variable(name.clone(), None, None);
+            for scope in self.scopes_sharing(&name) {
+                scope.reassigned.insert(name.clone());
+            }
         }
     }
 
     fn bind(&mut self, variable: Option<Name>, binding: Binding) {
-        if let Some(name) = &variable {
-            self.scope.made.insert(name.clone(), None);
+        match &variable {
+            Some(name) => {
+                self.scope.made.insert(name.clone(), None);
+                self.scope.origins.insert(name.clone(), None);
+            }
+            None => self.write_computed(),
         }
         self.scope.bindings.push((variable, binding));
+    }
+
+    /// That the expression `target` does what `access` says with what it
+    /// accesses.
+    fn mark(&mut self, target: &Expr, access: u8) {
+        *self
+            .accesses
+            .entry(std::ptr::from_ref(target.peeled()) as usize)
+            .or_default() |= access;
+    }
+
+    /// An operation PHP may run code of the value `operand` for.
+    fn implicit(&mut self, operand: &Expr, operation: Operation) {
+        self.implicit_on(origins_of(operand), operation);
+    }
+
+    /// An operation PHP may run code of a value from `on` for, from
+    /// anywhere when `None`: none on a value that is no object it runs code
+    /// of, and one of each in a scope.
+    fn implicit_on(&mut self, on: Option<Vec<Origin>>, operation: Operation) {
+        if on
+            .as_ref()
+            .is_some_and(|on| on.iter().all(Origin::runs_nothing))
+        {
+            return;
+        }
+        let callee = Callee::Implicit {
+            on: on.map(Vec::into_boxed_slice),
+            operation,
+        };
+        if !self
+            .scope
+            .implicit
+            .insert(syntax::canonical::print(&callee))
+        {
+            return;
+        }
+        self.scope.calls.push(CallWrites {
+            callee,
+            arguments: Box::new([]),
+            places: Box::new([]),
+            callables: Box::new([]),
+        });
+    }
+
+    /// An access to a property, `name` (`None` for a computed one), or an
+    /// element, when `element`, of `base`, doing what `access` says; `base`
+    /// is read on the way, tested too when the access tests.
+    fn member_access(&mut self, base: &Expr, name: Option<&Name>, access: u8, element: bool) {
+        let on = origins_of(base);
+        for (bit, kind) in [
+            (READ, Access::Read),
+            (WRITE, Access::Write),
+            (ISSET, Access::Isset),
+            (UNSET, Access::Unset),
+        ] {
+            if access & bit == 0 {
+                continue;
+            }
+            let operation = if element {
+                Operation::Element(kind)
+            } else {
+                Operation::Property(name.cloned(), kind)
+            };
+            self.implicit_on(on.clone(), operation);
+        }
+        let link = if access & ISSET != 0 {
+            ISSET | READ
+        } else {
+            READ
+        };
+        self.mark(base, link);
+    }
+
+    /// The targets of a destructuring of a value from `source`, written:
+    /// each element taken is read from it.
+    fn destructure(&mut self, items: &[DestructureItem], source: Option<Vec<Origin>>) {
+        self.implicit_on(source.clone(), Operation::Element(Access::Read));
+        let element = source.and_then(element_origins);
+        for item in items {
+            let Some(target) = &item.target else {
+                continue;
+            };
+            match &target.peeled().kind {
+                ExprKind::Destructure(inner, _) => self.destructure(inner, element.clone()),
+                _ if item.by_ref => {}
+                _ => self.mark(target, WRITE),
+            }
+        }
     }
 
     /// A call, with the arguments that are places and those that name a
@@ -930,6 +1379,37 @@ impl Summarizer {
     }
 }
 
+/// Whether `e` is a call writing variables whose names it computes:
+/// `extract()`, and `parse_str()` and `mb_parse_str()` with no array to
+/// write.
+fn writes_computed_variables(e: &Expr) -> bool {
+    let ExprKind::Call(callee, args) = &e.kind else {
+        return false;
+    };
+    let ExprKind::Name(name) = &callee.kind else {
+        return false;
+    };
+    let name = name.written.trim_start_matches('\\');
+    name.eq_ignore_ascii_case("extract")
+        || ((name.eq_ignore_ascii_case("parse_str") || name.eq_ignore_ascii_case("mb_parse_str"))
+            && args.len() < 2
+            && !args.iter().any(|arg| arg.spread || arg.name.is_some()))
+}
+
+/// Whether a destructuring takes a reference to an element, at any depth.
+fn destructures_by_ref(items: &[DestructureItem]) -> bool {
+    items.iter().any(|item| {
+        item.by_ref
+            || item
+                .target
+                .as_ref()
+                .is_some_and(|target| match &target.peeled().kind {
+                    ExprKind::Destructure(inner, _) => destructures_by_ref(inner),
+                    _ => false,
+                })
+    })
+}
+
 /// The call `e` is, as a body's summary records it.
 pub(crate) fn call_of(e: &Expr) -> Option<CallWrites> {
     let mut walk = Summarizer::default();
@@ -976,6 +1456,28 @@ impl<'ast> Visitor<'ast> for Summarizer {
         walk_class_def(&mut nested, class);
     }
 
+    fn visit_arg(&mut self, arg: &'ast Arg) {
+        if arg.spread {
+            self.implicit(&arg.value, Operation::Iterate { keys: true });
+        }
+        walk_arg(self, arg);
+    }
+
+    fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
+        if let Some(var) = &clause.var {
+            let name = var.name.clone();
+            let caught = Origin::Caught(clause.types.clone().into_boxed_slice());
+            self.note_variable(name.clone(), None, Some(vec![caught]));
+            for scope in self.scopes_sharing(&name) {
+                scope.reassigned.insert(name.clone());
+            }
+            self.scope
+                .writes
+                .push(Place::root(Root::Variable(Some(name))));
+        }
+        walk_catch_clause(self, clause);
+    }
+
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         syntax::stack::guard(|| {
             let impure = match &stmt.kind {
@@ -997,7 +1499,24 @@ impl<'ast> Visitor<'ast> for Summarizer {
             match &stmt.kind {
                 StmtKind::Unset(targets) => {
                     for target in targets {
-                        self.write(target, None);
+                        self.write(target, None, Some(vec![Origin::NoObject]));
+                        self.mark(target, UNSET);
+                    }
+                }
+                StmtKind::Echo(values) => {
+                    for value in values {
+                        self.implicit(value, Operation::String);
+                    }
+                }
+                StmtKind::Switch { subject, cases } => {
+                    let tests = || cases.iter().filter_map(|case| case.test.as_ref());
+                    if tests().any(may_be_string) {
+                        self.implicit(subject, Operation::String);
+                    }
+                    if may_be_string(subject) {
+                        for test in tests() {
+                            self.implicit(test, Operation::String);
+                        }
                     }
                 }
                 StmtKind::Foreach {
@@ -1007,9 +1526,18 @@ impl<'ast> Visitor<'ast> for Summarizer {
                     by_ref,
                     ..
                 } => {
+                    let source = origins_of(subject);
+                    self.implicit_on(
+                        source.clone(),
+                        Operation::Iterate {
+                            keys: key.is_some(),
+                        },
+                    );
                     if let Some(key) = key {
-                        self.write(key, None);
+                        self.write(key, None, None);
+                        self.mark(key, WRITE);
                     }
+                    let element = source.and_then(element_origins);
                     match &value.peeled().kind {
                         ExprKind::Variable(name) if *by_ref => {
                             let element = Place::of(subject)
@@ -1017,10 +1545,19 @@ impl<'ast> Visitor<'ast> for Summarizer {
                                 .then(Step::Element);
                             self.bind(Some(name.clone()), Binding::Reference(element));
                         }
-                        _ => self.write(value, None),
+                        ExprKind::Destructure(items, _) => {
+                            self.write(value, None, element.clone());
+                            self.destructure(items, element);
+                        }
+                        _ => {
+                            self.write(value, None, element);
+                            if !*by_ref {
+                                self.mark(value, WRITE);
+                            }
+                        }
                     }
                     if *by_ref {
-                        self.write(subject, None);
+                        self.write(subject, None, None);
                     }
                     for target in key.iter().map(|k| &**k).chain([&**value]) {
                         self.reassign(target);
@@ -1033,7 +1570,10 @@ impl<'ast> Visitor<'ast> for Summarizer {
                                 Some(name.name.clone()),
                                 Binding::Global(Some(name.name.clone())),
                             ),
-                            GlobalVar::Dynamic(_) => self.bind(None, Binding::Global(None)),
+                            GlobalVar::Dynamic(name) => {
+                                self.implicit(name, Operation::String);
+                                self.bind(None, Binding::Global(None));
+                            }
                         }
                     }
                 }
@@ -1073,15 +1613,43 @@ impl<'ast> Visitor<'ast> for Summarizer {
                 _ => false,
             };
             self.impure_unless_in_closure(impure);
+            let access = self
+                .accesses
+                .remove(&(std::ptr::from_ref(e) as usize))
+                .unwrap_or(READ);
             match &e.kind {
                 ExprKind::Assign(lhs, rhs) => {
                     let made = self.made_by(rhs);
-                    self.write(lhs, made);
+                    let origins = origins_of(rhs);
+                    self.write(lhs, made, origins.clone());
+                    if let ExprKind::Destructure(items, _) = &lhs.peeled().kind {
+                        // A reference taken to an element of what is
+                        // destructured.
+                        if destructures_by_ref(items) {
+                            self.write(rhs, None, None);
+                        }
+                        self.destructure(items, origins);
+                    } else {
+                        self.mark(lhs, WRITE);
+                    }
                     self.reassign(lhs);
                 }
-                ExprKind::CompoundAssign(_, lhs, _) => {
-                    self.write(lhs, None);
+                ExprKind::CompoundAssign(op, lhs, rhs) => {
+                    let origins = match op {
+                        BinOp::Concat => Some(vec![Origin::NoObject]),
+                        BinOp::Coalesce => origins_of(rhs),
+                        _ => Some(vec![Origin::Arithmetic]),
+                    };
+                    self.write(lhs, None, origins);
                     self.reassign(lhs);
+                    match op {
+                        BinOp::Coalesce => self.mark(lhs, ISSET | READ | WRITE),
+                        _ => self.mark(lhs, READ | WRITE),
+                    }
+                    if *op == BinOp::Concat {
+                        self.implicit(lhs, Operation::String);
+                        self.implicit(rhs, Operation::String);
+                    }
                 }
                 ExprKind::AssignRef(lhs, rhs) => {
                     match &lhs.peeled().kind {
@@ -1089,17 +1657,98 @@ impl<'ast> Visitor<'ast> for Summarizer {
                             let place = Place::of(rhs).unwrap_or_else(|| Place::root(Root::Value));
                             self.bind(Some(name.clone()), Binding::Reference(place));
                         }
-                        _ => self.write(lhs, None),
+                        _ => self.write(lhs, None, None),
                     }
-                    self.write(rhs, None);
+                    // A reference to a property or an element is taken by
+                    // reading it, as `rhs` is.
+                    self.write(rhs, None, None);
                     self.reassign(lhs);
                 }
                 ExprKind::Unary(
                     UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
                     target,
-                ) => self.write(target, None),
+                ) => {
+                    self.write(target, None, Some(vec![Origin::Arithmetic]));
+                    self.mark(target, READ | WRITE);
+                }
                 ExprKind::Eval(_) | ExprKind::Include(..) => self.scope.anything = true,
-                _ => self.record_call(e),
+                _ => {
+                    self.record_call(e);
+                    if writes_computed_variables(e) {
+                        self.write_computed();
+                    }
+                }
+            }
+            match &e.kind {
+                ExprKind::Isset(items) => {
+                    for item in items {
+                        self.mark(item, ISSET);
+                    }
+                }
+                ExprKind::Empty(item) => self.mark(item, ISSET | READ),
+                ExprKind::Binary(BinOp::Coalesce, l, _) => self.mark(l, ISSET | READ),
+                ExprKind::PropertyAccess(base, prop, _) => {
+                    self.member_access(base, Some(&prop.name), access, false);
+                }
+                ExprKind::DynamicPropertyAccess(base, name, _) => {
+                    self.member_access(base, None, access, false);
+                    self.implicit(name, Operation::String);
+                }
+                ExprKind::Index(base, _) => self.member_access(base, None, access, true),
+                ExprKind::DynamicVariable(name)
+                | ExprKind::DynamicStaticPropertyFetch(_, name)
+                | ExprKind::Cast(CastSpelling::String | CastSpelling::Binary, name)
+                | ExprKind::Print(name) => self.implicit(name, Operation::String),
+                ExprKind::Binary(BinOp::Concat, l, r) => {
+                    self.implicit(l, Operation::String);
+                    self.implicit(r, Operation::String);
+                }
+                // An object compared with a string becomes one.
+                ExprKind::Binary(
+                    BinOp::Eq
+                    | BinOp::NotEq
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::LtEq
+                    | BinOp::GtEq
+                    | BinOp::Spaceship,
+                    l,
+                    r,
+                ) => {
+                    if may_be_string(r) {
+                        self.implicit(l, Operation::String);
+                    }
+                    if may_be_string(l) {
+                        self.implicit(r, Operation::String);
+                    }
+                }
+                ExprKind::Interpolated(parts) => {
+                    for part in parts {
+                        if !matches!(part.kind, ExprKind::Literal(_)) {
+                            self.implicit(part, Operation::String);
+                        }
+                    }
+                }
+                ExprKind::Exit(_, Some(args)) => {
+                    if let Some(arg) = args.first() {
+                        self.implicit(&arg.value, Operation::String);
+                    }
+                }
+                ExprKind::Clone(inner, with) => self.implicit(
+                    inner,
+                    Operation::Clone {
+                        with: with.is_some(),
+                    },
+                ),
+                ExprKind::YieldFrom(inner) => {
+                    self.implicit(inner, Operation::Iterate { keys: true });
+                }
+                ExprKind::ArrayLiteral(items) => {
+                    for item in items.iter().filter(|item| item.spread) {
+                        self.implicit(&item.value, Operation::Iterate { keys: true });
+                    }
+                }
+                _ => {}
             }
             match &e.kind {
                 ExprKind::Closure(closure) => {
@@ -1232,6 +1881,33 @@ syntax::canonical_enum!(Callee {
     Anonymous(name),
     Value(name),
     Written(ids),
+    Implicit { on, operation },
+});
+
+syntax::canonical_enum!(Operation {
+    Property(name, access),
+    Element(access),
+    String,
+    Clone { with },
+    Iterate { keys },
+});
+
+syntax::canonical_enum!(Access {
+    Read,
+    Write,
+    Isset,
+    Unset,
+});
+
+syntax::canonical_enum!(Origin {
+    NoObject,
+    Arithmetic,
+    Place(place),
+    Returned(callee),
+    New(class),
+    Anonymous(name),
+    Closure,
+    Caught(classes),
 });
 
 syntax::canonical_enum!(ArgAt {
@@ -1263,6 +1939,8 @@ syntax::canonical_struct!(WriteFacts {
     writes,
     bindings,
     made,
+    origins,
+    computed,
     anything,
     calls,
 });

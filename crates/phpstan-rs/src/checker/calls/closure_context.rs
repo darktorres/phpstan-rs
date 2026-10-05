@@ -318,15 +318,18 @@ impl<'a> Checker<'a> {
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(body);
                 let enclosing_scope =
-                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
-                        body,
-                        uses,
-                        Some((
-                            self.current_class.as_deref().map(syntax::name::Name::from),
-                            syntax::name::Name::from("{closure}"),
-                        )),
-                        false,
-                    ));
+                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
+                        closure: true,
+                        ..crate::checker::shared_scope::SharedScope::of(
+                            body,
+                            uses,
+                            Some((
+                                self.current_class.as_deref().map(syntax::name::Name::from),
+                                syntax::name::Name::from("{closure}"),
+                            )),
+                            false,
+                        )
+                    });
                 // The closure's own by-reference state, as `checker::expr`'s
                 // `ExprKind::Closure` arm keeps it: its captures by
                 // reference are snapshotted where its body returns.

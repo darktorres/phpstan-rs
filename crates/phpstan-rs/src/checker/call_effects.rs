@@ -1,11 +1,13 @@
 //! What a call may have changed, forgotten after it: the storages its
 //! effect (`registry::effects`) says it may write, matched to what the
-//! scope knows of them. A property's facts go on each value whose type may
-//! hold an object the call writes, except an object the scope made that
-//! never leaves it (`SharedScope::unescaped`); a static property's by the
-//! class declaring it; and a variable bound to a written global, static
-//! variable or place, or captured by reference by a closure the call may
-//! run, is reset to what it may hold.
+//! scope knows of them. An operation PHP may run a value's code for (a
+//! magic method, an `ArrayAccess` or an iterator's method) is such a call.
+//! A property's facts go on each value whose type may hold an object the
+//! call writes, except an object the scope made that never leaves it
+//! (`SharedScope::unescaped`); a static property's by the class declaring
+//! it; and a variable bound to a written global, static variable or place,
+//! or captured by reference by a closure the call may run, is reset to what
+//! it may hold.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -18,7 +20,8 @@ use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::shared_scope::SharedScope;
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for, purge_stale_narrowing_for_var};
 use crate::registry::summaries::{
-    ArgAt, BodySummary, Callable, PairTarget, Place, Receiver, Root, Step, call_of,
+    ArgAt, BodySummary, CallWrites, Callable, Callee, Operation, Origin, PairTarget, Place,
+    Receiver, Root, Step, call_of,
 };
 use crate::registry::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
 
@@ -34,6 +37,9 @@ struct TypedCall<'c, 'a> {
     written: RefCell<Effect>,
     /// Whether the call runs a closure the scope wrote.
     runs_written: Cell<bool>,
+    /// The object an operation's operand is, and whether it is the scope's
+    /// own `$this`, for an operation PHP may run code for.
+    operand: Option<(Holder, bool)>,
 }
 
 impl TypedCall<'_, '_> {
@@ -170,6 +176,19 @@ impl CallContext for TypedCall<'_, '_> {
         self.runs_written.set(true);
         true
     }
+
+    fn operand(&self, _: Option<&[Origin]>) -> (Holder, bool) {
+        self.operand.clone().unwrap_or((Holder::Unknown, false))
+    }
+
+    fn rebindable(&self) -> bool {
+        self.checker.shared_scope.closure
+    }
+}
+
+/// Whether `e` is the scope's own `$this`.
+pub(crate) fn is_this(e: &Expr) -> bool {
+    matches!(&e.peeled().kind, ExprKind::Variable(name) if **name == *"this")
 }
 
 /// How a shared variable is reset.
@@ -186,7 +205,8 @@ enum Shared {
 
 impl Checker<'_> {
     /// After a call, what it may have written is stale: see the module's
-    /// doc comment.
+    /// doc comment. So is what iterating an argument spread into it may
+    /// have written.
     pub(crate) fn forget_what_a_call_may_change(&mut self, e: &Expr, locals: &mut Locals) {
         let (callee, receiver, args) = match &e.kind {
             ExprKind::MethodCall(recv, _, args, _)
@@ -198,6 +218,13 @@ impl Checker<'_> {
             ExprKind::NewAnonymousClass(class) => (None, None, &class.args[..]),
             _ => return,
         };
+        for arg in args.iter().filter(|arg| arg.spread) {
+            self.forget_what_an_operation_on_may_change(
+                &arg.value,
+                Operation::Iterate { keys: true },
+                locals,
+            );
+        }
         let scope = Rc::clone(&self.shared_scope);
         if !locals.has_state_to_forget() && scope.binds_nothing() {
             return;
@@ -230,6 +257,7 @@ impl Checker<'_> {
                 args,
                 written: Default::default(),
                 runs_written: Cell::new(false),
+                operand: None,
             };
             let mut effect = self.registry.call_effect(&call, &ctx);
             effect.join(&ctx.written.borrow());
@@ -239,6 +267,96 @@ impl Checker<'_> {
         // its own variables, which no effect names.
         let runs_written = effect.is_anything() || ran_written;
         self.forget_effect(&effect, runs_written, locals);
+    }
+
+    /// After `operation` on a value of type `ty`, what the code PHP may run
+    /// of the value for it may have written is stale; `this` when the value
+    /// is the scope's own `$this`.
+    pub(crate) fn forget_what_an_operation_may_change(
+        &self,
+        ty: &Type,
+        this: bool,
+        operation: Operation,
+        locals: &mut Locals,
+    ) {
+        if !locals.has_state_to_forget() && self.shared_scope.binds_nothing() {
+            return;
+        }
+        if ty.is_object().no() {
+            return;
+        }
+        let call = CallWrites {
+            callee: Callee::Implicit {
+                on: None,
+                operation,
+            },
+            arguments: Box::new([]),
+            places: Box::new([]),
+            callables: Box::new([]),
+        };
+        let effect = {
+            let ctx = TypedCall {
+                checker: self,
+                locals,
+                callee: None,
+                receiver: None,
+                args: &[],
+                written: Default::default(),
+                runs_written: Cell::new(false),
+                operand: Some((holder_of(ty), this)),
+            };
+            self.registry.call_effect(&call, &ctx)
+        };
+        self.forget_effect(&effect, effect.is_anything(), locals);
+    }
+
+    /// After the binary operator `op` on `l` and `r`, each with its type,
+    /// what converting an operand to a string may have written is stale:
+    /// both operands of `.`, and an operand compared loosely with one that
+    /// may be a string.
+    pub(crate) fn binary_string_conversions(
+        &self,
+        op: &BinOp,
+        l: (&Expr, &Type),
+        r: (&Expr, &Type),
+        locals: &mut Locals,
+    ) {
+        let converted = match op {
+            BinOp::Concat => [true, true],
+            BinOp::Eq
+            | BinOp::NotEq
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::LtEq
+            | BinOp::GtEq
+            | BinOp::Spaceship => [!r.1.is_string().no(), !l.1.is_string().no()],
+            _ => return,
+        };
+        for ((operand, ty), converted) in [l, r].into_iter().zip(converted) {
+            if converted {
+                self.forget_what_an_operation_may_change(
+                    ty,
+                    is_this(operand),
+                    Operation::String,
+                    locals,
+                );
+            }
+        }
+    }
+
+    /// `forget_what_an_operation_may_change` for `operation` on the value of
+    /// `operand`, evaluated.
+    pub(crate) fn forget_what_an_operation_on_may_change(
+        &self,
+        operand: &Expr,
+        operation: Operation,
+        locals: &mut Locals,
+    ) {
+        if !locals.has_state_to_forget() && self.shared_scope.binds_nothing() {
+            return;
+        }
+        let ty = self.infer_expr(operand, locals);
+        self.forget_what_an_operation_may_change(&ty, is_this(operand), operation, locals);
     }
 
     /// Forgets what `effect` may have written, and the variables captured by
