@@ -247,3 +247,81 @@ fn a_load_that_parses_as_it_walks_loads_what_a_load_of_the_listing_does() {
     );
     assert_eq!(walked.lex_warnings, listed.lex_warnings);
 }
+
+#[test]
+fn roots_spelled_with_dot_dot_are_listed_in_path_order() {
+    let dir = TempDir::new("source_dot_dot_roots");
+    dir.write("a/x.php", "<?php class X {}");
+    dir.write("a/y/z.php", "<?php class Z {}");
+    dir.write("b/f.php", "<?php class F {}");
+    let session = session(
+        &dir,
+        Overrides {
+            paths: paths(&["a", "a/../b"]),
+            ..Overrides::default()
+        },
+    );
+    let (analysed, _) = session.listing();
+    let mut sorted = analysed.clone();
+    sorted.sort();
+    assert_eq!(analysed, sorted);
+    assert_eq!(analysed.len(), 3);
+}
+
+#[test]
+fn files_the_classmap_lists_are_placed_among_the_walked_ones() {
+    let dir = TempDir::new("source_explicit_placed");
+    dir.write("composer.json", "{}");
+    dir.write("src/App.php", "<?php class App {}");
+    for file in [
+        "acme/lib/src/A.php",
+        "acme/lib/src/sub/B.php",
+        "acme/lib/Top.php",
+        "acme/other/O.php",
+        "aaa/First.php",
+        "zzz/Last.php",
+    ] {
+        dir.write(&format!("vendor/{file}"), "<?php class C {}");
+    }
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'Last' => $vendorDir . '/zzz/Last.php',\n    'First' => $vendorDir . '/aaa/First.php',\n    'O' => $vendorDir . '/acme/other/O.php',\n    'A' => $vendorDir . '/acme/lib/src/A.php',\n    'Top' => $vendorDir . '/acme/lib/Top.php',\n);\n",
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'Acme\\\\' => array($vendorDir . '/acme/lib/src'),\n);\n",
+    );
+    let schema = crate::app::config_schema();
+    let config = config::ConfigFile::parse("", &schema).unwrap();
+    let session = Session::resolve(
+        &config,
+        None,
+        dir.0.clone(),
+        Overrides {
+            paths: paths(&["src"]),
+            ..Overrides::default()
+        },
+        Policy::Fail,
+        worker_pool(),
+    )
+    .unwrap();
+    let (_, context) = session.listing();
+    let mut sorted = context.clone();
+    sorted.sort();
+    assert_eq!(context, sorted);
+    let names: Vec<&str> = context
+        .iter()
+        .filter_map(|path| path.file_name()?.to_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "First.php",
+            "Top.php",
+            "A.php",
+            "B.php",
+            "O.php",
+            "Last.php"
+        ]
+    );
+}

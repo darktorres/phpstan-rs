@@ -176,6 +176,64 @@ struct Walked {
     read: Option<Read>,
 }
 
+/// Where the walks of a listing's roots end in the list they are appended
+/// to. A root's walk is in path order, and the roots are walked in path
+/// order, so the list is in order wherever a root's last file is before the
+/// next root's first.
+#[derive(Default)]
+struct Runs(Vec<usize>);
+
+impl Runs {
+    fn end(&mut self, len: usize) {
+        self.0.push(len);
+    }
+
+    /// Puts `files` in path order: as it is when the runs join in order,
+    /// and sorted when two do not, which a root spelled with `..` can do.
+    fn join(self, files: &mut [Walked]) {
+        let joined = self
+            .0
+            .iter()
+            .all(|&end| end == 0 || end >= files.len() || files[end - 1].path < files[end].path);
+        if !joined {
+            composer::path_order::sort_by_path(files, |walked| &walked.path);
+        }
+        debug_assert!(files.windows(2).all(|pair| pair[0].path <= pair[1].path));
+    }
+}
+
+/// The `explicit` files, which no walk lists, among `files`, which are in
+/// path order: each is placed by a search of `files`, and one that is in
+/// `files` already is left to that entry, which may hold its parse.
+fn place_explicit(files: Vec<Walked>, mut explicit: Vec<Walked>) -> Vec<Walked> {
+    if explicit.is_empty() {
+        return files;
+    }
+    composer::path_order::sort_by_path(&mut explicit, |walked| &walked.path);
+    explicit.dedup_by(|later, earlier| later.path == earlier.path);
+    let mut at = 0;
+    let mut places = Vec::with_capacity(explicit.len());
+    for walked in explicit {
+        at += files[at..].partition_point(|listed| listed.path < walked.path);
+        if files
+            .get(at)
+            .is_none_or(|listed| listed.path != walked.path)
+        {
+            places.push((at, walked));
+        }
+    }
+    let mut placed = Vec::with_capacity(files.len() + places.len());
+    let mut rest = files.into_iter();
+    let mut done = 0;
+    for (at, walked) in places {
+        placed.extend(rest.by_ref().take(at - done));
+        done = at;
+        placed.push(walked);
+    }
+    placed.extend(rest);
+    placed
+}
+
 fn paths_of(walked: Vec<Walked>) -> Vec<PathBuf> {
     walked.into_iter().map(|walked| walked.path).collect()
 }
@@ -1221,10 +1279,14 @@ impl Session {
                 }
             })
             .collect();
+        let found = out.len();
         for path in held {
-            if !out[start..].iter().any(|walked| walked.path == path) {
+            if !out[start..found].iter().any(|walked| walked.path == path) {
                 out.push(Walked::bare(path));
             }
+        }
+        if out.len() > found {
+            composer::path_order::sort_by_path(&mut out[start..], |walked| &walked.path);
         }
     }
 
@@ -1653,7 +1715,10 @@ impl Session {
         parse: Option<Parse>,
     ) -> Vec<Walked> {
         let mut files = Vec::new();
-        for dir in super::roles::outermost(&self.dirs, |dir| self.absolute(dir)) {
+        let mut runs = Runs::default();
+        let mut roots = super::roles::outermost(&self.dirs, |dir| self.absolute(dir));
+        composer::path_order::sort_by_path(&mut roots, |dir| dir.as_path());
+        for dir in roots {
             let scan = Scan {
                 table,
                 parse,
@@ -1663,8 +1728,9 @@ impl Session {
                 context: false,
             };
             self.collect_files(scan, dir, &mut files);
+            runs.end(files.len());
         }
-        composer::path_order::sort_by_path(&mut files, |walked| &walked.path);
+        runs.join(&mut files);
         files
     }
 
@@ -1681,11 +1747,11 @@ impl Session {
         // The vendor context was being found while the analysed files were
         // listed.
         let mut scan_dirs = self.scan_dirs.clone();
-        let mut files: Vec<Walked> = self.scan_files.iter().cloned().map(Walked::bare).collect();
+        let mut explicit: Vec<Walked> = self.scan_files.iter().cloned().map(Walked::bare).collect();
         for vendor in &self.vendors {
             let found = vendor.get();
             scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
-            files.extend(
+            explicit.extend(
                 found
                     .files
                     .iter()
@@ -1698,8 +1764,12 @@ impl Session {
         let is_context = |walked: &Walked| {
             roles.classify(&self.absolute(&walked.path)).role == super::roles::Role::Context
         };
-        files.retain(is_context);
-        for dir in super::roles::outermost(&scan_dirs, |dir| self.absolute(dir)) {
+        explicit.retain(is_context);
+        let mut files = Vec::new();
+        let mut runs = Runs::default();
+        let mut roots = super::roles::outermost(&scan_dirs, |dir| self.absolute(dir));
+        composer::path_order::sort_by_path(&mut roots, |dir| dir.as_path());
+        for dir in roots {
             let absolute = self.absolute(dir);
             if roles.classify(&absolute).role == super::roles::Role::Analysed {
                 continue;
@@ -1723,17 +1793,11 @@ impl Session {
                 let walked = files.split_off(start);
                 files.extend(walked.into_iter().filter(is_context));
             }
+            runs.end(files.len());
         }
-        composer::path_order::sort_by_path(&mut files, |walked| &walked.path);
+        runs.join(&mut files);
         // A file both listed and walked keeps the parse the walk made.
-        files.dedup_by(|later, earlier| {
-            let same = later.path == earlier.path;
-            if same && earlier.read.is_none() {
-                earlier.read = later.read.take();
-            }
-            same
-        });
-        files
+        place_explicit(files, explicit)
     }
 
     /// `load`, the project built once or kept for edits as `keeps_as_built`
