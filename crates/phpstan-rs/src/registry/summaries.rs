@@ -163,8 +163,31 @@ pub(crate) enum Made {
     /// `static` and `parent` as written), or of a class not named (`clone`,
     /// `new $c`, `new class`).
     Object(Option<QualifiedName>),
-    /// A closure or an arrow function the body wrote.
-    Closure,
+    /// A closure, an arrow function or a first-class callable the body
+    /// wrote: one of those its summary lists at these indices.
+    Closure(Box<[u32]>),
+}
+
+impl Made {
+    /// What a variable holds that holds what `self` or `other` says: `None`
+    /// when that is not only what the body made.
+    pub(crate) fn join(&self, other: &Made) -> Option<Made> {
+        match (self, other) {
+            (Made::Closure(a), Made::Closure(b)) => {
+                let mut ids: Vec<u32> = a.iter().chain(b.iter()).copied().collect();
+                ids.sort_unstable();
+                ids.dedup();
+                Some(Made::Closure(ids.into_boxed_slice()))
+            }
+            (Made::Object(a), Made::Object(b)) => Some(Made::Object(
+                a.as_ref()
+                    .zip(b.as_ref())
+                    .filter(|(a, b)| a.written.eq_ignore_ascii_case(&b.written))
+                    .map(|(a, _)| a.clone()),
+            )),
+            _ => None,
+        }
+    }
 }
 
 /// The object a method is called on, as far as the body shows it.
@@ -204,6 +227,10 @@ pub(crate) enum Callee {
     /// A value called: the variable holding it, or `None` for any other
     /// expression.
     Value(Option<Name>),
+    /// A closure, an arrow function or a first-class callable the body
+    /// wrote, called where it is written: one of those its summary lists at
+    /// these indices.
+    Written(Box<[u32]>),
 }
 
 /// Where an argument is passed.
@@ -223,8 +250,8 @@ pub(crate) enum Callable {
     /// `[target, 'method']`.
     Pair(PairTarget, Name),
     /// A closure, an arrow function or a first-class callable the body
-    /// wrote: what it runs is the body's.
-    Written,
+    /// wrote, by the index its summary lists it at.
+    Written(u32),
 }
 
 /// The first element of an array callable.
@@ -237,15 +264,16 @@ pub(crate) enum PairTarget {
     Class(QualifiedName),
 }
 
-impl Callable {
+impl Summarizer {
     /// The callable `e` names, when the body wrote one.
-    fn of(e: &Expr) -> Option<Callable> {
-        match &e.peeled().kind {
+    fn callable(&mut self, e: &Expr) -> Option<Callable> {
+        let e = e.peeled();
+        match &e.kind {
             ExprKind::Literal(Literal::String(text)) => {
                 Some(Callable::Text(Name::from(text.as_str()?)))
             }
             ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
-                Some(Callable::Written)
+                Some(Callable::Written(self.closure_id(e)))
             }
             ExprKind::ArrayLiteral(items) => {
                 let [first, second] = &items[..] else {
@@ -282,6 +310,7 @@ impl Callable {
                 };
                 Some(Callable::Pair(target, Name::from(&*method)))
             }
+            ExprKind::Assign(_, rhs) => syntax::stack::guard(|| self.callable(rhs)),
             _ => None,
         }
     }
@@ -298,8 +327,9 @@ pub(crate) struct CallWrites {
     pub(crate) callables: Box<[(ArgAt, Callable)]>,
 }
 
-/// What a body writes, before any declaration is looked up. A closure's and
-/// an arrow function's body count for the body that holds them.
+/// What a body or a closure in it writes, before any declaration is looked
+/// up. A closure, an arrow function or a first-class callable it writes is
+/// not run by being written: what it writes is its own.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WriteFacts {
     /// The variables the body assigns, which a declared type of a parameter
@@ -310,12 +340,96 @@ pub(crate) struct WriteFacts {
     /// What its variables are bound to; `None` for a variable whose name is
     /// computed (`global $$n`), which may be any.
     pub(crate) bindings: Box<[(Option<Name>, Binding)]>,
-    /// The variables that only ever hold what the body made.
-    pub(crate) made: Box<[(Name, Made)]>,
+    /// The variables written, each with what it only ever holds when that is
+    /// what the body made, `None` otherwise. A body's own lists only those
+    /// that hold what it made; a closure's every variable it writes, since
+    /// one it takes from the code that wrote it holds what that code made
+    /// only while the closure writes it nothing else.
+    pub(crate) made: Box<[(Name, Option<Made>)]>,
     /// A construct that may write anything: `eval` or `include`.
     pub(crate) anything: bool,
     /// Every call, in the order the body makes them.
     pub(crate) calls: Box<[CallWrites]>,
+}
+
+/// A closure, an arrow function or a first-class callable a body wrote.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ClosureFacts {
+    /// The closure it is written in, by its index; `None` when the body
+    /// wrote it itself.
+    pub(crate) within: Option<u32>,
+    /// Its parameters, in order.
+    pub(crate) params: Box<[ClosureParam]>,
+    /// The variables it takes from the code that wrote it, each with whether
+    /// it takes it by reference; `None` for every variable but its
+    /// parameters, by value, as an arrow function and a first-class callable
+    /// take them.
+    pub(crate) captures: Option<Box<[(Name, bool)]>>,
+    pub(crate) facts: WriteFacts,
+}
+
+/// A closure's or an arrow function's parameter.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ClosureParam {
+    pub(crate) name: Name,
+    /// The classes its declared type admits objects of (`self`, `static` and
+    /// `parent` as written); `None` for an object of any class.
+    pub(crate) classes: Option<Box<[QualifiedName]>>,
+    /// Taken by reference, or variadic: its value is not its declared type's
+    /// all through the body.
+    pub(crate) untyped: bool,
+}
+
+impl ClosureParam {
+    fn of(param: &Param) -> ClosureParam {
+        ClosureParam {
+            name: param.name.name.clone(),
+            classes: hint_classes(param.type_hint.as_ref()),
+            untyped: param.by_ref || param.variadic,
+        }
+    }
+}
+
+/// The classes a value of the declared type `hint` may be an object of;
+/// `None` for any class.
+fn hint_classes(hint: Option<&TypeHint>) -> Option<Box<[QualifiedName]>> {
+    fn add(hint: &TypeHint, out: &mut Vec<QualifiedName>) -> Option<()> {
+        let keyword = |name: &str| QualifiedName {
+            written: Name::from(name),
+            resolved: ResolvedName::Exact(Name::from(name)),
+            span: hint.span,
+        };
+        match &hint.kind {
+            TypeHintKind::Keyword(native, _) => match native {
+                NativeType::Object | NativeType::Mixed | NativeType::Callable => return None,
+                NativeType::Iterable => out.push(keyword("Traversable")),
+                NativeType::SelfType => out.push(keyword("self")),
+                NativeType::Static => out.push(keyword("static")),
+                NativeType::Parent => out.push(keyword("parent")),
+                NativeType::Int
+                | NativeType::Float
+                | NativeType::String
+                | NativeType::Bool
+                | NativeType::Array
+                | NativeType::Void
+                | NativeType::Never
+                | NativeType::Null
+                | NativeType::True
+                | NativeType::False => {}
+            },
+            TypeHintKind::Name(name) => out.push(name.clone()),
+            TypeHintKind::Nullable(inner) => add(inner, out)?,
+            TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
+                for member in members {
+                    add(member, out)?;
+                }
+            }
+        }
+        Some(())
+    }
+    let mut out = Vec::new();
+    add(hint?, &mut out)?;
+    Some(out.into_boxed_slice())
 }
 
 /// A body, read by the passes.
@@ -325,6 +439,10 @@ pub struct BodySummary {
     /// holds a construct that makes it impure whatever they are.
     pub(crate) purity: Option<Box<[PurityCall]>>,
     pub(crate) writes: WriteFacts,
+    /// The closures, arrow functions and first-class callables the body
+    /// wrote, those written in them too, each by its index; one is listed
+    /// after the one it is written in.
+    pub(crate) closures: Box<[ClosureFacts]>,
     /// Whether the body has no statements.
     pub(crate) empty: bool,
     /// The properties the body assigns, when it assigns any.
@@ -332,10 +450,11 @@ pub struct BodySummary {
 }
 
 impl BodySummary {
-    /// The summary of an arrow function's body.
-    pub(crate) fn of_expr(body: &Expr) -> BodySummary {
+    /// The summary of code that only writes `e`, a closure, an arrow
+    /// function or a first-class callable: the first closure it lists.
+    pub(crate) fn of_closure(e: &Expr) -> BodySummary {
         let mut walk = Summarizer::default();
-        walk.visit_expr(body);
+        walk.visit_expr(e.peeled());
         walk.finish()
     }
 
@@ -466,14 +585,10 @@ fn record_property_assigned(
     }
 }
 
+/// What one scope writes, as the walk finds it: the body's own, or a
+/// closure's.
 #[derive(Default)]
-struct Summarizer {
-    // How many closures and arrow functions the walk is inside: they are
-    // not run by being made, so their statements are no part of the body's
-    // purity. What they write is the body's.
-    closures: u32,
-    impure: bool,
-    purity_calls: Vec<PurityCall>,
+struct Scope {
     reassigned: FxHashSet<Name>,
     writes: Vec<Place>,
     bindings: Vec<(Option<Name>, Binding)>,
@@ -482,32 +597,138 @@ struct Summarizer {
     made: FxHashMap<Name, Option<Made>>,
     anything: bool,
     calls: Vec<CallWrites>,
+}
+
+impl Scope {
+    /// The scope's facts; `all_written` keeps every variable written in
+    /// `made`, not only those holding what the body made.
+    fn finish(self, all_written: bool) -> WriteFacts {
+        let mut reassigned: Vec<Name> = self.reassigned.into_iter().collect();
+        reassigned.sort();
+        let mut made: Vec<(Name, Option<Made>)> = self
+            .made
+            .into_iter()
+            .filter(|(_, made)| all_written || made.is_some())
+            .collect();
+        made.sort_by(|a, b| a.0.cmp(&b.0));
+        WriteFacts {
+            reassigned: reassigned.into_boxed_slice(),
+            writes: self.writes.into_boxed_slice(),
+            bindings: self.bindings.into_boxed_slice(),
+            made: made.into_boxed_slice(),
+            anything: self.anything,
+            calls: self.calls.into_boxed_slice(),
+        }
+    }
+}
+
+/// A scope the walk is inside of, while it walks a closure written in it.
+struct Enclosing {
+    scope: Scope,
+    // The variables the closure written in it takes from it by reference.
+    shared: FxHashSet<Name>,
+}
+
+#[derive(Default)]
+struct Summarizer {
+    // How many closures and arrow functions the walk is inside: they are
+    // not run by being made, so their statements are no part of the body's
+    // purity.
+    closures: u32,
+    impure: bool,
+    purity_calls: Vec<PurityCall>,
     assigned: AssignedBuilder,
+    scope: Scope,
+    // The scopes around the one the walk is in, the outermost first.
+    enclosing: Vec<Enclosing>,
+    // The closure the walk is in, by its index; `None` in the body's own
+    // scope.
+    current: Option<u32>,
+    // Each closure's index, by the address of its expression.
+    ids: FxHashMap<usize, u32>,
+    written: Vec<ClosureFacts>,
 }
 
 impl Summarizer {
     fn finish(self) -> BodySummary {
-        let mut reassigned: Vec<Name> = self.reassigned.into_iter().collect();
-        reassigned.sort();
-        let mut made: Vec<(Name, Made)> = self
-            .made
-            .into_iter()
-            .filter_map(|(name, made)| Some((name, made?)))
-            .collect();
-        made.sort_by(|a, b| a.0.cmp(&b.0));
         BodySummary {
             purity: (!self.impure).then(|| self.purity_calls.into_boxed_slice()),
-            writes: WriteFacts {
-                reassigned: reassigned.into_boxed_slice(),
-                writes: self.writes.into_boxed_slice(),
-                bindings: self.bindings.into_boxed_slice(),
-                made: made.into_boxed_slice(),
-                anything: self.anything,
-                calls: self.calls.into_boxed_slice(),
-            },
+            writes: self.scope.finish(false),
+            closures: self.written.into_boxed_slice(),
             empty: false,
             assigned: self.assigned.finish(),
         }
+    }
+
+    /// The index of the closure, arrow function or first-class callable
+    /// `e`, given it when it is first met.
+    fn closure_id(&mut self, e: &Expr) -> u32 {
+        let next = self.written.len() as u32;
+        let id = *self
+            .ids
+            .entry(std::ptr::from_ref(e) as usize)
+            .or_insert(next);
+        if id == next {
+            // Until the walk reaches it, it may write anything.
+            self.written.push(ClosureFacts {
+                within: None,
+                params: Box::new([]),
+                captures: None,
+                facts: WriteFacts {
+                    anything: true,
+                    ..WriteFacts::default()
+                },
+            });
+        }
+        id
+    }
+
+    /// Walks the closure, arrow function or first-class callable `e` in a
+    /// scope of its own, which takes `captures` from the one the walk is in.
+    fn closure(
+        &mut self,
+        e: &Expr,
+        params: &[Param],
+        captures: Option<Box<[(Name, bool)]>>,
+        walk: impl FnOnce(&mut Summarizer),
+    ) {
+        let id = self.closure_id(e);
+        let shared = captures
+            .iter()
+            .flatten()
+            .filter(|(_, by_ref)| *by_ref)
+            .map(|(name, _)| name.clone())
+            .collect();
+        self.enclosing.push(Enclosing {
+            scope: std::mem::take(&mut self.scope),
+            shared,
+        });
+        let within = self.current.replace(id);
+        walk(self);
+        let Some(enclosing) = self.enclosing.pop() else {
+            unreachable!("pushed above");
+        };
+        let scope = std::mem::replace(&mut self.scope, enclosing.scope);
+        self.current = within;
+        self.written[id as usize] = ClosureFacts {
+            within,
+            params: params.iter().map(ClosureParam::of).collect(),
+            captures,
+            facts: scope.finish(true),
+        };
+    }
+
+    /// The scope the walk is in, and each around it sharing the variable
+    /// `name` with it by reference.
+    fn scopes_sharing(&mut self, name: &Name) -> Vec<&mut Scope> {
+        let mut out = vec![&mut self.scope];
+        for enclosing in self.enclosing.iter_mut().rev() {
+            if !enclosing.shared.contains(name) {
+                break;
+            }
+            out.push(&mut enclosing.scope);
+        }
+        out
     }
 
     /// A construct that makes the body impure, outside a closure.
@@ -520,6 +741,17 @@ impl Summarizer {
     fn purity_call(&mut self, call: PurityCall) {
         if self.closures == 0 && !self.impure {
             self.purity_calls.push(call);
+        }
+    }
+
+    /// An assignment to `target`: each variable it names is reassigned.
+    fn reassign(&mut self, target: &Expr) {
+        let mut names = FxHashSet::default();
+        collect_assigned(target, &mut names);
+        for name in names {
+            for scope in self.scopes_sharing(&name) {
+                scope.reassigned.insert(name.clone());
+            }
         }
     }
 
@@ -541,29 +773,30 @@ impl Summarizer {
         if let Some(name) = place.variable() {
             self.note_variable(name.clone(), made);
         }
-        self.writes.push(place);
+        self.scope.writes.push(place);
     }
 
     /// That the variable `name` is written what `made` says, or anything
-    /// else when `made` is `None`.
+    /// else when `made` is `None`: in the scope the walk is in, and in those
+    /// sharing it by reference.
     fn note_variable(&mut self, name: Name, made: Option<Made>) {
-        let held = self.made.entry(name).or_insert_with(|| made.clone());
-        *held = match (held.take(), made) {
-            (Some(Made::Closure), Some(Made::Closure)) => Some(Made::Closure),
-            (Some(Made::Object(a)), Some(Made::Object(b))) => Some(Made::Object(
-                a.zip(b)
-                    .filter(|(a, b)| a.written.eq_ignore_ascii_case(&b.written))
-                    .map(|(a, _)| a),
-            )),
-            _ => None,
-        };
+        for scope in self.scopes_sharing(&name) {
+            let held = scope
+                .made
+                .entry(name.clone())
+                .or_insert_with(|| made.clone());
+            *held = match (held.take(), &made) {
+                (Some(a), Some(b)) => a.join(b),
+                _ => None,
+            };
+        }
     }
 
     fn bind(&mut self, variable: Option<Name>, binding: Binding) {
         if let Some(name) = &variable {
-            self.made.insert(name.clone(), None);
+            self.scope.made.insert(name.clone(), None);
         }
-        self.bindings.push((variable, binding));
+        self.scope.bindings.push((variable, binding));
     }
 
     /// A call, with the arguments that are places and those that name a
@@ -581,19 +814,36 @@ impl Summarizer {
                 None => ArgAt::Position(at as u32),
             };
             arguments.push(at.clone());
-            if let Some(callable) = Callable::of(&arg.value) {
+            if let Some(callable) = self.callable(&arg.value) {
                 callables.push((at.clone(), callable));
             }
             if let Some(place) = Place::of(&arg.value) {
                 places.push((at, place));
             }
         }
-        self.calls.push(CallWrites {
+        self.scope.calls.push(CallWrites {
             callee,
             arguments: arguments.into_boxed_slice(),
             places: places.into_boxed_slice(),
             callables: callables.into_boxed_slice(),
         });
+    }
+
+    /// What the body made that `e` evaluates to, when it is that.
+    fn made_by(&mut self, e: &Expr) -> Option<Made> {
+        let e = e.peeled();
+        match &e.kind {
+            ExprKind::New(callee, _) => Some(Made::Object(match &callee.kind {
+                ExprKind::Name(name) => Some(name.clone()),
+                _ => None,
+            })),
+            ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Some(Made::Object(None)),
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
+                Some(Made::Closure(Box::new([self.closure_id(e)])))
+            }
+            ExprKind::Assign(_, rhs) => syntax::stack::guard(|| self.made_by(rhs)),
+            _ => None,
+        }
     }
 }
 
@@ -608,11 +858,14 @@ impl Summarizer {
                 }
                 _ => {
                     self.impure_unless_in_closure(true);
-                    let variable = match &callee.peeled().kind {
-                        ExprKind::Variable(name) => Some(name.clone()),
-                        _ => None,
+                    let callee = match self.made_by(callee) {
+                        Some(Made::Closure(ids)) => Callee::Written(ids),
+                        _ => Callee::Value(match &callee.peeled().kind {
+                            ExprKind::Variable(name) => Some(name.clone()),
+                            _ => None,
+                        }),
                     };
-                    self.call(Callee::Value(variable), args);
+                    self.call(callee, args);
                 }
             },
             ExprKind::MethodCall(recv, method, args, _) => {
@@ -681,23 +934,7 @@ impl Summarizer {
 pub(crate) fn call_of(e: &Expr) -> Option<CallWrites> {
     let mut walk = Summarizer::default();
     walk.record_call(e);
-    walk.calls.pop()
-}
-
-/// What the body made that `e` evaluates to, when it is that.
-fn made_by(e: &Expr) -> Option<Made> {
-    syntax::stack::guard(|| match &e.peeled().kind {
-        ExprKind::New(callee, _) => Some(Made::Object(match &callee.kind {
-            ExprKind::Name(name) => Some(name.clone()),
-            _ => None,
-        })),
-        ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Some(Made::Object(None)),
-        ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
-            Some(Made::Closure)
-        }
-        ExprKind::Assign(_, rhs) => made_by(rhs),
-        _ => None,
-    })
+    walk.scope.calls.pop()
 }
 
 /// `$obj->prop = ...`/`unset($obj->prop)`: a write to a property of any
@@ -730,12 +967,12 @@ impl<'ast> Visitor<'ast> for Summarizer {
         // A function declared in the body is a body of its own, but what it
         // assigns still counts against the parameters' types, as it always
         // did.
-        let mut nested = Reassigned(&mut self.reassigned);
+        let mut nested = Reassigned(&mut self.scope.reassigned);
         walk_function_decl(&mut nested, function);
     }
 
     fn visit_class_def(&mut self, class: &'ast ClassDef) {
-        let mut nested = Reassigned(&mut self.reassigned);
+        let mut nested = Reassigned(&mut self.scope.reassigned);
         walk_class_def(&mut nested, class);
     }
 
@@ -786,7 +1023,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
                         self.write(subject, None);
                     }
                     for target in key.iter().map(|k| &**k).chain([&**value]) {
-                        collect_assigned(target, &mut self.reassigned);
+                        self.reassign(target);
                     }
                 }
                 StmtKind::Global(vars) => {
@@ -838,12 +1075,13 @@ impl<'ast> Visitor<'ast> for Summarizer {
             self.impure_unless_in_closure(impure);
             match &e.kind {
                 ExprKind::Assign(lhs, rhs) => {
-                    self.write(lhs, made_by(rhs));
-                    collect_assigned(lhs, &mut self.reassigned);
+                    let made = self.made_by(rhs);
+                    self.write(lhs, made);
+                    self.reassign(lhs);
                 }
                 ExprKind::CompoundAssign(_, lhs, _) => {
                     self.write(lhs, None);
-                    collect_assigned(lhs, &mut self.reassigned);
+                    self.reassign(lhs);
                 }
                 ExprKind::AssignRef(lhs, rhs) => {
                     match &lhs.peeled().kind {
@@ -854,21 +1092,50 @@ impl<'ast> Visitor<'ast> for Summarizer {
                         _ => self.write(lhs, None),
                     }
                     self.write(rhs, None);
-                    collect_assigned(lhs, &mut self.reassigned);
+                    self.reassign(lhs);
                 }
                 ExprKind::Unary(
                     UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
                     target,
                 ) => self.write(target, None),
-                ExprKind::Eval(_) | ExprKind::Include(..) => self.anything = true,
+                ExprKind::Eval(_) | ExprKind::Include(..) => self.scope.anything = true,
                 _ => self.record_call(e),
             }
-            if matches!(e.kind, ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }) {
-                self.closures += 1;
-                walk_expr(self, e);
-                self.closures -= 1;
-            } else {
-                walk_expr(self, e);
+            match &e.kind {
+                ExprKind::Closure(closure) => {
+                    let captures = closure
+                        .uses
+                        .iter()
+                        .map(|u| (u.name.name.clone(), u.by_ref))
+                        .collect();
+                    self.closures += 1;
+                    self.closure(e, &closure.params, Some(captures), |walk| {
+                        walk_expr(walk, e);
+                    });
+                    self.closures -= 1;
+                }
+                ExprKind::ArrowFn(arrow) => {
+                    self.closures += 1;
+                    self.closure(e, &arrow.params, None, |walk| walk_expr(walk, e));
+                    self.closures -= 1;
+                }
+                // What its call's object or class is evaluates where it is
+                // written; the call runs where it is called, with the
+                // arguments it is called with.
+                ExprKind::FirstClassCallable(call) => {
+                    self.impure_unless_in_closure(matches!(
+                        call.kind,
+                        ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..)
+                    ));
+                    self.closure(e, &[], None, |walk| {
+                        walk.record_call(call);
+                        if let Some(own) = walk.scope.calls.last_mut() {
+                            own.arguments = Box::new([ArgAt::Spread]);
+                        }
+                    });
+                    walk_expr(self, call);
+                }
+                _ => walk_expr(self, e),
             }
         })
     }
@@ -946,7 +1213,7 @@ syntax::canonical_enum!(Binding {
 
 syntax::canonical_enum!(Made {
     Object(class),
-    Closure,
+    Closure(ids),
 });
 
 syntax::canonical_enum!(Receiver {
@@ -964,6 +1231,7 @@ syntax::canonical_enum!(Callee {
     New(class),
     Anonymous(name),
     Value(name),
+    Written(ids),
 });
 
 syntax::canonical_enum!(ArgAt {
@@ -975,7 +1243,7 @@ syntax::canonical_enum!(ArgAt {
 syntax::canonical_enum!(Callable {
     Text(name),
     Pair(target, method),
-    Written,
+    Written(id),
 });
 
 syntax::canonical_enum!(PairTarget {
@@ -999,9 +1267,23 @@ syntax::canonical_struct!(WriteFacts {
     calls,
 });
 
+syntax::canonical_struct!(ClosureFacts {
+    within,
+    params,
+    captures,
+    facts,
+});
+
+syntax::canonical_struct!(ClosureParam {
+    name,
+    classes,
+    untyped,
+});
+
 syntax::canonical_struct!(BodySummary {
     purity,
     writes,
+    closures,
     empty,
     assigned,
 });

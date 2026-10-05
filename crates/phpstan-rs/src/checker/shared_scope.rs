@@ -35,7 +35,8 @@ pub(crate) struct SharedScope {
     /// captures, for a closure's scope, and those of the closures it writes.
     pub(crate) captured: FxHashSet<Name>,
     /// The variables holding only closures, arrow functions or first-class
-    /// callables the scope wrote, with each one's body summarized.
+    /// callables the scope wrote, each one summarized
+    /// (`BodySummary::of_closure`).
     pub(crate) closures: FxHashMap<Name, Vec<BodySummary>>,
     /// The variables holding only objects the scope made, used only as the
     /// base of a property access, an operand of `===`, `!==`, `instanceof`,
@@ -108,7 +109,7 @@ impl SharedScope {
 enum Held {
     /// Only objects the scope made.
     Made,
-    /// Only closures the scope wrote, each one's body summarized.
+    /// Only closures the scope wrote, each one summarized.
     Closures(Vec<BodySummary>),
     /// Anything else.
     Other,
@@ -220,11 +221,12 @@ impl Scan {
 
 /// What the scope made or wrote that `e` evaluates to.
 fn held_by(e: &Expr) -> Held {
-    syntax::stack::guard(|| match &e.peeled().kind {
+    let e = e.peeled();
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::New(..) | ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Held::Made,
-        ExprKind::Closure(closure) => Held::Closures(vec![BodySummary::of(&closure.body)]),
-        ExprKind::ArrowFn(arrow) => Held::Closures(vec![BodySummary::of_expr(&arrow.body)]),
-        ExprKind::FirstClassCallable(call) => Held::Closures(vec![BodySummary::of_expr(call)]),
+        ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
+            Held::Closures(vec![BodySummary::of_closure(e)])
+        }
         ExprKind::Assign(_, rhs) => held_by(rhs),
         _ => Held::Other,
     })

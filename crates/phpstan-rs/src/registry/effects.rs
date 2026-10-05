@@ -14,6 +14,13 @@
 //! class is not known every loaded method of its name: the program is what
 //! the run loads. A builtin writes nothing unless a parameter of it takes
 //! something through which it runs code (`CODE_RUNNING_PARAMETER_TYPES`).
+//!
+//! A closure, an arrow function or a first-class callable a body writes has
+//! an effect of its own, settled with the body's, and counts where the body
+//! may run it: called, `__invoke` or `call` on a variable holding it, or
+//! passed to a builtin that runs it. Its parameters hold what their declared
+//! classes admit until it writes them, and what it takes by reference is the
+//! body's variable.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -25,8 +32,8 @@ use syntax::name::Name;
 
 use crate::registry::bodies::BodySource;
 use crate::registry::summaries::{
-    ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, Made, PairTarget, Place, Receiver,
-    Root, Step, WriteFacts,
+    ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, ClosureFacts, Made, PairTarget,
+    Place, Receiver, Root, Step, WriteFacts,
 };
 use crate::registry::{ClassReflection, FunctionReflection, NameSet, Registry, is_non_overridable};
 use types::Type;
@@ -124,7 +131,7 @@ impl Effect {
 
     /// This effect, written by a call whose callee's own `$this` is the
     /// object `transfer` says.
-    fn transferred(&self, transfer: &Transfer) -> Effect {
+    pub(crate) fn transferred(&self, transfer: &Transfer) -> Effect {
         let Some(storages) = &self.0 else {
             return Effect::anything();
         };
@@ -155,7 +162,7 @@ impl Effect {
 
 /// What a call's callee's own `$this` is to the caller.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Transfer {
+pub(crate) enum Transfer {
     /// The caller's own `$this`.
     Same,
     /// Another object, which may be of the class; `None` for any.
@@ -260,6 +267,20 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
 }
 
 impl DeclKey {
+    /// The key of the closure, arrow function or first-class callable this
+    /// declaration's body lists at `index`: a name no declaration has.
+    fn closure(&self, index: u32) -> DeclKey {
+        DeclKey {
+            class: self.class.clone(),
+            member: format!("{}{{closure#{index}}}", self.member),
+        }
+    }
+
+    /// Whether this is a closure's key (`DeclKey::closure`).
+    fn is_closure(&self) -> bool {
+        self.member.contains('{')
+    }
+
     /// The name the builtin table knows the declaration by: a function's,
     /// or `class::method`, lowercased.
     fn builtin_name(&self) -> String {
@@ -446,66 +467,22 @@ impl Registry {
         let mut classified: FxHashMap<DeclKey, Classification> = functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .map(|(name, sig)| {
-                let key = function_key(name);
-                let resolved = registry.classify(bodies, None, name, sig);
-                (key, resolved)
+            .flat_map_iter(|(name, sig)| {
+                registry.classify(bodies, None, name, sig, function_key(name))
             })
             .collect();
         classified.par_extend(
             methods
                 .par_iter()
                 .with_min_len(crate::registry::PASS_CHUNK)
-                .map(|(class, method, sig)| {
+                .flat_map_iter(|(class, method, sig)| {
                     let key = method_key(class, method);
-                    let resolved = registry.classify(bodies, Some(class), method, sig);
-                    (key, resolved)
+                    registry.classify(bodies, Some(class), method, sig, key)
                 }),
         );
-        let mut effects: FxHashMap<DeclKey, Effect> = classified
-            .iter()
-            .map(|(key, classification)| (key.clone(), classification.own.clone()))
-            .collect();
-        // An effect only ever grows, and grows only when one it is made of
-        // does: every declaration is joined once, and again only when a
-        // declaration it calls has grown.
-        let mut callers: FxHashMap<&DeclKey, Vec<&DeclKey>> = FxHashMap::default();
-        for (key, classification) in &classified {
-            for (callee, _) in &classification.calls {
-                if classified.contains_key(callee) {
-                    callers.entry(callee).or_default().push(key);
-                }
-            }
-        }
-        let mut queue: std::collections::VecDeque<&DeclKey> = classified.keys().collect();
-        let mut queued: FxHashSet<&DeclKey> = queue.iter().copied().collect();
-        while let Some(key) = queue.pop_front() {
-            queued.remove(key);
-            let classification = &classified[key];
-            let mut effect = effects[key].clone();
-            if effect.is_anything() {
-                continue;
-            }
-            let mut grew = false;
-            for (callee, transfer) in &classification.calls {
-                let callee_effect = match effects.get(callee) {
-                    Some(effect) => effect.clone(),
-                    None => self.declaration_effect(callee),
-                };
-                grew |= effect.join(&callee_effect.transferred(transfer));
-                if effect.is_anything() {
-                    break;
-                }
-            }
-            if grew {
-                effects.insert(key.clone(), effect);
-                for caller in callers.get(key).into_iter().flatten() {
-                    if queued.insert(caller) {
-                        queue.push_back(caller);
-                    }
-                }
-            }
-        }
+        let mut effects = settle(&classified, |key| registry.declaration_effect(key));
+        // A closure's effect is taken where it runs; no call names it.
+        effects.retain(|key, _| !key.is_closure());
         self.effects = effects;
     }
 
@@ -816,32 +793,85 @@ impl Registry {
     }
 
     /// The classification of the body of `sig`, the declaration `member` of
-    /// `class` (a function when `class` is `None`).
+    /// `class` (a function when `class` is `None`), under `key`, and of each
+    /// closure it wrote, under its own.
     fn classify(
         &self,
         bodies: &dyn BodySource,
         class: Option<&Name>,
         member: &Name,
         sig: &FunctionReflection,
-    ) -> Classification {
+        key: DeclKey,
+    ) -> Vec<(DeclKey, Classification)> {
         let Some(summary) = bodies.summary(&sig.provenance) else {
-            return Classification {
+            let anything = Classification {
                 own: Effect::anything(),
                 calls: Vec::new(),
             };
+            return vec![(key, anything)];
         };
-        let mut resolve = Resolve {
+        let resolve = Resolve {
             registry: self,
             class: class.map(Name::as_str),
             member,
-            facts: &summary.writes,
-            params: FxHashMap::default(),
-            made: FxHashMap::default(),
-            classification: Classification::default(),
+            summary,
         };
-        resolve.run(Some(sig));
-        resolve.classification
+        resolve.run(&key, Some(sig))
     }
+}
+
+/// The effect of each declaration `classified` holds, settled from what it
+/// writes itself: it grows by what each declaration it calls may write, by
+/// `outside` for one `classified` does not hold.
+fn settle(
+    classified: &FxHashMap<DeclKey, Classification>,
+    outside: impl Fn(&DeclKey) -> Effect,
+) -> FxHashMap<DeclKey, Effect> {
+    let mut effects: FxHashMap<DeclKey, Effect> = classified
+        .iter()
+        .map(|(key, classification)| (key.clone(), classification.own.clone()))
+        .collect();
+    // An effect only ever grows, and grows only when one it is made of
+    // does: every declaration is joined once, and again only when a
+    // declaration it calls has grown.
+    let mut callers: FxHashMap<&DeclKey, Vec<&DeclKey>> = FxHashMap::default();
+    for (key, classification) in classified {
+        for (callee, _) in &classification.calls {
+            if classified.contains_key(callee) {
+                callers.entry(callee).or_default().push(key);
+            }
+        }
+    }
+    let mut queue: std::collections::VecDeque<&DeclKey> = classified.keys().collect();
+    let mut queued: FxHashSet<&DeclKey> = queue.iter().copied().collect();
+    while let Some(key) = queue.pop_front() {
+        queued.remove(key);
+        let classification = &classified[key];
+        let mut effect = effects[key].clone();
+        if effect.is_anything() {
+            continue;
+        }
+        let mut grew = false;
+        for (callee, transfer) in &classification.calls {
+            let callee_effect = match effects.get(callee) {
+                Some(effect) => effect.clone(),
+                None => outside(callee),
+            };
+            grew |= effect.join(&callee_effect.transferred(transfer));
+            if effect.is_anything() {
+                break;
+            }
+        }
+        if grew {
+            effects.insert(key.clone(), effect);
+            for caller in callers.get(key).into_iter().flatten() {
+                if queued.insert(caller) {
+                    queue.push_back(caller);
+                }
+            }
+        }
+    }
+    effects
 }
 
 /// The classes `ty` may be an object of: `Some` with each one named, `None`
@@ -896,14 +926,27 @@ pub(crate) trait CallContext {
     /// The object the argument passed `at` is; `place` is what it names,
     /// when it names one.
     fn argument(&self, at: &ArgAt, place: Option<&Place>) -> Holder;
-    /// What the closure the caller wrote and passed `at` may write, when the
-    /// argument is one: a closure, an arrow function or a first-class callable
-    /// there (`written`), or a variable (`place`) holding only those. `None`
-    /// for any other argument.
-    fn written_effect(&self, at: &ArgAt, written: bool, place: Option<&Place>) -> Option<Effect>;
-    /// What calling the variable `name` may write, when it holds only
-    /// closures the caller wrote; `None` otherwise.
-    fn called_effect(&self, name: &Name) -> Option<Effect>;
+    /// Notes that the call runs what `written` names, its `$this` what
+    /// `transfer` says, when that is only closures, arrow functions or
+    /// first-class callables the caller wrote; `false` when it may be other
+    /// code.
+    fn runs_written(&self, written: Written<'_>, transfer: &Transfer) -> bool;
+}
+
+/// What a call may run that its caller may have written.
+pub(crate) enum Written<'a> {
+    /// The argument passed `at`: the callable it names, when it names one,
+    /// and the place it is, when it is one.
+    Argument {
+        at: &'a ArgAt,
+        callable: Option<&'a Callable>,
+        place: Option<&'a Place>,
+    },
+    /// What the variable holds.
+    Variable(&'a Name),
+    /// The call's callee, which the caller's summary lists at these
+    /// indices.
+    Callee(&'a [u32]),
 }
 
 /// The classes `class` as written names from code of the class `own`: `own`
@@ -933,14 +976,12 @@ fn named_classes(
 struct Reach<'r> {
     registry: &'r Registry,
     ctx: &'r dyn CallContext,
-    // What the closures the caller wrote, which a call runs, may write.
-    written: std::cell::RefCell<Effect>,
 }
 
 impl Reach<'_> {
     /// Every declaration the call runs, a builtin's by what it runs.
     fn runs(&self, call: &CallWrites) -> Option<Vec<(DeclKey, Transfer)>> {
-        let targets = self.call_targets(&call.callee)?;
+        let targets = self.call_targets(&call.callee, Some(call))?;
         self.expand(call, targets)
     }
 
@@ -1052,13 +1093,15 @@ impl Reach<'_> {
                     .find(|(at, _)| at == arg)
                     .map(|(_, place)| place);
                 match callable {
-                    Some(Callable::Written) | None => {
-                        let written = self.ctx.written_effect(
-                            arg,
-                            matches!(callable, Some(Callable::Written)),
+                    Some(Callable::Written(_)) | None => {
+                        let written = Written::Argument {
+                            at: arg,
+                            callable,
                             place,
-                        )?;
-                        self.written.borrow_mut().join(&written);
+                        };
+                        if !self.ctx.runs_written(written, &Transfer::Same) {
+                            return None;
+                        }
                     }
                     Some(callable) => out.extend(self.callable_targets(callable)?),
                 }
@@ -1139,7 +1182,7 @@ impl Reach<'_> {
         let registry = self.registry;
         match callable {
             // What the caller wrote is found where it is passed.
-            Callable::Written => None,
+            Callable::Written(_) => None,
             Callable::Text(text) => match text.split_once("::") {
                 Some((class, method)) => {
                     let class = QualifiedName {
@@ -1160,18 +1203,62 @@ impl Reach<'_> {
             Callable::Pair(PairTarget::Class(class), method) => {
                 self.static_targets(class, Some(method))
             }
-            Callable::Pair(PairTarget::Object(receiver), method) => {
-                self.call_targets(&Callee::Method {
+            Callable::Pair(PairTarget::Object(receiver), method) => self.call_targets(
+                &Callee::Method {
                     receiver: receiver.clone(),
                     method: Some(method.clone()),
-                })
-            }
+                },
+                None,
+            ),
         }
+    }
+
+    /// Whether `$name->method(...)` runs only closures the caller wrote,
+    /// `$name` holding only those: `__invoke` runs one with its own `$this`,
+    /// `call` with the object `call` passes first.
+    fn runs_held_closure(&self, name: &Name, method: &str, call: Option<&CallWrites>) -> bool {
+        let transfers = if method.eq_ignore_ascii_case("__invoke") {
+            vec![Transfer::Same]
+        } else if method.eq_ignore_ascii_case("call")
+            && let Some(call) = call
+        {
+            let new_this = call.arguments.iter().find(|at| match at {
+                ArgAt::Position(at) => *at == 0,
+                ArgAt::Named(name) => name.as_str() == "newThis",
+                ArgAt::Spread => true,
+            });
+            let Some(at) = new_this else {
+                return false;
+            };
+            let place = call
+                .places
+                .iter()
+                .find(|(passed, _)| passed == at)
+                .map(|(_, place)| place);
+            match self.ctx.argument(at, place) {
+                Holder::Classes(classes) => classes
+                    .into_iter()
+                    .map(|class| Transfer::Other(Some(class)))
+                    .collect(),
+                Holder::Made(_) => vec![Transfer::Made],
+                Holder::Unknown => vec![Transfer::Other(None)],
+            }
+        } else {
+            return false;
+        };
+        transfers
+            .iter()
+            .all(|transfer| self.ctx.runs_written(Written::Variable(name), transfer))
     }
 
     /// The declarations a call may run, each with what its callee's own
     /// `$this` is to the caller; `None` when it may run code not known.
-    fn call_targets(&self, callee: &Callee) -> Option<Vec<(DeclKey, Transfer)>> {
+    /// `call` is the call, when the callee is not a callable's.
+    fn call_targets(
+        &self,
+        callee: &Callee,
+        call: Option<&CallWrites>,
+    ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
         Some(match callee {
             Callee::Function(name) => match registry.resolve_function(name) {
@@ -1184,6 +1271,10 @@ impl Reach<'_> {
                 // A call to no function throws.
                 None => Vec::new(),
             },
+            Callee::Method {
+                receiver: Receiver::Variable(name),
+                method: Some(method),
+            } if self.runs_held_closure(name, method, call) => Vec::new(),
             Callee::Method { receiver, method } => {
                 let (holder, same) = self.ctx.receiver(receiver);
                 let transfer = |class: Option<&Name>| {
@@ -1265,8 +1356,16 @@ impl Reach<'_> {
                 .into_iter()
                 .collect(),
             Callee::Value(variable) => {
-                let written = self.ctx.called_effect(variable.as_ref()?)?;
-                self.written.borrow_mut().join(&written);
+                let written = Written::Variable(variable.as_ref()?);
+                if !self.ctx.runs_written(written, &Transfer::Same) {
+                    return None;
+                }
+                Vec::new()
+            }
+            Callee::Written(ids) => {
+                if !self.ctx.runs_written(Written::Callee(ids), &Transfer::Same) {
+                    return None;
+                }
                 Vec::new()
             }
         })
@@ -1359,44 +1458,45 @@ impl Reach<'_> {
 }
 
 impl Registry {
-    /// What running code the caller wrote may write - a closure's or an
-    /// arrow function's body, summarized - its `$this` the caller's: what it
-    /// writes itself and what the calls it makes may write, as settled.
-    pub(crate) fn body_effect(&self, summary: &BodySummary, class: Option<&str>) -> Effect {
+    /// What running the closure, arrow function or first-class callable a
+    /// summary holds (`BodySummary::of_closure`) may write, its `$this` the
+    /// caller's, an object of `class`: what it writes itself, what the
+    /// closures it runs may write, and what the calls it makes may write, as
+    /// settled.
+    pub(crate) fn closure_effect(&self, summary: &BodySummary, class: Option<&str>) -> Effect {
+        let holder = DeclKey {
+            class: class.map(str::to_ascii_lowercase),
+            member: String::new(),
+        };
         let member = Name::from("{closure}");
-        let mut resolve = Resolve {
+        let resolve = Resolve {
             registry: self,
             class,
             member: &member,
-            facts: &summary.writes,
-            params: FxHashMap::default(),
-            made: FxHashMap::default(),
-            classification: Classification::default(),
+            summary,
         };
-        resolve.run(None);
-        let Classification { own, calls } = resolve.classification;
-        let mut effect = own;
-        for (key, transfer) in calls {
-            effect.join(&self.settled_effect(&key).transferred(&transfer));
-            if effect.is_anything() {
-                break;
-            }
-        }
-        effect
+        let classified: FxHashMap<DeclKey, Classification> =
+            resolve.run(&holder, None).into_iter().collect();
+        let effects = settle(&classified, |key| self.settled_effect(key));
+        effects
+            .get(&holder.closure(0))
+            .cloned()
+            .unwrap_or_else(Effect::anything)
     }
 
     /// What a call may write, with what its caller knows of it: the
-    /// callee's own `$this` stays its own when it is the caller's.
+    /// callee's own `$this` stays its own when it is the caller's. What the
+    /// closures the caller wrote that it runs may write is the caller's to
+    /// add (`CallContext::runs_written`).
     pub(crate) fn call_effect(&self, call: &CallWrites, ctx: &dyn CallContext) -> Effect {
         let reach = Reach {
             registry: self,
             ctx,
-            written: Default::default(),
         };
         let Some(runs) = reach.runs(call) else {
             return Effect::anything();
         };
-        let mut effect = reach.written.into_inner();
+        let mut effect = Effect::nothing();
         for (key, transfer) in runs {
             effect.join(&self.settled_effect(&key).transferred(&transfer));
             if effect.is_anything() {
@@ -1407,21 +1507,265 @@ impl Registry {
     }
 }
 
-/// Looks a body's writes and calls up in the registry.
+/// Looks a body's writes and calls up in the registry, and those of each
+/// closure it wrote.
 struct Resolve<'r> {
     registry: &'r Registry,
     class: Option<&'r str>,
     member: &'r Name,
-    facts: &'r WriteFacts,
-    // The parameters whose declared type holds all through the body: neither
-    // assigned nor passed where a parameter is by reference.
-    params: FxHashMap<&'r str, &'r Type>,
-    // The variables that only ever hold what the body made.
-    made: FxHashMap<&'r str, &'r Made>,
-    classification: Classification,
+    summary: &'r BodySummary,
 }
 
-impl CallContext for Resolve<'_> {
+/// What each of a scope's calls reaches, and the places its calls may write
+/// by reference; `None` when it may write anything.
+type Reached<'r> = Option<(Vec<Vec<(DeclKey, Transfer)>>, Vec<&'r Place>)>;
+
+impl<'r> Resolve<'r> {
+    /// The classification of the body, under `key`, and of each closure it
+    /// wrote, under its own (`DeclKey::closure`); `sig` is the body's
+    /// declaration.
+    fn run(
+        &self,
+        key: &DeclKey,
+        sig: Option<&'r FunctionReflection>,
+    ) -> Vec<(DeclKey, Classification)> {
+        let scopes = 1 + self.summary.closures.len();
+        // What each call reaches depends on the variables' types, and which
+        // variables a call writes by reference on what it reaches: both are
+        // found again until no variable is lost.
+        let mut lost: Vec<FxHashSet<&'r str>> = vec![FxHashSet::default(); scopes];
+        let (levels, reached) = loop {
+            let levels = self.levels(sig, &lost);
+            let reached: Vec<Reached<'r>> = levels.iter().map(Level::reach).collect();
+            let mut grew = false;
+            for (at, found) in reached.iter().enumerate() {
+                for place in found.iter().flat_map(|(_, written_args)| written_args) {
+                    if let Some(name) = place_variable(place) {
+                        grew |= self.lose(&levels, &mut lost, at, name.as_str());
+                    }
+                }
+            }
+            if !grew {
+                break (levels, reached);
+            }
+        };
+        let mut out = Vec::with_capacity(scopes);
+        for (at, (level, found)) in levels.iter().zip(reached).enumerate() {
+            let scope_key = match at {
+                0 => key.clone(),
+                _ => key.closure(at as u32 - 1),
+            };
+            let classification = match found {
+                Some((targets, written_args)) => level.classify(key, targets, written_args),
+                None => Classification {
+                    own: Effect::anything(),
+                    calls: Vec::new(),
+                },
+            };
+            out.push((scope_key, classification));
+        }
+        out
+    }
+
+    /// Takes the variable `name` of the scope at `at` as written anything
+    /// there, and in each scope around it that shares it by reference;
+    /// whether that loses a parameter's declared type or what a body made.
+    fn lose(
+        &self,
+        levels: &[Level<'r>],
+        lost: &mut [FxHashSet<&'r str>],
+        mut at: usize,
+        name: &'r str,
+    ) -> bool {
+        let mut grew = false;
+        loop {
+            if lost[at].insert(name) {
+                grew |= levels[at].params.contains_key(name) || levels[at].made.contains_key(name);
+            }
+            let Some(closure) = at.checked_sub(1).map(|index| &self.summary.closures[index]) else {
+                return grew;
+            };
+            let shared = closure
+                .captures
+                .iter()
+                .flatten()
+                .any(|(captured, by_ref)| *by_ref && captured.as_str() == name);
+            if !shared {
+                return grew;
+            }
+            at = closure.within.map_or(0, |within| within as usize + 1);
+        }
+    }
+
+    /// Each scope's level: the body's, then each closure's in the order the
+    /// summary lists them; the variables `lost` names at a scope are written
+    /// anything there.
+    fn levels(
+        &self,
+        sig: Option<&'r FunctionReflection>,
+        lost: &[FxHashSet<&'r str>],
+    ) -> Vec<Level<'r>> {
+        let facts = &self.summary.writes;
+        let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
+        let params = sig_params
+            .iter()
+            .filter(|p| {
+                !p.by_ref
+                    && !facts.reassigned.iter().any(|name| name == p.name.as_ref())
+                    && !lost[0].contains(p.name.as_ref())
+            })
+            .map(|p| (p.name.as_ref(), Declared::Type(&p.ty)))
+            .collect();
+        // A parameter holds the argument until the body writes it.
+        let made = facts
+            .made
+            .iter()
+            .filter_map(|(name, made)| Some((name.as_str(), made.clone()?)))
+            .filter(|(name, _)| {
+                !lost[0].contains(name) && !sig_params.iter().any(|p| p.name.as_ref() == *name)
+            })
+            .collect();
+        let mut levels = vec![self.level(facts, params, made, facts.bindings.iter().collect())];
+        for (index, closure) in self.summary.closures.iter().enumerate() {
+            let parent = closure.within.map_or(0, |within| within as usize + 1);
+            let level = self.closure_level(closure, &levels[parent], &lost[index + 1]);
+            levels.push(level);
+        }
+        levels
+    }
+
+    /// The level of `closure`, written in the scope whose level is `parent`.
+    fn closure_level(
+        &self,
+        closure: &'r ClosureFacts,
+        parent: &Level<'r>,
+        lost: &FxHashSet<&'r str>,
+    ) -> Level<'r> {
+        let facts = &closure.facts;
+        let reassigned = |name: &str| facts.reassigned.iter().any(|n| n.as_str() == name);
+        let is_param = |name: &str| closure.params.iter().any(|p| p.name.as_str() == name);
+        let mut params: FxHashMap<&'r str, Declared<'r>> = closure
+            .params
+            .iter()
+            .filter(|p| !p.untyped && !reassigned(&p.name) && !lost.contains(p.name.as_str()))
+            .map(|p| (p.name.as_str(), Declared::Classes(p.classes.as_deref())))
+            .collect();
+        let mut made: FxHashMap<&'r str, Made> = FxHashMap::default();
+        let mut bindings: Vec<&'r (Option<Name>, Binding)> = facts.bindings.iter().collect();
+        // An arrow function and a first-class callable take every variable
+        // but their parameters, so one the code around them holds nothing
+        // made in may hold anything in them, even after they write it.
+        let captures: Vec<(&'r str, bool)> = match &closure.captures {
+            Some(captures) => captures
+                .iter()
+                .map(|(name, by_ref)| (name.as_str(), *by_ref))
+                .collect(),
+            None => parent
+                .params
+                .keys()
+                .chain(parent.made.keys())
+                .copied()
+                .filter(|name| !is_param(name))
+                .map(|name| (name, false))
+                .collect(),
+        };
+        for &(name, by_ref) in &captures {
+            if lost.contains(name) {
+                continue;
+            }
+            if let Some(declared) = parent.params.get(name)
+                && !reassigned(name)
+            {
+                params.insert(name, *declared);
+            }
+            if let Some(held) = parent.made.get(name) {
+                let written = facts.made.iter().find(|(n, _)| n.as_str() == name);
+                let joined = match written {
+                    None => Some(held.clone()),
+                    Some((_, Some(own))) => held.join(own),
+                    Some((_, None)) => None,
+                };
+                if let Some(joined) = joined {
+                    made.insert(name, joined);
+                }
+            }
+            if by_ref {
+                bindings.extend(
+                    parent
+                        .bindings
+                        .iter()
+                        .copied()
+                        .filter(|(bound, _)| bound.as_ref().is_none_or(|bound| bound == name)),
+                );
+            }
+        }
+        // A closure's own variable holds nothing until it writes it.
+        if closure.captures.is_some() {
+            for (name, held) in facts.made.iter() {
+                let name = name.as_str();
+                if let Some(held) = held
+                    && !is_param(name)
+                    && !lost.contains(name)
+                    && !captures.iter().any(|&(captured, _)| captured == name)
+                {
+                    made.insert(name, held.clone());
+                }
+            }
+        }
+        self.level(facts, params, made, bindings)
+    }
+
+    fn level(
+        &self,
+        facts: &'r WriteFacts,
+        params: FxHashMap<&'r str, Declared<'r>>,
+        made: FxHashMap<&'r str, Made>,
+        bindings: Vec<&'r (Option<Name>, Binding)>,
+    ) -> Level<'r> {
+        Level {
+            registry: self.registry,
+            class: self.class,
+            member: self.member,
+            facts,
+            params,
+            made,
+            bindings,
+            runs: Default::default(),
+        }
+    }
+}
+
+/// What a parameter is declared to hold.
+#[derive(Clone, Copy)]
+enum Declared<'r> {
+    /// A declaration's parameter, by its type.
+    Type(&'r Type),
+    /// A closure's, by the classes its type admits objects of; `None` for
+    /// any.
+    Classes(Option<&'r [QualifiedName]>),
+}
+
+/// One scope of a body, as `Resolve` reads it: the body's own, or a
+/// closure's.
+struct Level<'r> {
+    registry: &'r Registry,
+    class: Option<&'r str>,
+    member: &'r Name,
+    facts: &'r WriteFacts,
+    // The parameters whose declared type holds all through the scope:
+    // neither assigned nor passed where a parameter is by reference. A
+    // closure's are its own and those it takes of the code that wrote it.
+    params: FxHashMap<&'r str, Declared<'r>>,
+    // The variables that only ever hold what the body made.
+    made: FxHashMap<&'r str, Made>,
+    // What its variables are bound to: its own bindings and, for a variable
+    // a closure takes by reference, those of the code that wrote it.
+    bindings: Vec<&'r (Option<Name>, Binding)>,
+    // The closures its calls run, each with its `$this`.
+    runs: std::cell::RefCell<Vec<(u32, Transfer)>>,
+}
+
+impl CallContext for Level<'_> {
     fn class(&self) -> Option<&str> {
         self.class
     }
@@ -1457,124 +1801,110 @@ impl CallContext for Resolve<'_> {
         }
     }
 
-    // A closure the body wrote counts with the body's own writes.
-    fn written_effect(&self, _: &ArgAt, written: bool, place: Option<&Place>) -> Option<Effect> {
-        let held = place
-            .and_then(place_variable)
-            .is_some_and(|name| self.made_closure(name));
-        (written || held).then(Effect::nothing)
-    }
-
-    fn called_effect(&self, name: &Name) -> Option<Effect> {
-        self.made_closure(name).then(Effect::nothing)
+    fn runs_written(&self, written: Written<'_>, transfer: &Transfer) -> bool {
+        let held = |name: &Name| match self.made.get(name.as_str()) {
+            Some(Made::Closure(ids)) => Some(&ids[..]),
+            _ => None,
+        };
+        let ids = match written {
+            Written::Argument {
+                callable: Some(Callable::Written(id)),
+                ..
+            } => std::slice::from_ref(id),
+            Written::Argument {
+                callable: None,
+                place: Some(place),
+                ..
+            } => match place_variable(place).and_then(held) {
+                Some(ids) => ids,
+                None => return false,
+            },
+            Written::Argument { .. } => return false,
+            Written::Variable(name) => match held(name) {
+                Some(ids) => ids,
+                None => return false,
+            },
+            Written::Callee(ids) => ids,
+        };
+        self.runs
+            .borrow_mut()
+            .extend(ids.iter().map(|&id| (id, transfer.clone())));
+        true
     }
 }
 
-impl<'r> Resolve<'r> {
-    /// Whether the variable `name` holds only closures the body wrote.
-    fn made_closure(&self, name: &Name) -> bool {
-        self.made
-            .get(name.as_str())
-            .is_some_and(|made| matches!(made, Made::Closure))
+impl<'r> Level<'r> {
+    /// What each of the scope's calls reaches, and the places they may
+    /// write by reference; `None` when a call may run code not known, or the
+    /// scope may write anything.
+    fn reach(&self) -> Reached<'r> {
+        let facts: &'r WriteFacts = self.facts;
+        if facts.anything {
+            return None;
+        }
+        let reach = Reach {
+            registry: self.registry,
+            ctx: self,
+        };
+        let mut reached = Vec::with_capacity(facts.calls.len());
+        let mut written_args: Vec<&'r Place> = Vec::new();
+        for call in facts.calls.iter() {
+            let ran = self.runs.borrow().len();
+            let targets = reach.call_targets(&call.callee, Some(call))?;
+            // A closure the body wrote, called: what it takes by reference
+            // is not looked up.
+            let unknown_params = self.runs.borrow().len() > ran;
+            for (at, place) in call.places.iter() {
+                if unknown_params || targets.iter().any(|(key, _)| self.by_ref_at(key, at)) {
+                    written_args.push(place);
+                }
+            }
+            reached.push(targets);
+        }
+        Some((reached, written_args))
     }
 
-    fn run(&mut self, sig: Option<&'r FunctionReflection>) {
-        let facts = self.facts;
-        if facts.anything {
-            self.classification.own = Effect::anything();
-            return;
-        }
-        self.params = sig
-            .map_or(&[][..], |sig| &sig.params)
-            .iter()
-            .filter(|p| !p.by_ref && !facts.reassigned.iter().any(|name| name == p.name.as_ref()))
-            .map(|p| (p.name.as_ref(), &p.ty))
-            .collect();
-        self.made = facts
-            .made
-            .iter()
-            .map(|(name, made)| (name.as_str(), made))
-            .collect();
-        // What each call reaches depends on the variables' types, and which
-        // variables a call writes by reference on what it reaches: both are
-        // found again until no variable is lost.
-        let (reached, written_args) = loop {
-            let found = {
-                let reach = Reach {
-                    registry: self.registry,
-                    ctx: &*self,
-                    written: Default::default(),
-                };
-                let mut reached: Vec<Vec<(DeclKey, Transfer)>> = Vec::new();
-                let mut written_args: Vec<&'r Place> = Vec::new();
-                let mut known = true;
-                for call in facts.calls.iter() {
-                    let Some(targets) = reach.call_targets(&call.callee) else {
-                        known = false;
-                        break;
-                    };
-                    // A closure the body wrote, called: what it takes by
-                    // reference is not looked up.
-                    let unknown_params = matches!(call.callee, Callee::Value(_));
-                    for (at, place) in call.places.iter() {
-                        if unknown_params || targets.iter().any(|(key, _)| self.by_ref_at(key, at))
-                        {
-                            written_args.push(place);
-                        }
-                    }
-                    reached.push(targets);
-                }
-                known.then_some((reached, written_args))
-            };
-            let Some((reached, written_args)) = found else {
-                self.classification.own = Effect::anything();
-                return;
-            };
-            let mut lost = false;
-            for place in &written_args {
-                if let Some(name) = place_variable(place) {
-                    lost |= self.params.remove(name.as_str()).is_some();
-                    lost |= self.made.remove(name.as_str()).is_some();
-                }
-            }
-            if !lost {
-                break (reached, written_args);
-            }
-        };
+    /// The scope's own writes, and the declarations and closures of
+    /// `holder` it inherits writes from: what its calls reach, each builtin
+    /// among them by what it runs, and the closures they run.
+    fn classify(
+        &self,
+        holder: &DeclKey,
+        reached: Vec<Vec<(DeclKey, Transfer)>>,
+        written_args: Vec<&Place>,
+    ) -> Classification {
         // A builtin writes what the code it runs writes: what is passed to
         // it, and what of its object a class extending it declares.
-        let calls = {
-            let reach = Reach {
-                registry: self.registry,
-                ctx: &*self,
-                written: Default::default(),
-            };
-            let mut calls: Vec<(DeclKey, Transfer)> = Vec::new();
-            let mut known = true;
-            for (call, targets) in facts.calls.iter().zip(reached) {
-                match reach.expand(call, targets) {
-                    Some(runs) => calls.extend(runs),
-                    None => {
-                        known = false;
-                        break;
-                    }
+        let reach = Reach {
+            registry: self.registry,
+            ctx: self,
+        };
+        let mut calls: Vec<(DeclKey, Transfer)> = Vec::new();
+        for (call, targets) in self.facts.calls.iter().zip(reached) {
+            match reach.expand(call, targets) {
+                Some(runs) => calls.extend(runs),
+                None => {
+                    return Classification {
+                        own: Effect::anything(),
+                        calls: Vec::new(),
+                    };
                 }
             }
-            known.then_some(calls)
-        };
-        let Some(calls) = calls else {
-            self.classification.own = Effect::anything();
-            return;
-        };
+        }
         let mut own = Effect::nothing();
-        for place in facts.writes.iter().chain(written_args) {
+        for place in self.facts.writes.iter().chain(written_args) {
             self.place_storages(place, &mut own, 0);
             if own.is_anything() {
                 break;
             }
         }
-        self.classification.own = own;
-        self.classification.calls = calls;
+        calls.extend(
+            self.runs
+                .take()
+                .into_iter()
+                .map(|(id, transfer)| (holder.closure(id), transfer)),
+        );
+        Classification { own, calls }
     }
 
     /// Whether the declaration `key` takes the argument passed `at` by
@@ -1612,12 +1942,22 @@ impl<'r> Resolve<'r> {
                     named_classes(self.registry, self.class, class).unwrap_or_default(),
                 )),
                 Made::Object(None) => Holder::Made(None),
-                Made::Closure => Holder::Made(Some(vec![Name::from("Closure")])),
+                Made::Closure(_) => Holder::Made(Some(vec![Name::from("Closure")])),
             };
         }
         match self.params.get(name.as_str()) {
-            Some(ty) => holder_of(ty),
-            None => Holder::Unknown,
+            Some(Declared::Type(ty)) => holder_of(ty),
+            Some(Declared::Classes(Some(classes))) => {
+                let mut found = Vec::new();
+                for class in *classes {
+                    match named_classes(self.registry, self.class, class) {
+                        Some(named) => found.extend(named),
+                        None => return Holder::Unknown,
+                    }
+                }
+                Holder::Classes(found)
+            }
+            Some(Declared::Classes(None)) | None => Holder::Unknown,
         }
     }
 
@@ -1724,7 +2064,7 @@ impl<'r> Resolve<'r> {
     /// change by what it is bound to: a global, the declaration's static
     /// variable, or the place a reference was taken of.
     fn variable_storages(&self, name: Option<&Name>, place: &Place, out: &mut Effect, depth: u32) {
-        for (bound, binding) in self.facts.bindings.iter() {
+        for (bound, binding) in self.bindings.iter().copied() {
             let applies = match (bound, name) {
                 (None, _) | (_, None) => true,
                 (Some(bound), Some(name)) => bound == name,

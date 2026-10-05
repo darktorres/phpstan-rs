@@ -7,6 +7,7 @@
 //! variable or place, or captured by reference by a closure the call may
 //! run, is reset to what it may hold.
 
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use syntax::ast::*;
@@ -19,14 +20,20 @@ use crate::checker::{Checker, Locals, purge_stale_narrowing_for, purge_stale_nar
 use crate::registry::summaries::{
     ArgAt, BodySummary, Callable, PairTarget, Place, Receiver, Root, Step, call_of,
 };
-use crate::registry::{CallContext, Effect, Holder, Storage, holder_of};
+use crate::registry::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
 
 /// What a call's caller knows of it, from the types the checker inferred.
 struct TypedCall<'c, 'a> {
     checker: &'c Checker<'a>,
     locals: &'c Locals,
+    /// What a function call calls, when not a name.
+    callee: Option<&'c Expr>,
     receiver: Option<&'c Expr>,
     args: &'c [Arg],
+    /// What the closures the scope wrote that the call runs may write.
+    written: RefCell<Effect>,
+    /// Whether the call runs a closure the scope wrote.
+    runs_written: Cell<bool>,
 }
 
 impl TypedCall<'_, '_> {
@@ -49,6 +56,37 @@ impl TypedCall<'_, '_> {
 
     fn inferred(&self, e: &Expr) -> Holder {
         holder_of(&self.checker.infer_expr(e, self.locals))
+    }
+
+    /// What running `e` may write, when it is a closure, an arrow function
+    /// or a first-class callable, there or assigned there.
+    fn closure_effect(&self, e: &Expr) -> Option<Effect> {
+        let mut e = e.peeled();
+        while let ExprKind::Assign(_, rhs) = &e.kind {
+            e = rhs.peeled();
+        }
+        matches!(
+            e.kind,
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_)
+        )
+        .then(|| {
+            let summary = BodySummary::of_closure(e);
+            self.checker.registry.closure_effect(&summary, self.class())
+        })
+    }
+
+    /// What calling the variable `name` may write, when it holds only
+    /// closures the scope wrote.
+    fn held_effect(&self, name: &Name) -> Option<Effect> {
+        let closures = self.checker.shared_scope.closures.get(name)?;
+        let mut effect = Effect::nothing();
+        for closure in closures {
+            effect.join(&self.checker.registry.closure_effect(closure, self.class()));
+            if effect.is_anything() {
+                break;
+            }
+        }
+        Some(effect)
     }
 }
 
@@ -104,32 +142,33 @@ impl CallContext for TypedCall<'_, '_> {
             .map_or(Holder::Unknown, |arg| self.inferred(arg))
     }
 
-    fn written_effect(&self, at: &ArgAt, written: bool, place: Option<&Place>) -> Option<Effect> {
-        if written {
-            let summary = match &self.arg(at)?.peeled().kind {
-                ExprKind::Closure(closure) => BodySummary::of(&closure.body),
-                ExprKind::ArrowFn(arrow) => BodySummary::of_expr(&arrow.body),
-                ExprKind::FirstClassCallable(call) => BodySummary::of_expr(call),
-                _ => return None,
-            };
-            return Some(self.checker.registry.body_effect(&summary, self.class()));
-        }
-        match place.map(|place| (&place.root, &*place.steps)) {
-            Some((Root::Variable(Some(name)), [])) => self.called_effect(name),
-            _ => None,
-        }
-    }
-
-    fn called_effect(&self, name: &Name) -> Option<Effect> {
-        let bodies = self.checker.shared_scope.closures.get(name)?;
-        let mut effect = Effect::nothing();
-        for body in bodies {
-            effect.join(&self.checker.registry.body_effect(body, self.class()));
-            if effect.is_anything() {
-                break;
-            }
-        }
-        Some(effect)
+    fn runs_written(&self, written: Written<'_>, transfer: &Transfer) -> bool {
+        let effect = match written {
+            Written::Argument {
+                at,
+                callable: Some(Callable::Written(_)),
+                ..
+            } => self.arg(at).and_then(|arg| self.closure_effect(arg)),
+            Written::Argument {
+                callable: None,
+                place: Some(place),
+                ..
+            } => match (&place.root, &*place.steps) {
+                (Root::Variable(Some(name)), []) => self.held_effect(name),
+                _ => None,
+            },
+            Written::Argument { .. } => None,
+            Written::Variable(name) => self.held_effect(name),
+            Written::Callee(_) => self.callee.and_then(|callee| self.closure_effect(callee)),
+        };
+        let Some(effect) = effect else {
+            return false;
+        };
+        self.written
+            .borrow_mut()
+            .join(&effect.transferred(transfer));
+        self.runs_written.set(true);
+        true
     }
 }
 
@@ -149,14 +188,14 @@ impl Checker<'_> {
     /// After a call, what it may have written is stale: see the module's
     /// doc comment.
     pub(crate) fn forget_what_a_call_may_change(&mut self, e: &Expr, locals: &mut Locals) {
-        let (receiver, args) = match &e.kind {
+        let (callee, receiver, args) = match &e.kind {
             ExprKind::MethodCall(recv, _, args, _)
-            | ExprKind::DynamicMethodCall(recv, _, args, _) => (Some(&**recv), &args[..]),
-            ExprKind::Call(_, args)
-            | ExprKind::New(_, args)
+            | ExprKind::DynamicMethodCall(recv, _, args, _) => (None, Some(&**recv), &args[..]),
+            ExprKind::Call(callee, args) => (Some(&**callee), None, &args[..]),
+            ExprKind::New(_, args)
             | ExprKind::StaticCall(_, _, args)
-            | ExprKind::DynamicStaticCall(_, _, args) => (None, &args[..]),
-            ExprKind::NewAnonymousClass(class) => (None, &class.args[..]),
+            | ExprKind::DynamicStaticCall(_, _, args) => (None, None, &args[..]),
+            ExprKind::NewAnonymousClass(class) => (None, None, &class.args[..]),
             _ => return,
         };
         let scope = Rc::clone(&self.shared_scope);
@@ -182,27 +221,23 @@ impl Checker<'_> {
             })
             .cloned()
             .collect();
-        let effect = {
+        let (effect, ran_written) = {
             let ctx = TypedCall {
                 checker: self,
                 locals,
+                callee,
                 receiver,
                 args,
+                written: Default::default(),
+                runs_written: Cell::new(false),
             };
-            self.registry.call_effect(&call, &ctx)
+            let mut effect = self.registry.call_effect(&call, &ctx);
+            effect.join(&ctx.written.borrow());
+            (effect, ctx.runs_written.get())
         };
         // A closure the scope wrote writes what it captures by reference as
         // its own variables, which no effect names.
-        let runs_written = effect.is_anything()
-            || args.iter().any(|arg| match &arg.value.peeled().kind {
-                ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
-                    true
-                }
-                ExprKind::Variable(name) => scope.closures.contains_key(name),
-                _ => false,
-            })
-            || matches!(&e.kind, ExprKind::Call(callee, _)
-                if matches!(&callee.peeled().kind, ExprKind::Variable(name) if scope.closures.contains_key(name)));
+        let runs_written = effect.is_anything() || ran_written;
         self.forget_effect(&effect, runs_written, locals);
     }
 
