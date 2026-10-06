@@ -124,6 +124,23 @@ pub(super) fn collect(
                     .methods()
                     .shared_iter()
                     .map(|(name, declaration)| FileMember::from_shared(name.clone(), declaration));
+                let mut members = members.collect::<Vec<_>>();
+                members.sort_by(|left, right| {
+                    left.declaration
+                        .get()
+                        .provenance()
+                        .declaration_span()
+                        .start
+                        .cmp(
+                            &right
+                                .declaration
+                                .get()
+                                .provenance()
+                                .declaration_span()
+                                .start,
+                        )
+                        .then_with(|| left.name.lower().cmp(right.name.lower()))
+                });
                 found.file_decls.add_class(
                     std::sync::Arc::clone(info),
                     members,

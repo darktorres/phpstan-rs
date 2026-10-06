@@ -257,8 +257,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   handle from the enclosing class. Their parameter ranges are in the file's
   parameter arena too. Each class's methods now also have a case-folded
   file-local slot index, rebuilt when the cached arena is decoded and
-  checked against its typed member range; the focused arena round-trip test
-  checks uppercase lookup after decoding. Its test and `cargo clippy -p
+  checked against its typed member range. The arena orders methods by their
+  recorded declaration positions (with a stable name tie-breaker), not by
+  `Members` hash iteration. The focused arena round-trip test checks source
+  order and uppercase lookup after decoding. Its test and `cargo clippy -p
   phpstan-rs --all-targets` pass.
   The cache stores class/function declaration metadata beside the arena
   values, then reconstructs `BuiltDecl` with the same `Arc`; mismatched

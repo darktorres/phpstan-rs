@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn file_declarations_round_trip_with_typed_ranges() {
         let tokens = Lexer::new(
-            "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {}",
+            "<?php class Demo { public int $value; public const int MARK = 1; public function zebra(): void {} public function run(int $n): int {} public function alpha(): void {} } function helper(string $text): bool {}",
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
@@ -519,7 +519,7 @@ mod tests {
         let decoded_members = decoded.members(class_layout);
         assert_eq!(decoded_members.len(), members.len());
         assert_eq!(decoded.member(class_layout, "RUN").unwrap().name, "run");
-        assert_eq!(decoded_members[0].name, members[0].name);
+        assert_eq!(decoded_members[0].name, "zebra");
         assert_eq!(
             decoded_members[0].declaration.get(),
             members[0].declaration.get()
