@@ -2027,8 +2027,11 @@ impl Project {
         }
         self.registry.set_scope(scope.clone());
         self.finished = true;
+        self.registry.advance_relation_generation();
         self.registry.canonicalize_class_name_case();
+        self.registry.advance_relation_generation();
         self.registry.flatten_traits();
+        self.registry.advance_relation_generation();
         self.registry.resolve_method_tags();
         // `flatten_phpdoc_inheritance` consumes `lookup_ancestor_method_
         // with_owner`/`lookup_method_with_owner` internally - see
@@ -2036,28 +2039,39 @@ impl Project {
         // calls comment for why a single call at the very end (like
         // `precompute_ancestor_names`) isn't enough here.
         self.registry.precompute_member_owners();
+        self.registry.advance_relation_generation();
         // Aliases and deferred value types resolve first, so inherited
         // PHPDoc copies an ancestor's finished types.
         self.registry.resolve_deferred_type_imports();
+        self.registry.advance_relation_generation();
         self.registry.resolve_deferred_value_of();
+        self.registry.advance_relation_generation();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.advance_relation_generation();
         self.registry.inherit_property_hooks();
+        self.registry.advance_relation_generation();
         self.registry.apply_assertion_table();
+        self.registry.advance_relation_generation();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes
         // `lookup_method_with_owner`/`lookup_ancestor_method_with_owner`
         // internally, so the member-owner maps take in the mixin members
         // here, before it runs.
         self.registry.resolve_deferred_mixins();
+        self.registry.advance_relation_generation();
         self.registry.precompute_member_owners_after_mixins();
+        self.registry.advance_relation_generation();
         // The class graph is final here; the effects bound a call by the
         // classes descending from its receiver's, which this indexes.
         self.registry.precompute_ancestor_names();
+        self.registry.advance_relation_generation();
         // The declared types are final after these two, and purity and
         // the effects read them: a call through a property is resolved by
         // the type the property has, the one PHP enforces.
         self.registry.resolve_constant_named_types();
+        self.registry.advance_relation_generation();
         self.registry.drop_doc_members_excluded_by_native();
+        self.registry.advance_relation_generation();
         // Neither `resolve_transitive_purity` nor anything below it adds
         // or removes a method/property/const name anywhere, so the
         // member-owner maps built just above stay correct through this
@@ -2065,9 +2079,12 @@ impl Project {
         // needed.
         self.registry.set_scope(body_scope);
         self.registry.resolve_transitive_purity(&self.files);
+        self.registry.advance_relation_generation();
         self.registry.set_scope(scope);
         self.registry.index_assert_tagged_names();
+        self.registry.advance_relation_generation();
         self.registry.index_doctrine_entities();
+        self.registry.advance_relation_generation();
         let changed_keys = match (&before, &changed) {
             (Some(before), Some(changed)) => self.registry.changed_since(before, changed),
             _ => FxHashSet::default(),

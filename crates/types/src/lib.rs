@@ -65,6 +65,8 @@ pub use php_version::{
     parse_php_version,
 };
 pub use record::{record_unions, recorded_unions};
+#[doc(hidden)]
+pub use relation::mark_relation_answers_provisional;
 pub use relation::{
     AcceptsResult, MAX_RULE_LEVEL, Relation, UNCONFIGURED_RULE_LEVEL, strict_mixed_receiver_from,
 };

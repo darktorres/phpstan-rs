@@ -457,6 +457,7 @@ impl CanonicalOver for Registry {
             .collect();
         let Registry {
             id_generation: _,
+            relation_generation: _,
             purity_results: _,
             function_results: _,
             deferred_function_results: _,

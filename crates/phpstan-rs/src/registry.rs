@@ -261,6 +261,8 @@ pub struct Registry {
     #[serde(skip)]
     id_generation: u32,
     #[serde(skip)]
+    relation_generation: Option<u64>,
+    #[serde(skip)]
     purity_results: PurityResults,
     // Signatures completed by finishing passes, keyed by declaration ID.
     // The function table remains the as-built declaration source.
@@ -1152,6 +1154,7 @@ impl Registry {
             std::path::Path::new("<flattened>"),
             &GlobalFacts::of(program),
         )]);
+        registry.advance_relation_generation();
         registry
     }
 
@@ -1160,11 +1163,19 @@ impl Registry {
     /// them; a no-op before then, while they still are the declarations as
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
+        self.relation_generation = None;
         self.deferred_types_ready = false;
         self.deferred_function_results.clear();
         self.deferred_class_results.clear();
         // Declarations remain as built. Finishing results are reset by ID.
         self.stub_effect_results.clear();
+    }
+
+    /// Starts a stable hierarchy snapshot for the next read-only finishing
+    /// pass. The following pass receives a distinct memo generation.
+    pub(crate) fn advance_relation_generation(&mut self) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        self.relation_generation = Some(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     }
 
     /// Whether the finishing passes have resolved declarations that are
@@ -2521,6 +2532,7 @@ impl Registry {
         registry.class_reference_results_cache = NameTable::load(reader, CLASS_REFERENCES)?;
         registry.imported_type_aliases_cache =
             NameTable::load(reader, "table:imported_type_aliases")?;
+        registry.advance_relation_generation();
         Ok(registry)
     }
 
@@ -2663,6 +2675,7 @@ impl Registry {
             .collect();
         base.stub_effect_results.clear();
         *self = base;
+        self.advance_relation_generation();
     }
 
     /// Indexes the `DoctrineEntity`-mapped classes by table and by

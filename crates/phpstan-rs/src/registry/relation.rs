@@ -14,6 +14,14 @@ use types::{
 /// Every class name is looked up as PHP resolves it, case-insensitively:
 /// a name the relations carry keeps its spelling as written.
 impl ClassHierarchy for Registry {
+    fn generation(&self) -> Option<u64> {
+        if crate::registry::resolve::deferred_class_resolution_active() {
+            types::mark_relation_answers_provisional();
+            return None;
+        }
+        self.relation_generation
+    }
+
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {
         Registry::is_subclass_of(self, class, of)
     }

@@ -7,6 +7,8 @@ mod kinds;
 mod super_type;
 
 pub use accepts::{MAX_RULE_LEVEL, UNCONFIGURED_RULE_LEVEL, strict_mixed_receiver_from};
+#[doc(hidden)]
+pub use super_type::mark_relation_answers_provisional;
 pub(crate) use super_type::scalar_family;
 
 use crate::{ClassHierarchy, TrinaryLogic};

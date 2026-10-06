@@ -15,10 +15,10 @@ pub struct ClassFacts<'a> {
 }
 
 pub trait ClassHierarchy {
-    /// Whether this hierarchy is `NoClasses`: its relations depend on the
-    /// two types alone, so an answer can be kept for the pair.
-    fn is_structural(&self) -> bool {
-        false
+    /// A content generation for relation answers. `None` means the
+    /// hierarchy may change while its callers are asking questions.
+    fn generation(&self) -> Option<u64> {
+        None
     }
 
     /// Whether `class` is `of`, or extends or implements it.
@@ -86,8 +86,8 @@ pub(crate) fn effective_slot_variance(
 pub struct NoClasses;
 
 impl ClassHierarchy for NoClasses {
-    fn is_structural(&self) -> bool {
-        true
+    fn generation(&self) -> Option<u64> {
+        Some(0)
     }
 
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {

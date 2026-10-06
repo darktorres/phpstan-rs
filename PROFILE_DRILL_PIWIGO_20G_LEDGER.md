@@ -160,13 +160,13 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 6.9 | Oracle | Tests written: a file replaced while read, a corrupt record, `SOURCES_HASH` against the embedded files | 6.7, 6.8 | infra | SKIP (pulled forward to 5.9) |
 | 6.V | §11 | Validation: the builds, the tests and the fixtures; item 6's remaining diagnostic tests | 6.1, 6.6 | val | DONE (tests-only gate per user direction: `cargo test --workspace --lib --bins --tests -- --quiet`, 2,109 passed, 0 failed. Full §11 validation remains deferred until item 19.) |
 | **7** | **item 7** | **One memo for the type relation** | | | |
-| 7.1 | read first | The relation's code read for any input beyond the registry's content (thread-locals, the current class, contextual statics) | — | perf | OPEN |
-| 7.2 | generation | `ClassHierarchy::generation()`, the content generation; bumped by every finishing run and base switch; read-only levels get one of their own | 4.6 | perf | OPEN |
-| 7.3 | one memo | One memo replaces `structural_memo` and `KEEP_DECISIONS` | 7.2 | perf | OPEN |
-| 7.4 | final answers | Answers are stored only when final; cycles are resolved per component; constants on a cycle read `never` | 7.3 | sem | OPEN |
+| 7.1 | read first | The relation's code read for any input beyond the registry's content (thread-locals, the current class, contextual statics) | — | perf | DONE (the relation reads only its two types and `ClassHierarchy`; the rule-level settings are read only by `accepts`, which is not memoized) |
+| 7.2 | generation | `ClassHierarchy::generation()`, the content generation; bumped by every finishing run and base switch; read-only levels get one of their own | 4.6 | perf | DONE (unique process-wide generations mark stable registry snapshots; finishing passes each advance the generation, edits disable caching, and base switches and cache loads receive fresh generations) |
+| 7.3 | one memo | One memo replaces `structural_memo` and `KEEP_DECISIONS` | 7.2 | perf | DONE (thread-local relation memo keys both type nodes under the hierarchy generation and replaces the pass-local keep-decision map) |
+| 7.4 | final answers | Answers are stored only when final; cycles are resolved per component; constants on a cycle read `never` | 7.3 | sem | DONE (nested provisional relation work marks active memo evaluations non-cacheable; recursive constant-type components resolve to `never`, and existing PHPDoc alias-cycle handling keeps `mixed`) |
 | 7.4b | final answers | Constants on a cycle reported | 7.4 | check | DEFERRED (after O3, not optimization) |
-| 7.5 | bound, switch | Two segments per thread; a runtime off switch (`PHPSTAN_RS_NO_RELATION_MEMO`) | 7.3 | perf | OPEN |
-| 7.V | §11 | Validation: the builds, the tests and the fixtures | 7.5 | val | OPEN |
+| 7.5 | bound, switch | Two segments per thread; a runtime off switch (`PHPSTAN_RS_NO_RELATION_MEMO`) | 7.3 | perf | DONE (two 2^16-entry segments per thread; the environment switch is read once, and tests cover generation changes, provisional results and disabled memo behavior) |
+| 7.V | §11 | Validation: the builds, the tests and the fixtures | 7.5 | val | DONE (tests-only per user direction: workspace tests passed with memo enabled and with `PHPSTAN_RS_NO_RELATION_MEMO=1`, 2,113 passed and 0 failed in each run. Full §11 validation remains deferred until item 19.) |
 | **8** | **item 8** | **Declarations carry only what every reader needs** | | | |
 | 8.1 | fields and readers | Every declaration field listed with its readers | 4.3 | perf | OPEN |
 | 8.2 | case references | Computed by the checker from what it checks; the six fields leave the declarations | 8.1 | sem | OPEN |

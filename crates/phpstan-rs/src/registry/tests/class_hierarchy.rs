@@ -464,6 +464,29 @@ fn class_deferred_generic_types_are_results_not_declaration_writes() {
 }
 
 #[test]
+fn a_cycle_between_class_constant_types_resolves_to_never() {
+    let registry = build_registry(
+        r#"<?php
+            class CycleA {
+                /** @var value-of<CycleB::VALUE> */
+                public const VALUE = 'a';
+            }
+            class CycleB {
+                /** @var value-of<CycleA::VALUE> */
+                public const VALUE = 'b';
+            }
+            /** @param value-of<CycleA::VALUE> $value */
+            function accepts_cycle($value): void {}
+            "#,
+    );
+
+    assert_eq!(
+        registry.lookup_function("accepts_cycle").unwrap().params()[0].ty(),
+        &Type::never()
+    );
+}
+
+#[test]
 fn deferred_value_of_property_results_leave_the_declaration_unchanged() {
     let r = build_registry(
         r#"<?php

@@ -14,6 +14,10 @@ thread_local! {
     /// being built; the outer resolution memoizes the completed result.
     static RESOLVING_DEFERRED_CLASSES: RefCell<FxHashSet<ClassId>> = RefCell::new(FxHashSet::default());
 }
+
+pub(crate) fn deferred_class_resolution_active() -> bool {
+    RESOLVING_DEFERRED_CLASSES.with(|resolving| !resolving.borrow().is_empty())
+}
 pub(crate) type DeferredClassConstantTypes = Vec<(usize, Type)>;
 pub(crate) type ClassPropertyResults = Vec<(Name, Arc<PropertyReflection>)>;
 pub(crate) type ClassMethodResults = Vec<(MethodRef, FunctionReflection)>;
@@ -33,6 +37,15 @@ type ImportedTypeClassUpdate = (
     ClassMethodResults,
 );
 type VisibleClassConstTypes = OrderedNameMap<Type>;
+type VisibleClassConstEntries = OrderedNameMap<(Name, Type)>;
+
+thread_local! {
+    /// Constant type references are followed while resolving `value-of`.
+    /// Keep the active path so every member of a recursive component reads
+    /// as `never`, independent of which member was requested first.
+    static RESOLVING_CONSTANT_TYPES: RefCell<(Vec<(String, String)>, FxHashSet<(String, String)>)> =
+        RefCell::new((Vec::new(), FxHashSet::default()));
+}
 
 use crate::registry::Registry;
 use crate::registry::{
@@ -634,14 +647,12 @@ impl Registry {
     /// like `flatten_phpdoc_inheritance` above: a `value-of<value-of<X>>`-
     /// style chain isn't attempted.
     ///
-    /// Each class is resolved in parallel against the classes as they are
-    /// before the pass, and the results are inserted together, so no
-    /// result depends on the order classes are visited in. (A class whose
-    /// own docblock names `value-of<self>` on itself, where `self` is
-    /// genuinely an enum, degrades to `Mixed` - the same "can't verify,
-    /// don't guess" outcome every other unresolvable case here gets.)
-    /// Top-level functions are resolved after, against the classes with
-    /// theirs in.
+    /// The pass resolves class-constant references used by finishing
+    /// passes, then registers lazy per-declaration result cells. A class's
+    /// resolved types are computed on its first effective read; the
+    /// function equivalent is computed when its signature is read. Stub
+    /// base construction materializes stub results before the base is
+    /// shared.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
@@ -704,6 +715,7 @@ impl Registry {
         for (id, signature) in function_updates {
             self.function_results.insert(id, signature);
         }
+        self.advance_relation_generation();
     }
 
     /// Materializes the lazy type results on a registry clone before it is
@@ -812,8 +824,10 @@ impl Registry {
         let entered =
             RESOLVING_DEFERRED_CLASSES.with(|resolving| resolving.borrow_mut().insert(id));
         if !entered {
+            types::mark_relation_answers_provisional();
             return None;
         }
+        types::mark_relation_answers_provisional();
         let result = self.class_name_by_id(id).and_then(|name| {
             let (methods, constants, properties, types) = self.resolved_deferred_class(name)?;
             Some(DeferredClassResults {
@@ -1151,9 +1165,10 @@ impl Registry {
     /// else reads them. Iterated to a fixpoint so a chain (`A = self::B`,
     /// `B = Other::C`, ...) resolves whatever its length, each round a
     /// read-only computation against the current map followed by an
-    /// apply. A reference still unresolved once nothing changes, or after
-    /// `MAX_ROUNDS` (a cycle, `A = self::B` / `B = self::A`, never stops
-    /// changing), becomes `Mixed` - real PHP itself rejects such a cycle.
+    /// apply. A reference still unresolved after the fixed point is followed
+    /// once more by constant identity. Cycles resolve to `never`, matching
+    /// PHP's self-referencing constant failure; unknown references degrade
+    /// to `Mixed`.
     fn resolve_class_constant_references(&mut self) {
         const MAX_ROUNDS: usize = 16;
         // The classes with a deferred constant type, found by the first
@@ -1236,15 +1251,26 @@ impl Registry {
                 let Some(info) = registry.class_by_id(class_id) else {
                     return Vec::new();
                 };
+                let Some(owner) = registry.class_name_by_id(class_id).cloned() else {
+                    return Vec::new();
+                };
                 class_constant_entries(registry, info, class_id)
                     .into_iter()
-                    .filter_map(|(slot, _, sig)| {
+                    .filter_map(|(slot, name, sig)| {
                         let ty = registry
                             .class_const_types
                             .get(&(class_id, slot))
                             .unwrap_or(&sig.ty);
-                        ty.contains_deferred()
-                            .then(|| (class_id, slot, unresolved_class_const_to_mixed(ty.clone())))
+                        if !ty.contains_deferred() {
+                            return None;
+                        }
+                        let resolved = resolve_constant_type(&owner, name, ty.clone(), registry);
+                        let ty = if resolved.contains_deferred() {
+                            unresolved_class_const_to_mixed(resolved)
+                        } else {
+                            resolved
+                        };
+                        Some((class_id, slot, ty))
                     })
                     .collect::<Vec<_>>()
             })
@@ -2020,12 +2046,6 @@ impl types::ClassConstants for DeclaredConstants<'_> {
     }
 
     fn class_constants(&self, class: &Type, pattern: &str) -> Type {
-        if class
-            .as_object()
-            .is_some_and(|(fqn, _)| self.is_excluded(fqn))
-        {
-            return Type::mixed();
-        }
         resolve_class_const_type(class, pattern, self.registry)
     }
 }
@@ -2046,7 +2066,11 @@ fn resolve_class_const_type(class: &Type, pattern: &str, registry: &Registry) ->
         return Type::mixed();
     };
     let fqn = fqn.trim_start_matches('\\');
-    matching_class_const_type(&visible_class_consts(registry, fqn), pattern)
+    matching_class_const_entry_types(
+        &visible_class_const_entries(registry, fqn),
+        pattern,
+        registry,
+    )
 }
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `prop` contains
@@ -2085,7 +2109,14 @@ fn class_constant_entries<'a>(
 /// breadth-first, a class's own declaration winning over an inherited one
 /// of the same name.
 fn visible_class_consts(registry: &Registry, fqn: &str) -> VisibleClassConstTypes {
-    let mut consts = VisibleClassConstTypes::default();
+    visible_class_const_entries(registry, fqn)
+        .into_iter()
+        .map(|(name, (_, ty))| (name, ty))
+        .collect()
+}
+
+fn visible_class_const_entries(registry: &Registry, fqn: &str) -> VisibleClassConstEntries {
+    let mut consts = VisibleClassConstEntries::default();
     let mut seen: NameSet = NameSet::default();
     let mut queue: std::collections::VecDeque<Name> = std::collections::VecDeque::new();
     queue.push_back(Name::from(fqn));
@@ -2102,7 +2133,7 @@ fn visible_class_consts(registry: &Registry, fqn: &str) -> VisibleClassConstType
                     .class_const_types
                     .get(&(class_id, slot))
                     .unwrap_or(&sig.ty);
-                consts.insert(const_name.clone(), ty.clone());
+                consts.insert(const_name.clone(), (name.clone(), ty.clone()));
             }
         }
         if let Some(references) = registry.class_references(class_id) {
@@ -2116,20 +2147,19 @@ fn visible_class_consts(registry: &Registry, fqn: &str) -> VisibleClassConstType
     consts
 }
 
-/// The union of every constant in `consts` whose name matches `pattern` -
-/// see `resolve_class_const_type`.
-// Declared types are joined while the class hierarchy is being built.
-#[allow(clippy::disallowed_methods)]
-fn matching_class_const_type(consts: &VisibleClassConstTypes, pattern: &str) -> Type {
-    let names: Vec<&Name> = consts
-        .keys()
-        .filter(|name| glob_matches(pattern, name))
-        .collect();
+fn matching_class_const_entry_types(
+    consts: &VisibleClassConstEntries,
+    pattern: &str,
+    registry: &Registry,
+) -> Type {
     let mut members: Vec<Type> = Vec::new();
-    for name in names {
-        let ty = consts[name].clone();
-        if !members.contains(&ty) {
-            members.push(ty);
+    for (name, (owner, ty)) in consts
+        .iter()
+        .filter(|(name, _)| glob_matches(pattern, name))
+    {
+        let resolved = resolve_constant_type(owner, name, ty.clone(), registry);
+        if !members.contains(&resolved) {
+            members.push(resolved);
         }
     }
     match members.len() {
@@ -2137,6 +2167,39 @@ fn matching_class_const_type(consts: &VisibleClassConstTypes, pattern: &str) -> 
         1 => members.pop().expect("len checked"),
         _ => Type::union_of(members),
     }
+}
+
+fn resolve_constant_type(owner: &Name, name: &Name, ty: Type, registry: &Registry) -> Type {
+    let key = (owner.lower().to_string(), name.lower().to_string());
+    let entered = RESOLVING_CONSTANT_TYPES.with(|state| {
+        let mut state = state.borrow_mut();
+        if let Some(at) = state.0.iter().position(|active| active == &key) {
+            let cycle = state.0[at..].to_vec();
+            state.1.extend(cycle);
+            state.1.insert(key.clone());
+            return false;
+        }
+        state.0.push(key.clone());
+        true
+    });
+    if !entered {
+        types::mark_relation_answers_provisional();
+        return Type::never();
+    }
+
+    let resolved = resolve_deferred_value_of_in_type(ty, registry, None);
+    let is_cyclic = RESOLVING_CONSTANT_TYPES.with(|state| {
+        let mut state = state.borrow_mut();
+        let popped = state.0.pop();
+        debug_assert_eq!(popped.as_ref(), Some(&key));
+        let is_cyclic = state.1.contains(&key);
+        let is_root = state.0.is_empty();
+        if is_root {
+            state.1.clear();
+        }
+        is_cyclic
+    });
+    if is_cyclic { Type::never() } else { resolved }
 }
 
 /// `pattern` with `*` matching any (possibly empty) run of characters -
@@ -2167,21 +2230,20 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 /// `resolve_deferred_value_of_in_type` can't find a class's own constants
 /// there - this runs first, for the one class that's missing.
 fn bind_class_const_self(ty: Type, class: &str, own_consts: &VisibleClassConstTypes) -> Type {
-    bind_class_const_self_at(ty, class, own_consts, 0)
+    bind_class_const_self_at(ty, class, own_consts, &mut FxHashSet::default())
 }
 
 /// `bind_class_const_self`'s body. A substituted constant type can itself
 /// hold a further own-class reference (`A = self::B`), so each
-/// substitution is walked again, `depth` bounding a reference cycle
-/// (`A = self::B`, `B = self::A`), which degrades to `Mixed`.
+/// substitution is walked again. A repeated constant is a cycle and reads
+/// as `never`.
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,
     own_consts: &VisibleClassConstTypes,
-    depth: usize,
+    active: &mut FxHashSet<String>,
 ) -> Type {
     syntax::stack::guard(|| {
-        const MAX_DEPTH: usize = 16;
         ty.map_class_constants(&mut |owner, pattern| {
             let names_self = owner.is_self_reference()
                 || owner
@@ -2190,15 +2252,29 @@ fn bind_class_const_self_at(
             if !names_self {
                 return None;
             }
-            Some(if depth >= MAX_DEPTH {
-                Type::mixed()
-            } else {
-                bind_class_const_self_at(
-                    matching_class_const_type(own_consts, pattern),
-                    class,
-                    own_consts,
-                    depth + 1,
-                )
+            let mut members = Vec::new();
+            for (name, constant_type) in own_consts
+                .iter()
+                .filter(|(name, _)| glob_matches(pattern, name))
+            {
+                let key = format!("{}::{}", class.to_ascii_lowercase(), name.lower());
+                let resolved = if active.insert(key.clone()) {
+                    let resolved =
+                        bind_class_const_self_at(constant_type.clone(), class, own_consts, active);
+                    active.remove(&key);
+                    resolved
+                } else {
+                    types::mark_relation_answers_provisional();
+                    Type::never()
+                };
+                if !members.contains(&resolved) {
+                    members.push(resolved);
+                }
+            }
+            Some(match members.len() {
+                0 => Type::mixed(),
+                1 => members.pop().expect("len checked"),
+                _ => Type::union_of(members),
             })
         })
     })
@@ -2331,22 +2407,17 @@ impl Registry {
         }
         // (declaration id, parameter index or `None` for the return, corrected type)
         type Fix = (SigId, Option<usize>, Type);
-        let pass = next_keep_pass();
         let registry: &Registry = self;
         let sig_fixes = |key: SigId, class: Option<&Name>, sig: &FunctionReflection| {
             let mut fixes: Vec<Fix> = Vec::new();
             for (i, p) in sig.params.iter().enumerate() {
-                if let Some(ty) = registry.excluding_native(&p.ty, &p.ty_native, class, Some(pass))
-                {
+                if let Some(ty) = registry.excluding_native(&p.ty, &p.ty_native, class) {
                     fixes.push((key, Some(i), ty));
                 }
             }
-            if let Some(ty) = registry.excluding_native(
-                &sig.return_type,
-                &sig.return_type_native,
-                class,
-                Some(pass),
-            ) {
+            if let Some(ty) =
+                registry.excluding_native(&sig.return_type, &sig.return_type_native, class)
+            {
                 fixes.push((key, None, ty));
             }
             fixes
@@ -2398,12 +2469,8 @@ impl Registry {
                         if !prop.has_native_type {
                             return None;
                         }
-                        let ty = registry.excluding_native(
-                            &prop.ty,
-                            &prop.ty_native,
-                            Some(class),
-                            Some(pass),
-                        )?;
+                        let ty =
+                            registry.excluding_native(&prop.ty, &prop.ty_native, Some(class))?;
                         let mut updated = PropertyReflection::clone(prop);
                         updated.ty = ty;
                         Some((class_id, name.clone(), Arc::new(updated)))
@@ -2445,13 +2512,7 @@ impl Registry {
 
     /// `ty` without the members `native` provably excludes, when any are
     /// excluded; `None` when nothing changes.
-    fn excluding_native(
-        &self,
-        ty: &Type,
-        native: &Type,
-        class: Option<&Name>,
-        pass: Option<u64>,
-    ) -> Option<Type> {
+    fn excluding_native(&self, ty: &Type, native: &Type, class: Option<&Name>) -> Option<Type> {
         if ty == native || native.is_mixed() {
             return None;
         }
@@ -2471,7 +2532,7 @@ impl Registry {
         let mut changed = false;
         for m in members {
             let bound = bind(class, m);
-            let keep = self.keeps_member(&native, &bound, pass);
+            let keep = self.keeps_member(&native, &bound);
             if keep {
                 kept.push(m.clone());
                 continue;
@@ -2513,11 +2574,9 @@ impl Registry {
 
 impl Registry {
     /// Whether a documented member `bound` stays against the native type
-    /// `native`: held by it, or not provably apart from it. Kept for the
-    /// pass `pass` names, by the two types: the same pair of types comes
-    /// again and again across the classes of a pass.
-    fn keeps_member(&self, native: &Type, bound: &Type, pass: Option<u64>) -> bool {
-        let decide = || match self.is_super_type_of(native, bound) {
+    /// `native`: held by it, or not provably apart from it.
+    fn keeps_member(&self, native: &Type, bound: &Type) -> bool {
+        match self.is_super_type_of(native, bound) {
             types::TrinaryLogic::Yes => true,
             types::TrinaryLogic::No => false,
             // Two fully known class names only partly overlapping: the
@@ -2525,29 +2584,7 @@ impl Registry {
             types::TrinaryLogic::Maybe => {
                 !(self.is_fully_known_class_type(bound) && self.is_fully_known_class_type(native))
             }
-        };
-        let Some(pass) = pass else {
-            return decide();
-        };
-        let key = (native.identity(), bound.identity());
-        let remembered = KEEP_DECISIONS.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            if memo.0 != pass {
-                *memo = (pass, FxHashMap::default());
-            }
-            memo.1.get(&key).map(|(_, _, keep)| *keep)
-        });
-        if let Some(keep) = remembered {
-            return keep;
         }
-        let keep = decide();
-        KEEP_DECISIONS.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            if memo.0 == pass {
-                memo.1.insert(key, (native.clone(), bound.clone(), keep));
-            }
-        });
-        keep
     }
 
     /// Whether `ty` is only class names (and `null`) whose whole
@@ -2791,31 +2828,14 @@ impl Registry {
         }
         for i in 0..sig.params.len() {
             if let Some(ty) =
-                self.excluding_native(&sig.params[i].ty, &sig.params[i].ty_native, None, None)
+                self.excluding_native(&sig.params[i].ty, &sig.params[i].ty_native, None)
             {
                 sig.params[i].ty = ty;
             }
         }
-        if let Some(ty) =
-            self.excluding_native(&sig.return_type, &sig.return_type_native, None, None)
-        {
+        if let Some(ty) = self.excluding_native(&sig.return_type, &sig.return_type_native, None) {
             sig.return_type = ty;
         }
         sig
     }
-}
-
-/// What `Registry::keeps_member` decided in the pass it is for, by the
-/// identity of the two types, which are held so that it stays theirs.
-type KeepDecisions = FxHashMap<(usize, usize), (Type, Type, bool)>;
-
-thread_local! {
-    static KEEP_DECISIONS: std::cell::RefCell<(u64, KeepDecisions)> =
-        std::cell::RefCell::new((0, FxHashMap::default()));
-}
-
-/// A number no pass of `drop_doc_members_excluded_by_native` has had.
-fn next_keep_pass() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
