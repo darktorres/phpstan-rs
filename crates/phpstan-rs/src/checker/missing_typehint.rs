@@ -142,6 +142,28 @@ fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) ->
         || doc_type.is_some_and(crate::registry::mentions_mixed)
 }
 
+/// The resolved equivalent for a declaration whose PHPDoc has already
+/// been inherited into its signature. Explicit mixed is carried by the
+/// type tree, including nested generic arguments.
+fn resolved_type_mentions_explicit_mixed(ty: &Type) -> bool {
+    ty.is_explicit_mixed() || ty.any_child(resolved_type_mentions_explicit_mixed)
+}
+
+#[cfg(test)]
+mod resolved_explicit_mixed_tests {
+    use super::resolved_type_mentions_explicit_mixed;
+    use types::Type;
+
+    #[test]
+    fn detects_explicit_mixed_in_nested_resolved_types() {
+        let documented = Type::array(Type::string(), Type::explicit_mixed());
+        let inferred = Type::array(Type::string(), Type::mixed());
+
+        assert!(resolved_type_mentions_explicit_mixed(&documented));
+        assert!(!resolved_type_mentions_explicit_mixed(&inferred));
+    }
+}
+
 /// The "no type specified at all" case each of the six rules below leads
 /// with - `ty` resolved to plain `Mixed` (this project's stand-in for
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
@@ -404,13 +426,7 @@ impl<'a> Checker<'a> {
             ) {
                 continue;
             }
-            let native_hint = f
-                .params
-                .iter()
-                .find(|p| *p.name == **name)
-                .and_then(|p| p.type_hint.as_ref());
-            let doc_ty = doc.as_ref().and_then(|d| d.params.get(name));
-            let explicit_mixed = mentions_mixed(native_hint, doc_ty);
+            let explicit_mixed = resolved_type_mentions_explicit_mixed(ty);
             if ty.is_mixed() && !explicit_mixed {
                 self.report(
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
@@ -489,8 +505,8 @@ impl<'a> Checker<'a> {
         ) {
             return;
         }
-        let return_explicit_mixed = mentions_mixed(native_return, doc_return);
         let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
+        let return_explicit_mixed = resolved_type_mentions_explicit_mixed(&return_ty);
         if return_ty.is_mixed() && !return_explicit_mixed {
             self.report(
                 format!("{kind_word} {label}() has no return type specified."),
