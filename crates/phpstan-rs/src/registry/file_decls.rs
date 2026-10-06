@@ -1,15 +1,36 @@
 //! Per-file declaration storage. Arenas make indices and ranges specific to
 //! their declaration kind, so member and parameter ranges cannot be confused.
 
-use la_arena::{Arena, Idx, IdxRange};
+use la_arena::{Arena, Idx, IdxRange, RawIdx};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use syntax::name::Name;
 
 use super::ClassReflection;
 use super::class_info::{ConstantReflection, PropertyReflection};
 use super::function_sig::{FunctionReflection, ParameterReflection};
 
+#[allow(dead_code)] // Used by the cached per-file arena representation in row 4.3.
+fn encode_idx<T>(idx: Idx<T>) -> u32 {
+    u32::from(idx.into_raw())
+}
+
+#[allow(dead_code)] // Used by the cached per-file arena representation in row 4.3.
+fn decode_idx<T>(idx: u32) -> Idx<T> {
+    Idx::from_raw(RawIdx::from(idx))
+}
+
+#[allow(dead_code)] // Used by the cached per-file arena representation in row 4.3.
+fn encode_range<T>(range: &IdxRange<T>) -> (u32, u32) {
+    (encode_idx(range.start()), encode_idx(range.end()))
+}
+
+#[allow(dead_code)] // Used by the cached per-file arena representation in row 4.3.
+fn decode_range<T>(range: (u32, u32)) -> IdxRange<T> {
+    IdxRange::new(decode_idx(range.0)..decode_idx(range.1))
+}
+
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct FileMember {
     pub(crate) name: Name,
     pub(crate) declaration: FunctionReflection,
@@ -131,5 +152,119 @@ impl FileDecls {
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
     pub(crate) fn parameters(&self, layout: Idx<FunctionLayout>) -> &[ParameterReflection] {
         &self.parameters[self.function_layouts[layout].parameters.clone()]
+    }
+}
+
+#[allow(dead_code)] // Used once ParsedFile stores its declaration arenas.
+#[derive(Serialize)]
+struct EncodedFileDecls<'a> {
+    classes: Vec<&'a ClassReflection>,
+    functions: Vec<&'a FunctionReflection>,
+    class_layouts: Vec<EncodedClassLayout>,
+    function_layouts: Vec<EncodedFunctionLayout>,
+    members: Vec<&'a FileMember>,
+    parameters: Vec<&'a ParameterReflection>,
+    properties: Vec<&'a PropertyReflection>,
+    constants: Vec<&'a ConstantReflection>,
+    names: Vec<&'a Name>,
+}
+
+#[allow(dead_code)] // Used once ParsedFile stores its declaration arenas.
+#[derive(Serialize, Deserialize)]
+struct EncodedClassLayout {
+    declaration: u32,
+    members: (u32, u32),
+    properties: (u32, u32),
+    constants: (u32, u32),
+    names: (u32, u32),
+}
+
+#[allow(dead_code)] // Used once ParsedFile stores its declaration arenas.
+#[derive(Serialize, Deserialize)]
+struct EncodedFunctionLayout {
+    declaration: u32,
+    parameters: (u32, u32),
+}
+
+impl Serialize for FileDecls {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let encoded = EncodedFileDecls {
+            classes: self.classes.iter().map(|(_, value)| value).collect(),
+            functions: self.functions.iter().map(|(_, value)| value).collect(),
+            class_layouts: self
+                .class_layouts
+                .iter()
+                .map(|(_, layout)| EncodedClassLayout {
+                    declaration: encode_idx(layout.declaration),
+                    members: encode_range(&layout.members),
+                    properties: encode_range(&layout.properties),
+                    constants: encode_range(&layout.constants),
+                    names: encode_range(&layout.names),
+                })
+                .collect(),
+            function_layouts: self
+                .function_layouts
+                .iter()
+                .map(|(_, layout)| EncodedFunctionLayout {
+                    declaration: encode_idx(layout.declaration),
+                    parameters: encode_range(&layout.parameters),
+                })
+                .collect(),
+            members: self.members.iter().map(|(_, value)| value).collect(),
+            parameters: self.parameters.iter().map(|(_, value)| value).collect(),
+            properties: self.properties.iter().map(|(_, value)| value).collect(),
+            constants: self.constants.iter().map(|(_, value)| value).collect(),
+            names: self.names.iter().map(|(_, value)| value).collect(),
+        };
+        encoded.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileDecls {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct EncodedFileDecls {
+            classes: Vec<ClassReflection>,
+            functions: Vec<FunctionReflection>,
+            class_layouts: Vec<EncodedClassLayout>,
+            function_layouts: Vec<EncodedFunctionLayout>,
+            members: Vec<FileMember>,
+            parameters: Vec<ParameterReflection>,
+            properties: Vec<PropertyReflection>,
+            constants: Vec<ConstantReflection>,
+            names: Vec<Name>,
+        }
+
+        let encoded = EncodedFileDecls::deserialize(deserializer)?;
+        Ok(FileDecls {
+            classes: Arena::from_iter(encoded.classes),
+            functions: Arena::from_iter(encoded.functions),
+            class_layouts: Arena::from_iter(encoded.class_layouts.into_iter().map(|layout| {
+                ClassLayout {
+                    declaration: decode_idx(layout.declaration),
+                    members: decode_range(layout.members),
+                    properties: decode_range(layout.properties),
+                    constants: decode_range(layout.constants),
+                    names: decode_range(layout.names),
+                }
+            })),
+            function_layouts: Arena::from_iter(encoded.function_layouts.into_iter().map(
+                |layout| FunctionLayout {
+                    declaration: decode_idx(layout.declaration),
+                    parameters: decode_range(layout.parameters),
+                },
+            )),
+            members: Arena::from_iter(encoded.members),
+            parameters: Arena::from_iter(encoded.parameters),
+            properties: Arena::from_iter(encoded.properties),
+            constants: Arena::from_iter(encoded.constants),
+            names: Arena::from_iter(encoded.names),
+        })
     }
 }
