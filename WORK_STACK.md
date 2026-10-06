@@ -309,8 +309,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `MethodRef`, and both purity result fields have left `FunctionReflection`
   (`0949982c`). Changed/removed declarations and base switches clear those
   tables. The focused transitive/clear test and all 1,141 library tests pass;
-  library check and Clippy pass. Other pass results and immutable declaration
-  storage still remain to migrate.
+  library check and Clippy pass. `106045fd` keys the PHPStan-ancestry verdict
+  set by `ClassId`, applies scoped changes through IDs, and rebuilds it on
+  all-scope passes; the derived ID set no longer goes through the name-keyed
+  cache serializer. The full 1,141-test library suite, check, and Clippy pass.
+  Other pass results and immutable declaration storage still remain to migrate.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
