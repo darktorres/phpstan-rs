@@ -234,28 +234,23 @@ impl Provenance {
 impl Registry {
     /// Where a project file declares class-like `fqn`.
     pub fn class_declaration(&self, fqn: &str) -> Option<(&Path, Span)> {
-        self.classes.get(fqn)?.provenance.in_file()
+        self.class(fqn)?.2.provenance.in_file()
     }
 
     /// Where a project file declares function `fqn`.
     pub fn function_declaration(&self, fqn: &str) -> Option<(&Path, Span)> {
-        self.functions.get(fqn)?.provenance.in_file()
+        self.function(fqn)?.2.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s method `name`.
     pub fn method_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
-        self.classes
-            .get(owner)?
-            .methods
-            .get(name)?
-            .provenance
-            .in_file()
+        self.class(owner)?.2.methods.get(name)?.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s property `name`.
     pub fn property_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
-        self.classes
-            .get(owner)?
+        self.class(owner)?
+            .2
             .properties
             .get(name)?
             .provenance
@@ -264,12 +259,7 @@ impl Registry {
 
     /// Where a project file declares `owner`'s constant or enum case `name`.
     pub fn constant_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
-        self.classes
-            .get(owner)?
-            .consts
-            .get(name)?
-            .provenance
-            .in_file()
+        self.class(owner)?.2.consts.get(name)?.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s member `name` of unknown
