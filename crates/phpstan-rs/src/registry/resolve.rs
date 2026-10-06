@@ -2272,15 +2272,13 @@ impl Registry {
                 let Some(class_id) = registry.class_ids.get(*class).copied() else {
                     return Vec::new();
                 };
-                info.methods
+                info.member_order
                     .iter()
-                    .filter_map(|(name, sig)| {
-                        let slot = *info.member_slots.get(name)?;
-                        Some(sig_fixes(
-                            SigId::Method(MethodRef::new(class_id, slot)),
-                            Some(class),
-                            sig,
-                        ))
+                    .filter_map(|entry| {
+                        let slot = *info.member_slots.get(&entry.name)?;
+                        let method = MethodRef::new(class_id, slot);
+                        let sig = registry.method_by_ref(method)?;
+                        Some(sig_fixes(SigId::Method(method), Some(class), sig))
                     })
                     .flatten()
                     .collect::<Vec<_>>()
@@ -2332,11 +2330,8 @@ impl Registry {
                 .insert(name, property);
         }
         for (key, param, ty) in fixes {
-            let sig = match key {
+            match key {
                 SigId::Method(method) => {
-                    let Some(class) = self.class_name_by_id(method.class()).cloned() else {
-                        continue;
-                    };
                     let Some(name) = self
                         .class_by_id(method.class())
                         .and_then(|info| info.member_order.get(usize::from(method.slot())))
@@ -2344,14 +2339,17 @@ impl Registry {
                     else {
                         continue;
                     };
+                    let Some(mut result) = self.method_by_ref(method).cloned() else {
+                        continue;
+                    };
+                    match param {
+                        Some(i) => result.params[i].ty = ty,
+                        None => result.return_type = ty,
+                    }
                     self.class_method_results
-                        .get_mut(&method.class())
-                        .and_then(|methods| methods.get_mut(&name))
-                        .or_else(|| {
-                            self.classes
-                                .get_mut(&class)
-                                .and_then(|info| info.methods.get_mut(&name))
-                        })
+                        .entry(method.class())
+                        .or_default()
+                        .insert(name, result);
                 }
                 SigId::Function(function) => {
                     let Some(mut result) = self.function_by_id(function).cloned() else {
@@ -2362,13 +2360,7 @@ impl Registry {
                         None => result.return_type = ty,
                     }
                     self.function_results.insert(function, result);
-                    continue;
                 }
-            };
-            let Some(sig) = sig else { continue };
-            match param {
-                Some(i) => sig.params[i].ty = ty,
-                None => sig.return_type = ty,
             }
         }
     }
@@ -2515,12 +2507,14 @@ impl Registry {
                 let Some(class_id) = registry.class_ids.get(*class).copied() else {
                     return Vec::new();
                 };
-                info.methods
+                info.member_order
                     .iter()
-                    .filter_map(move |(name, sig)| {
-                        let slot = *info.member_slots.get(name)?;
+                    .filter_map(move |entry| {
+                        let slot = *info.member_slots.get(&entry.name)?;
+                        let method = MethodRef::new(class_id, slot);
+                        let sig = registry.method_by_ref(method)?;
                         let fixed = fixed_sig(registry, sig, &lookup)?;
-                        Some((MethodRef::new(class_id, slot), fixed))
+                        Some((method, fixed))
                     })
                     .collect::<Vec<_>>()
             })
@@ -2568,9 +2562,6 @@ impl Registry {
         }
         for (method, fixed) in method_fixes {
             let class_id = method.class();
-            let Some(class) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
             let Some(name) = self
                 .class_by_id(class_id)
                 .and_then(|info| info.member_order.get(usize::from(method.slot())))
@@ -2578,13 +2569,10 @@ impl Registry {
             else {
                 continue;
             };
-            if let Some(sig) = self
-                .classes
-                .get_mut(&class)
-                .and_then(|i| i.methods.get_mut(&name))
-            {
-                *sig = fixed;
-            }
+            self.class_method_results
+                .entry(class_id)
+                .or_default()
+                .insert(name, fixed);
         }
         for (function, fixed) in function_fixes {
             self.function_results.insert(function, fixed);

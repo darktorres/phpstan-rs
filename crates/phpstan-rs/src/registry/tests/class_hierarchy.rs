@@ -30,6 +30,43 @@ fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {
 }
 
 #[test]
+fn method_native_exclusion_is_a_result_not_a_declaration_write() {
+    let r = build_registry(
+        r#"<?php
+            class NativeBound {}
+            class Excluded {}
+            class Demo {
+                /** @param NativeBound|Excluded $value */
+                public function accept(NativeBound $value): void {}
+            }
+            "#,
+    );
+    let declaration = r.classes["Demo"].methods["accept"].clone();
+    let effective = r.lookup_own_method("Demo", "accept").unwrap();
+
+    assert_ne!(declaration.params[0].ty, effective.params[0].ty);
+    assert_eq!(r.classes["Demo"].methods["accept"], declaration);
+}
+
+#[test]
+fn method_constant_named_types_are_results_not_declaration_writes() {
+    let r = build_registry(
+        r#"<?php
+            const ACCEPTED_MODE = 7;
+            class Demo {
+                /** @param ACCEPTED_MODE $mode */
+                public function accept($mode): void {}
+            }
+            "#,
+    );
+    let declaration = r.classes["Demo"].methods["accept"].clone();
+    let effective = r.lookup_own_method("Demo", "accept").unwrap();
+
+    assert_ne!(declaration.params[0].ty, effective.params[0].ty);
+    assert_eq!(r.classes["Demo"].methods["accept"], declaration);
+}
+
+#[test]
 fn a_final_private_method_is_not_recorded_as_final() {
     // A `private` method isn't part of a class's inherited/
     // overridable surface at all in real PHP - `final` on one is
