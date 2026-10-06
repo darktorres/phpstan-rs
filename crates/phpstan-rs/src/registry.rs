@@ -126,6 +126,9 @@ pub(crate) struct ChangedNames {
     function_ids_before: FxHashMap<String, FnId>,
     function_declarations_before: FxHashMap<FnId, Arc<FunctionReflection>>,
     function_results_before: FxHashMap<FnId, FunctionReflection>,
+    // Class result tables are removed as soon as an edited declaration is
+    // reindexed, so keep that winner's prior result by its old declaration ID.
+    class_results_before: FxHashMap<Name, (ClassId, ClassResultOverlay)>,
     // With each constant's type before its first change.
     pub(crate) constants: FxHashMap<String, Option<Type>>,
 }
@@ -189,9 +192,29 @@ pub(crate) struct ResolvedSnapshot {
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
     function_results: Vec<Option<FunctionReflection>>,
-    member_topology: FxHashMap<Name, hierarchy::MemberTopology>,
+    class_results: FxHashMap<Name, (ClassId, ClassResultOverlay)>,
     effects: FxHashMap<effects::DeclKey, effects::Settled>,
     global_variables: syntax::name::NameMap<Type>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ClassReferences {
+    extends: Vec<Name>,
+    implements: Vec<Name>,
+    uses: Vec<Name>,
+    mixins: Vec<Name>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ClassResultOverlay {
+    methods: Vec<(Name, FunctionReflection)>,
+    topology: Option<hierarchy::MemberTopology>,
+    properties: Option<Vec<(Name, Arc<PropertyReflection>)>>,
+    constants: Option<OrderedNameMap<(usize, Arc<ConstantReflection>)>>,
+    const_types: Vec<(usize, Type)>,
+    types: Option<ClassTypeResults>,
+    imported_aliases: Option<Vec<(Name, Type)>>,
+    references: ClassReferences,
 }
 
 /// Class-level generic types completed after class constants are available.
@@ -1097,15 +1120,24 @@ impl Registry {
                     .collect()
             })
             .unwrap_or_default();
-        let member_topology_before = self
-            .class_ids
-            .iter()
-            .filter_map(|(name, id)| {
-                self.class_member_topology
-                    .get(id)
-                    .map(|topology| (name.clone(), topology.clone()))
-            })
-            .collect();
+        let mut class_results_before = FxHashMap::default();
+        if let Some(class_keys) = body_scope.and_then(scope::Scope::class_keys) {
+            for key in class_keys.iter() {
+                let Some((class_name, id)) = self.class_ids.get_with_name(key) else {
+                    continue;
+                };
+                class_results_before.insert(
+                    class_name.clone(),
+                    (
+                        *id,
+                        self.class_result_overlay(*id, self.classes.get(class_name)),
+                    ),
+                );
+            }
+        }
+        if let Some(changed) = changed {
+            class_results_before.extend(changed.class_results_before.clone());
+        }
         let snapshot = |classes, functions, registry: &Registry| ResolvedSnapshot {
             class_keys: body_scope.and_then(scope::Scope::shared_class_keys),
             classes,
@@ -1114,7 +1146,7 @@ impl Registry {
             function_results: function_results_before.clone(),
             effects: registry.effects_for_names(),
             global_variables: registry.global_variables().clone(),
-            member_topology: member_topology_before.clone(),
+            class_results: class_results_before.clone(),
         };
         if scope.is_all() {
             self.class_const_types.clear();
@@ -1445,7 +1477,74 @@ impl Registry {
 
     pub(crate) fn record_changed_class(&mut self, name: &str) {
         if self.raw.is_some() {
-            self.changed.classes.insert(name.to_ascii_lowercase());
+            let key = name.to_ascii_lowercase();
+            if self.changed.classes.insert(key.clone())
+                && let Some((class_name, id)) = self.class_ids.get_with_name(name)
+            {
+                let declaration = if self.raw_active {
+                    self.raw
+                        .as_ref()
+                        .and_then(|raw| raw.classes.get(class_name))
+                } else {
+                    self.classes.get(class_name)
+                };
+                let overlay = self.class_result_overlay(*id, declaration);
+                self.changed
+                    .class_results_before
+                    .insert(class_name.clone(), (*id, overlay));
+            }
+        }
+    }
+
+    fn class_result_overlay(
+        &self,
+        id: ClassId,
+        declaration: Option<&ClassReflection>,
+    ) -> ClassResultOverlay {
+        let mut methods: Vec<_> = self
+            .class_method_results
+            .get(&id)
+            .into_iter()
+            .flat_map(|methods| methods.iter())
+            .map(|(name, signature)| (name.clone(), signature.clone()))
+            .collect();
+        methods.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let mut const_types: Vec<_> = self
+            .class_const_types
+            .iter()
+            .filter_map(|((class, slot), ty)| (*class == id).then(|| (*slot, ty.clone())))
+            .collect();
+        const_types.sort_unstable_by_key(|(slot, _)| *slot);
+        let properties = self.class_property_results.get(&id).map(|properties| {
+            let mut properties: Vec<_> = properties
+                .iter()
+                .map(|(name, property)| (name.clone(), Arc::clone(property)))
+                .collect();
+            properties.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            properties
+        });
+        let imported_aliases = self.imported_type_aliases.get(&id).map(|aliases| {
+            let mut aliases: Vec<_> = aliases
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.clone()))
+                .collect();
+            aliases.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            aliases
+        });
+        ClassResultOverlay {
+            methods,
+            topology: self.class_member_topology.get(&id).cloned(),
+            properties,
+            constants: self.class_constant_results.get(&id).cloned(),
+            const_types,
+            types: self.class_type_results.get(&id).cloned(),
+            imported_aliases,
+            references: declaration.map_or_else(ClassReferences::default, |info| ClassReferences {
+                extends: info.extends.clone(),
+                implements: info.implements.clone(),
+                uses: info.uses.clone(),
+                mixins: info.mixins.clone(),
+            }),
         }
     }
 
@@ -1495,21 +1594,8 @@ impl Registry {
                 keys.insert(RefKey::class_text(key));
             }
         }
-        for (name, old) in &before.member_topology {
-            let current = self
-                .class_ids
-                .get(name)
-                .and_then(|id| self.class_member_topology.get(id));
-            if current != Some(old) {
-                keys.insert(RefKey::class_text(name.as_str()));
-            }
-        }
-        for (name, id) in self.class_ids.iter() {
-            if self.class_member_topology.contains_key(id)
-                && !before.member_topology.contains_key(name)
-            {
-                keys.insert(RefKey::class_text(name.as_str()));
-            }
+        for name in self.changed_class_results(before) {
+            keys.insert(RefKey::class_text(name.as_str()));
         }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(function_keys.clone().count(), before.functions.len());
@@ -1548,22 +1634,87 @@ impl Registry {
         keys
     }
 
+    fn changed_class_results(&self, before: &ResolvedSnapshot) -> FxHashSet<Name> {
+        let mut names: FxHashSet<Name> = before.class_results.keys().cloned().collect();
+        names.extend(
+            before
+                .class_keys
+                .iter()
+                .flat_map(|keys| keys.iter())
+                .filter_map(|key| {
+                    self.class_ids
+                        .get_with_name(key)
+                        .map(|(name, _)| name.clone())
+                }),
+        );
+        names
+            .into_iter()
+            .filter(|name| {
+                let old = before.class_results.get(name);
+                let current = self
+                    .class_ids
+                    .get(name)
+                    .map(|id| (*id, self.class_result_overlay(*id, self.classes.get(name))));
+                old != current.as_ref()
+            })
+            .collect()
+    }
+
     /// The traits the classes whose resolved form differs from `before`'s
     /// use, before the change and after it: a trait is checked as each class
     /// using it, so its file is checked again when one of them changes.
     pub(crate) fn traits_of_changed_classes(&self, before: &ResolvedSnapshot) -> Vec<Name> {
         let mut traits: Vec<Name> = Vec::new();
+        let result_changes = self.changed_class_results(before);
         let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
         for (key, old) in class_keys.zip(&before.classes) {
             let now = self.classes.get(&FoldedKey(key));
-            if !differs(now, old.as_ref()) {
+            let result_changed = result_changes
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(key));
+            if !differs(now, old.as_ref()) && !result_changed {
                 continue;
             }
-            for info in now.into_iter().chain(old.as_ref().map(Detached::get)) {
-                for used in &info.uses {
-                    if !traits.contains(used) {
-                        traits.push(used.clone());
-                    }
+            for used in before
+                .class_results
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(key))
+                .map(|(_, result)| result)
+                .into_iter()
+                .flat_map(|result| result.references.uses.iter())
+                .chain(now.into_iter().flat_map(|info| info.uses.iter()))
+                .chain(
+                    old.as_ref()
+                        .into_iter()
+                        .flat_map(|info| info.get().uses.iter()),
+                )
+            {
+                if !traits.contains(used) {
+                    traits.push(used.clone());
+                }
+            }
+        }
+        for name in result_changes {
+            if before.class_keys.as_ref().is_some_and(|keys| {
+                keys.iter()
+                    .any(|key| key.eq_ignore_ascii_case(name.as_ref()))
+            }) {
+                continue;
+            }
+            for used in before
+                .class_results
+                .get(&name)
+                .into_iter()
+                .flat_map(|(_, result)| result.references.uses.iter())
+                .chain(
+                    self.classes
+                        .get(&name)
+                        .into_iter()
+                        .flat_map(|info| info.uses.iter()),
+                )
+            {
+                if !traits.contains(used) {
+                    traits.push(used.clone());
                 }
             }
         }

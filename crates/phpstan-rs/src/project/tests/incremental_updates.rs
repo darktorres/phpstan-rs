@@ -912,6 +912,103 @@ fn an_inherited_return_tag_follows_the_parents_edit() {
 }
 
 #[test]
+fn a_trait_method_result_change_rechecks_its_unchanged_host_and_consumers() {
+    let mut project = Files::new()
+        .analysed(
+            "trait.php",
+            "<?php trait T { /** @return int */ public function m() { return 1; } }",
+        )
+        .analysed("host.php", "<?php class Host { use T; }")
+        .analysed(
+            "consumer.php",
+            "<?php function useHost(Host $host): int { return $host->m(); }",
+        )
+        .load();
+    let original_slot = project.registry().member_slot("Host", "m");
+    let original_declaration = project.registry().classes()["Host"].clone();
+
+    let checked = project
+        .update_file(
+            &PathBuf::from("trait.php"),
+            "<?php trait T { /** @return string */ public function m() { return 'x'; } }",
+        )
+        .unwrap();
+    assert!(checked.contains_key(&PathBuf::from("trait.php")));
+    assert!(checked.contains_key(&PathBuf::from("host.php")));
+    assert!(checked.contains_key(&PathBuf::from("consumer.php")));
+    assert_eq!(project.registry().member_slot("Host", "m"), original_slot);
+    assert_eq!(project.registry().classes()["Host"], original_declaration);
+    assert!(
+        project
+            .registry()
+            .lookup_own_method("Host", "m")
+            .unwrap()
+            .return_type()
+            .is_string()
+            .yes()
+    );
+
+    let unchanged = project
+        .update_file(
+            &PathBuf::from("trait.php"),
+            "<?php trait T { /** @return string */ public function m() { return 'x'; } }",
+        )
+        .unwrap();
+    let mut unchanged_paths: Vec<_> = unchanged
+        .keys()
+        .map(|path| path.display().to_string())
+        .collect();
+    unchanged_paths.sort();
+    assert_eq!(unchanged_paths, ["trait.php"]);
+}
+
+#[test]
+fn a_parent_constant_result_change_rechecks_a_child_signature_consumer() {
+    let mut project = Files::new()
+        .analysed("parent.php", "<?php class ParentType { public const MODES = ['a']; }")
+        .analysed(
+            "child.php",
+            "<?php class ChildType extends ParentType { /** @param value-of<ParentType::MODES> $mode */ public function setMode($mode): void {} }",
+        )
+        .analysed(
+            "consumer.php",
+            "<?php function useChild(ChildType $child): void { $child->setMode('a'); }",
+        )
+        .load();
+    let original_slot = project.registry().member_slot("ChildType", "setMode");
+    let original_declaration = project.registry().classes()["ChildType"].clone();
+
+    let checked = project
+        .update_file(
+            &PathBuf::from("parent.php"),
+            "<?php class ParentType { public const MODES = ['a', 'b']; }",
+        )
+        .unwrap();
+    assert!(checked.contains_key(&PathBuf::from("parent.php")));
+    assert!(checked.contains_key(&PathBuf::from("child.php")));
+    assert!(checked.contains_key(&PathBuf::from("consumer.php")));
+    assert_eq!(
+        project.registry().member_slot("ChildType", "setMode"),
+        original_slot
+    );
+    assert_eq!(
+        project.registry().classes()["ChildType"],
+        original_declaration
+    );
+    let expected =
+        types::Type::string_literal("a".into()).union(types::Type::string_literal("b".into()));
+    assert_eq!(
+        project
+            .registry()
+            .lookup_own_method("ChildType", "setMode")
+            .unwrap()
+            .params()[0]
+            .ty(),
+        &expected
+    );
+}
+
+#[test]
 fn a_method_removed_from_a_trait_is_gone_from_its_users() {
     assert_edit_matches_a_fresh_load(
         &[
