@@ -566,6 +566,11 @@ impl<V> OrderedNameMap<V> {
         self.position(key).map(|at| &self.entries[at].1)
     }
 
+    /// The stable position of `key` in insertion order.
+    pub fn get_index<K: NameKey + ?Sized>(&self, key: &K) -> Option<usize> {
+        self.position(key)
+    }
+
     pub fn get_mut<K: NameKey + ?Sized>(&mut self, key: &K) -> Option<&mut V> {
         self.position(key).map(|at| &mut self.entries[at].1)
     }
@@ -1614,6 +1619,9 @@ mod tests {
         map.insert(Interner::global().name("first"), 1);
         map.insert(Interner::global().name("second"), 2);
 
+        assert_eq!(map.get_index("first"), Some(0));
+        assert_eq!(map.get_index("second"), Some(1));
+
         *map.get_index_mut(0).unwrap() = 10;
         map.insert(Interner::global().name("first"), 11);
         assert_eq!(
@@ -1622,6 +1630,8 @@ mod tests {
         );
 
         map.insert(Interner::global().name("third"), 3);
+        assert_eq!(map.get_index("third"), Some(2));
+        assert_eq!(map.get_index("first"), Some(0));
         assert_eq!(map.get_index_mut(2).map(|value| *value), Some(3));
         assert!(map.get_index_mut(3).is_none());
     }
