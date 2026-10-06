@@ -1173,6 +1173,11 @@ impl Registry {
         for (_, id) in base.class_ids.iter_mut() {
             id.set_generation(base.id_generation);
         }
+        base.phpstan_ancestry = base
+            .phpstan_ancestry
+            .iter()
+            .map(|id| id.with_generation(base.id_generation))
+            .collect();
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);
         }
