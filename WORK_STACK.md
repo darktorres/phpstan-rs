@@ -405,8 +405,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   Registry property lookup. Cache round trips preserve it, and scoped edits
   clear affected IDs; the container format advances to version 10. The focused
   declaration-immutability and cache tests, all 1,147 crate tests and 275 syntax
-  tests, check, Clippy, formatting and diff checks pass. Item 4.6 is active:
-  trait-composed property results and other pass outputs still mutate
+  tests, check, Clippy, formatting and diff checks pass. `5318c9cd` extends the
+  class property result table to deferred and imported property type fixes,
+  constant-named/native property resolution and hook results; property readers
+  use the Registry overlay while declarations retain their built values. The
+  cache format advances to version 11. Imported-alias, deferred value-of,
+  declaration-immutability and cache round-trip checks pass with all 1,148
+  crate tests, all 275 syntax tests, Clippy, formatting and diff checks. Item
+  4.6 is active: trait-composed properties and other pass outputs still mutate
   declarations. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
