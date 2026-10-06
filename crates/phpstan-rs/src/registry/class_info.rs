@@ -356,6 +356,17 @@ pub struct TraitAlias {
     pub alias: Name,
 }
 
+/// One method the class has at its own local slot. Trait aliases keep the
+/// source method's declaration facts on the host-local entry.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct MethodEntry {
+    pub(crate) name: Name,
+    pub(crate) is_abstract: bool,
+    pub(crate) is_final: bool,
+    pub(crate) is_static: bool,
+    pub(crate) is_final_by_phpdoc: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[allow(clippy::type_complexity)]
 pub struct ClassReflection {
@@ -384,7 +395,7 @@ pub struct ClassReflection {
     // Every method the class currently has, in declaration order. Own
     // methods come first; trait contributions and aliases are appended as
     // composition runs. Slots are class-local and case-folded.
-    pub(in crate::registry) member_order: Vec<Name>,
+    pub(in crate::registry) member_order: Vec<MethodEntry>,
     pub(in crate::registry) member_slots: FoldedMap<u16>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
@@ -396,33 +407,12 @@ pub struct ClassReflection {
     // PHPStan.
     pub(in crate::registry) consts: Shared<OrderedNameMap<Arc<ConstantReflection>>>,
     pub(in crate::registry) uses: Vec<Name>,
-    // Method names declared `abstract` in this class's own body (not
-    // walked up the hierarchy - a completeness check needs to walk
-    // `extends`/`implements` itself and consult each ancestor's own set).
-    pub(in crate::registry) abstract_methods: NameSet,
-    // Method names declared `final` in this class's own body.
-    pub(in crate::registry) final_methods: NameSet,
-    // Method names declared `static` in this class's own body - same
-    // "not walked up the hierarchy" shape as `abstract_methods`/
-    // `final_methods` above, used by `check_one_method_override`'s
-    // `method.nonStatic`/`method.static` check, mirroring real PHPStan's
-    // `OverridingMethodRule`: an override must match its ancestor's
-    // static-ness exactly, either direction.
-    pub(in crate::registry) static_methods: NameSet,
     // Property names declared `final` in this class's own body (PHP 8.4) -
-    // same "not walked up the hierarchy" shape as `final_methods` above;
+    // same "not walked up the hierarchy" shape as method-entry flags;
     // `Registry::find_final_ancestor_property` does that walk. Real PHP
     // fatals overriding a `final` property in a subclass exactly like a
     // `final` method.
     pub(in crate::registry) final_properties: NameSet,
-    // `@final`'s docblock-only siblings to `final_methods`/
-    // `final_properties` above - real PHP never enforces this convention
-    // (no engine-level guarantee backs it, unlike the native keyword), so
-    // it needs its own explicit ancestor-walk consultation
-    // (`Registry::find_final_ancestor_method`/
-    // `find_final_ancestor_property`, real keyword taking priority when
-    // both somehow apply on the same ancestor).
-    pub(in crate::registry) final_methods_by_phpdoc: NameSet,
     pub(in crate::registry) final_properties_by_phpdoc: NameSet,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
@@ -656,24 +646,36 @@ impl ClassReflection {
         &self.uses
     }
 
-    pub fn abstract_methods(&self) -> &NameSet {
-        &self.abstract_methods
+    pub fn is_abstract_method(&self, name: &str) -> bool {
+        self.member_slots
+            .get(name)
+            .and_then(|slot| self.member_order.get(usize::from(*slot)))
+            .is_some_and(|entry| entry.is_abstract)
     }
 
-    pub fn final_methods(&self) -> &NameSet {
-        &self.final_methods
+    pub fn is_static_method(&self, name: &str) -> bool {
+        self.member_slots
+            .get(name)
+            .and_then(|slot| self.member_order.get(usize::from(*slot)))
+            .is_some_and(|entry| entry.is_static)
     }
 
-    pub fn static_methods(&self) -> &NameSet {
-        &self.static_methods
+    pub fn is_final_method(&self, name: &str) -> bool {
+        self.member_slots
+            .get(name)
+            .and_then(|slot| self.member_order.get(usize::from(*slot)))
+            .is_some_and(|entry| entry.is_final)
+    }
+
+    pub fn is_final_method_by_phpdoc(&self, name: &str) -> bool {
+        self.member_slots
+            .get(name)
+            .and_then(|slot| self.member_order.get(usize::from(*slot)))
+            .is_some_and(|entry| entry.is_final_by_phpdoc)
     }
 
     pub fn final_properties(&self) -> &NameSet {
         &self.final_properties
-    }
-
-    pub fn final_methods_by_phpdoc(&self) -> &NameSet {
-        &self.final_methods_by_phpdoc
     }
 
     pub fn final_properties_by_phpdoc(&self) -> &NameSet {
@@ -1089,7 +1091,13 @@ impl ClassReflection {
                 let slot =
                     u16::try_from(member_order.len()).expect("class method slot space exhausted");
                 member_slots.insert(method_name.clone(), slot);
-                member_order.push(method_name.clone());
+                member_order.push(MethodEntry {
+                    name: method_name.clone(),
+                    is_abstract: abstract_methods.contains(method_name),
+                    is_final: final_methods.contains(method_name),
+                    is_static: static_methods.contains(method_name),
+                    is_final_by_phpdoc: final_methods_by_phpdoc.contains(method_name),
+                });
             }
         }
         let (methods, redeclared_methods) = collect_merged_methods(methods_vec);
@@ -1687,11 +1695,7 @@ impl ClassReflection {
                 .map(|(name, constant)| (name, Arc::new(constant)))
                 .collect(),
             uses: c.used_traits().map(class_ref).collect(),
-            abstract_methods,
-            static_methods,
-            final_methods,
             final_properties,
-            final_methods_by_phpdoc,
             final_properties_by_phpdoc,
             trait_aliases,
             resolved_trait_conflicts: c.resolved_trait_conflicts().map(Name::from).collect(),
@@ -2082,8 +2086,15 @@ impl ClassReflection {
                     .methods
                     .iter()
                     .any(|m| m.function.name.eq_ignore_ascii_case(builtin))
+                && !self.register_member_entry(MethodEntry {
+                    name: Name::from(builtin),
+                    is_abstract: false,
+                    is_final: false,
+                    is_static: true,
+                    is_final_by_phpdoc: false,
+                })
             {
-                self.static_methods.insert(Name::from(builtin));
+                self.set_method_static(builtin, true);
             }
         }
     }
@@ -2121,8 +2132,16 @@ impl ClassReflection {
                 }
             }
         }
-        for name in other.member_order {
-            self.register_member_name(name);
+        for entry in other.member_order {
+            if !self.merge_member_facts(
+                &entry.name,
+                entry.is_abstract,
+                entry.is_final,
+                entry.is_static,
+                entry.is_final_by_phpdoc,
+            ) {
+                self.register_member_entry(entry);
+            }
         }
         self.redeclared_methods.extend(other.redeclared_methods);
         self.properties.extend(other.properties);
@@ -2131,12 +2150,7 @@ impl ClassReflection {
         self.type_aliases.extend(other.type_aliases);
         self.type_alias_case_refs.extend(other.type_alias_case_refs);
         self.type_imports.extend(other.type_imports);
-        self.abstract_methods.extend(other.abstract_methods);
-        self.final_methods.extend(other.final_methods);
-        self.static_methods.extend(other.static_methods);
         self.final_properties.extend(other.final_properties);
-        self.final_methods_by_phpdoc
-            .extend(other.final_methods_by_phpdoc);
         self.final_properties_by_phpdoc
             .extend(other.final_properties_by_phpdoc);
         self.resolved_trait_conflicts
@@ -2187,15 +2201,48 @@ impl ClassReflection {
         self
     }
 
-    pub(crate) fn register_member_name(&mut self, name: Name) -> bool {
-        if self.member_slots.contains_key(&name) {
+    pub(crate) fn register_member_entry(&mut self, entry: MethodEntry) -> bool {
+        if self.member_slots.contains_key(&entry.name) {
             return false;
         }
         let slot =
             u16::try_from(self.member_order.len()).expect("class method slot space exhausted");
-        self.member_slots.insert(name.clone(), slot);
-        self.member_order.push(name);
+        self.member_slots.insert(entry.name.clone(), slot);
+        self.member_order.push(entry);
         true
+    }
+
+    pub(crate) fn set_method_static(&mut self, name: &str, is_static: bool) -> bool {
+        let Some(slot) = self.member_slots.get(name).copied() else {
+            return false;
+        };
+        let entry = &mut self.member_order[usize::from(slot)];
+        let changed = entry.is_static != is_static;
+        entry.is_static = is_static;
+        changed
+    }
+
+    fn merge_member_facts(
+        &mut self,
+        name: &str,
+        is_abstract: bool,
+        is_final: bool,
+        is_static: bool,
+        is_final_by_phpdoc: bool,
+    ) -> bool {
+        let Some(slot) = self.member_slots.get(name).copied() else {
+            return false;
+        };
+        let entry = &mut self.member_order[usize::from(slot)];
+        let changed = (is_abstract && !entry.is_abstract)
+            || (is_final && !entry.is_final)
+            || (is_static && !entry.is_static)
+            || (is_final_by_phpdoc && !entry.is_final_by_phpdoc);
+        entry.is_abstract |= is_abstract;
+        entry.is_final |= is_final;
+        entry.is_static |= is_static;
+        entry.is_final_by_phpdoc |= is_final_by_phpdoc;
+        changed
     }
 }
 

@@ -25,7 +25,7 @@ use crate::registry::name_map::{NameMap, NameSet};
 use crate::registry::name_table::NameTable;
 use crate::registry::{
     AssertInfo, AssertTarget, ChangedNames, ClassReflection, ConstantReflection,
-    DoctrineEntityIndex, FunctionReflection, ParameterReflection, PropertyReflection,
+    DoctrineEntityIndex, FunctionReflection, MethodEntry, ParameterReflection, PropertyReflection,
     RawDeclarations, Registry,
 };
 
@@ -45,11 +45,7 @@ canonical_struct!(ClassReflection {
     properties,
     consts,
     uses,
-    abstract_methods,
-    final_methods,
-    static_methods,
     final_properties,
-    final_methods_by_phpdoc,
     final_properties_by_phpdoc,
     trait_aliases,
     resolved_trait_conflicts,
@@ -83,6 +79,14 @@ canonical_struct!(ClassReflection {
     mixin_case_refs,
     is_anonymous,
     provenance,
+});
+
+canonical_struct!(MethodEntry {
+    name,
+    is_abstract,
+    is_final,
+    is_static,
+    is_final_by_phpdoc,
 });
 
 canonical_struct!(PropertyReflection {

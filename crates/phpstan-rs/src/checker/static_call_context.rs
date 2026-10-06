@@ -90,8 +90,8 @@ impl<'a> Checker<'a> {
             .lookup_method_canonical_name(owner, method)
             .unwrap_or(method)
             .to_string();
-        let is_static = owner_info.static_methods().contains(canonical.as_str());
-        let is_abstract = owner_info.abstract_methods().contains(canonical.as_str());
+        let is_static = owner_info.is_static_method(canonical.as_str());
+        let is_abstract = owner_info.is_abstract_method(canonical.as_str());
         let owner_is_interface = owner_info.kind() == syntax::ast::ClassKind::Interface;
         if !is_static && !self.static_call_has_compatible_this(class) {
             let dom_load_html = canonical.eq_ignore_ascii_case("loadHTML")
@@ -138,12 +138,7 @@ impl<'a> Checker<'a> {
             .registry
             .lookup_method_with_owner(current_class, current_method)
             .and_then(|(owner, _)| self.registry.classes().get(&owner))
-            .is_some_and(|owner| {
-                owner
-                    .static_methods()
-                    .iter()
-                    .any(|m| m.eq_ignore_ascii_case(current_method))
-            });
+            .is_some_and(|owner| owner.is_static_method(current_method));
         let class = self
             .registry
             .lookup_class(class)

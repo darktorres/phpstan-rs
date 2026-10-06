@@ -1012,7 +1012,7 @@ mod tests {
             class
                 .member_order
                 .iter()
-                .map(Name::as_str)
+                .map(|entry| entry.name.as_str())
                 .collect::<Vec<_>>(),
             ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"]
         );

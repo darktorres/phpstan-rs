@@ -749,12 +749,7 @@ impl Project {
                 .registry
                 .classes()
                 .get(owner.as_ref())
-                .is_some_and(|owner_info| {
-                    owner_info
-                        .static_methods()
-                        .iter()
-                        .any(|m| m.eq_ignore_ascii_case(method))
-                });
+                .is_some_and(|owner_info| owner_info.is_static_method(method));
             let is_public = sig.visibility() == Visibility::Public;
             if is_static && is_public {
                 continue;

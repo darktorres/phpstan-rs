@@ -47,6 +47,7 @@ mod type_node;
 
 pub(crate) use anonymous_class::{anonymous_class_decls, name_anonymous_classes};
 pub use bodies::{BodySource, FileBodies, NoBodies};
+pub(crate) use class_info::MethodEntry;
 pub use class_info::{ClassReflection, ConstantReflection, PropertyReflection};
 pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};
 pub(crate) use function_sig::apply_implicit_nullable_default;
@@ -587,8 +588,8 @@ impl Registry {
     pub(crate) fn file_method_by_ref(&self, method: MethodRef) -> Option<&FunctionReflection> {
         let id = method.class();
         let class = self.class_by_id(id)?;
-        let name = class.member_order.get(usize::from(method.slot()))?;
-        class.methods.get(name)
+        let entry = class.member_order.get(usize::from(method.slot()))?;
+        class.methods.get(&entry.name)
     }
 
     pub(crate) fn file_property_by_class_id(

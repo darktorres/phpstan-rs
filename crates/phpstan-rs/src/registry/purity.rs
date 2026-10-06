@@ -538,7 +538,7 @@ pub(crate) fn is_non_overridable(
     if registry
         .classes()
         .get(owner)
-        .is_some_and(|info| info.final_methods.contains(method) || info.is_final)
+        .is_some_and(|info| info.is_final_method(method) || info.is_final)
     {
         return true;
     }

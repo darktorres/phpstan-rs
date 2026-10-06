@@ -590,10 +590,7 @@ fn never_runs(class: &ClassReflection, method: &str, sig: &FunctionReflection) -
     sig.is_stub
         || sig.is_magic
         || class.kind() == ClassKind::Interface
-        || class
-            .abstract_methods()
-            .iter()
-            .any(|m| m.eq_ignore_ascii_case(method))
+        || class.is_abstract_method(method)
 }
 
 /// One body's own writes and the calls it inherits writes from.
@@ -842,7 +839,7 @@ impl Registry {
                 let class = self.class_name_by_id(method.class())?;
                 let info = self.class_by_id(method.class())?;
                 let member = info.member_order.get(usize::from(method.slot()))?;
-                Some(method_key(class.as_str(), member.as_str()))
+                Some(method_key(class.as_str(), member.name.as_str()))
             }
             EffectId::Named(key) => Some(key.clone()),
         }
@@ -2427,11 +2424,8 @@ impl Reach<'_> {
         let registry = self.registry;
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
         let info = registry.classes().get(owner.as_str())?;
-        let abstract_method = info.kind() == ClassKind::Interface
-            || info
-                .abstract_methods()
-                .iter()
-                .any(|m| m.eq_ignore_ascii_case(method));
+        let abstract_method =
+            info.kind() == ClassKind::Interface || info.is_abstract_method(method);
         (!sig.is_magic && !abstract_method).then(|| method_key(&owner, method))
     }
 
@@ -2496,11 +2490,10 @@ impl Reach<'_> {
             };
             match registry.lookup_method_with_owner(target, method) {
                 Some((owner, sig)) => {
-                    let is_static = registry.classes().get(owner.as_str()).is_some_and(|info| {
-                        info.static_methods()
-                            .iter()
-                            .any(|m| m.eq_ignore_ascii_case(method))
-                    });
+                    let is_static = registry
+                        .classes()
+                        .get(owner.as_str())
+                        .is_some_and(|info| info.is_static_method(method));
                     let transfer = if !is_static && forwards_from(target) {
                         Transfer::Same
                     } else {

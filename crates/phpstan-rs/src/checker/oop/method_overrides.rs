@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
                 .filter(|name| {
                     !syntax::ast::is_constructor_name(name)
                         && !own_method_names.contains(name.as_ref())
-                        && !info.abstract_methods().contains(*name)
+                        && !info.is_abstract_method(name)
                 })
                 .cloned()
                 .collect();
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
         }
         for used in info.uses() {
             if let Some(trait_info) = self.registry.classes().get(used)
-                && trait_info.abstract_methods().contains(method_name)
+                && trait_info.is_abstract_method(method_name)
                 && let Some(trait_sig) = trait_info.methods().get(method_name)
             {
                 ancestors.push((
@@ -329,12 +329,12 @@ impl<'a> Checker<'a> {
         if let Some((ancestor_owner, ancestor_sig, _)) = &ancestor
             && ancestor_sig.visibility() != Visibility::Private
         {
-            let own_is_static = info.static_methods().contains(method_name);
+            let own_is_static = info.is_static_method(method_name);
             let ancestor_is_static = self
                 .registry
                 .classes()
                 .get(ancestor_owner)
-                .is_some_and(|i| i.static_methods().contains(method_name));
+                .is_some_and(|i| i.is_static_method(method_name));
             if ancestor_is_static && !own_is_static {
                 self.report_builder(
                     DiagnosticBuilder::new(format!(
@@ -369,14 +369,13 @@ impl<'a> Checker<'a> {
             // or even allows - the literal `abstract` keyword there),
             // unlike `static_methods` above, where interface methods use
             // the same explicit-keyword convention as any other class.
-            let own_is_abstract = info.abstract_methods().contains(method_name);
+            let own_is_abstract = info.is_abstract_method(method_name);
             let ancestor_is_abstract =
                 self.registry
                     .classes()
                     .get(ancestor_owner)
                     .is_some_and(|i| {
-                        i.kind() == ClassKind::Interface
-                            || i.abstract_methods().contains(method_name)
+                        i.kind() == ClassKind::Interface || i.is_abstract_method(method_name)
                     });
             if own_is_abstract && !ancestor_is_abstract {
                 self.report_builder(

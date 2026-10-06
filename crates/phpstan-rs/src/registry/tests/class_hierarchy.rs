@@ -24,8 +24,8 @@ fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {
     assert_eq!(base.kind, ClassKind::Class);
     assert!(base.is_abstract);
     assert!(!base.is_final);
-    assert!(base.abstract_methods.contains("required"));
-    assert!(base.final_methods.contains("locked"));
+    assert!(base.is_abstract_method("required"));
+    assert!(base.is_final_method("locked"));
     assert!(base.properties.get("id").unwrap().is_readonly);
 }
 
@@ -40,7 +40,7 @@ fn a_final_private_method_is_not_recorded_as_final() {
             "#,
     );
     let base = r.classes.get("Base").unwrap();
-    assert!(!base.final_methods.contains("__clone"));
+    assert!(!base.is_final_method("__clone"));
 }
 
 #[test]
@@ -112,6 +112,45 @@ fn an_unqualified_trait_as_alias_resolves_against_the_used_trait() {
     let y = r.classes.get("Y").unwrap();
     assert!(y.methods.contains_key("greet"));
     assert!(y.methods.contains_key("greetAlias"));
+}
+
+#[test]
+fn trait_method_flags_are_preserved_on_composed_methods_and_aliases() {
+    let r = build_registry(
+        r#"<?php
+            trait T {
+                abstract public function needs(): void;
+                public static function run(): void {}
+                final public function locked(): void {}
+                /** @final */
+                public function documentedFinal(): void {}
+            }
+            abstract class C {
+                use T {
+                    needs as needsAlias;
+                    run as runAlias;
+                    locked as lockedAlias;
+                    documentedFinal as documentedFinalAlias;
+                }
+            }
+            "#,
+    );
+    let c = r.classes.get("C").unwrap();
+    for method in ["needs", "needsAlias"] {
+        assert!(c.is_abstract_method(method), "{method}");
+        assert!(!c.is_static_method(method), "{method}");
+    }
+    for method in ["run", "runAlias"] {
+        assert!(!c.is_abstract_method(method), "{method}");
+        assert!(c.is_static_method(method), "{method}");
+    }
+    for method in ["locked", "lockedAlias"] {
+        assert!(c.is_final_method(method), "{method}");
+    }
+    for method in ["documentedFinal", "documentedFinalAlias"] {
+        assert!(c.is_final_method_by_phpdoc(method), "{method}");
+    }
+    assert!(c.is_static_method("RUNALIAS"));
 }
 
 #[test]

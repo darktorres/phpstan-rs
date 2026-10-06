@@ -94,7 +94,7 @@ fn class_overrides(
         .filter(|name| {
             !syntax::ast::is_constructor_name(name)
                 && !own_method_names.contains(name.as_ref())
-                && !info.abstract_methods().contains(*name)
+                && !info.is_abstract_method(name)
         })
         .cloned()
         .collect();

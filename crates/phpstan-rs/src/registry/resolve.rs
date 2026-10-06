@@ -10,7 +10,7 @@ type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::{
-    ClassId, ClassReflection, ConstantReflection, FnId, FunctionReflection, MethodRef,
+    ClassId, ClassReflection, ConstantReflection, FnId, FunctionReflection, MethodEntry, MethodRef,
     PropertyReflection, substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
@@ -149,11 +149,9 @@ impl Registry {
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             ClassId,
-            Vec<(MethodRef, Name, Arc<super::Lazy<FunctionReflection>>)>,
+            Vec<(MethodRef, MethodEntry, Arc<super::Lazy<FunctionReflection>>)>,
             Vec<(Name, Arc<PropertyReflection>)>,
             Vec<(usize, Name, Arc<ConstantReflection>)>,
-            NameSet,
-            NameSet,
         );
 
         let class_names = self.scoped_class_names();
@@ -185,18 +183,10 @@ impl Registry {
                 let mut consts = Vec::new();
                 let mut added_const_names = NameSet::default();
                 let mut next_const_slot = own.consts.len();
-                let mut abstract_from_traits: NameSet = NameSet::default();
-                // `static_methods` needs the identical trait-flattening
-                // treatment `abstract_from_traits` gets below - without
-                // it, a using class's own `static_methods` set would
-                // never learn about a trait-supplied static method it
-                // doesn't also redeclare itself, even though that
-                // method's (correctly flattened-in) `FunctionReflection` is
-                // right there in `info.methods`.
-                let mut static_from_traits: NameSet = NameSet::default();
                 for trait_name in uses {
                     if let Some(trait_info) = registry.classes().get(trait_name) {
-                        for name in &trait_info.member_order {
+                        for entry in &trait_info.member_order {
+                            let name = &entry.name;
                             let Some(shared_sig) = trait_info.methods.shared_get(name) else {
                                 continue;
                             };
@@ -222,7 +212,13 @@ impl Registry {
                                     added_method_names.insert(alias.alias.clone(), ());
                                     methods.push((
                                         MethodRef::new(class_id, slot),
-                                        alias.alias.clone(),
+                                        MethodEntry {
+                                            name: alias.alias.clone(),
+                                            is_abstract: entry.is_abstract,
+                                            is_final: entry.is_final,
+                                            is_static: entry.is_static,
+                                            is_final_by_phpdoc: entry.is_final_by_phpdoc,
+                                        },
                                         Arc::clone(&shared_sig),
                                     ));
                                 }
@@ -238,15 +234,15 @@ impl Registry {
                             added_method_names.insert(name.clone(), ());
                             methods.push((
                                 MethodRef::new(class_id, slot),
-                                name.clone(),
+                                MethodEntry {
+                                    name: name.clone(),
+                                    is_abstract: entry.is_abstract,
+                                    is_final: entry.is_final,
+                                    is_static: entry.is_static,
+                                    is_final_by_phpdoc: entry.is_final_by_phpdoc,
+                                },
                                 shared_sig,
                             ));
-                            if trait_info.abstract_methods.contains(name) {
-                                abstract_from_traits.insert(name.clone());
-                            }
-                            if trait_info.static_methods.contains(name) {
-                                static_from_traits.insert(name.clone());
-                            }
                         }
                         properties.extend(
                             trait_info
@@ -283,29 +279,24 @@ impl Registry {
                         }
                     }
                 }
-                Some((
-                    class_id,
-                    methods,
-                    properties,
-                    consts,
-                    abstract_from_traits,
-                    static_from_traits,
-                ))
+                Some((class_id, methods, properties, consts))
             })
             .collect();
 
         let mut changed = false;
-        for (class_id, methods, properties, consts, abstract_from_traits, static_from_traits) in
-            additions
-        {
+        for (class_id, methods, properties, consts) in additions {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
             if let Some(info) = self.classes.get_mut(&class_name) {
-                for (method_ref, name, sig) in methods {
+                for (method_ref, entry, sig) in methods {
                     debug_assert_eq!(method_ref.class(), class_id);
-                    if info.methods.insert_shared_if_absent(name.clone(), sig) {
-                        let inserted = info.register_member_name(name.clone());
+                    if info
+                        .methods
+                        .insert_shared_if_absent(entry.name.clone(), sig)
+                    {
+                        let name = entry.name.clone();
+                        let inserted = info.register_member_entry(entry);
                         debug_assert!(inserted);
                         debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
                         changed = true;
@@ -323,16 +314,6 @@ impl Registry {
                         info.consts.insert(name, sig);
                         changed = true;
                     }
-                }
-                let before = info.abstract_methods.len();
-                info.abstract_methods.extend(abstract_from_traits);
-                if info.abstract_methods.len() != before {
-                    changed = true;
-                }
-                let before = info.static_methods.len();
-                info.static_methods.extend(static_from_traits);
-                if info.static_methods.len() != before {
-                    changed = true;
                 }
             }
         }
@@ -368,10 +349,13 @@ impl Registry {
             .for_each(|info| {
                 for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
                     if info.methods.insert_if_absent(name.clone(), sig) {
-                        info.register_member_name(name.clone());
-                        if is_static {
-                            info.static_methods.insert(name);
-                        }
+                        info.register_member_entry(MethodEntry {
+                            name: name.clone(),
+                            is_abstract: false,
+                            is_final: false,
+                            is_static,
+                            is_final_by_phpdoc: false,
+                        });
                     }
                 }
             });
@@ -999,8 +983,11 @@ impl Registry {
     /// type_aliases`'s alias-of-alias handling accepts.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
-        let mut method_additions: Vec<(MethodRef, Name, Arc<super::Lazy<FunctionReflection>>)> =
-            Vec::new();
+        let mut method_additions: Vec<(
+            MethodRef,
+            MethodEntry,
+            Arc<super::Lazy<FunctionReflection>>,
+        )> = Vec::new();
         let mut property_additions: Vec<(ClassId, Name, Arc<PropertyReflection>)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
             let Some(class_id) = self.class_ids.get(class_name).copied() else {
@@ -1012,7 +999,8 @@ impl Registry {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
                 };
-                for name in &mixin_info.member_order {
+                for entry in &mixin_info.member_order {
+                    let name = &entry.name;
                     let Some(sig) = mixin_info.methods.get(name) else {
                         continue;
                     };
@@ -1027,7 +1015,13 @@ impl Registry {
                         added_method_names.insert(name.clone(), ());
                         method_additions.push((
                             MethodRef::new(class_id, slot),
-                            name.clone(),
+                            MethodEntry {
+                                name: name.clone(),
+                                is_abstract: entry.is_abstract,
+                                is_final: entry.is_final,
+                                is_static: entry.is_static,
+                                is_final_by_phpdoc: entry.is_final_by_phpdoc,
+                            },
                             shared_sig,
                         ));
                     }
@@ -1039,15 +1033,18 @@ impl Registry {
                 }
             }
         }
-        for (method_ref, name, sig) in method_additions {
+        for (method_ref, entry, sig) in method_additions {
             let class_id = method_ref.class();
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
             if let Some(info) = self.classes.get_mut(&class_name)
-                && info.methods.insert_shared_if_absent(name.clone(), sig)
+                && info
+                    .methods
+                    .insert_shared_if_absent(entry.name.clone(), sig)
             {
-                let inserted = info.register_member_name(name.clone());
+                let name = entry.name.clone();
+                let inserted = info.register_member_entry(entry);
                 debug_assert!(inserted);
                 debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
             }
@@ -1452,7 +1449,7 @@ impl Registry {
                 let Some(method_name) = info
                     .member_order
                     .get(usize::from(method_ref.slot()))
-                    .cloned()
+                    .map(|entry| entry.name.clone())
                 else {
                     continue;
                 };
@@ -1954,7 +1951,7 @@ impl Registry {
                     let Some(name) = self
                         .class_by_id(method.class())
                         .and_then(|info| info.member_order.get(usize::from(method.slot())))
-                        .cloned()
+                        .map(|entry| entry.name.clone())
                     else {
                         continue;
                     };
@@ -2182,7 +2179,7 @@ impl Registry {
             let Some(name) = self
                 .class_by_id(class_id)
                 .and_then(|info| info.member_order.get(usize::from(method.slot())))
-                .cloned()
+                .map(|entry| entry.name.clone())
             else {
                 continue;
             };

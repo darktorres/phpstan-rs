@@ -707,7 +707,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or(method)
                 .to_string();
             let owner_info = self.registry.classes().get(owner.as_ref())?;
-            if !owner_info.static_methods().contains(name.as_str()) {
+            if !owner_info.is_static_method(name.as_str()) {
                 return None;
             }
             // PHPStan's own test-case base classes expose their static

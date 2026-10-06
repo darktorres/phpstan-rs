@@ -73,7 +73,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes()
             .get(owner.as_ref())
-            .is_some_and(|o| o.static_methods().contains(name));
+            .is_some_and(|o| o.is_static_method(name));
         let required = sig
             .params()
             .iter()

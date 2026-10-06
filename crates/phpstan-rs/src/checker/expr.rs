@@ -2695,7 +2695,7 @@ impl<'a> Checker<'a> {
                             .registry
                             .classes()
                             .get(owner.as_str())
-                            .is_some_and(|info| info.static_methods().contains(declared.as_str()));
+                            .is_some_and(|info| info.is_static_method(declared.as_str()));
                         self.check_args(CheckArgsCall {
                             callee_label: CalleeLabel::Method { class, method },
                             callee: Callee::StaticMethod {

@@ -201,12 +201,7 @@ impl<'a> Checker<'a> {
             .registry
             .lookup_method_with_owner(&class, &method)
             .and_then(|(owner, _)| self.registry.classes().get(&owner))
-            .is_some_and(|owner| {
-                owner
-                    .static_methods()
-                    .iter()
-                    .any(|m| m.eq_ignore_ascii_case(&method))
-            });
+            .is_some_and(|owner| owner.is_static_method(&method));
         if is_abstract && in_static_method {
             self.report_builder(
                 DiagnosticBuilder::new(format!(
@@ -245,8 +240,7 @@ impl<'a> Checker<'a> {
             return false;
         }
         if registry.classes().get(&owner).is_some_and(|info| {
-            info.final_methods().contains("__construct")
-                || info.final_methods_by_phpdoc().contains("__construct")
+            info.is_final_method("__construct") || info.is_final_method_by_phpdoc("__construct")
         }) {
             return false;
         }
@@ -267,7 +261,7 @@ impl<'a> Checker<'a> {
         if registry
             .classes()
             .get(&prototype_owner)
-            .is_some_and(|info| info.abstract_methods().contains("__construct"))
+            .is_some_and(|info| info.is_abstract_method("__construct"))
         {
             return false;
         }
@@ -279,7 +273,7 @@ impl<'a> Checker<'a> {
             && registry
                 .classes()
                 .get(t.as_str())
-                .is_some_and(|info| info.abstract_methods().contains("__construct"))
+                .is_some_and(|info| info.is_abstract_method("__construct"))
         {
             return false;
         }

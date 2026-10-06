@@ -782,7 +782,7 @@ impl Registry {
             if self
                 .classes
                 .get(used)
-                .is_some_and(|trait_info| trait_info.abstract_methods.contains(method))
+                .is_some_and(|trait_info| trait_info.is_abstract_method(method))
                 && let Some(sig) = self.classes.get(used).and_then(|i| i.methods.get(method))
             {
                 return Some((used.clone(), sig, false));
@@ -866,7 +866,7 @@ impl Registry {
         info.uses.iter().any(|used_trait| {
             self.classes
                 .get(used_trait)
-                .is_some_and(|trait_info| trait_info.abstract_methods.contains(method))
+                .is_some_and(|trait_info| trait_info.is_abstract_method(method))
         })
     }
 
@@ -935,9 +935,9 @@ impl Registry {
     /// Real PHP forbids overriding a method declared `final` anywhere
     /// in the ancestor chain, no matter how many intervening subclasses
     /// sit between the `final` declaration and this one. Walks only
-    /// `extends` - an interface's methods have no bodies to protect, and
-    /// this project doesn't yet propagate a trait's `final_methods` the
-    /// way it does `abstract_methods`. Returns the name of the ancestor
+    /// `extends` - an interface's methods have no bodies to protect.
+    /// Trait methods are present in the consuming class's member entries,
+    /// so a child sees the trait's final flag on that class. Returns the name of the ancestor
     /// that declared it final, plus whether that was via `@final`
     /// (docblock, PHPStan-only convention, real PHP doesn't enforce it)
     /// rather than the real keyword - checked together, nearest-ancestor
@@ -956,10 +956,10 @@ impl Registry {
             let Some(current_info) = self.classes.get(&current) else {
                 continue;
             };
-            if current_info.final_methods.contains(method) {
+            if current_info.is_final_method(method) {
                 return Some((current, false));
             }
-            if current_info.final_methods_by_phpdoc.contains(method) {
+            if current_info.is_final_method_by_phpdoc(method) {
                 return Some((current, true));
             }
             stack.extend(current_info.extends.iter().cloned());
@@ -970,9 +970,8 @@ impl Registry {
     /// `find_final_ancestor_method`'s property-side
     /// mirror - PHP 8.4's own `final` property modifier. Walks only
     /// `extends`, same reasoning as the method version (properties have
-    /// no `implements`/interface side at all, and this project doesn't
-    /// propagate a trait's own `final_properties` the way it does
-    /// `abstract_methods` either). See that function's own doc comment
+    /// no `implements`/interface side at all, and traits do not have
+    /// corresponding final-property entries to propagate. See that function's own doc comment
     /// for the `@final`/keyword priority the returned `bool` encodes.
     pub fn find_final_ancestor_property(
         &self,
@@ -1049,9 +1048,9 @@ impl Registry {
     /// every one of them is implicitly abstract - real PHP doesn't
     /// require/allow the `abstract` keyword there), and every abstract
     /// method declared by a trait any of those classes `use`s -
-    /// `flatten_traits` already folds a trait's own `abstract_methods`
-    /// into each using class's own set (unless the using class supplies
-    /// its own concrete override), so a plain walk of `abstract_methods`
+    /// `flatten_traits` already folds a trait's own abstract method
+    /// entries into each using class (unless the using class supplies
+    /// its own concrete override), so a plain walk of method entries
     /// here already covers it, with no separate trait-specific case
     /// needed.
     pub fn required_abstract_methods(&self, class: &str) -> Vec<Name> {
@@ -1078,7 +1077,12 @@ impl Registry {
                         .map(|(name, _)| name.clone()),
                 );
             } else {
-                required.extend(info.abstract_methods.iter().cloned());
+                required.extend(
+                    info.member_order
+                        .iter()
+                        .filter(|entry| entry.is_abstract)
+                        .map(|entry| entry.name.clone()),
+                );
             }
             for parent in info.extends.iter().chain(info.implements.iter()) {
                 stack.push(parent.clone());
@@ -1111,7 +1115,7 @@ impl Registry {
             };
             if info.kind != ClassKind::Interface
                 && info.methods.contains_key(method)
-                && !info.abstract_methods.contains(method)
+                && !info.is_abstract_method(method)
             {
                 return true;
             }

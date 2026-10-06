@@ -1667,7 +1667,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes()
             .get(&ancestor)
-            .is_some_and(|info| info.abstract_methods().contains("__construct"))
+            .is_some_and(|info| info.is_abstract_method("__construct"))
         {
             return;
         }
