@@ -548,8 +548,19 @@ impl Registry {
     /// empty.
     pub(crate) fn index_assert_tagged_names(&mut self) {
         let mut names = (*self.base_assert_tagged).clone();
-        for (name, sig) in self.functions.own_iter() {
+        for (name, declaration) in self.functions.own_iter() {
+            let sig = self.lookup_function(name).unwrap_or(declaration);
             if !sig.assert.is_empty() {
+                names.insert(Name::from(name.rsplit('\\').next().unwrap_or(name)));
+            }
+        }
+        // Configured/default assertion overlays may target a base function,
+        // which `functions.own_iter()` does not visit. Their entries already
+        // contain the effective signature and are sparse by construction.
+        for (id, sig) in &self.function_results {
+            if !sig.assert.is_empty()
+                && let Some(name) = self.function_name_by_id(*id)
+            {
                 names.insert(Name::from(name.rsplit('\\').next().unwrap_or(name)));
             }
         }

@@ -32,6 +32,44 @@ fn updating_one_file_does_not_disturb_another_files_registry_entries() {
 }
 
 #[test]
+fn updating_an_unrelated_file_keeps_an_unchanged_function_result_overlay() {
+    let mut project = Files::new()
+        .analysed(
+            "a.php",
+            "<?php const ANSWER = 42; /** @param ANSWER $value */ function reads_answer($value): void {}",
+        )
+        .analysed("b.php", "<?php class Other {}")
+        .load();
+
+    assert_eq!(
+        project
+            .registry()
+            .lookup_function("reads_answer")
+            .unwrap()
+            .params()[0]
+            .ty(),
+        &types::Type::int_literal(42)
+    );
+
+    project
+        .update_file(
+            &PathBuf::from("b.php"),
+            "<?php class Other { public int $x; }",
+        )
+        .unwrap();
+
+    assert_eq!(
+        project
+            .registry()
+            .lookup_function("reads_answer")
+            .unwrap()
+            .params()[0]
+            .ty(),
+        &types::Type::int_literal(42)
+    );
+}
+
+#[test]
 fn removing_a_declaration_on_update_drops_it_from_the_registry() {
     let mut project = Files::new()
         .context(

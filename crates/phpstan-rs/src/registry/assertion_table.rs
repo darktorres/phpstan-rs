@@ -58,79 +58,156 @@ impl Registry {
             .cloned()
             .collect();
         for entry in entries {
-            let sig = match (&entry.function, &entry.class, &entry.method) {
+            match (&entry.function, &entry.class, &entry.method) {
                 (Some(function), _, _) => {
                     let function = function.trim_start_matches('\\');
                     if !self.scope.has_function(function) {
                         continue;
                     }
-                    let Some(declared) = self
-                        .functions
-                        .get_with_name(function)
-                        .map(|(name, _)| name.clone())
-                    else {
+                    let Some((id, _, declaration)) = self.function(function) else {
                         continue;
                     };
-                    self.functions.get_mut(&declared)
+                    let mut result = declaration.clone();
+                    if add_assertion(&mut result, &entry) {
+                        self.function_results.insert(id, result);
+                    }
                 }
                 (None, Some(class), Some(method)) => {
-                    let Some(canonical) = self
-                        .lookup_class(class.trim_start_matches('\\'))
-                        .map(|(c, _)| Name::from(c))
+                    let Some((id, canonical, _)) = self.class(class.trim_start_matches('\\'))
                     else {
                         continue;
                     };
-                    if !self.scope.has_class(&canonical) {
+                    if !self.scope.has_class(canonical) {
                         continue;
                     }
-                    self.classes.get_mut(&canonical).and_then(|info| {
-                        info.methods
-                            .iter_mut()
-                            .find(|(name, _)| name.eq_ignore_ascii_case(method))
-                            .map(|(_, sig)| sig)
-                    })
+                    let Some(info) = self.class_by_id(id) else {
+                        continue;
+                    };
+                    let Some(slot) = info.member_slots.get(method).copied() else {
+                        continue;
+                    };
+                    let Some(name) = info
+                        .member_order
+                        .get(usize::from(slot))
+                        .map(|member| member.name.clone())
+                    else {
+                        continue;
+                    };
+                    let Some(declaration) = self.lookup_own_method(canonical, method) else {
+                        continue;
+                    };
+                    let mut result = declaration.clone();
+                    if add_assertion(&mut result, &entry) {
+                        self.class_method_results
+                            .entry(id)
+                            .or_default()
+                            .insert(name, result);
+                    }
                 }
-                _ => None,
-            };
-            let Some(sig) = sig else {
-                continue;
-            };
-            let parameter = entry.parameter.trim_start_matches('$');
-            if !sig.params.iter().any(|p| p.name.as_ref() == parameter) {
-                continue;
-            }
-            let (negated, written) = match entry.ty.strip_prefix('!') {
-                Some(rest) => (true, rest),
-                None => (false, entry.ty.as_str()),
-            };
-            let (equality, written) = match written.strip_prefix('=') {
-                Some(rest) => (true, rest),
-                None => (false, written),
-            };
-            let info = AssertInfo {
-                negated,
-                equality,
-                ty: types::parse_type_string(written),
-                target: AssertTarget::Param(Name::from(parameter)),
-                case_refs: Vec::new(),
-                written_ty: grammar::parse_type_prefix(written)
-                    .0
-                    .unwrap_or(TypeNode::Error)
-                    .into(),
-            };
-            let list = match entry.when {
-                AssertWhen::Always => &mut sig.assert,
-                AssertWhen::True => &mut sig.assert_if_true,
-                AssertWhen::False => &mut sig.assert_if_false,
-            };
-            let already = list.iter().any(|existing| {
-                existing.negated == info.negated
-                    && existing.target == info.target
-                    && existing.written_ty == info.written_ty
-            });
-            if !already {
-                list.push(info);
+                _ => {}
             }
         }
+    }
+}
+
+fn add_assertion(sig: &mut crate::registry::FunctionReflection, entry: &AssertionEntry) -> bool {
+    let parameter = entry.parameter.trim_start_matches('$');
+    if !sig.params.iter().any(|p| p.name.as_ref() == parameter) {
+        return false;
+    }
+    let (negated, written) = match entry.ty.strip_prefix('!') {
+        Some(rest) => (true, rest),
+        None => (false, entry.ty.as_str()),
+    };
+    let (equality, written) = match written.strip_prefix('=') {
+        Some(rest) => (true, rest),
+        None => (false, written),
+    };
+    let info = AssertInfo {
+        negated,
+        equality,
+        ty: types::parse_type_string(written),
+        target: AssertTarget::Param(Name::from(parameter)),
+        case_refs: Vec::new(),
+        written_ty: grammar::parse_type_prefix(written)
+            .0
+            .unwrap_or(TypeNode::Error)
+            .into(),
+    };
+    let list = match entry.when {
+        AssertWhen::Always => &mut sig.assert,
+        AssertWhen::True => &mut sig.assert_if_true,
+        AssertWhen::False => &mut sig.assert_if_false,
+    };
+    let already = list.iter().any(|existing| {
+        existing.negated == info.negated
+            && existing.target == info.target
+            && existing.written_ty == info.written_ty
+    });
+    if already {
+        false
+    } else {
+        list.push(info);
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::Registry;
+    use syntax::{lexer::Lexer, parser::Parser};
+
+    #[test]
+    fn assertion_tables_overlay_function_and_method_signatures() {
+        let tokens = Lexer::new(
+            "<?php function configured_guard($value): void {} class Demo { public function guard($value): void {} }",
+        )
+        .tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut registry = Registry::build(&program);
+        let entry = |function, class, method| AssertionEntry {
+            function,
+            class,
+            method,
+            parameter: "value".into(),
+            ty: "int".into(),
+            when: AssertWhen::Always,
+        };
+        registry.set_assertion_tables(
+            vec![
+                entry(Some("configured_guard".into()), None, None),
+                entry(None, Some("Demo".into()), Some("guard".into())),
+            ],
+            Vec::new(),
+        );
+
+        let function_declaration = registry.functions["configured_guard"].clone();
+        let method_declaration = registry.classes["Demo"].methods["guard"].clone();
+        registry.apply_assertion_table();
+
+        assert!(registry.functions["configured_guard"].assert.is_empty());
+        assert!(registry.classes["Demo"].methods["guard"].assert.is_empty());
+        assert_eq!(
+            registry
+                .lookup_function("configured_guard")
+                .unwrap()
+                .assert
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry
+                .lookup_own_method("Demo", "guard")
+                .unwrap()
+                .assert
+                .len(),
+            1
+        );
+        assert_eq!(registry.functions["configured_guard"], function_declaration);
+        assert_eq!(
+            registry.classes["Demo"].methods["guard"],
+            method_declaration
+        );
     }
 }

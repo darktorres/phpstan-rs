@@ -83,6 +83,28 @@ fn deferred_class_constant_results_survive_freeze_and_cache_round_trip() {
 }
 
 #[test]
+fn function_signature_results_survive_freeze_and_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            const ANSWER = 42;
+            /** @param ANSWER $value */
+            function reads_answer($value): void {}
+            "#,
+    );
+    let declared = registry.functions["reads_answer"].clone();
+    let effective = registry.lookup_function("reads_answer").unwrap();
+    assert_eq!(effective.params[0].ty, Type::int_literal(42));
+    assert_eq!(registry.functions["reads_answer"], declared);
+
+    let back = round_trip(&registry);
+    assert_eq!(
+        back.lookup_function("reads_answer").unwrap().params[0].ty,
+        Type::int_literal(42)
+    );
+    assert_eq!(back.functions["reads_answer"], declared);
+}
+
+#[test]
 fn inherited_class_property_results_survive_cache_round_trip() {
     let registry = build_registry(
         r#"<?php

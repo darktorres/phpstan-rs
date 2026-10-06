@@ -477,6 +477,8 @@ impl CanonicalOver for Registry {
         let Registry {
             id_generation: _,
             purity_results: _,
+            function_results: _,
+            function_results_cache: _,
             classes,
             class_ids: _,
             project_class_names: _,
@@ -709,6 +711,8 @@ canonical_struct!(Registry {
 } skip {
     id_generation,
     purity_results,
+    function_results,
+    function_results_cache,
     phpstan_ancestry,
     ancestors_by_id,
     ancestor_names_cache,

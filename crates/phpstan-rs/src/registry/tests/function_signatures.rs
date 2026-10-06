@@ -7,6 +7,43 @@ use super::super::*;
 use super::helpers::*;
 
 #[test]
+fn configured_function_assertions_reach_the_fast_gate_without_changing_declarations() {
+    let mut registry =
+        build_registry(r#"<?php namespace App; function configured_guard($value): void {}"#);
+    let declaration = registry.functions["App\\configured_guard"].clone();
+    registry.set_assertion_tables(
+        vec![crate::assertion_tables::AssertionEntry {
+            class: None,
+            function: Some("App\\configured_guard".into()),
+            method: None,
+            parameter: "value".into(),
+            ty: "int".into(),
+            when: crate::assertion_tables::AssertWhen::Always,
+        }],
+        Vec::new(),
+    );
+
+    registry.apply_assertion_table();
+    registry.index_assert_tagged_names();
+
+    assert!(registry.names_with_assert_tags.contains("configured_guard"));
+    assert!(
+        registry.functions["App\\configured_guard"]
+            .assert
+            .is_empty()
+    );
+    assert_eq!(
+        registry
+            .lookup_function("App\\configured_guard")
+            .unwrap()
+            .assert
+            .len(),
+        1
+    );
+    assert_eq!(registry.functions["App\\configured_guard"], declaration);
+}
+
+#[test]
 fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
     // The literal `mixed` keyword, written natively here, is real
     // PHPStan's own definition of

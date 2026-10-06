@@ -885,7 +885,10 @@ impl Registry {
         let functions: Vec<(&Name, &FunctionReflection)> = registry
             .functions()
             .own_iter()
-            .filter(|(_, sig)| !sig.is_stub)
+            .filter_map(|(name, _)| {
+                let (_, declared, sig) = registry.function(name)?;
+                (!sig.is_stub).then_some((declared, sig))
+            })
             .collect();
         let methods: Vec<(&Name, &Name, &FunctionReflection)> = registry
             .classes()

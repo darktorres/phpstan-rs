@@ -182,6 +182,7 @@ pub(crate) struct ResolvedSnapshot {
     classes: Vec<Option<Detached<ClassReflection>>>,
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
+    function_results: Vec<Option<FunctionReflection>>,
     effects: FxHashMap<effects::DeclKey, effects::Settled>,
     global_variables: syntax::name::NameMap<Type>,
 }
@@ -261,6 +262,12 @@ pub struct Registry {
     id_generation: u32,
     #[serde(skip)]
     purity_results: PurityResults,
+    // Signatures completed by finishing passes, keyed by declaration ID.
+    // The function table remains the as-built declaration source.
+    #[serde(skip)]
+    function_results: FxHashMap<FnId, FunctionReflection>,
+    #[serde(skip)]
+    function_results_cache: FunctionTable,
     #[serde(skip)]
     classes: NameTable<ClassReflection>,
     #[serde(skip)]
@@ -663,6 +670,11 @@ impl Registry {
     /// unmerged project declaration from its file arena.
     pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
         self.debug_check_id_generation(id.generation());
+        if !self.raw_active
+            && let Some(result) = self.function_results.get(&id)
+        {
+            return Some(result);
+        }
         match id.source()? {
             IdSource::Stub => {
                 let name = self.functions.base_name(id.local() as usize)?;
@@ -766,6 +778,7 @@ impl Registry {
         {
             self.function_ids.remove(name);
             self.project_function_decls[id.local() as usize] = None;
+            self.function_results.remove(&id);
             self.purity_results.pure_functions.remove(&id);
             self.purity_results.function_dependencies.remove(&id);
         }
@@ -931,16 +944,32 @@ impl Registry {
             std::mem::swap(&mut self.functions, &mut raw.functions);
             self.raw_active = false;
         }
+        let function_keys = body_scope.and_then(scope::Scope::shared_function_keys);
+        let function_results_before: Vec<Option<FunctionReflection>> = function_keys
+            .as_ref()
+            .map(|keys| {
+                keys.iter()
+                    .map(|name| {
+                        self.function_ids
+                            .get(name)
+                            .and_then(|id| self.function_results.get(id))
+                            .cloned()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let snapshot = |classes, functions, registry: &Registry| ResolvedSnapshot {
             class_keys: body_scope.and_then(scope::Scope::shared_class_keys),
             classes,
-            function_keys: body_scope.and_then(scope::Scope::shared_function_keys),
+            function_keys: function_keys.clone(),
             functions,
+            function_results: function_results_before.clone(),
             effects: registry.effects_for_names(),
             global_variables: registry.global_variables().clone(),
         };
         if scope.is_all() {
             self.class_const_types.clear();
+            self.function_results.clear();
             self.class_constant_results.clear();
             self.class_method_results.clear();
             self.class_property_results.clear();
@@ -974,6 +1003,14 @@ impl Registry {
             scope.function_keys(),
             body_scope.and_then(scope::Scope::function_keys),
         );
+        let changed_function_ids: FxHashSet<FnId> = self
+            .function_ids
+            .iter()
+            .filter(|(name, _)| scope.has_function(name))
+            .map(|(_, id)| *id)
+            .collect();
+        self.function_results
+            .retain(|id, _| !changed_function_ids.contains(id));
         body_scope.map(|_| snapshot(classes, functions, self))
     }
 
@@ -1021,6 +1058,7 @@ impl Registry {
             })
             .collect();
         let class_const_types = self.class_const_types_for_cache();
+        let function_results = self.function_results_for_cache();
         let class_constant_results = self.class_constant_results_for_cache();
         let class_method_results = self.class_method_results_for_cache();
         let class_property_results = self.class_property_results_for_cache();
@@ -1057,6 +1095,16 @@ impl Registry {
             );
         }
         self.function_ids.freeze();
+        self.function_results = function_results
+            .iter()
+            .filter_map(|(name, result)| {
+                self.function_ids
+                    .get(name)
+                    .copied()
+                    .map(|id| (id, result.clone()))
+            })
+            .collect();
+        self.function_results_cache = FunctionTable::default();
         self.rebuild_effect_ids(effects);
         if ancestor_names.is_empty() {
             // The cached form is persisted by name for stable cache reads;
@@ -1224,8 +1272,18 @@ impl Registry {
         }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(function_keys.clone().count(), before.functions.len());
-        for (key, old) in function_keys.zip(&before.functions) {
-            if differs(self.functions.get(&FoldedKey(key)), old.as_ref()) {
+        debug_assert_eq!(before.functions.len(), before.function_results.len());
+        for ((key, old), old_result) in function_keys
+            .zip(&before.functions)
+            .zip(&before.function_results)
+        {
+            let new_result = self
+                .function_ids
+                .get(key)
+                .and_then(|id| self.function_results.get(id));
+            if differs(self.functions.get(&FoldedKey(key)), old.as_ref())
+                || old_result.as_ref() != new_result
+            {
                 keys.insert(RefKey::function_text(key));
             }
         }
@@ -1299,6 +1357,8 @@ impl Registry {
             .store(writer, "table:member_owners")?;
         self.class_const_types_for_cache()
             .store(writer, "table:class_const_types")?;
+        self.function_results_for_cache()
+            .store(writer, "table:function_results")?;
         self.class_constant_results_for_cache()
             .store(writer, "table:class_constant_results")?;
         self.class_method_results_for_cache()
@@ -1364,6 +1424,21 @@ impl Registry {
             results.sort_unstable_by_key(|(slot, _)| *slot);
         }
         by_name.into_iter().collect()
+    }
+
+    /// The disk cache uses function names; runtime results use generation-
+    /// checked function IDs.
+    fn function_results_for_cache(&self) -> FunctionTable {
+        if !self.function_results_cache.is_empty() {
+            return self.function_results_cache.clone();
+        }
+        self.function_results
+            .iter()
+            .filter_map(|(id, result)| {
+                self.function_name_by_id(*id)
+                    .map(|name| (name.clone(), result.clone()))
+            })
+            .collect()
     }
 
     fn class_constant_results_for_cache(
@@ -1436,6 +1511,8 @@ impl Registry {
             .check_order("table:member_owners")?;
         self.class_const_types_for_cache()
             .check_order("table:class_const_types")?;
+        self.function_results_for_cache()
+            .check_order("table:function_results")?;
         self.class_constant_results_for_cache()
             .check_order("table:class_constant_results")?;
         self.class_method_results_for_cache()
@@ -1472,6 +1549,7 @@ impl Registry {
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
         registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;
+        registry.function_results_cache = FunctionTable::load(reader, "table:function_results")?;
         registry.class_constant_results_cache =
             NameTable::load(reader, "table:class_constant_results")?;
         registry.class_method_results_cache =
@@ -1540,6 +1618,11 @@ impl Registry {
             .class_const_types
             .drain()
             .map(|((id, slot), ty)| ((id.with_generation(generation), slot), ty))
+            .collect();
+        base.function_results = base
+            .function_results
+            .drain()
+            .map(|(id, result)| (id.with_generation(generation), result))
             .collect();
         base.class_constant_results = base
             .class_constant_results

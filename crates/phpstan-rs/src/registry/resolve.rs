@@ -2290,12 +2290,10 @@ impl Registry {
             functions
                 .par_iter()
                 .with_min_len(crate::registry::PASS_CHUNK)
-                .flat_map_iter(|(name, sig)| {
+                .flat_map_iter(|(name, _)| {
                     registry
-                        .function_ids
-                        .get(*name)
-                        .copied()
-                        .map(|id| sig_fixes(SigId::Function(id), None, sig))
+                        .function(name)
+                        .map(|(id, _, sig)| sig_fixes(SigId::Function(id), None, sig))
                         .into_iter()
                         .flatten()
                 }),
@@ -2356,10 +2354,15 @@ impl Registry {
                         })
                 }
                 SigId::Function(function) => {
-                    let Some(name) = self.function_name_by_id(function).cloned() else {
+                    let Some(mut result) = self.function_by_id(function).cloned() else {
                         continue;
                     };
-                    self.functions.get_mut(&name)
+                    match param {
+                        Some(i) => result.params[i].ty = ty,
+                        None => result.return_type = ty,
+                    }
+                    self.function_results.insert(function, result);
+                    continue;
                 }
             };
             let Some(sig) = sig else { continue };
@@ -2525,11 +2528,9 @@ impl Registry {
         let function_fixes: Vec<(FnId, FunctionReflection)> = functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .filter_map(|(name, sig)| {
-                Some((
-                    *registry.function_ids.get(*name)?,
-                    fixed_sig(registry, sig, &lookup)?,
-                ))
+            .filter_map(|(name, _)| {
+                let (id, _, sig) = registry.function(name)?;
+                Some((id, fixed_sig(registry, sig, &lookup)?))
             })
             .collect();
         let property_fixes: Vec<(ClassId, Name, Arc<PropertyReflection>)> = classes
@@ -2586,12 +2587,7 @@ impl Registry {
             }
         }
         for (function, fixed) in function_fixes {
-            let Some(name) = self.function_name_by_id(function).cloned() else {
-                continue;
-            };
-            if let Some(sig) = self.functions.get_mut(&name) {
-                *sig = fixed;
-            }
+            self.function_results.insert(function, fixed);
         }
     }
 }
