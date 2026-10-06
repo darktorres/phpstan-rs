@@ -379,7 +379,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   moves abstract, native-final, static and PHPDoc-final facts onto each
   class-local method entry, carries them through trait aliases and mixins, and
   gives synthesized enum built-ins slots. All 1,142 crate tests, 275 syntax
-  tests, check, Clippy and formatting pass. The 4.7 reference, include-graph,
+  tests, check, Clippy and formatting pass. `0b82e5f6` puts native-final and
+  PHPDoc-final property facts on each `PropertyReflection`, carries them through
+  trait composition, and advances the stub-container version to 8; the focused
+  inherited-trait-property test and all 1,143 crate tests, 275 syntax tests,
+  check, Clippy and formatting pass. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
