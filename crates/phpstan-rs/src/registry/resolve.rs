@@ -10,8 +10,8 @@ type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::{
-    ClassId, ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
-    substitute_type_aliases,
+    ClassId, ClassReflection, ConstantReflection, FnId, FunctionReflection, MethodRef,
+    PropertyReflection, substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
 use types::{self, Type};
@@ -1793,17 +1793,21 @@ impl Registry {
     /// `?ValidationContext` parameter) is dropped here; when none
     /// survive, the native type stands, as PHP enforces it at runtime.
     pub(crate) fn drop_doc_members_excluded_by_native(&mut self) {
-        // (class, method or function, parameter index or `None` for the
-        // return, corrected type)
-        type Fix = (Option<Name>, Name, Option<usize>, Type);
+        #[derive(Clone, Copy)]
+        enum SigId {
+            Method(MethodRef),
+            Function(FnId),
+        }
+        // (declaration id, parameter index or `None` for the return, corrected type)
+        type Fix = (SigId, Option<usize>, Type);
         let pass = next_keep_pass();
         let registry: &Registry = self;
-        let sig_fixes = |class: Option<&Name>, name: &Name, sig: &FunctionReflection| {
+        let sig_fixes = |key: SigId, class: Option<&Name>, sig: &FunctionReflection| {
             let mut fixes: Vec<Fix> = Vec::new();
             for (i, p) in sig.params.iter().enumerate() {
                 if let Some(ty) = registry.excluding_native(&p.ty, &p.ty_native, class, Some(pass))
                 {
-                    fixes.push((class.cloned(), name.clone(), Some(i), ty));
+                    fixes.push((key, Some(i), ty));
                 }
             }
             if let Some(ty) = registry.excluding_native(
@@ -1812,7 +1816,7 @@ impl Registry {
                 class,
                 Some(pass),
             ) {
-                fixes.push((class.cloned(), name.clone(), None, ty));
+                fixes.push((key, None, ty));
             }
             fixes
         };
@@ -1822,36 +1826,65 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
+                let Some(class_id) = registry.class_ids.get(*class).copied() else {
+                    return Vec::new();
+                };
                 info.methods
                     .iter()
-                    .flat_map(|(name, sig)| sig_fixes(Some(class), name, sig))
+                    .filter_map(|(name, sig)| {
+                        let slot = *info.member_slots.get(name)?;
+                        Some(sig_fixes(
+                            SigId::Method(MethodRef::new(class_id, slot)),
+                            Some(class),
+                            sig,
+                        ))
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>()
             })
             .collect();
         fixes.par_extend(
             functions
                 .par_iter()
                 .with_min_len(crate::registry::PASS_CHUNK)
-                .flat_map_iter(|(name, sig)| sig_fixes(None, name, sig)),
+                .flat_map_iter(|(name, sig)| {
+                    registry
+                        .function_ids
+                        .get(*name)
+                        .copied()
+                        .map(|id| sig_fixes(SigId::Function(id), None, sig))
+                        .into_iter()
+                        .flatten()
+                }),
         );
-        let property_fixes: Vec<(Name, Name, Type)> = classes
+        let property_fixes: Vec<(ClassId, Name, Type)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
-                info.properties.iter().filter_map(|(name, prop)| {
-                    if !prop.has_native_type {
-                        return None;
-                    }
-                    let ty = registry.excluding_native(
-                        &prop.ty,
-                        &prop.ty_native,
-                        Some(class),
-                        Some(pass),
-                    )?;
-                    Some(((*class).clone(), name.clone(), ty))
-                })
+                let Some(class_id) = registry.class_ids.get(*class).copied() else {
+                    return Vec::new();
+                };
+                info.properties
+                    .iter()
+                    .filter_map(|(name, prop)| {
+                        if !prop.has_native_type {
+                            return None;
+                        }
+                        let ty = registry.excluding_native(
+                            &prop.ty,
+                            &prop.ty_native,
+                            Some(class),
+                            Some(pass),
+                        )?;
+                        Some((class_id, name.clone(), ty))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
-        for (class, name, ty) in property_fixes {
+        for (class_id, name, ty) in property_fixes {
+            let Some(class) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             if let Some(prop) = self
                 .classes
                 .get_mut(&class)
@@ -1860,13 +1893,29 @@ impl Registry {
                 Arc::make_mut(prop).ty = ty;
             }
         }
-        for (class, name, param, ty) in fixes {
-            let sig = match &class {
-                Some(c) => self
-                    .classes
-                    .get_mut(c)
-                    .and_then(|info| info.methods.get_mut(&name)),
-                None => self.functions.get_mut(&name),
+        for (key, param, ty) in fixes {
+            let sig = match key {
+                SigId::Method(method) => {
+                    let Some(class) = self.class_name_by_id(method.class()).cloned() else {
+                        continue;
+                    };
+                    let Some(name) = self
+                        .class_by_id(method.class())
+                        .and_then(|info| info.member_order.get(usize::from(method.slot())))
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    self.classes
+                        .get_mut(&class)
+                        .and_then(|info| info.methods.get_mut(&name))
+                }
+                SigId::Function(function) => {
+                    let Some(name) = self.function_name_by_id(function).cloned() else {
+                        continue;
+                    };
+                    self.functions.get_mut(&name)
+                }
             };
             let Some(sig) = sig else { continue };
             match param {
@@ -2011,34 +2060,54 @@ impl Registry {
         let registry: &Registry = self;
         let classes = self.scoped_classes();
         let functions = self.scoped_functions();
-        let method_fixes: Vec<(Name, Name, FunctionReflection)> = classes
+        let method_fixes: Vec<(MethodRef, FunctionReflection)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
-                info.methods.iter().filter_map(|(name, sig)| {
-                    let fixed = fixed_sig(registry, sig, &lookup)?;
-                    Some(((*class).clone(), name.clone(), fixed))
-                })
+                let Some(class_id) = registry.class_ids.get(*class).copied() else {
+                    return Vec::new();
+                };
+                info.methods
+                    .iter()
+                    .filter_map(move |(name, sig)| {
+                        let slot = *info.member_slots.get(name)?;
+                        let fixed = fixed_sig(registry, sig, &lookup)?;
+                        Some((MethodRef::new(class_id, slot), fixed))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
-        let function_fixes: Vec<(Name, FunctionReflection)> = functions
+        let function_fixes: Vec<(FnId, FunctionReflection)> = functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .filter_map(|(name, sig)| Some(((*name).clone(), fixed_sig(registry, sig, &lookup)?)))
+            .filter_map(|(name, sig)| {
+                Some((
+                    *registry.function_ids.get(*name)?,
+                    fixed_sig(registry, sig, &lookup)?,
+                ))
+            })
             .collect();
-        let property_fixes: Vec<(Name, Name, Option<Type>, Option<Type>)> = classes
+        let property_fixes: Vec<(ClassId, Name, Option<Type>, Option<Type>)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
-                info.properties.iter().filter_map(|(name, prop)| {
-                    let ty = lookup(registry, &prop.ty);
-                    let doc = prop.doc_ty.as_ref().and_then(|d| lookup(registry, d));
-                    (ty.is_some() || doc.is_some())
-                        .then(|| ((*class).clone(), name.clone(), ty, doc))
-                })
+                let Some(class_id) = registry.class_ids.get(*class).copied() else {
+                    return Vec::new();
+                };
+                info.properties
+                    .iter()
+                    .filter_map(|(name, prop)| {
+                        let ty = lookup(registry, &prop.ty);
+                        let doc = prop.doc_ty.as_ref().and_then(|d| lookup(registry, d));
+                        (ty.is_some() || doc.is_some()).then(|| (class_id, name.clone(), ty, doc))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
-        for (class, name, ty, doc) in property_fixes {
+        for (class_id, name, ty, doc) in property_fixes {
+            let Some(class) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             if let Some(prop) = self
                 .classes
                 .get_mut(&class)
@@ -2053,7 +2122,18 @@ impl Registry {
                 }
             }
         }
-        for (class, name, fixed) in method_fixes {
+        for (method, fixed) in method_fixes {
+            let class_id = method.class();
+            let Some(class) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
+            let Some(name) = self
+                .class_by_id(class_id)
+                .and_then(|info| info.member_order.get(usize::from(method.slot())))
+                .cloned()
+            else {
+                continue;
+            };
             if let Some(sig) = self
                 .classes
                 .get_mut(&class)
@@ -2062,7 +2142,10 @@ impl Registry {
                 *sig = fixed;
             }
         }
-        for (name, fixed) in function_fixes {
+        for (function, fixed) in function_fixes {
+            let Some(name) = self.function_name_by_id(function).cloned() else {
+                continue;
+            };
             if let Some(sig) = self.functions.get_mut(&name) {
                 *sig = fixed;
             }
