@@ -10,7 +10,7 @@ type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::{
-    ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
+    ClassId, ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
     substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
@@ -148,7 +148,7 @@ impl Registry {
     /// Arcs.
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
-            Name,
+            ClassId,
             Vec<(Name, Arc<super::Lazy<FunctionReflection>>)>,
             Vec<(Name, Arc<PropertyReflection>)>,
             Vec<(Name, Arc<ConstantReflection>)>,
@@ -162,6 +162,7 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|class_name| {
+                let class_id = *registry.class_ids.get(class_name)?;
                 let own = &registry.classes()[class_name];
                 let (uses, trait_aliases) = (&own.uses, &own.trait_aliases);
                 if uses.is_empty() && trait_aliases.is_empty() {
@@ -258,7 +259,7 @@ impl Registry {
                     }
                 }
                 Some((
-                    class_name.clone(),
+                    class_id,
                     methods,
                     properties,
                     consts,
@@ -269,9 +270,12 @@ impl Registry {
             .collect();
 
         let mut changed = false;
-        for (class_name, methods, properties, consts, abstract_from_traits, static_from_traits) in
+        for (class_id, methods, properties, consts, abstract_from_traits, static_from_traits) in
             additions
         {
+            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
                     if info.methods.insert_shared_if_absent(name.clone(), sig) {
@@ -1140,11 +1144,12 @@ impl Registry {
         type Backfill = (Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
 
         let registry: &Registry = self;
-        let backfills: Vec<(Name, Vec<Backfill>)> = order
+        let backfills: Vec<(ClassId, Vec<Backfill>)> = order
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|&index| {
                 let class_name = &class_names[index];
+                let class_id = *registry.class_ids.get(class_name)?;
                 let mut per_class: Vec<Backfill> = Vec::new();
                 let info = registry.classes().get(class_name)?;
                 // What `lookup_ancestor_method_with_owner` reads, read once
@@ -1342,12 +1347,15 @@ impl Registry {
                         per_class.push((method_name.clone(), param_fills, return_fill));
                     }
                 }
-                (!per_class.is_empty()).then(|| (class_name.clone(), per_class))
+                (!per_class.is_empty()).then_some((class_id, per_class))
             })
             .collect();
 
         let mut changed = false;
-        for (class_name, per_class) in backfills {
+        for (class_id, per_class) in backfills {
+            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             let Some(info) = self.classes.get_mut(&class_name) else {
                 continue;
             };
