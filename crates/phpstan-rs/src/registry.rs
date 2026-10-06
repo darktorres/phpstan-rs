@@ -14,6 +14,7 @@ pub(crate) mod canonical;
 mod class_info;
 mod container;
 mod effects;
+mod file_decls;
 mod function_sig;
 mod generics;
 mod global_vars;
