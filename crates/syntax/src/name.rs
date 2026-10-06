@@ -570,6 +570,12 @@ impl<V> OrderedNameMap<V> {
         self.position(key).map(|at| &mut self.entries[at].1)
     }
 
+    /// The value at an ordered position. Positions remain stable when an
+    /// existing entry is updated; new entries append to the end.
+    pub fn get_index_mut(&mut self, index: usize) -> Option<&mut V> {
+        self.entries.get_mut(index).map(|(_, value)| value)
+    }
+
     pub fn contains_key<K: NameKey + ?Sized>(&self, key: &K) -> bool {
         self.position(key).is_some()
     }
@@ -1600,6 +1606,24 @@ mod tests {
         let json = serde_json::to_string(&map).expect("serializes");
         let back: NameMap<usize> = serde_json::from_str(&json).expect("reads back");
         assert!(back == map);
+    }
+
+    #[test]
+    fn ordered_name_map_indices_survive_replacing_and_append_new_values() {
+        let mut map = OrderedNameMap::default();
+        map.insert(Interner::global().name("first"), 1);
+        map.insert(Interner::global().name("second"), 2);
+
+        *map.get_index_mut(0).unwrap() = 10;
+        map.insert(Interner::global().name("first"), 11);
+        assert_eq!(
+            map.iter().map(|(_, value)| *value).collect::<Vec<_>>(),
+            [11, 2]
+        );
+
+        map.insert(Interner::global().name("third"), 3);
+        assert_eq!(map.get_index_mut(2).map(|value| *value), Some(3));
+        assert!(map.get_index_mut(3).is_none());
     }
 
     #[test]

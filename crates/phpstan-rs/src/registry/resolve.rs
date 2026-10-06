@@ -812,7 +812,7 @@ impl Registry {
                 if let Some(sig) = self
                     .classes
                     .get_mut(&class_name)
-                    .and_then(|info| info.consts.values_mut().nth(const_slot))
+                    .and_then(|info| info.consts.get_index_mut(const_slot))
                 {
                     Arc::make_mut(sig).ty = ty;
                 }
