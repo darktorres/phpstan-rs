@@ -316,8 +316,12 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   when a cache read has no runtime IDs. `fb72f92b` retags the set across base
   generation changes; the base-switch test checks the verdict still resolves.
   The cache round-trip oracle checks class names reached through IDs for both
-  stub bases. The full 1,141-test library suite, check, and Clippy pass. Other
-  pass results and immutable declaration storage still remain to migrate.
+  stub bases. `17222b57` moves the extends/implements closure into a
+  `ClassId`-keyed table; reads in the checker and architecture pass use the
+  Registry API, while the disk cache retains its stable name section and
+  translates it to IDs when freezing. Closure queries are covered across
+  cache reads and base switches. The full 1,141-test library suite, check, and
+  Clippy pass. Other pass results and immutable declaration storage remain.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
