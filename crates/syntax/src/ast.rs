@@ -962,6 +962,8 @@ impl PartialEq<&str> for QualifiedName {
 #[derive(Debug, Clone)]
 pub struct Ident {
     pub name: Name,
+    /// The owning file's compact name-table index, when parsed from a file.
+    pub name_id: Option<crate::name::NameId>,
     pub span: Span,
 }
 

@@ -6,6 +6,13 @@ use crate::span::Span;
 use crate::token::{Keyword, Token};
 
 impl Parser<'_> {
+    pub(crate) fn name_id(&self, name: &Name) -> Option<crate::name::NameId> {
+        match &*self.supply.borrow() {
+            crate::parser::Supply::Lexer(lexer) => lexer.name_id(name),
+            crate::parser::Supply::List(_) => None,
+        }
+    }
+
     // ---- token stream helpers ----
 
     #[inline]
@@ -192,12 +199,21 @@ impl Parser<'_> {
     }
 
     fn ident_from(&self, name: &str, start: u32) -> Ident {
-        Ident {
-            name: self.interner.name(name),
-            span: Span {
+        self.ident(
+            self.intern(name),
+            Span {
                 start,
                 end: self.previous_end(),
             },
+        )
+    }
+
+    pub(crate) fn ident(&self, name: Name, span: Span) -> Ident {
+        let name_id = self.name_id(&name);
+        Ident {
+            name,
+            name_id,
+            span,
         }
     }
 
@@ -216,13 +232,13 @@ impl Parser<'_> {
     pub(crate) fn take_ident(&mut self) -> Option<Ident> {
         let start = self.current_pos();
         let name = self.take_name_segment()?;
-        Some(Ident {
+        Some(self.ident(
             name,
-            span: Span {
+            Span {
                 start,
                 end: self.previous_end(),
             },
-        })
+        ))
     }
 
     /// Consumes one identifier *or* keyword token as a name segment - most
@@ -254,10 +270,7 @@ impl Parser<'_> {
                 // canonical (always-lowercase) form only if it's somehow
                 // missing (shouldn't happen for a real lexer-produced
                 // token stream).
-                Some(
-                    self.interner
-                        .name(raw_keyword.as_deref().unwrap_or_else(|| kw.as_str())),
-                )
+                Some(self.intern(raw_keyword.as_deref().unwrap_or_else(|| kw.as_str())))
             }
             _ => None,
         }

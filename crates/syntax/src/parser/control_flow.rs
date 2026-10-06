@@ -278,13 +278,13 @@ impl Parser<'_> {
             let var = if matches!(self.peek(), Token::Variable(_)) {
                 let var_start = self.current_pos();
                 let name = self.expect_variable()?;
-                Some(Ident {
+                Some(self.ident(
                     name,
-                    span: Span {
+                    Span {
                         start: var_start,
                         end: self.previous_end(),
                     },
-                })
+                ))
             } else {
                 None
             };

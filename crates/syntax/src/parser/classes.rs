@@ -303,10 +303,7 @@ impl Parser<'_> {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: Ident {
-                            name: cname,
-                            span: cname_span,
-                        },
+                        name: self.ident(cname, cname_span),
                         value,
                         doc_comment: doc.clone(),
                         visibility,
@@ -384,10 +381,7 @@ impl Parser<'_> {
                     self.note_doc(&doc, member_start);
                     properties.push(PropertyDecl {
                         removal_span: None,
-                        name: Ident {
-                            name: self.interner.name(&name),
-                            span: name_span,
-                        },
+                        name: self.ident(self.intern(&name), name_span),
                         visibility,
                         write_visibility,
                         is_static,
@@ -409,10 +403,7 @@ impl Parser<'_> {
                 self.note_doc(&doc, member_start);
                 properties.push(PropertyDecl {
                     removal_span: None,
-                    name: Ident {
-                        name: self.interner.name(&name),
-                        span: name_span,
-                    },
+                    name: self.ident(self.intern(&name), name_span),
                     visibility,
                     write_visibility,
                     is_static,

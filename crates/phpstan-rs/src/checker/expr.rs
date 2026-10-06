@@ -6052,6 +6052,7 @@ fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) 
             Ident {
                 name: method.as_str().into(),
                 span,
+                name_id: None,
             },
             args.to_vec(),
         ),
@@ -6070,6 +6071,7 @@ fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
             Ident {
                 name: name.as_str().into(),
                 span,
+                name_id: None,
             },
         )
     };

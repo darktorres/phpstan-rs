@@ -199,7 +199,15 @@ impl Parser<'_> {
                             }
                             StaticMember::Name(n) => ExprKind::ClassConstFetch(target, n),
                             StaticMember::Variable(name, span) => {
-                                ExprKind::StaticPropertyFetch(target, Ident { name, span })
+                                let name_id = self.name_id(&name);
+                                ExprKind::StaticPropertyFetch(
+                                    target,
+                                    Ident {
+                                        name,
+                                        name_id,
+                                        span,
+                                    },
+                                )
                             }
                             StaticMember::Dynamic(name) => {
                                 ExprKind::DynamicStaticPropertyFetch(target, Box::new(name))

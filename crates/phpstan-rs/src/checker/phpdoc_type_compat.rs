@@ -286,6 +286,7 @@ impl<'a> Checker<'a> {
                         name: Ident {
                             name: "value".into(),
                             span,
+                            name_id: None,
                         },
                         type_hint: property_type_hint.cloned(),
                         default: None,
@@ -311,6 +312,7 @@ impl<'a> Checker<'a> {
             name: Ident {
                 name: name.into(),
                 span,
+                name_id: None,
             },
             params,
             return_type,

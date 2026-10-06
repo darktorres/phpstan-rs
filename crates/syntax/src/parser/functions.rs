@@ -111,10 +111,7 @@ impl Parser<'_> {
             };
             self.note_doc(&doc_comment, param_start);
             params.push(Param {
-                name: Ident {
-                    name,
-                    span: name_span,
-                },
+                name: self.ident(name, name_span),
                 type_hint,
                 default,
                 by_ref,
@@ -173,10 +170,7 @@ impl Parser<'_> {
         };
         Ok(FunctionDecl {
             namespaced_name: None,
-            name: Ident {
-                name,
-                span: name_span,
-            },
+            name: self.ident(name, name_span),
             params,
             return_type,
             body,

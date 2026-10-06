@@ -232,10 +232,7 @@ impl Parser<'_> {
                         };
                         imports.push(UseImport {
                             path: self.use_path(&format!("{group_prefix}\\{member}")),
-                            written: Ident {
-                                name: member,
-                                span: member_span,
-                            },
+                            written: self.ident(member, member_span),
                             alias,
                             kind,
                         });
@@ -257,10 +254,7 @@ impl Parser<'_> {
                 };
                 let mut imports = vec![UseImport {
                     path: self.use_path(&name),
-                    written: Ident {
-                        name,
-                        span: name_span,
-                    },
+                    written: self.ident(name, name_span),
                     alias,
                     kind: default_kind,
                 }];
@@ -277,10 +271,7 @@ impl Parser<'_> {
                     };
                     imports.push(UseImport {
                         path: self.use_path(&path),
-                        written: Ident {
-                            name: path,
-                            span: path_span,
-                        },
+                        written: self.ident(path, path_span),
                         alias,
                         kind: default_kind,
                     });
@@ -304,10 +295,7 @@ impl Parser<'_> {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: Ident {
-                            name,
-                            span: name_span,
-                        },
+                        name: self.ident(name, name_span),
                         value,
                         doc_comment: None,
                         // A top-level `const` has no `public`/`private`

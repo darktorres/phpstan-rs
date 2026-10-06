@@ -166,13 +166,13 @@ impl Parser<'_> {
                         let Token::Variable(name) = self.take_token() else {
                             unreachable!()
                         };
-                        let ident = Ident {
-                            name: self.interner.name(&name),
-                            span: Span {
+                        let ident = self.ident(
+                            self.intern(&name),
+                            Span {
                                 start: var_start,
                                 end: self.previous_end(),
                             },
-                        };
+                        );
                         self.expr(ExprKind::StaticPropertyFetch(target, ident), start)
                     } else {
                         let name = self.parse_primary()?;

@@ -37,7 +37,7 @@ impl Canonical for Expr {
 
 impl Canonical for Ident {
     fn canonical(&self, p: &mut Printer) {
-        let Ident { name, span } = self;
+        let Ident { name, span, .. } = self;
         name.canonical(p);
         p.atom("@");
         span.canonical(p);

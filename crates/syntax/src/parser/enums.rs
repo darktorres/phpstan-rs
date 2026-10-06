@@ -23,10 +23,7 @@ impl Parser<'_> {
         };
         self.expect_semicolon()?;
         Ok(EnumCase {
-            name: Ident {
-                name,
-                span: name_span,
-            },
+            name: self.ident(name, name_span),
             value,
             attrs,
             span: Span {

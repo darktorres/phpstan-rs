@@ -92,14 +92,14 @@ impl Parser<'_> {
                         id: self.node_id(),
                         kind: ExprKind::PropertyAccess(
                             Box::new(var_expr),
-                            Ident {
-                                name: self.interner.name(&prop),
+                            self.ident(
+                                self.intern(&prop),
                                 // Past the arrow.
-                                span: Span {
+                                Span {
                                     start: var_end.saturating_add(arrow_len),
                                     end,
                                 },
-                            },
+                            ),
                             ObjectOperator::from_nullsafe(nullsafe),
                         ),
                         span: Span {

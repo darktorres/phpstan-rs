@@ -62,10 +62,7 @@ impl Parser<'_> {
                 };
                 self.expect(&Token::RParen)?;
                 Some(Param {
-                    name: Ident {
-                        name,
-                        span: name_span,
-                    },
+                    name: self.ident(name, name_span),
                     type_hint,
                     default: None,
                     by_ref,

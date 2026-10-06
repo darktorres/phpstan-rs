@@ -522,7 +522,6 @@ impl<'a> Lexer<'a> {
         (name, bits, id)
     }
 
-    #[allow(dead_code)] // Used when parser name sites move to `NameId`.
     pub(crate) fn name_id(&self, name: &Name) -> Option<NameId> {
         let hash = crate::name::text_hash(name.as_str());
         self.names

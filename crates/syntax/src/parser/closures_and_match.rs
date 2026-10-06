@@ -26,13 +26,13 @@ impl Parser<'_> {
                 let name_start = self.current_pos();
                 let name = self.expect_variable()?;
                 uses.push(ClosureUse {
-                    name: Ident {
+                    name: self.ident(
                         name,
-                        span: Span {
+                        Span {
                             start: name_start,
                             end: self.previous_end(),
                         },
-                    },
+                    ),
                     by_ref: use_by_ref,
                 });
                 if !self.eat_list_comma(
