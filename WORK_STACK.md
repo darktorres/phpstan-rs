@@ -305,10 +305,12 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   source methods. Focused order/lookup tests, all 1,140 library tests, check,
   and Clippy pass. Item 4.6 is active: transitive-purity verdicts now live in
   Registry sets keyed by `FnId` and `MethodRef`, and checker reads use those
-  IDs (`b4e4a4fc`). Changed/removed declarations and base switches clear those
-  results. The focused table/clear test and all 1,141 library tests pass;
-  library check and Clippy pass. Purity dependencies and the other pass
-  results still live on legacy declarations and remain to migrate.
+  IDs (`b4e4a4fc`). The dependency graph is also stored by `FnId` and
+  `MethodRef`, and both purity result fields have left `FunctionReflection`
+  (`0949982c`). Changed/removed declarations and base switches clear those
+  tables. The focused transitive/clear test and all 1,141 library tests pass;
+  library check and Clippy pass. Other pass results and immutable declaration
+  storage still remain to migrate.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
