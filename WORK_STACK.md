@@ -237,12 +237,13 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
   existing failure count recorded at 2.V. The 3.4 scratch-store row remains
   with item 9. Item 9.2 is in progress: syntax parse results now own their
-  source bytes, and retained project trees carry those bytes alongside the
-  AST; cache-only context entries and dropped context trees release them.
-  This is the source ownership foundation for converting AST payloads to
-  ranges in 9.4. No item gate or full validation has run for item 9. The
-  syntax tree still uses the existing boxed/vector nodes, and the source copy
-  is interim until payloads become source ranges. Row 4.1 made the four public declaration tables private behind
+  source bytes and the lexer's distinct names in first-use order; retained
+  project trees carry both alongside the AST, while cache-only context
+  entries and dropped context trees release them. `NameId` is defined for
+  the upcoming node conversion. No item gate or full validation has run for
+  item 9. AST nodes still use boxed/vector children and `Name` handles; the
+  source copy is interim until payloads become source ranges. Row 4.1 made
+  the four public declaration tables private behind
   `Registry` read accessors (`e06503ad`, preserving owned stub-table
   extraction). Row 4.2 added stub, context-base and project ID ranges
   (`1b8f79aa`); `cargo check -p phpstan-rs --lib --tests` and Clippy passed.

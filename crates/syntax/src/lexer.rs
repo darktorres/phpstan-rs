@@ -74,6 +74,9 @@ pub struct Lexer<'a> {
     // without the interner's lock. Held for as long as the lexer is, so
     // the names it returns are those the interner holds for the text.
     names: hashbrown::HashTable<(u64, Name, u32)>,
+    // The distinct names in stable first-use order, for the parsed file's
+    // compact `NameId` table.
+    file_names: Vec<Name>,
     // The spellings whose mention the file's facts hold.
     watch: Option<&'static WatchList>,
 }
@@ -210,6 +213,8 @@ pub struct LexEnd {
     pub warnings: Vec<LexWarning>,
     pub facts: FileFacts,
     pub line_index: Arc<LineIndex>,
+    /// The distinct names encountered in this file, in first-use order.
+    pub names: Box<[Name]>,
 }
 
 /// What is true of a file as a whole, found as it is lexed and parsed, so
@@ -452,6 +457,7 @@ impl<'a> Lexer<'a> {
             warnings: Vec::new(),
             interner: Interner::global(),
             names: hashbrown::HashTable::new(),
+            file_names: Vec::new(),
             watch: None,
         }
     }
@@ -511,6 +517,7 @@ impl<'a> Lexer<'a> {
         let bits = self.watch.map_or(0, |watch| watch.bits(text));
         self.names
             .insert_unique(hash, (hash, name.clone(), bits), |(h, _, _)| *h);
+        self.file_names.push(name.clone());
         (name, bits)
     }
 
@@ -710,6 +717,7 @@ impl<'a> Lexer<'a> {
             warnings: std::mem::take(&mut self.warnings),
             facts: self.facts,
             line_index: Arc::clone(&self.line_index),
+            names: self.file_names.into_boxed_slice(),
         }
     }
 

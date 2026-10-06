@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::ast::{GotoLabel, Stmt};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
-use crate::name::NameCache;
+use crate::name::{Name, NameCache};
 use crate::parser::{ParseError, Parser};
 use crate::references::FileReferences;
 use crate::span::LineIndex;
@@ -17,6 +17,8 @@ pub struct ParsedFile {
     /// The bytes this tree was parsed from. AST payloads will become ranges
     /// into this buffer as the tree moves to typed arenas.
     pub source: Box<[u8]>,
+    /// The distinct names encountered in the file, in first-use order.
+    pub names: Box<[Name]>,
     pub stmts: Vec<Stmt>,
     /// Every comment that holds `@phpstan-ignore`, doc comments included,
     /// in source order, with what the code next to it is.
@@ -131,6 +133,7 @@ pub fn parse_watching<'a>(
         warnings,
         mut facts,
         line_index,
+        names,
     } = parser
         .into_lex_end()
         .expect("a parser of a lexer ends with the lexer's record");
@@ -147,6 +150,7 @@ pub fn parse_watching<'a>(
     facts.syntax.merge(&syntax_marks);
     Ok(ParsedFile {
         source: source_bytes,
+        names,
         stmts,
         ignore_marks,
         line_index,

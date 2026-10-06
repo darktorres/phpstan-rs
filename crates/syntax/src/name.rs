@@ -22,6 +22,20 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use rustc_hash::FxHasher;
 
+/// An index into one parsed file's distinct-name table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NameId(u32);
+
+impl NameId {
+    pub(crate) fn new(index: usize) -> NameId {
+        NameId(u32::try_from(index).expect("a parsed file has too many names"))
+    }
+
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 struct NameData {
     text: Box<str>,
     /// `None` when `text` is already lowercase.

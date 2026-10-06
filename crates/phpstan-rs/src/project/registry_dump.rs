@@ -196,6 +196,7 @@ fn write_file(
     let FileState {
         kept_ast,
         kept_source: _,
+        kept_names: _,
         source_len,
         load_order,
         functions,

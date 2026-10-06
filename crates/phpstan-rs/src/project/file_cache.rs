@@ -276,6 +276,7 @@ impl CachedFile {
         Some(ParsedFile {
             ast: None,
             source: None,
+            names: None,
             lex_warnings: self.lex_warnings,
             functions: self.functions,
             classes: self.classes,
