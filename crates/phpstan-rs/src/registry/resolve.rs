@@ -151,7 +151,7 @@ impl Registry {
             ClassId,
             Vec<(MethodRef, Name, Arc<super::Lazy<FunctionReflection>>)>,
             Vec<(Name, Arc<PropertyReflection>)>,
-            Vec<(Name, Arc<ConstantReflection>)>,
+            Vec<(usize, Name, Arc<ConstantReflection>)>,
             NameSet,
             NameSet,
         );
@@ -183,6 +183,8 @@ impl Registry {
                 let mut next_method_slot = own.member_order.len();
                 let mut properties = Vec::new();
                 let mut consts = Vec::new();
+                let mut added_const_names = NameSet::default();
+                let mut next_const_slot = own.consts.len();
                 let mut abstract_from_traits: NameSet = NameSet::default();
                 // `static_methods` needs the identical trait-flattening
                 // treatment `abstract_from_traits` gets below - without
@@ -270,13 +272,15 @@ impl Registry {
                         // its hosts, since the constant was never
                         // anywhere but the trait's own, otherwise-
                         // unreachable registry entry.
-                        consts.extend(
-                            trait_info
-                                .consts
-                                .iter()
-                                .filter(|(n, _)| !own.consts.contains_key(*n))
-                                .map(|(n, s)| (n.clone(), s.clone())),
-                        );
+                        for (name, sig) in &trait_info.consts {
+                            if own.consts.contains_key(name)
+                                || !added_const_names.insert(name.clone())
+                            {
+                                continue;
+                            }
+                            consts.push((next_const_slot, name.clone(), sig.clone()));
+                            next_const_slot += 1;
+                        }
                     }
                 }
                 Some((
@@ -313,8 +317,9 @@ impl Registry {
                         changed = true;
                     }
                 }
-                for (name, sig) in consts {
+                for (slot, name, sig) in consts {
                     if !info.consts.contains_key(&name) {
+                        debug_assert_eq!(info.consts.len(), slot);
                         info.consts.insert(name, sig);
                         changed = true;
                     }
