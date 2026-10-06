@@ -246,9 +246,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   (`8607a515`). Source/name lookup is exposed, and syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. Those IDs now target `ExprNode`/`StmtNode`
   (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
-  and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); their fields still use
-  recursive storage. Row 9.3 is in
-  progress: the shared `NodeId` is
+  and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
+  return those explicit node values (`36d608ba`), while child fields still use
+  recursive storage. Row 9.3 is in progress: the shared `NodeId` is
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
   indices, and the inference cache is keyed by `ExprId` alone during a
   file's active expression check. Its checker entry point now takes that id
