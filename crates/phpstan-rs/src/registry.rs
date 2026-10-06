@@ -19,6 +19,7 @@ mod generics;
 mod global_vars;
 mod guard;
 mod hierarchy;
+mod ids;
 mod index;
 pub(crate) mod init_flow;
 mod members;
@@ -70,6 +71,7 @@ pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
 pub(crate) use guard::Guard;
+pub(crate) use ids::{ClassId, FnId, IdSource};
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
@@ -224,6 +226,10 @@ struct RawDeclarations {
 pub struct Registry {
     #[serde(skip)]
     classes: NameTable<ClassReflection>,
+    #[serde(skip)]
+    class_ids: NameTable<ClassId>,
+    #[serde(skip)]
+    project_class_names: Vec<Name>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     #[serde(skip)]
@@ -232,6 +238,10 @@ pub struct Registry {
     pub(crate) configured_class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     #[serde(skip)]
     functions: FunctionTable,
+    #[serde(skip)]
+    function_ids: NameTable<FnId>,
+    #[serde(skip)]
+    project_function_names: Vec<Name>,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -436,6 +446,102 @@ impl Registry {
     /// The inferred global variables known to the project.
     pub fn global_variables(&self) -> &syntax::name::NameMap<Type> {
         &self.global_variables
+    }
+
+    /// The id and declaration selected for `name` by PHP's class-name rules.
+    pub(crate) fn class(&self, name: &str) -> Option<(ClassId, &Name, &ClassReflection)> {
+        let (name, declaration) = self.classes.get_with_name(name)?;
+        Some((*self.class_ids.get(name)?, name, declaration))
+    }
+
+    /// A class declaration addressed by its source-range id.
+    #[allow(dead_code)] // Called by later registry-by-id rows as storage moves out of the name table.
+    pub(crate) fn class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
+        match id.source()? {
+            IdSource::Stub => {
+                let name = self.classes.base_name(id.local() as usize)?;
+                (self.class_ids.get(name) == Some(&id))
+                    .then(|| self.classes.get(name))
+                    .flatten()
+            }
+            // The context range is reserved for item 17's context base.
+            IdSource::Context => None,
+            IdSource::Project => {
+                let name = self.project_class_names.get(id.local() as usize)?;
+                (self.class_ids.get(name) == Some(&id))
+                    .then(|| self.classes.get(name))
+                    .flatten()
+            }
+        }
+    }
+
+    /// The id and declaration selected for `name` by PHP's function-name rules.
+    pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
+        let (name, declaration) = self.functions.get_with_name(name)?;
+        Some((*self.function_ids.get(name)?, name, declaration))
+    }
+
+    /// A function declaration addressed by its source-range id.
+    #[allow(dead_code)] // Called by later registry-by-id rows as storage moves out of the name table.
+    pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
+        match id.source()? {
+            IdSource::Stub => {
+                let name = self.functions.base_name(id.local() as usize)?;
+                (self.function_ids.get(name) == Some(&id))
+                    .then(|| self.functions.get(name))
+                    .flatten()
+            }
+            // The context range is reserved for item 17's context base.
+            IdSource::Context => None,
+            IdSource::Project => {
+                let name = self.project_function_names.get(id.local() as usize)?;
+                (self.function_ids.get(name) == Some(&id))
+                    .then(|| self.functions.get(name))
+                    .flatten()
+            }
+        }
+    }
+
+    fn ensure_class_id(&mut self, name: &Name) {
+        if self.class_ids.contains_key(name) {
+            return;
+        }
+        let local = u32::try_from(self.project_class_names.len())
+            .expect("project class id range exhausted");
+        let id = ClassId::project(local);
+        self.class_ids.insert(name.clone(), id);
+        self.project_class_names.push(name.clone());
+    }
+
+    fn ensure_function_id(&mut self, name: &Name) {
+        if self.function_ids.contains_key(name) {
+            return;
+        }
+        let local = u32::try_from(self.project_function_names.len())
+            .expect("project function id range exhausted");
+        let id = FnId::project(local);
+        self.function_ids.insert(name.clone(), id);
+        self.project_function_names.push(name.clone());
+    }
+
+    fn remove_project_class_id(&mut self, name: &Name) {
+        if self
+            .class_ids
+            .get(name)
+            .is_some_and(|id| id.source() == Some(IdSource::Project))
+        {
+            self.class_ids.remove(name);
+        }
+    }
+
+    fn remove_project_function_id(&mut self, name: &Name) {
+        if self
+            .function_ids
+            .get(name)
+            .is_some_and(|id| id.source() == Some(IdSource::Project))
+        {
+            self.function_ids.remove(name);
+        }
     }
 
     /// Whether `feature` is available on every PHP version the project
@@ -647,6 +753,28 @@ impl Registry {
             Arc::new(self.builtin_methods_running_code.clone());
         self.classes.freeze();
         self.functions.freeze();
+        self.class_ids = NameTable::default();
+        self.project_class_names.clear();
+        for index in 0..self.classes.base_len() {
+            let local = u32::try_from(index).expect("stub class id range exhausted");
+            let name = self
+                .classes
+                .base_name(index)
+                .expect("base index is in range");
+            self.class_ids.insert(name.clone(), ClassId::stub(local));
+        }
+        self.class_ids.freeze();
+        self.function_ids = NameTable::default();
+        self.project_function_names.clear();
+        for index in 0..self.functions.base_len() {
+            let local = u32::try_from(index).expect("stub function id range exhausted");
+            let name = self
+                .functions
+                .base_name(index)
+                .expect("base index is in range");
+            self.function_ids.insert(name.clone(), FnId::stub(local));
+        }
+        self.function_ids.freeze();
         self.built_in_stub_classes.freeze();
         self.ancestor_names.freeze();
         self.phpstan_ancestry.freeze();

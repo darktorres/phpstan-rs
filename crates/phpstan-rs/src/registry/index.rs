@@ -191,8 +191,14 @@ impl Registry {
         };
         if !leaves_entry {
             match &decl {
-                BuiltDecl::Class { name, .. } => self.record_changed_class(name),
-                BuiltDecl::Function { name, .. } => self.record_changed_function(name),
+                BuiltDecl::Class { name, .. } => {
+                    self.ensure_class_id(name);
+                    self.record_changed_class(name);
+                }
+                BuiltDecl::Function { name, .. } => {
+                    self.ensure_function_id(name);
+                    self.record_changed_function(name);
+                }
                 BuiltDecl::GlobalConst { name, .. } => self.record_changed_constant(name),
             }
         }
@@ -507,6 +513,7 @@ impl Registry {
         for name in functions {
             self.record_changed_function(name);
             self.functions.remove(name.as_str());
+            self.remove_project_function_id(name);
             // Stay in lockstep with `functions`, for the identical
             // reason the class side does below - otherwise a later
             // re-index of the same name would find a stale "already
@@ -519,6 +526,7 @@ impl Registry {
         for name in classes {
             self.record_changed_class(name);
             self.classes.remove(name.as_str());
+            self.remove_project_class_id(name);
             // Must stay in lockstep with `classes` - otherwise a
             // later re-index of the same name (incremental re-checking's
             // whole reason for calling this) would find a stale "already

@@ -390,6 +390,10 @@ impl<V> Base<V> {
         self.keys.len()
     }
 
+    pub(super) fn name_at(&self, index: usize) -> Option<&Name> {
+        (index < self.len()).then(|| self.name(index))
+    }
+
     /// The position of the entry whose name (lowercased, for a base that
     /// folds) is `key`.
     pub(super) fn find(&self, key: &str) -> Option<usize> {
@@ -547,6 +551,16 @@ impl<V> Default for NameTable<V> {
 }
 
 impl<V> NameTable<V> {
+    /// The number of entries in this table's immutable base.
+    pub(crate) fn base_len(&self) -> usize {
+        self.base.as_ref().map_or(0, |base| base.len())
+    }
+
+    /// The name at `index` in this table's immutable base.
+    pub(crate) fn base_name(&self, index: usize) -> Option<&Name> {
+        self.base.as_ref()?.name_at(index)
+    }
+
     /// The version of the names the table holds, see the field.
     pub(crate) fn version(&self) -> u64 {
         self.version

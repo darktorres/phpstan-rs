@@ -1184,7 +1184,7 @@ impl Registry {
 
     /// The function `name` names, compared case-insensitively as PHP does.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionReflection> {
-        self.functions.get(name)
+        self.function(name).map(|(_, _, declaration)| declaration)
     }
 
     /// The function a call to `name` reaches, with the name it's declared
@@ -1222,9 +1222,8 @@ impl Registry {
         &self,
         name: &str,
     ) -> Option<(&str, &FunctionReflection)> {
-        self.functions
-            .get_with_name(name)
-            .map(|(declared, sig)| (declared.as_str(), sig))
+        self.function(name)
+            .map(|(_, declared, sig)| (declared.as_str(), sig))
     }
 
     /// `lookup_function`'s class-side mirror - real PHP resolves
@@ -1235,9 +1234,8 @@ impl Registry {
     /// `canonicalize_class_name_case` for why those two need different
     /// treatment).
     pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassReflection)> {
-        self.classes
-            .get_with_name(name)
-            .map(|(declared, info)| (declared.as_str(), info))
+        self.class(name)
+            .map(|(_, declared, info)| (declared.as_str(), info))
     }
 
     /// Whether a native intersection type's own members (`Foo&Bar&...`)

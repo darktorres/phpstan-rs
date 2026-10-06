@@ -451,9 +451,13 @@ impl CanonicalOver for Registry {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         let Registry {
             classes,
+            class_ids: _,
+            project_class_names: _,
             configured_assertions,
             configured_class_argument_returns,
             functions,
+            function_ids: _,
+            project_function_names: _,
             global_constants,
             global_variables,
             phpstan_class_files,
@@ -641,6 +645,10 @@ canonical_struct!(Registry {
     unset_properties,
     global_sites,
 } skip {
+    class_ids,
+    project_class_names,
+    function_ids,
+    project_function_names,
     // What the last lookups of the names in scope made of `scope` and the
     // tables.
     scoped_names,
