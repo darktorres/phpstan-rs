@@ -108,6 +108,9 @@ pub(crate) struct FileState {
     // Parsed bytes live beside a retained tree so source-backed payloads do
     // not depend on the caller's read buffer.
     kept_source: Option<Box<[u8]>>,
+    // Node spans share the same file-local ids as the parsed tree.
+    kept_expr_spans: Option<Box<[Span]>>,
+    kept_stmt_spans: Option<Box<[Span]>>,
     // Distinct file names in first-use order, shared by node `NameId`s.
     kept_names: Option<Box<[Name]>>,
     // The source's length in bytes: what checking the file costs, roughly.
@@ -239,6 +242,10 @@ impl FileState {
         debug_assert!(
             self.kept_names.is_some(),
             "a retained tree must own its distinct-name table"
+        );
+        debug_assert!(
+            self.kept_expr_spans.is_some() && self.kept_stmt_spans.is_some(),
+            "a retained tree must own its node-span tables"
         );
         self.kept_ast.as_deref().unwrap_or(&[])
     }
@@ -1216,6 +1223,8 @@ impl Project {
         {
             file.kept_ast = Some(parsed.ast);
             file.kept_source = Some(parsed.source);
+            file.kept_expr_spans = Some(parsed.expr_spans);
+            file.kept_stmt_spans = Some(parsed.stmt_spans);
             file.kept_names = Some(parsed.names);
             file.ignores = parsed.ignores;
         }
@@ -1230,6 +1239,8 @@ impl Project {
             if !file.analyzed {
                 file.kept_ast = None;
                 file.kept_source = None;
+                file.kept_expr_spans = None;
+                file.kept_stmt_spans = None;
                 file.kept_names = None;
                 file.ignores = Default::default();
             }
@@ -1354,6 +1365,8 @@ impl Project {
             ast,
             source: parsed_source,
             names: parsed_names,
+            expr_spans,
+            stmt_spans,
             lex_warnings: _,
             functions,
             classes,
@@ -1421,6 +1434,8 @@ impl Project {
             FileState {
                 kept_ast: ast.filter(|_| keeps_tree),
                 kept_source: parsed_source.filter(|_| keeps_tree),
+                kept_expr_spans: expr_spans.filter(|_| keeps_tree),
+                kept_stmt_spans: stmt_spans.filter(|_| keeps_tree),
                 kept_names: parsed_names.filter(|_| keeps_tree),
                 source_len: len,
                 load_order,
@@ -3699,6 +3714,8 @@ struct Parsed {
     ast: Vec<Stmt>,
     source: Box<[u8]>,
     names: Box<[Name]>,
+    expr_spans: Box<[Span]>,
+    stmt_spans: Box<[Span]>,
     // What the tree refers to, as the parse recorded it; none when a pass
     // changed the tree after.
     references: Option<syntax::references::FileReferences>,
@@ -3760,6 +3777,8 @@ fn parse_recording<'a>(
         ast,
         source: parsed.source,
         names: parsed.names,
+        expr_spans: parsed.expr_spans,
+        stmt_spans: parsed.stmt_spans,
         references,
         ignores,
         warnings: parsed.warnings,
@@ -3784,6 +3803,9 @@ pub struct ParsedFile {
     source: Option<Box<[u8]>>,
     // The per-file distinct-name table, retained with the tree.
     names: Option<Box<[Name]>>,
+    // The parallel spans for file-local syntax-node indices.
+    expr_spans: Option<Box<[Span]>>,
+    stmt_spans: Option<Box<[Span]>>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
     lex_warnings: Vec<LexWarning>,
     functions: Vec<Name>,
@@ -3924,6 +3946,8 @@ fn parse_file_recording_with_origin<'a>(
         ast,
         source: parsed_source,
         names: parsed_names,
+        expr_spans,
+        stmt_spans,
         references,
         ignores,
         warnings: lex_warnings,
@@ -3957,6 +3981,8 @@ fn parse_file_recording_with_origin<'a>(
         ast: Some(ast),
         source: Some(parsed_source),
         names: Some(parsed_names),
+        expr_spans: Some(expr_spans),
+        stmt_spans: Some(stmt_spans),
         lex_warnings,
         functions,
         classes,
@@ -3993,6 +4019,8 @@ impl ParsedFile {
         self.ast = None;
         self.source = None;
         self.names = None;
+        self.expr_spans = None;
+        self.stmt_spans = None;
         self.ignores = Default::default();
     }
 
@@ -4010,6 +4038,8 @@ impl syntax::canonical::Canonical for ParsedFile {
             ast,
             source: _,
             names: _,
+            expr_spans: _,
+            stmt_spans: _,
             lex_warnings,
             functions,
             classes,

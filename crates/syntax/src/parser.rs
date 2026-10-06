@@ -50,6 +50,12 @@ pub struct Parser<'a> {
     // The next indices to allocate when each node is committed to its arena.
     pub(crate) next_expr_id: std::cell::Cell<u32>,
     pub(crate) next_stmt_id: std::cell::Cell<u32>,
+    // Spans are parallel to node indices. Interpolation fragments have a
+    // non-zero base and append their newly parsed spans to their parent.
+    pub(crate) expr_span_base: u32,
+    pub(crate) stmt_span_base: u32,
+    expr_spans: std::cell::RefCell<Vec<Span>>,
+    stmt_spans: std::cell::RefCell<Vec<Span>>,
     // What names in the tree are interned into.
     pub(crate) interner: &'static Interner,
     // Errors that stand unless the node they're keyed by turns out to be
@@ -203,6 +209,10 @@ impl<'a> Parser<'a> {
             line_index,
             next_expr_id: std::cell::Cell::new(0),
             next_stmt_id: std::cell::Cell::new(0),
+            expr_span_base: 0,
+            stmt_span_base: 0,
+            expr_spans: std::cell::RefCell::new(Vec::new()),
+            stmt_spans: std::cell::RefCell::new(Vec::new()),
             interner: Interner::global(),
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
@@ -625,13 +635,18 @@ impl Parser<'_> {
         {
             self.saw_nested_declaration.set(true);
         }
+        let span = Span {
+            start,
+            end: self.previous_end(),
+        };
+        let id = self.stmt_id();
+        let span_index = self.stmt_span_base + self.stmt_spans.borrow().len() as u32;
+        debug_assert_eq!(u32::from(id.into_raw()), span_index);
+        self.stmt_spans.borrow_mut().push(span);
         Stmt {
-            id: self.stmt_id(),
+            id,
             kind,
-            span: Span {
-                start,
-                end: self.previous_end(),
-            },
+            span,
             doc_comment: None,
             doc_line: None,
         }
@@ -639,14 +654,37 @@ impl Parser<'_> {
 
     /// Same as `stmt`, for expressions.
     pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> Expr {
-        Expr {
-            id: self.expr_id(),
+        self.expr_at(
             kind,
-            span: Span {
+            Span {
                 start,
                 end: self.previous_end(),
             },
-        }
+        )
+    }
+
+    /// Builds an expression whose span came directly from a lexer fragment.
+    pub(crate) fn expr_at(&self, kind: ExprKind, span: Span) -> Expr {
+        let id = self.expr_id();
+        let span_index = self.expr_span_base + self.expr_spans.borrow().len() as u32;
+        debug_assert_eq!(u32::from(id.into_raw()), span_index);
+        self.expr_spans.borrow_mut().push(span);
+        Expr { id, kind, span }
+    }
+
+    /// Takes the span side tables built by this parser. A fragment parser's
+    /// entries begin at its base and are appended by the parent parser.
+    pub(crate) fn take_node_spans(&self) -> (Vec<Span>, Vec<Span>) {
+        (
+            std::mem::take(&mut *self.expr_spans.borrow_mut()),
+            std::mem::take(&mut *self.stmt_spans.borrow_mut()),
+        )
+    }
+
+    /// Updates the parallel span when parsing later extends a node's span.
+    pub(crate) fn set_expr_span(&self, id: ExprId, span: Span) {
+        let index = u32::from(id.into_raw()) - self.expr_span_base;
+        self.expr_spans.borrow_mut()[index as usize] = span;
     }
 
     /// Consumes any doc comment immediately preceding the current position -

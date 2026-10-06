@@ -277,6 +277,8 @@ impl CachedFile {
             ast: None,
             source: None,
             names: None,
+            expr_spans: None,
+            stmt_spans: None,
             lex_warnings: self.lex_warnings,
             functions: self.functions,
             classes: self.classes,

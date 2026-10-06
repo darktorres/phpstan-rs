@@ -175,11 +175,7 @@ impl Parser<'_> {
                         let kind = match member {
                             StaticMember::Name(n) => ExprKind::StaticCall(target, n, args),
                             StaticMember::Variable(v, span) => {
-                                let name = Expr {
-                                    id: self.expr_id(),
-                                    kind: ExprKind::Variable(v),
-                                    span,
-                                };
+                                let name = self.expr_at(ExprKind::Variable(v), span);
                                 ExprKind::DynamicStaticCall(target, Box::new(name), args)
                             }
                             StaticMember::Dynamic(name) => {

@@ -20,16 +20,12 @@ impl Parser<'_> {
         let mut exprs = Vec::new();
         for part in parts {
             match part {
-                StringPart::Literal(s, span) => exprs.push(Expr {
-                    id: self.expr_id(),
-                    kind: ExprKind::Literal(Literal::String(s)),
-                    span,
-                }),
-                StringPart::SimpleVar(name, span) => exprs.push(Expr {
-                    id: self.expr_id(),
-                    kind: ExprKind::Variable(name),
-                    span,
-                }),
+                StringPart::Literal(s, span) => {
+                    exprs.push(self.expr_at(ExprKind::Literal(Literal::String(s)), span))
+                }
+                StringPart::SimpleVar(name, span) => {
+                    exprs.push(self.expr_at(ExprKind::Variable(name), span))
+                }
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
@@ -41,6 +37,8 @@ impl Parser<'_> {
                     *sub.ctx.borrow_mut() = self.ctx.borrow().clone();
                     sub.next_expr_id.set(self.next_expr_id.get());
                     sub.next_stmt_id.set(self.next_stmt_id.get());
+                    sub.expr_span_base = self.next_expr_id.get();
+                    sub.stmt_span_base = self.next_stmt_id.get();
                     *sub.recorder.borrow_mut() = self.recorder.borrow().fork();
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;
@@ -65,6 +63,9 @@ impl Parser<'_> {
                     }
                     self.next_expr_id.set(sub.next_expr_id.get());
                     self.next_stmt_id.set(sub.next_stmt_id.get());
+                    let (expr_spans, stmt_spans) = sub.take_node_spans();
+                    self.expr_spans.borrow_mut().extend(expr_spans);
+                    self.stmt_spans.borrow_mut().extend(stmt_spans);
                     self.recorder.borrow_mut().absorb(sub.take_references());
                     exprs.push(parsed);
                 }
@@ -81,18 +82,16 @@ impl Parser<'_> {
                     nullsafe,
                     end,
                 } => {
-                    let var_expr = Expr {
-                        id: self.expr_id(),
-                        kind: ExprKind::Variable(var),
-                        span: Span {
+                    let var_expr = self.expr_at(
+                        ExprKind::Variable(var),
+                        Span {
                             start: var_start,
                             end: var_end,
                         },
-                    };
+                    );
                     let arrow_len = if nullsafe { 3 } else { 2 };
-                    exprs.push(Expr {
-                        id: self.expr_id(),
-                        kind: ExprKind::PropertyAccess(
+                    exprs.push(self.expr_at(
+                        ExprKind::PropertyAccess(
                             Box::new(var_expr),
                             self.ident(
                                 self.intern(&prop),
@@ -104,11 +103,11 @@ impl Parser<'_> {
                             ),
                             ObjectOperator::from_nullsafe(nullsafe),
                         ),
-                        span: Span {
+                        Span {
                             start: var_start,
                             end,
                         },
-                    });
+                    ));
                 }
                 StringPart::Index {
                     var,
@@ -117,14 +116,13 @@ impl Parser<'_> {
                     key,
                     end,
                 } => {
-                    let var_expr = Expr {
-                        id: self.expr_id(),
-                        kind: ExprKind::Variable(var),
-                        span: Span {
+                    let var_expr = self.expr_at(
+                        ExprKind::Variable(var),
+                        Span {
                             start: var_start,
                             end: var_end,
                         },
-                    };
+                    );
                     let key_kind = match key {
                         SimpleIndexKey::Var(name) => ExprKind::Variable(name),
                         SimpleIndexKey::Int(n) => ExprKind::Literal(Literal::Int(n)),
@@ -132,22 +130,20 @@ impl Parser<'_> {
                             ExprKind::Literal(Literal::String(PhpString::from(s)))
                         }
                     };
-                    let key_expr = Expr {
-                        id: self.expr_id(),
-                        kind: key_kind,
-                        span: Span {
+                    let key_expr = self.expr_at(
+                        key_kind,
+                        Span {
                             start: var_end,
                             end,
                         },
-                    };
-                    exprs.push(Expr {
-                        id: self.expr_id(),
-                        kind: ExprKind::Index(Box::new(var_expr), Some(Box::new(key_expr))),
-                        span: Span {
+                    );
+                    exprs.push(self.expr_at(
+                        ExprKind::Index(Box::new(var_expr), Some(Box::new(key_expr))),
+                        Span {
                             start: var_start,
                             end,
                         },
-                    });
+                    ));
                 }
             }
         }
@@ -160,6 +156,7 @@ impl Parser<'_> {
                 start: base,
                 end: self.previous_end(),
             };
+            self.set_expr_span(only.id, only.span);
             return Ok(exprs.pop().expect("one part"));
         }
         Ok(self.expr(ExprKind::Interpolated(exprs), base))
