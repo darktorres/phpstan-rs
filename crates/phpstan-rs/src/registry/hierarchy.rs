@@ -13,6 +13,48 @@ use crate::registry::{Lazy, NameTable, Registry};
 use syntax::ast::ClassKind;
 use types::Type;
 
+/// The resolved extends/implements closure for one declaration. Registered
+/// ancestors use stable declaration IDs; unresolved direct names are retained
+/// so PHP's name-based `is_subclass_of` behavior survives missing symbols.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct AncestorIds {
+    ids: FxHashSet<ClassId>,
+    unresolved: NameSet,
+}
+
+impl AncestorIds {
+    pub(crate) fn from_names(registry: &Registry, names: &NameSet) -> Self {
+        let mut closure = Self::default();
+        for name in names {
+            if let Some(id) = registry.class_ids.get(name) {
+                closure.ids.insert(*id);
+            } else {
+                closure.unresolved.insert(name.clone());
+            }
+        }
+        closure
+    }
+
+    pub(crate) fn names(&self, registry: &Registry) -> NameSet {
+        let mut names = self.unresolved.clone();
+        for id in &self.ids {
+            if let Some(name) = registry.class_name_by_id(*id) {
+                names.insert(name.clone());
+            }
+        }
+        names
+    }
+
+    pub(crate) fn with_generation(mut self, generation: u32) -> Self {
+        self.ids = self
+            .ids
+            .into_iter()
+            .map(|id| id.with_generation(generation))
+            .collect();
+        self
+    }
+}
+
 /// What owns the members of one class, by kind: for each method, property
 /// and constant name, the class (or ancestor) that declares it, found
 /// walking `extends` and `implements` from the class itself. A map is
@@ -77,18 +119,28 @@ impl Registry {
         if class.eq_ignore_ascii_case(of) {
             return true;
         }
-        let of = self.lookup_class(of).map_or(of, |(k, _)| k);
-        self.class_ids
+        let Some(ancestors) = self
+            .class_ids
             .get(class)
             .and_then(|id| self.ancestors_by_id.get(id))
-            .is_some_and(|ancestors| ancestors.contains(of))
+        else {
+            return false;
+        };
+        if let Some((id, _, _)) = self.class(of) {
+            ancestors.ids.contains(&id)
+        } else {
+            ancestors.unresolved.contains(of)
+        }
     }
 
     /// The extends/implements closure for a declaration, addressed through
-    /// its stable class ID. Names stay in the values for existing callers.
-    pub(crate) fn ancestor_names_of(&self, class: &str) -> Option<&NameSet> {
+    /// its stable class ID. Names are reconstructed only at this API
+    /// boundary for consumers that still need class names.
+    pub(crate) fn ancestor_names_of(&self, class: &str) -> Option<NameSet> {
         let id = self.class_ids.get(class)?;
-        self.ancestors_by_id.get(id)
+        self.ancestors_by_id
+            .get(id)
+            .map(|ancestors| ancestors.names(self))
     }
 
     /// The exact `extends`+`implements`-only transitive closure
@@ -97,12 +149,12 @@ impl Registry {
     /// `instanceof`/`is_subclass_of` never recognizes). `class` itself
     /// is never included (matching `is_subclass_of`'s own separate
     /// `class == of` check).
-    fn class_extends_implements_closure(&self, class: &Name) -> NameSet {
+    fn class_extends_implements_closure(&self, class: &Name) -> AncestorIds {
         // The names walked are borrowed from the classes (or `class`), and
         // one is copied only the first time it is found.
         let mut seen: FxHashSet<&Name> = FxHashSet::default();
         let mut stack: Vec<&Name> = vec![class];
-        let mut result = NameSet::default();
+        let mut result = AncestorIds::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current) {
                 continue;
@@ -111,8 +163,10 @@ impl Registry {
                 continue;
             };
             for parent in info.extends.iter().chain(info.implements.iter()) {
-                if !result.contains(parent) {
-                    result.insert(parent.clone());
+                if let Some(id) = self.class_ids.get(parent) {
+                    result.ids.insert(*id);
+                } else {
+                    result.unresolved.insert(parent.clone());
                 }
                 stack.push(parent);
             }

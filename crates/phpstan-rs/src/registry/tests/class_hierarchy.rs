@@ -67,6 +67,23 @@ fn method_constant_named_types_are_results_not_declaration_writes() {
 }
 
 #[test]
+fn base_switch_retags_id_valued_ancestor_closures_and_keeps_unresolved_edges() {
+    let mut registry = build_registry("<?php class Old {} ");
+    let replacement =
+        build_registry("<?php class Parent {} class Child extends Parent implements Missing {}");
+
+    registry.switch_base(replacement);
+
+    assert!(registry.is_subclass_of("Child", "Parent"));
+    assert!(registry.is_subclass_of("Child", "Missing"));
+    assert_eq!(
+        registry.ancestor_names_of("Child").unwrap().len(),
+        2,
+        "registered IDs resolve back to names after generation retagging"
+    );
+}
+
+#[test]
 fn a_final_private_method_is_not_recorded_as_final() {
     // A `private` method isn't part of a class's inherited/
     // overridable surface at all in real PHP - `final` on one is

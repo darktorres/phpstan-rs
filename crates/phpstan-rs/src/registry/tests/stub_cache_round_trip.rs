@@ -328,6 +328,12 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
                 built.ancestor_names_of(name),
                 "the ID-addressed ancestor closure for {name} survives a cache read"
             );
+            for ancestor in back.ancestor_names_of(name).into_iter().flatten() {
+                assert!(
+                    back.is_subclass_of(name, ancestor.as_str()),
+                    "the resolved ID closure for {name} still reaches {ancestor} after a cache read"
+                );
+            }
             assert_eq!(
                 back.method_owners(name),
                 built.method_owners(name),

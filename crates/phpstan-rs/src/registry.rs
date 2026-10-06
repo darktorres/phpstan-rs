@@ -427,7 +427,7 @@ pub struct Registry {
     // `precompute_ancestor_names` (`registry/hierarchy.rs`). Rebuilt whenever
     // the class graph could have changed.
     #[serde(skip)]
-    pub(crate) ancestors_by_id: FxHashMap<ClassId, syntax::name::NameSet>,
+    pub(crate) ancestors_by_id: FxHashMap<ClassId, hierarchy::AncestorIds>,
     #[serde(skip)]
     ancestor_names_cache: NameTable<syntax::name::NameSet>,
     // The classes, as declared, with a `PHPStan\` name anywhere among what
@@ -1045,7 +1045,7 @@ impl Registry {
             .filter_map(|(name, id)| {
                 self.ancestors_by_id
                     .get(id)
-                    .map(|ancestors| (name.clone(), ancestors.clone()))
+                    .map(|ancestors| (name.clone(), ancestors.names(self)))
             })
             .collect();
         let member_owners: FxHashMap<Name, hierarchy::ClassOwners> = self
@@ -1116,7 +1116,7 @@ impl Registry {
                     self.class_ids
                         .get(name)
                         .copied()
-                        .map(|id| (id, ancestors.clone()))
+                        .map(|id| (id, hierarchy::AncestorIds::from_names(self, ancestors)))
                 })
                 .collect();
             self.ancestor_names_cache = NameTable::default();
@@ -1124,7 +1124,10 @@ impl Registry {
             self.ancestors_by_id = ancestor_names
                 .into_iter()
                 .filter_map(|(name, ancestors)| {
-                    self.class_ids.get(&name).copied().map(|id| (id, ancestors))
+                    self.class_ids
+                        .get(&name)
+                        .copied()
+                        .map(|id| (id, hierarchy::AncestorIds::from_names(self, &ancestors)))
                 })
                 .collect();
         }
@@ -1384,7 +1387,7 @@ impl Registry {
             .filter_map(|(name, id)| {
                 self.ancestors_by_id
                     .get(id)
-                    .map(|ancestors| (name.clone(), ancestors.clone()))
+                    .map(|ancestors| (name.clone(), ancestors.names(self)))
             })
             .collect()
     }
@@ -1607,7 +1610,12 @@ impl Registry {
         base.ancestors_by_id = base
             .ancestors_by_id
             .drain()
-            .map(|(id, ancestors)| (id.with_generation(generation), ancestors))
+            .map(|(id, ancestors)| {
+                (
+                    id.with_generation(generation),
+                    ancestors.with_generation(generation),
+                )
+            })
             .collect();
         base.member_owners = base
             .member_owners
