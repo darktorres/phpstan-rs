@@ -191,7 +191,10 @@ impl Registry {
                 let mut static_from_traits: NameSet = NameSet::default();
                 for trait_name in uses {
                     if let Some(trait_info) = registry.classes().get(trait_name) {
-                        for (name, sig) in trait_info.methods.iter() {
+                        for name in &trait_info.member_order {
+                            let Some(sig) = trait_info.methods.get(name) else {
+                                continue;
+                            };
                             if own_method_names.contains_key(name) {
                                 continue;
                             }
@@ -276,7 +279,8 @@ impl Registry {
         {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
-                    if info.methods.insert_if_absent(name, sig) {
+                    if info.methods.insert_if_absent(name.clone(), sig) {
+                        info.register_member_name(name);
                         changed = true;
                     }
                 }
@@ -335,8 +339,11 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|info| {
                 for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
-                    if info.methods.insert_if_absent(name.clone(), sig) && is_static {
-                        info.static_methods.insert(name);
+                    if info.methods.insert_if_absent(name.clone(), sig) {
+                        info.register_member_name(name.clone());
+                        if is_static {
+                            info.static_methods.insert(name);
+                        }
                     }
                 }
             });
@@ -953,8 +960,10 @@ impl Registry {
             }
         }
         for (class_name, name, sig) in method_additions {
-            if let Some(info) = self.classes.get_mut(&class_name) {
-                info.methods.insert_if_absent(name, sig);
+            if let Some(info) = self.classes.get_mut(&class_name)
+                && info.methods.insert_if_absent(name.clone(), sig)
+            {
+                info.register_member_name(name);
             }
         }
         for (class_name, name, sig) in property_additions {

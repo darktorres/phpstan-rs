@@ -567,14 +567,11 @@ impl Registry {
         // class and function names: the owners hold one entry for each
         // method, by the most derived declaration's spelling.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_method_by_class_id(*id, declared))
-        } else {
-            None
-        };
-        from_file.or_else(|| self.classes.get(owner)?.methods.get(declared))
+        let from_id = self
+            .class_ids
+            .get(owner)
+            .and_then(|id| self.file_method_by_class_id(*id, declared));
+        from_id.or_else(|| self.classes.get(owner)?.methods.get(declared))
     }
 
     /// The real declared spelling `lookup_method`/`lookup_method_with_
@@ -641,14 +638,11 @@ impl Registry {
     ) -> Option<(Name, &FunctionReflection)> {
         // See `lookup_method`.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_method_by_class_id(*id, declared))
-        } else {
-            None
-        };
-        let sig = from_file.or_else(|| self.classes.get(owner)?.methods.get(declared))?;
+        let from_id = self
+            .class_ids
+            .get(owner)
+            .and_then(|id| self.file_method_by_class_id(*id, declared));
+        let sig = from_id.or_else(|| self.classes.get(owner)?.methods.get(declared))?;
         Some((owner.clone(), sig))
     }
 

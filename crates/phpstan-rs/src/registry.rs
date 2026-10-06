@@ -563,35 +563,16 @@ impl Registry {
         id: ClassId,
         method: &str,
     ) -> Option<MethodRef> {
-        self.debug_check_id_generation(id.generation());
-        if id.source()? != IdSource::Project {
-            return None;
-        }
-        let declaration = self
-            .project_class_decls
-            .get(id.local() as usize)?
-            .as_ref()?;
-        let slot = declaration.file.member_slot(declaration.layout, method)?;
+        let class = self.class_by_id(id)?;
+        let slot = *class.member_slots.get(method)?;
         Some(MethodRef::new(id, slot))
     }
 
     pub(crate) fn file_method_by_ref(&self, method: MethodRef) -> Option<&FunctionReflection> {
         let id = method.class();
-        self.debug_check_id_generation(id.generation());
-        if id.source()? != IdSource::Project {
-            return None;
-        }
-        let declaration = self
-            .project_class_decls
-            .get(id.local() as usize)?
-            .as_ref()?;
-        Some(
-            declaration
-                .file
-                .member_at_slot(declaration.layout, method.slot())?
-                .declaration
-                .get(),
-        )
+        let class = self.class_by_id(id)?;
+        let name = class.member_order.get(usize::from(method.slot()))?;
+        class.methods.get(name)
     }
 
     pub(crate) fn file_property_by_class_id(

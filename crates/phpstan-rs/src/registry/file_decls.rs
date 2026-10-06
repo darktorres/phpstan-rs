@@ -264,25 +264,6 @@ impl FileDecls {
         Some(&self.members[*slot])
     }
 
-    pub(crate) fn member_slot(&self, layout: Idx<ClassLayout>, name: &str) -> Option<u16> {
-        let slot = self
-            .member_slots
-            .get(&(encode_idx(layout), name.to_ascii_lowercase()))?;
-        let start = encode_idx(self.class_layouts[layout].members.start());
-        u16::try_from(encode_idx(*slot).checked_sub(start)?).ok()
-    }
-
-    pub(crate) fn member_at_slot(
-        &self,
-        layout: Idx<ClassLayout>,
-        slot: u16,
-    ) -> Option<&FileMember> {
-        let range = &self.class_layouts[layout].members;
-        let (start, end) = encode_range(range);
-        let index = start.checked_add(u32::from(slot))?;
-        (index < end).then(|| &self.members[decode_idx(index)])
-    }
-
     fn index_members(&mut self, layout: Idx<ClassLayout>) {
         let class = encode_idx(layout);
         let (start, end) = encode_range(&self.class_layouts[layout].members);
@@ -996,5 +977,34 @@ mod tests {
             registry.class_by_id(old_id)
         }));
         assert!(stale_read.is_err());
+    }
+
+    #[test]
+    fn trait_members_and_aliases_receive_ordered_class_local_slots() {
+        let tokens = Lexer::new(
+            "<?php trait Extra { public function zebra(): void {} public function alpha(): void {} } class Host { use Extra { zebra as zebraAlias; } public function own(): void {} }",
+        )
+        .tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let registry = crate::registry::Registry::build(&program);
+        let (class_id, _, class) = registry.class("Host").unwrap();
+
+        assert_eq!(
+            class
+                .member_order
+                .iter()
+                .map(Name::as_str)
+                .collect::<Vec<_>>(),
+            ["own", "zebra", "alpha", "zebraAlias"]
+        );
+        for name in ["own", "zebra", "alpha", "zebraAlias"] {
+            let method_ref = registry
+                .file_method_ref_by_class_id(class_id, name)
+                .unwrap();
+            assert!(std::ptr::eq(
+                registry.file_method_by_ref(method_ref).unwrap(),
+                registry.lookup_method("Host", name).unwrap()
+            ));
+        }
     }
 }

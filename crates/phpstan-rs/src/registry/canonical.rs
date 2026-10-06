@@ -39,6 +39,8 @@ canonical_struct!(ClassReflection {
     extends,
     implements,
     methods,
+    member_order,
+    member_slots,
     redeclared_methods,
     properties,
     consts,

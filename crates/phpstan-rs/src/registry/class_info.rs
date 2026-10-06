@@ -381,6 +381,11 @@ pub struct ClassReflection {
     pub(in crate::registry) extends: Vec<Name>,
     pub(in crate::registry) implements: Vec<Name>,
     pub(in crate::registry) methods: Members<FunctionReflection>,
+    // Every method the class currently has, in declaration order. Own
+    // methods come first; trait contributions and aliases are appended as
+    // composition runs. Slots are class-local and case-folded.
+    pub(in crate::registry) member_order: Vec<Name>,
+    pub(in crate::registry) member_slots: FoldedMap<u16>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
@@ -1077,6 +1082,16 @@ impl ClassReflection {
             );
             methods_vec.push((name.clone(), name_site(&m.function), sig));
         }
+        let mut member_order = Vec::new();
+        let mut member_slots = FoldedMap::default();
+        for (method_name, _, _) in &methods_vec {
+            if !member_slots.contains_key(method_name) {
+                let slot =
+                    u16::try_from(member_order.len()).expect("class method slot space exhausted");
+                member_slots.insert(method_name.clone(), slot);
+                member_order.push(method_name.clone());
+            }
+        }
         let (methods, redeclared_methods) = collect_merged_methods(methods_vec);
         // Same private-is-not-overridable exemption `final_methods`
         // above applies, one member kind over - a private property
@@ -1660,6 +1675,8 @@ impl ClassReflection {
             extends: c.extends.iter().map(class_ref).collect(),
             implements,
             methods: methods.into_iter().collect(),
+            member_order,
+            member_slots,
             redeclared_methods,
             properties: properties
                 .into_iter()
@@ -2110,6 +2127,9 @@ impl ClassReflection {
                 }
             }
         }
+        for name in other.member_order {
+            self.register_member_name(name);
+        }
         self.redeclared_methods.extend(other.redeclared_methods);
         self.properties.extend(other.properties);
         self.consts.extend(other.consts);
@@ -2171,6 +2191,17 @@ impl ClassReflection {
             self.trait_aliases = other.trait_aliases;
         }
         self
+    }
+
+    pub(crate) fn register_member_name(&mut self, name: Name) -> bool {
+        if self.member_slots.contains_key(&name) {
+            return false;
+        }
+        let slot =
+            u16::try_from(self.member_order.len()).expect("class method slot space exhausted");
+        self.member_slots.insert(name.clone(), slot);
+        self.member_order.push(name);
+        true
     }
 }
 
