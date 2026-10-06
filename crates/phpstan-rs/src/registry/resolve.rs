@@ -149,7 +149,7 @@ impl Registry {
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             ClassId,
-            Vec<(Name, Arc<super::Lazy<FunctionReflection>>)>,
+            Vec<(MethodRef, Name, Arc<super::Lazy<FunctionReflection>>)>,
             Vec<(Name, Arc<PropertyReflection>)>,
             Vec<(Name, Arc<ConstantReflection>)>,
             NameSet,
@@ -179,6 +179,8 @@ impl Registry {
                 // declares is left out here instead of cloned and dropped.
                 let own_method_names = &own.methods;
                 let mut methods = Vec::new();
+                let mut added_method_names = FoldedMap::default();
+                let mut next_method_slot = own.member_order.len();
                 let mut properties = Vec::new();
                 let mut consts = Vec::new();
                 let mut abstract_from_traits: NameSet = NameSet::default();
@@ -210,14 +212,33 @@ impl Registry {
                                 });
                                 if selected_trait == Some(trait_name)
                                     && !own_method_names.contains_key(&alias.alias)
+                                    && !added_method_names.contains_key(&alias.alias)
                                 {
-                                    methods.push((alias.alias.clone(), Arc::clone(&shared_sig)));
+                                    let slot = u16::try_from(next_method_slot)
+                                        .expect("class method slot space exhausted");
+                                    next_method_slot += 1;
+                                    added_method_names.insert(alias.alias.clone(), ());
+                                    methods.push((
+                                        MethodRef::new(class_id, slot),
+                                        alias.alias.clone(),
+                                        Arc::clone(&shared_sig),
+                                    ));
                                 }
                             }
-                            if own_method_names.contains_key(name) {
+                            if own_method_names.contains_key(name)
+                                || added_method_names.contains_key(name)
+                            {
                                 continue;
                             }
-                            methods.push((name.clone(), shared_sig));
+                            let slot = u16::try_from(next_method_slot)
+                                .expect("class method slot space exhausted");
+                            next_method_slot += 1;
+                            added_method_names.insert(name.clone(), ());
+                            methods.push((
+                                MethodRef::new(class_id, slot),
+                                name.clone(),
+                                shared_sig,
+                            ));
                             if trait_info.abstract_methods.contains(name) {
                                 abstract_from_traits.insert(name.clone());
                             }
@@ -277,9 +298,12 @@ impl Registry {
                 continue;
             };
             if let Some(info) = self.classes.get_mut(&class_name) {
-                for (name, sig) in methods {
+                for (method_ref, name, sig) in methods {
+                    debug_assert_eq!(method_ref.class(), class_id);
                     if info.methods.insert_shared_if_absent(name.clone(), sig) {
-                        info.register_member_name(name);
+                        let inserted = info.register_member_name(name.clone());
+                        debug_assert!(inserted);
+                        debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
                         changed = true;
                     }
                 }
