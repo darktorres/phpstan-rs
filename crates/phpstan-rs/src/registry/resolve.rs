@@ -999,13 +999,15 @@ impl Registry {
     /// type_aliases`'s alias-of-alias handling accepts.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
-        let mut method_additions: Vec<(ClassId, Name, Arc<super::Lazy<FunctionReflection>>)> =
+        let mut method_additions: Vec<(MethodRef, Name, Arc<super::Lazy<FunctionReflection>>)> =
             Vec::new();
         let mut property_additions: Vec<(ClassId, Name, Arc<PropertyReflection>)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
             let Some(class_id) = self.class_ids.get(class_name).copied() else {
                 continue;
             };
+            let mut added_method_names = FoldedMap::default();
+            let mut next_method_slot = info.member_order.len();
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
@@ -1016,9 +1018,18 @@ impl Registry {
                     };
                     if sig.visibility == Visibility::Public
                         && !info.methods.contains_key(name)
+                        && !added_method_names.contains_key(name)
                         && let Some(shared_sig) = mixin_info.methods.shared_get(name)
                     {
-                        method_additions.push((class_id, name.clone(), shared_sig));
+                        let slot = u16::try_from(next_method_slot)
+                            .expect("class method slot space exhausted");
+                        next_method_slot += 1;
+                        added_method_names.insert(name.clone(), ());
+                        method_additions.push((
+                            MethodRef::new(class_id, slot),
+                            name.clone(),
+                            shared_sig,
+                        ));
                     }
                 }
                 for (name, sig) in &mixin_info.properties {
@@ -1028,14 +1039,17 @@ impl Registry {
                 }
             }
         }
-        for (class_id, name, sig) in method_additions {
+        for (method_ref, name, sig) in method_additions {
+            let class_id = method_ref.class();
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
             if let Some(info) = self.classes.get_mut(&class_name)
                 && info.methods.insert_shared_if_absent(name.clone(), sig)
             {
-                info.register_member_name(name);
+                let inserted = info.register_member_name(name.clone());
+                debug_assert!(inserted);
+                debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
             }
         }
         for (class_id, name, sig) in property_additions {
