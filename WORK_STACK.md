@@ -363,7 +363,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   when mutating the current reflection store. The full crate suite (1,199
   tests), check, Clippy and formatting pass. `dec35a80` carries each
   inherited-PHPDoc fill by `MethodRef` inside the class batch. The full crate
-  suite, check, Clippy and formatting pass. The 4.7 reference, include-graph,
+  suite, check, Clippy and formatting pass. `3e6a1772` keys deferred class
+  constant updates by `ClassId` and constant slot. The full 1,199-test suite,
+  check, Clippy and formatting pass. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
