@@ -1507,7 +1507,7 @@ mod declaration_batch_tests {
         let mut next_function = 0u32;
         let mut declarations = Vec::new();
         for (file, parsed) in parsed.iter().enumerate() {
-            for declaration in &parsed.built_decls {
+            for declaration in parsed.built_declarations() {
                 let (class_local, function_local) = match declaration {
                     BuiltDecl::Class { .. } => {
                         let local = next_class;

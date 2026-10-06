@@ -3835,6 +3835,11 @@ fn parse_file_recording_with_origin<'a>(
 }
 
 impl ParsedFile {
+    #[cfg(test)]
+    pub(crate) fn built_declarations(&self) -> &[crate::registry::BuiltDecl] {
+        &self.built_decls
+    }
+
     /// Drops the tree and the ignore comments, which only a file whose tree
     /// is kept has; a file read back from the per-file cache has neither.
     pub(crate) fn drop_tree(&mut self) {
