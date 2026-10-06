@@ -412,8 +412,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   cache format advances to version 11. Imported-alias, deferred value-of,
   declaration-immutability and cache round-trip checks pass with all 1,148
   crate tests, all 275 syntax tests, Clippy, formatting and diff checks. Item
-  4.6 is active: trait-composed properties and other pass outputs still mutate
-  declarations. The 4.7 reference,
+  `0cdb6a41` moves trait- and mixin-composed properties to the Registry result
+  table and exposes their names to owner indexing, hooks/effects, checker,
+  architecture, dead-member and LSP readers. Deferred type passes include
+  composed properties; host declarations remain as built. The hierarchy and
+  cache round-trip fixtures pass with all 1,148 crate tests, 275 syntax tests,
+  check, Clippy, formatting and diff checks. Item 4.6 remains active: trait
+  methods/constants and other pass outputs still mutate declarations. The
+  4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
