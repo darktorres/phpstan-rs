@@ -1,4 +1,5 @@
 use rustc_hash::FxHashMap;
+use syntax::ast::Param;
 use syntax::name::Name;
 
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
@@ -73,7 +74,7 @@ pub struct AssertInfo {
 /// a parameter that doesn't actually exist (a stale doc comment, or
 /// simply a name this project failed to match for some other reason)
 /// isn't silently misread as some other shape instead.
-fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
+fn classify_assert_target(target: &str, params: &[Param]) -> AssertTarget {
     if target == "$this" {
         return AssertTarget::ThisSelf;
     }
@@ -87,7 +88,7 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
         && !name.is_empty()
         && name.chars().all(|c| c.is_alphanumeric() || c == '_')
     {
-        return if param_names.contains(&name) {
+        return if params.iter().any(|param| param.name.as_ref() == name) {
             AssertTarget::Param(Name::from(name))
         } else {
             AssertTarget::NotFound(Name::from(name))
@@ -106,13 +107,13 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
 /// declaration already goes through.
 pub(crate) fn resolve_assert_tags(
     tags: &[docblock::AssertTag],
-    param_names: &[&str],
+    params: &[Param],
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> Vec<AssertInfo> {
     tags.iter()
         .map(|tag| {
-            let target = classify_assert_target(&tag.target, param_names);
+            let target = classify_assert_target(&tag.target, params);
             let ty = parse_type_node(&tag.ty);
             let ty = mark_template_params(ty, template_params);
             let mut case_refs = Vec::new();

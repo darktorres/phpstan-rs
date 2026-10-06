@@ -21,7 +21,6 @@
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
 use crate::checker::Checker;
-use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use phpdoc::DocType;
 use phpdoc::docblock;
@@ -371,19 +370,8 @@ impl<'a> Checker<'a> {
     /// e.g. a genuinely untyped `...$args`'s own per-argument `mixed`
     /// behind an `array<mixed>`).
     ///
-    /// `sig` is the same `Option<&FunctionReflection>` `check_function`
-    /// itself already looked up - when present, its `ParameterReflection::
-    /// explicit_mixed_hint`/`FunctionReflection::return_explicit_mixed_hint`
-    /// (computed once in `from_decl`, from whichever declaration's
-    /// docblock `ty`/`return_type` actually came from - this declaration's
-    /// own, or an ancestor's via `Registry::flatten_phpdoc_inheritance`)
-    /// are used instead of re-deriving "was `mixed` written explicitly"
-    /// from `f`'s own raw text: re-deriving from `f` alone would silently
-    /// miss every inherited `array<string, mixed>`/nested-`mixed` type
-    /// on a class implementing an interface with no docblock of its own.
-    /// `sig` is only ever `None` for an anonymous class (never indexed
-    /// into the registry - see `lookup_own_signature`'s own doc comment),
-    /// where the text-based fallback below still applies.
+    /// The explicit-`mixed` check reads this declaration's own native
+    /// hints and PHPDoc while its AST is already in hand.
     pub(crate) fn check_missing_function_typehints(
         &mut self,
         f: &FunctionDecl,
@@ -391,31 +379,8 @@ impl<'a> Checker<'a> {
         label: &str,
         resolved_params: &[(String, Type, Span)],
         declared_return: Option<&Type>,
-        sig: Option<&FunctionReflection>,
     ) {
-        // The registry-computed `sig` (built once at index time via
-        // `FunctionReflection::from_decl`) already carries every per-param/
-        // return "was there an explicit `mixed` somewhere" verdict this
-        // function would otherwise re-derive by re-parsing the identical
-        // raw docblock text again here - a real, measured cost at
-        // `check_function`'s own call volume. Skip the full parse
-        // whenever `sig` already covers every param (`resolved_params`
-        // and `sig.params` are always built 1:1 from the same `f.params`,
-        // so `sig.is_some()` alone is enough - see `lookup_own_signature`'s
-        // own doc comment: `sig` is only ever `None` for an anonymous
-        // class method) *and* the magic-method short-circuit just below
-        // can't possibly need `doc_return`'s real presence/absence either
-        // (checked here, cheaply, via the same name-table lookup that
-        // short-circuit itself uses - not a substring probe, to avoid any
-        // false-positive risk on that carefully-tuned check).
-        let magic_method_may_need_doc_return = class_name.is_some()
-            && f.return_type.is_none()
-            && is_magic_method_with_implicit_return_type(&f.name);
-        let doc = if sig.is_none() || magic_method_may_need_doc_return {
-            f.doc_comment.as_deref().map(docblock::parse_shared)
-        } else {
-            None
-        };
+        let doc = f.doc_comment.as_deref().map(docblock::parse_shared);
         let kind_word = if class_name.is_some() {
             "Method"
         } else {
@@ -432,7 +397,7 @@ impl<'a> Checker<'a> {
             node.is_some_and(|n| this.type_node_unresolvable(n, class_name))
         };
 
-        for (i, (name, ty, span)) in resolved_params.iter().enumerate() {
+        for (name, ty, span) in resolved_params {
             if unresolvable(
                 self,
                 doc_nodes.as_ref().and_then(|n| n.params.get(name.as_str())),
@@ -445,10 +410,7 @@ impl<'a> Checker<'a> {
                 .find(|p| *p.name == **name)
                 .and_then(|p| p.type_hint.as_ref());
             let doc_ty = doc.as_ref().and_then(|d| d.params.get(name));
-            let explicit_mixed = match sig.and_then(|s| s.params().get(i)) {
-                Some(param_sig) => param_sig.explicit_mixed_hint(),
-                None => mentions_mixed(native_hint, doc_ty),
-            };
+            let explicit_mixed = mentions_mixed(native_hint, doc_ty);
             if ty.is_mixed() && !explicit_mixed {
                 self.report(
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
@@ -527,10 +489,7 @@ impl<'a> Checker<'a> {
         ) {
             return;
         }
-        let return_explicit_mixed = match sig {
-            Some(s) => s.return_explicit_mixed_hint(),
-            None => mentions_mixed(native_return, doc_return),
-        };
+        let return_explicit_mixed = mentions_mixed(native_return, doc_return);
         let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
         if return_ty.is_mixed() && !return_explicit_mixed {
             self.report(

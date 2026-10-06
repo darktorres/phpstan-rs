@@ -467,7 +467,11 @@ impl<'a> Checker<'a> {
                 "parameter.trait",
             );
             // `class.nameCase` for the set hook's parameter type.
-            self.check_type_class_name_case(prop_sig.set_case_refs(), span);
+            if let Some(param) = param {
+                let (_, case_refs) =
+                    self.resolve_type_hint_with_case_refs(param.type_hint.as_ref());
+                self.check_type_class_name_case(&case_refs, span);
+            }
         }
 
         // `ExistingClassesInPropertyHookTypehintsRule`'s native-union-

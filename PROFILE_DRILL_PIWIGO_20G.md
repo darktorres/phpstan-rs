@@ -2,7 +2,7 @@
 
 Profile: `~/.cache/prs-profile/cl-20g/cg.out-01..10` (ten threads), copied from the scratchpad of the session that built `PROFILE_DRILL_PIWIGO_25G.md`'s designs. Binary `cl-20g/prs-dhat`: the `dhat` profile with frame pointers, code of `5fb858c9` (HEAD's code). Command `check-project --config phpstan-rs.toml --format json` in `/home/torres/piwigo17-frozen`, `PHPSTAN_RS_NO_FILE_CACHE=1`, warm stub cache. Total **20,570,586,331 Ir**. The same directory holds that session's sampling profile (`perf.data`, 3,322 samples) and build log. Percentages are of 20.57 G unless marked.
 
-Nothing was built or run for this report. Everything below is read from these two profiles, from the other session's dhat heap profile of the same code (`target/dhat-heap.json`, §8), from the 25.14 G profile (`cl-final`) and its line-tables twin (`lt`), and from the code at HEAD. Part I compares what was built with the 25 G report's designs, step by step (§2), and drills down the heap (§8). Part II is the plan: twenty items in the order they are built, each validated at its end; §13 outlines the audits that shaped it.
+Nothing was built or run for this report. Everything below is read from these two profiles, from the other session's dhat heap profile of the same code (`target/dhat-heap.json`, §8), from the 25.14 G profile (`cl-final`) and its line-tables twin (`lt`), and from the code at HEAD. Part I compares what was built with the 25 G report's designs, step by step (§2), and drills down the heap (§8). Part II is the plan: twenty items in build order, each ending with a tests-only gate; the complete §11 validation and O3 run once after item 19. Section 13 outlines the audits that shaped it.
 
 # Part I. Drill-down
 
@@ -2740,7 +2740,7 @@ All the corrections are in the designs above. The eleven passes, in outline:
 | 11 | late items against each other and the code | one load path (1); the walk's `stat`s and link cycles (2) | — |
 
 The rewrite made two more changes:
-- validation happens once, at the end (§9, §11), and oracles that needed an old implementation alive became dumps from the starting commit (later, when building started, validation moved to the end of each item, at the user's request);
+- full validation happens once, at the end (§9, §11), and oracles that needed an old implementation alive became dumps from the starting commit; item gates run tests only;
 - the file's names live in an append-only arena of their own, so the tree can refer to them before item 10 changes how the lexer hands out tokens. (Later: item 9's `names` vector, by `NameId`.)
 
 **The heap profile (§8) added:**

@@ -442,6 +442,7 @@ impl<'a> Checker<'a> {
             .as_deref()
             .filter(|doc| doc.contains('@'))
             .map(super::phpdoc_unresolvable::tag_type_nodes);
+        let function_doc = f.doc_comment.as_deref().map(docblock::parse_shared);
         let doc_unresolvable = |this: &Self, node: Option<&phpdoc::grammar::TypeNode>| {
             node.is_some_and(|n| this.type_node_unresolvable(n, class_name))
         };
@@ -449,6 +450,7 @@ impl<'a> Checker<'a> {
             self,
             doc_nodes.as_ref().and_then(|n| n.return_type.as_ref()),
         );
+        let function_template_params = self.current_function_template_params();
         match sig {
             // The registry's FunctionReflection already has PHPDoc types merged
             // in - using it here, instead of re-deriving from the raw
@@ -512,8 +514,17 @@ impl<'a> Checker<'a> {
                         ast_param.span,
                         "parameter.noParent",
                     );
-                    self.check_type_class_name_case(param.case_refs(), ast_param.span);
-                    self.check_type_internal_usage(param.case_refs(), ast_param.span);
+                    let case_refs = registry::declared_type(
+                        function_doc
+                            .as_ref()
+                            .and_then(|doc| doc.params.get(ast_param.name.as_ref())),
+                        ast_param.type_hint.as_ref(),
+                        &function_template_params,
+                        &self.name_ctx,
+                    )
+                    .case_refs;
+                    self.check_type_class_name_case(&case_refs, ast_param.span);
+                    self.check_type_internal_usage(&case_refs, ast_param.span);
                     resolved_params.push((param.name().to_string(), ty.clone(), ast_param.span));
                     // `ParameterReflection::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
@@ -633,7 +644,6 @@ impl<'a> Checker<'a> {
         // Captured (moved into) by the `.or_else` closure below when
         // `sig` is `None`. Stays empty (and unused) when `sig` is
         // `Some`, since the closure never runs in that case.
-        let mut declared_return_case_refs_none_path: Vec<(Name, Name)> = Vec::new();
         let declared_return = sig
             .map(|s| {
                 if return_doc_unresolvable {
@@ -654,14 +664,13 @@ impl<'a> Checker<'a> {
                 let registry::DeclaredType {
                     ty,
                     native: native_ty,
-                    case_refs,
+                    ..
                 } = registry::declared_type(
                     doc_return.as_ref(),
                     f.return_type.as_ref(),
-                    &Default::default(),
+                    &function_template_params,
                     &self.name_ctx,
                 );
-                declared_return_case_refs_none_path = case_refs;
                 let ty = self
                     .registry
                     .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
@@ -688,14 +697,17 @@ impl<'a> Checker<'a> {
                 None => ty,
             })
         });
-        // Whichever path actually produced `declared_return` above -
-        // `sig`'s own stored field when present, otherwise whatever the
-        // `.or_else` closure collected inline into
-        // `declared_return_case_refs_none_path` (empty and unused when
-        // `sig` was `Some`, since that closure never ran).
-        let declared_return_case_refs = sig
-            .map(|s| s.return_case_refs().clone())
-            .unwrap_or(declared_return_case_refs_none_path);
+        // Compute case references from this declaration while it is being
+        // checked, rather than retaining them in every registry signature.
+        let declared_return_case_refs = registry::declared_type(
+            function_doc
+                .as_ref()
+                .and_then(|doc| doc.return_type.as_ref()),
+            f.return_type.as_ref(),
+            &function_template_params,
+            &self.name_ctx,
+        )
+        .case_refs;
         // Mirrors real PHPStan's `ExistingClassesInTypehintsRule`'s
         // return-type check - the un-widened, exactly-as-declared type
         // (not the `?`-and-`resolve_pseudo`-adjusted `expected` the
@@ -821,7 +833,6 @@ impl<'a> Checker<'a> {
             &label,
             &resolved_params,
             declared_return.as_ref(),
-            sig,
         );
         if self.settings.extras.check_native_type_hints
             && let Some(sig) = sig

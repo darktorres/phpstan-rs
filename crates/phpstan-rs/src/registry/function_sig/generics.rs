@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use syntax::name::Name;
 use syntax::name::NameMap;
 
-use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::name_context::resolve_names_in_type;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
 use phpdoc::docblock::DocBlock;
@@ -50,27 +50,21 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &NameMap<Type>) -> Type
 /// aliases' own values - a sibling alias reference inside this one's RHS
 /// isn't itself a class-name reference to case-check (it's resolved
 /// separately, when *that* alias's own entry is built).
-pub(crate) type TypeAliasCaseRefs = NameMap<Vec<(Name, Name)>>;
-
 pub(crate) fn build_type_aliases(
     class_doc: Option<&DocBlock>,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (NameMap<Type>, TypeAliasCaseRefs) {
+) -> NameMap<Type> {
     let Some(class_doc) = class_doc else {
-        return (NameMap::default(), NameMap::default());
+        return NameMap::default();
     };
-    let mut case_refs: TypeAliasCaseRefs = NameMap::default();
     let raw: NameMap<Type> = class_doc
         .type_aliases
         .iter()
         .map(|(name, node)| {
             let ty = parse_type_node(node);
             let ty = mark_template_params(ty, template_params);
-            let mut refs = Vec::new();
-            collect_class_name_case_refs(&ty, ctx, &mut refs);
             let resolved_name = Name::from(&ctx.resolve(name));
-            case_refs.insert(resolved_name.clone(), refs);
             let ty = resolve_names_in_type(ty, ctx);
             (resolved_name, ty)
         })
@@ -80,7 +74,7 @@ pub(crate) fn build_type_aliases(
     for name in raw.keys() {
         expand_type_alias(name, &raw, &mut aliases, &mut visiting);
     }
-    (aliases, case_refs)
+    aliases
 }
 
 /// `name`'s value with every alias it uses expanded, at any depth. An alias

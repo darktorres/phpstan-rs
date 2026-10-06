@@ -11,6 +11,40 @@ impl Type {
     /// resolves to the real, useful native type instead of losing all
     /// precision.
     pub fn reconcile_with_native(self, native_ty: Type) -> Type {
+        // The overwhelmingly common PHPDoc type is one member. Keep it
+        // directly through the filter/refinement path; allocate a result
+        // vector only if a native union has an uncovered alternative to add.
+        if !matches!(self.repr(), Repr::Union(_)) {
+            if !member_possible_given_native(&self, &native_ty) {
+                return native_ty;
+            }
+            let kept = refine_callable_member(self, &native_ty);
+            let Repr::Union(native_members) = native_ty.repr() else {
+                return kept;
+            };
+            if kept.contains_deferred()
+                || matches!(kept.repr(), Repr::Conditional { .. })
+                || kept.references_template()
+            {
+                return kept;
+            }
+            let additions: Vec<Type> = native_members
+                .iter()
+                .filter(|nm| {
+                    native_member_addable(nm)
+                        && !Relation::structural().is_super_type_of(nm, &kept).yes()
+                })
+                .cloned()
+                .collect();
+            if additions.is_empty() {
+                return kept;
+            }
+            let mut result = Vec::with_capacity(1 + additions.len());
+            result.push(kept);
+            result.extend(additions);
+            return Type::new(Repr::Union(result));
+        }
+
         // A type that is not a union is its own one member, not its form
         // taken apart and built again.
         let members: Vec<Type> = if matches!(self.repr(), Repr::Union(_)) {

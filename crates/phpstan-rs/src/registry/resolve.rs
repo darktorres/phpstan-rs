@@ -621,7 +621,6 @@ impl Registry {
                 if !own.has_set_hook && inherited.has_set_hook {
                     merged.has_set_hook = true;
                     merged.set_ty = inherited.set_ty.clone();
-                    merged.set_case_refs = inherited.set_case_refs.clone();
                 }
                 merged.is_virtual = own.is_virtual && inherited.is_virtual;
                 if merged.has_get_hook != own.has_get_hook
@@ -1724,9 +1723,8 @@ impl Registry {
     /// genuinely untyped native parameter, PSR-3's
     /// `LoggerInterface::log(mixed $level, ...)` shape), there's nothing
     /// to lose - inheriting the ancestor's `Mixed` here is exactly what
-    /// correctly propagates `explicit_mixed_hint` down from wherever it
-    /// was deliberately written, rather than leaving the position
-    /// looking entirely undocumented.
+    /// correctly backfills the inherited PHPDoc type when the native
+    /// declaration has no more specific information.
     pub(crate) fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
         !ancestor_ty.is_mixed() || native_ty.is_mixed()
     }
@@ -1769,7 +1767,7 @@ impl Registry {
     ) -> bool {
         // What one method takes from its ancestors: the parameters by
         // position and the return type.
-        type Backfill = (MethodRef, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
+        type Backfill = (MethodRef, Vec<(usize, Type)>, Option<Type>);
 
         let registry: &Registry = self;
         let backfills: Vec<(ClassId, Vec<Backfill>)> = order
@@ -1888,7 +1886,6 @@ impl Registry {
                                             &ancestor_bindings,
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
-                                        ancestor_param.explicit_mixed_hint,
                                     ));
                                 }
                             }
@@ -1920,7 +1917,6 @@ impl Registry {
                                             &ancestor_bindings,
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
-                                        ancestor_param.explicit_mixed_hint,
                                     ));
                                 }
                             }
@@ -1951,14 +1947,11 @@ impl Registry {
                             &sig.return_type_native,
                         ))
                     .then(|| {
-                        (
-                            Registry::substitute_class_scoped_ancestor_templates(
-                                &ancestor_sig.return_type.bind_self(owner),
-                                &ancestor_bindings,
-                            )
-                            .reconcile_with_native(sig.return_type_native.clone()),
-                            ancestor_sig.return_explicit_mixed_hint,
+                        Registry::substitute_class_scoped_ancestor_templates(
+                            &ancestor_sig.return_type.bind_self(owner),
+                            &ancestor_bindings,
                         )
+                        .reconcile_with_native(sig.return_type_native.clone())
                     });
                     if !param_fills.is_empty() || return_fill.is_some() {
                         let slot = registry.member_slot(class_name, method_name)?;
@@ -1979,18 +1972,16 @@ impl Registry {
                 let Some(mut sig) = self.method_by_ref(method_ref).cloned() else {
                     continue;
                 };
-                for (i, ty, explicit_mixed_hint) in param_fills {
+                for (i, ty) in param_fills {
                     if let Some(p) = sig.params.get_mut(i) {
                         p.ty = ty;
                         p.has_own_doc = true;
-                        p.explicit_mixed_hint = explicit_mixed_hint;
                         changed = true;
                     }
                 }
-                if let Some((ty, explicit_mixed_hint)) = return_fill {
+                if let Some(ty) = return_fill {
                     sig.return_type = ty;
                     sig.return_has_own_doc = true;
-                    sig.return_explicit_mixed_hint = explicit_mixed_hint;
                     changed = true;
                 }
                 self.set_method_result(method_ref, sig);

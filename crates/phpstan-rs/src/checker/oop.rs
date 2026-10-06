@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
     /// existence machinery. `methodTag.trait` (the type resolves but is
     /// a trait, invalid there) is deliberately not built - no analog
     /// exists anywhere else in this project for any typehint location.
-    pub(crate) fn check_method_tag_types(&mut self, fqn: &str, span: Span) {
+    pub(crate) fn check_method_tag_types(&mut self, fqn: &str, doc: Option<&str>, span: Span) {
         if self.class_info(fqn).is_none() {
             return;
         }
@@ -270,17 +270,39 @@ impl<'a> Checker<'a> {
                     format!("PHPDoc tag @method for method {fqn}::{name}()"),
                     span,
                 );
-                // `class.nameCase` for this `@method`-tag parameter.
-                self.check_type_class_name_case(param.case_refs(), span);
-                self.check_type_internal_usage(param.case_refs(), span);
             }
             self.check_type_class_names_exist(
                 sig.return_type(),
                 format!("PHPDoc tag @method for method {fqn}::{name}()"),
                 span,
             );
-            self.check_type_class_name_case(sig.return_case_refs(), span);
-            self.check_type_internal_usage(sig.return_case_refs(), span);
+        }
+        if let Some(doc) = doc {
+            let block = docblock::parse_shared(doc);
+            for tag in &block.method_tags {
+                for param in &tag.params {
+                    if let Some(ty) = &param.ty {
+                        let (_, mut refs) = self.resolve_type_node_with_case_refs(ty);
+                        refs.retain(|(raw, _)| {
+                            !tag.templates
+                                .iter()
+                                .any(|template| template.name == raw.as_ref())
+                        });
+                        self.check_type_class_name_case(&refs, span);
+                        self.check_type_internal_usage(&refs, span);
+                    }
+                }
+                if let Some(ty) = &tag.return_type {
+                    let (_, mut refs) = self.resolve_type_node_with_case_refs(ty);
+                    refs.retain(|(raw, _)| {
+                        !tag.templates
+                            .iter()
+                            .any(|template| template.name == raw.as_ref())
+                    });
+                    self.check_type_class_name_case(&refs, span);
+                    self.check_type_internal_usage(&refs, span);
+                }
+            }
         }
     }
 
@@ -369,10 +391,10 @@ impl<'a> Checker<'a> {
     /// silently contribute nothing instead of surfacing a real typo.
     /// `mixin.nonObject`/`mixin.trait` are deliberately not built, same
     /// scope as `check_method_tag_types`.
-    pub(crate) fn check_mixin_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.class_info(fqn) else {
+    pub(crate) fn check_mixin_types(&mut self, fqn: &str, doc: Option<&str>, span: Span) {
+        if self.class_info(fqn).is_none() {
             return;
-        };
+        }
         let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
@@ -386,12 +408,14 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        // `class.nameCase` for an `@mixin` target - `check_mixin_types`
-        // doesn't route through `check_type_class_names_exist` at all
-        // (its bare `class_name_exists` check above), so this is a
-        // parallel loop rather than a rewire of an existing one.
-        self.check_type_class_name_case(info.mixin_case_refs(), span);
-        self.check_type_internal_usage(info.mixin_case_refs(), span);
+        if let Some(doc) = doc {
+            let block = docblock::parse_shared(doc);
+            for mixin in &block.mixins {
+                let (_, refs) = self.resolve_type_node_with_case_refs(mixin);
+                self.check_type_class_name_case(&refs, span);
+                self.check_type_internal_usage(&refs, span);
+            }
+        }
     }
 
     /// Mirrors real PHPStan's `RequireExtendsCheck`/
@@ -606,10 +630,10 @@ impl<'a> Checker<'a> {
     /// `from Class` existence: that class is commonly only reachable via
     /// Composer autoloading this registry may legitimately have no data
     /// for in a partial-analysis run.
-    pub(crate) fn check_type_alias_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.class_info(fqn) else {
+    pub(crate) fn check_type_alias_types(&mut self, fqn: &str, doc: Option<&str>, span: Span) {
+        if self.class_info(fqn).is_none() {
             return;
-        };
+        }
         let aliases = self.registry.effective_type_aliases_by_name(fqn);
         for (name, ty) in &aliases {
             self.check_type_class_names_exist(
@@ -617,11 +641,13 @@ impl<'a> Checker<'a> {
                 format!("PHPDoc tag @phpstan-type {name} for class {fqn}"),
                 span,
             );
-            // `class.nameCase` for this alias's RHS - looked up by the
-            // same key already in scope here.
-            if let Some(case_refs) = info.type_alias_case_refs().get(name) {
-                self.check_type_class_name_case(case_refs, span);
-                self.check_type_internal_usage(case_refs, span);
+        }
+        if let Some(doc) = doc {
+            let block = docblock::parse_shared(doc);
+            for ty in block.type_aliases.values() {
+                let (_, refs) = self.resolve_type_node_with_case_refs(ty);
+                self.check_type_class_name_case(&refs, span);
+                self.check_type_internal_usage(&refs, span);
             }
         }
     }

@@ -4,10 +4,9 @@ use syntax::name::Name;
 use syntax::name::NameMap;
 
 use crate::registry::name_context::{class_ref, resolve_names_in_type};
-use crate::registry::type_node::{mentions_mixed, parse_type_node};
+use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
-use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 
@@ -57,18 +56,6 @@ pub struct ParameterReflection {
     // ancestor, which then sets this `true` too - what makes
     // multi-level inheritance resolve one level per fixed-point pass.
     pub(in crate::registry) has_own_doc: bool,
-    // Whether this declaration's own native hint/`@param` text spells
-    // out `mixed` explicitly - needed so `checker::missing_typehint`
-    // still recognizes a backfilled (`flatten_phpdoc_inheritance`)
-    // `mixed` as deliberate, not undocumented; that pass copies this
-    // field alongside `ty`.
-    pub(in crate::registry) explicit_mixed_hint: bool,
-    // Every class-name reference `ty` carries, as (raw, resolved-FQN)
-    // pairs, collected before `resolve_names_in_type` destroys the
-    // original spelling. Empty for a backfilled position - the raw text
-    // belongs to an ancestor file's own `use` imports, not this one's
-    // `name_ctx`.
-    pub(in crate::registry) case_refs: Vec<(Name, Name)>,
     // `@param-closure-this Type $name`'s resolved `Type` - what `$this`
     // becomes inside a `Closure`/`ArrowFn` argument at this position.
     // `None` when untagged.
@@ -101,8 +88,6 @@ impl Clone for ParameterReflection {
             doc_ty,
             by_ref,
             has_own_doc,
-            explicit_mixed_hint,
-            case_refs,
             closure_this_type,
             out_ty,
             attributes,
@@ -117,8 +102,6 @@ impl Clone for ParameterReflection {
             doc_ty: doc_ty.clone(),
             by_ref: *by_ref,
             has_own_doc: *has_own_doc,
-            explicit_mixed_hint: *explicit_mixed_hint,
-            case_refs: clone_vec(case_refs),
             closure_this_type: closure_this_type.clone(),
             out_ty: out_ty.clone(),
             attributes: clone_vec(attributes),
@@ -136,8 +119,6 @@ impl Clone for FunctionReflection {
             return_has_own_doc,
             return_doc_ty,
             self_out,
-            return_case_refs,
-            return_explicit_mixed_hint,
             no_discard,
             returns_ref,
             must_use_result,
@@ -163,8 +144,6 @@ impl Clone for FunctionReflection {
             return_has_own_doc: *return_has_own_doc,
             return_doc_ty: return_doc_ty.clone(),
             self_out: self_out.clone(),
-            return_case_refs: clone_vec(return_case_refs),
-            return_explicit_mixed_hint: *return_explicit_mixed_hint,
             no_discard: *no_discard,
             returns_ref: *returns_ref,
             must_use_result: *must_use_result,
@@ -234,14 +213,6 @@ impl ParameterReflection {
         self.has_own_doc
     }
 
-    pub fn explicit_mixed_hint(&self) -> bool {
-        self.explicit_mixed_hint
-    }
-
-    pub fn case_refs(&self) -> &Vec<(Name, Name)> {
-        &self.case_refs
-    }
-
     pub fn closure_this_type(&self) -> &Option<Type> {
         &self.closure_this_type
     }
@@ -270,10 +241,6 @@ pub struct FunctionReflection {
     // `@phpstan-self-out Type`: the receiver's type after a call to this
     // method. `None` without the tag.
     pub(in crate::registry) self_out: Option<Type>,
-    // `ParameterReflection::case_refs`'s return-position equivalent.
-    pub(in crate::registry) return_case_refs: Vec<(Name, Name)>,
-    // `ParameterReflection::explicit_mixed_hint`'s return-position equivalent.
-    pub(in crate::registry) return_explicit_mixed_hint: bool,
     // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
     // call to this declaration should be flagged
     // (`Checker::check_no_discard_statement`), matching real PHPStan's
@@ -397,14 +364,6 @@ impl FunctionReflection {
 
     pub fn self_out(&self) -> &Option<Type> {
         &self.self_out
-    }
-
-    pub fn return_case_refs(&self) -> &Vec<(Name, Name)> {
-        &self.return_case_refs
-    }
-
-    pub fn return_explicit_mixed_hint(&self) -> bool {
-        self.return_explicit_mixed_hint
     }
 
     pub fn no_discard(&self) -> bool {
@@ -749,7 +708,7 @@ impl FunctionReflection {
                 let DeclaredType {
                     ty,
                     native: ty_native,
-                    case_refs,
+                    ..
                 } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
@@ -794,9 +753,6 @@ impl FunctionReflection {
                         .map(&resolve_doc_type),
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
-                    explicit_mixed_hint: p.type_hint.as_ref().is_some_and(TypeHint::is_mixed)
-                        || doc_ty.as_ref().is_some_and(mentions_mixed),
-                    case_refs,
                     closure_this_type,
                     out_ty,
                 }
@@ -808,7 +764,7 @@ impl FunctionReflection {
         let DeclaredType {
             ty: return_type,
             native: return_type_native,
-            case_refs: return_case_refs,
+            ..
         } = declared_type(doc_return, f.return_type.as_ref(), &template_params, ctx);
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
@@ -838,14 +794,13 @@ impl FunctionReflection {
                     })
                 });
 
-        let param_names: Vec<&str> = f.params.iter().map(|p| p.name.as_ref()).collect();
         let (assert_if_true, assert_if_false, assert) = doc
             .as_ref()
             .map(|d| {
                 (
-                    resolve_assert_tags(&d.assert_if_true, &param_names, &template_params, ctx),
-                    resolve_assert_tags(&d.assert_if_false, &param_names, &template_params, ctx),
-                    resolve_assert_tags(&d.assert, &param_names, &template_params, ctx),
+                    resolve_assert_tags(&d.assert_if_true, &f.params, &template_params, ctx),
+                    resolve_assert_tags(&d.assert_if_false, &f.params, &template_params, ctx),
+                    resolve_assert_tags(&d.assert, &f.params, &template_params, ctx),
                 )
             })
             .unwrap_or_default();
@@ -864,9 +819,6 @@ impl FunctionReflection {
                 .as_ref()
                 .and_then(|d| d.self_out.as_ref())
                 .map(resolve_doc_type),
-            return_case_refs,
-            return_explicit_mixed_hint: f.return_type.as_ref().is_some_and(TypeHint::is_mixed)
-                || doc_return.is_some_and(mentions_mixed),
             no_discard,
             returns_ref: f.by_ref,
             must_use_result,
@@ -947,15 +899,6 @@ impl FunctionReflection {
                     // documents this position, the merged signature
                     // shouldn't look like a further-inheritance candidate.
                     has_own_doc: a.has_own_doc || b.has_own_doc,
-                    // Same permissive either-overload-wins rule as
-                    // `has_own_doc` just above, for the identical reason.
-                    explicit_mixed_hint: a.explicit_mixed_hint || b.explicit_mixed_hint,
-                    // Both real overloads' own case refs are real,
-                    // independent class-name references worth checking -
-                    // concatenated, not chosen between, matching this
-                    // function's own permissive "either side contributes"
-                    // convention throughout.
-                    case_refs: a.case_refs.into_iter().chain(b.case_refs).collect(),
                     // Later declaration wins on conflict, matching `name`
                     // above - falls back to the earlier one when only it
                     // declared the tag.
@@ -984,13 +927,6 @@ impl FunctionReflection {
             return_has_own_doc: self.return_has_own_doc || other.return_has_own_doc,
             return_doc_ty: other.return_doc_ty.or(self.return_doc_ty),
             self_out: other.self_out.or(self.self_out),
-            return_case_refs: self
-                .return_case_refs
-                .into_iter()
-                .chain(other.return_case_refs)
-                .collect(),
-            return_explicit_mixed_hint: self.return_explicit_mixed_hint
-                || other.return_explicit_mixed_hint,
             no_discard,
             // Only a reference when every overload returns one.
             returns_ref: self.returns_ref && other.returns_ref,
@@ -1076,6 +1012,19 @@ impl FunctionReflection {
 /// *position* of its *first*, so later uniquely-named parameters aren't
 /// shifted.
 fn dedup_versioned_params(params: Vec<ParameterReflection>) -> Vec<ParameterReflection> {
+    // This is the ordinary case, including all first-party declarations:
+    // avoid allocating both a name map and an ordering vector just to
+    // reproduce the input. The exceptional versioned-stub shape is fixed
+    // up below, retaining the last occurrence at the first one's position.
+    let has_duplicate = params.iter().enumerate().any(|(i, param)| {
+        params[..i]
+            .iter()
+            .any(|previous| previous.name == param.name)
+    });
+    if !has_duplicate {
+        return params;
+    }
+
     let mut order: Vec<Name> = Vec::new();
     let mut by_name: NameMap<ParameterReflection> = NameMap::default();
     for p in params {

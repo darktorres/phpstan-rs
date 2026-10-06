@@ -4,6 +4,7 @@ use types::Name;
 use crate::checker::{
     Checker, ITERABLE_GENERIC_CLASS_NAMES, TemplateBindings, class_kind_identifier,
 };
+use crate::registry;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::span::Span;
@@ -208,8 +209,16 @@ impl<'a> Checker<'a> {
                     "property.trait",
                 );
                 // `class.nameCase` for this PHPDoc-typed property position.
-                self.check_type_class_name_case(prop_sig.case_refs(), p.span);
-                self.check_type_internal_usage(prop_sig.case_refs(), p.span);
+                let property_doc = p.doc_comment.as_deref().map(docblock::parse_shared);
+                let case_refs = registry::declared_type(
+                    property_doc.as_ref().and_then(|doc| doc.var_type.as_ref()),
+                    p.type_hint.as_ref(),
+                    &self.current_class_template_params(),
+                    &self.name_ctx,
+                )
+                .case_refs;
+                self.check_type_class_name_case(&case_refs, p.span);
+                self.check_type_internal_usage(&case_refs, p.span);
             }
         }
         self.check_property_tag_types(fqn, &c.def);
@@ -293,8 +302,9 @@ impl<'a> Checker<'a> {
                 c.span,
             );
             // `class.nameCase` for this `@property`-tag target.
-            self.check_type_class_name_case(prop_sig.case_refs(), c.span);
-            self.check_type_internal_usage(prop_sig.case_refs(), c.span);
+            let (_, case_refs) = self.resolve_type_node_with_case_refs(&tag.ty);
+            self.check_type_class_name_case(&case_refs, c.span);
+            self.check_type_internal_usage(&case_refs, c.span);
         }
     }
 

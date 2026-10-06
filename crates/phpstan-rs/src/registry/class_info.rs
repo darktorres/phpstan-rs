@@ -5,9 +5,7 @@ use crate::registry::function_sig::{
     build_template_params, build_type_aliases, declared_type, infer_class_const_type,
     mark_template_params, substitute_type_aliases,
 };
-use crate::registry::name_context::{
-    class_ref, collect_class_name_case_refs, resolve_names_in_type,
-};
+use crate::registry::name_context::{class_ref, resolve_names_in_type};
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
@@ -163,14 +161,6 @@ pub struct PropertyReflection {
     // equivalent. `None` without one.
     pub(in crate::registry) doc_ty: Option<Type>,
     pub(in crate::registry) has_native_type: bool,
-    // `ParameterReflection::case_refs`'s property-position equivalent. Populated
-    // identically at all three real construction sites (plain declared
-    // property, promoted constructor property, `@property`/`-read`/
-    // `-write` tag).
-    pub(in crate::registry) case_refs: Vec<(Name, Name)>,
-    // `set_ty`'s case_refs equivalent - `property_hook_set_type` never
-    // collected these, unlike the sibling `ty` field above.
-    pub(in crate::registry) set_case_refs: Vec<(Name, Name)>,
     pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
     pub(in crate::registry) provenance: Provenance,
 }
@@ -278,14 +268,6 @@ impl PropertyReflection {
 
     pub fn has_native_type(&self) -> bool {
         self.has_native_type
-    }
-
-    pub fn case_refs(&self) -> &Vec<(Name, Name)> {
-        &self.case_refs
-    }
-
-    pub fn set_case_refs(&self) -> &Vec<(Name, Name)> {
-        &self.set_case_refs
     }
 }
 
@@ -535,14 +517,6 @@ pub struct ClassReflection {
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
     pub(in crate::registry) type_aliases: NameMap<Type>,
-    // `ParameterReflection::case_refs`'s `@phpstan-type` equivalent - keyed the
-    // same way `type_aliases` itself is (the alias's resolved local
-    // name), `(raw, resolved)` pairs for every class-name reference the
-    // alias's own RHS text carries (not a reference to the alias
-    // elsewhere - that's this same mechanism at whatever
-    // `@param`/`@return`/property tag actually uses the alias, via its
-    // own `case_refs`).
-    pub(in crate::registry) type_alias_case_refs: NameMap<Vec<(Name, Name)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
@@ -582,12 +556,6 @@ pub struct ClassReflection {
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
     // mirroring `resolve_deferred_type_imports`'s own two-step shape.
     pub(in crate::registry) mixins: Vec<Name>,
-    // `ParameterReflection::case_refs`'s `@mixin`-tag equivalent - `(raw, resolved)`
-    // pairs for every `@mixin` target on this class's docblock, in
-    // declaration order (not keyed by name - unlike
-    // `type_alias_case_refs`, a class can carry several `@mixin` tags
-    // with no unique name to key by).
-    pub(in crate::registry) mixin_case_refs: Vec<(Name, Name)>,
     // A `new class { ... }` expression's class.
     pub(in crate::registry) is_anonymous: bool,
     pub(in crate::registry) provenance: Provenance,
@@ -769,11 +737,6 @@ impl ClassReflection {
         &self.type_aliases
     }
 
-    #[allow(clippy::type_complexity)]
-    pub fn type_alias_case_refs(&self) -> &NameMap<Vec<(Name, Name)>> {
-        &self.type_alias_case_refs
-    }
-
     pub fn type_imports(&self) -> &Vec<ResolvedTypeImport> {
         &self.type_imports
     }
@@ -808,10 +771,6 @@ impl ClassReflection {
 
     pub fn mixins(&self) -> &Vec<Name> {
         &self.mixins
-    }
-
-    pub fn mixin_case_refs(&self) -> &Vec<(Name, Name)> {
-        &self.mixin_case_refs
     }
 
     /// The classes the finishing passes copy into this one from: what it
@@ -1018,8 +977,7 @@ impl ClassReflection {
         // `substitute_type_aliases`. See that function's doc comment for
         // why this must run after `resolve_names_in_type` on each
         // member's surrounding type, not before.
-        let (type_aliases, type_alias_case_refs) =
-            build_type_aliases(class_doc.as_deref(), &template_params, ctx);
+        let type_aliases = build_type_aliases(class_doc.as_deref(), &template_params, ctx);
         // `@phpstan-import-type` - resolved just enough here (both names,
         // via this class's `ctx`) to be looked up in the source class's
         // `type_aliases` once it's indexed too; see `ResolvedTypeImport`'s
@@ -1180,7 +1138,7 @@ impl ClassReflection {
                 let DeclaredType {
                     ty,
                     native: ty_native,
-                    case_refs,
+                    ..
                 } = declared_type(
                     doc_ty.as_ref().and_then(|d| d.var_type.as_ref()),
                     p.type_hint.as_ref(),
@@ -1195,8 +1153,7 @@ impl ClassReflection {
                         let t = mark_template_params(parse_type_node(raw), &template_params);
                         substitute_type_aliases(resolve_names_in_type(t, ctx), &type_aliases)
                     });
-                let (set_ty, set_case_refs) =
-                    property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
+                let set_ty = property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_ref()
@@ -1242,8 +1199,6 @@ impl ClassReflection {
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
                         get_hook_body: hook_has_body(p.hooks.as_ref().and_then(|h| h.get.as_ref())),
                         set_hook_body: hook_has_body(p.hooks.as_ref().and_then(|h| h.set.as_ref())),
-                        case_refs,
-                        set_case_refs,
                     },
                 )
             })
@@ -1284,7 +1239,7 @@ impl ClassReflection {
                 let DeclaredType {
                     ty,
                     native: ty_native,
-                    case_refs,
+                    ..
                 } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let own_doc_ty = doc_ty.as_ref().map(|raw| {
@@ -1304,8 +1259,7 @@ impl ClassReflection {
                 // inline PHP 8.4 hooks (`Param::hooks`) exactly like a
                 // plain property declaration can - resolved through the
                 // identical generalized helpers.
-                let (set_ty, set_case_refs) =
-                    property_hook_set_type(p.hooks.as_deref(), &template_params, ctx);
+                let set_ty = property_hook_set_type(p.hooks.as_deref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_deref()
@@ -1369,8 +1323,6 @@ impl ClassReflection {
                         set_hook_body: hook_has_body(
                             p.hooks.as_deref().and_then(|h| h.set.as_ref()),
                         ),
-                        case_refs,
-                        set_case_refs,
                     },
                 );
             }
@@ -1388,8 +1340,6 @@ impl ClassReflection {
                 properties.entry(Name::from(&tag.name)).or_insert_with(|| {
                     let ty = parse_type_node(&tag.ty);
                     let ty = mark_template_params(ty, &template_params);
-                    let mut case_refs = Vec::new();
-                    collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertyReflection {
                         attributes: Vec::new(),
@@ -1429,8 +1379,6 @@ impl ClassReflection {
                         has_set_hook: false,
                         get_hook_body: false,
                         set_hook_body: false,
-                        case_refs,
-                        set_case_refs: Vec::new(),
                     }
                 });
             }
@@ -1674,22 +1622,6 @@ impl ClassReflection {
             .as_ref()
             .map(|d| resolve_tag_types(&d.mixins))
             .unwrap_or_default();
-        // Own small dedicated closure, not `resolve_tag_types` above -
-        // see `mixin_case_refs`'s doc comment.
-        let mixin_case_refs: Vec<(Name, Name)> = class_doc
-            .as_ref()
-            .map(|d| {
-                d.mixins
-                    .iter()
-                    .flat_map(|text| {
-                        let ty = parse_type_node(text);
-                        let mut refs = Vec::new();
-                        collect_class_name_case_refs(&ty, ctx, &mut refs);
-                        refs
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
         let doctrine_entity = compute_doctrine_entity(c, &properties);
@@ -1738,13 +1670,11 @@ impl ClassReflection {
             access,
             method_access,
             mixins,
-            mixin_case_refs,
             deprecated,
             attribute_targets,
             attributes: ReflectionAttribute::all(&c.attrs),
             enum_case_values: NameMap::default(),
             type_aliases,
-            type_alias_case_refs,
             type_imports,
             method_tags,
             doctrine_entity,
@@ -1794,8 +1724,6 @@ impl ClassReflection {
                 self_out: None,
                 // No real docblock/native text behind any of these
                 // synthesized enum methods - nothing to check the case of.
-                return_case_refs: Vec::new(),
-                return_explicit_mixed_hint: false,
                 no_discard: false,
                 returns_ref: false,
                 must_use_result: false,
@@ -1833,8 +1761,6 @@ impl ClassReflection {
                 doc_ty: None,
                 by_ref: false,
                 has_own_doc: true,
-                explicit_mixed_hint: false,
-                case_refs: Vec::new(),
                 closure_this_type: None,
                 out_ty: None,
             };
@@ -1848,8 +1774,6 @@ impl ClassReflection {
                     return_has_own_doc: true,
                     return_doc_ty: None,
                     self_out: None,
-                    return_case_refs: Vec::new(),
-                    return_explicit_mixed_hint: false,
                     no_discard: false,
                     returns_ref: false,
                     must_use_result: false,
@@ -1881,8 +1805,6 @@ impl ClassReflection {
                     return_has_own_doc: true,
                     return_doc_ty: None,
                     self_out: None,
-                    return_case_refs: Vec::new(),
-                    return_explicit_mixed_hint: false,
                     no_discard: false,
                     returns_ref: false,
                     must_use_result: false,
@@ -2016,8 +1938,6 @@ impl ClassReflection {
                 set_hook_body: false,
                 // A language built-in, not textual - nothing to check
                 // the case of.
-                case_refs: Vec::new(),
-                set_case_refs: Vec::new(),
             }),
         );
         if let Some(backing) = &e.backing_type {
@@ -2082,8 +2002,6 @@ impl ClassReflection {
                     has_set_hook: false,
                     get_hook_body: false,
                     set_hook_body: false,
-                    case_refs: Vec::new(),
-                    set_case_refs: Vec::new(),
                 }),
             );
         }
@@ -2176,7 +2094,6 @@ impl ClassReflection {
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);
         self.type_aliases.extend(other.type_aliases);
-        self.type_alias_case_refs.extend(other.type_alias_case_refs);
         self.type_imports.extend(other.type_imports);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);
@@ -2201,7 +2118,6 @@ impl ClassReflection {
         self.require_implements.extend(other.require_implements);
         self.sealed.extend(other.sealed);
         self.mixins.extend(other.mixins);
-        self.mixin_case_refs.extend(other.mixin_case_refs);
         self.method_tags.extend(other.method_tags);
         self.deprecated = self.deprecated.or(other.deprecated);
         self.attribute_targets = self.attribute_targets.or(other.attribute_targets);

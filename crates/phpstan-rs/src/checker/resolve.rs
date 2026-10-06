@@ -90,6 +90,16 @@ impl<'a> Checker<'a> {
         resolved
     }
 
+    /// Resolves a declaration's PHPDoc type and returns its written class
+    /// references for the checks that run at that same declaration.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn resolve_type_node_with_case_refs<T: phpdoc::WrittenType + ?Sized>(
+        &self,
+        node: &T,
+    ) -> (Type, Vec<(Name, Name)>) {
+        self.resolve_written_type(registry::parse_type_node(node))
+    }
+
     /// Resolves a type as written in the current scope: its templates
     /// marked, its class names resolved, with the case refs of those names.
     #[allow(clippy::type_complexity)]
@@ -178,7 +188,7 @@ impl<'a> Checker<'a> {
     /// Only ever finds a template that appears somewhere in the
     /// signature itself; one declared but used only inside a body-local
     /// `@var`, never in the signature, isn't reachable this way.
-    fn current_function_template_params(
+    pub(crate) fn current_function_template_params(
         &self,
     ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
         let Some(method_name) = &self.current_method else {

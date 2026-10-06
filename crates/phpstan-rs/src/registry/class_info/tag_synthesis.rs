@@ -4,7 +4,7 @@ use syntax::name::Name;
 use crate::registry::function_sig::{
     FunctionReflection, ParameterReflection, mark_template_params,
 };
-use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::name_context::resolve_names_in_type;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::WrittenType;
 use phpdoc::docblock;
@@ -58,27 +58,24 @@ pub(crate) fn method_tag_sig(
         }
     }
     let template_params = &template_params;
-    #[allow(clippy::type_complexity)]
-    let resolve = |node: &dyn WrittenType| -> (Type, Vec<(Name, Name)>) {
+    let resolve = |node: &dyn WrittenType| -> Type {
         let ty = parse_type_node(node);
         let ty = mark_template_params(ty, template_params);
-        let mut case_refs = Vec::new();
-        collect_class_name_case_refs(&ty, ctx, &mut case_refs);
-        (resolve_names_in_type(ty, ctx), case_refs)
+        resolve_names_in_type(ty, ctx)
     };
-    let (return_type, return_case_refs) = tag
+    let return_type = tag
         .return_type
         .as_ref()
         .map(|r| resolve(r))
-        .unwrap_or((Type::mixed(), Vec::new()));
+        .unwrap_or_else(Type::mixed);
     let params = tag
         .params
         .iter()
         .map(|p| {
-            let (ty, case_refs) =
+            let ty =
                 p.ty.as_ref()
                     .map(|t| resolve(t))
-                    .unwrap_or((Type::mixed(), Vec::new()));
+                    .unwrap_or_else(Type::mixed);
             ParameterReflection {
                 attributes: Vec::new(),
                 name: Name::from(&p.name),
@@ -90,8 +87,6 @@ pub(crate) fn method_tag_sig(
                 doc_ty: None,
                 by_ref: p.by_ref,
                 has_own_doc: true,
-                explicit_mixed_hint: false,
-                case_refs,
                 closure_this_type: None,
                 out_ty: None,
             }
@@ -105,8 +100,6 @@ pub(crate) fn method_tag_sig(
         return_has_own_doc: true,
         return_doc_ty: None,
         self_out: None,
-        return_case_refs,
-        return_explicit_mixed_hint: false,
         no_discard: false,
         returns_ref: false,
         must_use_result: false,

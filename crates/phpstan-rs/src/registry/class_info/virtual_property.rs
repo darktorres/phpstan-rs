@@ -1,5 +1,4 @@
 use rustc_hash::FxHashMap;
-use syntax::name::Name;
 
 use crate::registry::function_sig::declared_type;
 use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks};
@@ -21,12 +20,12 @@ pub(crate) fn property_hook_set_type(
     hooks: Option<&PropertyHooks>,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (Option<Type>, Vec<(Name, Name)>) {
+) -> Option<Type> {
     let Some(param) = hooks.and_then(|h| h.set.as_ref()?.param.as_ref()) else {
-        return (None, Vec::new());
+        return None;
     };
     let declared = declared_type(None, param.type_hint.as_ref(), template_params, ctx);
-    (Some(declared.ty), declared.case_refs)
+    Some(declared.ty)
 }
 
 /// Whether either hook of `hooks` references `$this->prop_name` anywhere

@@ -1923,10 +1923,10 @@ impl<'a> Checker<'a> {
                     {
                         self.check_class_name_case(name);
                     }
-                    self.check_method_tag_types(&fqn, c.def.span);
+                    self.check_method_tag_types(&fqn, c.def.doc_comment.as_deref(), c.def.span);
                     self.check_method_tag_templates(&fqn, c.def.doc_comment.as_deref(), c.def.span);
-                    self.check_mixin_types(&fqn, c.def.span);
-                    self.check_type_alias_types(&fqn, c.def.span);
+                    self.check_mixin_types(&fqn, c.def.doc_comment.as_deref(), c.def.span);
+                    self.check_type_alias_types(&fqn, c.def.doc_comment.as_deref(), c.def.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_property_overrides(&fqn, &c.def);
                     self.check_require_tags(&fqn, c.def.span);
