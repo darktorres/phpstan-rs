@@ -242,7 +242,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   (`1b8f79aa`); `cargo check -p phpstan-rs --lib --tests` and Clippy passed.
   Row 4.3 is under way: the pinned `la-arena` dependency, typed per-file
   arenas, and class/member/property/constant/name and function/parameter
-  range layouts are in place (`b7651f06`); declaration construction and registry storage
+  range layouts and accessors are in place (`b7651f06`, `105f4b2b`); declaration construction and registry storage
   still need to migrate. The layout layer passes `cargo check -p phpstan-rs
   --lib --tests` and `cargo clippy -p phpstan-rs --all-targets`. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
