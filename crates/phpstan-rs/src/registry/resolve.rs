@@ -415,11 +415,13 @@ impl Registry {
     /// table after the parallel collection.
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
-        let scope = &self.scope;
         let tagged_classes: Vec<(Name, Vec<(Name, FunctionReflection, bool)>)> = self
-            .classes
-            .iter_mut_scoped_where(scope.class_keys(), |info| !info.method_tags.is_empty())
-            .map(|(class_name, info)| (class_name.clone(), std::mem::take(&mut info.method_tags)))
+            .scoped_classes()
+            .into_iter()
+            .filter_map(|(class_name, info)| {
+                (!info.method_tags.is_empty())
+                    .then(|| (class_name.clone(), info.method_tags.clone()))
+            })
             .collect();
         let registry: &Registry = self;
         let resolved: Vec<(ClassId, Vec<(MethodRef, MethodEntry, FunctionReflection)>)> =
