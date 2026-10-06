@@ -247,8 +247,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   at `c9efbee6` and deserialization bounds checks at `0e522f0b`. The parsed
   declaration collector now populates those ranges, and `ParsedFile`, the
   retained `FileState`, and the disk cache carry the arena. Validation for
-  this increment passed: the focused round-trip test, `cargo check -p
-  phpstan-rs --lib --tests`, and `cargo clippy -p phpstan-rs --all-targets`.
+  this increment passed: the focused round-trip test, an end-to-end
+  `CachedFile` serialization/reconstruction test, `cargo check -p phpstan-rs
+  --lib --tests`, and `cargo clippy -p phpstan-rs --all-targets`.
   Property and constant ranges share their existing `Arc` values rather than
   deep-copying reflections into the arena.
   Registry name tables and resolution still read legacy declaration values;

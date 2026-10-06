@@ -343,6 +343,8 @@ fn trim_builds(builds: &Path, current: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::parse_file_recording;
+    use syntax::name::NameCache;
 
     fn scratch(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -399,6 +401,26 @@ mod tests {
         other[0] = b'X';
         assert_eq!(payload_of(&other), None);
         assert_eq!(payload_of(&[]), None);
+    }
+
+    #[test]
+    fn cached_file_round_trip_keeps_declaration_arenas() {
+        let source = "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {}";
+        let path = Path::new("cache-round-trip.php");
+        let mut names = NameCache::default();
+        let parsed = parse_file_recording(path, source, false, Some(&mut names), None).unwrap();
+        let content_hash = parsed.content_hash;
+        let cached = CachedFile::of(&parsed, source.len());
+        let bytes = postcard::to_allocvec(&cached).unwrap();
+        let cached: CachedFile = postcard::from_bytes(&bytes).unwrap();
+        let restored = cached.into_parsed(path, content_hash);
+
+        assert_eq!(restored.file_decls.classes.len(), 1);
+        assert_eq!(restored.file_decls.functions.len(), 1);
+        assert_eq!(restored.file_decls.members.len(), 1);
+        assert_eq!(restored.file_decls.parameters.len(), 1);
+        assert_eq!(restored.file_decls.properties.len(), 1);
+        assert_eq!(restored.file_decls.constants.len(), 1);
     }
 
     fn payload_of(bytes: &[u8]) -> Option<&[u8]> {
