@@ -1,6 +1,8 @@
 //! PHPStan's own rule interface, loaded through the embedded stub
 //! pipeline, counts as `@api`. The gate itself is covered by the fixtures
 //! under `tests/fixtures/project/phpstan_api_gating`.
+use std::path::Path;
+
 use super::super::test_support::Files;
 
 /// Not a normal regression test (nothing in this project's own behavior
@@ -54,5 +56,26 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
     assert!(
         !resolver.is_api(),
         "expected PHPStan\\Analyser\\NodeScopeResolver to NOT be @api"
+    );
+}
+
+#[test]
+fn finishing_an_edit_that_introduces_phpstan_resolves_stub_functions_by_id() {
+    let path = Path::new("file.php");
+    let mut project = Files::new()
+        .analysed("file.php", "<?php function f(): void {}")
+        .load();
+    project.check_file(path);
+
+    project
+        .update_file(path, r"<?php \PHPStan\Testing\assertType('int', 1);")
+        .unwrap();
+
+    assert!(
+        project
+            .registry()
+            .lookup_function("PHPStan\\Testing\\assertType")
+            .is_some(),
+        "the dynamically merged PHPStan stub must have a declaration id"
     );
 }

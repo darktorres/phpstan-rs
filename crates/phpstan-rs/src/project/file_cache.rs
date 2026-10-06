@@ -540,6 +540,10 @@ mod tests {
         };
         let cached_class = restored.file_decls.classes.iter().next().unwrap().1;
         assert!(Arc::ptr_eq(info, cached_class));
+        let class_layout = restored.file_decls.class_layouts.iter().next().unwrap().0;
+        let member = &restored.file_decls.members(class_layout)[0];
+        let cached_method = info.methods().shared_get(&member.name).unwrap();
+        assert!(Arc::ptr_eq(&member.declaration, &cached_method));
         assert!(matches!(
             restored.built_decls.last(),
             Some(BuiltDecl::GlobalConst { name, .. }) if name == "GLOBAL_MARK"

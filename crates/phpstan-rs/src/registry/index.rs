@@ -573,6 +573,7 @@ impl Registry {
         for (name, sig) in stubs {
             let name: Name = name.into();
             self.record_changed_function(&name);
+            self.ensure_function_id(&name);
             self.unconditionally_declared_functions
                 .insert(folded_key(&name));
             self.stub_provided_functions.insert(folded_key(&name));
@@ -602,6 +603,7 @@ impl Registry {
         for (name, info) in stubs {
             let name: Name = name.into();
             self.record_changed_class(&name);
+            self.ensure_class_id(&name);
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
             match self.classes.take(&name) {

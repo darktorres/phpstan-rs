@@ -70,6 +70,18 @@ impl<V> Members<V> {
         self.map.values().map(|member| member.get())
     }
 
+    /// The shared member entries, without cloning or decoding their values.
+    pub(crate) fn shared_iter(&self) -> impl Iterator<Item = (&Name, Arc<Lazy<V>>)> {
+        self.map
+            .iter()
+            .map(|(name, member)| (name, Arc::clone(member)))
+    }
+
+    /// A member's shared entry, without decoding its value.
+    pub(crate) fn shared_get<K: FoldKey + ?Sized>(&self, key: &K) -> Option<Arc<Lazy<V>>> {
+        self.map.get(key).map(Arc::clone)
+    }
+
     /// Whether both hold the same map of members, not merely equal ones.
     pub fn ptr_eq(&self, other: &Members<V>) -> bool {
         self.map.ptr_eq(&other.map)

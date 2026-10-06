@@ -10,6 +10,7 @@ use syntax::name::Name;
 use super::ClassReflection;
 use super::class_info::{ConstantReflection, PropertyReflection};
 use super::function_sig::{FunctionReflection, ParameterReflection};
+use super::name_table::Lazy;
 
 #[allow(dead_code)] // Used by the cached per-file arena representation in row 4.3.
 fn encode_idx<T>(idx: Idx<T>) -> u32 {
@@ -47,12 +48,17 @@ fn range_is_valid<T>(range: &IdxRange<T>, arena_len: usize) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FileMember {
     pub(crate) name: Name,
-    pub(crate) declaration: FunctionReflection,
+    pub(crate) declaration: Arc<Lazy<FunctionReflection>>,
     parameters: IdxRange<ParameterReflection>,
 }
 
 impl FileMember {
+    #[cfg(test)]
     pub(crate) fn new(name: Name, declaration: FunctionReflection) -> Self {
+        Self::from_shared(name, Arc::new(Lazy::decoded(declaration)))
+    }
+
+    pub(crate) fn from_shared(name: Name, declaration: Arc<Lazy<FunctionReflection>>) -> Self {
         Self {
             name,
             declaration,
@@ -121,7 +127,7 @@ impl FileDecls {
         for mut member in members {
             member.parameters = self
                 .parameters
-                .alloc_many(member.declaration.params().iter().cloned());
+                .alloc_many(member.declaration.get().params().iter().cloned());
             stored_members.push(member);
         }
         let members = self.members.alloc_many(stored_members);
@@ -236,14 +242,12 @@ struct EncodedFileDecls<'a> {
 #[derive(Serialize)]
 struct EncodedFileMember<'a> {
     name: &'a Name,
-    declaration: &'a FunctionReflection,
     parameters: (u32, u32),
 }
 
 #[derive(Deserialize)]
 struct DecodedFileMember {
     name: Name,
-    declaration: FunctionReflection,
     parameters: (u32, u32),
 }
 
@@ -296,7 +300,6 @@ impl Serialize for FileDecls {
                 .iter()
                 .map(|(_, member)| EncodedFileMember {
                     name: &member.name,
-                    declaration: &member.declaration,
                     parameters: encode_range(&member.parameters),
                 })
                 .collect(),
@@ -328,29 +331,65 @@ impl<'de> Deserialize<'de> for FileDecls {
         }
 
         let encoded = EncodedFileDecls::deserialize(deserializer)?;
-        let declarations = FileDecls {
-            classes: Arena::from_iter(encoded.classes),
-            functions: Arena::from_iter(encoded.functions),
-            class_layouts: Arena::from_iter(encoded.class_layouts.into_iter().map(|layout| {
-                ClassLayout {
-                    declaration: decode_idx(layout.declaration),
-                    members: decode_range(layout.members),
-                    properties: decode_range(layout.properties),
-                    constants: decode_range(layout.constants),
-                    names: decode_range(layout.names),
+        let classes = Arena::from_iter(encoded.classes);
+        let class_layouts =
+            Arena::from_iter(encoded.class_layouts.into_iter().map(|layout| ClassLayout {
+                declaration: decode_idx(layout.declaration),
+                members: decode_range(layout.members),
+                properties: decode_range(layout.properties),
+                constants: decode_range(layout.constants),
+                names: decode_range(layout.names),
+            }));
+        let mut decoded_members: Vec<Option<FileMember>> = std::iter::repeat_with(|| None)
+            .take(encoded.members.len())
+            .collect();
+        for (_, layout) in class_layouts.iter() {
+            if !idx_is_valid(layout.declaration, classes.len())
+                || !range_is_valid(&layout.members, encoded.members.len())
+            {
+                return Err(D::Error::custom("class member range is invalid"));
+            }
+            let class = &classes[layout.declaration];
+            let (start, end) = encode_range(&layout.members);
+            for index in start..end {
+                let Some(member) = encoded.members.get(index as usize) else {
+                    return Err(D::Error::custom("class member range is invalid"));
+                };
+                let Some(declaration) = class.methods.shared_get(&member.name) else {
+                    return Err(D::Error::custom(
+                        "class member is missing from its declaration",
+                    ));
+                };
+                let Some(slot) = decoded_members.get_mut(index as usize) else {
+                    return Err(D::Error::custom("class member range is invalid"));
+                };
+                if slot
+                    .replace(FileMember {
+                        name: member.name.clone(),
+                        declaration,
+                        parameters: decode_range(member.parameters),
+                    })
+                    .is_some()
+                {
+                    return Err(D::Error::custom("class member ranges overlap"));
                 }
-            })),
+            }
+        }
+        let members = decoded_members
+            .into_iter()
+            .map(|member| member.ok_or_else(|| D::Error::custom("class member range is missing")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let declarations = FileDecls {
+            classes,
+            functions: Arena::from_iter(encoded.functions),
+            class_layouts,
             function_layouts: Arena::from_iter(encoded.function_layouts.into_iter().map(
                 |layout| FunctionLayout {
                     declaration: decode_idx(layout.declaration),
                     parameters: decode_range(layout.parameters),
                 },
             )),
-            members: Arena::from_iter(encoded.members.into_iter().map(|member| FileMember {
-                name: member.name,
-                declaration: member.declaration,
-                parameters: decode_range(member.parameters),
-            })),
+            members: Arena::from_iter(members),
             parameters: Arena::from_iter(encoded.parameters),
             properties: Arena::from_iter(encoded.properties),
             constants: Arena::from_iter(encoded.constants),
@@ -418,10 +457,19 @@ mod tests {
         let decoded_members = decoded.members(class_layout);
         assert_eq!(decoded_members.len(), members.len());
         assert_eq!(decoded_members[0].name, members[0].name);
-        assert_eq!(decoded_members[0].declaration, members[0].declaration);
+        assert_eq!(
+            decoded_members[0].declaration.get(),
+            members[0].declaration.get()
+        );
+        let shared = decoded
+            .class(class_layout)
+            .methods
+            .shared_get(&decoded_members[0].name)
+            .unwrap();
+        assert!(Arc::ptr_eq(&shared, &decoded_members[0].declaration));
         assert_eq!(
             decoded.member_parameters(&decoded_members[0]),
-            members[0].declaration.params()
+            members[0].declaration.get().params()
         );
         assert_eq!(decoded.properties(class_layout), properties);
         assert_eq!(decoded.constants(class_layout), constants);

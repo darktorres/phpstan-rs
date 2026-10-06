@@ -252,15 +252,21 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   --lib --tests`, and `cargo clippy -p phpstan-rs --all-targets`.
   Property and constant ranges share their existing `Arc` values rather than
   deep-copying reflections into the arena.
+  Method entries share `Members`' existing `Arc<Lazy<FunctionReflection>>`;
+  their serialized layout writes each method once and restores the shared
+  handle from the enclosing class. Their parameter ranges are in the file's
+  parameter arena too.
   The cache stores class/function declaration metadata beside the arena
   values, then reconstructs `BuiltDecl` with the same `Arc`; mismatched
   metadata is rejected so loading falls back to parsing. The end-to-end cache
   test checks class, function and global-constant reconstruction, pointer
-  sharing, mismatch rejection, and method-parameter ranges. A full library
-  test run had 1,134 pass and one failure: the incremental-versus-fresh
-  fixture comparison adds a missing `PHPStan\Testing\assertType` diagnostic
-  after replacing `f020.php`. A detached baseline run stalled, so that failure
-  is not classified yet; it remains to resolve or establish as pre-existing.
+  sharing, mismatch rejection, and method-parameter ranges. The incremental-
+  versus-fresh fixture test exposed a missing `PHPStan\Testing\assertType`
+  after a finished project switched stub bases. It reproduced at baseline
+  `14d2c4b7`: post-freeze stub merges inserted declarations without assigning
+  class/function IDs. Those merge paths now assign IDs, covered by a focused
+  edit-triggered base-switch test. The full library suite passes: 1,136 tests;
+  Clippy and the library check pass too.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at

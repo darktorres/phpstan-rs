@@ -122,8 +122,8 @@ pub(super) fn collect(
             BuiltDecl::Class { info, .. } => {
                 let members = info
                     .methods()
-                    .iter()
-                    .map(|(name, declaration)| FileMember::new(name.clone(), declaration.clone()));
+                    .shared_iter()
+                    .map(|(name, declaration)| FileMember::from_shared(name.clone(), declaration));
                 found.file_decls.add_class(
                     std::sync::Arc::clone(info),
                     members,
