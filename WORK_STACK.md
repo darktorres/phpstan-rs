@@ -365,7 +365,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   inherited-PHPDoc fill by `MethodRef` inside the class batch. The full crate
   suite, check, Clippy and formatting pass. `3e6a1772` keys deferred class
   constant updates by `ClassId` and constant slot. The full 1,199-test suite,
-  check, Clippy and formatting pass. `6f6f53da` assigns composed methods and
+  check, Clippy and formatting pass. `6cc05daf` applies class constant
+  updates by ordered slot through `get_index_mut`, avoiding a linear scan. The
+  index-stability test, all 275 syntax tests and all 1,199 crate tests, check,
+  Clippy and formatting pass. `6f6f53da` assigns composed methods and
   aliases their host `MethodRef` during collection, then verifies the slot on
   insertion. Reflection-order fixtures and all 1,199 crate tests, check,
   Clippy and formatting pass. `ba4dc50b` keys trait-composed constants by
