@@ -502,21 +502,6 @@ mod builtin_runs {
     }
 }
 
-/// What a stub signature's effect (`stub_effect`) was the first time it was
-/// asked, kept with the signature: the same few thousand builtins are asked
-/// about hundreds of thousands of times. It is no part of what a signature
-/// is, so equal signatures are equal whether or not it is filled, and a copy
-/// of a signature starts without it, since the copy's parameters may yet
-/// change.
-#[derive(Debug, Default)]
-pub(in crate::registry) struct StubEffect(std::sync::OnceLock<bool>);
-
-impl PartialEq for StubEffect {
-    fn eq(&self, _: &StubEffect) -> bool {
-        true
-    }
-}
-
 /// The parameter types through which a builtin runs code an object
 /// brings, or writes the object's properties itself: a callable, an
 /// untyped object (`ReflectionProperty::setValue`), and the interfaces a
@@ -873,6 +858,7 @@ impl Registry {
     /// change.
     pub(crate) fn resolve_effects(&mut self, bodies: &dyn BodySource) {
         self.methods_by_name = Arc::new(methods_by_name(self));
+        self.prepare_stub_effect_results();
         let mut unset = crate::registry::bodies::UnsetProperties::default();
         bodies.unset_properties(&mut unset);
         unset.settle();
@@ -1230,27 +1216,62 @@ impl Registry {
     /// seen, nothing when its doc declares it pure and it takes no code;
     /// anything otherwise.
     fn stub_effect(&self, key: &DeclKey, sig: &FunctionReflection) -> Effect {
-        let runs_code = *sig.stub_effect.0.get_or_init(|| {
-            let takes_code = sig
-                .params
-                .iter()
-                .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
-            let Some(name) = self.builtin_entry(key) else {
-                // A stub no run of PHP has seen is taken at its word: one
-                // its doc declares pure writes nothing, unless it takes
-                // code to run.
-                return !sig.declared_pure || takes_code;
-            };
-            key.class.as_deref().is_some_and(|class| {
-                self.builtin_holds_code(class) || !self.builtin_held_wrappers(class).is_empty()
-            }) || !builtin_runs::runs(&name).is_empty()
-                || takes_code
-        });
+        let id = self.effect_id_for(key);
+        let runs_code = self
+            .stub_effect_results
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| self.stub_runs_code(key, sig));
         if runs_code {
             Effect::anything()
         } else {
             Effect::nothing()
         }
+    }
+
+    /// Rebuilds stub behavior facts after declaration and hierarchy results
+    /// are ready. The map is immutable while effect settlement runs in
+    /// parallel, and stores the memo by the declaration's stable ID rather
+    /// than on its mutable signature.
+    fn prepare_stub_effect_results(&mut self) {
+        let mut results = FxHashMap::default();
+        for (name, _) in self.functions().own_iter() {
+            let Some((_, declared, sig)) = self.function(name) else {
+                continue;
+            };
+            if sig.is_stub {
+                let key = function_key(declared.as_str());
+                results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
+            }
+        }
+        for (class, _) in self.classes().own_iter() {
+            for method in self.method_names(class) {
+                let Some(sig) = self.lookup_own_method(class, method) else {
+                    continue;
+                };
+                if sig.is_stub {
+                    let key = method_key(class, method);
+                    results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
+                }
+            }
+        }
+        self.stub_effect_results = results;
+    }
+
+    fn stub_runs_code(&self, key: &DeclKey, sig: &FunctionReflection) -> bool {
+        let takes_code = sig
+            .params
+            .iter()
+            .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
+        let Some(name) = self.builtin_entry(key) else {
+            // A stub no run of PHP has seen is taken at its word: one
+            // its doc declares pure writes nothing, unless it takes code.
+            return !sig.declared_pure || takes_code;
+        };
+        key.class.as_deref().is_some_and(|class| {
+            self.builtin_holds_code(class) || !self.builtin_held_wrappers(class).is_empty()
+        }) || !builtin_runs::runs(&name).is_empty()
+            || takes_code
     }
 
     /// The builtin `key` is, when it is one.

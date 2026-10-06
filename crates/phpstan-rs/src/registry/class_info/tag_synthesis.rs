@@ -125,6 +125,5 @@ pub(crate) fn method_tag_sig(
         declared_pure: false,
         is_stub: false,
         is_magic: true,
-        stub_effect: Default::default(),
     }
 }

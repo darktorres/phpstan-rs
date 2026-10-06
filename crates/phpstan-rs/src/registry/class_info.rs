@@ -1818,7 +1818,6 @@ impl ClassReflection {
                 // about `is_magic`'s own general meaning staying
                 // accurate, not fixing a second live bug.
                 is_magic: true,
-                stub_effect: Default::default(),
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -1870,7 +1869,6 @@ impl ClassReflection {
                     declared_pure: false,
                     is_stub: false,
                     is_magic: true,
-                    stub_effect: Default::default(),
                 },
             );
             self.methods.insert(
@@ -1901,7 +1899,6 @@ impl ClassReflection {
                     declared_pure: false,
                     is_stub: false,
                     is_magic: true,
-                    stub_effect: Default::default(),
                 },
             );
         }

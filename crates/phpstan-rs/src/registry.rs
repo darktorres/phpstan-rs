@@ -513,6 +513,11 @@ pub struct Registry {
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
     pub(crate) effects: FxHashMap<effects::EffectId, effects::Settled>,
+    // Whether a stub may run code passed to it, keyed by the same stable
+    // declaration IDs used by effect settlement. Rebuilt before each effects
+    // pass; unlike the signature, this is a derived Registry result.
+    #[serde(skip)]
+    pub(crate) stub_effect_results: FxHashMap<effects::EffectId, bool>,
     // The names, lowercased, of the builtin methods that run code passed
     // to them (`registry::effects`): the base's, and those of the classes
     // the registry holds itself, as the last finish found them. Stored
@@ -1029,6 +1034,7 @@ impl Registry {
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
         // Declarations remain as built. Finishing results are reset by ID.
+        self.stub_effect_results.clear();
     }
 
     /// Whether the finishing passes have resolved declarations that are
@@ -1116,6 +1122,7 @@ impl Registry {
             class_results: class_results_before.clone(),
         };
         if scope.is_all() {
+            self.stub_effect_results.clear();
             self.class_const_types.clear();
             self.class_const_types_by_id.clear();
             self.function_results.clear();
@@ -1178,6 +1185,7 @@ impl Registry {
             .collect();
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
+        self.stub_effect_results.clear();
         body_scope.map(|_| snapshot(functions, self))
     }
 
@@ -1197,6 +1205,9 @@ impl Registry {
     /// Makes the class, function and derived tables a shared base, for
     /// clones of the registry to share rather than copy.
     pub(crate) fn freeze(&mut self) {
+        // IDs may be reassigned from project to stub space below. The next
+        // effect pass rebuilds this ephemeral memo against the frozen IDs.
+        self.stub_effect_results.clear();
         self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
         self.base_builtin_methods_running_code =
             Arc::new(self.builtin_methods_running_code.clone());
@@ -2099,6 +2110,7 @@ impl Registry {
             .drain()
             .map(|(id, settled)| (id.with_generation(generation), settled))
             .collect();
+        base.stub_effect_results.clear();
         *self = base;
     }
 

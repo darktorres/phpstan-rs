@@ -204,7 +204,6 @@ canonical_struct!(FunctionReflection {
     attributes,
     provenance,
 } skip {
-    stub_effect,
 });
 
 canonical_struct!(AssertInfo {
@@ -505,6 +504,7 @@ impl CanonicalOver for Registry {
             class_property_results: _,
             class_property_results_cache: _,
             effects: _,
+            stub_effect_results: _,
             builtin_methods_running_code,
             base_builtin_methods_running_code,
             methods_by_name: _,
@@ -706,6 +706,7 @@ canonical_struct!(Registry {
     class_reference_results_cache,
     member_owners_cache,
     effects,
+    stub_effect_results,
     methods_by_name,
     class_ids,
     project_class_names,
