@@ -530,9 +530,8 @@ impl Registry {
 
     /// The id and declaration selected for `name` by PHP's class-name rules.
     pub(crate) fn class(&self, name: &str) -> Option<(ClassId, &Name, &ClassReflection)> {
-        let (name, current) = self.classes.get_with_name(name)?;
-        let id = *self.class_ids.get(name)?;
-        Some((id, name, self.class_by_id(id).unwrap_or(current)))
+        let (name, id) = self.class_ids.get_with_name(name)?;
+        Some((*id, name, self.class_by_id(*id)?))
     }
 
     fn debug_check_id_generation(&self, generation: u32) {
@@ -660,9 +659,8 @@ impl Registry {
 
     /// The id and declaration selected for `name` by PHP's function-name rules.
     pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
-        let (name, current) = self.functions.get_with_name(name)?;
-        let id = *self.function_ids.get(name)?;
-        Some((id, name, self.function_by_id(id).unwrap_or(current)))
+        let (name, id) = self.function_ids.get_with_name(name)?;
+        Some((*id, name, self.function_by_id(*id)?))
     }
 
     /// A function declaration addressed by its source-range id. While the

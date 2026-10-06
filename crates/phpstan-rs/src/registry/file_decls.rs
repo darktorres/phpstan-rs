@@ -919,6 +919,13 @@ mod tests {
 
         let class_id = registry.class("demo").unwrap().0;
         let function_id = registry.function("HELPER").unwrap().0;
+        // Raw reads for project declarations come from their immutable file
+        // locators. The mutable tables are no longer needed to find them by
+        // name once the ID index has selected the winner.
+        assert!(registry.classes.remove("Demo"));
+        assert!(registry.functions.remove("helper"));
+        assert_eq!(registry.class("DEMO").unwrap().0, class_id);
+        assert_eq!(registry.function("helper").unwrap().0, function_id);
         assert!(std::ptr::eq(
             registry.file_class_by_id(class_id).unwrap(),
             registry.class("Demo").unwrap().2
