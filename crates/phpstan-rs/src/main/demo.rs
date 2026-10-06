@@ -85,7 +85,9 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     let mut fn_names: Vec<&Name> = registry.functions().keys().collect();
     fn_names.sort();
     for name in &fn_names {
-        println!("{}", format_signature(name, &registry.functions()[*name]));
+        if let Some(sig) = registry.lookup_function(name) {
+            println!("{}", format_signature(name, sig));
+        }
     }
 
     let mut class_names: Vec<&Name> = registry.classes().keys().collect();

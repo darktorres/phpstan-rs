@@ -2676,7 +2676,10 @@ impl Project {
                 out.extend(rule.check_class(info, fqn));
             }
         }
-        for (fqn, sig) in self.registry.functions() {
+        for fqn in self.registry.functions().keys() {
+            let Some(sig) = self.registry.lookup_function(fqn) else {
+                continue;
+            };
             for rule in rules {
                 out.extend(rule.check_function(sig, fqn));
             }

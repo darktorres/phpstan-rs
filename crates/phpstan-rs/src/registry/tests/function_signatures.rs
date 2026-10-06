@@ -44,6 +44,26 @@ fn configured_function_assertions_reach_the_fast_gate_without_changing_declarati
 }
 
 #[test]
+fn top_level_deferred_value_of_is_a_function_result_not_a_declaration_write() {
+    let registry = build_registry(
+        r#"<?php
+            class Config { public const VALUES = ['first', 'second']; }
+            /** @param value-of<Config::VALUES> $value */
+            function accepts_value(string $value): void {}
+            "#,
+    );
+    let declaration = registry.functions["accepts_value"].clone();
+    let effective = registry.lookup_function("accepts_value").unwrap();
+
+    assert!(declaration.params[0].ty.contains_deferred());
+    assert_eq!(
+        effective.params[0].ty,
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+    );
+    assert_eq!(registry.functions["accepts_value"], declaration);
+}
+
+#[test]
 fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
     // The literal `mixed` keyword, written natively here, is real
     // PHPStan's own definition of

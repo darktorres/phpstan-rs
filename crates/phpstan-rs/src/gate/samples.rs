@@ -476,7 +476,7 @@ pub fn runtime_calls(registry: &Registry, files: &[(&str, &str)]) -> String {
                 continue;
             }
             let name = function.fq_name().trim_start_matches('\\');
-            let Some(sig) = registry.functions().get(name) else {
+            let Some(sig) = registry.lookup_function(name) else {
                 continue;
             };
             php.push_str(&calls(&sampler, sig, &|args| format!("\\{name}({args})")));

@@ -701,11 +701,18 @@ impl Registry {
                 );
             }
         };
-        let scope = &self.scope;
-        for (_, sig) in self
-            .functions
-            .iter_mut_scoped_where(scope.function_keys(), function_has_deferred_type)
-        {
+        let mut function_updates = Vec::new();
+        for name in self.scoped_function_names().iter() {
+            let Some(id) = self.function_ids.get(name).copied() else {
+                continue;
+            };
+            let Some(current) = self.function_by_id(id).cloned() else {
+                continue;
+            };
+            if !function_has_deferred_type(&current) {
+                continue;
+            }
+            let mut sig = current.clone();
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
                 let native = param.ty_native.clone();
@@ -724,6 +731,12 @@ impl Registry {
             if let Some(doc_ty) = &mut sig.return_doc_ty {
                 resolve(doc_ty, &sig.return_type_native, &self.classes);
             }
+            if sig != current {
+                function_updates.push((id, sig));
+            }
+        }
+        for (id, result) in function_updates {
+            self.function_results.insert(id, result);
         }
     }
 

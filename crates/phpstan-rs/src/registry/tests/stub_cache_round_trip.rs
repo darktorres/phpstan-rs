@@ -90,12 +90,22 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
             const ANSWER = 42;
             /** @param ANSWER $value */
             function reads_answer($value): void {}
+            class Config { public const VALUES = ['first', 'second']; }
+            /** @param value-of<Config::VALUES> $value */
+            function accepts_value(string $value): void {}
             "#,
     );
     let declared = registry.functions["reads_answer"].clone();
+    let value_of_declaration = registry.functions["accepts_value"].clone();
     let effective = registry.lookup_function("reads_answer").unwrap();
     assert_eq!(effective.params[0].ty, Type::int_literal(42));
     assert_eq!(registry.functions["reads_answer"], declared);
+    assert!(value_of_declaration.params[0].ty.contains_deferred());
+    assert_eq!(
+        registry.lookup_function("accepts_value").unwrap().params[0].ty,
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+    );
+    assert_eq!(registry.functions["accepts_value"], value_of_declaration);
 
     let back = round_trip(&registry);
     assert_eq!(
@@ -103,6 +113,11 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
         Type::int_literal(42)
     );
     assert_eq!(back.functions["reads_answer"], declared);
+    assert_eq!(back.functions["accepts_value"], value_of_declaration);
+    assert_eq!(
+        back.lookup_function("accepts_value").unwrap().params[0].ty,
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+    );
 }
 
 #[test]
