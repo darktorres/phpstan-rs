@@ -84,10 +84,7 @@ fn member_target(
     member: &str,
 ) -> use_sites::RefTarget {
     let names_another_member = registry.property_names(&owner).any(|name| name == member)
-        || registry
-            .classes()
-            .get(&owner)
-            .is_some_and(|info| info.consts().contains_key(member));
+        || registry.constant_names(&owner).any(|name| name == member);
     let member = if names_another_member {
         member.to_string()
     } else {

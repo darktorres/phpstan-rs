@@ -453,23 +453,40 @@ fn trait_methods_and_properties_are_flattened_in() {
 #[test]
 fn trait_constants_are_flattened_in() {
     // Same shape as `trait_methods_and_properties_are_flattened_in`
-    // just above, but for PHP 8.2+ trait constants specifically - these
-    // were never merged into a using class's own `consts` map at all
-    // (only methods/properties were), so `lookup_const` against the
-    // using class silently found nothing.
+    // just above, but for PHP 8.2+ trait constants specifically. The
+    // result stays outside the host declaration while Registry lookup
+    // serves it to the host and its subclasses.
     let r = build_registry(
         r#"<?php
             trait Greets {
                 public const string GREETING = "hi";
+                public const COPY = self::GREETING;
             }
             class Person {
                 use Greets;
             }
+            class Child extends Person {}
         "#,
     );
+    assert!(
+        !r.classes
+            .get("Person")
+            .unwrap()
+            .consts
+            .contains_key("GREETING")
+    );
+    assert!(r.constant_names("Person").any(|name| name == "GREETING"));
     assert_eq!(
         r.lookup_const("Person", "GREETING").unwrap().ty,
         Type::string_literal("hi".into())
+    );
+    assert_eq!(
+        r.lookup_const("Child", "GREETING").unwrap().ty,
+        Type::string_literal("hi".into())
+    );
+    assert_eq!(
+        r.lookup_const_type("Person", "COPY"),
+        Some(&Type::string_literal("hi".into()))
     );
 }
 

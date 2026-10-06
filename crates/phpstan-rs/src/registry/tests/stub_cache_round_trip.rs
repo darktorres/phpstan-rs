@@ -101,6 +101,8 @@ fn inherited_class_property_results_survive_cache_round_trip() {
             }
             trait HasIdentifier { final public int $id; }
             class TraitHost { use HasIdentifier; }
+            trait HasGreeting { public const string GREETING = "hi"; }
+            class TraitConstHost { use HasGreeting; }
             "#,
     );
     let back = round_trip(&registry);
@@ -143,6 +145,21 @@ fn inherited_class_property_results_survive_cache_round_trip() {
         "trait properties stay out of the host declaration"
     );
     assert!(back.lookup_property("TraitHost", "id").unwrap().is_final());
+    assert!(
+        !back
+            .classes
+            .get("TraitConstHost")
+            .unwrap()
+            .consts
+            .contains_key("GREETING"),
+        "trait constants stay out of the host declaration"
+    );
+    assert_eq!(
+        back.lookup_const("TraitConstHost", "GREETING")
+            .unwrap()
+            .ty(),
+        &Type::string_literal("hi".into())
+    );
 }
 
 #[test]

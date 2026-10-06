@@ -247,7 +247,10 @@ pub(crate) fn find_dead_members<'a>(
             }
             dead.push((fqn.to_string(), name.to_string(), MemberKind::Property));
         }
-        for (name, sig) in info.consts() {
+        for name in registry.constant_names(fqn) {
+            let Some(sig) = registry.lookup_const(fqn, name) else {
+                continue;
+            };
             if sig.ty().is_enum_case() || !is_visible(&sig.visibility()) || is_used(name) {
                 continue;
             }

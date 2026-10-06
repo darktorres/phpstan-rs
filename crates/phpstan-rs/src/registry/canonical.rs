@@ -454,6 +454,8 @@ impl CanonicalOver for Registry {
         let base_member_owners = base.member_owners_for_cache();
         let class_const_types = self.class_const_types_for_cache();
         let base_class_const_types = base.class_const_types_for_cache();
+        let class_constant_results = self.class_constant_results_for_cache();
+        let base_class_constant_results = base.class_constant_results_for_cache();
         let class_property_results = self.class_property_results_for_cache();
         let base_class_property_results = base.class_property_results_for_cache();
         let effects = self.effects_for_names();
@@ -513,6 +515,8 @@ impl CanonicalOver for Registry {
             member_owners_cache: _,
             class_const_types: _,
             class_const_types_cache: _,
+            class_constant_results: _,
+            class_constant_results_cache: _,
             class_property_results: _,
             class_property_results_cache: _,
             effects: _,
@@ -617,6 +621,14 @@ impl CanonicalOver for Registry {
                     &Over(&class_const_types, &base_class_const_types, compare),
                 ),
                 (
+                    "class_constant_results",
+                    &Over(
+                        &class_constant_results,
+                        &base_class_constant_results,
+                        compare,
+                    ),
+                ),
+                (
                     "class_property_results",
                     &Over(
                         &class_property_results,
@@ -695,6 +707,8 @@ canonical_struct!(Registry {
     member_owners,
     class_const_types,
     class_const_types_cache,
+    class_constant_results,
+    class_constant_results_cache,
     class_property_results,
     class_property_results_cache,
     member_owners_cache,

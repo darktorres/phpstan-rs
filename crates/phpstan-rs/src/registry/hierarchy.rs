@@ -474,6 +474,15 @@ impl Registry {
                     const_owner.insert(name.clone(), current.clone());
                 }
             }
+            if let Some(id) = self.class_ids.get(current)
+                && let Some(constants) = self.class_constant_results.get(id)
+            {
+                for name in constants.keys() {
+                    if !const_owner.contains_key(name) {
+                        const_owner.insert(name.clone(), current.clone());
+                    }
+                }
+            }
             for parent in info.extends.iter().chain(info.implements.iter()) {
                 queue.push_back(parent);
             }
@@ -1237,12 +1246,44 @@ impl Registry {
             None
         };
         from_file.or_else(|| {
-            self.classes
-                .get(owner)?
-                .consts
-                .get(const_name)
-                .map(|constant| &**constant)
+            (!self.raw_active)
+                .then(|| {
+                    let id = self.class_ids.get(owner)?;
+                    self.class_constant_results
+                        .get(id)?
+                        .get(const_name)
+                        .map(|(_, constant)| &**constant)
+                })
+                .flatten()
+                .or_else(|| {
+                    self.classes
+                        .get(owner)?
+                        .consts
+                        .get(const_name)
+                        .map(|constant| &**constant)
+                })
         })
+    }
+
+    /// Iterates a class's declared constants, including constants composed
+    /// from traits and held as Registry results.
+    pub fn constant_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
+        let declared = self.classes.get(class).map(|info| &info.consts);
+        let results = if self.raw_active {
+            None
+        } else {
+            self.class_ids
+                .get(class)
+                .and_then(|id| self.class_constant_results.get(id))
+        };
+        declared
+            .into_iter()
+            .flat_map(|constants| constants.keys())
+            .chain(results.into_iter().flat_map(move |constants| {
+                constants.keys().filter(move |name| {
+                    !declared.is_some_and(|declared| declared.contains_key(*name))
+                })
+            }))
     }
 
     /// Looks up a class constant and returns its stable slot in the
@@ -1256,7 +1297,18 @@ impl Registry {
     ) -> Option<(Name, usize, &ConstantReflection)> {
         let owner = self.const_owners(class)?.get(const_name)?;
         let info = self.classes.get(owner)?;
-        let slot = info.consts.get_index(const_name)?;
+        let result = (!self.raw_active)
+            .then(|| {
+                let id = self.class_ids.get(owner)?;
+                self.class_constant_results.get(id)?.get(const_name)
+            })
+            .flatten();
+        let (slot, declared) = result
+            .map(|(slot, constant)| (*slot, &**constant))
+            .or_else(|| {
+                let slot = info.consts.get_index(const_name)?;
+                Some((slot, &**info.consts.get_index_value(slot)?))
+            })?;
         let from_file = if self.raw_active {
             self.class_ids
                 .get(owner)
@@ -1264,7 +1316,7 @@ impl Registry {
         } else {
             None
         };
-        let constant = from_file.or_else(|| info.consts.get_index_value(slot).map(|c| &**c))?;
+        let constant = from_file.unwrap_or(declared);
         Some((owner.clone(), slot, constant))
     }
 
@@ -1312,11 +1364,22 @@ impl Registry {
             None
         };
         let constant = from_file.or_else(|| {
-            self.classes
-                .get(owner)?
-                .consts
-                .get(const_name)
-                .map(|constant| &**constant)
+            (!self.raw_active)
+                .then(|| {
+                    let id = self.class_ids.get(owner)?;
+                    self.class_constant_results
+                        .get(id)?
+                        .get(const_name)
+                        .map(|(_, constant)| &**constant)
+                })
+                .flatten()
+                .or_else(|| {
+                    self.classes
+                        .get(owner)?
+                        .consts
+                        .get(const_name)
+                        .map(|constant| &**constant)
+                })
         })?;
         Some((owner.clone(), constant))
     }

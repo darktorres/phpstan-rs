@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use syntax::name::Name;
+use syntax::name::{Name, OrderedNameMap};
 
 use syntax::ast::Stmt;
 use types::Type;
@@ -453,6 +453,13 @@ pub struct Registry {
     pub(crate) class_const_types: FxHashMap<(ClassId, usize), Type>,
     #[serde(skip)]
     class_const_types_cache: NameTable<Vec<(u32, Type)>>,
+    // Constants composed from traits, keyed by the using class and their
+    // stable class-constant slot. The ClassReflection keeps only declarations.
+    #[serde(skip)]
+    pub(crate) class_constant_results:
+        FxHashMap<ClassId, OrderedNameMap<(usize, Arc<ConstantReflection>)>>,
+    #[serde(skip)]
+    class_constant_results_cache: NameTable<Vec<(Name, u32, Arc<ConstantReflection>)>>,
     // Hook facts inherited by a redeclared property, keyed by the class
     // declaration that owns the completed property. The underlying
     // PropertyReflection remains the as-built declaration.
@@ -738,6 +745,7 @@ impl Registry {
                 .method_dependencies
                 .retain(|method, _| method.class() != id);
             self.class_const_types.retain(|(class, _), _| *class != id);
+            self.class_constant_results.remove(&id);
             self.class_property_results.remove(&id);
         }
     }
@@ -926,6 +934,7 @@ impl Registry {
         };
         if scope.is_all() {
             self.class_const_types.clear();
+            self.class_constant_results.clear();
             self.class_property_results.clear();
             self.classes = raw.classes.clone();
             self.functions = raw.functions.clone();
@@ -945,6 +954,8 @@ impl Registry {
             .collect();
         self.class_const_types
             .retain(|(id, _), _| !changed_class_ids.contains(id));
+        self.class_constant_results
+            .retain(|id, _| !changed_class_ids.contains(id));
         self.class_property_results
             .retain(|id, _| !changed_class_ids.contains(id));
         let functions = reset_scoped(
@@ -1000,6 +1011,7 @@ impl Registry {
             })
             .collect();
         let class_const_types = self.class_const_types_for_cache();
+        let class_constant_results = self.class_constant_results_for_cache();
         let class_property_results = self.class_property_results_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
@@ -1100,6 +1112,29 @@ impl Registry {
             })
             .collect();
         self.class_const_types_cache = NameTable::default();
+        self.class_constant_results = class_constant_results
+            .iter()
+            .filter_map(|(name, constants)| {
+                self.class_ids.get(name).copied().map(|id| {
+                    (
+                        id,
+                        constants
+                            .iter()
+                            .map(|(name, slot, constant)| {
+                                (
+                                    name.clone(),
+                                    (
+                                        usize::try_from(*slot).expect("usize is at least 32 bits"),
+                                        Arc::clone(constant),
+                                    ),
+                                )
+                            })
+                            .collect::<OrderedNameMap<_>>(),
+                    )
+                })
+            })
+            .collect();
+        self.class_constant_results_cache = NameTable::default();
         self.class_property_results = class_property_results
             .iter()
             .filter_map(|(name, properties)| {
@@ -1243,6 +1278,8 @@ impl Registry {
             .store(writer, "table:member_owners")?;
         self.class_const_types_for_cache()
             .store(writer, "table:class_const_types")?;
+        self.class_constant_results_for_cache()
+            .store(writer, "table:class_constant_results")?;
         self.class_property_results_for_cache()
             .store(writer, "table:class_property_results")?;
         self.store_tables(writer)?;
@@ -1306,6 +1343,32 @@ impl Registry {
         by_name.into_iter().collect()
     }
 
+    fn class_constant_results_for_cache(
+        &self,
+    ) -> NameTable<Vec<(Name, u32, Arc<ConstantReflection>)>> {
+        if !self.class_constant_results_cache.is_empty() {
+            return self.class_constant_results_cache.clone();
+        }
+        self.class_constant_results
+            .iter()
+            .filter_map(|(id, constants)| {
+                let mut constants: Vec<_> = constants
+                    .iter()
+                    .map(|(name, (slot, constant))| {
+                        (
+                            name.clone(),
+                            u32::try_from(*slot).expect("class constant slot range exhausted"),
+                            Arc::clone(constant),
+                        )
+                    })
+                    .collect();
+                constants.sort_unstable_by_key(|(_, slot, _)| *slot);
+                self.class_name_by_id(*id)
+                    .map(|class| (class.clone(), constants))
+            })
+            .collect()
+    }
+
     fn class_property_results_for_cache(&self) -> NameTable<Vec<(Name, Arc<PropertyReflection>)>> {
         if !self.class_property_results_cache.is_empty() {
             return self.class_property_results_cache.clone();
@@ -1337,6 +1400,8 @@ impl Registry {
             .check_order("table:member_owners")?;
         self.class_const_types_for_cache()
             .check_order("table:class_const_types")?;
+        self.class_constant_results_for_cache()
+            .check_order("table:class_constant_results")?;
         self.class_property_results_for_cache()
             .check_order("table:class_property_results")?;
         if let Some(raw) = &self.raw {
@@ -1369,6 +1434,8 @@ impl Registry {
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
         registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;
+        registry.class_constant_results_cache =
+            NameTable::load(reader, "table:class_constant_results")?;
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
         if reader.has_section(RAW_CLASSES) {
@@ -1433,6 +1500,11 @@ impl Registry {
             .class_const_types
             .drain()
             .map(|((id, slot), ty)| ((id.with_generation(generation), slot), ty))
+            .collect();
+        base.class_constant_results = base
+            .class_constant_results
+            .drain()
+            .map(|(id, constants)| (id.with_generation(generation), constants))
             .collect();
         base.class_property_results = base
             .class_property_results
