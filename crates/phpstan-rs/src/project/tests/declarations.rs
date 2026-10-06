@@ -21,7 +21,7 @@ fn classes_and_members_are_recorded_without_retain_source() {
     let (path, _) = registry.method_declaration("Foo", "bar").expect("bar");
     assert_eq!(path, Path::new("a.php"));
     assert_eq!(
-        registry.classes["Foo"].methods()["bar"]
+        registry.classes()["Foo"].methods()["bar"]
             .provenance()
             .declaring_class(),
         Some("Foo")
@@ -47,7 +47,7 @@ fn an_inherited_member_keeps_its_declaring_class() {
 #[test]
 fn a_builtin_records_its_extension_and_no_file() {
     let project = Project::new();
-    let info = &project.registry().classes["ArrayObject"];
+    let info = &project.registry().classes()["ArrayObject"];
     assert!(info.provenance().is_builtin());
     assert_eq!(info.provenance().extension_name(), Some("SPL"));
     assert_eq!(info.provenance().file(), None);

@@ -512,7 +512,7 @@ impl<'a> Checker<'a> {
         let parsed = grammar::parse_shared(doc);
         let aliases = self
             .registry
-            .classes
+            .classes()
             .get(fqn)
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();

@@ -35,12 +35,12 @@ fn the_resolved_stub_registry_survives_a_round_trip() {
     let registry = project.registry();
     let back = read_back();
 
-    assert_eq!(back.classes.len(), registry.classes.len());
-    assert_eq!(back.functions.len(), registry.functions.len());
-    for (name, class) in registry.classes.iter() {
+    assert_eq!(back.classes.len(), registry.classes().len());
+    assert_eq!(back.functions.len(), registry.functions().len());
+    for (name, class) in registry.classes().iter() {
         assert_eq!(back.classes.get(name), Some(class), "class {name}");
     }
-    for (name, function) in registry.functions.iter() {
+    for (name, function) in registry.functions().iter() {
         assert_eq!(back.functions.get(name), Some(function), "function {name}");
     }
 }
@@ -160,9 +160,12 @@ fn the_stored_maps_and_sets_read_back_whole() {
     let registry = project.registry();
     let back = read_back();
 
-    assert!(!registry.global_constants.is_empty());
-    assert_eq!(back.global_constants.len(), registry.global_constants.len());
-    for (name, ty) in registry.global_constants.iter() {
+    assert!(!registry.global_constants().is_empty());
+    assert_eq!(
+        back.global_constants.len(),
+        registry.global_constants().len()
+    );
+    for (name, ty) in registry.global_constants().iter() {
         assert_eq!(back.global_constants.get(name), Some(ty), "constant {name}");
     }
     assert_eq!(
@@ -206,7 +209,7 @@ fn a_conditional_type_survives_the_codec() {
     // Declared after the one variant that is not stored: the codec writes
     // the variant's number.
     let project = Project::new();
-    let ty = &project.registry().functions["iterator_to_array"].return_type;
+    let ty = &project.registry().functions()["iterator_to_array"].return_type;
     assert!(ty.to_string().contains(" is true ? "), "got {ty}");
     let back: types::Type = decode(&encode(ty).unwrap()).unwrap();
     assert_eq!(&back, ty);

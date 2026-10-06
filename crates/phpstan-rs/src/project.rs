@@ -629,7 +629,7 @@ impl Project {
     fn dump_base(&self) -> Option<(&'static str, &'static Registry)> {
         Project::loaded_bases()
             .into_iter()
-            .find(|(_, base)| self.registry.classes.shares_base(&base.classes))
+            .find(|(_, base)| self.registry.classes().shares_base(base.classes()))
     }
 
     /// Both stub bases whole, by name (`registry_dump::stub_bases_dump`).
@@ -1558,7 +1558,7 @@ impl Project {
         // too, read from the declarations as built.
         let mut copied_from: Vec<String> = classes.iter().cloned().collect();
         while let Some(class) = copied_from.pop() {
-            let Some(info) = self.registry.classes.get(class.as_str()) else {
+            let Some(info) = self.registry.classes().get(class.as_str()) else {
                 continue;
             };
             for name in info.copies_from() {
@@ -1669,7 +1669,7 @@ impl Project {
             for name in self.registry.traits_of_changed_classes(before) {
                 let file = self
                     .registry
-                    .classes
+                    .classes()
                     .get(&name)
                     .and_then(|info| info.provenance().file())
                     .and_then(|origin| self.files.id_by_origin(origin));
@@ -2427,7 +2427,7 @@ impl Project {
         let mut scopes: NameSet = NameSet::default();
         let mut stack: Vec<Name> = writers.iter().cloned().collect();
         while let Some(class) = stack.pop() {
-            if let Some(info) = self.registry.classes.get(class.as_ref()) {
+            if let Some(info) = self.registry.classes().get(class.as_ref()) {
                 stack.extend(info.uses().iter().cloned());
             }
             scopes.insert(class);
@@ -2639,12 +2639,12 @@ impl Project {
         rules: &[Box<dyn crate::reflection_rule::ReflectionRule>],
     ) -> Vec<Diagnostic> {
         let mut out = Vec::new();
-        for (fqn, info) in &self.registry.classes {
+        for (fqn, info) in self.registry.classes() {
             for rule in rules {
                 out.extend(rule.check_class(info, fqn));
             }
         }
-        for (fqn, sig) in &self.registry.functions {
+        for (fqn, sig) in self.registry.functions() {
             for rule in rules {
                 out.extend(rule.check_function(sig, fqn));
             }

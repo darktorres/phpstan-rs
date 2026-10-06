@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
         match ty.as_object() {
             Some((class, args)) => {
                 if !args.is_empty()
-                    && let Some(info) = self.registry.classes.get(class.as_str())
+                    && let Some(info) = self.registry.classes().get(class.as_str())
                     && !info.template_bounds().is_empty()
                 {
                     // Bound-checking cares about the real referenced
@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
         syntax::stack::guard(|| {
             ty.as_object()
-                .is_none_or(|(name, _)| self.registry.classes.contains_key(name.as_str()))
+                .is_none_or(|(name, _)| self.registry.classes().contains_key(name.as_str()))
                 && !ty.any_child(|t| !self.is_type_fully_known(t))
         })
     }
@@ -359,7 +359,7 @@ impl<'a> Checker<'a> {
         if args.is_empty() {
             return;
         }
-        let Some(info) = self.registry.classes.get(class.as_str()) else {
+        let Some(info) = self.registry.classes().get(class.as_str()) else {
             return;
         };
         let kind = class_kind_identifier(&info.kind());

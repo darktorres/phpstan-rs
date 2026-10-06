@@ -83,7 +83,7 @@ fn class_overrides(
     if !class.uses_traits {
         return;
     }
-    let Some(info) = registry.classes.get(fqn) else {
+    let Some(info) = registry.classes().get(fqn) else {
         return;
     };
     let own_method_names: FxHashSet<&str> =
@@ -110,7 +110,7 @@ fn method_overrides(
     method_name: &str,
     out: &mut RenamedParameterOverrideFacts,
 ) {
-    let Some(info) = registry.classes.get(fqn) else {
+    let Some(info) = registry.classes().get(fqn) else {
         return;
     };
     let Some(own_sig) = info.methods().get(method_name) else {

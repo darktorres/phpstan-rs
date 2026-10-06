@@ -5,7 +5,7 @@
 //! `Diagnostic` is a `pub struct` with every field `pub`, and
 //! `ast::{Stmt, Expr, ...}` is fully public - this trait gives an
 //! external crate a named entry point for exactly this kind of check,
-//! rather than writing it by hand against `project.registry().classes`.
+//! rather than writing it by hand against `project.registry().classes()`.
 //!
 //! **What this tier can see**: whatever a fully-resolved `ClassReflection`/
 //! `FunctionReflection` records - declared types (native and PHPDoc-merged),

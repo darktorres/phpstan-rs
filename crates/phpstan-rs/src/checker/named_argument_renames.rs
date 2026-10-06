@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
         }
         if self
             .registry
-            .classes
+            .classes()
             .get(owner.as_ref())
             .is_some_and(|info| info.is_final() || info.final_methods().contains(method))
         {

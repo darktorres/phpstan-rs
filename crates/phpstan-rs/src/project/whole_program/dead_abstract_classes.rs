@@ -45,7 +45,7 @@ pub(crate) fn find_dead_abstract_classes<'a>(
             // can ever actually be constructed.
             !registry.subclasses(declaration.name).iter().any(|name| {
                 registry
-                    .classes
+                    .classes()
                     .get(name)
                     .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())
             })

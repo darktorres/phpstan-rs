@@ -38,7 +38,7 @@ impl<'a> Checker<'a> {
                 };
                 let has_parent = self
                     .registry
-                    .classes
+                    .classes()
                     .get(class.as_str())
                     .is_none_or(|info| !info.extends().is_empty());
                 if keyword == "parent" && !has_parent {
@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
         method: &str,
         span: Span,
     ) {
-        let Some(owner_info) = self.registry.classes.get(owner) else {
+        let Some(owner_info) = self.registry.classes().get(owner) else {
             return;
         };
         let canonical = self
@@ -137,7 +137,7 @@ impl<'a> Checker<'a> {
         let in_static_method = self
             .registry
             .lookup_method_with_owner(current_class, current_method)
-            .and_then(|(owner, _)| self.registry.classes.get(&owner))
+            .and_then(|(owner, _)| self.registry.classes().get(&owner))
             .is_some_and(|owner| {
                 owner
                     .static_methods()

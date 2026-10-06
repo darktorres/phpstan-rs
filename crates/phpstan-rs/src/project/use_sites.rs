@@ -254,7 +254,7 @@ fn resolve_class_ref(name: &QualifiedName) -> Option<String> {
 /// own entry point. `parent`/member halves of a `ClassConstFetch`/`StaticPropertyFetch`/
 /// `StaticCall` are deliberately NOT resolved here (parent needs the
 /// registry's own ancestor lookup only `resolve_class_ref` in
-/// `navigation.rs` does via `registry.classes`, harmless to add later but
+/// `navigation.rs` does via `registry.classes()`, harmless to add later but
 /// unneeded for Tier 1's own class/function scope; the member half is
 /// Tier 2's job entirely, via a real Checker-resolved declaring owner).
 pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, RefTarget)> {

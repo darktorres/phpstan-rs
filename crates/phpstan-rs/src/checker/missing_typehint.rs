@@ -176,7 +176,7 @@ impl<'a> Checker<'a> {
         for written in ty.bare_object_class_names() {
             // Compared and shown as declared: class names are
             // case-insensitive.
-            let (name, info) = match self.registry.classes.get_with_name(written.as_str()) {
+            let (name, info) = match self.registry.classes().get_with_name(written.as_str()) {
                 Some((declared, info)) => (declared.as_str(), Some(info)),
                 None => (written.as_str(), None),
             };
@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
         for p in properties {
             let Some(ty) = self
                 .registry
-                .classes
+                .classes()
                 .get(fqn)
                 .and_then(|c| c.properties().get(p.name.as_ref()))
                 .map(|sig| sig.ty().clone())
@@ -343,7 +343,7 @@ impl<'a> Checker<'a> {
             }
             let Some(ty) = self
                 .registry
-                .classes
+                .classes()
                 .get(fqn)
                 .and_then(|info| info.consts().get(&c.name.name))
                 .map(|cs| cs.ty().clone())

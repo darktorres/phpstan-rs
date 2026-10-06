@@ -140,7 +140,7 @@ impl Project {
                 .into_iter()
                 .flatten()
             {
-                let Some(info) = self.registry.classes.get(child) else {
+                let Some(info) = self.registry.classes().get(child) else {
                     continue;
                 };
                 let extends_current = info
@@ -164,7 +164,7 @@ impl Project {
             .into_iter()
             .flatten()
             .any(|child| {
-                self.registry.classes.get(child).is_some_and(|info| {
+                self.registry.classes().get(child).is_some_and(|info| {
                     info.extends()
                         .first()
                         .is_some_and(|parent| parent.eq_ignore_ascii_case(lower))
@@ -191,7 +191,7 @@ impl Project {
         if c.def.kind != ClassKind::Class {
             return;
         }
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.registry.classes().get(fqn) else {
             return;
         };
         let attribute_names: Vec<String> = c

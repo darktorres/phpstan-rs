@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
         let has_hooks = view.has_hooks();
         let is_virtual = self
             .registry
-            .classes
+            .classes()
             .get(registry_name)
             .and_then(|info| info.properties().get(view.name))
             .is_some_and(|sig| sig.is_virtual());

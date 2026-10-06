@@ -66,7 +66,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let kind_word = if is_static { "staticMethod" } else { "method" };
-        if let Some(declaring_info) = self.registry.classes.get(owner)
+        if let Some(declaring_info) = self.registry.classes().get(owner)
             && let Some(reason) = declaring_info.deprecated()
         {
             let type_word = class_type_word(declaring_info.kind());
@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
         } else {
             "property"
         };
-        if let Some(declaring_info) = self.registry.classes.get(owner)
+        if let Some(declaring_info) = self.registry.classes().get(owner)
             && let Some(reason) = declaring_info.deprecated()
         {
             let type_word = class_type_word(declaring_info.kind());
@@ -172,7 +172,7 @@ impl<'a> Checker<'a> {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
-        if let Some(declaring_info) = self.registry.classes.get(owner)
+        if let Some(declaring_info) = self.registry.classes().get(owner)
             && let Some(reason) = declaring_info.deprecated()
         {
             let type_word = class_type_word(declaring_info.kind());
@@ -213,7 +213,7 @@ impl<'a> Checker<'a> {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
-        let Some(info) = self.registry.classes.get(class) else {
+        let Some(info) = self.registry.classes().get(class) else {
             return;
         };
         let Some(reason) = info.deprecated() else {
@@ -243,7 +243,7 @@ impl Checker<'_> {
     /// `interface`, `trait` or `enum`.
     fn class_type_word_of(&self, class: &str) -> String {
         self.registry
-            .classes
+            .classes()
             .get(class)
             .map_or("class", |info| class_type_word(info.kind()))
             .to_lowercase()

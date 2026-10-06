@@ -128,7 +128,7 @@ impl<'a> Checker<'a> {
         if let Some(parent) = info.extends().first()
             && let Some(parent_sig) = self
                 .registry
-                .classes
+                .classes()
                 .get(parent)
                 .and_then(|p| p.methods().get(method_name))
             && parent_sig.visibility() != Visibility::Private
@@ -148,7 +148,7 @@ impl<'a> Checker<'a> {
             ));
         }
         for used in info.uses() {
-            if let Some(trait_info) = self.registry.classes.get(used)
+            if let Some(trait_info) = self.registry.classes().get(used)
                 && trait_info.abstract_methods().contains(method_name)
                 && let Some(trait_sig) = trait_info.methods().get(method_name)
             {
@@ -332,7 +332,7 @@ impl<'a> Checker<'a> {
             let own_is_static = info.static_methods().contains(method_name);
             let ancestor_is_static = self
                 .registry
-                .classes
+                .classes()
                 .get(ancestor_owner)
                 .is_some_and(|i| i.static_methods().contains(method_name));
             if ancestor_is_static && !own_is_static {
@@ -370,9 +370,14 @@ impl<'a> Checker<'a> {
             // unlike `static_methods` above, where interface methods use
             // the same explicit-keyword convention as any other class.
             let own_is_abstract = info.abstract_methods().contains(method_name);
-            let ancestor_is_abstract = self.registry.classes.get(ancestor_owner).is_some_and(|i| {
-                i.kind() == ClassKind::Interface || i.abstract_methods().contains(method_name)
-            });
+            let ancestor_is_abstract =
+                self.registry
+                    .classes()
+                    .get(ancestor_owner)
+                    .is_some_and(|i| {
+                        i.kind() == ClassKind::Interface
+                            || i.abstract_methods().contains(method_name)
+                    });
             if own_is_abstract && !ancestor_is_abstract {
                 self.report_builder(
                     DiagnosticBuilder::new(format!(

@@ -65,10 +65,12 @@ impl ConstantResolver {
             return Some(ty);
         }
         let found = registry
-            .global_constants
+            .global_constants()
             .get(primary)
             .map(|ty| (primary, ty))
-            .or_else(|| fallback.and_then(|f| registry.global_constants.get(f).map(|ty| (f, ty))));
+            .or_else(|| {
+                fallback.and_then(|f| registry.global_constants().get(f).map(|ty| (f, ty)))
+            });
         // A dynamic constant is known even when nothing declares it.
         let dynamic = match found {
             Some((name, ty)) => self.dynamic_global_constant_type(name, Some(ty)),

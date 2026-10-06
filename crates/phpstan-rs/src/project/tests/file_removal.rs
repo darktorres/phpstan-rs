@@ -12,13 +12,13 @@ fn removing_a_file_drops_its_declarations_from_the_registry() {
             "<?php function helperA(): int { return 1; } class Foo {}",
         )
         .load();
-    assert!(project.registry().functions.contains_key("helperA"));
-    assert!(project.registry().classes.contains_key("Foo"));
+    assert!(project.registry().functions().contains_key("helperA"));
+    assert!(project.registry().classes().contains_key("Foo"));
 
     project.remove_file(&PathBuf::from("a.php"));
 
-    assert!(!project.registry().functions.contains_key("helperA"));
-    assert!(!project.registry().classes.contains_key("Foo"));
+    assert!(!project.registry().functions().contains_key("helperA"));
+    assert!(!project.registry().classes().contains_key("Foo"));
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn removing_a_never_loaded_file_is_a_harmless_no_op() {
         vec![&PathBuf::from("never.php")]
     );
     assert!(result[&PathBuf::from("never.php")].is_empty());
-    assert!(project.registry().functions.contains_key("helperA"));
+    assert!(project.registry().functions().contains_key("helperA"));
 }
 
 #[test]

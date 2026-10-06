@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
             }
             let Some(sig) = self
                 .registry
-                .classes
+                .classes()
                 .get(fqn)
                 .and_then(|info| info.consts().get(&constant.name.name))
             else {
@@ -168,7 +168,7 @@ impl<'a> Checker<'a> {
             };
             let suggested_ty = self.suggested_type(&suggested, Some(fqn));
             let redeclared_incompatibly = self.registry.subclasses(fqn).iter().any(|name| {
-                self.registry.classes.get(name).is_some_and(|info| {
+                self.registry.classes().get(name).is_some_and(|info| {
                     info.consts().get(&constant.name.name).is_some_and(|child| {
                         child.native_ty().as_ref().is_none_or(|child_ty| {
                             self.registry.is_super_type_of(&suggested_ty, child_ty)

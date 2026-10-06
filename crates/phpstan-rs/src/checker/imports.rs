@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 let fqn = import.path.trim_start_matches('\\');
-                if !self.registry.global_constants.contains_key(fqn) {
+                if !self.registry.global_constants().contains_key(fqn) {
                     self.report(
                         format!("used constant {fqn} not found"),
                         stmt.span,

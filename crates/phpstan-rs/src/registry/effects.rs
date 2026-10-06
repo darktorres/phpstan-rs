@@ -517,7 +517,7 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// declared in.
 fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
     let mut by_name: FxHashMap<String, Vec<Name>> = FxHashMap::default();
-    for (class, info) in registry.classes.own_iter() {
+    for (class, info) in registry.classes().own_iter() {
         for (method, sig) in info.methods.iter() {
             if !sig.is_stub {
                 by_name
@@ -725,12 +725,12 @@ impl Registry {
         self.builtin_methods_running_code = running_code;
         let registry: &Registry = self;
         let functions: Vec<(&Name, &FunctionReflection)> = registry
-            .functions
+            .functions()
             .own_iter()
             .filter(|(_, sig)| !sig.is_stub)
             .collect();
         let methods: Vec<(&Name, &Name, &FunctionReflection)> = registry
-            .classes
+            .classes()
             .own_iter()
             .flat_map(|(class, info)| {
                 info.methods
@@ -756,7 +756,7 @@ impl Registry {
                 }),
         );
         let hooks: Vec<(&Name, &Name, &PropertyReflection, bool)> = registry
-            .classes
+            .classes()
             .own_iter()
             .flat_map(|(class, info)| {
                 info.properties
@@ -1511,7 +1511,7 @@ pub(crate) fn holder_of(ty: &Type) -> Holder {
 fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &str) -> Holder {
     let mut ty = ty.bind_static(class).bind_self(owner);
     if let Some(parent) = registry
-        .classes
+        .classes()
         .get(owner)
         .and_then(|info| info.extends().first())
     {
@@ -1580,7 +1580,7 @@ fn named_classes(
     Some(if class.is_keyword("self") {
         vec![Name::from(own?)]
     } else if class.is_keyword("parent") {
-        vec![registry.classes.get(own?)?.extends().first()?.clone()]
+        vec![registry.classes().get(own?)?.extends().first()?.clone()]
     } else if class.is_keyword("static") {
         let own = own?;
         std::iter::once(Name::from(own))
@@ -1984,7 +1984,11 @@ impl Reach<'_> {
                 out
             }
             Callee::ParentHook { property, set } => {
-                let parent = registry.classes.get(self.ctx.class()?)?.extends().first()?;
+                let parent = registry
+                    .classes()
+                    .get(self.ctx.class()?)?
+                    .extends()
+                    .first()?;
                 registry
                     .hook_owner(parent, property, *set)
                     .map(|owner| (hook_key(&owner, property, *set), Transfer::Same))
@@ -2023,7 +2027,7 @@ impl Reach<'_> {
         };
         let member = hook_member(property.map(Name::as_str), set);
         for declaring in registry.classes_declaring(&member) {
-            let Some(info) = registry.classes.get(declaring.as_str()) else {
+            let Some(info) = registry.classes().get(declaring.as_str()) else {
                 continue;
             };
             // How an object of each of the holder's classes is one of the
@@ -2245,7 +2249,7 @@ impl Reach<'_> {
     fn implicit_method(&self, class: &str, method: &str) -> Option<DeclKey> {
         let registry = self.registry;
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
-        let info = registry.classes.get(owner.as_str())?;
+        let info = registry.classes().get(owner.as_str())?;
         let abstract_method = info.kind() == ClassKind::Interface
             || info
                 .abstract_methods()
@@ -2315,7 +2319,7 @@ impl Reach<'_> {
             };
             match registry.lookup_method_with_owner(target, method) {
                 Some((owner, sig)) => {
-                    let is_static = registry.classes.get(owner.as_str()).is_some_and(|info| {
+                    let is_static = registry.classes().get(owner.as_str()).is_some_and(|info| {
                         info.static_methods()
                             .iter()
                             .any(|m| m.eq_ignore_ascii_case(method))
@@ -3260,7 +3264,7 @@ impl<'r> Level<'r> {
             } => {
                 let Some(parent) = self
                     .class
-                    .and_then(|class| registry.classes.get(class))
+                    .and_then(|class| registry.classes().get(class))
                     .and_then(|info| info.extends().first())
                 else {
                     return Holder::Unknown;

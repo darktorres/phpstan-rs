@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
         if !self.settings.language_extensions {
             return;
         }
-        let Some(info) = self.registry.classes.get(owner) else {
+        let Some(info) = self.registry.classes().get(owner) else {
             return;
         };
         let own = info
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
         if !self.settings.language_extensions {
             return;
         }
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.registry.classes().get(fqn) else {
             return;
         };
         let uses: Vec<(String, Vec<Name>)> = info
@@ -160,7 +160,7 @@ impl<'a> Checker<'a> {
             .filter_map(|t| {
                 let restriction = &self
                     .registry
-                    .classes
+                    .classes()
                     .get(t.as_ref())?
                     .access()
                     .restrict_trait_to;
@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
                 !a.eq_ignore_ascii_case(canonical)
                     && self
                         .registry
-                        .classes
+                        .classes()
                         .get(a.as_ref())
                         .is_some_and(|i| i.access().injectable_version)
             })

@@ -119,7 +119,7 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
-                let sig = &registry.functions[name];
+                let sig = &registry.functions()[name];
                 if !purity_gate_passes(sig, false) {
                     return None;
                 }
@@ -142,7 +142,7 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map(|class_name| {
                 let mut per_class = Vec::new();
-                for (method_name, sig) in registry.classes[class_name].methods.iter() {
+                for (method_name, sig) in registry.classes()[class_name].methods.iter() {
                     if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
                         continue;
                     }
@@ -481,14 +481,14 @@ pub(crate) fn is_non_overridable(
         return true;
     }
     if registry
-        .classes
+        .classes()
         .get(owner)
         .is_some_and(|info| info.final_methods.contains(method) || info.is_final)
     {
         return true;
     }
     registry
-        .classes
+        .classes()
         .get(calling_class)
         .is_some_and(|info| info.is_final)
 }

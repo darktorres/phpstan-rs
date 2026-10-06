@@ -47,7 +47,7 @@ impl<'a> Checker<'a> {
         }
         let has_parent = self
             .registry
-            .classes
+            .classes()
             .get(class.as_str())
             .is_none_or(|info| !info.extends().is_empty());
         if has_parent {
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
         let Some(class) = self.current_class.clone() else {
             return;
         };
-        let Some(info) = self.registry.classes.get(class.as_str()) else {
+        let Some(info) = self.registry.classes().get(class.as_str()) else {
             return;
         };
         let is_abstract = info.is_abstract();
@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
         let in_static_method = self
             .registry
             .lookup_method_with_owner(&class, &method)
-            .and_then(|(owner, _)| self.registry.classes.get(&owner))
+            .and_then(|(owner, _)| self.registry.classes().get(&owner))
             .is_some_and(|owner| {
                 owner
                     .static_methods()
@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
         let registry = &self.registry;
         let mut current = Some(class.to_string());
         while let Some(c) = current {
-            let Some(info) = registry.classes.get(c.as_str()) else {
+            let Some(info) = registry.classes().get(c.as_str()) else {
                 break;
             };
             if info.is_consistent_constructor() {
@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        if registry.classes.get(&owner).is_some_and(|info| {
+        if registry.classes().get(&owner).is_some_and(|info| {
             info.final_methods().contains("__construct")
                 || info.final_methods_by_phpdoc().contains("__construct")
         }) {
@@ -252,11 +252,11 @@ impl<'a> Checker<'a> {
         }
         let mut prototype_owner = owner.clone();
         let mut current = registry
-            .classes
+            .classes()
             .get(&owner)
             .and_then(|info| info.extends().first().cloned());
         while let Some(c) = current {
-            let Some(info) = registry.classes.get(&c) else {
+            let Some(info) = registry.classes().get(&c) else {
                 break;
             };
             if info.methods().contains_key("__construct") {
@@ -265,7 +265,7 @@ impl<'a> Checker<'a> {
             current = info.extends().first().cloned();
         }
         if registry
-            .classes
+            .classes()
             .get(&prototype_owner)
             .is_some_and(|info| info.abstract_methods().contains("__construct"))
         {
@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
         if abstract_trait_methods_supported
             && let Some(t) = &self.current_trait
             && registry
-                .classes
+                .classes()
                 .get(t.as_str())
                 .is_some_and(|info| info.abstract_methods().contains("__construct"))
         {

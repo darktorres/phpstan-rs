@@ -24,7 +24,7 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
     let registry = project.registry();
 
     let rule = registry
-        .classes
+        .classes()
         .get("PHPStan\\Rules\\Rule")
         .expect("PHPStan\\Rules\\Rule should be present via the generated stub pipeline");
     assert!(rule.is_api(), "expected PHPStan\\Rules\\Rule to be @api");
@@ -33,7 +33,7 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
     // proves the `@api-do-not-implement` half of the pipeline also
     // survives all the way through, not just a bare `@api`.
     let scope = registry
-        .classes
+        .classes()
         .get("PHPStan\\Analyser\\Scope")
         .expect("PHPStan\\Analyser\\Scope should be present via the generated stub pipeline");
     assert!(
@@ -48,8 +48,7 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
     // A real, ordinary internal class with no `@api` tag at all must not
     // come out tagged by accident (a `false`-by-default sanity check, not
     // just "the true case works").
-    let resolver = registry
-        .classes
+    let resolver = registry.classes()
         .get("PHPStan\\Analyser\\NodeScopeResolver")
         .expect("PHPStan\\Analyser\\NodeScopeResolver should be present via the generated stub pipeline");
     assert!(

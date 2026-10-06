@@ -35,7 +35,7 @@ impl<'a> Checker<'a> {
     /// `implements`/`@use` checking (sharing one call site across all
     /// three declaration kinds).
     pub(crate) fn check_cross_path_interface_conflicts(&mut self, fqn: &str, span: Span) {
-        let Some(root_info) = self.registry.classes.get(fqn) else {
+        let Some(root_info) = self.registry.classes().get(fqn) else {
             return;
         };
         // Real PHPStan's own message literally only ever says "Class" or
@@ -77,7 +77,7 @@ impl<'a> Checker<'a> {
         );
 
         for (iface, idx, new_ty, old_ty) in diagnostics {
-            let Some(info) = self.registry.classes.get(iface.as_str()) else {
+            let Some(info) = self.registry.classes().get(iface.as_str()) else {
                 continue;
             };
             let Some(template_name) = info.templates().get(idx) else {

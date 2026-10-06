@@ -706,7 +706,7 @@ impl<'a> Checker<'a> {
                 .lookup_method_canonical_name(class, method)
                 .unwrap_or(method)
                 .to_string();
-            let owner_info = self.registry.classes.get(owner.as_ref())?;
+            let owner_info = self.registry.classes().get(owner.as_ref())?;
             if !owner_info.static_methods().contains(name.as_str()) {
                 return None;
             }
@@ -742,7 +742,7 @@ impl<'a> Checker<'a> {
         if let Some(trait_name) = self.current_trait.as_deref() {
             let users: Vec<&str> = self
                 .registry
-                .classes
+                .classes()
                 .iter()
                 .filter(|(_, info)| {
                     info.uses()
@@ -792,7 +792,7 @@ impl<'a> Checker<'a> {
         let mut current = class.to_string();
         while let Some(parent) = self
             .registry
-            .classes
+            .classes()
             .get(current.as_str())
             .and_then(|info| info.extends().first())
         {

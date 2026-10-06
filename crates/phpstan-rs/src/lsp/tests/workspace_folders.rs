@@ -184,8 +184,8 @@ fn adding_a_folder_moves_the_documents_open_in_it_there() {
     assert!(!server.unrooted.open_documents.contains(&path));
     let folder = &server.folders[server.folder_of(&path).unwrap()];
     assert!(folder.open_documents.contains(&path));
-    assert!(folder.project.registry().classes.contains_key("InEditor"));
-    assert!(!folder.project.registry().classes.contains_key("OnDisk"));
+    assert!(folder.project.registry().classes().contains_key("InEditor"));
+    assert!(!folder.project.registry().classes().contains_key("OnDisk"));
 }
 
 #[test]

@@ -292,7 +292,7 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
         let type_aliases = self
             .registry
-            .classes
+            .classes()
             .get(fqn)
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
@@ -635,7 +635,7 @@ impl<'a> Checker<'a> {
         let mut seen_props: FxHashMap<&str, (&str, &PropertyReflection)> = FxHashMap::default();
         let mut seen_methods: FxHashMap<&str, (&str, &FunctionReflection)> = FxHashMap::default();
         for trait_name in info.uses() {
-            let Some(trait_info) = self.registry.classes.get(trait_name) else {
+            let Some(trait_info) = self.registry.classes().get(trait_name) else {
                 continue;
             };
             for (prop_name, sig) in trait_info.properties() {
@@ -978,7 +978,7 @@ impl<'a> Checker<'a> {
         );
         self.check_class_constant_modifiers(fqn, c.def.kind, &c.def.consts);
         let own = crate::registry::ClassReflection::from_decl(c, &self.name_ctx);
-        let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
+        let registry_matches = self.registry.classes().get(fqn).is_some_and(|info| {
             *info.extends() == *own.extends()
                 && *info.implements() == *own.implements()
                 && *info.uses() == *own.uses()
@@ -1017,7 +1017,7 @@ impl<'a> Checker<'a> {
             // interface role.
             let immediate: Vec<_> = if is_interface {
                 self.registry
-                    .classes
+                    .classes()
                     .get(fqn)
                     .map(|i| i.extends().clone())
                     .unwrap_or_default()
@@ -1141,7 +1141,7 @@ impl<'a> Checker<'a> {
             if all_traits.contains(&t) {
                 continue;
             }
-            if let Some(trait_info) = self.registry.classes.get(&t) {
+            if let Some(trait_info) = self.registry.classes().get(&t) {
                 stack.extend(trait_info.uses().iter().cloned());
             }
             all_traits.push(t);
@@ -1665,7 +1665,7 @@ impl<'a> Checker<'a> {
         }
         if self
             .registry
-            .classes
+            .classes()
             .get(&ancestor)
             .is_some_and(|info| info.abstract_methods().contains("__construct"))
         {
@@ -1801,7 +1801,7 @@ impl<'a> Checker<'a> {
         // check for one either way.
         let is_interface = info.kind() == ClassKind::Interface;
         for ancestor_fqn in self.registry.all_ancestor_names(fqn) {
-            let Some(ancestor_info) = self.registry.classes.get(&ancestor_fqn) else {
+            let Some(ancestor_info) = self.registry.classes().get(&ancestor_fqn) else {
                 continue;
             };
             if !is_interface {
@@ -1868,7 +1868,7 @@ impl<'a> Checker<'a> {
         }
         let kind = info.kind();
         for parent_fqn in info.extends().iter().chain(info.implements().iter()) {
-            let Some(parent_info) = self.registry.classes.get(parent_fqn) else {
+            let Some(parent_info) = self.registry.classes().get(parent_fqn) else {
                 continue;
             };
             let attribute_sealed: &[Name] = if self.settings.language_extensions {

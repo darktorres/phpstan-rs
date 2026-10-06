@@ -740,10 +740,10 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
         let mut program = parsed.stmts;
         crate::stub_attributes::apply_stub_attributes(&mut program);
         let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
-        for (name, stub) in registry.classes {
+        for (name, stub) in registry.classes() {
             let Some((_, info)) = classes
                 .iter_mut()
-                .find(|(n, _)| n.eq_ignore_ascii_case(&name))
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
             else {
                 continue;
             };
@@ -1450,30 +1450,36 @@ pub(crate) fn index_stub_program(
             .map(str::to_string)
             .collect(),
         functions: registry
-            .functions
-            .into_iter()
-            .map(|(name, mut sig)| {
+            .functions()
+            .iter()
+            .map(|(name, sig)| {
                 // See `FunctionReflection::is_stub`'s own doc comment: a stub
                 // file's own body is never real - `Registry::
                 // index_and_flatten` has no way to know that on its own,
                 // so this is set here instead, the one place that does.
+                let mut sig = sig.clone();
                 sig.is_stub = true;
-                (name, sig)
+                (name.clone(), sig)
             })
             .collect(),
         classes: registry
-            .classes
-            .into_iter()
-            .map(|(name, mut info)| {
+            .classes()
+            .iter()
+            .map(|(name, info)| {
                 // Same reasoning one level down: every method a stub
                 // class declares has an equally empty, unreal body.
+                let mut info = info.clone();
                 for sig in info.methods.values_mut() {
                     sig.is_stub = true;
                 }
-                (name, info)
+                (name.clone(), info)
             })
             .collect(),
-        constants: registry.global_constants.into_iter().collect(),
+        constants: registry
+            .global_constants()
+            .iter()
+            .map(|(name, ty)| (name.clone(), ty.clone()))
+            .collect(),
     }
 }
 

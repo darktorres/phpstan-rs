@@ -399,7 +399,7 @@ impl Checker<'_> {
             let ty = match shared {
                 Shared::Global(global) => self
                     .registry
-                    .global_variables
+                    .global_variables()
                     .get(global.as_str())
                     .cloned()
                     .unwrap_or_else(Type::mixed),
@@ -469,7 +469,7 @@ impl Checker<'_> {
             })
             .unwrap_or_default()
         } else if class.eq_ignore_ascii_case("parent") {
-            own.and_then(|own| self.registry.classes.get(own))
+            own.and_then(|own| self.registry.classes().get(own))
                 .and_then(|info| info.extends().first().map(|parent| parent.to_string()))
                 .into_iter()
                 .collect()
@@ -583,7 +583,7 @@ impl Checker<'_> {
         let own = self.current_class.as_deref();
         let declared = match (&place.root, &*place.steps) {
             (Root::Global(Some(name)), []) => {
-                self.registry.global_variables.get(name.as_str()).cloned()
+                self.registry.global_variables().get(name.as_str()).cloned()
             }
             (Root::Static(class, Some(prop)), []) => {
                 let class = if class.is_keyword("self")

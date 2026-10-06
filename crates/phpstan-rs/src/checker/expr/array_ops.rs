@@ -507,7 +507,7 @@ impl<'a> Checker<'a> {
             &|tp| {
                 tp.scope
                     .as_deref()
-                    .is_some_and(|scope| !self.registry.classes.contains_key(scope))
+                    .is_some_and(|scope| !self.registry.classes().contains_key(scope))
             },
             &relation,
         )

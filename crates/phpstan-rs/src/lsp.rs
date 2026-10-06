@@ -83,7 +83,7 @@ fn member_target(
     owner: String,
     member: &str,
 ) -> use_sites::RefTarget {
-    let names_another_member = registry.classes.get(&owner).is_some_and(|info| {
+    let names_another_member = registry.classes().get(&owner).is_some_and(|info| {
         info.properties().contains_key(member) || info.consts().contains_key(member)
     });
     let member = if names_another_member {
@@ -1115,7 +1115,7 @@ impl Workspace {
                 Some(format_signature(fqn, registry.lookup_function(fqn)?))
             }
             navigation::Resolved::Class(fqn) => {
-                let info = registry.classes.get(fqn.as_str())?;
+                let info = registry.classes().get(fqn.as_str())?;
                 let kind = match info.kind() {
                     ClassKind::Class => "class",
                     ClassKind::Interface => "interface",

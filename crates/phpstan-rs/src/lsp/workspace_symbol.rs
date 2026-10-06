@@ -58,7 +58,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
         ));
     };
 
-    for (fqn, info) in &registry.classes {
+    for (fqn, info) in registry.classes() {
         push(
             short_name(fqn),
             class_kind_symbol_kind(info.kind()),
@@ -102,7 +102,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
         }
     }
 
-    for (fqn, sig) in registry.functions.iter() {
+    for (fqn, sig) in registry.functions().iter() {
         push(
             short_name(fqn),
             SymbolKind::FUNCTION,

@@ -45,7 +45,7 @@ fn build_with_files(sources: &[(&str, &str)]) -> Registry {
 }
 
 fn global_type<'a>(registry: &'a Registry, name: &str) -> Option<&'a Type> {
-    registry.global_variables.get(name)
+    registry.global_variables().get(name)
 }
 
 #[test]

@@ -82,16 +82,16 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     registry.precompute_member_owners();
 
     println!("\n-- resolved signatures (from source) --");
-    let mut fn_names: Vec<&Name> = registry.functions.keys().collect();
+    let mut fn_names: Vec<&Name> = registry.functions().keys().collect();
     fn_names.sort();
     for name in &fn_names {
-        println!("{}", format_signature(name, &registry.functions[*name]));
+        println!("{}", format_signature(name, &registry.functions()[*name]));
     }
 
-    let mut class_names: Vec<&Name> = registry.classes.keys().collect();
+    let mut class_names: Vec<&Name> = registry.classes().keys().collect();
     class_names.sort();
     for class_name in &class_names {
-        let info = &registry.classes[*class_name];
+        let info = &registry.classes()[*class_name];
         let mut method_names: Vec<&Name> = info.methods().keys().collect();
         method_names.sort();
         for method_name in method_names {

@@ -220,7 +220,7 @@ impl<'a> Checker<'a> {
         let is_final = self
             .current_class
             .as_deref()
-            .and_then(|c| self.registry.classes.get(c))
+            .and_then(|c| self.registry.classes().get(c))
             .is_some_and(|info| info.is_final());
         if is_final {
             return;
@@ -249,7 +249,10 @@ impl<'a> Checker<'a> {
                 .and_then(|n| self.resolve_static_class_name(n)),
             ExprKind::Literal(Literal::String(s)) => {
                 let s = s.as_str()?.trim_start_matches('\\');
-                self.registry.classes.contains_key(s).then(|| s.to_string())
+                self.registry
+                    .classes()
+                    .contains_key(s)
+                    .then(|| s.to_string())
             }
             _ => None,
         }

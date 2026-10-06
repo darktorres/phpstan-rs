@@ -514,7 +514,7 @@ impl<'a> Checker<'a> {
         let Some(class) = &self.current_class else {
             return Vec::new();
         };
-        let Some(info) = self.registry.classes.get(class.as_str()) else {
+        let Some(info) = self.registry.classes().get(class.as_str()) else {
             return Vec::new();
         };
         info.methods()
@@ -809,7 +809,7 @@ impl<'a> Checker<'a> {
         let entry = entry.clone();
         let type_word = self
             .registry
-            .classes
+            .classes()
             .get(class)
             .map(|info| class_type_word(info.kind()))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
@@ -847,7 +847,7 @@ impl<'a> Checker<'a> {
         let entry = entry.clone();
         let type_word = self
             .registry
-            .classes
+            .classes()
             .get(class)
             .map(|info| class_type_word(info.kind()))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
@@ -876,7 +876,7 @@ impl<'a> Checker<'a> {
         if self.settings.restricted_symbols.is_empty() {
             return;
         }
-        let Some(info) = self.registry.classes.get(fqn) else {
+        let Some(info) = self.registry.classes().get(fqn) else {
             return;
         };
         let (extends, implements) = (info.extends().clone(), info.implements().clone());

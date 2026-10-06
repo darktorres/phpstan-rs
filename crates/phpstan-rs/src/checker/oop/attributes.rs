@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
         for attr in attrs {
             let fqn = self.resolve_class_name(&attr.name);
             // `lookup_class` (case-insensitive fallback), not a bare
-            // `self.registry.classes.get(&fqn)` - without it, a
+            // `self.registry.classes().get(&fqn)` - without it, a
             // case-mismatched attribute reference always reports "does
             // not exist" here before `check_class_name_case` below ever
             // gets a chance to see it. Every subsequent lookup/message
@@ -155,7 +155,7 @@ impl<'a> Checker<'a> {
         let mut seen_non_repeatable: FxHashSet<String> = FxHashSet::default();
         for attr in attrs {
             let fqn = self.resolve_class_name(&attr.name);
-            let Some(info) = self.registry.classes.get(fqn.as_str()) else {
+            let Some(info) = self.registry.classes().get(fqn.as_str()) else {
                 continue;
             };
             let Some(flags) = info.attribute_targets() else {

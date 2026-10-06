@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
 
         if self
             .registry
-            .classes
+            .classes()
             .get(owner)
             .is_some_and(|c| !c.templates().is_empty())
         {
@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
             // An erased receiver's template is its declared default
             // (`@template T = 'array'`, so a conditional on `T` resolves),
             // or else its bound: what a value of it is surely known to be.
-            if let Some(info) = self.registry.classes.get(owner) {
+            if let Some(info) = self.registry.classes().get(owner) {
                 for name in info.templates() {
                     if !bindings.contains_key(name.as_ref())
                         && let Some(erased) = info
@@ -131,7 +131,7 @@ impl<'a> Checker<'a> {
             for ancestor in self.registry.all_ancestor_names(owner) {
                 if !self
                     .registry
-                    .classes
+                    .classes()
                     .get(&ancestor)
                     .is_some_and(|c| !c.templates().is_empty())
                 {
@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
     ) -> Type {
         if !self
             .registry
-            .classes
+            .classes()
             .get(owner)
             .is_some_and(|c| !c.templates().is_empty())
         {

@@ -318,7 +318,7 @@ impl PestConfig {
             return ty;
         }
         const DEFAULT: &str = "PHPUnit\\Framework\\TestCase";
-        if registry.classes.contains_key(DEFAULT) {
+        if registry.classes().contains_key(DEFAULT) {
             Type::object(DEFAULT.into(), Vec::new())
         } else {
             Type::mixed()

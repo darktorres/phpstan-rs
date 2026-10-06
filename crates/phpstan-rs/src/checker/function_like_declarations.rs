@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
         self.registry
             .classes_using_trait(trait_fqn)
             .iter()
-            .filter_map(|host| self.registry.classes.get(host))
+            .filter_map(|host| self.registry.classes().get(host))
             .flat_map(|info| info.trait_aliases().iter())
             .any(|a| {
                 syntax::ast::is_constructor_name(&a.alias)

@@ -637,7 +637,7 @@ impl Project {
     ) {
         let first_party: Vec<&str> = self
             .registry
-            .classes
+            .classes()
             .iter()
             .filter(|(_, info)| {
                 info.provenance()
@@ -648,7 +648,7 @@ impl Project {
             .map(|(name, _)| name.as_ref())
             .filter(|name| {
                 self.registry
-                    .classes
+                    .classes()
                     .get(name)
                     .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())
             })
@@ -747,7 +747,7 @@ impl Project {
             };
             let is_static = self
                 .registry
-                .classes
+                .classes()
                 .get(owner.as_ref())
                 .is_some_and(|owner_info| {
                     owner_info

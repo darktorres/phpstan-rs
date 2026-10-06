@@ -223,7 +223,7 @@ struct RawDeclarations {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     #[serde(skip)]
-    pub classes: NameTable<ClassReflection>,
+    classes: NameTable<ClassReflection>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     #[serde(skip)]
@@ -231,7 +231,7 @@ pub struct Registry {
     #[serde(skip)]
     pub(crate) configured_class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     #[serde(skip)]
-    pub functions: FunctionTable,
+    functions: FunctionTable,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -242,7 +242,7 @@ pub struct Registry {
     // unindexed, the same "don't know, don't guess" leniency that
     // function already documents.
     #[serde(skip)]
-    pub global_constants: NameMap<Type>,
+    global_constants: NameMap<Type>,
     // `global $x;`-declared variable name -> inferred-type table, built by
     // folding every real assignment site to that name anywhere in the
     // corpus (`global_vars::infer_global_variables`) - the project-wide
@@ -253,7 +253,7 @@ pub struct Registry {
     // `Mixed`-valued one) means "no assignment site found or resolved" -
     // callers should treat a missing key the same as they already treat
     // `Mixed`.
-    pub global_variables: syntax::name::NameMap<Type>,
+    global_variables: syntax::name::NameMap<Type>,
     // The one narrow crack in this struct's "path-agnostic" contract
     // (see `project/decl_locations.rs` for why `ClassReflection`/`Registry`
     // are otherwise path-agnostic) - needed to port real
@@ -418,6 +418,26 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// The project's indexed classes, keyed by PHP's case-insensitive class name.
+    pub fn classes(&self) -> &NameTable<ClassReflection> {
+        &self.classes
+    }
+
+    /// The project's indexed functions, keyed by PHP's case-insensitive function name.
+    pub fn functions(&self) -> &FunctionTable {
+        &self.functions
+    }
+
+    /// The literal-shaped global constants known to the project.
+    pub fn global_constants(&self) -> &NameMap<Type> {
+        &self.global_constants
+    }
+
+    /// The inferred global variables known to the project.
+    pub fn global_variables(&self) -> &syntax::name::NameMap<Type> {
+        &self.global_variables
+    }
+
     /// Whether `feature` is available on every PHP version the project
     /// runs on; `None` when none is known.
     pub(crate) fn php_supports_everywhere(&self, feature: types::PhpFeature) -> Option<bool> {
@@ -584,7 +604,7 @@ impl Registry {
             function_keys: body_scope.and_then(scope::Scope::shared_function_keys),
             functions,
             effects: registry.effects.clone(),
-            global_variables: registry.global_variables.clone(),
+            global_variables: registry.global_variables().clone(),
         };
         if scope.is_all() {
             self.classes = raw.classes.clone();

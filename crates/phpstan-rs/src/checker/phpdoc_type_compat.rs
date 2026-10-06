@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
         if callables.is_empty() {
             return;
         }
-        let class_info = class.and_then(|c| self.registry.classes.get(c));
+        let class_info = class.and_then(|c| self.registry.classes().get(c));
         let type_aliases = class_info
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
@@ -325,7 +325,7 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
         let aliases = self
             .registry
-            .classes
+            .classes()
             .get(fqn)
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
@@ -341,7 +341,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDef) {
-        if !self.registry.classes.contains_key(fqn) {
+        if !self.registry.classes().contains_key(fqn) {
             return;
         }
         // A promoted property's PHPDoc type is its constructor `@param`,
@@ -386,7 +386,7 @@ impl<'a> Checker<'a> {
             }
             let Some(prop) = self
                 .registry
-                .classes
+                .classes()
                 .get(fqn)
                 .and_then(|info| info.properties().get(name))
             else {
@@ -613,7 +613,7 @@ impl<'a> Checker<'a> {
             .as_deref()
             .map(|d| docblock::parse_shared(d).templates.clone())
             .unwrap_or_default();
-        if let Some(info) = class_name.and_then(|c| self.registry.classes.get(c)) {
+        if let Some(info) = class_name.and_then(|c| self.registry.classes().get(c)) {
             names.extend(info.templates().iter().map(|t| t.to_string()));
         }
         names

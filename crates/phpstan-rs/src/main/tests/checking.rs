@@ -26,7 +26,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         .tokenize_with_spans();
     let program = syntax::parser::Parser::new(tokens).parse_program().unwrap();
     let registry = registry::Registry::build(&program);
-    let sig = registry.functions.get("f").unwrap();
+    let sig = registry.functions().get("f").unwrap();
     assert_eq!(
         format_signature("f", sig),
         "f(int $x, string ...$rest): bool"

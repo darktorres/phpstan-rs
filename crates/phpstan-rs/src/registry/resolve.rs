@@ -162,7 +162,7 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|class_name| {
-                let own = &registry.classes[class_name];
+                let own = &registry.classes()[class_name];
                 let (uses, trait_aliases) = (&own.uses, &own.trait_aliases);
                 if uses.is_empty() && trait_aliases.is_empty() {
                     return None;
@@ -190,7 +190,7 @@ impl Registry {
                 // right there in `info.methods`.
                 let mut static_from_traits: NameSet = NameSet::default();
                 for trait_name in uses {
-                    if let Some(trait_info) = registry.classes.get(trait_name) {
+                    if let Some(trait_info) = registry.classes().get(trait_name) {
                         for (name, sig) in trait_info.methods.iter() {
                             if own_method_names.contains_key(name) {
                                 continue;
@@ -246,12 +246,12 @@ impl Registry {
                 for alias in trait_aliases {
                     let source_sig = match &alias.trait_name {
                         Some(t) => registry
-                            .classes
+                            .classes()
                             .get(t)
                             .and_then(|i| i.methods.get(&alias.method)),
                         None => uses
                             .iter()
-                            .find_map(|t| registry.classes.get(t)?.methods.get(&alias.method)),
+                            .find_map(|t| registry.classes().get(t)?.methods.get(&alias.method)),
                     };
                     if let Some(sig) = source_sig
                         && !own_method_names.contains_key(&alias.alias)
@@ -1139,7 +1139,7 @@ impl Registry {
             .filter_map(|&index| {
                 let class_name = &class_names[index];
                 let mut per_class: Vec<Backfill> = Vec::new();
-                let info = registry.classes.get(class_name)?;
+                let info = registry.classes().get(class_name)?;
                 // What `lookup_ancestor_method_with_owner` reads, read once
                 // per class and only when a method needs it: the maps of
                 // its parents' methods to their owners, and the owners
@@ -1167,7 +1167,7 @@ impl Registry {
                     let owner_class = match owner_classes.iter().find(|(name, _)| *name == owner) {
                         Some((_, class)) => *class,
                         None => {
-                            let Some(class) = registry.classes.get(owner) else {
+                            let Some(class) = registry.classes().get(owner) else {
                                 continue;
                             };
                             if owner_classes.len() < 8 {
@@ -2114,9 +2114,9 @@ fn constant_named_value<'r>(name: &str, registry: &'r Registry) -> Option<&'r Ty
     // which most names the constants' table does not have never need.
     let bare = name.trim_start_matches('\\');
     let value = registry
-        .global_constants
+        .global_constants()
         .get(bare)
-        .or_else(|| registry.global_constants.get(short))?;
+        .or_else(|| registry.global_constants().get(short))?;
     if registry.lookup_class(name).is_some() {
         return None;
     }

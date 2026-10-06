@@ -178,7 +178,7 @@ fn is_phpunit_test_method(registry: &Registry, fqn: &str, method_name: &str) -> 
 fn overrides_an_ancestor_method(registry: &Registry, fqn: &str, method_name: &str) -> bool {
     registry.all_ancestor_names(fqn).iter().any(|ancestor| {
         registry
-            .classes
+            .classes()
             .get(ancestor)
             .is_some_and(|info| info.methods().contains_key(method_name))
     })
@@ -202,7 +202,7 @@ pub(crate) fn find_dead_members<'a>(
 ) -> Vec<(String, String, MemberKind)> {
     let mut dead = Vec::new();
     for fqn in classes {
-        let Some(info) = registry.classes.get(fqn) else {
+        let Some(info) = registry.classes().get(fqn) else {
             continue;
         };
         // An interface/trait is never itself instantiable - its own

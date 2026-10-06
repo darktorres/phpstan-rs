@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.registry
-            .classes
+            .classes()
             .get(class.as_str())
             .is_some_and(|i| i.kind() == ClassKind::Enum)
             .then_some(class.to_string())
@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
         if !other.is_object().yes() {
             return None;
         }
-        let info = self.registry.classes.get(class.as_str())?;
+        let info = self.registry.classes().get(class.as_str())?;
         if info.kind() == ClassKind::Enum {
             return None;
         }
@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
         let (owner, sig) = self.lookup_method_with_owner(class, "equals")?;
         let is_static = self
             .registry
-            .classes
+            .classes()
             .get(owner.as_ref())
             .is_some_and(|o| o.static_methods().contains(name));
         let required = sig

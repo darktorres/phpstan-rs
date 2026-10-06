@@ -47,7 +47,7 @@ impl<'a> Checker<'a> {
     /// registered class. `Mixed`, an unresolvable class, and a PHPDoc
     /// type alias this project doesn't resolve (both surface as an
     /// object type naming no registered class - see
-    /// `self.registry.classes.contains_key`) all fall through the
+    /// `self.registry.classes().contains_key`) all fall through the
     /// catch-all, matching this project's usual "don't know, don't
     /// guess" leniency - this arm must tell "confidently not a
     /// number-castable object" apart from "not a real, known class at
@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
             } else if m.is_object().yes()
                 && m.object_class_names()
                     .iter()
-                    .any(|c| self.registry.classes.contains_key(c.as_str()))
+                    .any(|c| self.registry.classes().contains_key(c.as_str()))
             {
                 self.instance_of_any(m, &["SimpleXMLElement", "GMP", "BcMath\\Number"])
             } else {

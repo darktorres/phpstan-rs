@@ -2006,7 +2006,7 @@ impl<'a> Checker<'a> {
     /// where the "don't guess" convention leaves plain `string|false`
     /// unchanged rather than picking a side.
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
-        let info = self.registry.classes.get(class)?;
+        let info = self.registry.classes().get(class)?;
         Some(match info.extends().first() {
             Some(parent) => Type::class_string(Type::object(parent.into(), Vec::new())),
             None => Type::bool_literal(false),
@@ -2956,7 +2956,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
             // is the answer only when no subclass can stand in for it.
             let exact = member.is_enum_case()
                 || registry
-                    .classes
+                    .classes()
                     .get(class.as_str())
                     .is_some_and(|info| info.is_final());
             if exact {

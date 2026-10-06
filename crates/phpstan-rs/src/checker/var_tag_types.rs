@@ -317,7 +317,7 @@ impl<'a> Checker<'a> {
                 let name = name.clone();
                 let ty = self.resolve_type_node(node, "inline @var");
                 let ty = match &self.current_class {
-                    Some(class) => match self.registry.classes.get(class.as_str()) {
+                    Some(class) => match self.registry.classes().get(class.as_str()) {
                         Some(info) if !info.type_aliases().is_empty() => {
                             registry::substitute_type_aliases(ty, info.type_aliases())
                         }
@@ -730,7 +730,7 @@ impl<'a> Checker<'a> {
 
     /// Whether `ty` names a subclass of `PHPStan\Type\Type`.
     fn contains_phpstan_type(&self, ty: &Type) -> bool {
-        self.registry.classes.contains_key("PHPStan\\Type\\Type")
+        self.registry.classes().contains_key("PHPStan\\Type\\Type")
             && ty
                 .object_class_names()
                 .iter()

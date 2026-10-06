@@ -108,7 +108,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
     }
     let mut current = checker
         .registry
-        .classes
+        .classes()
         .get(fqn)
         .and_then(|info| info.extends().first().cloned());
     let mut seen = FxHashSet::default();
@@ -116,7 +116,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         if !seen.insert(ancestor.clone()) {
             break; // cycle guard for a malformed/circular hierarchy
         }
-        let Some(info) = checker.registry.classes.get(&ancestor) else {
+        let Some(info) = checker.registry.classes().get(&ancestor) else {
             break;
         };
         let found = info.methods().values().any(|sig| {

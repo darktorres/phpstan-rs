@@ -1085,7 +1085,7 @@ impl<'a> Checker<'a> {
         self.settings.doctrine.then_some(self.registry)
     }
 
-    /// `registry.classes.get(name)`, remembered for the next ask for the
+    /// `registry.classes().get(name)`, remembered for the next ask for the
     /// same name: a class is asked for by every check of it, one after
     /// another.
     pub(crate) fn class_info(&self, name: &str) -> Option<&'a crate::registry::ClassReflection> {
@@ -1094,7 +1094,7 @@ impl<'a> Checker<'a> {
             return memo.1;
         }
         let registry: &'a Registry = self.registry;
-        let info = registry.classes.get(name);
+        let info = registry.classes().get(name);
         memo.0.clear();
         memo.0.push_str(name);
         memo.1 = info;
@@ -1657,7 +1657,7 @@ impl<'a> Checker<'a> {
         );
         if info.is_abstract() || info.kind() != ClassKind::Class {
             for other_fqn in self.registry.inheritors(&canonical) {
-                let Some(other_info) = self.registry.classes.get(&other_fqn) else {
+                let Some(other_info) = self.registry.classes().get(&other_fqn) else {
                     continue;
                 };
                 if other_info.kind() == ClassKind::Class && !other_info.is_abstract() {
@@ -1874,7 +1874,7 @@ impl<'a> Checker<'a> {
                 StmtKind::ClassDecl(c) => {
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
-                    // `self.registry.classes` (via `resolve_pseudo` for
+                    // `self.registry.classes()` (via `resolve_pseudo` for
                     // self/parent/static, and the undefined-class check
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.

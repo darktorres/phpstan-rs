@@ -347,7 +347,7 @@ fn a_created_file_that_is_not_utf8_is_loaded_from_its_bytes() {
         server.folders[0]
             .project
             .registry()
-            .classes
+            .classes()
             .contains_key("Odd")
     );
 }
@@ -367,14 +367,14 @@ fn a_change_on_disk_leaves_an_open_document_as_the_editor_has_it() {
         server.folders[0]
             .project
             .registry()
-            .classes
+            .classes()
             .contains_key("InEditor")
     );
     assert!(
         !server.folders[0]
             .project
             .registry()
-            .classes
+            .classes()
             .contains_key("Changed")
     );
 
@@ -384,14 +384,14 @@ fn a_change_on_disk_leaves_an_open_document_as_the_editor_has_it() {
         server.folders[0]
             .project
             .registry()
-            .classes
+            .classes()
             .contains_key("Changed")
     );
     assert!(
         !server.folders[0]
             .project
             .registry()
-            .classes
+            .classes()
             .contains_key("InEditor")
     );
 }

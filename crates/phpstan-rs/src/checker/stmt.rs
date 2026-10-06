@@ -1090,7 +1090,7 @@ impl<'a> Checker<'a> {
                     if !locals.contains_var(name) {
                         let ty = self
                             .registry
-                            .global_variables
+                            .global_variables()
                             .get(&**name)
                             .cloned()
                             .unwrap_or(Type::mixed());
