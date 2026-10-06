@@ -252,6 +252,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   --lib --tests`, and `cargo clippy -p phpstan-rs --all-targets`.
   Property and constant ranges share their existing `Arc` values rather than
   deep-copying reflections into the arena.
+  The cache stores class/function declaration metadata beside the arena
+  values, then reconstructs `BuiltDecl` with the same `Arc`; mismatched
+  metadata is rejected so loading falls back to parsing. The end-to-end cache
+  test checks class, function and global-constant reconstruction, pointer
+  sharing, and mismatch rejection.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at

@@ -83,7 +83,7 @@ pub(super) struct CachedFile {
     constants: Vec<Name>,
     references: Vec<RefKey>,
     declaration_references: Vec<RefKey>,
-    built_decls: Vec<BuiltDecl>,
+    built_decls: Vec<CachedBuiltDecl>,
     file_decls: Arc<crate::registry::FileDecls>,
     pest_facts: Option<PestFacts>,
     declared_classes: Vec<DeclaredClass>,
@@ -97,6 +97,65 @@ pub(super) struct CachedFile {
     class_fn_refs: Option<Vec<(Span, RefTarget)>>,
 }
 
+/// The per-declaration data the registry needs alongside the reflection
+/// stored once in `file_decls`.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+enum CachedBuiltDecl {
+    Class {
+        name: Name,
+        conditional: bool,
+        guard: Option<crate::registry::GuardExpr>,
+        namespace: Name,
+    },
+    Function {
+        name: Name,
+        conditional: bool,
+        guard: Option<crate::registry::GuardExpr>,
+        site: u32,
+    },
+    GlobalConst {
+        name: Name,
+        guard: Option<crate::registry::GuardExpr>,
+        ty: types::Type,
+    },
+}
+
+impl From<&BuiltDecl> for CachedBuiltDecl {
+    fn from(declaration: &BuiltDecl) -> Self {
+        match declaration {
+            BuiltDecl::Class {
+                name,
+                conditional,
+                guard,
+                namespace,
+                ..
+            } => Self::Class {
+                name: name.clone(),
+                conditional: *conditional,
+                guard: guard.clone(),
+                namespace: namespace.clone(),
+            },
+            BuiltDecl::Function {
+                name,
+                conditional,
+                guard,
+                site,
+                ..
+            } => Self::Function {
+                name: name.clone(),
+                conditional: *conditional,
+                guard: guard.clone(),
+                site: *site,
+            },
+            BuiltDecl::GlobalConst { name, guard, ty } => Self::GlobalConst {
+                name: name.clone(),
+                guard: guard.clone(),
+                ty: ty.clone(),
+            },
+        }
+    }
+}
+
 impl CachedFile {
     /// What `parsed`, of a file `len` long, is stored as.
     pub(super) fn of(parsed: &ParsedFile, len: usize) -> CachedFile {
@@ -108,7 +167,11 @@ impl CachedFile {
             constants: parsed.constants.clone(),
             references: parsed.references.iter().cloned().collect(),
             declaration_references: parsed.declaration_references.iter().cloned().collect(),
-            built_decls: parsed.built_decls.clone(),
+            built_decls: parsed
+                .built_decls
+                .iter()
+                .map(CachedBuiltDecl::from)
+                .collect(),
             file_decls: Arc::clone(&parsed.file_decls),
             pest_facts: parsed.pest_facts.clone(),
             declared_classes: parsed.declared_classes.clone(),
@@ -125,11 +188,62 @@ impl CachedFile {
 
     /// The parse of the file at `path` this was stored from, without its
     /// tree and its ignore comments, which only an analysed file reads.
-    pub(super) fn into_parsed(self, path: &Path, content_hash: ContentHash) -> ParsedFile {
+    pub(super) fn into_parsed(self, path: &Path, content_hash: ContentHash) -> Option<ParsedFile> {
         let references: FxHashSet<RefKey> = self.references.into_iter().collect();
         let declaration_references: FxHashSet<RefKey> =
             self.declaration_references.into_iter().collect();
-        ParsedFile {
+        let mut classes = self
+            .file_decls
+            .classes
+            .iter()
+            .map(|(_, info)| Arc::clone(info));
+        let mut functions = self
+            .file_decls
+            .functions
+            .iter()
+            .map(|(_, sig)| Arc::clone(sig));
+        let built_decls: Option<Vec<_>> = self
+            .built_decls
+            .into_iter()
+            .map(|declaration| {
+                Some(match declaration {
+                    CachedBuiltDecl::Class {
+                        name,
+                        conditional,
+                        guard,
+                        namespace,
+                    } => BuiltDecl::Class {
+                        name,
+                        conditional,
+                        guard,
+                        info: classes.next()?,
+                        namespace,
+                    },
+                    CachedBuiltDecl::Function {
+                        name,
+                        conditional,
+                        guard,
+                        site,
+                    } => BuiltDecl::Function {
+                        name,
+                        conditional,
+                        guard,
+                        sig: functions.next()?,
+                        site,
+                    },
+                    CachedBuiltDecl::GlobalConst { name, guard, ty } => {
+                        BuiltDecl::GlobalConst { name, guard, ty }
+                    }
+                })
+            })
+            .collect();
+        let built_decls = built_decls?;
+        if classes.next().is_some() || functions.next().is_some() {
+            return None;
+        }
+        drop(classes);
+        drop(functions);
+        Some(ParsedFile {
             ast: None,
             lex_warnings: self.lex_warnings,
             functions: self.functions,
@@ -138,7 +252,7 @@ impl CachedFile {
             references,
             declaration_references,
             ignores: Default::default(),
-            built_decls: self.built_decls,
+            built_decls,
             file_decls: self.file_decls,
             pest_facts: self.pest_facts,
             declared_classes: self.declared_classes,
@@ -153,7 +267,7 @@ impl CachedFile {
             class_fn_refs: self.class_fn_refs,
             owner: None,
             content_hash,
-        }
+        })
     }
 }
 
@@ -405,7 +519,7 @@ mod tests {
 
     #[test]
     fn cached_file_round_trip_keeps_declaration_arenas() {
-        let source = "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {}";
+        let source = "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {} const GLOBAL_MARK = true;";
         let path = Path::new("cache-round-trip.php");
         let mut names = NameCache::default();
         let parsed = parse_file_recording(path, source, false, Some(&mut names), None).unwrap();
@@ -413,7 +527,7 @@ mod tests {
         let cached = CachedFile::of(&parsed, source.len());
         let bytes = postcard::to_allocvec(&cached).unwrap();
         let cached: CachedFile = postcard::from_bytes(&bytes).unwrap();
-        let restored = cached.into_parsed(path, content_hash);
+        let restored = cached.into_parsed(path, content_hash).unwrap();
 
         assert_eq!(restored.file_decls.classes.len(), 1);
         assert_eq!(restored.file_decls.functions.len(), 1);
@@ -421,6 +535,19 @@ mod tests {
         assert_eq!(restored.file_decls.parameters.len(), 1);
         assert_eq!(restored.file_decls.properties.len(), 1);
         assert_eq!(restored.file_decls.constants.len(), 1);
+        let BuiltDecl::Class { info, .. } = &restored.built_decls[0] else {
+            panic!("the first declaration should be Demo");
+        };
+        let cached_class = restored.file_decls.classes.iter().next().unwrap().1;
+        assert!(Arc::ptr_eq(info, cached_class));
+        assert!(matches!(
+            restored.built_decls.last(),
+            Some(BuiltDecl::GlobalConst { name, .. }) if name == "GLOBAL_MARK"
+        ));
+
+        let mut mismatched = CachedFile::of(&parsed, source.len());
+        mismatched.built_decls.clear();
+        assert!(mismatched.into_parsed(path, content_hash).is_none());
     }
 
     fn payload_of(bytes: &[u8]) -> Option<&[u8]> {

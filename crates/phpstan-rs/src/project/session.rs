@@ -1389,12 +1389,15 @@ impl Session {
         if let Some(key) = &cache_key
             && let Some(cached) = file_cache::load(key)
         {
-            return Read::Loaded(Box::new(ReadFile {
-                len: cached.len,
-                source: String::new(),
-                parsed: cached.into_parsed(path, content_hash),
-                cache_key: None,
-            }));
+            let len = cached.len;
+            if let Some(parsed) = cached.into_parsed(path, content_hash) {
+                return Read::Loaded(Box::new(ReadFile {
+                    len,
+                    source: String::new(),
+                    parsed,
+                    cache_key: None,
+                }));
+            }
         }
         // Whether the file is UTF-8 is settled here, once, and the lexer
         // takes the text as it is. What checking costs is told by the
