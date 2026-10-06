@@ -242,7 +242,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   entries and dropped context trees release them. Parser-created `Ident`s
   now carry typed `NameId`s; synthetic/list-parsed identifiers can omit
   them. They still retain their `Name` handle pending reader migration.
-  Source/name lookup is exposed, and syntax depends on `la-arena` with typed
+  `ParsedFile::ident_name` now resolves parser IDs through the file table
+  (`8607a515`). Source/name lookup is exposed, and syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. Those IDs now target `ExprNode`/`StmtNode`
   (`9763cc81`), while their fields still use recursive storage. Row 9.3 is in
   progress: the shared `NodeId` is
