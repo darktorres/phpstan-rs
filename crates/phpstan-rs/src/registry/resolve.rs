@@ -1185,7 +1185,7 @@ impl Registry {
     ) -> bool {
         // What one method takes from its ancestors: the parameters by
         // position and the return type.
-        type Backfill = (Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
+        type Backfill = (MethodRef, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
 
         let registry: &Registry = self;
         let backfills: Vec<(ClassId, Vec<Backfill>)> = order
@@ -1388,7 +1388,8 @@ impl Registry {
                         )
                     });
                     if !param_fills.is_empty() || return_fill.is_some() {
-                        per_class.push((method_name.clone(), param_fills, return_fill));
+                        let slot = *info.member_slots.get(method_name)?;
+                        per_class.push((MethodRef::new(class_id, slot), param_fills, return_fill));
                     }
                 }
                 (!per_class.is_empty()).then_some((class_id, per_class))
@@ -1403,7 +1404,15 @@ impl Registry {
             let Some(info) = self.classes.get_mut(&class_name) else {
                 continue;
             };
-            for (method_name, param_fills, return_fill) in per_class {
+            for (method_ref, param_fills, return_fill) in per_class {
+                debug_assert_eq!(method_ref.class(), class_id);
+                let Some(method_name) = info
+                    .member_order
+                    .get(usize::from(method_ref.slot()))
+                    .cloned()
+                else {
+                    continue;
+                };
                 let Some(sig) = info.methods.get_mut(&method_name) else {
                     continue;
                 };
