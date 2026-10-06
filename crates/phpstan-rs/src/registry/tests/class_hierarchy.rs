@@ -179,6 +179,31 @@ fn a_final_trait_property_keeps_its_flag_on_the_using_class() {
 }
 
 #[test]
+fn inherited_property_hooks_are_registry_results_not_declaration_writes() {
+    let r = build_registry(
+        r#"<?php
+            class ParentHook {
+                public string $name { set(string $value) {} }
+            }
+            class ChildHook extends ParentHook {
+                public string $name { get => 'child'; }
+            }
+            "#,
+    );
+    let declared = r
+        .classes
+        .get("ChildHook")
+        .unwrap()
+        .properties
+        .get("name")
+        .unwrap();
+    assert!(!declared.has_set_hook());
+    let resolved = r.lookup_property("ChildHook", "name").unwrap();
+    assert!(resolved.has_get_hook());
+    assert!(resolved.has_set_hook());
+}
+
+#[test]
 fn class_consts_are_registered_and_typed_from_their_literal_value() {
     let r = build_registry(
         r#"<?php

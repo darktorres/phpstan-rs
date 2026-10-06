@@ -491,7 +491,14 @@ impl Registry {
     /// and its own hooks never use the backing value.
     #[hotpath::measure]
     pub(crate) fn inherit_property_hooks(&mut self) {
-        let max_iterations = self.scoped_class_names().len().max(1);
+        let class_names = self.scoped_class_names();
+        let scoped_ids: FxHashSet<ClassId> = class_names
+            .iter()
+            .filter_map(|name| self.class_ids.get(name).copied())
+            .collect();
+        self.property_hook_results
+            .retain(|id, _| !scoped_ids.contains(id));
+        let max_iterations = class_names.len().max(1);
         for _ in 0..max_iterations {
             if !self.inherit_property_hooks_one_pass() {
                 break;
@@ -509,6 +516,11 @@ impl Registry {
                 continue;
             };
             for (name, own) in &info.properties {
+                let own = self
+                    .property_hook_results
+                    .get(&class_id)
+                    .and_then(|properties| properties.get(name))
+                    .unwrap_or(own);
                 let Some((_, inherited)) = self.lookup_property_with_owner(parent, name) else {
                     continue;
                 };
@@ -535,12 +547,10 @@ impl Registry {
         }
         let changed = !updates.is_empty();
         for (class_id, name, merged) in updates {
-            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
-            if let Some(info) = self.classes.get_mut(&class_name) {
-                info.properties.insert(name, merged);
-            }
+            self.property_hook_results
+                .entry(class_id)
+                .or_default()
+                .insert(name, merged);
         }
         changed
     }

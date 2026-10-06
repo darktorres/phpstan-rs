@@ -1139,7 +1139,18 @@ impl Registry {
         } else {
             None
         };
-        from_file.or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))
+        from_file.or_else(|| {
+            let id = self.class_ids.get(owner)?;
+            if !self.raw_active
+                && let Some(property) = self
+                    .property_hook_results
+                    .get(id)
+                    .and_then(|properties| properties.get(prop))
+            {
+                return Some(&**property);
+            }
+            self.classes.get(owner)?.properties.get(prop).map(|p| &**p)
+        })
     }
 
     /// Same as `lookup_property`, but also returns the declaring
@@ -1158,8 +1169,18 @@ impl Registry {
         } else {
             None
         };
-        let sig =
-            from_file.or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))?;
+        let sig = from_file.or_else(|| {
+            let id = self.class_ids.get(owner)?;
+            if !self.raw_active
+                && let Some(property) = self
+                    .property_hook_results
+                    .get(id)
+                    .and_then(|properties| properties.get(prop))
+            {
+                return Some(&**property);
+            }
+            self.classes.get(owner)?.properties.get(prop).map(|p| &**p)
+        })?;
         Some((owner.clone(), sig))
     }
 

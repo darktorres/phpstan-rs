@@ -83,6 +83,35 @@ fn deferred_class_constant_results_survive_freeze_and_cache_round_trip() {
 }
 
 #[test]
+fn inherited_property_hook_results_survive_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            class ParentHook {
+                public string $name { set(string $value) {} }
+            }
+            class ChildHook extends ParentHook {
+                public string $name { get => 'child'; }
+            }
+            "#,
+    );
+    let back = round_trip(&registry);
+    let resolved = back.lookup_property("ChildHook", "name").unwrap();
+    assert!(resolved.has_get_hook());
+    assert!(resolved.has_set_hook());
+    assert!(
+        !back
+            .classes
+            .get("ChildHook")
+            .unwrap()
+            .properties
+            .get("name")
+            .unwrap()
+            .has_set_hook(),
+        "the cached declaration remains the as-built property"
+    );
+}
+
+#[test]
 fn the_declarations_as_built_survive_a_round_trip() {
     let project = Project::new();
     let registry = project.registry();
