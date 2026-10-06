@@ -340,9 +340,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   clones while preserving host-local slots; the alias sharing check and all
   1,141 library tests pass. `8efa71a0` translates each classified declaration
   to an `EffectId` once and runs effect settlement, caller edges, queueing and
-  dependency reads by ID; call-target records still enter as `DeclKey`, and
-  closure effects stay in the fixed point before the final table drops them.
-  All 1,199 crate tests, check, Clippy and formatting pass. Item 4.6 remains
+  dependency reads by ID. `9f560a46` also converts recorded call edges and
+  passed-closure targets before settlement. Source discovery still produces
+  `DeclKey`, and argument-position lookup converts a callee back at that
+  boundary. Closure effects stay in the fixed point before the final table
+  drops them. All 1,199 crate tests, check, Clippy and formatting pass. Item 4.6 remains
   open; inherited PHPDoc, the remaining trait-composition outputs, constant
   resolution, other pass results and immutable declaration storage remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
