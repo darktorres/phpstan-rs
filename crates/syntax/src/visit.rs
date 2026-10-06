@@ -17,7 +17,7 @@ use crate::ast::*;
 /// interest and call the matching `walk_*` function to continue into the
 /// node's children.
 pub trait Visitor<'ast> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         walk_stmt(self, stmt);
     }
 
@@ -99,13 +99,13 @@ pub trait Visitor<'ast> {
     }
 }
 
-pub fn walk_stmts<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmts: &'ast [Stmt]) {
+pub fn walk_stmts<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmts: &'ast [StmtNode]) {
     for stmt in stmts {
         v.visit_stmt(stmt);
     }
 }
 
-pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
+pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast StmtNode) {
     crate::stack::guard(|| match &stmt.kind {
         StmtKind::InlineHtml(_)
         | StmtKind::Break(_)
@@ -607,13 +607,16 @@ pub fn walk_expr_in_scope<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'as
 /// Whether `pred` holds for `stmt` or a statement nested in it within the
 /// same function body: expressions (so closures) and nested function,
 /// class and enum declarations are not entered. Stops at the first match.
-pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> bool) -> bool {
+pub fn any_stmt_in_body<'ast>(
+    stmt: &'ast StmtNode,
+    pred: impl FnMut(&'ast StmtNode) -> bool,
+) -> bool {
     struct Search<F> {
         pred: F,
         found: bool,
     }
-    impl<'ast, F: FnMut(&'ast Stmt) -> bool> Visitor<'ast> for Search<F> {
-        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    impl<'ast, F: FnMut(&'ast StmtNode) -> bool> Visitor<'ast> for Search<F> {
+        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
             if self.found {
                 return;
             }
@@ -638,7 +641,7 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
 /// are not entered (though `pred` sees the expression that starts one, and
 /// an anonymous class's constructor arguments). Stops at the first match.
 pub fn any_expr_in_body<'ast>(
-    stmts: &'ast [Stmt],
+    stmts: &'ast [StmtNode],
     pred: impl FnMut(&'ast ExprNode) -> bool,
 ) -> bool {
     struct Search<F> {
@@ -646,7 +649,7 @@ pub fn any_expr_in_body<'ast>(
         found: bool,
     }
     impl<'ast, F: FnMut(&'ast ExprNode) -> bool> Visitor<'ast> for Search<F> {
-        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
             if !self.found {
                 walk_stmt(self, stmt);
             }
@@ -722,13 +725,13 @@ pub fn any_child_expr<'ast>(expr: &'ast ExprNode, f: impl FnMut(&'ast ExprNode) 
 /// body, in order, until `f` returns true. A function, class or enum
 /// declaration has none, and statements inside expressions (closure
 /// bodies) are not reached.
-pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool) -> bool {
+pub fn any_child_stmt<'ast>(stmt: &'ast StmtNode, f: impl FnMut(&'ast StmtNode) -> bool) -> bool {
     struct Children<F> {
         f: F,
         found: bool,
     }
-    impl<'ast, F: FnMut(&'ast Stmt) -> bool> Visitor<'ast> for Children<F> {
-        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    impl<'ast, F: FnMut(&'ast StmtNode) -> bool> Visitor<'ast> for Children<F> {
+        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
             if !self.found && (self.f)(stmt) {
                 self.found = true;
             }
@@ -754,7 +757,7 @@ pub fn for_each_child_expr<'ast>(expr: &'ast ExprNode, mut f: impl FnMut(&'ast E
 
 /// Calls `f` on each statement directly inside `stmt` in the same function
 /// body, in order; see `any_child_stmt`.
-pub fn for_each_child_stmt<'ast>(stmt: &'ast Stmt, mut f: impl FnMut(&'ast Stmt)) {
+pub fn for_each_child_stmt<'ast>(stmt: &'ast StmtNode, mut f: impl FnMut(&'ast StmtNode)) {
     any_child_stmt(stmt, |child| {
         f(child);
         false
@@ -765,7 +768,7 @@ pub fn for_each_child_stmt<'ast>(stmt: &'ast Stmt, mut f: impl FnMut(&'ast Stmt)
 /// function it is in, outside the closures, arrow functions, classes and
 /// functions nested in it. A function-like's own answer is its
 /// `is_generator`, found as it was parsed; this is for a loop's body.
-pub fn body_contains_yield(stmts: &[Stmt]) -> bool {
+pub fn body_contains_yield(stmts: &[StmtNode]) -> bool {
     any_expr_in_body(stmts, |e| {
         matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
     })
@@ -775,7 +778,7 @@ pub fn body_contains_yield(stmts: &[Stmt]) -> bool {
 /// interest and call the matching `walk_*` function to continue into the
 /// node's children.
 pub trait VisitorMut {
-    fn visit_stmt(&mut self, stmt: &mut Stmt) {
+    fn visit_stmt(&mut self, stmt: &mut StmtNode) {
         walk_stmt_mut(self, stmt);
     }
 
@@ -847,13 +850,13 @@ pub trait VisitorMut {
     }
 }
 
-pub fn walk_stmts_mut<V: VisitorMut + ?Sized>(v: &mut V, stmts: &mut [Stmt]) {
+pub fn walk_stmts_mut<V: VisitorMut + ?Sized>(v: &mut V, stmts: &mut [StmtNode]) {
     for stmt in stmts {
         v.visit_stmt(stmt);
     }
 }
 
-pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
+pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut StmtNode) {
     crate::stack::guard(|| match &mut stmt.kind {
         StmtKind::InlineHtml(_)
         | StmtKind::Break(_)

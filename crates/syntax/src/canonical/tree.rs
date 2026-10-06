@@ -7,9 +7,9 @@ use crate::ast::*;
 use crate::canonical::{Canonical, Printer};
 use crate::{canonical_enum, canonical_struct};
 
-impl Canonical for Stmt {
+impl Canonical for StmtNode {
     fn canonical(&self, p: &mut Printer) {
-        let Stmt {
+        let StmtNode {
             id: _,
             kind,
             span,
