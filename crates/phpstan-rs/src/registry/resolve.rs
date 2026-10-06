@@ -195,6 +195,24 @@ impl Registry {
                             let Some(sig) = trait_info.methods.get(name) else {
                                 continue;
                             };
+                            // PHP exposes an adapted alias immediately
+                            // before the source method in the composed
+                            // method list (ReflectionClass::getMethods).
+                            for alias in trait_aliases.iter().filter(|alias| alias.method == *name)
+                            {
+                                let selected_trait = alias.trait_name.as_ref().or_else(|| {
+                                    uses.iter().find(|candidate| {
+                                        registry.classes().get(candidate).is_some_and(|info| {
+                                            info.methods.contains_key(&alias.method)
+                                        })
+                                    })
+                                });
+                                if selected_trait == Some(trait_name)
+                                    && !own_method_names.contains_key(&alias.alias)
+                                {
+                                    methods.push((alias.alias.clone(), sig.clone()));
+                                }
+                            }
                             if own_method_names.contains_key(name) {
                                 continue;
                             }
@@ -237,29 +255,6 @@ impl Registry {
                                 .filter(|(n, _)| !own.consts.contains_key(*n))
                                 .map(|(n, s)| (n.clone(), s.clone())),
                         );
-                    }
-                }
-                // `use A, B { B::hello as helloB; }` - registers the
-                // trait method under its new alias too, alongside its
-                // original name (both stay callable in real PHP). A bare
-                // `method as newName;` with no `TraitName::` prefix (real,
-                // valid PHP when the name is unambiguous among the traits
-                // used) resolves against the first used trait that
-                // declares it.
-                for alias in trait_aliases {
-                    let source_sig = match &alias.trait_name {
-                        Some(t) => registry
-                            .classes()
-                            .get(t)
-                            .and_then(|i| i.methods.get(&alias.method)),
-                        None => uses
-                            .iter()
-                            .find_map(|t| registry.classes().get(t)?.methods.get(&alias.method)),
-                    };
-                    if let Some(sig) = source_sig
-                        && !own_method_names.contains_key(&alias.alias)
-                    {
-                        methods.push((alias.alias.clone(), sig.clone()));
                     }
                 }
                 Some((
@@ -947,7 +942,10 @@ impl Registry {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
                 };
-                for (name, sig) in mixin_info.methods.iter() {
+                for name in &mixin_info.member_order {
+                    let Some(sig) = mixin_info.methods.get(name) else {
+                        continue;
+                    };
                     if sig.visibility == Visibility::Public && !info.methods.contains_key(name) {
                         method_additions.push((class_name.clone(), name.clone(), sig.clone()));
                     }

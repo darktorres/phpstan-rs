@@ -982,7 +982,7 @@ mod tests {
     #[test]
     fn trait_members_and_aliases_receive_ordered_class_local_slots() {
         let tokens = Lexer::new(
-            "<?php trait Extra { public function zebra(): void {} public function alpha(): void {} } class Host { use Extra { zebra as zebraAlias; } public function own(): void {} }",
+            "<?php trait Extra { public function zebra(): void {} public function alpha(): void {} } class Host { public function ownBefore(): void {} use Extra { zebra as zebraAlias; } public function ownAfter(): void {} }",
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
@@ -995,9 +995,9 @@ mod tests {
                 .iter()
                 .map(Name::as_str)
                 .collect::<Vec<_>>(),
-            ["own", "zebra", "alpha", "zebraAlias"]
+            ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"]
         );
-        for name in ["own", "zebra", "alpha", "zebraAlias"] {
+        for name in ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"] {
             let method_ref = registry
                 .file_method_ref_by_class_id(class_id, name)
                 .unwrap();
