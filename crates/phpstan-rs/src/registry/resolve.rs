@@ -484,8 +484,11 @@ impl Registry {
     }
 
     fn inherit_property_hooks_one_pass(&mut self) -> bool {
-        let mut updates: Vec<(Name, Name, Arc<PropertyReflection>)> = Vec::new();
+        let mut updates: Vec<(ClassId, Name, Arc<PropertyReflection>)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
+            let Some(class_id) = self.class_ids.get(class_name).copied() else {
+                continue;
+            };
             let Some(parent) = info.extends.first() else {
                 continue;
             };
@@ -510,12 +513,15 @@ impl Registry {
                     || merged.has_set_hook != own.has_set_hook
                     || merged.is_virtual != own.is_virtual
                 {
-                    updates.push((class_name.clone(), name.clone(), Arc::new(merged)));
+                    updates.push((class_id, name.clone(), Arc::new(merged)));
                 }
             }
         }
         let changed = !updates.is_empty();
-        for (class_name, name, merged) in updates {
+        for (class_id, name, merged) in updates {
+            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             if let Some(info) = self.classes.get_mut(&class_name) {
                 info.properties.insert(name, merged);
             }
@@ -544,17 +550,20 @@ impl Registry {
         self.resolve_class_constant_references();
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
-        let resolved: Vec<(Name, ClassReflection)> = class_names
+        let resolved: Vec<(ClassId, ClassReflection)> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
+                let id = *registry.class_ids.get(name)?;
                 registry
                     .resolved_deferred_class(name)
-                    .map(|info| (name.clone(), info))
+                    .map(|info| (id, info))
             })
             .collect();
-        for (name, info) in resolved {
-            self.classes.insert(name, info);
+        for (id, info) in resolved {
+            if let Some(name) = self.class_name_by_id(id).cloned() {
+                self.classes.insert(name, info);
+            }
         }
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
             if ty.contains_deferred() {
