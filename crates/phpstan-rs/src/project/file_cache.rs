@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn cached_file_round_trip_keeps_declaration_arenas() {
-        let source = "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {} const GLOBAL_MARK = true;";
+        let source = "<?php class Demo { public int $value; public const int MARK = 1; public function zebra(): void {} public function run(int $n): int {} public function alpha(): void {} } function helper(string $text): bool {} const GLOBAL_MARK = true;";
         let path = Path::new("cache-round-trip.php");
         let mut names = NameCache::default();
         let parsed = parse_file_recording(path, source, false, Some(&mut names), None).unwrap();
@@ -531,7 +531,7 @@ mod tests {
 
         assert_eq!(restored.file_decls.classes.len(), 1);
         assert_eq!(restored.file_decls.functions.len(), 1);
-        assert_eq!(restored.file_decls.members.len(), 1);
+        assert_eq!(restored.file_decls.members.len(), 3);
         assert_eq!(restored.file_decls.parameters.len(), 2);
         assert_eq!(restored.file_decls.properties.len(), 1);
         assert_eq!(restored.file_decls.constants.len(), 1);
@@ -541,7 +541,17 @@ mod tests {
         let cached_class = restored.file_decls.classes.iter().next().unwrap().1;
         assert!(Arc::ptr_eq(info, cached_class));
         let class_layout = restored.file_decls.class_layouts.iter().next().unwrap().0;
-        let member = &restored.file_decls.members(class_layout)[0];
+        let members = restored.file_decls.members(class_layout);
+        assert_eq!(members[0].name, "zebra");
+        assert_eq!(
+            restored
+                .file_decls
+                .member(class_layout, "RUN")
+                .unwrap()
+                .name,
+            "run"
+        );
+        let member = &members[1];
         let cached_method = info.methods().shared_get(&member.name).unwrap();
         assert!(Arc::ptr_eq(&member.declaration, &cached_method));
         assert!(matches!(
