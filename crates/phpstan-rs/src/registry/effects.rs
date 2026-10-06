@@ -274,6 +274,29 @@ pub(crate) struct DeclKey {
     pub(in crate::registry) member: String,
 }
 
+/// A settled body effect addressed by its declaration, without hashing the
+/// declaration's class or member name on every lookup. Synthetic property
+/// hooks do not yet have a property slot, so they retain their folded key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum EffectId {
+    Function(crate::registry::FnId),
+    Method(crate::registry::MethodRef),
+    Named(DeclKey),
+}
+
+impl EffectId {
+    pub(crate) fn with_generation(self, generation: u32) -> EffectId {
+        match self {
+            EffectId::Function(id) => EffectId::Function(id.with_generation(generation)),
+            EffectId::Method(method) => EffectId::Method(crate::registry::MethodRef::new(
+                method.class().with_generation(generation),
+                method.slot(),
+            )),
+            EffectId::Named(key) => EffectId::Named(key),
+        }
+    }
+}
+
 /// The names a `DeclKey` hashes and compares by, case-insensitively.
 trait DeclQuery {
     fn class(&self) -> Option<&str>;
@@ -707,6 +730,54 @@ fn push_target(out: &mut Vec<(DeclKey, Transfer)>, key: DeclKey, transfer: Trans
 }
 
 impl Registry {
+    pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
+        match key.class.as_deref() {
+            None => self
+                .function_ids
+                .get(key.member.as_str())
+                .copied()
+                .map_or_else(|| EffectId::Named(key.clone()), EffectId::Function),
+            Some(_) if key.member.starts_with('$') => EffectId::Named(key.clone()),
+            Some(class) => {
+                let method = self.class_ids.get(class).and_then(|id| {
+                    self.class_by_id(*id)
+                        .and_then(|info| info.member_slots.get(key.member.as_str()))
+                        .map(|slot| crate::registry::MethodRef::new(*id, *slot))
+                });
+                method.map_or_else(|| EffectId::Named(key.clone()), EffectId::Method)
+            }
+        }
+    }
+
+    fn effect_decl_key(&self, id: &EffectId) -> Option<DeclKey> {
+        match id {
+            EffectId::Function(id) => self
+                .function_name_by_id(*id)
+                .map(|name| function_key(name.as_str())),
+            EffectId::Method(method) => {
+                let class = self.class_name_by_id(method.class())?;
+                let info = self.class_by_id(method.class())?;
+                let member = info.member_order.get(usize::from(method.slot()))?;
+                Some(method_key(class.as_str(), member.as_str()))
+            }
+            EffectId::Named(key) => Some(key.clone()),
+        }
+    }
+
+    pub(crate) fn effects_for_names(&self) -> FxHashMap<DeclKey, Settled> {
+        self.effects
+            .iter()
+            .filter_map(|(id, settled)| self.effect_decl_key(id).map(|key| (key, settled.clone())))
+            .collect()
+    }
+
+    pub(crate) fn rebuild_effect_ids(&mut self, effects: FxHashMap<DeclKey, Settled>) {
+        self.effects = effects
+            .into_iter()
+            .map(|(key, settled)| (self.effect_id_for(&key), settled))
+            .collect();
+    }
+
     /// Settles what every function and method with a body may write. Run with
     /// `resolve_transitive_purity`, after every class is indexed and
     /// flattened. Every declaration is resolved again on each run: what a
@@ -785,7 +856,7 @@ impl Registry {
         });
         // A closure's effect is taken where it runs; no call names it.
         effects.retain(|key, _| !key.is_closure());
-        self.effects = effects;
+        self.rebuild_effect_ids(effects);
     }
 
     /// What a declaration with no body at hand may write: a stub's by its
@@ -817,7 +888,7 @@ impl Registry {
 
     /// What a call to the declaration `key` may write, as settled.
     fn settled(&self, key: &DeclKey) -> Settled {
-        match self.effects.get(key) {
+        match self.effects.get(&self.effect_id_for(key)) {
             Some(settled) => settled.clone(),
             None => Settled::of(self.declaration_effect(key)),
         }
@@ -826,7 +897,7 @@ impl Registry {
     /// What a call to the declaration `key` whose arguments are not known
     /// may write, as settled.
     fn settled_effect(&self, key: &DeclKey) -> Effect {
-        match self.effects.get(key) {
+        match self.effects.get(&self.effect_id_for(key)) {
             Some(settled) => settled.unconditional(),
             None => self.declaration_effect(key),
         }

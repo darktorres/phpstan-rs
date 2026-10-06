@@ -446,8 +446,9 @@ pub struct Registry {
     #[serde(skip)]
     member_owners_cache: NameTable<hierarchy::ClassOwners>,
     // What a call to each function and method with a body may write
-    // (`registry::effects`), keyed by lowercased (class, name).
-    pub(crate) effects: FxHashMap<effects::DeclKey, effects::Settled>,
+    // (`registry::effects`), keyed by declaration ID where one exists.
+    #[serde(skip)]
+    pub(crate) effects: FxHashMap<effects::EffectId, effects::Settled>,
     // The names, lowercased, of the builtin methods that run code passed
     // to them (`registry::effects`): the base's, and those of the classes
     // the registry holds itself, as the last finish found them. Stored
@@ -536,6 +537,16 @@ impl Registry {
                 self.classes.get(name)
             }
         }
+    }
+
+    pub(crate) fn class_name_by_id(&self, id: ClassId) -> Option<&Name> {
+        self.debug_check_id_generation(id.generation());
+        let name = match id.source()? {
+            IdSource::Stub => self.classes.base_name(id.local() as usize)?,
+            IdSource::Context => return None,
+            IdSource::Project => self.project_class_names.get(id.local() as usize)?,
+        };
+        (self.class_ids.get(name) == Some(&id)).then_some(name)
     }
 
     /// The immutable declaration as built in its file, when this project id
@@ -646,6 +657,16 @@ impl Registry {
                 self.functions.get(name)
             }
         }
+    }
+
+    pub(crate) fn function_name_by_id(&self, id: FnId) -> Option<&Name> {
+        self.debug_check_id_generation(id.generation());
+        let name = match id.source()? {
+            IdSource::Stub => self.functions.base_name(id.local() as usize)?,
+            IdSource::Context => return None,
+            IdSource::Project => self.project_function_names.get(id.local() as usize)?,
+        };
+        (self.function_ids.get(name) == Some(&id)).then_some(name)
     }
 
     /// The immutable function declaration as built in its file, when this
@@ -883,7 +904,7 @@ impl Registry {
             classes,
             function_keys: body_scope.and_then(scope::Scope::shared_function_keys),
             functions,
-            effects: registry.effects.clone(),
+            effects: registry.effects_for_names(),
             global_variables: registry.global_variables().clone(),
         };
         if scope.is_all() {
@@ -949,6 +970,7 @@ impl Registry {
                     .map(|owners| (name.clone(), owners.clone()))
             })
             .collect();
+        let effects = self.effects_for_names();
         self.classes.freeze();
         self.functions.freeze();
         self.class_ids = NameTable::default();
@@ -981,6 +1003,7 @@ impl Registry {
             );
         }
         self.function_ids.freeze();
+        self.rebuild_effect_ids(effects);
         if ancestor_names.is_empty() {
             // The cached form is persisted by name for stable cache reads;
             // declaration IDs are assigned only after that table is read.
@@ -1093,11 +1116,12 @@ impl Registry {
                 keys.insert(RefKey::constant_text(name));
             }
         }
+        let effects = self.effects_for_names();
         let decls = before
             .effects
             .keys()
-            .chain(self.effects.keys())
-            .filter(|key| before.effects.get(*key) != self.effects.get(*key));
+            .chain(effects.keys())
+            .filter(|key| before.effects.get(*key) != effects.get(*key));
         for key in decls {
             keys.insert(match &key.class {
                 Some(class) => RefKey::class_text(class),
@@ -1294,6 +1318,11 @@ impl Registry {
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);
         }
+        base.effects = base
+            .effects
+            .drain()
+            .map(|(id, settled)| (id.with_generation(generation), settled))
+            .collect();
         *self = base;
     }
 

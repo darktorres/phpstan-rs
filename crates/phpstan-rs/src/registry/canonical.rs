@@ -448,6 +448,8 @@ impl CanonicalOver for Registry {
         let base_ancestor_names = base.ancestor_names_for_cache();
         let member_owners = self.member_owners_for_cache();
         let base_member_owners = base.member_owners_for_cache();
+        let effects = self.effects_for_names();
+        let base_effects = base.effects_for_names();
         let Registry {
             id_generation: _,
             purity_results: _,
@@ -489,7 +491,7 @@ impl CanonicalOver for Registry {
             recorded_parents,
             member_owners: _,
             member_owners_cache: _,
-            effects,
+            effects: _,
             builtin_methods_running_code,
             base_builtin_methods_running_code,
             methods_by_name,
@@ -586,7 +588,7 @@ impl CanonicalOver for Registry {
                     "member_owners",
                     &Over(&member_owners, &base_member_owners, compare),
                 ),
-                ("effects", effects),
+                ("effects", &Over(&effects, &base_effects, compare)),
                 (
                     "builtin_methods_running_code",
                     &Over(
@@ -608,6 +610,14 @@ impl CanonicalOver for Registry {
                 ("global_sites", global_sites),
             ],
         );
+    }
+}
+
+impl CanonicalOver
+    for rustc_hash::FxHashMap<crate::registry::effects::DeclKey, crate::registry::effects::Settled>
+{
+    fn canonical_over(&self, base: &Self, _compare: CompareAt, p: &mut Printer) {
+        p.node("Effects", &[("current", self), ("base", base)]);
     }
 }
 
@@ -636,7 +646,6 @@ canonical_struct!(Registry {
     subtype_children,
     trait_users,
     recorded_parents,
-    effects,
     builtin_methods_running_code,
     base_builtin_methods_running_code,
     methods_by_name,
@@ -650,6 +659,7 @@ canonical_struct!(Registry {
     ancestor_names_cache,
     member_owners,
     member_owners_cache,
+    effects,
     class_ids,
     project_class_names,
     project_class_decls,
