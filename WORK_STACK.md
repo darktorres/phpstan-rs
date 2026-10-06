@@ -253,8 +253,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   pointer-sized representation (`88e56ded`). Expression and statement spans
   now travel
   in typed-ID-indexed tables through retained
-  project trees (`a42f63ab`); parser tests cover name-ID reuse and span
-  alignment (`eee0c503`, `a42f63ab`) but have not run. Nodes still use recursive
+  project trees (`a42f63ab`); parser tests cover name-ID reuse, parsed-file
+  name/source lookup and span alignment (`eee0c503`, `d0a45686`, `a42f63ab`);
+  the tests have not run. Nodes still use recursive
   storage, arena commits are not implemented, and no item gate or full
   validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
