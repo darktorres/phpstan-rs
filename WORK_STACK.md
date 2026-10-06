@@ -231,7 +231,7 @@ memory. What it gathered beyond that, new checks and changes to what the
 analysis finds that the optimization does not need, is deferred until after
 O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
-- **State: items 4.6-4.8, 5.1-5.9, 6.1/6.6, 7.1-7.5, and 8.1-8.4 implementation complete; tests-only gates 4.V through 8.V passed. Item 9 is active.** Item 8 removed serialized declaration case-reference fields and explicit-`mixed` flags, computes those facts while checking the declaration AST/docblock, avoids the unique-parameter dedup map/order allocations, and refines singleton doc types without temporary member vectors. Its workspace gate passed: 2,113 tests, 0 failed. Full §11 validation remains deferred until item 19. Items 0-2 are closed. Item 3's
+- **State: items 4.6-4.8, 5.1-5.9, 6.1/6.6, 7.1-7.5, and 8.1-8.4 implementation complete; tests-only gates 4.V through 8.V passed. Item 9 is active.** Item 8 (`451f0fa6`) removed serialized declaration case-reference fields and explicit-`mixed` flags, computes those facts while checking the declaration AST/docblock, avoids the unique-parameter dedup map/order allocations, and refines singleton doc types without temporary member vectors. Its workspace gate passed: 2,113 tests, 0 failed. Full §11 validation remains deferred until item 19. Items 0-2 are closed. Item 3's
   implementation is done (3.1-3.2); its validation at 3.V passed the gate
   workspace build, workspace tests, and the scoped and all-on oracle corpus
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
