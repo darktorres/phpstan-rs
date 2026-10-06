@@ -469,8 +469,8 @@ impl Checker<'_> {
             })
             .unwrap_or_default()
         } else if class.eq_ignore_ascii_case("parent") {
-            own.and_then(|own| self.registry.classes().get(own))
-                .and_then(|info| info.extends().first().map(|parent| parent.to_string()))
+            own.and_then(|own| self.registry.class_references_by_name(own))
+                .and_then(|references| references.extends.first().map(|parent| parent.to_string()))
                 .into_iter()
                 .collect()
         } else {

@@ -247,8 +247,8 @@ impl<'a> Checker<'a> {
             "$this" | "self" | "static" => class.is_none(),
             "parent" => class.is_none_or(|c| {
                 self.registry
-                    .lookup_class(c)
-                    .is_none_or(|(_, info)| info.extends().is_empty())
+                    .class_references_by_name(c)
+                    .is_none_or(|references| references.extends.is_empty())
             }),
             _ => {
                 // A hyphenated name that isn't one of the keywords (`non-
@@ -269,8 +269,8 @@ impl<'a> Checker<'a> {
                 None => return true,
             },
             "parent" => match class
-                .and_then(|c| self.registry.lookup_class(c))
-                .and_then(|(_, info)| info.extends().first().cloned())
+                .and_then(|c| self.registry.class_references_by_name(c))
+                .and_then(|references| references.extends.first().cloned())
             {
                 Some(p) => p.to_string(),
                 None => return true,

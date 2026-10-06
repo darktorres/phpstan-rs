@@ -482,9 +482,8 @@ impl<'a> Walker<'a> {
             let current = self.current_class_fqn.as_deref()?;
             return self
                 .registry
-                .classes()
-                .get(current)?
-                .extends()
+                .class_references_by_name(current)?
+                .extends
                 .first()
                 .map(|s| s.to_string());
         }

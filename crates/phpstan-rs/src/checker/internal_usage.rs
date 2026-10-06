@@ -391,10 +391,13 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes().get(fqn) else {
             return;
         };
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
         let (extends, implements, uses) = (
-            info.extends().clone(),
-            info.implements().clone(),
-            info.uses().clone(),
+            references.extends.to_vec(),
+            references.implements.to_vec(),
+            references.uses.to_vec(),
         );
         let subject = class_type_word(kind);
         let extends_prefix = if kind == ClassKind::Interface {

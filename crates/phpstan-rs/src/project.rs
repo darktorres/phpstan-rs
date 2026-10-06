@@ -2843,7 +2843,6 @@ impl Project {
                             span: info.provenance().declaration_span(),
                         },
                         namespace,
-                        info,
                         analysed: file.analyzed,
                     }),
                     _ => None,
@@ -2981,6 +2980,7 @@ impl Project {
             let declarations = self.project_class_declarations();
             let cycles = whole_program::circular_namespace_deps::find_namespace_cycles(
                 &declarations,
+                &self.registry,
                 |name| self.registry.is_builtin_class(name),
             );
             for cycle in cycles {

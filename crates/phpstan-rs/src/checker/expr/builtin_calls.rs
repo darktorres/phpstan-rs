@@ -2006,8 +2006,8 @@ impl<'a> Checker<'a> {
     /// where the "don't guess" convention leaves plain `string|false`
     /// unchanged rather than picking a side.
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
-        let info = self.registry.classes().get(class)?;
-        Some(match info.extends().first() {
+        let references = self.registry.class_references_by_name(class)?;
+        Some(match references.extends.first() {
             Some(parent) => Type::class_string(Type::object(parent.into(), Vec::new())),
             None => Type::bool_literal(false),
         })

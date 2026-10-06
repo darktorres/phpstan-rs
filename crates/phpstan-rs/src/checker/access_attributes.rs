@@ -151,11 +151,11 @@ impl<'a> Checker<'a> {
         if !self.settings.language_extensions {
             return;
         }
-        let Some(info) = self.registry.classes().get(fqn) else {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
-        let uses: Vec<(String, Vec<Name>)> = info
-            .uses()
+        let uses: Vec<(String, Vec<Name>)> = references
+            .uses
             .iter()
             .filter_map(|t| {
                 let restriction = &self

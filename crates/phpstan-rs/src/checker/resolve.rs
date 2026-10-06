@@ -357,9 +357,8 @@ impl<'a> Checker<'a> {
         }
         match self
             .registry
-            .classes()
-            .get(declaring_class)
-            .and_then(|info| info.extends().first())
+            .class_references_by_name(declaring_class)
+            .and_then(|references| references.extends.first())
         {
             Some(parent) => bound.bind_parent(parent),
             None => bound,

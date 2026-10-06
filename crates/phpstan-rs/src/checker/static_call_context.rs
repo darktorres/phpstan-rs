@@ -38,9 +38,8 @@ impl<'a> Checker<'a> {
                 };
                 let has_parent = self
                     .registry
-                    .classes()
-                    .get(class.as_str())
-                    .is_none_or(|info| !info.extends().is_empty());
+                    .class_references_by_name(class.as_str())
+                    .is_none_or(|references| !references.extends.is_empty());
                 if keyword == "parent" && !has_parent {
                     let current = self.current_method.clone().unwrap_or_default();
                     self.report(format!(

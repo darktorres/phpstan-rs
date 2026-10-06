@@ -27,7 +27,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::project::whole_program::Declaration;
-use crate::registry::ClassReflection;
+use crate::registry::Registry;
 
 /// Everything before a fully-qualified name's last `\` - the empty
 /// string for a global-namespace name (a real, if unusual, node in the
@@ -42,7 +42,6 @@ fn namespace_of(fqn: &str) -> &str {
 pub(crate) struct ClassDeclaration<'a> {
     pub(crate) declaration: Declaration<'a>,
     pub(crate) namespace: &'a str,
-    pub(crate) info: &'a ClassReflection,
     pub(crate) analysed: bool,
 }
 
@@ -70,6 +69,7 @@ fn representative_key<'a>(declaration: &Declaration<'a>) -> (&'a str, &'a std::p
 /// contributes an edge to is vendor code's, and is not returned.
 pub(crate) fn find_namespace_cycles<'a>(
     declarations: &[ClassDeclaration<'a>],
+    registry: &Registry,
     is_builtin_class: impl Fn(&str) -> bool,
 ) -> Vec<NamespaceCycle<'a>> {
     let declared: FxHashSet<String> = declarations
@@ -93,12 +93,14 @@ pub(crate) fn find_namespace_cycles<'a>(
                 }
             })
             .or_insert(d.namespace);
-        let targets = d
-            .info
-            .extends()
+        let Some(references) = registry.class_references_by_name(d.declaration.name) else {
+            continue;
+        };
+        let targets = references
+            .extends
             .iter()
-            .chain(d.info.implements().iter())
-            .chain(d.info.uses().iter());
+            .chain(references.implements.iter())
+            .chain(references.uses.iter());
         for target in targets {
             if !declared.contains(&target.to_ascii_lowercase()) && is_builtin_class(target) {
                 continue;

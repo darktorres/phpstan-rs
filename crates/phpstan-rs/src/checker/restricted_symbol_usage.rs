@@ -876,10 +876,10 @@ impl<'a> Checker<'a> {
         if self.settings.restricted_symbols.is_empty() {
             return;
         }
-        let Some(info) = self.registry.classes().get(fqn) else {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
-        let (extends, implements) = (info.extends().clone(), info.implements().clone());
+        let (extends, implements) = (references.extends.to_vec(), references.implements.to_vec());
         for parent in &extends {
             self.check_restricted_class_name_usage(
                 parent,

@@ -742,26 +742,30 @@ impl<'a> Checker<'a> {
             return false;
         };
         if let Some(trait_name) = self.current_trait.as_deref() {
-            let users: Vec<&str> = self
-                .registry
-                .classes()
-                .iter()
-                .filter(|(_, info)| {
-                    info.uses()
-                        .iter()
-                        .any(|u| u.eq_ignore_ascii_case(trait_name))
-                        && (syntax::ast::is_constructor_name(method)
-                            || info.trait_aliases().iter().any(|alias| {
-                                syntax::ast::is_constructor_name(&alias.alias)
-                                    && alias.method.eq_ignore_ascii_case(method)
-                                    && alias
-                                        .trait_name
-                                        .as_deref()
-                                        .is_none_or(|t| t.eq_ignore_ascii_case(trait_name))
-                            }))
-                })
-                .map(|(class, _)| class.as_ref())
-                .collect();
+            let users: Vec<&str> =
+                self.registry
+                    .classes()
+                    .iter()
+                    .filter(|(class, _)| {
+                        self.registry
+                            .class_references_by_name(class)
+                            .is_some_and(|references| {
+                                references
+                                    .uses
+                                    .iter()
+                                    .any(|u| u.eq_ignore_ascii_case(trait_name))
+                                    && (syntax::ast::is_constructor_name(method)
+                                        || references.trait_aliases.iter().any(|alias| {
+                                            syntax::ast::is_constructor_name(&alias.alias)
+                                                && alias.method.eq_ignore_ascii_case(method)
+                                                && alias.trait_name.as_deref().is_none_or(|t| {
+                                                    t.eq_ignore_ascii_case(trait_name)
+                                                })
+                                        }))
+                            })
+                    })
+                    .map(|(class, _)| class.as_ref())
+                    .collect();
             if name.eq_ignore_ascii_case("parent") {
                 return !users.is_empty();
             }
@@ -794,9 +798,8 @@ impl<'a> Checker<'a> {
         let mut current = class.to_string();
         while let Some(parent) = self
             .registry
-            .classes()
-            .get(current.as_str())
-            .and_then(|info| info.extends().first())
+            .class_references_by_name(&current)
+            .and_then(|references| references.extends.first())
         {
             let parent = parent.to_string();
             if parents.iter().any(|p| p.eq_ignore_ascii_case(&parent))

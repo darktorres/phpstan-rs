@@ -204,9 +204,8 @@ pub(super) fn resolve_class_ref(
     }
     if name.is_keyword("parent") {
         return registry
-            .classes()
-            .get(current_class?)
-            .and_then(|info| info.extends().first())
+            .class_references_by_name(current_class?)
+            .and_then(|references| references.extends.first())
             .map(|s| s.to_string());
     }
     name.resolved_class().map(str::to_string)

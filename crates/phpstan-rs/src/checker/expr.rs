@@ -5666,9 +5666,8 @@ impl<'a> Checker<'a> {
             return Type::mixed();
         };
         self.registry
-            .classes()
-            .get(current.as_str())
-            .and_then(|info| info.extends().first())
+            .class_references_by_name(current.as_str())
+            .and_then(|references| references.extends.first())
             .and_then(|parent| {
                 let (owner, sig) = self.registry.lookup_property_with_owner(parent, property)?;
                 Some(self.resolve_pseudo(sig.ty(), &owner))
