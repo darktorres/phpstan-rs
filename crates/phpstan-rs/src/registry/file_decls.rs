@@ -967,6 +967,48 @@ mod tests {
     }
 
     #[test]
+    fn function_declarations_stay_as_built_while_class_state_resets() {
+        let tokens = Lexer::new("<?php function helper(): int {}").tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut registry = crate::registry::Registry::build(&program);
+        let all = crate::registry::scope::Scope::all();
+        registry.end_declaration_changes(&all, None, true);
+
+        let mut edited = registry.functions.get("helper").unwrap().clone();
+        edited.return_type = Type::string();
+        registry.begin_declaration_changes();
+        registry
+            .functions
+            .insert(Name::from("helper"), edited.clone());
+
+        let scope = crate::registry::scope::Scope::of(std::iter::empty::<&str>(), ["helper"]);
+        let before = registry
+            .end_declaration_changes(&scope, Some(&scope), true)
+            .unwrap();
+        assert_eq!(registry.functions.get("helper"), Some(&edited));
+        assert_eq!(before.functions.len(), 1);
+        assert_eq!(
+            before.functions[0].as_ref().unwrap().get().return_type,
+            Type::int()
+        );
+        assert!(
+            !registry
+                .changed_since(&before, &crate::registry::ChangedNames::default())
+                .is_empty()
+        );
+
+        registry.begin_declaration_changes();
+        let unchanged = registry
+            .end_declaration_changes(&scope, Some(&scope), true)
+            .unwrap();
+        assert!(
+            registry
+                .changed_since(&unchanged, &crate::registry::ChangedNames::default())
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn switching_registry_bases_invalidates_the_previous_id_generation() {
         let tokens = Lexer::new(
             "<?php class ParentDemo { public function work(): void {} } class Demo extends ParentDemo implements \\PHPStan\\Rules\\Rule {}",

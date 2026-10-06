@@ -222,6 +222,10 @@ macro_rules! stored_tables {
 #[derive(Debug, Clone)]
 struct RawDeclarations {
     classes: NameTable<ClassReflection>,
+    // Function declarations are never rewritten by finishing passes; their
+    // results live in `function_results`. Keep this as the previous
+    // declaration view for incremental change detection, not as the table
+    // swapped into `functions` while editing.
     functions: FunctionTable,
 }
 
@@ -917,7 +921,7 @@ impl Registry {
         registry
     }
 
-    /// Makes `classes` and `functions` the declarations as built, for
+    /// Makes the class table the declarations as built, for
     /// declarations to change on, once the finishing passes have resolved
     /// them; a no-op before then, while they still are the declarations as
     /// built.
@@ -926,7 +930,6 @@ impl Registry {
             && !self.raw_active
         {
             std::mem::swap(&mut self.classes, &mut raw.classes);
-            std::mem::swap(&mut self.functions, &mut raw.functions);
             self.raw_active = true;
         }
     }
@@ -943,17 +946,19 @@ impl Registry {
         std::mem::take(&mut self.changed)
     }
 
-    /// Makes `classes` and `functions` the resolved declarations again,
-    /// with the entries in `scope` reset to their declarations as built
-    /// (or removed with them), for the finishing passes to resolve. The
-    /// first time, with `keep_raw`, keeps a copy of the declarations as
-    /// built instead.
+    /// Makes the class table the resolved declarations again, with the
+    /// entries in `scope` reset to their declarations as built (or removed
+    /// with them), for the finishing passes to resolve. Function
+    /// declarations stay in their as-built table; finishing-pass results
+    /// are kept in `function_results`. The first time, with `keep_raw`,
+    /// keeps a copy of the declarations as built instead.
     ///
     /// With a `body_scope` (a scope with `scope` in it), returns the
-    /// resolved forms those entries had, each taken out of the table
-    /// rather than copied where `scope` resets it, and every property-write
-    /// verdict, for `changed_since` to compare against. Only a registry
-    /// that keeps its declarations as built has resolved forms to return.
+    /// resolved class forms those entries had, each taken out of the table
+    /// rather than copied where `scope` resets it, the prior function
+    /// declarations and result overlays, and every property-write verdict,
+    /// for `changed_since` to compare against. Only a registry that keeps
+    /// its declarations as built has resolved forms to return.
     pub(crate) fn end_declaration_changes(
         &mut self,
         scope: &scope::Scope,
@@ -969,11 +974,10 @@ impl Registry {
             }
             return None;
         };
-        // While declarations change, the resolved tables sit in `raw`.
+        // While declarations change, the resolved class table sits in `raw`.
         let swap_back = self.raw_active;
         if swap_back {
             std::mem::swap(&mut self.classes, &mut raw.classes);
-            std::mem::swap(&mut self.functions, &mut raw.functions);
             self.raw_active = false;
         }
         let function_keys = body_scope.and_then(scope::Scope::shared_function_keys);
@@ -1007,7 +1011,7 @@ impl Registry {
             self.class_property_results.clear();
             self.imported_type_aliases.clear();
             self.classes = raw.classes.clone();
-            self.functions = raw.functions.clone();
+            raw.functions = self.functions.clone();
             return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
         }
         let classes = reset_scoped(
@@ -1032,12 +1036,20 @@ impl Registry {
             .retain(|id, _| !changed_class_ids.contains(id));
         self.imported_type_aliases
             .retain(|id, _| !changed_class_ids.contains(id));
-        let functions = reset_scoped(
-            &mut self.functions,
-            &raw.functions,
-            scope.function_keys(),
-            body_scope.and_then(scope::Scope::function_keys),
-        );
+        let function_scope = scope.function_keys();
+        let functions = function_keys
+            .as_ref()
+            .into_iter()
+            .flat_map(|keys| keys.iter())
+            .map(|key| {
+                let source = if function_scope.is_some_and(|keys| keys.contains(key)) {
+                    &raw.functions
+                } else {
+                    &self.functions
+                };
+                source.get_shared(&FoldedKey(key)).map(Detached::Own)
+            })
+            .collect();
         let changed_function_ids: FxHashSet<FnId> = self
             .function_ids
             .iter()
@@ -1046,6 +1058,7 @@ impl Registry {
             .collect();
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
+        raw.functions = self.functions.clone();
         body_scope.map(|_| snapshot(classes, functions, self))
     }
 
