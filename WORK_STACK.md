@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `e4bcd895`. Counts below were read from the files on
+State as of 2026-10-06, `c4a849df`. Counts below were read from the files on
 that date.
 
 ## Where to resume
@@ -388,10 +388,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   while returning the declaring class and stable slot. `58930b47` adds immutable
   slot access and uses it after the name-to-slot lookup; `e4bcd895` preserves
   the direct path for old callers. Direct/inherited slot tests, the index test,
-  library check, Clippy, formatting and diff checks pass. The ledger records
-  these at 4.6. Next: move resolved class constant types to ID-and-slot results,
-  covering deferred `value-of`, Registry readers, cache freeze/load, base
-  switches and scoped edits. The 4.7 reference,
+  library check, Clippy, formatting and diff checks pass. `c4a849df` adds a
+  `(ClassId, slot) -> Type` result table, populates it from deferred class
+  constant/value-of resolution, and routes type-sensitive checker, global
+  variable and LSP readers through Registry. All 1,143 crate tests and 275
+  syntax tests, check, Clippy, formatting and diff checks pass. The table still
+  duplicates reflection writes, is runtime-only, and falls back to reflected
+  values after cache loads; next remove those writes and persist the table by
+  stable class names and slots, preserving base switches and scoped edits. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
