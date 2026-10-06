@@ -4507,7 +4507,14 @@ impl<'a> Checker<'a> {
         question: InferQuestion,
         answer: impl FnOnce() -> Type,
     ) -> Type {
-        if e.id == syntax::ast::SYNTHETIC_EXPR_ID || self.infer_cache.borrow().is_none() {
+        // A completion probe may splice an expression parsed from its own
+        // token slice into a cloned scope from the loaded file. Those two
+        // trees have independent file-local ids; the short-lived probe
+        // bypasses this one-file cache rather than mixing their slots.
+        if e.id == syntax::ast::SYNTHETIC_EXPR_ID
+            || self.probe_span.get().is_some()
+            || self.infer_cache.borrow().is_none()
+        {
             return syntax::stack::guard(answer);
         }
         let version = locals.version();
