@@ -179,7 +179,7 @@ impl<'a> Checker<'a> {
         let Some(class) = self.current_class.clone() else {
             return;
         };
-        let Some(info) = self.registry.classes().get(class.as_str()) else {
+        let Some(info) = self.registry.class_by_name(class.as_str()) else {
             return;
         };
         let is_abstract = info.is_abstract();
@@ -220,7 +220,7 @@ impl<'a> Checker<'a> {
         let registry = &self.registry;
         let mut current = Some(class.to_string());
         while let Some(c) = current {
-            let Some(info) = registry.classes().get(c.as_str()) else {
+            let Some(info) = registry.class_by_name(c.as_str()) else {
                 break;
             };
             if info.is_consistent_constructor() {
@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
             .class_references_by_name(&owner)
             .and_then(|references| references.extends.first().cloned());
         while let Some(c) = current {
-            if registry.classes().get(&c).is_none() {
+            if registry.class_by_name(&c).is_none() {
                 break;
             }
             if registry.lookup_own_method(&c, "__construct").is_some() {

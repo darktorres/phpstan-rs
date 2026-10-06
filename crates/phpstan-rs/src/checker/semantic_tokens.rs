@@ -88,7 +88,7 @@ impl<'a> Checker<'a> {
     /// `check_deprecated_method_call`/etc.'s cascade-first shape), gated
     /// on `current_scope_deprecated` exactly like those functions.
     /// Internal: `check_internal_method_call`/`_property_access`/
-    /// `_class_constant_access` all *require* `registry.classes().get(owner)`
+    /// `_class_constant_access` all *require* `registry.class_by_name(owner)`
     /// to succeed at all before considering either tag (an unresolved/
     /// external declaring class never reports, even when the member's
     /// own `sig.is_internal` is true) - mirrored here via the
@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
         own_internal: bool,
         span: Span,
     ) {
-        let class = self.registry.classes().get(owner);
+        let class = self.registry.class_by_name(owner);
         let deprecated = !self.current_scope_deprecated
             && (own_deprecated || class.is_some_and(|c| c.deprecated().is_some()));
         let internal = class.is_some_and(|c| {
@@ -119,7 +119,7 @@ impl<'a> Checker<'a> {
     /// lookup itself to succeed; internal additionally requires
     /// `should_report_internal_usage(class)`.
     pub(crate) fn record_instantiation_usage_token(&mut self, class: &str, span: Span) {
-        let info = self.registry.classes().get(class);
+        let info = self.registry.class_by_name(class);
         let deprecated =
             !self.current_scope_deprecated && info.is_some_and(|i| i.deprecated().is_some());
         let internal =

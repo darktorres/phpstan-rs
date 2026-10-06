@@ -40,7 +40,7 @@ impl<'a> Checker<'a> {
         self.current_trait = Some(fqn.to_string());
         let start = self.diagnostics.len();
         // This exact literal declaration's own signature table - not
-        // `self.registry.classes().get(fqn)`, which is whichever
+        // `self.registry.class_by_name(fqn)`, which is whichever
         // conditional declaration of `fqn` won the registry's single
         // slot (first-wins, no tiebreak for classes/traits) and may be a
         // different branch's own signatures when a trait is declared
@@ -128,7 +128,7 @@ impl<'a> Checker<'a> {
     /// follow once its params/return type have been copied into `locals`.
     /// `Registry::index` keys `self.registry.functions()` by the
     /// function's fully-qualified name, so a bare
-    /// `self.registry.functions().get(&f.name)` here would look it up by
+    /// `self.registry.function_by_name(&f.name)` here would look it up by
     /// its raw, unqualified AST name and never find a namespaced
     /// function's real signature. Methods don't share this issue:
     /// `class_name` is already the FQN by the time it gets here, and a
@@ -213,8 +213,7 @@ impl<'a> Checker<'a> {
             .get(crate::registry::function_key(f.fq_name()).as_ref());
         let slot_file = self
             .registry
-            .functions()
-            .get(f.fq_name())
+            .function_by_name(f.fq_name())
             .and_then(|slot| slot.provenance().file());
         let same_file = match (self.current_file.as_deref(), slot_file) {
             (Some(current), Some(slot)) => current == slot,
@@ -242,8 +241,7 @@ impl<'a> Checker<'a> {
         let site = f.name.span.start;
         let sig = self
             .registry
-            .classes()
-            .get(class)?
+            .class_by_name(class)?
             .redeclared_methods()
             .get(&site)?;
         Some(self.registry.finalize_standalone_sig(sig.clone()))
@@ -401,7 +399,7 @@ impl<'a> Checker<'a> {
             // `method.shadowTemplate`: a method-level `@template` reusing
             // a name already declared on the enclosing class.
             if let Some(c) = class_name
-                && let Some(info) = self.registry.classes().get(c)
+                && let Some(info) = self.registry.class_by_name(c)
             {
                 let mut shadowed: Vec<&String> = doc
                     .templates
@@ -621,8 +619,7 @@ impl<'a> Checker<'a> {
             // Its own templates stay templates inside the class.
             let own = self
                 .registry
-                .classes()
-                .get(c)
+                .class_by_name(c)
                 .map(|_| self.registry.own_template_args(c))
                 .unwrap_or_default();
             locals.insert_var("this", Type::object(c.into(), own));
@@ -850,7 +847,7 @@ impl<'a> Checker<'a> {
         // matching - see `current_class_attrs`'s own doc comment.
         let previous_class_attrs = std::mem::take(&mut self.current_class_attrs);
         self.current_class_attrs = class_name
-            .and_then(|c| self.registry.classes().get(c))
+            .and_then(|c| self.registry.class_by_name(c))
             .map(|info| {
                 info.attributes()
                     .iter()
@@ -871,14 +868,12 @@ impl<'a> Checker<'a> {
         self.current_scope_deprecated = sig.is_some_and(|s| s.deprecated().is_some())
             || self.current_class.as_deref().is_some_and(|c| {
                 self.registry
-                    .classes()
-                    .get(c)
+                    .class_by_name(c)
                     .is_some_and(|i| i.deprecated().is_some())
             })
             || self.current_trait.as_deref().is_some_and(|t| {
                 self.registry
-                    .classes()
-                    .get(t)
+                    .class_by_name(t)
                     .is_some_and(|i| i.deprecated().is_some())
             });
 

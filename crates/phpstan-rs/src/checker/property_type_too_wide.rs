@@ -17,6 +17,7 @@
 //! is skipped.
 
 use crate::checker::{Checker, PropertyAssignFacts};
+use crate::registry::{ClassId, PropertyRef};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassDef, Expr, ExprKind, Literal, Visibility};
 use syntax::span::{LineIndex, Span};
@@ -31,14 +32,14 @@ pub(crate) struct PropertyTypeSite {
     class: Name,
     /// The classes in whose scope the properties are written, whose
     /// facts hold the writes: the class itself, or a trait's hosts.
-    writers: Vec<Name>,
+    writers: Vec<ClassId>,
     span: Span,
     properties: Vec<SiteProperty>,
 }
 
 impl PropertyTypeSite {
     /// The classes whose facts this site is judged against.
-    pub(crate) fn writers(&self) -> &[Name] {
+    pub(crate) fn writers(&self) -> &[ClassId] {
         &self.writers
     }
 }
@@ -46,6 +47,7 @@ impl PropertyTypeSite {
 #[derive(Debug, Clone)]
 struct SiteProperty {
     name: Name,
+    properties_by_writer: Vec<(ClassId, PropertyRef)>,
     declared: Type,
     span: Span,
     null_default: bool,
@@ -77,6 +79,13 @@ impl<'a> Checker<'a> {
         writers: Vec<Name>,
         c: &ClassDef,
     ) {
+        let Some((_class_id, _, _)) = self.registry.class(fqn) else {
+            return;
+        };
+        let writers: Vec<ClassId> = writers
+            .iter()
+            .filter_map(|writer| self.registry.class(writer.as_ref()).map(|(id, _, _)| id))
+            .collect();
         let properties: Vec<SiteProperty> = c
             .properties
             .iter()
@@ -87,8 +96,17 @@ impl<'a> Checker<'a> {
                 {
                     return None;
                 }
+                let properties_by_writer = writers
+                    .iter()
+                    .filter_map(|writer| {
+                        self.registry
+                            .property_ref_by_name(*writer, p.name.as_ref())
+                            .map(|property| (*writer, property))
+                    })
+                    .collect();
                 Some(SiteProperty {
                     name: Name::from(p.name.as_ref()),
+                    properties_by_writer,
                     declared: sig.ty().clone(),
                     span: p.span,
                     null_default: is_null_default(&p.default),
@@ -135,7 +153,15 @@ pub(crate) fn check_too_wide_property_types(
             let assigned = site
                 .writers
                 .iter()
-                .filter_map(|writer| facts.get(writer.as_ref())?.get(p.name.as_ref()))
+                .filter_map(|writer| {
+                    let property =
+                        p.properties_by_writer
+                            .iter()
+                            .find_map(|(candidate, property)| {
+                                (candidate == writer).then_some(property)
+                            })?;
+                    facts.get(writer)?.get(property)
+                })
                 .flatten()
                 .cloned()
                 .union_all_with(relation);

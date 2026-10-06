@@ -360,8 +360,7 @@ impl<'a> Checker<'a> {
             }
             let is_final = self
                 .registry
-                .classes()
-                .get(class.as_ref())
+                .class_by_name(class.as_ref())
                 .is_some_and(|info| info.is_final());
             return if is_final {
                 Type::error()
@@ -548,7 +547,7 @@ impl<'a> Checker<'a> {
         if let Some((class, _)) = recv_ty.as_object()
             && self.lookup_method_with_owner(class, method).is_none()
             && self.lookup_method_with_owner(class, "__call").is_none()
-            && self.registry.classes().contains_key(class.as_str())
+            && self.registry.has_class(class.as_str())
         {
             return Type::error();
         }

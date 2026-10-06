@@ -702,42 +702,16 @@ impl<V> NameTable<V> {
     }
 }
 
-/// An entry taken out of a table: the table's own value moved out, or a
-/// base's, which stays where it is in the base it is read from.
+/// A shared entry retained in a change snapshot.
 pub(crate) enum Detached<V> {
     Own(Arc<V>),
-    Base(Arc<Base<V>>, usize),
 }
 
 impl<V> Detached<V> {
     pub(crate) fn get(&self) -> &V {
         match self {
             Detached::Own(value) => value,
-            Detached::Base(base, i) => base.value(*i),
         }
-    }
-}
-
-impl<V> NameTable<V> {
-    /// Takes out what `name` finds, without copying it: the table's own
-    /// value is moved out, and a base's is hidden from the table and read
-    /// where it is. `take` is the same, returning a copy of a base's.
-    pub(crate) fn detach<K: TableKey + ?Sized>(&mut self, name: &K) -> Option<Detached<V>> {
-        name.with_key(move |key| {
-            if let Some(value) = self.entries.remove(key) {
-                self.version = next_version();
-                return Some(Detached::Own(value));
-            }
-            if self.hidden.contains(key) {
-                return None;
-            }
-            let base = self.base.as_ref()?;
-            let i = base.find(key)?;
-            let (declared, base) = (base.name(i).clone(), Arc::clone(base));
-            self.hidden.insert(declared);
-            self.version = next_version();
-            Some(Detached::Base(base, i))
-        })
     }
 }
 

@@ -561,20 +561,16 @@ mod tests {
 
         let mut registry = crate::registry::Registry::default();
         for declaration in &restored.built_decls {
-            registry.insert_built_decl_from_file(
-                declaration.clone(),
-                true,
-                Some(&restored.file_decls),
-            );
+            registry.insert_built_decl(declaration.clone(), true);
         }
         let (class_id, _, registered_class) = registry.class("Demo").unwrap();
         assert!(std::ptr::eq(
-            registry.file_class_by_id(class_id).unwrap(),
+            registry.class_by_id(class_id).unwrap(),
             registered_class
         ));
         let (function_id, _, registered_function) = registry.function("helper").unwrap();
         assert!(std::ptr::eq(
-            registry.file_function_by_id(function_id).unwrap(),
+            registry.function_declaration_by_id(function_id).unwrap(),
             registered_function
         ));
 

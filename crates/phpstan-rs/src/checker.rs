@@ -228,9 +228,10 @@ pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 
 /// A private property's every discovered assigned type, keyed by
 /// (declaring class fqn, property name) - see `Checker::
-/// property_assign_facts`' own doc comment. Both maps are by `Name`, found by a
-/// `Name` or by text.
-pub(crate) type PropertyAssignFacts = NameMap<NameMap<Vec<Type>>>;
+/// property_assign_facts`' own doc comment. Writer classes and properties use
+/// their stable Registry IDs.
+pub(crate) type PropertyAssignFacts =
+    FxHashMap<crate::registry::ClassId, FxHashMap<crate::registry::PropertyRef, Vec<Type>>>;
 
 /// How long each record a checking pass appends to was when the pass
 /// began (`Checker::pass_mark`), so a pass whose results are discarded -
@@ -624,8 +625,7 @@ pub struct Checker<'a> {
     // accepts an empty dim, since it creates the element.
     pub(crate) by_ref_empty_dim_args: std::cell::RefCell<rustc_hash::FxHashSet<syntax::span::Span>>,
     // The type of every legal write to a private property, keyed by the
-    // declaring class and the property. A trait's methods are checked once
-    // per host, so a write in one lands under the host's name.
+    // class whose scope performs it and the property's exact-case ID.
     pub(crate) property_assign_facts: PropertyAssignFacts,
     // Named-argument call sites against overridable methods - see
     // `checker::named_argument_renames`'s module doc comment.
@@ -1085,7 +1085,7 @@ impl<'a> Checker<'a> {
         self.settings.doctrine.then_some(self.registry)
     }
 
-    /// `registry.classes().get(name)`, remembered for the next ask for the
+    /// `Registry::class_by_name`, remembered for the next ask for the
     /// same name: a class is asked for by every check of it, one after
     /// another.
     pub(crate) fn class_info(&self, name: &str) -> Option<&'a crate::registry::ClassReflection> {
@@ -1094,7 +1094,7 @@ impl<'a> Checker<'a> {
             return memo.1;
         }
         let registry: &'a Registry = self.registry;
-        let info = registry.classes().get(name);
+        let info = registry.class_by_name(name);
         memo.0.clear();
         memo.0.push_str(name);
         memo.1 = info;
@@ -1189,7 +1189,7 @@ impl<'a> Checker<'a> {
             enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
-            property_assign_facts: NameMap::default(),
+            property_assign_facts: FxHashMap::default(),
             named_argument_call_facts: FxHashMap::default(),
             property_type_sites: Vec::new(),
             defer_property_type_checks: false,
@@ -1282,7 +1282,7 @@ impl<'a> Checker<'a> {
     }
 
     /// This run's `property_assign_facts`.
-    pub fn take_property_assign_facts(&mut self) -> PropertyAssignFacts {
+    pub(crate) fn take_property_assign_facts(&mut self) -> PropertyAssignFacts {
         std::mem::take(&mut self.property_assign_facts)
     }
 
@@ -1657,7 +1657,7 @@ impl<'a> Checker<'a> {
         );
         if info.is_abstract() || info.kind() != ClassKind::Class {
             for other_fqn in self.registry.inheritors(&canonical) {
-                let Some(other_info) = self.registry.classes().get(&other_fqn) else {
+                let Some(other_info) = self.registry.class_by_name(&other_fqn) else {
                     continue;
                 };
                 if other_info.kind() == ClassKind::Class && !other_info.is_abstract() {

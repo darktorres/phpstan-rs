@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
             let Some((class, _)) = thrown.as_object() else {
                 continue;
             };
-            if !self.registry.classes().contains_key(class.as_str()) {
+            if !self.registry.has_class(class) {
                 continue;
             }
             let covered = throws.is_some_and(|t| self.accepts(t, &thrown).yes());

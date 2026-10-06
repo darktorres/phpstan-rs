@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
         method: &str,
         span: Span,
     ) {
-        let Some(owner_info) = self.registry.classes().get(owner) else {
+        let Some(owner_info) = self.registry.class_by_name(owner) else {
             return;
         };
         let canonical = self

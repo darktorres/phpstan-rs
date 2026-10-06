@@ -8,8 +8,7 @@ use crate::registry::class_info::MemberSpans;
 use crate::registry::guard::{Guard, GuardExpr};
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
-    ClassDeclAt, ClassReflection, FileDecls, FunctionDeclAt, FunctionReflection, folded_key,
-    function_key, infer_const_type,
+    ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
 };
 use syntax::ast::{Expr, Stmt, Visibility};
 use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
@@ -162,18 +161,9 @@ impl Registry {
     /// caller: an analyzed file's declaration must always win a same-name
     /// collision outright, never merge with a pre-existing context/stub
     /// entry the way two context-only declarations legitimately do.
+    /// Applies one built declaration, updating the immutable ID-addressed
+    /// winner only after conditional selection and merge policy finish.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
-        self.insert_built_decl_from_file(decl, analyzed, None);
-    }
-
-    /// Applies one built declaration while retaining its per-file arena
-    /// address if that declaration directly wins the registry name.
-    pub(crate) fn insert_built_decl_from_file(
-        &mut self,
-        decl: BuiltDecl,
-        analyzed: bool,
-        file: Option<&Arc<FileDecls>>,
-    ) {
         // A guard the configured PHP versions rule out is a declaration that
         // never runs: it changes nothing, and is not a change. One they
         // always satisfy declares as if it stood unguarded.
@@ -183,29 +173,11 @@ impl Registry {
             Guard::Maybe => decl,
         };
         let class_source = match &decl {
-            BuiltDecl::Class { name, info, .. } => Some((
-                name.clone(),
-                Arc::clone(info),
-                file.and_then(|file| {
-                    file.class_layout_for(info).map(|layout| ClassDeclAt {
-                        file: Arc::clone(file),
-                        layout,
-                    })
-                }),
-            )),
+            BuiltDecl::Class { name, .. } => Some(name.clone()),
             _ => None,
         };
         let function_source = match &decl {
-            BuiltDecl::Function { name, sig, .. } => Some((
-                name.clone(),
-                Arc::clone(sig),
-                file.and_then(|file| {
-                    file.function_layout_for(sig).map(|layout| FunctionDeclAt {
-                        file: Arc::clone(file),
-                        layout,
-                    })
-                }),
-            )),
+            BuiltDecl::Function { name, .. } => Some(name.clone()),
             _ => None,
         };
         // A name is changed when its entry is: a conditional declaration the
@@ -512,32 +484,21 @@ impl Registry {
             }
         }
 
-        // A merged value no longer has a single file-local declaration.
-        // A conditional declaration that left the entry untouched keeps
-        // the old locator; otherwise retain a locator only when the exact
-        // per-file Arc is what the name table selected.
+        // The selected value, including any supported declaration merge,
+        // is now immutable and addressed by the active declaration ID.
         if !leaves_entry {
-            if let Some((name, info, source)) = class_source
+            if let Some(name) = &class_source
                 && let Some(id) = self.class_ids.get(&name).copied()
-                && id.source() == Some(super::IdSource::Project)
+                && let Some(declaration) = self.classes.get_shared(name)
             {
-                let slot = id.local() as usize;
-                self.project_class_decls[slot] = self
-                    .classes
-                    .get_shared(&name)
-                    .filter(|current| Arc::ptr_eq(current, &info))
-                    .and(source);
+                self.class_declarations.insert(id, declaration);
+                self.ensure_property_topology(id);
             }
-            if let Some((name, sig, source)) = function_source
+            if let Some(name) = &function_source
                 && let Some(id) = self.function_ids.get(&name).copied()
-                && id.source() == Some(super::IdSource::Project)
+                && let Some(declaration) = self.functions.get_shared(name)
             {
-                let slot = id.local() as usize;
-                self.project_function_decls[slot] = self
-                    .functions
-                    .get_shared(&name)
-                    .filter(|current| Arc::ptr_eq(current, &sig))
-                    .and(source);
+                self.function_declarations.insert(id, declaration);
             }
         }
     }
@@ -658,7 +619,12 @@ impl Registry {
             self.unconditionally_declared_functions
                 .insert(folded_key(&name));
             self.stub_provided_functions.insert(folded_key(&name));
-            self.functions.insert_if_absent(name, sig);
+            self.functions.insert_if_absent(name.clone(), sig);
+            if let Some(id) = self.function_ids.get(&name).copied()
+                && let Some(declaration) = self.functions.get_shared(&name)
+            {
+                self.function_declarations.insert(id, declaration);
+            }
         }
     }
 
@@ -685,16 +651,9 @@ impl Registry {
             let name: Name = name.into();
             self.record_changed_class(&name);
             self.ensure_class_id(&name);
-            if let Some(id) = self
-                .class_ids
-                .get(&name)
-                .copied()
-                .filter(|id| id.source() == Some(super::IdSource::Project))
-            {
-                self.project_class_decls[id.local() as usize] = None;
-            }
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
+            let class_name = name.clone();
             match self.classes.take(&name) {
                 Some(existing) => {
                     self.classes.insert(name, info.merge(existing));
@@ -702,6 +661,12 @@ impl Registry {
                 None => {
                     self.classes.insert(name, info);
                 }
+            }
+            if let Some(id) = self.class_ids.get(&class_name).copied()
+                && let Some(declaration) = self.classes.get_shared(&class_name)
+            {
+                self.class_declarations.insert(id, declaration);
+                self.ensure_property_topology(id);
             }
         }
     }

@@ -514,7 +514,7 @@ impl<'a> Checker<'a> {
         let Some(class) = &self.current_class else {
             return Vec::new();
         };
-        if self.registry.classes().get(class.as_str()).is_none() {
+        if self.registry.class_by_name(class).is_none() {
             return Vec::new();
         }
         self.registry
@@ -809,8 +809,7 @@ impl<'a> Checker<'a> {
         let entry = entry.clone();
         let type_word = self
             .registry
-            .classes()
-            .get(class)
+            .class_by_name(class)
             .map(|info| class_type_word(info.kind()))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
         self.report_restricted(
@@ -847,8 +846,7 @@ impl<'a> Checker<'a> {
         let entry = entry.clone();
         let type_word = self
             .registry
-            .classes()
-            .get(class)
+            .class_by_name(class)
             .map(|info| class_type_word(info.kind()))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
         self.report_restricted(

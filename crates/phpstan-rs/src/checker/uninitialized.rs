@@ -115,7 +115,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         if !seen.insert(ancestor.clone()) {
             break; // cycle guard for a malformed/circular hierarchy
         }
-        if checker.registry.classes().get(&ancestor).is_none() {
+        if checker.registry.class_by_name(&ancestor).is_none() {
             break;
         }
         let found = checker.registry.method_names(&ancestor).any(|method| {

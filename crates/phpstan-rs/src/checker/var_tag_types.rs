@@ -732,7 +732,7 @@ impl<'a> Checker<'a> {
 
     /// Whether `ty` names a subclass of `PHPStan\Type\Type`.
     fn contains_phpstan_type(&self, ty: &Type) -> bool {
-        self.registry.classes().contains_key("PHPStan\\Type\\Type")
+        self.registry.has_class("PHPStan\\Type\\Type")
             && ty
                 .object_class_names()
                 .iter()

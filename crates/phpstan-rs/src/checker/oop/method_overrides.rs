@@ -8,9 +8,6 @@ use types::Type;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
-        let Some(references) = self.registry.class_references_by_name(fqn) else {
-            return;
-        };
         // Redeclaring a native enum method is itself the error.
         for m in c
             .def
@@ -106,7 +103,7 @@ impl<'a> Checker<'a> {
         if syntax::ast::is_constructor_name(method_name) || *own_visibility == Visibility::Private {
             return;
         }
-        let Some(info) = self.class_info(fqn) else {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
         let Some(own_sig) = self.registry.lookup_own_method(fqn, method_name) else {
@@ -132,8 +129,7 @@ impl<'a> Checker<'a> {
         if let Some(parent) = references.extends.first()
             && let Some(parent_sig) = self
                 .registry
-                .classes()
-                .get(parent)
+                .class_by_name(parent)
                 .and_then(|_| self.registry.lookup_own_method(parent, method_name))
             && parent_sig.visibility() != Visibility::Private
         {
@@ -371,8 +367,7 @@ impl<'a> Checker<'a> {
             let own_is_abstract = self.registry.method_is_abstract(fqn, method_name);
             let ancestor_is_abstract = self
                 .registry
-                .classes()
-                .get(ancestor_owner)
+                .class_by_name(ancestor_owner)
                 .is_some_and(|i| i.kind() == ClassKind::Interface)
                 || self
                     .registry

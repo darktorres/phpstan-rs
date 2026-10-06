@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
         if callables.is_empty() {
             return;
         }
-        let class_info = class.and_then(|c| self.registry.classes().get(c));
+        let class_info = class.and_then(|c| self.registry.class_by_name(c));
         let type_aliases = class
             .map(|class| self.registry.effective_type_aliases_by_name(class))
             .unwrap_or_default();
@@ -336,7 +336,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDef) {
-        if !self.registry.classes().contains_key(fqn) {
+        if !self.registry.has_class(fqn) {
             return;
         }
         // A promoted property's PHPDoc type is its constructor `@param`,
@@ -603,7 +603,7 @@ impl<'a> Checker<'a> {
             .as_deref()
             .map(|d| docblock::parse_shared(d).templates.clone())
             .unwrap_or_default();
-        if let Some(info) = class_name.and_then(|c| self.registry.classes().get(c)) {
+        if let Some(info) = class_name.and_then(|c| self.registry.class_by_name(c)) {
             names.extend(info.templates().iter().map(|t| t.to_string()));
         }
         names

@@ -373,7 +373,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let Some(owner_info) = self.registry.classes().get(owner) else {
+        let Some(owner_info) = self.registry.class_by_name(owner) else {
             return;
         };
         if owner_info.is_api() && !syntax::ast::is_constructor_name(method) {
@@ -579,7 +579,7 @@ impl<'a> Walker<'a> {
         if !self.is_phpstan_code(&self.namespace, fqn) {
             return;
         }
-        let Some(info) = self.registry.classes().get(fqn) else {
+        let Some(info) = self.registry.class_by_name(fqn) else {
             return;
         };
         if info.is_api() {
@@ -621,7 +621,7 @@ impl<'a> Walker<'a> {
         if !self.is_phpstan_code(&self.namespace, &owner) {
             return;
         }
-        let Some(owner_info) = self.registry.classes().get(&owner) else {
+        let Some(owner_info) = self.registry.class_by_name(&owner) else {
             return;
         };
         if owner_info.is_api() && !syntax::ast::is_constructor_name(method) {
@@ -667,7 +667,7 @@ impl<'a> Walker<'a> {
         if !self.is_phpstan_code(&self.namespace, fqn) {
             return;
         }
-        let Some(info) = self.registry.classes().get(fqn) else {
+        let Some(info) = self.registry.class_by_name(fqn) else {
             return;
         };
         if check_do_not_implement && info.is_api_do_not_implement() {
@@ -745,7 +745,7 @@ impl<'a> Walker<'a> {
         }
         for used in c.used_traits() {
             if let Some(ufqn) = self.resolve_if_phpstan(used)
-                && self.registry.classes().contains_key(ufqn.as_str())
+                && self.registry.has_class(&ufqn)
             {
                 // Real `ApiTraitUseRule` flags trait use
                 // unconditionally - no `@api`/`@api-do-not-implement`
@@ -942,7 +942,7 @@ impl Walker<'_> {
         let Some(fqn) = self.resolve_if_phpstan(n) else {
             return;
         };
-        if self.registry.classes().get(fqn.as_str()).is_none() {
+        if self.registry.class_by_name(&fqn).is_none() {
             return;
         }
         // Real PHPStan's own `ApiInstantiationRule` flags instantiation
@@ -971,7 +971,7 @@ impl Walker<'_> {
         // Independent of `@api` status entirely - see
         // `check_instanceof_deprecated`'s own doc comment.
         self.check_instanceof_deprecated(&fqn, span);
-        let Some(info) = self.registry.classes().get(fqn.as_str()) else {
+        let Some(info) = self.registry.class_by_name(&fqn) else {
             return;
         };
         // Two genuinely different diagnostics depending on whether the

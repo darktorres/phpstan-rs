@@ -83,7 +83,7 @@ fn class_overrides(
     if !class.uses_traits {
         return;
     }
-    if registry.classes().get(fqn).is_none() {
+    if registry.class_by_name(fqn).is_none() {
         return;
     }
     let own_method_names: FxHashSet<&str> =

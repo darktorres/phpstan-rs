@@ -2,7 +2,6 @@ use crate::checker::{
     Checker, Locals, MemberKind, MemberLabel, MemberVisibilityCheck, UsageTokenKind,
 };
 use syntax::ast::*;
-use types::Name;
 use types::php_version::PhpFeature;
 
 impl<'a> Checker<'a> {
@@ -118,12 +117,20 @@ impl<'a> Checker<'a> {
         // sees). A write the scope may not make fails at runtime, so it
         // assigns nothing.
         if prop_sig.write_visibility() == Visibility::Private && can_write && !not_writable {
-            self.property_assign_facts
-                .entry(Name::from(&owner))
-                .or_default()
-                .entry(Name::from(&prop.name))
-                .or_default()
-                .push(actual.clone());
+            let writer = self
+                .current_class
+                .as_deref()
+                .and_then(|class| self.registry.class(class).map(|(id, _, _)| id));
+            let property =
+                writer.and_then(|id| self.registry.property_ref_by_name(id, prop.as_ref()));
+            if let (Some(writer), Some(property)) = (writer, property) {
+                self.property_assign_facts
+                    .entry(writer)
+                    .or_default()
+                    .entry(property)
+                    .or_default()
+                    .push(actual.clone());
+            }
         }
         // See `checker::calls`' own identical comment: `rejected_from`
         // already accepts a `Mixed` actual value below real PHPStan's own

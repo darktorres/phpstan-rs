@@ -82,14 +82,14 @@ impl<'a> Checker<'a> {
     /// through any ancestor) an interface that itself declares
     /// `__construct`.
     fn constructor_signature_is_dictated(&self, class: &str) -> bool {
-        let Some(info) = self.registry.classes().get(class) else {
+        let Some(info) = self.registry.class_by_name(class) else {
             return false;
         };
         if info.attribute_targets().is_some() {
             return true;
         }
         self.registry.all_ancestor_names(class).iter().any(|name| {
-            self.registry.classes().get(name).is_some_and(|ancestor| {
+            self.registry.class_by_name(name).is_some_and(|ancestor| {
                 ancestor.kind() == ClassKind::Interface
                     && self
                         .registry

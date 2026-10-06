@@ -82,18 +82,16 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     registry.precompute_member_owners();
 
     println!("\n-- resolved signatures (from source) --");
-    let mut fn_names: Vec<&Name> = registry.functions().keys().collect();
-    fn_names.sort();
-    for name in &fn_names {
-        if let Some(sig) = registry.lookup_function(name) {
-            println!("{}", format_signature(name, sig));
-        }
+    let mut functions: Vec<_> = registry.iter_functions().collect();
+    functions.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, sig) in &functions {
+        println!("{}", format_signature(name, sig));
     }
 
-    let mut class_names: Vec<&Name> = registry.classes().keys().collect();
-    class_names.sort();
-    for class_name in &class_names {
-        let info = &registry.classes()[*class_name];
+    let mut classes: Vec<_> = registry.iter_classes().collect();
+    classes.sort_by(|left, right| left.0.cmp(right.0));
+    let class_names: Vec<&Name> = classes.iter().map(|(name, _)| *name).collect();
+    for (class_name, info) in &classes {
         let mut method_names: Vec<&Name> = info.methods().keys().collect();
         method_names.sort();
         for method_name in method_names {

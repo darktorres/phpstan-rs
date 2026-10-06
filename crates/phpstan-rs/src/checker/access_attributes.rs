@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
         if !self.settings.language_extensions {
             return;
         }
-        let Some(info) = self.registry.classes().get(owner) else {
+        let Some(info) = self.registry.class_by_name(owner) else {
             return;
         };
         let own = info
@@ -154,14 +154,16 @@ impl<'a> Checker<'a> {
         let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
+        let Some(info) = self.registry.class_by_name(fqn) else {
+            return;
+        };
         let uses: Vec<(String, Vec<Name>)> = references
             .uses
             .iter()
             .filter_map(|t| {
                 let restriction = &self
                     .registry
-                    .classes()
-                    .get(t.as_ref())?
+                    .class_by_name(t.as_ref())?
                     .access()
                     .restrict_trait_to;
                 (!restriction.is_empty()).then(|| (t.to_string(), restriction.clone()))
@@ -249,8 +251,7 @@ impl<'a> Checker<'a> {
                 !a.eq_ignore_ascii_case(canonical)
                     && self
                         .registry
-                        .classes()
-                        .get(a.as_ref())
+                        .class_by_name(a.as_ref())
                         .is_some_and(|i| i.access().injectable_version)
             })
             .map(|a| a.to_string())

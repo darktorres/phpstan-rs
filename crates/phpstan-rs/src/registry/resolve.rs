@@ -1,4 +1,3 @@
-use crate::registry::NameTable;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Arc, OnceLock};
@@ -9,8 +8,7 @@ use syntax::name::{NameMap, NameSet, OrderedNameMap};
 type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 type DeferredClassConstantTypes = Vec<(usize, Type)>;
 type ClassPropertyResults = Vec<(Name, Arc<PropertyReflection>)>;
-type ClassMethodResults = Vec<(Name, FunctionReflection)>;
-type ClassConstantResults = OrderedNameMap<(usize, Arc<ConstantReflection>)>;
+type ClassMethodResults = Vec<(MethodRef, FunctionReflection)>;
 type ResolvedClassUpdate = (
     ClassId,
     ClassMethodResults,
@@ -23,7 +21,7 @@ type VisibleClassConstTypes = OrderedNameMap<Type>;
 use crate::registry::Registry;
 use crate::registry::{
     ClassId, ClassReflection, ClassTypeResults, ConstantReflection, FnId, FunctionReflection,
-    Members, MethodEntry, MethodRef, PropertyReflection, substitute_type_aliases,
+    MethodEntry, MethodRef, PropertyReflection, substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
 use types::{self, Type};
@@ -46,7 +44,7 @@ impl Registry {
             .collect();
         self.class_reference_results
             .retain(|id, _| !scoped_ids.contains(id));
-        for class_name in class_names {
+        for class_name in class_names.iter() {
             let Some(id) = self.class_ids.get(&class_name).copied() else {
                 continue;
             };
@@ -146,9 +144,9 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|class_name| {
                 let class_id = *registry.class_ids.get(class_name)?;
-                let own = &registry.classes()[class_name];
+                let own = registry.class_by_id(class_id)?;
                 let references = registry.class_references(class_id)?;
-                let (uses, trait_aliases) = (&references.uses, &references.trait_aliases);
+                let (uses, trait_aliases) = (references.uses, references.trait_aliases);
                 if uses.is_empty() && trait_aliases.is_empty() {
                     return None;
                 }
@@ -168,11 +166,12 @@ impl Registry {
                 let mut added_property_names = NameSet::default();
                 let mut consts = Vec::new();
                 let mut added_const_names = NameSet::default();
-                let existing_const_results = registry.class_constant_results.get(&class_id);
                 let mut next_const_slot =
-                    own.consts.len() + existing_const_results.map_or(0, |results| results.len());
+                    own.consts.len() + registry.class_constant_results_for_class(class_id).count();
                 for trait_name in uses {
-                    if let Some(trait_info) = registry.classes().get(trait_name) {
+                    if let Some(trait_id) = registry.class_ids.get(trait_name).copied()
+                        && let Some(trait_info) = registry.class_by_id(trait_id)
+                    {
                         for entry in registry.member_entries(trait_name) {
                             let name = &entry.name;
                             let Some(shared_sig) = registry.shared_own_method(trait_name, name)
@@ -186,9 +185,7 @@ impl Registry {
                             {
                                 let selected_trait = alias.trait_name.as_ref().or_else(|| {
                                     uses.iter().find(|candidate| {
-                                        registry.classes().get(candidate).is_some_and(|info| {
-                                            registry.member_slot(candidate, &alias.method).is_some()
-                                        })
+                                        registry.member_slot(candidate, &alias.method).is_some()
                                     })
                                 });
                                 if selected_trait == Some(trait_name)
@@ -235,31 +232,27 @@ impl Registry {
                         }
                         for (name, declared) in &trait_info.properties {
                             if own.properties.contains_key(name)
-                                || registry
-                                    .class_property_results
-                                    .get(&class_id)
-                                    .is_some_and(|results| results.contains_key(name))
+                                || registry.property_result_by_name(class_id, name).is_some()
                                 || !added_property_names.insert(name.clone())
                             {
                                 continue;
                             }
                             let trait_id = registry.class_ids.get(trait_name).copied();
                             let property = trait_id
-                                .and_then(|id| registry.class_property_results.get(&id))
-                                .and_then(|results| results.get(name))
+                                .and_then(|id| registry.property_result_shared_by_name(id, name))
                                 .unwrap_or(declared);
                             properties.push((name.clone(), Arc::clone(property)));
                         }
-                        if let Some(trait_id) = registry.class_ids.get(trait_name)
-                            && let Some(results) = registry.class_property_results.get(trait_id)
-                        {
-                            for (name, property) in results {
+                        if let Some(trait_id) = registry.class_ids.get(trait_name) {
+                            for (property_ref, property) in
+                                registry.property_results_for_class(*trait_id)
+                            {
+                                let Some(name) = registry.property_name_by_ref(property_ref) else {
+                                    continue;
+                                };
                                 if trait_info.properties.contains_key(name)
                                     || own.properties.contains_key(name)
-                                    || registry
-                                        .class_property_results
-                                        .get(&class_id)
-                                        .is_some_and(|own_results| own_results.contains_key(name))
+                                    || registry.property_result_by_name(class_id, name).is_some()
                                     || !added_property_names.insert(name.clone())
                                 {
                                     continue;
@@ -286,31 +279,29 @@ impl Registry {
                         // unreachable registry entry.
                         for (name, declared) in &trait_info.consts {
                             if own.consts.contains_key(name)
-                                || existing_const_results
-                                    .is_some_and(|results| results.contains_key(name))
+                                || registry
+                                    .class_constant_result_by_name(class_id, name)
+                                    .is_some()
                                 || !added_const_names.insert(name.clone())
                             {
                                 continue;
                             }
                             let trait_id = registry.class_ids.get(trait_name).copied();
                             let constant = trait_id
-                                .and_then(|id| registry.class_constant_results.get(&id))
-                                .and_then(|results| results.get(name))
-                                .map_or_else(
-                                    || Arc::clone(declared),
-                                    |(_, result)| Arc::clone(result),
-                                );
+                                .and_then(|id| registry.class_constant_result_by_name(id, name))
+                                .map_or_else(|| Arc::clone(declared), Arc::clone);
                             consts.push((next_const_slot, name.clone(), constant));
                             next_const_slot += 1;
                         }
-                        if let Some(trait_id) = registry.class_ids.get(trait_name)
-                            && let Some(results) = registry.class_constant_results.get(trait_id)
-                        {
-                            for (name, (_, constant)) in results {
+                        if let Some(trait_id) = registry.class_ids.get(trait_name) {
+                            for (_, name, constant) in
+                                registry.class_constant_results_for_class(*trait_id)
+                            {
                                 if trait_info.consts.contains_key(name)
                                     || own.consts.contains_key(name)
-                                    || existing_const_results
-                                        .is_some_and(|own_results| own_results.contains_key(name))
+                                    || registry
+                                        .class_constant_result_by_name(class_id, name)
+                                        .is_some()
                                     || !added_const_names.insert(name.clone())
                                 {
                                     continue;
@@ -332,19 +323,16 @@ impl Registry {
             };
             for (method_ref, entry, sig) in methods {
                 debug_assert_eq!(method_ref.class(), class_id);
-                let name = entry.name.clone();
                 let inserted = self.add_member_entry(class_id, entry);
                 debug_assert_eq!(inserted, Some(method_ref));
                 if inserted.is_some() {
-                    let methods = self.class_method_results.entry(class_id).or_default();
-                    let inserted = methods.insert_shared_if_absent(name, sig);
+                    let inserted = self.set_shared_method_result(method_ref, sig);
                     debug_assert!(inserted);
                     changed = true;
                 }
             }
-            let own_properties = self.class_property_results.entry(class_id).or_default();
             for (name, property) in properties {
-                if own_properties.contains_key(&name)
+                if self.property_result_by_name(class_id, &name).is_some()
                     || self
                         .classes
                         .get(&class_name)
@@ -352,12 +340,13 @@ impl Registry {
                 {
                     continue;
                 }
-                own_properties.insert(name, property);
+                self.set_property_result(class_id, name, property);
                 changed = true;
             }
-            let own_constants = self.class_constant_results.entry(class_id).or_default();
             for (slot, name, constant) in consts {
-                if own_constants.contains_key(&name)
+                if self
+                    .class_constant_result_by_name(class_id, &name)
+                    .is_some()
                     || self
                         .classes
                         .get(&class_name)
@@ -365,7 +354,7 @@ impl Registry {
                 {
                     continue;
                 }
-                own_constants.insert(name, (slot, constant));
+                self.set_class_constant_result(class_id, slot, name, constant);
                 changed = true;
             }
         }
@@ -390,11 +379,13 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
         let tagged_classes: Vec<(Name, Vec<(Name, FunctionReflection, bool)>)> = self
-            .scoped_classes()
+            .scoped_class_names()
             .into_iter()
-            .filter_map(|(class_name, info)| {
+            .filter_map(|class_name| {
+                let class_id = self.class_ids.get(&class_name).copied()?;
+                let info = self.class_by_id(class_id)?;
                 (!info.method_tags.is_empty())
-                    .then(|| (class_name.clone(), info.method_tags.clone()))
+                    .then(|| (Name::from(class_name.as_str()), info.method_tags.clone()))
             })
             .collect();
         let registry: &Registry = self;
@@ -433,12 +424,8 @@ impl Registry {
                 .collect();
         for (class_id, methods) in resolved {
             for (method, entry, signature) in methods {
-                let name = entry.name.clone();
                 debug_assert_eq!(self.add_member_entry(class_id, entry), Some(method));
-                self.class_method_results
-                    .entry(class_id)
-                    .or_default()
-                    .insert(name, signature);
+                self.set_method_result(method, signature);
             }
         }
     }
@@ -582,7 +569,7 @@ impl Registry {
 
     fn inherit_property_hooks_one_pass(&mut self) -> bool {
         let mut updates: Vec<(ClassId, Name, Arc<PropertyReflection>)> = Vec::new();
-        for (class_name, info) in self.scoped_classes() {
+        for (class_name, _info) in self.scoped_classes() {
             let Some(class_id) = self.class_ids.get(class_name).copied() else {
                 continue;
             };
@@ -596,7 +583,8 @@ impl Registry {
                 let Some(own) = self.lookup_property(class_name, name) else {
                     continue;
                 };
-                let Some((_, inherited)) = self.lookup_property_with_owner(parent, name) else {
+                let Some((_, inherited)) = self.lookup_property_with_owner(parent.as_str(), name)
+                else {
                     continue;
                 };
                 if inherited.visibility == Visibility::Private {
@@ -622,10 +610,7 @@ impl Registry {
         }
         let changed = !updates.is_empty();
         for (class_id, name, merged) in updates {
-            self.class_property_results
-                .entry(class_id)
-                .or_default()
-                .insert(name, merged);
+            self.set_property_result(class_id, name, merged);
         }
         changed
     }
@@ -673,33 +658,20 @@ impl Registry {
             for (slot, ty) in constants {
                 self.set_class_const_type(id, slot, ty);
             }
-            self.class_property_results
-                .entry(id)
-                .or_default()
-                .extend(properties);
-            let method_results = self.class_method_results.entry(id).or_default();
-            for (name, method) in methods {
-                method_results.insert(name, method);
+            for (name, property) in properties {
+                self.set_property_result(id, name, property);
+            }
+            for (method_ref, method) in methods {
+                self.set_method_result(method_ref, method);
             }
             if !type_results.is_empty() {
                 self.class_type_results.insert(id, type_results);
             }
         }
-        let class_ids = &self.class_ids;
-        let const_types = &self.class_const_types;
-        let constant_results = &self.class_constant_results;
-        let resolve = |ty: &mut Type, native: &Type, classes: &_| {
+        let resolve = |ty: &mut Type, native: &Type| {
             if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
-                *ty = resolve_deferred_value_of_with_native_fallback(
-                    taken,
-                    native,
-                    classes,
-                    class_ids,
-                    const_types,
-                    constant_results,
-                    None,
-                );
+                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, self, None);
             }
         };
         let mut function_updates = Vec::new();
@@ -715,7 +687,7 @@ impl Registry {
             }
             let mut sig = current.clone();
             for param in &mut sig.params {
-                resolve(&mut param.ty, &param.ty_native, &self.classes);
+                resolve(&mut param.ty, &param.ty_native);
                 let native = param.ty_native.clone();
                 for extra in [
                     &mut param.doc_ty,
@@ -725,12 +697,12 @@ impl Registry {
                 .into_iter()
                 .flatten()
                 {
-                    resolve(extra, &native, &self.classes);
+                    resolve(extra, &native);
                 }
             }
-            resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
+            resolve(&mut sig.return_type, &sig.return_type_native);
             if let Some(doc_ty) = &mut sig.return_doc_ty {
-                resolve(doc_ty, &sig.return_type_native, &self.classes);
+                resolve(doc_ty, &sig.return_type_native);
             }
             if sig != current {
                 function_updates.push((id, sig));
@@ -756,41 +728,25 @@ impl Registry {
         // inherited-constant view (the overwhelming majority, stubs
         // included, have none).
         let class_id = *self.class_ids.get(class_name)?;
-        let own_consts =
-            match self.classes.get(class_name) {
-                Some(info)
-                    if class_has_deferred_type(info, self.class_method_results.get(&class_id))
-                        || self.class_property_results.get(&class_id).is_some_and(
-                            |properties| {
-                                properties
-                                    .iter()
-                                    .any(|(_, prop)| property_has_deferred_type(prop))
-                            },
-                        )
-                        || self.class_constant_results.get(&class_id).is_some_and(
-                            |constants| {
-                                constants
-                                    .iter()
-                                    .any(|(_, (_, constant))| constant.ty.contains_deferred())
-                            },
-                        ) =>
-                {
-                    visible_class_consts(
-                        class_name,
-                        &self.classes,
-                        &self.class_ids,
-                        &self.class_const_types,
-                        &self.class_constant_results,
-                        &self.class_reference_results,
-                    )
-                }
-                _ => return None,
-            };
-        let info = self.classes.get(class_name)?;
-        let class_ids = &self.class_ids;
-        let const_types = &self.class_const_types;
-        let constant_results = &self.class_constant_results;
-        let resolve = |ty: &mut Type, native: &Type, classes: &_| {
+        let own_consts = match self.class_by_id(class_id) {
+            Some(info)
+                if class_has_deferred_type(
+                    info,
+                    self.method_results_for_class(class_id)
+                        .any(|(_, method)| function_has_deferred_type(method)),
+                ) || self
+                    .property_results_for_class(class_id)
+                    .any(|(_, prop)| property_has_deferred_type(prop))
+                    || self
+                        .class_constant_results_for_class(class_id)
+                        .any(|(_, _, constant)| constant.ty.contains_deferred()) =>
+            {
+                visible_class_consts(self, class_name)
+            }
+            _ => return None,
+        };
+        let info = self.class_by_id(class_id)?;
+        let resolve = |ty: &mut Type, native: &Type| {
             if ty.contains_deferred() {
                 let bound = bind_class_const_self(
                     std::mem::replace(ty, Type::mixed()),
@@ -800,17 +756,14 @@ impl Registry {
                 *ty = resolve_deferred_value_of_with_native_fallback(
                     bound,
                     native,
-                    classes,
-                    class_ids,
-                    const_types,
-                    constant_results,
+                    self,
                     Some(class_name),
                 );
             }
         };
         let resolve_signature = |sig: &mut FunctionReflection| {
             for param in &mut sig.params {
-                resolve(&mut param.ty, &param.ty_native, &self.classes);
+                resolve(&mut param.ty, &param.ty_native);
                 let native = param.ty_native.clone();
                 for extra in [
                     &mut param.doc_ty,
@@ -820,15 +773,15 @@ impl Registry {
                 .into_iter()
                 .flatten()
                 {
-                    resolve(extra, &native, &self.classes);
+                    resolve(extra, &native);
                 }
             }
-            resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
+            resolve(&mut sig.return_type, &sig.return_type_native);
             if let Some(doc_ty) = &mut sig.return_doc_ty {
-                resolve(doc_ty, &sig.return_type_native, &self.classes);
+                resolve(doc_ty, &sig.return_type_native);
             }
             if let Some(out) = &mut sig.self_out {
-                resolve(out, &Type::mixed(), &self.classes);
+                resolve(out, &Type::mixed());
             }
         };
         let mut method_results = Vec::new();
@@ -837,25 +790,22 @@ impl Registry {
             let mut resolved = current.clone();
             resolve_signature(&mut resolved);
             if resolved != *current {
-                method_results.push((name.clone(), resolved));
+                let slot = self.member_slot(class_name, name)?;
+                method_results.push((MethodRef::new(class_id, slot), resolved));
             }
         }
-        if let Some(results) = self.class_method_results.get(&class_id) {
-            for (name, current) in results.iter() {
-                let mut resolved = current.clone();
-                resolve_signature(&mut resolved);
-                if resolved != *current {
-                    method_results.push((name.clone(), resolved));
-                }
+        for (method, current) in self.method_results_for_class(class_id) {
+            let mut resolved = current.clone();
+            resolve_signature(&mut resolved);
+            if resolved != *current {
+                method_results.push((method, resolved));
             }
         }
         let mut properties = Vec::new();
         for name in self.property_names(class_name) {
             let Some(current) = self
-                .class_property_results
-                .get(&class_id)
-                .and_then(|results| results.get(name))
-                .or_else(|| info.properties.get(name))
+                .property_result_by_name(class_id, name)
+                .or_else(|| info.properties.get(name).map(Arc::as_ref))
             else {
                 continue;
             };
@@ -869,15 +819,7 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                prop.ty = resolve_deferred_value_of_in_type(
-                    ty,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
-                    Some(class_name),
-                );
+                prop.ty = resolve_deferred_value_of_in_type(ty, self, Some(class_name));
             }
             if let Some(doc) = &mut prop.doc_ty
                 && doc.contains_deferred()
@@ -887,15 +829,7 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                *doc = resolve_deferred_value_of_in_type(
-                    ty,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
-                    Some(class_name),
-                );
+                *doc = resolve_deferred_value_of_in_type(ty, self, Some(class_name));
             }
             if let Some(set_ty) = &prop.set_ty
                 && set_ty.contains_deferred()
@@ -904,19 +838,15 @@ impl Registry {
                     bind_class_const_self(prop.set_ty.take().unwrap(), class_name, &own_consts);
                 prop.set_ty = Some(resolve_deferred_value_of_in_type(
                     ty,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
+                    self,
                     Some(class_name),
                 ));
             }
-            if prop != **current {
+            if prop != *current {
                 properties.push((name.clone(), Arc::new(prop)));
             }
         }
-        let constants = class_constant_entries(&info, self.class_constant_results.get(&class_id))
+        let constants = class_constant_entries(self, &info, class_id)
             .into_iter()
             .filter_map(|(slot, _, constant)| {
                 let current = self
@@ -927,15 +857,7 @@ impl Registry {
                     return None;
                 }
                 let bound = bind_class_const_self(current.clone(), class_name, &own_consts);
-                let ty = resolve_deferred_value_of_in_type(
-                    bound,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
-                    Some(class_name),
-                );
+                let ty = resolve_deferred_value_of_in_type(bound, self, Some(class_name));
                 Some((slot, ty))
             })
             .collect();
@@ -943,15 +865,7 @@ impl Registry {
         for (name, bound) in info.template_bounds.iter() {
             if bound.contains_deferred() {
                 let ty = bind_class_const_self(bound.clone(), class_name, &own_consts);
-                let resolved = resolve_deferred_value_of_in_type(
-                    ty,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
-                    Some(class_name),
-                );
+                let resolved = resolve_deferred_value_of_in_type(ty, self, Some(class_name));
                 if resolved != *bound {
                     type_results.template_bounds.push((name.clone(), resolved));
                 }
@@ -966,15 +880,7 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                *arg = resolve_deferred_value_of_in_type(
-                    ty,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
-                    Some(class_name),
-                );
+                *arg = resolve_deferred_value_of_in_type(ty, self, Some(class_name));
             }
         }
         if extends_args != info.extends_args {
@@ -989,15 +895,7 @@ impl Registry {
                         class_name,
                         &own_consts,
                     );
-                    *arg = resolve_deferred_value_of_in_type(
-                        ty,
-                        &self.classes,
-                        &self.class_ids,
-                        &self.class_const_types,
-                        &self.class_constant_results,
-                        &self.class_reference_results,
-                        Some(class_name),
-                    );
+                    *arg = resolve_deferred_value_of_in_type(ty, self, Some(class_name));
                 }
             }
             if resolved_args != *args {
@@ -1028,8 +926,11 @@ impl Registry {
             match &with_deferred {
                 None => {
                     let mut found = Vec::new();
-                    for (class_name, info) in self.scoped_classes() {
+                    for (class_name, _info) in self.scoped_classes() {
                         let Some(class_id) = self.class_ids.get(class_name).copied() else {
+                            continue;
+                        };
+                        let Some(info) = self.class_by_id(class_id) else {
                             continue;
                         };
                         if self.constant_reference_updates(class_id, class_name, info, &mut updates)
@@ -1044,7 +945,7 @@ impl Registry {
                         let Some(class_name) = self.class_name_by_id(*class_id).cloned() else {
                             continue;
                         };
-                        if let Some(info) = self.classes.get(&class_name) {
+                        if let Some(info) = self.class_by_id(*class_id) {
                             self.constant_reference_updates(
                                 *class_id,
                                 &class_name,
@@ -1063,24 +964,20 @@ impl Registry {
             }
         }
         for class_id in with_deferred.iter().flatten().copied() {
-            let Some(class_name) = self.class_name_by_id(class_id) else {
+            let Some(info) = self.class_by_id(class_id) else {
                 continue;
             };
-            let Some(info) = self.classes.get(class_name) else {
-                continue;
-            };
-            let unresolved: Vec<_> =
-                class_constant_entries(info, self.class_constant_results.get(&class_id))
-                    .into_iter()
-                    .filter_map(|(slot, _, sig)| {
-                        let ty = self
-                            .class_const_types
-                            .get(&(class_id, slot))
-                            .unwrap_or(&sig.ty);
-                        ty.contains_deferred()
-                            .then(|| (slot, unresolved_class_const_to_mixed(ty.clone())))
-                    })
-                    .collect();
+            let unresolved: Vec<_> = class_constant_entries(self, info, class_id)
+                .into_iter()
+                .filter_map(|(slot, _, sig)| {
+                    let ty = self
+                        .class_const_types
+                        .get(&(class_id, slot))
+                        .unwrap_or(&sig.ty);
+                    ty.contains_deferred()
+                        .then(|| (slot, unresolved_class_const_to_mixed(ty.clone())))
+                })
+                .collect();
             for (slot, ty) in unresolved {
                 self.set_class_const_type(class_id, slot, ty);
             }
@@ -1097,7 +994,7 @@ impl Registry {
         info: &ClassReflection,
         updates: &mut Vec<(ClassId, usize, Type)>,
     ) -> bool {
-        let constants = class_constant_entries(info, self.class_constant_results.get(&class_id));
+        let constants = class_constant_entries(self, info, class_id);
         if !constants.iter().any(|(slot, _, sig)| {
             self.class_const_types
                 .get(&(class_id, *slot))
@@ -1106,14 +1003,7 @@ impl Registry {
         }) {
             return false;
         }
-        let own_consts = visible_class_consts(
-            class_name,
-            &self.classes,
-            &self.class_ids,
-            &self.class_const_types,
-            &self.class_constant_results,
-            &self.class_reference_results,
-        );
+        let own_consts = visible_class_consts(self, class_name);
         for (const_slot, _, sig) in constants {
             let current = self
                 .class_const_types
@@ -1124,11 +1014,7 @@ impl Registry {
             }
             let step = resolve_deferred_value_of_in_type(
                 bind_class_const_self(current.clone(), class_name, &own_consts),
-                &self.classes,
-                &self.class_ids,
-                &self.class_const_types,
-                &self.class_constant_results,
-                &self.class_reference_results,
+                self,
                 None,
             );
             if step != *current {
@@ -1178,7 +1064,7 @@ impl Registry {
                 continue;
             }
             classes_with_imports.push(class_id);
-            for imp in &references.type_imports {
+            for imp in references.type_imports {
                 let source_key = syntax::name_resolution::qualify(
                     class_namespace(&imp.source_class_fqn),
                     &imp.source_alias_name,
@@ -1204,7 +1090,7 @@ impl Registry {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
-            let Some(info) = self.classes.get(&class_name) else {
+            let Some(info) = self.class_by_id(class_id) else {
                 continue;
             };
             // Keep even an empty result: it records that the class's import
@@ -1236,34 +1122,32 @@ impl Registry {
                 let current = info.methods.get(name).expect("method key exists");
                 let mut resolved = current.clone();
                 substitute_signature(&mut resolved);
+                if resolved != *current
+                    && let Some(slot) = self.member_slot(class_name.as_ref(), name)
+                {
+                    resolved_methods.push((MethodRef::new(class_id, slot), resolved));
+                }
+            }
+            for (method, current) in self.method_results_for_class(class_id) {
+                let mut resolved = current.clone();
+                substitute_signature(&mut resolved);
                 if resolved != *current {
-                    resolved_methods.push((name.clone(), resolved));
+                    resolved_methods.push((method, resolved));
                 }
             }
-            if let Some(methods) = self.class_method_results.get(&class_id) {
-                for (name, current) in methods.iter() {
-                    let mut resolved = current.clone();
-                    substitute_signature(&mut resolved);
-                    if resolved != *current {
-                        resolved_methods.push((name.clone(), resolved));
-                    }
-                }
-            }
-            let existing_properties = self.class_property_results.get(&class_id);
             let property_names: NameSet = info
                 .properties
                 .keys()
                 .chain(
-                    existing_properties
-                        .into_iter()
-                        .flat_map(|properties| properties.keys()),
+                    self.property_results_for_class(class_id)
+                        .filter_map(|(property, _)| self.property_name_by_ref(property)),
                 )
                 .cloned()
                 .collect();
             for name in property_names {
-                let Some(current) = existing_properties
-                    .and_then(|properties| properties.get(&name))
-                    .or_else(|| info.properties.get(&name))
+                let Some(current) = self
+                    .property_result_by_name(class_id, &name)
+                    .or_else(|| info.properties.get(&name).map(Arc::as_ref))
                 else {
                     continue;
                 };
@@ -1275,13 +1159,11 @@ impl Registry {
                 if let Some(set_ty) = &mut prop.set_ty {
                     substitute(set_ty);
                 }
-                if prop != **current {
+                if prop != *current {
                     resolved_properties.push((name, Arc::new(prop)));
                 }
             }
-            for (slot, _, c) in
-                class_constant_entries(&info, self.class_constant_results.get(&class_id))
-            {
+            for (slot, _, c) in class_constant_entries(self, &info, class_id) {
                 let current = self
                     .class_const_types
                     .get(&(class_id, slot))
@@ -1294,15 +1176,14 @@ impl Registry {
             for (slot, ty) in resolved_const_types {
                 self.set_class_const_type(class_id, slot, ty);
             }
-            self.class_property_results
-                .entry(class_id)
-                .or_default()
-                .extend(resolved_properties);
-            let method_results = self.class_method_results.entry(class_id).or_default();
-            for (name, method) in resolved_methods {
-                method_results.insert(name, method);
+            for (name, property) in resolved_properties {
+                self.set_property_result(class_id, name, property);
             }
-            self.imported_type_aliases.insert(class_id, aliases);
+            for (method, result) in resolved_methods {
+                self.set_method_result(method, result);
+            }
+            self.imported_type_aliases
+                .insert(class_id, aliases.into_iter().collect());
         }
     }
 
@@ -1342,8 +1223,11 @@ impl Registry {
             let mut added_method_names = FoldedMap::default();
             let own_property_names: NameSet = self.property_names(class_name).cloned().collect();
             let mut next_method_slot = self.member_entries(class_name).count();
-            for mixin_fqn in &references.mixins {
-                let Some(mixin_info) = self.classes.get(mixin_fqn) else {
+            for mixin_fqn in references.mixins {
+                let Some(mixin_id) = self.class_ids.get(mixin_fqn).copied() else {
+                    continue;
+                };
+                let Some(_mixin_info) = self.class_by_id(mixin_id) else {
                     continue;
                 };
                 for entry in self.member_entries(mixin_fqn) {
@@ -1385,12 +1269,10 @@ impl Registry {
         }
         for (method_ref, entry, sig) in method_additions {
             let class_id = method_ref.class();
-            let name = entry.name.clone();
             let inserted = self.add_member_entry(class_id, entry);
             debug_assert_eq!(inserted, Some(method_ref));
             if inserted.is_some() {
-                let methods = self.class_method_results.entry(class_id).or_default();
-                debug_assert!(methods.insert_shared_if_absent(name, sig));
+                debug_assert!(self.set_shared_method_result(method_ref, sig));
             }
         }
         for (class_id, name, sig) in property_additions {
@@ -1401,17 +1283,11 @@ impl Registry {
                 .classes
                 .get(&class_name)
                 .is_some_and(|info| info.properties.contains_key(&name))
-                || self
-                    .class_property_results
-                    .get(&class_id)
-                    .is_some_and(|properties| properties.contains_key(&name))
+                || self.property_result_by_name(class_id, &name).is_some()
             {
                 continue;
             }
-            self.class_property_results
-                .entry(class_id)
-                .or_default()
-                .insert(name, sig);
+            self.set_property_result(class_id, name, sig);
         }
     }
 
@@ -1431,15 +1307,7 @@ impl Registry {
         if !ty.contains_deferred() {
             return ty;
         }
-        resolve_deferred_value_of_in_type(
-            ty,
-            &self.classes,
-            &self.class_ids,
-            &self.class_const_types,
-            &self.class_constant_results,
-            &self.class_reference_results,
-            None,
-        )
+        resolve_deferred_value_of_in_type(ty, self, None)
     }
 
     /// `resolve_deferred_value_of_now`'s native-fallback-aware sibling.
@@ -1459,16 +1327,7 @@ impl Registry {
         if !ty.contains_deferred() {
             return ty;
         }
-        resolve_deferred_value_of_with_native_fallback(
-            ty,
-            native,
-            &self.classes,
-            &self.class_ids,
-            &self.class_const_types,
-            &self.class_constant_results,
-            &self.class_reference_results,
-            None,
-        )
+        resolve_deferred_value_of_with_native_fallback(ty, native, self, None)
     }
 
     /// `class_name`'s concrete binding for each templated ancestor
@@ -1476,11 +1335,14 @@ impl Registry {
     /// templates, scoped to it, through the mapping, so an inherited
     /// `list<T>` becomes `list<CMTemplate>` for a `@template-implements
     /// Factory<CMTemplate>` class rather than losing `T` to `Mixed`.
-    fn ancestor_bindings(&self, class_name: &str, info: &ClassReflection) -> AncestorBindings {
+    fn ancestor_bindings(&self, class_name: &str) -> AncestorBindings {
         let own_args = self.own_template_args(class_name);
         self.all_ancestor_names(class_name)
             .into_iter()
-            .filter(|a| self.classes.get(a).is_some_and(|c| !c.templates.is_empty()))
+            .filter(|a| {
+                self.class(a)
+                    .is_some_and(|(_, _, class)| !class.templates.is_empty())
+            })
             .map(|a| {
                 let bindings = self.class_template_bindings(class_name, &own_args, &a);
                 (a, bindings)
@@ -1651,9 +1513,8 @@ impl Registry {
                     // safe_to_backfill`'s doc comment for why this must be
                     // the real resolved bindings, not merely "is this
                     // ancestor name reachable at all".
-                    let ancestor_bindings = || {
-                        bindings[index].get_or_init(|| registry.ancestor_bindings(class_name, info))
-                    };
+                    let ancestor_bindings =
+                        || bindings[index].get_or_init(|| registry.ancestor_bindings(class_name));
                     // Mirrors real PHPStan's identical carve-out
                     // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`):
                     // a subclass's `__construct` legitimately takes
@@ -1801,19 +1662,12 @@ impl Registry {
 
         let mut changed = false;
         for (class_id, per_class) in backfills {
-            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+            if self.class_by_id(class_id).is_none() {
                 continue;
-            };
+            }
             for (method_ref, param_fills, return_fill) in per_class {
                 debug_assert_eq!(method_ref.class(), class_id);
-                let Some(method_name) = self
-                    .member_entry_by_ref(method_ref)
-                    .map(|entry| entry.name.clone())
-                else {
-                    continue;
-                };
-                let Some(mut sig) = self.lookup_own_method(&class_name, &method_name).cloned()
-                else {
+                let Some(mut sig) = self.method_by_ref(method_ref).cloned() else {
                     continue;
                 };
                 for (i, ty, explicit_mixed_hint) in param_fills {
@@ -1830,10 +1684,7 @@ impl Registry {
                     sig.return_explicit_mixed_hint = explicit_mixed_hint;
                     changed = true;
                 }
-                self.class_method_results
-                    .entry(class_id)
-                    .or_default()
-                    .insert(method_name, sig);
+                self.set_method_result(method_ref, sig);
             }
         }
         changed
@@ -1855,21 +1706,10 @@ fn class_namespace(fqn: &str) -> &str {
 /// `"value-of"` arm for where a `ValueOf` is produced.
 fn resolve_deferred_value_of_in_type(
     ty: Type,
-    classes: &NameTable<ClassReflection>,
-    class_ids: &NameTable<ClassId>,
-    const_types: &FxHashMap<(ClassId, usize), Type>,
-    constant_results: &FxHashMap<ClassId, ClassConstantResults>,
-    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
+    registry: &Registry,
     excluded: Option<&str>,
 ) -> Type {
-    ty.resolve_class_references(&DeclaredConstants {
-        classes,
-        class_ids,
-        const_types,
-        constant_results,
-        class_references,
-        excluded,
-    })
+    ty.resolve_class_references(&DeclaredConstants { registry, excluded })
 }
 
 /// The constants and enum cases of the classes indexed so far, but for
@@ -1877,11 +1717,7 @@ fn resolve_deferred_value_of_in_type(
 /// types degrades to `Mixed`, the same "can't verify, don't guess"
 /// outcome every other unresolvable one gets.
 struct DeclaredConstants<'a> {
-    classes: &'a NameTable<ClassReflection>,
-    class_ids: &'a NameTable<ClassId>,
-    const_types: &'a FxHashMap<(ClassId, usize), Type>,
-    constant_results: &'a FxHashMap<ClassId, ClassConstantResults>,
-    class_reference_results: &'a FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
+    registry: &'a Registry,
     excluded: Option<&'a str>,
 }
 
@@ -1897,12 +1733,7 @@ impl types::ClassConstants for DeclaredConstants<'_> {
         if self.is_excluded(class) {
             return Type::mixed();
         }
-        resolve_value_of_target(
-            class,
-            self.classes,
-            &self.class_ids,
-            &self.class_reference_results,
-        )
+        resolve_value_of_target(class, self.registry)
     }
 
     fn class_constants(&self, class: &Type, pattern: &str) -> Type {
@@ -1912,15 +1743,7 @@ impl types::ClassConstants for DeclaredConstants<'_> {
         {
             return Type::mixed();
         }
-        resolve_class_const_type(
-            class,
-            pattern,
-            self.classes,
-            self.class_ids,
-            self.const_types,
-            self.constant_results,
-            self.class_reference_results,
-        )
+        resolve_class_const_type(class, pattern, self.registry)
     }
 }
 
@@ -1935,33 +1758,12 @@ impl types::ClassConstants for DeclaredConstants<'_> {
 /// `static` reference has already been bound to the owning class by
 /// `bind_class_const_self`, or stays unresolved (`Mixed`) where no owning
 /// class exists.
-fn resolve_class_const_type(
-    class: &Type,
-    pattern: &str,
-    classes: &NameTable<ClassReflection>,
-    class_ids: &NameTable<ClassId>,
-    const_types: &FxHashMap<(ClassId, usize), Type>,
-    constant_results: &FxHashMap<ClassId, ClassConstantResults>,
-    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
-) -> Type {
+fn resolve_class_const_type(class: &Type, pattern: &str, registry: &Registry) -> Type {
     let Some((fqn, _)) = class.as_object() else {
         return Type::mixed();
     };
     let fqn = fqn.trim_start_matches('\\');
-    if !classes.contains_key(fqn) {
-        return Type::mixed();
-    }
-    matching_class_const_type(
-        &visible_class_consts(
-            fqn,
-            classes,
-            class_ids,
-            const_types,
-            constant_results,
-            class_references,
-        ),
-        pattern,
-    )
+    matching_class_const_type(&visible_class_consts(registry, fqn), pattern)
 }
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `prop` contains
@@ -1991,12 +1793,9 @@ fn function_has_deferred_type(sig: &FunctionReflection) -> bool {
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `info`
 /// contains a deferred sentinel - lets that pass skip a class outright.
-fn class_has_deferred_type(
-    info: &ClassReflection,
-    method_results: Option<&Members<FunctionReflection>>,
-) -> bool {
+fn class_has_deferred_type(info: &ClassReflection, method_results_have_deferred: bool) -> bool {
     info.methods.values().any(function_has_deferred_type)
-        || method_results.is_some_and(|methods| methods.values().any(function_has_deferred_type))
+        || method_results_have_deferred
         || info
             .extends_args
             .iter()
@@ -2011,8 +1810,9 @@ fn class_has_deferred_type(
 }
 
 fn class_constant_entries<'a>(
+    registry: &'a Registry,
     info: &'a ClassReflection,
-    results: Option<&'a ClassConstantResults>,
+    class_id: ClassId,
 ) -> Vec<(usize, &'a Name, &'a ConstantReflection)> {
     let mut entries: Vec<_> = info
         .consts
@@ -2020,13 +1820,11 @@ fn class_constant_entries<'a>(
         .enumerate()
         .map(|(slot, (name, constant))| (slot, name, &**constant))
         .collect();
-    if let Some(results) = results {
-        entries.extend(
-            results
-                .iter()
-                .map(|(name, (slot, constant))| (*slot, name, &**constant)),
-        );
-    }
+    entries.extend(
+        registry
+            .class_constant_results_for_class(class_id)
+            .map(|(slot, name, constant)| (slot, name, &**constant)),
+    );
     entries.sort_unstable_by_key(|(slot, _, _)| *slot);
     entries
 }
@@ -2036,14 +1834,7 @@ fn class_constant_entries<'a>(
 /// `ClassReflection::getConstants()` resolves a `Foo::*` against. Walked
 /// breadth-first, a class's own declaration winning over an inherited one
 /// of the same name.
-fn visible_class_consts(
-    fqn: &str,
-    classes: &NameTable<ClassReflection>,
-    class_ids: &NameTable<ClassId>,
-    const_types: &FxHashMap<(ClassId, usize), Type>,
-    constant_results: &FxHashMap<ClassId, ClassConstantResults>,
-    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
-) -> VisibleClassConstTypes {
+fn visible_class_consts(registry: &Registry, fqn: &str) -> VisibleClassConstTypes {
     let mut consts = VisibleClassConstTypes::default();
     let mut seen: NameSet = NameSet::default();
     let mut queue: std::collections::VecDeque<Name> = std::collections::VecDeque::new();
@@ -2052,20 +1843,19 @@ fn visible_class_consts(
         if !seen.insert(name.clone()) {
             continue;
         }
-        let Some(info) = classes.get(&name) else {
+        let Some((class_id, _, info)) = registry.class(&name) else {
             continue;
         };
-        let class_id = class_ids.get(&name).copied();
-        let results = class_id.and_then(|id| constant_results.get(&id));
-        for (slot, const_name, sig) in class_constant_entries(info, results) {
+        for (slot, const_name, sig) in class_constant_entries(registry, info, class_id) {
             if !consts.contains_key(const_name) {
-                let ty = class_id
-                    .and_then(|id| const_types.get(&(id, slot)))
+                let ty = registry
+                    .class_const_types
+                    .get(&(class_id, slot))
                     .unwrap_or(&sig.ty);
                 consts.insert(const_name.clone(), ty.clone());
             }
         }
-        if let Some(references) = class_id.and_then(|id| class_references.get(&id)) {
+        if let Some(references) = registry.class_references(class_id) {
             queue.extend(references.extends.iter().cloned());
             queue.extend(references.implements.iter().cloned());
         } else {
@@ -2181,17 +1971,12 @@ fn unresolved_class_const_to_mixed(ty: Type) -> Type {
 /// PHPStan computes independently - reused directly, not recomputed.
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
-fn resolve_value_of_target(
-    target_fqn: &str,
-    classes: &NameTable<ClassReflection>,
-    class_ids: &NameTable<ClassId>,
-    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
-) -> Type {
+fn resolve_value_of_target(target_fqn: &str, registry: &Registry) -> Type {
     // Any enum's case values, whichever enum it turns out to be.
-    if is_enum_interface(target_fqn, classes, class_ids, class_references, 0) {
+    if is_enum_interface(target_fqn, registry, 0) {
         return Type::union_of(vec![Type::int(), Type::string()]);
     }
-    let Some(info) = classes.get(target_fqn) else {
+    let Some((_, _, info)) = registry.class(target_fqn) else {
         return Type::mixed();
     };
     if info.kind != ClassKind::Enum {
@@ -2205,28 +1990,23 @@ fn resolve_value_of_target(
 
 /// Whether `fqn` is `UnitEnum`, `BackedEnum` or an interface extending
 /// one, which only enums implement.
-fn is_enum_interface(
-    fqn: &str,
-    classes: &NameTable<ClassReflection>,
-    class_ids: &NameTable<ClassId>,
-    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
-    depth: usize,
-) -> bool {
+fn is_enum_interface(fqn: &str, registry: &Registry, depth: usize) -> bool {
     let fqn = fqn.trim_start_matches('\\');
     if fqn.eq_ignore_ascii_case("UnitEnum") || fqn.eq_ignore_ascii_case("BackedEnum") {
         return true;
     }
     depth < 32
-        && classes.get(fqn).is_some_and(|info| {
+        && registry.class(fqn).is_some_and(|(id, _, info)| {
             info.kind == ClassKind::Interface && {
-                let references = class_ids.get(fqn).and_then(|id| class_references.get(id));
+                let references = registry.class_references(id);
                 let (extends, implements) = references
-                    .map_or((&info.extends, &info.implements), |references| {
-                        (&references.extends, &references.implements)
+                    .map_or((&info.extends[..], &info.implements[..]), |references| {
+                        (references.extends, references.implements)
                     });
-                extends.iter().chain(implements).any(|parent| {
-                    is_enum_interface(parent, classes, class_ids, class_references, depth + 1)
-                })
+                extends
+                    .iter()
+                    .chain(implements)
+                    .any(|parent| is_enum_interface(parent, registry, depth + 1))
             }
         })
 }
@@ -2248,22 +2028,10 @@ fn is_enum_interface(
 fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
     native: &Type,
-    classes: &NameTable<ClassReflection>,
-    class_ids: &NameTable<ClassId>,
-    const_types: &FxHashMap<(ClassId, usize), Type>,
-    constant_results: &FxHashMap<ClassId, ClassConstantResults>,
-    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
+    registry: &Registry,
     excluded: Option<&str>,
 ) -> Type {
-    let resolved = resolve_deferred_value_of_in_type(
-        ty,
-        classes,
-        class_ids,
-        const_types,
-        constant_results,
-        class_references,
-        excluded,
-    );
+    let resolved = resolve_deferred_value_of_in_type(ty, registry, excluded);
     if resolved.is_mixed() && !native.is_mixed() {
         native.clone()
     } else {
@@ -2276,7 +2044,7 @@ impl Registry {
     /// `class_name` - the identity binding, which `class_template_bindings`
     /// maps through to an ancestor without erasing them.
     pub(crate) fn own_template_args(&self, class_name: &str) -> Vec<Type> {
-        let Some(info) = self.classes.get(class_name) else {
+        let Some((_, _, info)) = self.class(class_name) else {
             return Vec::new();
         };
         let bounds = self.effective_template_bounds_by_name(class_name);
@@ -2394,21 +2162,14 @@ impl Registry {
             })
             .collect();
         for (class_id, name, property) in property_fixes {
-            self.class_property_results
-                .entry(class_id)
-                .or_default()
-                .insert(name, property);
+            self.set_property_result(class_id, name, property);
         }
         for (key, param, ty) in fixes {
             match key {
                 SigId::Method(method) => {
-                    let Some(name) = self
-                        .class_by_id(method.class())
-                        .and_then(|_| self.member_entry_by_ref(method))
-                        .map(|entry| entry.name.clone())
-                    else {
+                    if self.member_entry_by_ref(method).is_none() {
                         continue;
-                    };
+                    }
                     let Some(mut result) = self.method_by_ref(method).cloned() else {
                         continue;
                     };
@@ -2416,10 +2177,7 @@ impl Registry {
                         Some(i) => result.params[i].ty = ty,
                         None => result.return_type = ty,
                     }
-                    self.class_method_results
-                        .entry(method.class())
-                        .or_default()
-                        .insert(name, result);
+                    self.set_method_result(method, result);
                 }
                 SigId::Function(function) => {
                     let Some(mut result) = self.function_by_id(function).cloned() else {
@@ -2625,24 +2383,13 @@ impl Registry {
             })
             .collect();
         for (class_id, name, property) in property_fixes {
-            self.class_property_results
-                .entry(class_id)
-                .or_default()
-                .insert(name, property);
+            self.set_property_result(class_id, name, property);
         }
         for (method, fixed) in method_fixes {
-            let class_id = method.class();
-            let Some(name) = self
-                .class_by_id(class_id)
-                .and_then(|_| self.member_entry_by_ref(method))
-                .map(|entry| entry.name.clone())
-            else {
+            if self.member_entry_by_ref(method).is_none() {
                 continue;
-            };
-            self.class_method_results
-                .entry(class_id)
-                .or_default()
-                .insert(name, fixed);
+            }
+            self.set_method_result(method, fixed);
         }
         for (function, fixed) in function_fixes {
             self.function_results.insert(function, fixed);
@@ -2775,16 +2522,7 @@ impl Registry {
         let resolve = |ty: &mut Type, native: &Type| {
             if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
-                *ty = resolve_deferred_value_of_with_native_fallback(
-                    taken,
-                    native,
-                    &self.classes,
-                    &self.class_ids,
-                    &self.class_const_types,
-                    &self.class_constant_results,
-                    &self.class_reference_results,
-                    None,
-                );
+                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, self, None);
             }
         };
         for p in &mut sig.params {

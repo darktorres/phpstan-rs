@@ -83,21 +83,13 @@ impl Registry {
                     let Some(slot) = self.member_slot(canonical, method) else {
                         continue;
                     };
-                    let Some(name) = self
-                        .member_entry_by_ref(crate::registry::MethodRef::new(id, slot))
-                        .map(|member| member.name.clone())
-                    else {
-                        continue;
-                    };
-                    let Some(declaration) = self.lookup_own_method(canonical, method) else {
+                    let method = crate::registry::MethodRef::new(id, slot);
+                    let Some(declaration) = self.method_by_ref(method) else {
                         continue;
                     };
                     let mut result = declaration.clone();
                     if add_assertion(&mut result, &entry) {
-                        self.class_method_results
-                            .entry(id)
-                            .or_default()
-                            .insert(name, result);
+                        self.set_method_result(method, result);
                     }
                 }
                 _ => {}

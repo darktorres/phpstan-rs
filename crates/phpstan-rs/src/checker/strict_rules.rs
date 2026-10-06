@@ -744,9 +744,8 @@ impl<'a> Checker<'a> {
         if let Some(trait_name) = self.current_trait.as_deref() {
             let users: Vec<&str> =
                 self.registry
-                    .classes()
-                    .iter()
-                    .filter(|(class, _)| {
+                    .classes_by_id()
+                    .filter(|(_, class, _)| {
                         self.registry
                             .class_references_by_name(class)
                             .is_some_and(|references| {
@@ -764,7 +763,7 @@ impl<'a> Checker<'a> {
                                         }))
                             })
                     })
-                    .map(|(class, _)| class.as_ref())
+                    .map(|(_, class, _)| class.as_ref())
                     .collect();
             if name.eq_ignore_ascii_case("parent") {
                 return !users.is_empty();

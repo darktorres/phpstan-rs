@@ -29,6 +29,7 @@ mod name_context;
 mod name_map;
 mod name_table;
 mod packed;
+mod property_topology;
 pub mod provenance;
 mod purity;
 pub mod reflection_attribute;
@@ -73,12 +74,13 @@ pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
-pub(crate) use file_decls::{ClassLayout, FileDecls, FileMember, FunctionLayout};
+pub(crate) use file_decls::{FileDecls, FileMember};
 pub(crate) use guard::{Guard, GuardExpr};
-pub(crate) use ids::{ClassId, FnId, IdSource, MethodRef};
+pub(crate) use ids::{ClassId, FnId, IdSource, MethodRef, PropertyRef};
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
+use property_topology::PropertyTopology;
 pub use provenance::{Origin, Provenance};
 pub(crate) use purity::{PurityResults, collect_impure_points, is_non_overridable};
 pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
@@ -211,6 +213,7 @@ impl ClassTypeResults {
 /// built, and the rest.
 const REST: &str = "rest";
 const CLASS_REFERENCES: &str = "table:class_references";
+const EFFECTS: &str = "table:effects";
 
 /// `Registry::store_tables` and `load_tables` for the tables named: each a
 /// section called `table:<field>`.
@@ -237,35 +240,6 @@ macro_rules! stored_tables {
     };
 }
 
-/// The winning project declaration's address inside its parsed file.
-#[derive(Clone)]
-struct ClassDeclAt {
-    file: Arc<FileDecls>,
-    layout: la_arena::Idx<ClassLayout>,
-}
-
-impl std::fmt::Debug for ClassDeclAt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClassDeclAt")
-            .field("layout", &self.layout)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone)]
-struct FunctionDeclAt {
-    file: Arc<FileDecls>,
-    layout: la_arena::Idx<FunctionLayout>,
-}
-
-impl std::fmt::Debug for FunctionDeclAt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FunctionDeclAt")
-            .field("layout", &self.layout)
-            .finish_non_exhaustive()
-    }
-}
-
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     /// Changes whenever the declaration id space is replaced. IDs kept by
@@ -282,12 +256,15 @@ pub struct Registry {
     function_results_cache: FunctionTable,
     #[serde(skip)]
     classes: NameTable<ClassReflection>,
+    // Immutable declarations selected by the Registry's active ID space.
+    // The name tables remain the insertion/cache boundary while declarations
+    // are indexed; readers resolve through these ID-addressed Arc stores.
+    #[serde(skip)]
+    class_declarations: FxHashMap<ClassId, Arc<ClassReflection>>,
     #[serde(skip)]
     class_ids: NameTable<ClassId>,
     #[serde(skip)]
     project_class_names: Vec<Name>,
-    #[serde(skip)]
-    project_class_decls: Vec<Option<ClassDeclAt>>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     #[serde(skip)]
@@ -297,11 +274,11 @@ pub struct Registry {
     #[serde(skip)]
     functions: FunctionTable,
     #[serde(skip)]
+    function_declarations: FxHashMap<FnId, Arc<FunctionReflection>>,
+    #[serde(skip)]
     function_ids: NameTable<FnId>,
     #[serde(skip)]
     project_function_names: Vec<Name>,
-    #[serde(skip)]
-    project_function_decls: Vec<Option<FunctionDeclAt>>,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -467,25 +444,31 @@ pub struct Registry {
     #[serde(skip)]
     class_const_types_cache: NameTable<Vec<(u32, Type)>>,
     // Constants composed from traits, keyed by the using class and their
-    // stable class-constant slot. The ClassReflection keeps only declarations.
+    // stable class-constant slot. Names are kept separately as topology for
+    // lookup and cache projection; the result values themselves are slot-keyed.
     #[serde(skip)]
-    pub(crate) class_constant_results:
-        FxHashMap<ClassId, OrderedNameMap<(usize, Arc<ConstantReflection>)>>,
+    pub(crate) class_constant_results: FxHashMap<(ClassId, usize), Arc<ConstantReflection>>,
     #[serde(skip)]
     class_constant_results_cache: NameTable<Vec<(Name, u32, Arc<ConstantReflection>)>>,
+    #[serde(skip)]
+    class_constant_names: FxHashMap<ClassId, Vec<Option<Name>>>,
     // Methods introduced by traits or mixins, keyed by the class that has
     // the local MethodRef. ClassReflection.methods remains as-built.
     #[serde(skip)]
-    pub(crate) class_method_results: FxHashMap<ClassId, Members<FunctionReflection>>,
+    pub(crate) class_method_results: FxHashMap<MethodRef, Arc<Lazy<FunctionReflection>>>,
     #[serde(skip)]
     class_method_results_cache: NameTable<Members<FunctionReflection>>,
     // Hook facts inherited by a redeclared property, keyed by the class
     // declaration that owns the completed property. The underlying
     // PropertyReflection remains the as-built declaration.
     #[serde(skip)]
-    pub(crate) class_property_results: FxHashMap<ClassId, NameMap<Arc<PropertyReflection>>>,
+    pub(crate) class_property_results: FxHashMap<PropertyRef, Arc<PropertyReflection>>,
     #[serde(skip)]
     class_property_results_cache: NameTable<Vec<(Name, Arc<PropertyReflection>)>>,
+    #[serde(skip)]
+    class_property_topology: FxHashMap<ClassId, PropertyTopology>,
+    #[serde(skip)]
+    class_property_topology_cache: NameTable<Vec<Name>>,
     // Resolved class-level generic types, keyed by declaration ID.
     #[serde(skip)]
     pub(crate) class_type_results: FxHashMap<ClassId, ClassTypeResults>,
@@ -513,6 +496,10 @@ pub struct Registry {
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
     pub(crate) effects: FxHashMap<effects::EffectId, effects::Settled>,
+    // The cache stores effects by stable declaration names, then freeze
+    // translates them back to generation-checked EffectIds.
+    #[serde(skip)]
+    effects_cache: Option<Vec<(effects::DeclKey, effects::Settled)>>,
     // Whether a stub may run code passed to it, keyed by the same stable
     // declaration IDs used by effect settlement. Rebuilt before each effects
     // pass; unlike the signature, this is a derived Registry result.
@@ -552,6 +539,11 @@ impl Registry {
         &self.functions
     }
 
+    /// Whether these registries share the same class-table base.
+    pub(crate) fn shares_class_base(&self, other: &Registry) -> bool {
+        self.classes.shares_base(&other.classes)
+    }
+
     /// The literal-shaped global constants known to the project.
     pub fn global_constants(&self) -> &NameMap<Type> {
         &self.global_constants
@@ -568,6 +560,41 @@ impl Registry {
         Some((*id, name, self.class_by_id(*id)?))
     }
 
+    /// The selected class declaration for a PHP class name, through its ID.
+    pub fn class_by_name(&self, name: &str) -> Option<&ClassReflection> {
+        self.class(name).map(|(_, _, declaration)| declaration)
+    }
+
+    /// Whether this Registry has an active declaration for `name`.
+    pub fn has_class(&self, name: &str) -> bool {
+        self.class_by_name(name).is_some()
+    }
+
+    /// Active class declarations in the Registry's name-table iteration
+    /// order, resolved through their IDs.
+    pub(crate) fn classes_by_id(&self) -> impl Iterator<Item = (ClassId, &Name, &ClassReflection)> {
+        self.class_ids.iter().filter_map(|(name, id)| {
+            self.class_by_id(*id)
+                .map(|declaration| (*id, name, declaration))
+        })
+    }
+
+    /// Iterates active class declarations with their selected names.
+    pub fn iter_classes(&self) -> impl Iterator<Item = (&Name, &ClassReflection)> {
+        self.classes_by_id()
+            .map(|(_, name, declaration)| (name, declaration))
+    }
+
+    /// Active declarations owned by this Registry rather than its shared base.
+    pub(crate) fn own_classes_by_id(
+        &self,
+    ) -> impl Iterator<Item = (ClassId, &Name, &ClassReflection)> {
+        self.class_ids.own_iter().filter_map(|(name, id)| {
+            self.class_by_id(*id)
+                .map(|declaration| (*id, name, declaration))
+        })
+    }
+
     fn debug_check_id_generation(&self, generation: u32) {
         #[cfg(debug_assertions)]
         debug_assert_eq!(
@@ -578,31 +605,10 @@ impl Registry {
         let _ = generation;
     }
 
-    /// A class declaration addressed by its source-range id. While the
-    /// registry exposes its as-built table for an edit, this reads an
-    /// unmerged project declaration from its file arena.
+    /// The selected immutable class declaration addressed by its Registry ID.
     pub(crate) fn class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
         self.debug_check_id_generation(id.generation());
-        match id.source()? {
-            IdSource::Stub => {
-                let name = self.classes.base_name(id.local() as usize)?;
-                (self.class_ids.get(name) == Some(&id))
-                    .then(|| self.classes.get(name))
-                    .flatten()
-            }
-            // The context range is reserved for item 17's context base.
-            IdSource::Context => None,
-            IdSource::Project => {
-                let name = self.project_class_names.get(id.local() as usize)?;
-                if self.class_ids.get(name) != Some(&id) {
-                    return None;
-                }
-                if let Some(declaration) = self.file_class_by_id(id) {
-                    return Some(declaration);
-                }
-                self.classes.get(name)
-            }
-        }
+        self.class_declarations.get(&id).map(Arc::as_ref)
     }
 
     pub(crate) fn class_references(&self, id: ClassId) -> Option<ClassReferences<'_>> {
@@ -635,23 +641,92 @@ impl Registry {
         }
     }
 
+    pub(crate) fn class_constant_result_by_name(
+        &self,
+        id: ClassId,
+        name: &str,
+    ) -> Option<&Arc<ConstantReflection>> {
+        let slot = self.class_constant_slot_by_name(id, name)?;
+        self.class_constant_results.get(&(id, slot))
+    }
+
+    pub(crate) fn class_constant_slot_by_name(&self, id: ClassId, name: &str) -> Option<usize> {
+        let info = self.class_by_id(id)?;
+        info.consts.get_index(name).or_else(|| {
+            self.class_constant_names
+                .get(&id)?
+                .iter()
+                .position(|candidate| candidate.as_deref() == Some(name))
+                .map(|index| info.consts.len() + index)
+        })
+    }
+
+    pub(crate) fn class_constant_name_by_slot(&self, id: ClassId, slot: usize) -> Option<&Name> {
+        let info = self.class_by_id(id)?;
+        if let Some(name) = info.consts.get_index_name(slot) {
+            return Some(name);
+        }
+        self.class_constant_names
+            .get(&id)?
+            .get(slot.checked_sub(info.consts.len())?)?
+            .as_ref()
+    }
+
+    pub(crate) fn class_constant_results_for_class(
+        &self,
+        id: ClassId,
+    ) -> impl Iterator<Item = (usize, &Name, &Arc<ConstantReflection>)> {
+        let declaration_len = self.class_by_id(id).map_or(0, |info| info.consts.len());
+        self.class_constant_names
+            .get(&id)
+            .into_iter()
+            .flat_map(move |names| names.iter().enumerate())
+            .filter_map(move |(index, name)| {
+                let slot = declaration_len + index;
+                Some((
+                    slot,
+                    name.as_ref()?,
+                    self.class_constant_results.get(&(id, slot))?,
+                ))
+            })
+    }
+
+    pub(crate) fn set_class_constant_result(
+        &mut self,
+        id: ClassId,
+        slot: usize,
+        name: Name,
+        constant: Arc<ConstantReflection>,
+    ) {
+        let declaration_len = self.class_by_id(id).map_or(0, |info| info.consts.len());
+        if slot >= declaration_len {
+            let names = self.class_constant_names.entry(id).or_default();
+            let composed_slot = slot - declaration_len;
+            if names.len() <= composed_slot {
+                names.resize_with(composed_slot + 1, || None);
+            }
+            names[composed_slot] = Some(name);
+        }
+        self.class_constant_results.insert((id, slot), constant);
+    }
+
     /// Local aliases declared on `id`, overlaid with aliases resolved from
     /// `@phpstan-import-type` tags. Callers get an owned map so the source
     /// declaration remains immutable.
-    pub(crate) fn effective_type_aliases(&self, id: ClassId) -> NameMap<Type> {
+    pub(crate) fn effective_type_aliases(&self, id: ClassId) -> syntax::name::NameMap<Type> {
         let mut aliases = self
             .class_by_id(id)
             .map(|class| class.type_aliases().clone())
             .unwrap_or_default();
         if let Some(imported) = self.imported_type_aliases.get(&id) {
-            aliases.extend(imported.clone());
+            aliases.extend(imported.iter().map(|(name, ty)| (name.clone(), ty.clone())));
         }
         aliases
     }
 
     /// Name-addressed convenience for checker paths which already carry a
     /// class name rather than its declaration ID.
-    pub(crate) fn effective_type_aliases_by_name(&self, name: &str) -> NameMap<Type> {
+    pub(crate) fn effective_type_aliases_by_name(&self, name: &str) -> syntax::name::NameMap<Type> {
         self.class_ids
             .get(name)
             .copied()
@@ -659,7 +734,7 @@ impl Registry {
             .unwrap_or_default()
     }
 
-    pub(crate) fn effective_template_bounds(&self, id: ClassId) -> NameMap<Type> {
+    pub(crate) fn effective_template_bounds(&self, id: ClassId) -> syntax::name::NameMap<Type> {
         let mut bounds = self
             .class_by_id(id)
             .map(|class| class.template_bounds().clone())
@@ -670,7 +745,10 @@ impl Registry {
         bounds
     }
 
-    pub(crate) fn effective_template_bounds_by_name(&self, name: &str) -> NameMap<Type> {
+    pub(crate) fn effective_template_bounds_by_name(
+        &self,
+        name: &str,
+    ) -> syntax::name::NameMap<Type> {
         self.class_ids
             .get(name)
             .copied()
@@ -699,7 +777,10 @@ impl Registry {
             .unwrap_or_default()
     }
 
-    pub(crate) fn effective_implements_args(&self, id: ClassId) -> NameMap<Vec<Type>> {
+    pub(crate) fn effective_implements_args(
+        &self,
+        id: ClassId,
+    ) -> syntax::name::NameMap<Vec<Type>> {
         let mut args = self
             .class_by_id(id)
             .map(|class| class.implements_args().clone())
@@ -710,7 +791,10 @@ impl Registry {
         args
     }
 
-    pub(crate) fn effective_implements_args_by_name(&self, name: &str) -> NameMap<Vec<Type>> {
+    pub(crate) fn effective_implements_args_by_name(
+        &self,
+        name: &str,
+    ) -> syntax::name::NameMap<Vec<Type>> {
         self.class_ids
             .get(name)
             .copied()
@@ -728,114 +812,63 @@ impl Registry {
         (self.class_ids.get(name) == Some(&id)).then_some(name)
     }
 
-    /// The immutable declaration as built in its file, when this project id
-    /// still names one unmerged file declaration. Resolved or merged values
-    /// remain available through `class_by_id` until the Registry finishes its
-    /// id-store migration.
-    pub(crate) fn file_class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
-        self.debug_check_id_generation(id.generation());
-        if id.source()? != IdSource::Project {
-            return None;
-        }
-        let declaration = self
-            .project_class_decls
-            .get(id.local() as usize)?
-            .as_ref()?;
-        Some(declaration.file.class(declaration.layout))
-    }
-
-    pub(crate) fn file_method_by_class_id(
-        &self,
-        id: ClassId,
-        method: &str,
-    ) -> Option<&FunctionReflection> {
-        let method_ref = self.file_method_ref_by_class_id(id, method)?;
-        self.file_method_by_ref(method_ref)
-    }
-
-    pub(crate) fn file_method_ref_by_class_id(
-        &self,
-        id: ClassId,
-        method: &str,
-    ) -> Option<MethodRef> {
-        let class = self.class_by_id(id)?;
-        let slot = *class.member_slots.get(method)?;
-        Some(MethodRef::new(id, slot))
-    }
-
-    pub(crate) fn file_method_by_ref(&self, method: MethodRef) -> Option<&FunctionReflection> {
-        let id = method.class();
-        let class = self.class_by_id(id)?;
-        let entry = class.member_order.get(usize::from(method.slot()))?;
-        class.methods.get(&entry.name)
-    }
-
-    pub(crate) fn file_property_by_class_id(
-        &self,
-        id: ClassId,
-        property: &str,
-    ) -> Option<&PropertyReflection> {
-        self.debug_check_id_generation(id.generation());
-        if id.source()? != IdSource::Project {
-            return None;
-        }
-        let declaration = self
-            .project_class_decls
-            .get(id.local() as usize)?
-            .as_ref()?;
-        declaration.file.property(declaration.layout, property)
-    }
-
-    pub(crate) fn file_constant_by_class_id(
-        &self,
-        id: ClassId,
-        constant: &str,
-    ) -> Option<&ConstantReflection> {
-        self.debug_check_id_generation(id.generation());
-        if id.source()? != IdSource::Project {
-            return None;
-        }
-        let declaration = self
-            .project_class_decls
-            .get(id.local() as usize)?
-            .as_ref()?;
-        declaration.file.constant(declaration.layout, constant)
-    }
-
     /// The id and declaration selected for `name` by PHP's function-name rules.
     pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
         let (name, id) = self.function_ids.get_with_name(name)?;
         Some((*id, name, self.function_by_id(*id)?))
     }
 
-    /// A function declaration addressed by its source-range id. While the
-    /// registry exposes its as-built table for an edit, this reads an
-    /// unmerged project declaration from its file arena.
+    /// The selected function signature for a PHP function name, through its ID.
+    pub fn function_by_name(&self, name: &str) -> Option<&FunctionReflection> {
+        self.function(name).map(|(_, _, declaration)| declaration)
+    }
+
+    /// Whether this Registry has an active declaration for `name`.
+    pub fn has_function(&self, name: &str) -> bool {
+        self.function_by_name(name).is_some()
+    }
+
+    /// Active function declarations in the Registry's name-table iteration
+    /// order, resolved through their IDs.
+    pub(crate) fn functions_by_id(
+        &self,
+    ) -> impl Iterator<Item = (FnId, &Name, &FunctionReflection)> {
+        self.function_ids.iter().filter_map(|(name, id)| {
+            self.function_by_id(*id)
+                .map(|declaration| (*id, name, declaration))
+        })
+    }
+
+    /// Iterates active function declarations with their selected names.
+    pub fn iter_functions(&self) -> impl Iterator<Item = (&Name, &FunctionReflection)> {
+        self.functions_by_id()
+            .map(|(_, name, declaration)| (name, declaration))
+    }
+
+    /// Active declarations owned by this Registry rather than its shared base.
+    pub(crate) fn own_functions_by_id(
+        &self,
+    ) -> impl Iterator<Item = (FnId, &Name, &FunctionReflection)> {
+        self.function_ids.own_iter().filter_map(|(name, id)| {
+            self.function_by_id(*id)
+                .map(|declaration| (*id, name, declaration))
+        })
+    }
+
+    /// The selected immutable function signature addressed by its Registry ID.
     pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
         self.debug_check_id_generation(id.generation());
         if let Some(result) = self.function_results.get(&id) {
             return Some(result);
         }
-        match id.source()? {
-            IdSource::Stub => {
-                let name = self.functions.base_name(id.local() as usize)?;
-                (self.function_ids.get(name) == Some(&id))
-                    .then(|| self.functions.get(name))
-                    .flatten()
-            }
-            // The context range is reserved for item 17's context base.
-            IdSource::Context => None,
-            IdSource::Project => {
-                let name = self.project_function_names.get(id.local() as usize)?;
-                if self.function_ids.get(name) != Some(&id) {
-                    return None;
-                }
-                if let Some(declaration) = self.file_function_by_id(id) {
-                    return Some(declaration);
-                }
-                self.functions.get(name)
-            }
-        }
+        self.function_declaration_by_id(id)
+    }
+
+    /// The immutable as-built function declaration. A resolved signature,
+    /// when present, is read separately from `function_results`.
+    pub(crate) fn function_declaration_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
+        self.debug_check_id_generation(id.generation());
+        self.function_declarations.get(&id).map(Arc::as_ref)
     }
 
     pub(crate) fn function_name_by_id(&self, id: FnId) -> Option<&Name> {
@@ -848,20 +881,6 @@ impl Registry {
         (self.function_ids.get(name) == Some(&id)).then_some(name)
     }
 
-    /// The immutable function declaration as built in its file, when this
-    /// project id still names one unmerged file declaration.
-    pub(crate) fn file_function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
-        self.debug_check_id_generation(id.generation());
-        if id.source()? != IdSource::Project {
-            return None;
-        }
-        let declaration = self
-            .project_function_decls
-            .get(id.local() as usize)?
-            .as_ref()?;
-        Some(declaration.file.function(declaration.layout))
-    }
-
     fn ensure_class_id(&mut self, name: &Name) {
         if self.class_ids.contains_key(name) {
             return;
@@ -871,7 +890,6 @@ impl Registry {
         let id = ClassId::project_in_generation(local, self.id_generation);
         self.class_ids.insert(name.clone(), id);
         self.project_class_names.push(name.clone());
-        self.project_class_decls.push(None);
     }
 
     fn ensure_function_id(&mut self, name: &Name) {
@@ -883,7 +901,6 @@ impl Registry {
         let id = FnId::project_in_generation(local, self.id_generation);
         self.function_ids.insert(name.clone(), id);
         self.project_function_names.push(name.clone());
-        self.project_function_decls.push(None);
     }
 
     fn remove_project_class_id(&mut self, name: &Name) {
@@ -894,7 +911,7 @@ impl Registry {
             .filter(|id| id.source() == Some(IdSource::Project))
         {
             self.class_ids.remove(name);
-            self.project_class_decls[id.local() as usize] = None;
+            self.class_declarations.remove(&id);
             self.purity_results
                 .pure_methods
                 .retain(|method| method.class() != id);
@@ -903,10 +920,15 @@ impl Registry {
                 .retain(|method, _| method.class() != id);
             self.class_const_types.retain(|(class, _), _| *class != id);
             self.class_const_types_by_id.remove(&id);
-            self.class_constant_results.remove(&id);
-            self.class_method_results.remove(&id);
+            self.class_constant_results
+                .retain(|(class, _), _| *class != id);
+            self.class_constant_names.remove(&id);
+            self.class_method_results
+                .retain(|method, _| method.class() != id);
             self.class_member_topology.remove(&id);
-            self.class_property_results.remove(&id);
+            self.class_property_results
+                .retain(|property, _| property.class() != id);
+            self.class_property_topology.remove(&id);
             self.class_type_results.remove(&id);
             self.imported_type_aliases.remove(&id);
         }
@@ -920,7 +942,7 @@ impl Registry {
             .filter(|id| id.source() == Some(IdSource::Project))
         {
             self.function_ids.remove(name);
-            self.project_function_decls[id.local() as usize] = None;
+            self.function_declarations.remove(&id);
             self.function_results.remove(&id);
             self.purity_results.pure_functions.remove(&id);
             self.purity_results.function_dependencies.remove(&id);
@@ -1127,6 +1149,7 @@ impl Registry {
             self.class_const_types_by_id.clear();
             self.function_results.clear();
             self.class_constant_results.clear();
+            self.class_constant_names.clear();
             self.class_method_results.clear();
             self.class_member_topology.clear();
             self.class_property_results.clear();
@@ -1146,13 +1169,15 @@ impl Registry {
         self.class_const_types_by_id
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_constant_results
+            .retain(|(id, _), _| !changed_class_ids.contains(id));
+        self.class_constant_names
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_method_results
-            .retain(|id, _| !changed_class_ids.contains(id));
+            .retain(|method, _| !changed_class_ids.contains(&method.class()));
         self.class_member_topology
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_property_results
-            .retain(|id, _| !changed_class_ids.contains(id));
+            .retain(|property, _| !changed_class_ids.contains(&property.class()));
         self.imported_type_aliases
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_type_results
@@ -1241,15 +1266,18 @@ impl Registry {
         let class_method_results = self.class_method_results_for_cache();
         let class_member_topology = self.class_member_topology_for_cache();
         let class_property_results = self.class_property_results_for_cache();
+        let class_property_topology = self.class_property_topology_for_cache();
         let class_type_results = self.class_type_results_for_cache();
         let class_reference_results = self.class_reference_results_for_cache();
         let imported_type_aliases = self.imported_type_aliases_for_cache();
-        let effects = self.effects_for_names();
+        let effects = self.effects_cache.take().map_or_else(
+            || self.effects_for_names(),
+            |entries| entries.into_iter().collect(),
+        );
         self.classes.freeze();
         self.functions.freeze();
         self.class_ids = NameTable::default();
         self.project_class_names.clear();
-        self.project_class_decls.clear();
         for index in 0..self.classes.base_len() {
             let local = u32::try_from(index).expect("stub class id range exhausted");
             let name = self
@@ -1262,9 +1290,17 @@ impl Registry {
             );
         }
         self.class_ids.freeze();
+        self.class_declarations = self
+            .class_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.classes
+                    .get_shared(name)
+                    .map(|declaration| (*id, declaration))
+            })
+            .collect();
         self.function_ids = NameTable::default();
         self.project_function_names.clear();
-        self.project_function_decls.clear();
         for index in 0..self.functions.base_len() {
             let local = u32::try_from(index).expect("stub function id range exhausted");
             let name = self
@@ -1277,6 +1313,15 @@ impl Registry {
             );
         }
         self.function_ids.freeze();
+        self.function_declarations = self
+            .function_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.functions
+                    .get_shared(name)
+                    .map(|declaration| (*id, declaration))
+            })
+            .collect();
         self.function_results = function_results
             .iter()
             .filter_map(|(name, result)| {
@@ -1287,7 +1332,6 @@ impl Registry {
             })
             .collect();
         self.function_results_cache = FunctionTable::default();
-        self.rebuild_effect_ids(effects);
         if ancestor_names.is_empty() {
             // The cached form is persisted by name for stable cache reads;
             // declaration IDs are assigned only after that table is read.
@@ -1363,39 +1407,22 @@ impl Registry {
                 .push((*slot, ty.clone()));
         }
         self.class_const_types_cache = NameTable::default();
-        self.class_constant_results = class_constant_results
-            .iter()
-            .filter_map(|(name, constants)| {
-                self.class_ids.get(name).copied().map(|id| {
-                    (
-                        id,
-                        constants
-                            .iter()
-                            .map(|(name, slot, constant)| {
-                                (
-                                    name.clone(),
-                                    (
-                                        usize::try_from(*slot).expect("usize is at least 32 bits"),
-                                        Arc::clone(constant),
-                                    ),
-                                )
-                            })
-                            .collect::<OrderedNameMap<_>>(),
-                    )
-                })
-            })
-            .collect();
+        self.class_constant_results.clear();
+        self.class_constant_names.clear();
+        for (name, constants) in &class_constant_results {
+            let Some(id) = self.class_ids.get(name).copied() else {
+                continue;
+            };
+            for (constant_name, slot, constant) in constants {
+                self.set_class_constant_result(
+                    id,
+                    usize::try_from(*slot).expect("usize is at least 32 bits"),
+                    constant_name.clone(),
+                    Arc::clone(constant),
+                );
+            }
+        }
         self.class_constant_results_cache = NameTable::default();
-        self.class_method_results = class_method_results
-            .iter()
-            .filter_map(|(name, methods)| {
-                self.class_ids
-                    .get(name)
-                    .copied()
-                    .map(|id| (id, methods.clone()))
-            })
-            .collect();
-        self.class_method_results_cache = NameTable::default();
         self.class_member_topology = class_member_topology
             .iter()
             .filter_map(|(name, entries)| {
@@ -1409,15 +1436,59 @@ impl Registry {
             })
             .collect();
         self.class_member_topology_cache = NameTable::default();
-        self.class_property_results = class_property_results
+        self.class_method_results = class_method_results
             .iter()
-            .filter_map(|(name, properties)| {
-                self.class_ids
-                    .get(name)
-                    .copied()
-                    .map(|id| (id, properties.iter().cloned().collect::<NameMap<_>>()))
+            .flat_map(|(name, methods)| {
+                let Some(class) = self.class_ids.get(name).copied() else {
+                    return Vec::new();
+                };
+                methods
+                    .iter()
+                    .filter_map(|(method_name, _)| {
+                        let slot = self.member_slot(name, method_name)?;
+                        Some((
+                            MethodRef::new(class, slot),
+                            methods.shared_get(method_name)?,
+                        ))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
+        self.class_method_results_cache = NameTable::default();
+        self.class_property_topology = class_property_topology
+            .iter()
+            .filter_map(|(name, properties)| {
+                let id = self.class_ids.get(name).copied()?;
+                let mut topology = PropertyTopology::default();
+                for property in properties {
+                    topology.append(property.clone())?;
+                }
+                Some((id, topology))
+            })
+            .collect();
+        self.class_property_topology_cache = NameTable::default();
+        let active_classes: Vec<ClassId> = self.class_ids.iter().map(|(_, id)| *id).collect();
+        for id in active_classes {
+            self.ensure_property_topology(id);
+        }
+        self.class_property_results.clear();
+        let restored_properties: Vec<_> = class_property_results
+            .iter()
+            .flat_map(|(name, properties)| {
+                let Some(id) = self.class_ids.get(name).copied() else {
+                    return Vec::new();
+                };
+                properties
+                    .iter()
+                    .map(|(property_name, property)| {
+                        (id, property_name.clone(), Arc::clone(property))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (id, name, property) in restored_properties {
+            self.set_property_result(id, name, property);
+        }
         self.class_property_results_cache = NameTable::default();
         self.class_type_results = class_type_results
             .iter()
@@ -1454,6 +1525,11 @@ impl Registry {
             })
             .collect();
         self.imported_type_aliases_cache = NameTable::default();
+        // Method and property-hook IDs are reconstructed from the effective
+        // class-local slots, so restore their result overlays before
+        // translating the name-keyed cache representation back to IDs.
+        self.rebuild_effect_ids(effects);
+        self.rebuild_methods_by_name();
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -1475,13 +1551,14 @@ impl Registry {
             let key = name.to_ascii_lowercase();
             if self.changed.classes.insert(key.clone()) {
                 let id = self.class_ids.get(name).copied();
-                let declaration = id.and_then(|id| self.class_by_id(id));
-                let declaration_snapshot = declaration.cloned().map(Arc::new);
+                let declaration_snapshot = id
+                    .and_then(|id| self.class_by_id(id).cloned())
+                    .map(Arc::new);
                 self.changed
                     .class_declarations_before
-                    .insert(key.clone(), (id, declaration_snapshot));
+                    .insert(key.clone(), (id, declaration_snapshot.clone()));
                 if let Some(id) = id {
-                    let overlay = self.class_result_overlay(id, declaration);
+                    let overlay = self.class_result_overlay(id, declaration_snapshot.as_deref());
                     self.changed
                         .class_results_before
                         .insert(id, (Name::from(name), overlay));
@@ -1496,11 +1573,11 @@ impl Registry {
         declaration: Option<&ClassReflection>,
     ) -> ClassResultOverlay {
         let mut methods: Vec<_> = self
-            .class_method_results
-            .get(&id)
-            .into_iter()
-            .flat_map(|methods| methods.iter())
-            .map(|(name, signature)| (name.clone(), signature.clone()))
+            .method_results_for_class(id)
+            .filter_map(|(method, signature)| {
+                self.member_entry_by_ref(method)
+                    .map(|entry| (entry.name.clone(), signature.clone()))
+            })
             .collect();
         methods.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         let mut const_types = self
@@ -1509,14 +1586,15 @@ impl Registry {
             .cloned()
             .unwrap_or_default();
         const_types.sort_unstable_by_key(|(slot, _)| *slot);
-        let properties = self.class_property_results.get(&id).map(|properties| {
-            let mut properties: Vec<_> = properties
-                .iter()
-                .map(|(name, property)| (name.clone(), Arc::clone(property)))
-                .collect();
-            properties.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-            properties
-        });
+        let mut properties: Vec<_> = self
+            .property_results_for_class(id)
+            .filter_map(|(property_ref, property)| {
+                self.property_name_by_ref(property_ref)
+                    .map(|name| (name.clone(), Arc::clone(property)))
+            })
+            .collect();
+        properties.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let properties = (!properties.is_empty()).then_some(properties);
         let imported_aliases = self.imported_type_aliases.get(&id).map(|aliases| {
             let mut aliases: Vec<_> = aliases
                 .iter()
@@ -1529,7 +1607,13 @@ impl Registry {
             methods,
             topology: self.class_member_topology.get(&id).cloned(),
             properties,
-            constants: self.class_constant_results.get(&id).cloned(),
+            constants: {
+                let constants: OrderedNameMap<_> = self
+                    .class_constant_results_for_class(id)
+                    .map(|(slot, name, constant)| (name.clone(), (slot, Arc::clone(constant))))
+                    .collect();
+                (!constants.is_empty()).then_some(constants)
+            },
             const_types,
             types: self.class_type_results.get(&id).cloned(),
             imported_aliases,
@@ -1710,6 +1794,13 @@ impl Registry {
     /// Writes the registry into `writer`: its tables as sections of their
     /// own, and the rest of it, encoded, as one.
     pub(crate) fn store(&self, writer: &mut container::Writer) -> Result<(), String> {
+        let mut effects: Vec<_> = self.effects_for_names().into_iter().collect();
+        effects.sort_unstable_by(|(left, _), (right, _)| {
+            left.class
+                .cmp(&right.class)
+                .then_with(|| left.member.cmp(&right.member))
+        });
+        writer.section(EFFECTS, &stub_cache::encode(&effects)?)?;
         self.ancestor_names_for_cache()
             .store(writer, "table:ancestor_names")?;
         self.member_owners_for_cache()
@@ -1726,6 +1817,8 @@ impl Registry {
             .store(writer, "table:class_member_topology")?;
         self.class_property_results_for_cache()
             .store(writer, "table:class_property_results")?;
+        self.class_property_topology_for_cache()
+            .store(writer, "table:class_property_topology")?;
         self.class_type_results_for_cache()
             .store(writer, "table:class_type_results")?;
         self.class_reference_results_for_cache()
@@ -1810,37 +1903,46 @@ impl Registry {
         if !self.class_constant_results_cache.is_empty() {
             return self.class_constant_results_cache.clone();
         }
-        self.class_constant_results
-            .iter()
-            .filter_map(|(id, constants)| {
-                let mut constants: Vec<_> = constants
-                    .iter()
-                    .map(|(name, (slot, constant))| {
-                        (
-                            name.clone(),
-                            u32::try_from(*slot).expect("class constant slot range exhausted"),
-                            Arc::clone(constant),
-                        )
-                    })
-                    .collect();
-                constants.sort_unstable_by_key(|(_, slot, _)| *slot);
-                self.class_name_by_id(*id)
-                    .map(|class| (class.clone(), constants))
-            })
-            .collect()
+        let mut results: NameTable<Vec<(Name, u32, Arc<ConstantReflection>)>> =
+            NameTable::default();
+        for ((id, slot), constant) in &self.class_constant_results {
+            let (Some(class_name), Some(constant_name)) = (
+                self.class_name_by_id(*id),
+                self.class_constant_name_by_slot(*id, *slot),
+            ) else {
+                continue;
+            };
+            results
+                .get_or_insert_with(class_name.clone(), Vec::new)
+                .push((
+                    constant_name.clone(),
+                    u32::try_from(*slot).expect("class constant slot range exhausted"),
+                    Arc::clone(constant),
+                ));
+        }
+        for constants in results.values_mut() {
+            constants.sort_unstable_by_key(|(_, slot, _)| *slot);
+        }
+        results
     }
 
     fn class_method_results_for_cache(&self) -> NameTable<Members<FunctionReflection>> {
         if !self.class_method_results_cache.is_empty() {
             return self.class_method_results_cache.clone();
         }
-        self.class_method_results
-            .iter()
-            .filter_map(|(id, methods)| {
-                self.class_name_by_id(*id)
-                    .map(|class| (class.clone(), methods.clone()))
-            })
-            .collect()
+        let mut results: NameTable<Members<FunctionReflection>> = NameTable::default();
+        for (method, signature) in &self.class_method_results {
+            let Some(class_name) = self.class_name_by_id(method.class()) else {
+                continue;
+            };
+            let Some(entry) = self.member_entry_by_ref(*method) else {
+                continue;
+            };
+            results
+                .get_or_insert_with(class_name.clone(), Members::default)
+                .insert_shared_if_absent(entry.name.clone(), Arc::clone(signature));
+        }
+        results
     }
 
     fn class_member_topology_for_cache(&self) -> NameTable<Vec<MethodEntry>> {
@@ -1860,16 +1962,33 @@ impl Registry {
         if !self.class_property_results_cache.is_empty() {
             return self.class_property_results_cache.clone();
         }
-        self.class_property_results
+        let mut results: NameTable<Vec<(Name, Arc<PropertyReflection>)>> = NameTable::default();
+        for (property_ref, property) in &self.class_property_results {
+            let Some(class_name) = self.class_name_by_id(property_ref.class()) else {
+                continue;
+            };
+            let Some(property_name) = self.property_name_by_ref(*property_ref) else {
+                continue;
+            };
+            results
+                .get_or_insert_with(class_name.clone(), Vec::new)
+                .push((property_name.clone(), Arc::clone(property)));
+        }
+        for (_, properties) in results.iter_mut() {
+            properties.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        }
+        results
+    }
+
+    fn class_property_topology_for_cache(&self) -> NameTable<Vec<Name>> {
+        if !self.class_property_topology_cache.is_empty() {
+            return self.class_property_topology_cache.clone();
+        }
+        self.class_property_topology
             .iter()
-            .filter_map(|(id, properties)| {
-                let mut properties: Vec<_> = properties
-                    .iter()
-                    .map(|(name, property)| (name.clone(), Arc::clone(property)))
-                    .collect();
-                properties.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            .filter_map(|(id, topology)| {
                 self.class_name_by_id(*id)
-                    .map(|name| (name.clone(), properties))
+                    .map(|name| (name.clone(), topology.entries().to_vec()))
             })
             .collect()
     }
@@ -1948,6 +2067,8 @@ impl Registry {
             .check_order("table:class_member_topology")?;
         self.class_property_results_for_cache()
             .check_order("table:class_property_results")?;
+        self.class_property_topology_for_cache()
+            .check_order("table:class_property_topology")?;
         self.class_type_results_for_cache()
             .check_order("table:class_type_results")?;
         self.class_reference_results_for_cache()
@@ -1977,6 +2098,9 @@ impl Registry {
         let rest = reader.section(REST)?;
         let mut registry: Registry = stub_cache::decode(&reader.buffer()[rest])?;
         registry.load_tables(reader)?;
+        registry.effects_cache = Some(stub_cache::decode(
+            &reader.buffer()[reader.section(EFFECTS)?],
+        )?);
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
         registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;
@@ -1989,6 +2113,8 @@ impl Registry {
             NameTable::load(reader, "table:class_member_topology")?;
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
+        registry.class_property_topology_cache =
+            NameTable::load(reader, "table:class_property_topology")?;
         registry.class_type_results_cache = NameTable::load(reader, "table:class_type_results")?;
         registry.class_reference_results_cache = NameTable::load(reader, CLASS_REFERENCES)?;
         registry.imported_type_aliases_cache =
@@ -2030,6 +2156,11 @@ impl Registry {
         for (_, id) in base.class_ids.iter_mut() {
             id.set_generation(base.id_generation);
         }
+        base.class_declarations = base
+            .class_declarations
+            .drain()
+            .map(|(id, declaration)| (id.with_generation(generation), declaration))
+            .collect();
         base.phpstan_ancestry = base
             .phpstan_ancestry
             .iter()
@@ -2070,12 +2201,22 @@ impl Registry {
         base.class_constant_results = base
             .class_constant_results
             .drain()
-            .map(|(id, constants)| (id.with_generation(generation), constants))
+            .map(|((id, slot), constant)| ((id.with_generation(generation), slot), constant))
+            .collect();
+        base.class_constant_names = base
+            .class_constant_names
+            .drain()
+            .map(|(id, names)| (id.with_generation(generation), names))
             .collect();
         base.class_method_results = base
             .class_method_results
             .drain()
-            .map(|(id, methods)| (id.with_generation(generation), methods))
+            .map(|(method, signature)| {
+                (
+                    MethodRef::new(method.class().with_generation(generation), method.slot()),
+                    signature,
+                )
+            })
             .collect();
         base.class_member_topology = base
             .class_member_topology
@@ -2085,7 +2226,12 @@ impl Registry {
         base.class_property_results = base
             .class_property_results
             .drain()
-            .map(|(id, properties)| (id.with_generation(generation), properties))
+            .map(|(property, value)| (property.with_generation(generation), value))
+            .collect();
+        base.class_property_topology = base
+            .class_property_topology
+            .drain()
+            .map(|(id, topology)| (id.with_generation(generation), topology))
             .collect();
         base.class_type_results = base
             .class_type_results
@@ -2105,6 +2251,11 @@ impl Registry {
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);
         }
+        base.function_declarations = base
+            .function_declarations
+            .drain()
+            .map(|(id, declaration)| (id.with_generation(generation), declaration))
+            .collect();
         base.effects = base
             .effects
             .drain()

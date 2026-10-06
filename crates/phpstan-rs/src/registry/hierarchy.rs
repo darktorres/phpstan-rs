@@ -1,5 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use syntax::name::NameSet;
 use syntax::name::{FoldedMap, Name, NameMap};
 
@@ -100,10 +101,92 @@ impl PartialEq for ClassOwners {
 }
 
 impl Registry {
+    /// Ensure a class has stable exact-case property slots. Declared
+    /// properties are installed first; synthesized results append after them.
+    pub(crate) fn ensure_property_topology(&mut self, class: super::ClassId) -> bool {
+        let Some(declaration) = self.class_by_id(class) else {
+            return false;
+        };
+        let mut declared: Vec<Name> = declaration.properties().keys().cloned().collect();
+        declared.sort_unstable();
+        let topology = self.class_property_topology.entry(class).or_default();
+        for name in declared {
+            if topology.slot(&name).is_none() {
+                topology.append(name);
+            }
+        }
+        true
+    }
+
+    pub(crate) fn property_ref_by_name(
+        &self,
+        class: super::ClassId,
+        property: &str,
+    ) -> Option<super::PropertyRef> {
+        self.debug_check_id_generation(class.generation());
+        let slot = self.class_property_topology.get(&class)?.slot(property)?;
+        Some(super::PropertyRef::new(class, slot))
+    }
+
+    pub(crate) fn property_name_by_ref(&self, property: super::PropertyRef) -> Option<&Name> {
+        self.debug_check_id_generation(property.class().generation());
+        self.class_property_topology
+            .get(&property.class())?
+            .name(property.slot())
+    }
+
+    pub(crate) fn property_result_by_name(
+        &self,
+        class: super::ClassId,
+        property: &str,
+    ) -> Option<&PropertyReflection> {
+        self.property_result_shared_by_name(class, property)
+            .map(Arc::as_ref)
+    }
+
+    pub(crate) fn property_result_shared_by_name(
+        &self,
+        class: super::ClassId,
+        property: &str,
+    ) -> Option<&Arc<PropertyReflection>> {
+        let slot = self.property_ref_by_name(class, property)?;
+        self.class_property_results.get(&slot)
+    }
+
+    pub(crate) fn property_results_for_class(
+        &self,
+        class: super::ClassId,
+    ) -> impl Iterator<Item = (super::PropertyRef, &Arc<PropertyReflection>)> {
+        self.class_property_results
+            .iter()
+            .filter_map(move |(property, value)| {
+                (property.class() == class).then_some((*property, value))
+            })
+    }
+
+    pub(crate) fn set_property_result(
+        &mut self,
+        class: super::ClassId,
+        name: Name,
+        property: Arc<PropertyReflection>,
+    ) {
+        assert!(
+            self.ensure_property_topology(class),
+            "property result class is active"
+        );
+        let topology = self.class_property_topology.get_mut(&class).unwrap();
+        let slot = topology
+            .slot(&name)
+            .or_else(|| topology.append(name.clone()))
+            .expect("property slot exists after append");
+        self.class_property_results
+            .insert(super::PropertyRef::new(class, slot), property);
+    }
+
     /// All declared and pass-added member entries in host-local slot order.
     pub(crate) fn member_entries(&self, class: &str) -> impl Iterator<Item = &MethodEntry> {
-        self.classes
-            .get(class)
+        self.class(class)
+            .map(|(_, _, info)| info)
             .into_iter()
             .flat_map(|info| info.member_order.iter())
             .chain(
@@ -116,9 +199,8 @@ impl Registry {
     }
 
     pub(crate) fn member_slot(&self, class: &str, method: &str) -> Option<u16> {
-        self.classes
-            .get(class)
-            .and_then(|info| info.member_slots.get(method).copied())
+        self.class(class)
+            .and_then(|(_, _, info)| info.member_slots.get(method).copied())
             .or_else(|| {
                 self.class_ids
                     .get(class)
@@ -158,6 +240,47 @@ impl Registry {
             .or_default()
             .add(declaration_len, entry)?;
         Some(super::MethodRef::new(class, slot))
+    }
+
+    pub(crate) fn method_result(&self, method: super::MethodRef) -> Option<&FunctionReflection> {
+        self.class_method_results
+            .get(&method)
+            .map(|signature| signature.get())
+    }
+
+    pub(crate) fn method_results_for_class(
+        &self,
+        class: super::ClassId,
+    ) -> impl Iterator<Item = (super::MethodRef, &FunctionReflection)> {
+        self.class_method_results
+            .iter()
+            .filter_map(move |(method, signature)| {
+                (method.class() == class).then(|| (*method, signature.get()))
+            })
+    }
+
+    pub(crate) fn set_method_result(
+        &mut self,
+        method: super::MethodRef,
+        signature: FunctionReflection,
+    ) {
+        self.class_method_results
+            .insert(method, std::sync::Arc::new(super::Lazy::decoded(signature)));
+    }
+
+    pub(crate) fn set_shared_method_result(
+        &mut self,
+        method: super::MethodRef,
+        signature: std::sync::Arc<super::Lazy<FunctionReflection>>,
+    ) -> bool {
+        use std::collections::hash_map::Entry;
+        match self.class_method_results.entry(method) {
+            Entry::Vacant(entry) => {
+                entry.insert(signature);
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
     }
 
     pub(crate) fn method_is_abstract(&self, class: &str, method: &str) -> bool {
@@ -331,7 +454,7 @@ impl Registry {
     /// Rebuilds the ID-addressed PHPStan-ancestry verdicts after loading a
     /// cached registry, whose declaration IDs are assigned when it freezes.
     pub(crate) fn rebuild_phpstan_ancestry_ids(&mut self) {
-        let class_names: Vec<_> = self.classes.iter().map(|(name, _)| name).collect();
+        let class_names = self.scoped_class_names();
         let registry: &Registry = self;
         self.phpstan_ancestry = class_names
             .par_iter()
@@ -358,8 +481,8 @@ impl Registry {
     /// Rebuilds `self.ancestors_by_id` (see `is_subclass_of`) from
     /// scratch over every registered class - call this any time the
     /// class graph could have changed, so `is_subclass_of` can always
-    /// trust this map is current. Read-only over `self.classes`; the
-    /// results are collected directly into the ID-keyed table.
+    /// trust this map is current. The results are collected directly into
+    /// the ID-keyed table.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
         let class_names = self.scoped_class_names();
@@ -519,7 +642,7 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(&current) else {
+            let Some((_, _, info)) = self.class(&current) else {
                 continue;
             };
             if info.is_immutable {
@@ -581,9 +704,8 @@ impl Registry {
             }
             for name in self.trait_users.get(&current).into_iter().flatten() {
                 if self
-                    .classes
-                    .get(name)
-                    .is_some_and(|info| info.kind == ClassKind::Trait)
+                    .class(name)
+                    .is_some_and(|(_, _, info)| info.kind == ClassKind::Trait)
                 {
                     stack.push(name.clone());
                 } else {
@@ -625,13 +747,13 @@ impl Registry {
         let mut queue: VecDeque<Name> = VecDeque::new();
         queue.push_back(class.clone());
         while let Some(current) = queue.pop_front() {
-            if !seen.insert(current) {
+            if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(current) else {
+            let Some((id, _, info)) = self.class(current.as_str()) else {
                 continue;
             };
-            for name in self.method_names(current) {
+            for name in self.method_names(current.as_str()) {
                 if !method_owner.contains_key(name) {
                     method_owner.insert(name.clone(), current.clone());
                 }
@@ -641,13 +763,11 @@ impl Registry {
                     property_owner.insert(name.clone(), current.clone());
                 }
             }
-            if let Some(id) = self.class_ids.get(current)
-                && let Some(properties) = self.class_property_results.get(id)
-            {
-                for name in properties.keys() {
-                    if !property_owner.contains_key(name) {
-                        property_owner.insert(name.clone(), current.clone());
-                    }
+            for (property, _) in self.property_results_for_class(id) {
+                if let Some(name) = self.property_name_by_ref(property)
+                    && !property_owner.contains_key(name)
+                {
+                    property_owner.insert(name.clone(), current.clone());
                 }
             }
             for name in info.consts.keys() {
@@ -655,16 +775,12 @@ impl Registry {
                     const_owner.insert(name.clone(), current.clone());
                 }
             }
-            if let Some(id) = self.class_ids.get(current)
-                && let Some(constants) = self.class_constant_results.get(id)
-            {
-                for name in constants.keys() {
-                    if !const_owner.contains_key(name) {
-                        const_owner.insert(name.clone(), current.clone());
-                    }
+            for (_, name, _) in self.class_constant_results_for_class(id) {
+                if !const_owner.contains_key(name) {
+                    const_owner.insert(name.clone(), current.clone());
                 }
             }
-            if let Some(references) = self.class_references_by_name(current) {
+            if let Some(references) = self.class_references_by_name(current.as_str()) {
                 for parent in references.extends.iter().chain(references.implements) {
                     queue.push_back(parent.clone());
                 }
@@ -787,7 +903,7 @@ impl Registry {
 
     /// Iterates the methods this class declares or composes, in its local
     /// method order. Finishing-pass entries live in the topology result.
-    pub fn method_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
+    pub fn method_names<'a>(&'a self, class: &'a str) -> impl Iterator<Item = &'a Name> + 'a {
         self.member_entries(class).map(|entry| &entry.name)
     }
 
@@ -799,12 +915,13 @@ impl Registry {
         if let Some(result) = self
             .class_ids
             .get(class)
-            .and_then(|id| self.class_method_results.get(id))
-            .and_then(|methods| methods.get(method))
+            .copied()
+            .zip(self.member_slot(class, method))
+            .and_then(|(class, slot)| self.method_result(super::MethodRef::new(class, slot)))
         {
             return Some(result);
         }
-        self.classes.get(class)?.methods.get(method)
+        self.class(class)?.2.methods.get(method)
     }
 
     pub(crate) fn shared_own_method(
@@ -815,18 +932,25 @@ impl Registry {
         if let Some(result) = self
             .class_ids
             .get(class)
-            .and_then(|id| self.class_method_results.get(id))
-            .and_then(|methods| methods.shared_get(method))
+            .copied()
+            .zip(self.member_slot(class, method))
+            .and_then(|(class, slot)| {
+                self.class_method_results
+                    .get(&super::MethodRef::new(class, slot))
+                    .cloned()
+            })
         {
             return Some(result);
         }
-        self.classes.get(class)?.methods.shared_get(method)
+        self.class(class)?.2.methods.shared_get(method)
     }
 
     pub(crate) fn method_by_ref(&self, method: super::MethodRef) -> Option<&FunctionReflection> {
-        let class = self.class_name_by_id(method.class())?;
-        let name = self.member_entry_by_ref(method)?.name.as_ref();
-        self.lookup_own_method(class, name)
+        self.method_result(method).or_else(|| {
+            let class = self.class_name_by_id(method.class())?;
+            let name = self.member_entry_by_ref(method)?.name.as_ref();
+            self.class(class)?.2.methods.get(name)
+        })
     }
 
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionReflection> {
@@ -993,7 +1117,7 @@ impl Registry {
         //    `ExtensionInterface extends SubscriberInterface`, where
         //    `subscribedEvents()` is declared only on the *grandparent*
         //    interface).
-        for iface in &references.implements {
+        for iface in references.implements {
             if let Some((owner, sig)) = self.lookup_method_with_owner(iface, method) {
                 return Some((owner, sig, true));
             }
@@ -1003,10 +1127,9 @@ impl Registry {
         //    (real PHPStan's own equivalent gate,
         //    `supportsAbstractTraitMethods`, is PHP 8.0+, a bar every
         //    realistic target version already clears).
-        for used in &references.uses {
+        for used in references.uses {
             if self
-                .classes
-                .get(used)
+                .class(used)
                 .is_some_and(|_| self.method_is_abstract(used, method))
                 && let Some(sig) = self.lookup_own_method(used, method)
             {
@@ -1015,7 +1138,7 @@ impl Registry {
         }
         // 3. Ordinary `extends` chain (existing, already-correct
         //    recursive walk).
-        for parent in &references.extends {
+        for parent in references.extends {
             if let Some((owner, sig)) = self.lookup_method_with_owner(parent, method) {
                 return Some((owner, sig, true));
             }
@@ -1031,7 +1154,7 @@ impl Registry {
     /// looking for what it's being held *to*), walks up `extends` until
     /// an ancestor tagged `@phpstan-consistent-constructor` is found,
     /// returning that ancestor's own `__construct` - or `None` if the
-    /// chain ends (or cycles - bounded by `self.classes.len()`, same
+    /// chain ends (or cycles - bounded by the registered class ID count, same
     /// guard `Registry::flatten_traits`'s cycle protection uses) with no
     /// tagged ancestor at all, meaning no check applies, real
     /// PHP's own default.
@@ -1039,8 +1162,9 @@ impl Registry {
     /// Deliberately doesn't synthesize a zero-parameter dummy constructor
     /// for a tagged ancestor with no `__construct` of its own the way real
     /// PHPStan's `DummyConstructorReflection` does - every `FunctionReflection`
-    /// this project returns is borrowed from `self.classes`, and a class
-    /// that bothers tagging itself `@phpstan-consistent-constructor` at
+    /// this project returns is borrowed from registry declaration/result
+    /// storage, and a class that bothers tagging itself
+    /// `@phpstan-consistent-constructor` at
     /// all almost always also declares the constructor it's pinning down
     /// (the entire point of the tag), so this narrower scope isn't
     /// expected to leave real value on the table.
@@ -1053,8 +1177,8 @@ impl Registry {
             .extends
             .first()?
             .clone();
-        for _ in 0..self.classes.len().max(1) {
-            let info = self.classes.get(&current)?;
+        for _ in 0..self.class_ids.len().max(1) {
+            let (_, _, info) = self.class(&current)?;
             if info.is_consistent_constructor {
                 return self
                     .lookup_own_method(&current, "__construct")
@@ -1096,8 +1220,7 @@ impl Registry {
             return false;
         };
         references.uses.iter().any(|used_trait| {
-            self.classes
-                .get(used_trait)
+            self.class(used_trait)
                 .is_some_and(|_| self.method_is_abstract(used_trait, method))
         })
     }
@@ -1132,7 +1255,7 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(current_info) = self.classes.get(&current) else {
+            let Some(_) = self.class(&current) else {
                 return true;
             };
             if let Some(references) = self.class_references_by_name(&current) {
@@ -1158,11 +1281,16 @@ impl Registry {
     ) -> Option<(Name, &PropertyReflection)> {
         let owner = self.ancestor_property_owner(class, prop)?;
         let sig = self
-            .classes
-            .get(owner)?
-            .properties
-            .get(prop)
-            .map(|p| &**p)?;
+            .class_ids
+            .get(&owner)
+            .and_then(|id| self.property_result_by_name(*id, prop))
+            .or_else(|| {
+                self.class(&owner)?
+                    .2
+                    .properties
+                    .get(prop)
+                    .map(|property| &**property)
+            })?;
         Some((owner.clone(), sig))
     }
 
@@ -1186,7 +1314,7 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(current_info) = self.classes.get(&current) else {
+            let Some(_) = self.class(&current) else {
                 continue;
             };
             if self.method_is_final(&current, method) {
@@ -1218,14 +1346,13 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(current_info) = self.classes.get(&current) else {
+            let Some((_, _, current_info)) = self.class(&current) else {
                 continue;
             };
             let property_result = self
                 .class_ids
                 .get(&current)
-                .and_then(|id| self.class_property_results.get(id))
-                .and_then(|properties| properties.get(property));
+                .and_then(|id| self.property_result_by_name(*id, property));
             if property_result.is_some_and(|property| property.is_final())
                 || current_info.is_final_property(property)
             {
@@ -1264,7 +1391,7 @@ impl Registry {
             if !seen_classes.insert(c.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(&c) else {
+            let Some(_) = self.class(&c) else {
                 continue;
             };
             let Some(references) = self.class_references_by_name(&c) else {
@@ -1276,7 +1403,7 @@ impl Registry {
                 if !seen_ifaces.insert(iface.clone()) {
                     continue;
                 }
-                let Some(iface_info) = self.classes.get(&iface) else {
+                let Some(_) = self.class(&iface) else {
                     continue;
                 };
                 if let Some(sig) = self.lookup_own_method(&iface, method) {
@@ -1310,7 +1437,7 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(&current) else {
+            let Some((_, _, info)) = self.class(&current) else {
                 continue;
             };
             if info.kind == ClassKind::Interface {
@@ -1359,7 +1486,7 @@ impl Registry {
             if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(&current) else {
+            let Some((_, _, info)) = self.class(&current) else {
                 continue;
             };
             if info.kind != ClassKind::Interface
@@ -1385,11 +1512,8 @@ impl Registry {
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertyReflection> {
         let owner = self.property_owners(class)?.get(prop)?;
         let id = self.class_ids.get(owner)?;
-        self.class_property_results
-            .get(id)
-            .and_then(|properties| properties.get(prop))
-            .map(|property| &**property)
-            .or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))
+        self.property_result_by_name(*id, prop)
+            .or_else(|| self.class_by_id(*id)?.properties.get(prop).map(|p| &**p))
     }
 
     /// Iterates a class's declared properties, including composed and
@@ -1397,19 +1521,19 @@ impl Registry {
     /// replaces a declaration keeps its place in the declaration map; only
     /// result-only names are appended.
     pub fn property_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
-        let declared = self.classes.get(class).map(|info| &info.properties);
-        let results = self
-            .class_ids
-            .get(class)
-            .and_then(|id| self.class_property_results.get(id));
+        let declared = self.class(class).map(|(_, _, info)| &info.properties);
+        let results = self.class_ids.get(class).copied().map(|id| {
+            self.property_results_for_class(id)
+                .filter_map(move |(property, _)| self.property_name_by_ref(property))
+        });
         declared
             .into_iter()
             .flat_map(|properties| properties.keys())
-            .chain(results.into_iter().flat_map(move |properties| {
-                properties.keys().filter(move |name| {
+            .chain(
+                results.into_iter().flatten().filter(move |name| {
                     !declared.is_some_and(|declared| declared.contains_key(*name))
-                })
-            }))
+                }),
+            )
     }
 
     /// Same as `lookup_property`, but also returns the declaring
@@ -1423,11 +1547,8 @@ impl Registry {
         let owner = self.property_owners(class)?.get(prop)?;
         let id = self.class_ids.get(owner)?;
         let sig = self
-            .class_property_results
-            .get(id)
-            .and_then(|properties| properties.get(prop))
-            .map(|property| &**property)
-            .or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))?;
+            .property_result_by_name(*id, prop)
+            .or_else(|| self.class_by_id(*id)?.properties.get(prop).map(|p| &**p))?;
         Some((owner.clone(), sig))
     }
 
@@ -1435,36 +1556,28 @@ impl Registry {
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstantReflection> {
         let owner = self.const_owners(class)?.get(const_name)?;
-        let result = self.class_ids.get(owner).and_then(|id| {
-            self.class_constant_results
-                .get(id)?
-                .get(const_name)
-                .map(|(_, c)| &**c)
-        });
-        result.or_else(|| {
-            self.classes
-                .get(owner)?
-                .consts
-                .get(const_name)
-                .map(|c| &**c)
-        })
+        let result = self
+            .class_ids
+            .get(owner)
+            .and_then(|id| self.class_constant_result_by_name(*id, const_name))
+            .map(|constant| &**constant);
+        result.or_else(|| self.class(owner)?.2.consts.get(const_name).map(|c| &**c))
     }
 
     /// Iterates a class's declared constants, including constants composed
     /// from traits and held as Registry results.
     pub fn constant_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
-        let declared = self.classes.get(class).map(|info| &info.consts);
-        let results = self
-            .class_ids
-            .get(class)
-            .and_then(|id| self.class_constant_results.get(id));
+        let declared = self.class(class).map(|(_, _, info)| &info.consts);
+        let results = self.class_ids.get(class).copied();
         declared
             .into_iter()
             .flat_map(|constants| constants.keys())
-            .chain(results.into_iter().flat_map(move |constants| {
-                constants.keys().filter(move |name| {
-                    !declared.is_some_and(|declared| declared.contains_key(*name))
-                })
+            .chain(results.into_iter().flat_map(move |id| {
+                self.class_constant_results_for_class(id)
+                    .map(|(_, name, _)| name)
+                    .filter(move |name| {
+                        !declared.is_some_and(|declared| declared.contains_key(*name))
+                    })
             }))
     }
 
@@ -1478,14 +1591,17 @@ impl Registry {
         const_name: &str,
     ) -> Option<(Name, usize, &ConstantReflection)> {
         let owner = self.const_owners(class)?.get(const_name)?;
-        let info = self.classes.get(owner)?;
-        let result = self
-            .class_ids
-            .get(owner)
-            .and_then(|id| self.class_constant_results.get(id))
-            .and_then(|constants| constants.get(const_name));
+        let id = self.class_ids.get(owner).copied()?;
+        let info = self.class_by_id(id)?;
+        let result_slot = self.class_constant_slot_by_name(id, const_name);
+        let result = result_slot.and_then(|slot| self.class_constant_results.get(&(id, slot)));
         let (slot, declared) = result
-            .map(|(slot, constant)| (*slot, &**constant))
+            .map(|constant| {
+                (
+                    result_slot.expect("constant result has a slot"),
+                    &**constant,
+                )
+            })
             .or_else(|| {
                 let slot = info.consts.get_index(const_name)?;
                 Some((slot, &**info.consts.get_index_value(slot)?))
@@ -1531,16 +1647,9 @@ impl Registry {
         let constant = self
             .class_ids
             .get(owner)
-            .and_then(|id| self.class_constant_results.get(id))
-            .and_then(|constants| constants.get(const_name))
-            .map(|(_, constant)| &**constant)
-            .or_else(|| {
-                self.classes
-                    .get(owner)?
-                    .consts
-                    .get(const_name)
-                    .map(|c| &**c)
-            })?;
+            .and_then(|id| self.class_constant_result_by_name(*id, const_name))
+            .map(|constant| &**constant)
+            .or_else(|| self.class(owner)?.2.consts.get(const_name).map(|c| &**c))?;
         Some((owner.clone(), constant))
     }
 
@@ -1549,7 +1658,7 @@ impl Registry {
     /// own doc comment) - not hierarchy-walked, since an enum can't
     /// extend anything for a case to inherit from in the first place.
     pub fn enum_case_value(&self, class: &str, case: &str) -> Option<&Type> {
-        self.classes.get(class)?.enum_case_values.get(case)
+        self.class(class)?.2.enum_case_values.get(case)
     }
 
     /// The matching case (if any, and if provable) for a
@@ -1558,7 +1667,7 @@ impl Registry {
     /// since PHP itself only stores value -> case at runtime, never the
     /// other way around.
     pub fn enum_case_for_value(&self, class: &str, value: &Type) -> Option<&str> {
-        let info = self.classes.get(class)?;
+        let (_, _, info) = self.class(class)?;
         info.enum_case_values
             .iter()
             .find(|(_, v)| *v == value)
@@ -1675,10 +1784,10 @@ impl Registry {
         if a.eq_ignore_ascii_case(b) || self.is_subclass_of(a, b) || self.is_subclass_of(b, a) {
             return true;
         }
-        let Some(a_info) = self.classes.get(a) else {
+        let Some((_, _, a_info)) = self.class(a) else {
             return true;
         };
-        let Some(b_info) = self.classes.get(b) else {
+        let Some((_, _, b_info)) = self.class(b) else {
             return true;
         };
         use syntax::ast::ClassKind::{Class, Interface};

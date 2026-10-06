@@ -204,6 +204,7 @@ impl FileDecls {
         layout
     }
 
+    #[cfg(test)]
     pub(crate) fn class_layout_for(
         &self,
         declaration: &Arc<ClassReflection>,
@@ -213,6 +214,7 @@ impl FileDecls {
             .copied()
     }
 
+    #[cfg(test)]
     pub(crate) fn function_layout_for(
         &self,
         declaration: &Arc<FunctionReflection>,
@@ -232,6 +234,8 @@ impl FileDecls {
         &self.members[self.class_layouts[layout].members.clone()]
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn property(
         &self,
         layout: Idx<ClassLayout>,
@@ -243,6 +247,8 @@ impl FileDecls {
         Some(self.properties[*slot].declaration.as_ref())
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn constant(
         &self,
         layout: Idx<ClassLayout>,
@@ -736,6 +742,7 @@ mod tests {
     use super::*;
     use syntax::lexer::Lexer;
     use syntax::parser::Parser;
+    use types::Type;
 
     #[test]
     fn file_declarations_round_trip_with_typed_ranges() {
@@ -855,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn project_ids_retain_winning_file_declaration_locations() {
+    fn project_ids_retain_winning_declarations_by_id() {
         let tokens = Lexer::new(
             "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {}",
         )
@@ -864,34 +871,8 @@ mod tests {
         let built = crate::registry::Registry::build(&program);
         let class = Arc::new(built.lookup_class("Demo").unwrap().1.clone());
         let function = Arc::new(built.lookup_function("helper").unwrap().clone());
-        let class_members = class
-            .methods()
-            .shared_iter()
-            .map(|(name, declaration)| FileMember::from_shared(name.clone(), declaration));
-        let mut declarations = FileDecls::new();
-        declarations.add_class(
-            Arc::clone(&class),
-            class_members,
-            class
-                .properties()
-                .iter()
-                .map(|(name, property)| (name.clone(), Arc::clone(property))),
-            class
-                .consts()
-                .iter()
-                .map(|(name, constant)| (name.clone(), Arc::clone(constant))),
-            class
-                .extends()
-                .iter()
-                .chain(class.implements())
-                .chain(class.uses())
-                .cloned(),
-        );
-        declarations.add_function(Arc::clone(&function), function.params().iter().cloned());
-        let declarations = Arc::new(declarations);
-
         let mut registry = crate::registry::Registry::default();
-        registry.insert_built_decl_from_file(
+        registry.insert_built_decl(
             crate::registry::BuiltDecl::Class {
                 name: Name::from("Demo"),
                 conditional: false,
@@ -900,9 +881,8 @@ mod tests {
                 namespace: Name::from(""),
             },
             true,
-            Some(&declarations),
         );
-        registry.insert_built_decl_from_file(
+        registry.insert_built_decl(
             crate::registry::BuiltDecl::Function {
                 name: Name::from("helper"),
                 conditional: false,
@@ -911,7 +891,6 @@ mod tests {
                 site: 0,
             },
             true,
-            Some(&declarations),
         );
         registry.precompute_member_owners();
         registry.end_declaration_changes(&crate::registry::scope::Scope::all(), None, true, None);
@@ -919,51 +898,55 @@ mod tests {
 
         let class_id = registry.class("demo").unwrap().0;
         let function_id = registry.function("HELPER").unwrap().0;
-        // Raw reads for project declarations come from their immutable file
-        // locators. The mutable tables are no longer needed to find them by
-        // name once the ID index has selected the winner.
+        // The selected declaration is retained in the immutable ID store
+        // even if the name-keyed builder tables are removed.
         assert!(registry.classes.remove("Demo"));
         assert!(registry.functions.remove("helper"));
         assert_eq!(registry.class("DEMO").unwrap().0, class_id);
         assert_eq!(registry.function("helper").unwrap().0, function_id);
         assert!(std::ptr::eq(
-            registry.file_class_by_id(class_id).unwrap(),
+            registry.class_by_id(class_id).unwrap(),
             registry.class("Demo").unwrap().2
         ));
         assert!(std::ptr::eq(
-            registry.file_function_by_id(function_id).unwrap(),
+            registry.function_declaration_by_id(function_id).unwrap(),
             registry.function("helper").unwrap().2
         ));
         assert!(std::ptr::eq(
             registry.lookup_method("Demo", "RUN").unwrap(),
-            registry.file_method_by_class_id(class_id, "run").unwrap()
-        ));
-        let method_ref = registry
-            .file_method_ref_by_class_id(class_id, "RUN")
-            .unwrap();
-        assert_eq!(method_ref.class(), class_id);
-        assert!(std::ptr::eq(
-            registry.file_method_by_ref(method_ref).unwrap(),
-            registry.file_method_by_class_id(class_id, "run").unwrap()
+            registry
+                .class_by_id(class_id)
+                .unwrap()
+                .methods
+                .get("run")
+                .unwrap()
         ));
         assert!(std::ptr::eq(
             registry.lookup_property("Demo", "value").unwrap(),
             registry
-                .file_property_by_class_id(class_id, "value")
+                .class_by_id(class_id)
                 .unwrap()
+                .properties()
+                .get("value")
+                .unwrap()
+                .as_ref()
         ));
         assert!(std::ptr::eq(
             registry.lookup_const("Demo", "MARK").unwrap(),
             registry
-                .file_constant_by_class_id(class_id, "MARK")
+                .class_by_id(class_id)
                 .unwrap()
+                .consts()
+                .get("MARK")
+                .unwrap()
+                .as_ref()
         ));
         let mut merged = registry.clone();
         merged.merge_stub_classes(vec![(Name::from("Demo"), (*class).clone())]);
-        assert!(merged.file_class_by_id(class_id).is_none());
+        assert!(merged.class_by_id(class_id).is_some());
         registry.remove_declarations(&[Name::from("helper")], &[Name::from("Demo")]);
-        assert!(registry.file_class_by_id(class_id).is_none());
-        assert!(registry.file_function_by_id(function_id).is_none());
+        assert!(registry.class_by_id(class_id).is_none());
+        assert!(registry.function_declaration_by_id(function_id).is_none());
     }
 
     #[test]
@@ -1019,6 +1002,23 @@ mod tests {
     }
 
     #[test]
+    fn stub_function_is_available_by_id_before_freeze() {
+        let tokens =
+            Lexer::new("<?php function strlen(string $value): int {}").tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let built = crate::registry::Registry::build(&program);
+        let signature = built.lookup_function("strlen").unwrap().clone();
+        let mut registry = crate::registry::Registry::default();
+        registry.merge_stubs(vec![("strlen", signature)]);
+
+        let (id, _, selected) = registry.function("STRLEN").unwrap();
+        assert!(std::ptr::eq(
+            selected,
+            registry.function_declaration_by_id(id).unwrap()
+        ));
+    }
+
+    #[test]
     fn switching_registry_bases_invalidates_the_previous_id_generation() {
         let tokens = Lexer::new(
             "<?php class ParentDemo { public function work(): void {} } class Demo extends ParentDemo implements \\PHPStan\\Rules\\Rule {}",
@@ -1067,18 +1067,28 @@ mod tests {
         let registry = crate::registry::Registry::build(&program);
         let (class_id, _, class) = registry.class("Host").unwrap();
 
+        let expected = ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"];
+        assert_eq!(
+            registry
+                .member_entries("Host")
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        // The declaration itself stays immutable; trait-composed aliases
+        // and methods occupy the ID-keyed class-local topology overlay.
         assert_eq!(
             class
                 .member_order
                 .iter()
                 .map(|entry| entry.name.as_str())
                 .collect::<Vec<_>>(),
-            ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"]
+            ["ownBefore", "ownAfter"]
         );
-        for name in ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"] {
-            let method_ref = registry
-                .file_method_ref_by_class_id(class_id, name)
-                .unwrap();
+        for name in expected {
+            let slot = registry.member_slot("Host", name).unwrap();
+            let method_ref = crate::registry::MethodRef::new(class_id, slot);
+            assert_eq!(registry.member_entry_by_ref(method_ref).unwrap().name, name);
             assert!(std::ptr::eq(
                 registry.method_by_ref(method_ref).unwrap(),
                 registry.lookup_method("Host", name).unwrap()

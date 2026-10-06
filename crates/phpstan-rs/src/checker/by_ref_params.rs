@@ -34,7 +34,7 @@ impl<'a> Checker<'a> {
         if visibility == Visibility::Private {
             return true;
         }
-        let Some(info) = self.registry.classes().get(class_name) else {
+        let Some(info) = self.registry.class_by_name(class_name) else {
             return true;
         };
         if info.is_final() || self.registry.method_is_final(class_name, method_name) {

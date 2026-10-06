@@ -19,7 +19,8 @@ impl Registry {
     /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
     /// generic class.
     pub(crate) fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
-        let info = self.classes.get(class)?;
+        let class_id = *self.class_ids.get(class)?;
+        let info = self.class_by_id(class_id)?;
         let name = info.templates.get(index)?;
         Some(if info.covariant_templates.contains(name) {
             Variance::Covariant
@@ -89,8 +90,9 @@ impl Registry {
             if !seen.insert(class.to_string()) {
                 return None;
             }
-            let info = self.classes.get(class)?;
-            let references = self.class_references_by_name(class)?;
+            let class_id = *self.class_ids.get(class)?;
+            let info = self.class_by_id(class_id)?;
+            let references = self.class_references(class_id)?;
             let own_bindings: FxHashMap<String, Type> = info
                 .templates
                 .iter()
@@ -104,7 +106,7 @@ impl Registry {
 
             if let Some(parent) = references.extends.first() {
                 let parent_args: Vec<Type> = self
-                    .effective_extends_args_by_name(class)
+                    .effective_extends_args(class_id)
                     .iter()
                     .map(|t| t.substitute_templates(&own_bindings, &self.relation()))
                     .collect();
@@ -117,8 +119,8 @@ impl Registry {
                     return Some(found);
                 }
             }
-            let implements_args = self.effective_implements_args_by_name(class);
-            for iface in &references.implements {
+            let implements_args = self.effective_implements_args(class_id);
+            for iface in references.implements {
                 let iface_args: Vec<Type> = implements_args
                     .get(iface)
                     .map(|args| {

@@ -2956,8 +2956,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
             // is the answer only when no subclass can stand in for it.
             let exact = member.is_enum_case()
                 || registry
-                    .classes()
-                    .get(class.as_str())
+                    .class_by_name(class.as_str())
                     .is_some_and(|info| info.is_final());
             if exact {
                 named(class.as_str())

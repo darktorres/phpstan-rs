@@ -536,15 +536,13 @@ pub(crate) fn is_non_overridable(
     }
     if registry.method_is_final(owner, method)
         || registry
-            .classes()
-            .get(owner)
+            .class_by_name(owner)
             .is_some_and(|info| info.is_final())
     {
         return true;
     }
     registry
-        .classes()
-        .get(calling_class)
+        .class_by_name(calling_class)
         .is_some_and(|info| info.is_final)
 }
 

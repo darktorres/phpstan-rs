@@ -55,7 +55,7 @@ pub(crate) fn find_dead_cases<'a>(
 ) -> Vec<(String, String)> {
     let mut dead = Vec::new();
     for fqn in enums {
-        let Some(info) = registry.classes().get(fqn) else {
+        let Some(info) = registry.class_by_name(fqn) else {
             continue;
         };
         if info.kind() != ClassKind::Enum || escaped_enum_cases.contains(fqn) {

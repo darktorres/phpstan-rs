@@ -436,6 +436,7 @@ impl Project {
             .class_references_by_name(fqn)
             .map(|references| references.uses.iter().map(ToString::to_string).collect())
             .unwrap_or_default();
+        let info = self.registry.class_by_name(fqn);
         let relation_checks: [RelationCheck; 6] = [
             (
                 &rule.should_extend,

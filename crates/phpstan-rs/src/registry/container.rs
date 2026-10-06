@@ -15,7 +15,7 @@ const MAGIC: [u8; 8] = *b"PRSSTUBS";
 
 /// Bumped with any change to the layout, so a file of another layout is
 /// rebuilt instead of read.
-const VERSION: u32 = 18;
+const VERSION: u32 = 19;
 
 /// Magic, version, the body's length, the directory's length, the
 /// checksum.
@@ -235,10 +235,6 @@ impl Reader {
             sections,
             decoded: Arc::default(),
         })
-    }
-
-    pub(super) fn has_section(&self, name: &str) -> bool {
-        self.sections.contains_key(name)
     }
 
     /// Section `name`, read in place.

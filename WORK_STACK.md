@@ -439,12 +439,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   invalidation preserve the results. Incremental snapshots compare old
   function overlays, and the assertion fast-gate indexes effective signatures.
   The focused cache, incremental and fast-gate tests and all 1,153 library
-  tests pass; check, formatting and diff checks pass. Item 4.6 remains open:
-  declarations still live in mutable name-keyed tables with `raw/reset_scoped`,
-  and other finishing outputs remain to migrate. The 4.7 reference,
-  include-graph, purity, and property-write relations remain open. Registry name
-  tables and resolution still read legacy declaration values; their migration
-  remains open. The plan was committed at
+  tests pass; check, formatting and diff checks pass. Item 4.6 remains open. The current working diff moves composed constant results to `(ClassId, slot)`, converts effect classifications to `EffectId` before the worklist, keys project property-write facts by writer `ClassId` and `PropertyRef`, and routes production declaration readers through ID-backed Registry APIs. The old raw class reset/swap path is gone. Remaining 4.6 storage work: `classes`/`functions` still retain name-keyed reflection values alongside ID-addressed declaration maps; `EffectId::Named(DeclKey)` remains for unresolved declarations. Name-keyed snapshots are tracked with 4.8; global-variable/include-graph relations remain under 4.7. Formatting, diff check, and `CARGO_INCREMENTAL=0 cargo check -p phpstan-rs --lib --tests` pass on the current tree; this increment’s full tests have not been run. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per

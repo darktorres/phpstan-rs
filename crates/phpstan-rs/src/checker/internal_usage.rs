@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_internal_usage {
             return;
         }
-        let Some(declaring_info) = self.registry.classes().get(owner) else {
+        let Some(declaring_info) = self.registry.class_by_name(owner) else {
             return;
         };
         let is_method_internal = sig.is_internal();
@@ -182,7 +182,7 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_internal_usage {
             return;
         }
-        let Some(declaring_info) = self.registry.classes().get(owner) else {
+        let Some(declaring_info) = self.registry.class_by_name(owner) else {
             return;
         };
         let is_prop_internal = sig.is_internal();
@@ -243,7 +243,7 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_internal_usage {
             return;
         }
-        let Some(declaring_info) = self.registry.classes().get(owner) else {
+        let Some(declaring_info) = self.registry.class_by_name(owner) else {
             return;
         };
         let is_const_internal = sig.is_internal();
@@ -353,7 +353,7 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_internal_usage {
             return;
         }
-        let Some(info) = self.registry.classes().get(class) else {
+        let Some(info) = self.registry.class_by_name(class) else {
             return;
         };
         if !info.is_internal() {
@@ -388,9 +388,6 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_internal_usage {
             return;
         }
-        let Some(info) = self.registry.classes().get(fqn) else {
-            return;
-        };
         let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
@@ -444,7 +441,7 @@ impl<'a> Checker<'a> {
         id_prefix: &str,
         span: Span,
     ) {
-        let Some(info) = self.registry.classes().get(target) else {
+        let Some(info) = self.registry.class_by_name(target) else {
             return;
         };
         if !info.is_internal() || !self.should_report_internal_usage(target) {
@@ -463,7 +460,7 @@ impl<'a> Checker<'a> {
     }
 
     fn report_internal_trait_use(&mut self, fqn: &str, target: &str, span: Span) {
-        let Some(info) = self.registry.classes().get(target) else {
+        let Some(info) = self.registry.class_by_name(target) else {
             return;
         };
         if !info.is_internal() || !self.should_report_internal_usage(target) {
@@ -583,7 +580,7 @@ impl<'a> Checker<'a> {
         id_prefix: &str,
         span: Span,
     ) {
-        let Some(info) = self.registry.classes().get(class) else {
+        let Some(info) = self.registry.class_by_name(class) else {
             return;
         };
         if !info.is_internal() || !self.should_report_internal_usage(class) {

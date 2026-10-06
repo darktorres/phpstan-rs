@@ -637,21 +637,15 @@ impl Project {
     ) {
         let first_party: Vec<&str> = self
             .registry
-            .classes()
-            .iter()
-            .filter(|(_, info)| {
+            .classes_by_id()
+            .filter(|(_, _, info)| {
                 info.provenance()
                     .file()
                     .and_then(|path| self.files.get(path))
                     .is_some_and(|f| f.analyzed)
             })
-            .map(|(name, _)| name.as_ref())
-            .filter(|name| {
-                self.registry
-                    .classes()
-                    .get(name)
-                    .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())
-            })
+            .filter(|(_, _, info)| info.kind() == ClassKind::Class && !info.is_abstract())
+            .map(|(_, name, _)| name.as_ref())
             .collect();
         for entry in &manifest.provide {
             let Some((_, interfaces)) = PSR_VIRTUAL_PACKAGES

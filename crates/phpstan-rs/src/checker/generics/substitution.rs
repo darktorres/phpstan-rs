@@ -71,15 +71,14 @@ impl<'a> Checker<'a> {
 
         if self
             .registry
-            .classes()
-            .get(owner)
+            .class_by_name(owner)
             .is_some_and(|c| !c.templates().is_empty())
         {
             let mut bindings = self.class_template_bindings(class, type_args, owner);
             // An erased receiver's template is its declared default
             // (`@template T = 'array'`, so a conditional on `T` resolves),
             // or else its bound: what a value of it is surely known to be.
-            if let Some(info) = self.registry.classes().get(owner) {
+            if let Some(info) = self.registry.class_by_name(owner) {
                 let bounds = self.registry.effective_template_bounds_by_name(owner);
                 for name in info.templates() {
                     if !bindings.contains_key(name.as_ref())
@@ -132,8 +131,7 @@ impl<'a> Checker<'a> {
             for ancestor in self.registry.all_ancestor_names(owner) {
                 if !self
                     .registry
-                    .classes()
-                    .get(&ancestor)
+                    .class_by_name(&ancestor)
                     .is_some_and(|c| !c.templates().is_empty())
                 {
                     continue;
@@ -178,8 +176,7 @@ impl<'a> Checker<'a> {
     ) -> Type {
         if !self
             .registry
-            .classes()
-            .get(owner)
+            .class_by_name(owner)
             .is_some_and(|c| !c.templates().is_empty())
         {
             return ty.clone();

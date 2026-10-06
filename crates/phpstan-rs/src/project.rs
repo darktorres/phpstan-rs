@@ -3,7 +3,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use syntax::name::{NameMap, NameSet};
 
 use crate::checker::constant_resolver::ConstantResolver;
 use crate::checker::rule_level_helper::RuleLevelHelper;
@@ -16,7 +15,7 @@ use crate::pest_config::{PestConfig, PestFacts};
 use crate::registry::scope::Scope;
 use crate::registry::stubs;
 use crate::registry::{
-    BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
+    BodySource, BuiltDecl, ClassId, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
 };
 use composer::dir_table::{DirTable, EntryKind};
 use declared_classes::DeclaredClass;
@@ -169,7 +168,6 @@ struct DeclarationSource<'a> {
     load_order: u64,
     path: &'a Path,
     declarations: &'a [BuiltDecl],
-    file_decls: &'a Arc<crate::registry::FileDecls>,
     pending: bool,
 }
 
@@ -485,7 +483,7 @@ impl FileCheck {
             type_dump: Vec::new(),
             expr_types: Vec::new(),
             doc_resolutions: Vec::new(),
-            property_assign_facts: NameMap::default(),
+            property_assign_facts: FxHashMap::default(),
             property_type_sites: Vec::new(),
             include_probes: Vec::new(),
         }
@@ -641,7 +639,7 @@ impl Project {
     fn dump_base(&self) -> Option<(&'static str, &'static Registry)> {
         Project::loaded_bases()
             .into_iter()
-            .find(|(_, base)| self.registry.classes().shares_base(base.classes()))
+            .find(|(_, base)| self.registry.shares_class_base(base))
     }
 
     /// Both stub bases whole, by name (`registry_dump::stub_bases_dump`).
@@ -1214,11 +1212,7 @@ impl Project {
     ) {
         self.begin_declaration_changes();
         for decl in &parsed.built_decls {
-            self.registry.insert_built_decl_from_file(
-                decl.clone(),
-                analyzed,
-                Some(&parsed.file_decls),
-            );
+            self.registry.insert_built_decl(decl.clone(), analyzed);
         }
         // `record_phpstan_class_file` no-ops unless the name is
         // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
@@ -1445,7 +1439,6 @@ impl Project {
                 load_order: state.load_order,
                 path: path.as_path(),
                 declarations: &state.built_decls,
-                file_decls: &state.file_decls,
                 pending: false,
             })
             .collect();
@@ -1455,11 +1448,8 @@ impl Project {
                 if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, source.path);
                 }
-                self.registry.insert_built_decl_from_file(
-                    decl.clone(),
-                    source.analyzed,
-                    Some(source.file_decls),
-                );
+                self.registry
+                    .insert_built_decl(decl.clone(), source.analyzed);
             }
         }
     }
@@ -1580,7 +1570,7 @@ impl Project {
         // too, read from the declarations as built.
         let mut copied_from: Vec<String> = classes.iter().cloned().collect();
         while let Some(class) = copied_from.pop() {
-            let Some(info) = self.registry.classes().get(class.as_str()) else {
+            let Some(info) = self.registry.class_by_name(class.as_str()) else {
                 continue;
             };
             for name in info.copies_from() {
@@ -1692,8 +1682,7 @@ impl Project {
             for name in self.registry.traits_of_changed_classes(before) {
                 let file = self
                     .registry
-                    .classes()
-                    .get(&name)
+                    .class_by_name(&name)
                     .and_then(|info| info.provenance().file())
                     .and_then(|origin| self.files.id_by_origin(origin));
                 walk.affected.extend(file);
@@ -1826,7 +1815,6 @@ impl Project {
                 load_order: state.load_order,
                 path: path.as_path(),
                 declarations: &state.built_decls,
-                file_decls: &state.file_decls,
                 pending: false,
             })
             .collect();
@@ -1850,11 +1838,8 @@ impl Project {
                 if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, source.path);
                 }
-                self.registry.insert_built_decl_from_file(
-                    decl.clone(),
-                    source.analyzed,
-                    Some(source.file_decls),
-                );
+                self.registry
+                    .insert_built_decl(decl.clone(), source.analyzed);
             }
         }
     }
@@ -2002,6 +1987,18 @@ impl Project {
         // introduced its own trigger) reads it for as long as the file
         // keeps failing to parse.
         let parsed = parse_file(path, new_source, classified.is_stub)?;
+        // An identical edit cannot change what another file reads from
+        // this declaration. Keep the registry IDs and result overlays
+        // stable, and recheck only the edited file for the caller's
+        // diagnostics payload.
+        if self
+            .files
+            .get(path)
+            .is_some_and(|previous| previous.content_hash == parsed.content_hash)
+        {
+            self.unchecked.clear();
+            return Ok(self.recheck([path.to_path_buf()], &should_abort));
+        }
         let text = match new_source {
             syntax::Source::Text(text) => std::borrow::Cow::Borrowed(text),
             syntax::Source::Bytes(bytes) => String::from_utf8_lossy(bytes),
@@ -2037,7 +2034,6 @@ impl Project {
                 load_order,
                 path,
                 declarations: &parsed.built_decls,
-                file_decls: &parsed.file_decls,
                 pending: true,
             }),
         );
@@ -2446,22 +2442,27 @@ impl Project {
         checks: &mut [(PathBuf, CheckOutcome)],
         pool: Option<&rayon::ThreadPool>,
     ) {
-        let mut writers: NameSet = NameSet::default();
+        let mut writers: FxHashSet<ClassId> = FxHashSet::default();
         for (_, outcome) in checks.iter() {
             if let Ok(check) = outcome {
                 for site in &check.property_type_sites {
-                    writers.extend(site.writers().iter().cloned());
+                    writers.extend(site.writers().iter().copied());
                 }
             }
         }
         if writers.is_empty() {
             return;
         }
-        let mut scopes: NameSet = NameSet::default();
-        let mut stack: Vec<Name> = writers.iter().cloned().collect();
+        let mut scopes: FxHashSet<ClassId> = FxHashSet::default();
+        let mut stack: Vec<ClassId> = writers.iter().copied().collect();
         while let Some(class) = stack.pop() {
-            if let Some(references) = self.registry.class_references_by_name(class.as_ref()) {
-                stack.extend(references.uses.iter().cloned());
+            if let Some(references) = self.registry.class_references(class) {
+                stack.extend(
+                    references
+                        .uses
+                        .iter()
+                        .filter_map(|used| self.registry.class(used.as_ref()).map(|(id, _, _)| id)),
+                );
             }
             scopes.insert(class);
         }
@@ -2474,7 +2475,10 @@ impl Project {
                     && file
                         .classes
                         .iter()
-                        .any(|class| scopes.contains(class.as_str()))
+                        .filter_map(|class| {
+                            self.registry.class(class.as_str()).map(|(id, _, _)| id)
+                        })
+                        .any(|class| scopes.contains(&class))
             })
             .map(|(path, _)| path.clone())
             .collect();
@@ -2497,15 +2501,15 @@ impl Project {
             }
         }
         sources.sort_by(|a, b| a.0.cmp(b.0));
-        let mut merged: PropertyAssignFacts = NameMap::default();
+        let mut merged: PropertyAssignFacts = FxHashMap::default();
         for (_, facts) in sources {
-            for (class, props) in facts {
-                if !writers.contains(&class) {
+            for (writer, props) in facts {
+                if !writers.contains(&writer) {
                     continue;
                 }
-                let entry = merged.entry(class).or_default();
-                for (prop, mut types) in props {
-                    entry.entry(prop).or_default().append(&mut types);
+                let entry = merged.entry(writer).or_default();
+                for (property, mut types) in props {
+                    entry.entry(property).or_default().append(&mut types);
                 }
             }
         }
@@ -2672,15 +2676,12 @@ impl Project {
         rules: &[Box<dyn crate::reflection_rule::ReflectionRule>],
     ) -> Vec<Diagnostic> {
         let mut out = Vec::new();
-        for (fqn, info) in self.registry.classes() {
+        for (_, fqn, info) in self.registry.classes_by_id() {
             for rule in rules {
                 out.extend(rule.check_class(info, fqn));
             }
         }
-        for fqn in self.registry.functions().keys() {
-            let Some(sig) = self.registry.lookup_function(fqn) else {
-                continue;
-            };
+        for (_, fqn, sig) in self.registry.functions_by_id() {
             for rule in rules {
                 out.extend(rule.check_function(sig, fqn));
             }

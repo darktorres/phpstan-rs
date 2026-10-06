@@ -140,7 +140,7 @@ impl Project {
                 .into_iter()
                 .flatten()
             {
-                if self.registry.classes().get(child).is_none() {
+                if self.registry.class_by_name(child).is_none() {
                     continue;
                 }
                 let extends_current =
@@ -199,7 +199,7 @@ impl Project {
         if c.def.kind != ClassKind::Class {
             return;
         }
-        let Some(info) = self.registry.classes().get(fqn) else {
+        let Some(info) = self.registry.class_by_name(fqn) else {
             return;
         };
         let Some(references) = self.registry.class_references_by_name(fqn) else {

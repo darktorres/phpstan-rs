@@ -67,7 +67,7 @@ impl<'a> Checker<'a> {
         };
         let mut reports: Vec<(String, &'static str)> = Vec::new();
 
-        for parent in &references.extends {
+        for parent in references.extends {
             let Some((parent_fqn, parent_info)) = self.registry.lookup_class(parent) else {
                 continue;
             };
@@ -125,7 +125,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        for iface in &references.implements {
+        for iface in references.implements {
             let Some((iface_fqn, iface_kind)) = target_kind(iface) else {
                 continue;
             };
@@ -148,7 +148,7 @@ impl<'a> Checker<'a> {
             ));
         }
 
-        for used in &references.uses {
+        for used in references.uses {
             let Some((used_fqn, used_kind)) = target_kind(used) else {
                 continue;
             };
@@ -198,7 +198,7 @@ impl<'a> Checker<'a> {
         let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
-        for parent in &references.extends {
+        for parent in references.extends {
             if !self.class_name_exists(parent) {
                 let verb = if info.kind() == ClassKind::Interface {
                     "extends unknown interface"
@@ -208,7 +208,7 @@ impl<'a> Checker<'a> {
                 self.report(format!("{fqn} {verb} {parent}"), span, 0, "class.notFound");
             }
         }
-        for iface in &references.implements {
+        for iface in references.implements {
             if !self.class_name_exists(iface) {
                 self.report(
                     format!("{fqn} implements unknown interface {iface}"),
@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for used_trait in &references.uses {
+        for used_trait in references.uses {
             if !self.class_name_exists(used_trait) {
                 self.report(
                     format!("{fqn} uses unknown trait {used_trait}"),
@@ -647,7 +647,7 @@ impl<'a> Checker<'a> {
 
         let mut seen_props: FxHashMap<&str, (&str, &PropertyReflection)> = FxHashMap::default();
         let mut seen_methods: FxHashMap<&str, (&str, &FunctionReflection)> = FxHashMap::default();
-        for trait_name in &references.uses {
+        for trait_name in references.uses {
             for prop_name in self.registry.property_names(trait_name) {
                 let Some(sig) = self.registry.lookup_property(trait_name, prop_name) else {
                     continue;
@@ -1156,9 +1156,6 @@ impl<'a> Checker<'a> {
     /// `.missingNativeType`); against an immediately used trait it must
     /// also keep the same value (`classConstant.value`).
     pub(crate) fn check_trait_constant_conflicts(&mut self, fqn: &str, consts: &[ClassConst]) {
-        let Some(info) = self.class_info(fqn) else {
-            return;
-        };
         let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
@@ -1827,7 +1824,7 @@ impl<'a> Checker<'a> {
         // check for one either way.
         let is_interface = info.kind() == ClassKind::Interface;
         for ancestor_fqn in self.registry.all_ancestor_names(fqn) {
-            let Some(ancestor_info) = self.registry.classes().get(&ancestor_fqn) else {
+            let Some(ancestor_info) = self.registry.class_by_name(&ancestor_fqn) else {
                 continue;
             };
             if !is_interface {
@@ -1897,7 +1894,7 @@ impl<'a> Checker<'a> {
             return;
         };
         for parent_fqn in references.extends.iter().chain(references.implements) {
-            let Some(parent_info) = self.registry.classes().get(parent_fqn) else {
+            let Some(parent_info) = self.registry.class_by_name(parent_fqn) else {
                 continue;
             };
             let attribute_sealed: &[Name] = if self.settings.language_extensions {

@@ -127,8 +127,7 @@ fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionReflection>) -> 
 fn throws_is_valid(ty: &Type, registry: &Registry) -> bool {
     ty.union_members().iter().all(|m| {
         m.as_object().is_none_or(|(class, _)| {
-            !registry.classes().contains_key(class.as_str())
-                || registry.is_subclass_of(class, "Throwable")
+            !registry.has_class(class) || registry.is_subclass_of(class, "Throwable")
         })
     })
 }

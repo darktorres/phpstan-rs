@@ -418,8 +418,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         if let Some(fqn) = self.class().map(str::to_string)
             && let Some(native) = self
                 .registry
-                .classes()
-                .get(fqn.as_str())
+                .class_by_name(fqn.as_str())
                 .and_then(|i| i.consts().get(&c.name.name))
                 .and_then(|k| k.native_ty().as_ref())
         {

@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
         class: &str,
     ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
         let class = &class.to_string();
-        let Some(info) = self.registry.classes().get(class.as_str()) else {
+        let Some(info) = self.registry.class_by_name(class) else {
             return rustc_hash::FxHashMap::default();
         };
         let bounds = self.registry.effective_template_bounds_by_name(class);

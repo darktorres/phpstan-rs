@@ -52,7 +52,7 @@ use crate::registry::summaries::{
     Operation, Origin, PairTarget, Place, Receiver, Root, Step, WriteFacts,
 };
 use crate::registry::{
-    ClassReflection, FunctionReflection, NameSet, PropertyReflection, Registry, is_non_overridable,
+    FunctionReflection, NameSet, PropertyReflection, Registry, is_non_overridable,
 };
 use types::Type;
 
@@ -282,16 +282,14 @@ pub(crate) enum PropertyHookKind {
 }
 
 /// A settled body effect addressed by its declaration, without hashing the
-/// declaration's class or member name on every lookup. Property slots are
-/// assigned by sorting a class's effective property names, so they are stable
-/// across declaration insertion order and cache reconstruction.
+/// declaration's class or member name on every lookup. Property hooks use
+/// the class's exact-case `PropertyRef` topology.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum EffectId {
     Function(crate::registry::FnId),
     Method(crate::registry::MethodRef),
     PropertyHook {
-        class: crate::registry::ClassId,
-        slot: u32,
+        property: crate::registry::PropertyRef,
         kind: PropertyHookKind,
     },
     Closure {
@@ -313,9 +311,8 @@ impl EffectId {
                 method.class().with_generation(generation),
                 method.slot(),
             )),
-            EffectId::PropertyHook { class, slot, kind } => EffectId::PropertyHook {
-                class: class.with_generation(generation),
-                slot,
+            EffectId::PropertyHook { property, kind } => EffectId::PropertyHook {
+                property: property.with_generation(generation),
                 kind,
             },
             EffectId::Closure { caller, ordinal } => EffectId::Closure {
@@ -403,11 +400,6 @@ impl DeclKey {
             class: self.class.clone(),
             member: format!("{}{{closure#{index}}}", self.member),
         }
-    }
-
-    /// Whether this is a closure's key (`DeclKey::closure`).
-    fn is_closure(&self) -> bool {
-        closure_parent(self).is_some()
     }
 
     /// The name the builtin table knows the declaration by: a function's,
@@ -569,10 +561,7 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// declared in.
 fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry::ClassId>> {
     let mut by_name: FxHashMap<String, Vec<crate::registry::ClassId>> = FxHashMap::default();
-    for class in registry.classes().own_iter().map(|(class, _)| class) {
-        let Some(class_id) = registry.class_ids.get(class).copied() else {
-            continue;
-        };
+    for (class, class_id) in registry.class_ids.iter() {
         for method in registry.method_names(class) {
             let Some(sig) = registry.lookup_own_method(class, method) else {
                 continue;
@@ -581,7 +570,7 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry
                 by_name
                     .entry(method.to_ascii_lowercase())
                     .or_default()
-                    .push(class_id);
+                    .push(*class_id);
             }
         }
         for property in registry.property_names(class) {
@@ -597,8 +586,8 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry
                 }
                 for member in [hook_member(Some(property), set), hook_member(None, set)] {
                     let classes = by_name.entry(member).or_default();
-                    if classes.last() != Some(&class_id) {
-                        classes.push(class_id);
+                    if classes.last() != Some(class_id) {
+                        classes.push(*class_id);
                     }
                 }
             }
@@ -621,9 +610,8 @@ fn never_runs(registry: &Registry, class: &str, method: &str, sig: &FunctionRefl
     sig.is_stub
         || sig.is_magic
         || registry
-            .classes()
-            .get(class)
-            .is_some_and(|info| info.kind() == ClassKind::Interface)
+            .class(class)
+            .is_some_and(|(_, _, info)| info.kind() == ClassKind::Interface)
         || registry.method_is_abstract(class, method)
 }
 
@@ -793,55 +781,49 @@ fn push_target(out: &mut Vec<(DeclKey, Transfer)>, key: DeclKey, transfer: Trans
     }
 }
 
-fn classifications_by_id<'r>(
+fn classification_by_id<'r>(
     registry: &Registry,
-    classified: FxHashMap<DeclKey, Classification<'r>>,
-) -> FxHashMap<EffectId, IdClassification<'r>> {
-    classified
+    key: DeclKey,
+    classification: Classification<'r>,
+) -> (EffectId, IdClassification<'r>) {
+    let calls = classification
+        .calls
         .into_iter()
-        .map(|(key, classification)| {
-            let calls = classification
-                .calls
+        .map(|(key, transfer, site)| (registry.effect_id_for(&key), transfer, site))
+        .collect();
+    let sites = classification
+        .sites
+        .into_iter()
+        .map(|site| IdSite {
+            call: site.call,
+            passed: site
+                .passed
                 .into_iter()
-                .map(|(key, transfer, site)| (registry.effect_id_for(&key), transfer, site))
-                .collect();
-            let sites = classification
-                .sites
-                .into_iter()
-                .map(|site| IdSite {
-                    call: site.call,
-                    passed: site
-                        .passed
-                        .into_iter()
-                        .map(|(at, passed)| {
-                            (
-                                at,
-                                IdPassed {
-                                    runs: passed
-                                        .runs
-                                        .into_iter()
-                                        .map(|(key, transfer)| {
-                                            (registry.effect_id_for(&key), transfer)
-                                        })
-                                        .collect(),
-                                    params: passed.params,
-                                },
-                            )
-                        })
-                        .collect(),
+                .map(|(at, passed)| {
+                    (
+                        at,
+                        IdPassed {
+                            runs: passed
+                                .runs
+                                .into_iter()
+                                .map(|(key, transfer)| (registry.effect_id_for(&key), transfer))
+                                .collect(),
+                            params: passed.params,
+                        },
+                    )
                 })
-                .collect();
-            (
-                registry.effect_id_for(&key),
-                IdClassification {
-                    own: classification.own,
-                    calls,
-                    sites,
-                    runs: classification.runs,
-                },
-            )
+                .collect(),
         })
-        .collect()
+        .collect();
+    (
+        registry.effect_id_for(&key),
+        IdClassification {
+            own: classification.own,
+            calls,
+            sites,
+            runs: classification.runs,
+        },
+    )
 }
 
 impl Registry {
@@ -874,14 +856,10 @@ impl Registry {
                 let Some(class_id) = self.class_ids.get(class).copied() else {
                     return EffectId::Named(key.clone());
                 };
-                let Some(slot) = self.property_slot(class, property.as_str()) else {
+                let Some(property) = self.property_ref_by_name(class_id, property.as_str()) else {
                     return EffectId::Named(key.clone());
                 };
-                EffectId::PropertyHook {
-                    class: class_id,
-                    slot,
-                    kind,
-                }
+                EffectId::PropertyHook { property, kind }
             }
             Some(class) => {
                 let method = self.class_ids.get(class).and_then(|id| {
@@ -891,24 +869,6 @@ impl Registry {
                 method.map_or_else(|| EffectId::Named(key.clone()), EffectId::Method)
             }
         }
-    }
-
-    /// A class-local property slot assigned in spelling order. Effective
-    /// names are sorted because NameMap iteration order can differ between a
-    /// source build and a cache-backed registry.
-    fn property_slot(&self, class: &str, property: &str) -> Option<u32> {
-        let mut properties: Vec<&str> = self.property_names(class).map(Name::as_str).collect();
-        properties.sort_unstable();
-        properties
-            .binary_search(&property)
-            .ok()
-            .and_then(|slot| u32::try_from(slot).ok())
-    }
-
-    fn property_name_for_slot(&self, class: &str, slot: u32) -> Option<Name> {
-        let mut properties: Vec<Name> = self.property_names(class).cloned().collect();
-        properties.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
-        properties.get(usize::try_from(slot).ok()?).cloned()
     }
 
     fn effect_decl_key(&self, id: &EffectId) -> Option<DeclKey> {
@@ -921,9 +881,9 @@ impl Registry {
                 let member = self.member_entry_by_ref(*method)?;
                 Some(method_key(class.as_str(), member.name.as_str()))
             }
-            EffectId::PropertyHook { class, slot, kind } => {
-                let class_name = self.class_name_by_id(*class)?;
-                let property = self.property_name_for_slot(class_name.as_str(), *slot)?;
+            EffectId::PropertyHook { property, kind } => {
+                let class_name = self.class_name_by_id(property.class())?;
+                let property = self.property_name_by_ref(*property)?;
                 Some(hook_key(
                     class_name.as_str(),
                     property.as_str(),
@@ -968,29 +928,28 @@ impl Registry {
         self.builtin_methods_running_code = running_code;
         let registry: &Registry = self;
         let functions: Vec<(&Name, &FunctionReflection)> = registry
-            .functions()
-            .own_iter()
-            .filter_map(|(name, _)| {
-                let (_, declared, sig) = registry.function(name)?;
-                (!sig.is_stub).then_some((declared, sig))
-            })
+            .own_functions_by_id()
+            .filter_map(|(_, name, sig)| (!sig.is_stub).then_some((name, sig)))
             .collect();
         let methods: Vec<(&Name, &Name, &FunctionReflection)> = registry
-            .classes()
-            .own_iter()
-            .flat_map(|(class, _)| {
+            .own_classes_by_id()
+            .flat_map(|(_, class, _)| {
                 registry.method_names(class).filter_map(move |method| {
-                    let info = registry.classes().get(class)?;
                     let sig = registry.lookup_own_method(class, method)?;
                     (!never_runs(registry, class, method, sig)).then_some((class, method, sig))
                 })
             })
             .collect();
-        let mut classified: FxHashMap<DeclKey, Classification<'_>> = functions
+        let mut classified: FxHashMap<EffectId, IdClassification<'_>> = functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(name, sig)| {
-                registry.classify(bodies, None, name, sig, function_key(name))
+                registry
+                    .classify(bodies, None, name, sig, function_key(name))
+                    .into_iter()
+                    .map(|(key, classification)| {
+                        classification_by_id(registry, key, classification)
+                    })
             })
             .collect();
         classified.par_extend(
@@ -999,13 +958,17 @@ impl Registry {
                 .with_min_len(crate::registry::PASS_CHUNK)
                 .flat_map_iter(|(class, method, sig)| {
                     let key = method_key(class, method);
-                    registry.classify(bodies, Some(class), method, sig, key)
+                    registry
+                        .classify(bodies, Some(class), method, sig, key)
+                        .into_iter()
+                        .map(|(key, classification)| {
+                            classification_by_id(registry, key, classification)
+                        })
                 }),
         );
         let hooks: Vec<(&Name, &Name, &PropertyReflection, bool)> = registry
-            .classes()
-            .own_iter()
-            .flat_map(|(class, _)| {
+            .own_classes_by_id()
+            .flat_map(|(_, class, _)| {
                 registry.property_names(class).flat_map(move |property| {
                     registry
                         .lookup_property(class, property)
@@ -1027,10 +990,14 @@ impl Registry {
                 .par_iter()
                 .with_min_len(crate::registry::PASS_CHUNK)
                 .flat_map_iter(|(class, property, declared, set)| {
-                    registry.classify_hook(bodies, class, property, declared, *set)
+                    registry
+                        .classify_hook(bodies, class, property, declared, *set)
+                        .into_iter()
+                        .map(|(key, classification)| {
+                            classification_by_id(registry, key, classification)
+                        })
                 }),
         );
-        let classified = classifications_by_id(registry, classified);
         let mut effects = settle(registry, &classified, |id| {
             registry.effect_decl_key(id).map_or_else(
                 || Settled::of(Effect::anything()),
@@ -1049,21 +1016,21 @@ impl Registry {
     fn declaration_effect(&self, key: &DeclKey) -> Effect {
         match &key.class {
             Some(class) => {
-                let Some(info) = self.classes.get(class.as_str()) else {
+                if self.class(class.as_str()).is_none() {
                     return Effect::anything();
-                };
+                }
                 let Some(sig) = self.lookup_own_method(class, key.member.as_str()) else {
                     return Effect::anything();
                 };
                 if sig.is_stub {
                     self.stub_effect(key, sig)
-                } else if never_runs(info, &key.member, sig) {
+                } else if never_runs(self, class, &key.member, sig) {
                     Effect::nothing()
                 } else {
                     Effect::anything()
                 }
             }
-            None => match self.functions.get(key.member.as_str()) {
+            None => match self.lookup_function(key.member.as_str()) {
                 Some(sig) if sig.is_stub => self.stub_effect(key, sig),
                 _ => Effect::anything(),
             },
@@ -1091,7 +1058,7 @@ impl Registry {
     fn declaration(&self, key: &DeclKey) -> Option<&FunctionReflection> {
         match &key.class {
             Some(class) => self.lookup_method(class, &key.member),
-            None => self.functions.get(key.member.as_str()),
+            None => self.lookup_function(key.member.as_str()),
         }
     }
 
@@ -1333,7 +1300,7 @@ impl Registry {
     /// than on its mutable signature.
     fn prepare_stub_effect_results(&mut self) {
         let mut results = FxHashMap::default();
-        for (name, _) in self.functions().own_iter() {
+        for (name, _) in self.function_ids.iter() {
             let Some((_, declared, sig)) = self.function(name) else {
                 continue;
             };
@@ -1342,7 +1309,7 @@ impl Registry {
                 results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
             }
         }
-        for (class, _) in self.classes().own_iter() {
+        for (class, _) in self.class_ids.iter() {
             for method in self.method_names(class) {
                 let Some(sig) = self.lookup_own_method(class, method) else {
                     continue;
@@ -1384,7 +1351,7 @@ impl Registry {
     /// be an ancestor's, and from each class below `receiver` declaring it
     /// with a body.
     fn overrides_of_builtin(&self, receiver: &str, builtin: &str) -> Vec<DeclKey> {
-        if !self.classes.contains_key(builtin) {
+        if self.class(builtin).is_none() {
             return Vec::new();
         }
         let below = self.subclasses(receiver);
@@ -1472,6 +1439,10 @@ impl Registry {
         effect
     }
 
+    pub(crate) fn rebuild_methods_by_name(&mut self) {
+        self.methods_by_name = Arc::new(methods_by_name(self));
+    }
+
     /// The names (lowercased) of the builtin methods that run code passed to
     /// them, found once: the stubs do not change.
     fn builtin_methods_running_code(&self) -> &NameSet {
@@ -1483,7 +1454,7 @@ impl Registry {
     /// whose effect is anything.
     pub(crate) fn own_builtin_methods_running_code(&self) -> FxHashSet<String> {
         let mut names = FxHashSet::default();
-        for class in self.classes.own_iter().map(|(class, _)| class) {
+        for (class, _) in self.class_ids.iter() {
             for method in self.method_names(class) {
                 let Some(sig) = self.lookup_own_method(class, method) else {
                     continue;
@@ -2344,7 +2315,7 @@ impl Reach<'_> {
         };
         let member = hook_member(property.map(Name::as_str), set);
         for declaring in registry.classes_declaring(&member) {
-            if registry.classes().get(declaring.as_str()).is_none() {
+            if registry.class(declaring.as_str()).is_none() {
                 continue;
             }
             // How an object of each of the holder's classes is one of the
@@ -2568,7 +2539,7 @@ impl Reach<'_> {
     fn implicit_method(&self, class: &str, method: &str) -> Option<DeclKey> {
         let registry = self.registry;
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
-        let info = registry.classes().get(owner.as_str())?;
+        let (_, _, info) = registry.class(owner.as_str())?;
         let abstract_method =
             info.kind() == ClassKind::Interface || registry.method_is_abstract(&owner, method);
         (!sig.is_magic && !abstract_method).then(|| method_key(&owner, method))
@@ -2674,9 +2645,11 @@ impl Registry {
             summary,
             value: None,
         };
-        let classified: FxHashMap<DeclKey, Classification<'_>> =
-            resolve.run(&holder, None).into_iter().collect();
-        let classified = classifications_by_id(self, classified);
+        let classified: FxHashMap<EffectId, IdClassification<'_>> = resolve
+            .run(&holder, None)
+            .into_iter()
+            .map(|(key, classification)| classification_by_id(self, key, classification))
+            .collect();
         let effects = settle(self, &classified, |id| {
             self.effect_decl_key(id)
                 .map_or_else(|| Settled::of(Effect::anything()), |key| self.settled(&key))
@@ -3869,7 +3842,10 @@ mod effect_id_tests {
     fn cache_round_trip(registry: &Registry) -> Registry {
         let mut writer = Writer::new();
         registry.store(&mut writer).expect("stores");
-        let reader = Reader::new(writer.finish()).expect("stored registry is a whole file");
+        let reader = match Reader::new(writer.finish()) {
+            Ok(reader) => reader,
+            Err(_) => panic!("stored registry is a whole file"),
+        };
         let mut back = Registry::load(&reader).expect("reads back");
         back.check_stored().expect("stored tables are ordered");
         back.freeze();
@@ -3911,7 +3887,7 @@ mod effect_id_tests {
     }
 
     #[test]
-    fn property_hook_effect_ids_use_sorted_class_local_slots_and_round_trip_names() {
+    fn property_hook_effect_ids_use_property_refs_and_round_trip_names() {
         let mut registry = registry(
             r#"<?php
                 class Hooks {
@@ -3930,24 +3906,21 @@ mod effect_id_tests {
         assert_eq!(
             get_a_id,
             EffectId::PropertyHook {
-                class: registry.class_ids["Hooks"],
-                slot: 0,
+                property: crate::registry::PropertyRef::new(registry.class_ids["Hooks"], 0),
                 kind: PropertyHookKind::Get,
             }
         );
         assert_eq!(
             set_a_id,
             EffectId::PropertyHook {
-                class: registry.class_ids["Hooks"],
-                slot: 0,
+                property: crate::registry::PropertyRef::new(registry.class_ids["Hooks"], 0),
                 kind: PropertyHookKind::Set,
             }
         );
         assert_eq!(
             get_z_id,
             EffectId::PropertyHook {
-                class: registry.class_ids["Hooks"],
-                slot: 2,
+                property: crate::registry::PropertyRef::new(registry.class_ids["Hooks"], 2),
                 kind: PropertyHookKind::Get,
             }
         );
@@ -3965,22 +3938,23 @@ mod effect_id_tests {
         assert_eq!(
             get_a_id.clone().with_generation(77),
             EffectId::PropertyHook {
-                class: registry.class_ids["Hooks"].with_generation(77),
-                slot: 0,
+                property: crate::registry::PropertyRef::new(
+                    registry.class_ids["Hooks"].with_generation(77),
+                    0,
+                ),
                 kind: PropertyHookKind::Get,
             }
         );
 
         let back = cache_round_trip(&registry);
         let back_id = back.effect_id_for(&get_a);
-        assert!(matches!(
-            &back_id,
+        assert_eq!(
+            back_id,
             EffectId::PropertyHook {
-                slot: 0,
+                property: crate::registry::PropertyRef::new(back.class_ids["Hooks"], 0),
                 kind: PropertyHookKind::Get,
-                ..
             }
-        ));
+        );
         assert_eq!(back.effect_decl_key(&back_id), Some(get_a));
     }
 }

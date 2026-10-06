@@ -144,6 +144,10 @@ fn inherited_class_property_results_survive_cache_round_trip() {
             "#,
     );
     let back = round_trip(&registry);
+    let child_id = back.class_ids["ChildHook"];
+    let child_property = back.property_ref_by_name(child_id, "name").unwrap();
+    assert!(back.class_property_results.contains_key(&child_property));
+    assert_eq!(back.property_name_by_ref(child_property).unwrap(), "name");
     let resolved = back.lookup_property("ChildHook", "name").unwrap();
     assert!(resolved.has_get_hook());
     assert!(resolved.has_set_hook());
@@ -183,6 +187,9 @@ fn inherited_class_property_results_survive_cache_round_trip() {
         "trait properties stay out of the host declaration"
     );
     assert!(back.lookup_property("TraitHost", "id").unwrap().is_final());
+    let host_id = back.class_ids["TraitHost"];
+    let trait_property = back.property_ref_by_name(host_id, "id").unwrap();
+    assert!(back.class_property_results.contains_key(&trait_property));
     assert!(
         !back
             .classes
@@ -383,6 +390,9 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
 
     for method in ["greet", "welcome"] {
         let original_slot = registry.member_slot("MethodHost", method).unwrap();
+        let original_ref =
+            crate::registry::MethodRef::new(registry.class_ids["MethodHost"], original_slot);
+        assert!(registry.class_method_results.contains_key(&original_ref));
         assert!(
             registry
                 .classes
@@ -395,6 +405,13 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
         assert!(registry.lookup_own_method("MethodHost", method).is_some());
         let signature = back.lookup_own_method("MethodHost", method).unwrap();
         assert_eq!(back.member_slot("MethodHost", method), Some(original_slot));
+        assert!(
+            back.class_method_results
+                .contains_key(&crate::registry::MethodRef::new(
+                    back.class_ids["MethodHost"],
+                    original_slot,
+                ))
+        );
         assert_eq!(
             back.member_entry_by_ref(crate::registry::MethodRef::new(
                 back.class_ids["MethodHost"],
@@ -533,7 +550,7 @@ fn stub_effect_memos_live_on_the_registry_and_use_function_ids() {
         "DateTime::format has a method-ID entry and runs no passed code"
     );
 
-    let back = round_trip(registry);
+    let back = round_trip(&registry);
     assert!(
         back.stub_effect_results.is_empty(),
         "the runtime memo is rebuilt for the loaded registry rather than serialized"

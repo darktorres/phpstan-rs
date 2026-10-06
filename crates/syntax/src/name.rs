@@ -580,6 +580,11 @@ impl<V> OrderedNameMap<V> {
         self.entries.get(index).map(|(_, value)| value)
     }
 
+    /// The name at an ordered position.
+    pub fn get_index_name(&self, index: usize) -> Option<&Name> {
+        self.entries.get(index).map(|(name, _)| name)
+    }
+
     /// The mutable value at an ordered position. Positions remain stable
     /// when an existing entry is updated; new entries append to the end.
     pub fn get_index_mut(&mut self, index: usize) -> Option<&mut V> {

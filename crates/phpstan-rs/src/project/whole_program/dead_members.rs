@@ -200,7 +200,7 @@ pub(crate) fn find_dead_members<'a>(
 ) -> Vec<(String, String, MemberKind)> {
     let mut dead = Vec::new();
     for fqn in classes {
-        let Some(info) = registry.classes().get(fqn) else {
+        let Some(info) = registry.class_by_name(fqn) else {
             continue;
         };
         // An interface/trait is never itself instantiable - its own

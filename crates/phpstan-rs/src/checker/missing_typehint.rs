@@ -176,8 +176,8 @@ impl<'a> Checker<'a> {
         for written in ty.bare_object_class_names() {
             // Compared and shown as declared: class names are
             // case-insensitive.
-            let (name, info) = match self.registry.classes().get_with_name(written.as_str()) {
-                Some((declared, info)) => (declared.as_str(), Some(info)),
+            let (name, info) = match self.registry.class(written.as_str()) {
+                Some((_, declared, info)) => (declared.as_str(), Some(info)),
                 None => (written.as_str(), None),
             };
             if ITERABLE_GENERIC_CLASS_NAMES.contains(&name)

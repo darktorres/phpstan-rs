@@ -46,8 +46,7 @@ impl<'a> Checker<'a> {
                 }
                 let is_final = self
                     .registry
-                    .classes()
-                    .get(class.as_ref())
+                    .class_by_name(class.as_ref())
                     .is_some_and(|info| info.is_final());
                 (!is_final).then(|| (member.clone(), false))
             })

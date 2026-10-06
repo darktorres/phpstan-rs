@@ -599,7 +599,7 @@ pub(super) fn enumerate_bare(
     let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut items = Vec::new();
 
-    for (fqn, info) in registry.classes() {
+    for (_, fqn, info) in registry.classes_by_id() {
         if seen.insert(fqn.to_string()) {
             let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
             items.push(CompletionItem {
@@ -611,7 +611,7 @@ pub(super) fn enumerate_bare(
             });
         }
     }
-    for fqn in registry.functions().keys() {
+    for (_, fqn, _) in registry.functions_by_id() {
         if seen.insert(fqn.to_string()) {
             let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
             items.push(CompletionItem {

@@ -46,8 +46,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.registry
-            .classes()
-            .get(class.as_str())
+            .class_by_name(class)
             .is_some_and(|i| i.kind() == ClassKind::Enum)
             .then_some(class.to_string())
     }
@@ -61,7 +60,7 @@ impl<'a> Checker<'a> {
         if !other.is_object().yes() {
             return None;
         }
-        let info = self.registry.classes().get(class.as_str())?;
+        let info = self.registry.class_by_name(class)?;
         if info.kind() == ClassKind::Enum {
             return None;
         }

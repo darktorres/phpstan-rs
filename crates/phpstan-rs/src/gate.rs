@@ -52,7 +52,7 @@ pub fn template_scope_at(registry: &Registry, stmts: &[Stmt], at: u32) -> Templa
     visit::walk_stmts(&mut finder, stmts);
     let mut templates = FxHashMap::default();
     if let Some(class) = finder.class
-        && let Some(info) = registry.classes().get(class.fq_name())
+        && let Some(info) = registry.class_by_name(class.fq_name())
     {
         for (name, arg) in info
             .templates()
