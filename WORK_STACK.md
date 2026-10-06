@@ -332,7 +332,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   property-hook effects named until they have property slots; canonical output
   and change snapshots translate effects back to names, and base switches
   retag their IDs. Its settling graph still uses `DeclKey`. All 1,199 tests
-  from `cargo test -p phpstan-rs`, the library check and Clippy pass. Item 4.6 remains open; inherited
+  from `cargo test -p phpstan-rs`, the library check and Clippy pass. `02ce0ec9`
+  also keys the effect pass's `methods_by_name` values by `ClassId`; lookup and
+  canonical output resolve IDs through the Registry. The full crate suite,
+  check and Clippy pass. Item 4.6 remains open; inherited
   PHPDoc, trait composition, constant resolution, other pass results and
   immutable declaration storage remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
