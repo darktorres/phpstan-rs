@@ -249,7 +249,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   file's active expression check. Commit `36ad3c08` removes the address key
   and adds cache coverage for ID, question, and scope; completion's mixed-tree
   probe bypasses it (`a6960c97`). Parser errors are boxed and their canonical
-  print is preserved (`2e33f369`). Expression and statement spans now travel
+  print is preserved (`2e33f369`); an unrun regression test asserts their
+  pointer-sized representation (`88e56ded`). Expression and statement spans
+  now travel
   in typed-ID-indexed tables through retained
   project trees (`a42f63ab`); parser tests cover name-ID reuse and span
   alignment (`eee0c503`, `a42f63ab`) but have not run. Nodes still use recursive
