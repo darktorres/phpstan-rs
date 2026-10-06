@@ -900,8 +900,8 @@ mod tests {
         let function_id = registry.function("HELPER").unwrap().0;
         // The selected declaration is retained in the immutable ID store
         // even if the name-keyed builder tables are removed.
-        assert!(registry.classes.remove("Demo"));
-        assert!(registry.functions.remove("helper"));
+        registry.classes = Default::default();
+        registry.functions = Default::default();
         assert_eq!(registry.class("DEMO").unwrap().0, class_id);
         assert_eq!(registry.function("helper").unwrap().0, function_id);
         assert!(std::ptr::eq(
@@ -959,24 +959,29 @@ mod tests {
 
         registry.begin_declaration_changes();
         let function_id = *registry.function_ids.get("helper").unwrap();
-        let mut prior_result = registry.functions.get("helper").unwrap().clone();
+        let mut prior_result = (*registry.function_declaration_by_id(function_id).unwrap()).clone();
         prior_result.return_type = Type::bool();
         registry
             .function_results
             .insert(function_id, prior_result.clone());
         registry.record_changed_function("helper");
         let changed = registry.take_changed();
-        let mut edited = registry.functions.get("helper").unwrap().clone();
+        let mut edited = (*registry.function_declaration_by_id(function_id).unwrap()).clone();
         edited.return_type = Type::string();
         registry
-            .functions
-            .insert(Name::from("helper"), edited.clone());
+            .function_declarations
+            .insert(function_id, Arc::new(edited.clone()));
 
         let scope = crate::registry::scope::Scope::of(std::iter::empty::<&str>(), ["helper"]);
         let before = registry
             .end_declaration_changes(&scope, Some(&scope), true, Some(&changed))
             .unwrap();
-        assert_eq!(registry.functions.get("helper"), Some(&edited));
+        assert_eq!(
+            registry
+                .function_declaration_by_id(function_id)
+                .map(|signature| signature.return_type.clone()),
+            Some(edited.return_type.clone())
+        );
         assert_eq!(before.functions.len(), 1);
         assert_eq!(
             before.functions[&function_id]

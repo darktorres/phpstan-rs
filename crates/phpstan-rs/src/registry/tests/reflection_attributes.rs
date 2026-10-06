@@ -77,7 +77,7 @@ fn members_and_parameters_carry_their_own_attributes() {
     let registry = build_registry(
         "<?php class C { #[P] public $p; #[K] const K = 1; #[M] function m(#[Q] $q) {} }",
     );
-    let info = &registry.classes()["C"];
+    let info = &registry.class_by_name("C").unwrap();
     assert_eq!(info.properties["p"].attributes[0].name(), "P");
     assert_eq!(info.consts["K"].attributes[0].name(), "K");
     let method = &info.methods["m"];

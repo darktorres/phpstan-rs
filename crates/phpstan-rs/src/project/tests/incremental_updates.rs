@@ -14,8 +14,8 @@ fn updating_one_file_does_not_disturb_another_files_registry_entries() {
         )
         .load();
 
-    assert!(project.registry().functions().contains_key("helperA"));
-    assert!(project.registry().functions().contains_key("helperB"));
+    assert!(project.registry().has_function("helperA"));
+    assert!(project.registry().has_function("helperB"));
 
     // Change b.php's return type - a.php's own registry entry and
     // parse tree must be untouched by this.
@@ -26,8 +26,8 @@ fn updating_one_file_does_not_disturb_another_files_registry_entries() {
         )
         .unwrap();
 
-    assert!(project.registry().functions().contains_key("helperA"));
-    let helper_b = &project.registry().functions()["helperB"];
+    assert!(project.registry().has_function("helperA"));
+    let helper_b = &project.registry().function_by_name("helperB").unwrap();
     assert_eq!(helper_b.return_type().to_string(), "string");
 }
 
@@ -77,7 +77,7 @@ fn removing_a_declaration_on_update_drops_it_from_the_registry() {
             "<?php function helperA(): int { return 1; } class Foo {}",
         )
         .load();
-    assert!(project.registry().classes().contains_key("Foo"));
+    assert!(project.registry().has_class("Foo"));
 
     // The new version of the file no longer declares Foo at all.
     project
@@ -86,8 +86,8 @@ fn removing_a_declaration_on_update_drops_it_from_the_registry() {
             "<?php function helperA(): int { return 1; }",
         )
         .unwrap();
-    assert!(!project.registry().classes().contains_key("Foo"));
-    assert!(project.registry().functions().contains_key("helperA"));
+    assert!(!project.registry().has_class("Foo"));
+    assert!(project.registry().has_function("helperA"));
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn removing_a_referenced_declaration_still_flags_its_old_dependents() {
 
     assert!(result.contains_key(&PathBuf::from("thing.php")));
     assert!(result.contains_key(&PathBuf::from("caller.php")));
-    assert!(!project.registry().functions().contains_key("thing"));
+    assert!(!project.registry().has_function("thing"));
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
         "the last-good AST must survive a failed reparse"
     );
     assert!(
-        project.registry().functions().contains_key("helperA"),
+        project.registry().has_function("helperA"),
         "the last-good registry entry must survive a failed reparse too"
     );
 }
@@ -523,7 +523,14 @@ fn editing_a_polyfill_a_built_in_function_beat_keeps_the_built_in() {
     let source = "<?php if (!function_exists('mb_str_pad')) { function mb_str_pad($string, $length) { return $string; } }";
     let path = PathBuf::from("polyfill.php");
     let mut project = Files::new().context(&path, source).load();
-    let params = |project: &Project| project.registry().functions()["mb_str_pad"].params().len();
+    let params = |project: &Project| {
+        project
+            .registry()
+            .function_by_name("mb_str_pad")
+            .unwrap()
+            .params()
+            .len()
+    };
     assert_eq!(params(&project), 5);
 
     project.update_file(&path, &format!("{source}\n")).unwrap();
@@ -925,7 +932,7 @@ fn a_trait_method_result_change_rechecks_its_unchanged_host_and_consumers() {
         )
         .load();
     let original_slot = project.registry().member_slot("Host", "m");
-    let original_declaration = project.registry().classes()["Host"].clone();
+    let original_declaration = (*project.registry().class_by_name("Host").unwrap()).clone();
 
     let checked = project
         .update_file(
@@ -937,7 +944,10 @@ fn a_trait_method_result_change_rechecks_its_unchanged_host_and_consumers() {
     assert!(checked.contains_key(&PathBuf::from("host.php")));
     assert!(checked.contains_key(&PathBuf::from("consumer.php")));
     assert_eq!(project.registry().member_slot("Host", "m"), original_slot);
-    assert_eq!(project.registry().classes()["Host"], original_declaration);
+    assert_eq!(
+        project.registry().class_by_name("Host").unwrap(),
+        &original_declaration
+    );
     assert!(
         project
             .registry()
@@ -976,7 +986,11 @@ fn a_parent_constant_result_change_rechecks_a_child_signature_consumer() {
         )
         .load();
     let original_slot = project.registry().member_slot("ChildType", "setMode");
-    let original_declaration = project.registry().classes()["ChildType"].clone();
+    let original_declaration = project
+        .registry()
+        .class_by_name("ChildType")
+        .map(|class| (*class).clone())
+        .unwrap();
 
     let checked = project
         .update_file(
@@ -992,8 +1006,8 @@ fn a_parent_constant_result_change_rechecks_a_child_signature_consumer() {
         original_slot
     );
     assert_eq!(
-        project.registry().classes()["ChildType"],
-        original_declaration
+        project.registry().class_by_name("ChildType").unwrap(),
+        &original_declaration
     );
     let expected =
         types::Type::string_literal("a".into()).union(types::Type::string_literal("b".into()));
@@ -1050,21 +1064,21 @@ fn removing_a_trait_file_drops_its_members_from_its_users() {
 fn phpstans_own_classes_are_loaded_only_while_a_file_names_them() {
     let rule = "PHPStan\\Rules\\Rule";
     let mut project = Files::new().analysed("a.php", "<?php class A {}").load();
-    assert!(!project.registry().classes().contains_key(rule));
+    assert!(!project.registry().has_class(rule));
     project
         .update_file(
             &PathBuf::from("a.php"),
             "<?php class A { public function f(\\PHPStan\\Rules\\Rule $r): void {} }",
         )
         .unwrap();
-    assert!(project.registry().classes().contains_key(rule));
+    assert!(project.registry().has_class(rule));
     assert!(project.registry().built_in_stub_classes.contains_key(rule));
     project
         .update_file(&PathBuf::from("a.php"), "<?php class A {}")
         .unwrap();
-    assert!(!project.registry().classes().contains_key(rule));
+    assert!(!project.registry().has_class(rule));
     assert!(!project.registry().built_in_stub_classes.contains_key(rule));
-    assert!(project.registry().classes().contains_key("Exception"));
+    assert!(project.registry().has_class("Exception"));
 }
 
 #[test]
@@ -1075,7 +1089,10 @@ fn a_project_declaring_a_phpstan_class_merges_its_declaration_into_the_stub() {
             "<?php namespace PHPStan\\Rules; interface Rule { public function ownMethod(): void; }",
         )
         .load();
-    let rule = &project.registry().classes()["PHPStan\\Rules\\Rule"];
+    let rule = &project
+        .registry()
+        .class_by_name("PHPStan\\Rules\\Rule")
+        .unwrap();
     assert!(rule.methods().contains_key("ownMethod"));
     assert!(rule.methods().contains_key("processNode"));
 }
@@ -1299,7 +1316,10 @@ fn a_rebuild_follows_the_order_files_were_loaded_not_their_paths() {
             .load()
     };
     let methods = |project: &Project| -> Vec<String> {
-        let mut names: Vec<String> = project.registry().classes()["Dup"]
+        let mut names: Vec<String> = project
+            .registry()
+            .class_by_name("Dup")
+            .unwrap()
             .methods()
             .keys()
             .map(|name| name.to_string())

@@ -324,10 +324,10 @@ fn merge_stubs_does_not_override_user_functions() {
 #[test]
 fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
     let stub_sig =
-        build_registry("<?php function str_contains(string $haystack, string $needle): bool {}")
-            .functions
-            .take("str_contains")
-            .unwrap();
+        (*build_registry("<?php function str_contains(string $haystack, string $needle): bool {}")
+            .function_declaration_by_name("str_contains")
+            .unwrap())
+        .clone();
 
     let mut r = Registry::default();
     r.merge_stubs(vec![("str_contains", stub_sig)]);
@@ -366,10 +366,10 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
 // matches the stub's shape, regardless of which one is seen first.
 #[test]
 fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
-    let stub_sig = build_registry("<?php function grapheme_strrev(string $string): string {}")
-        .functions
-        .take("grapheme_strrev")
-        .unwrap();
+    let stub_sig = (*build_registry("<?php function grapheme_strrev(string $string): string {}")
+        .function_declaration_by_name("grapheme_strrev")
+        .unwrap())
+    .clone();
 
     let mut r = Registry::default();
     r.merge_stubs(vec![("grapheme_strrev", stub_sig)]);
@@ -496,10 +496,10 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
 // parameter/return type as missing.
 #[test]
 fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration() {
-    let stub_sig = build_registry("<?php function ctype_punct(mixed $text): bool {}")
-        .functions
-        .take("ctype_punct")
-        .unwrap();
+    let stub_sig = (*build_registry("<?php function ctype_punct(mixed $text): bool {}")
+        .function_declaration_by_name("ctype_punct")
+        .unwrap())
+    .clone();
 
     let mut r = Registry::default();
     r.merge_stubs(vec![("ctype_punct", stub_sig)]);
@@ -553,10 +553,10 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
 #[test]
 fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
     let stub_sig =
-        build_registry("<?php function str_contains(string $haystack, string $needle): bool {}")
-            .functions
-            .take("str_contains")
-            .unwrap();
+        (*build_registry("<?php function str_contains(string $haystack, string $needle): bool {}")
+            .function_declaration_by_name("str_contains")
+            .unwrap())
+        .clone();
 
     let mut r = Registry::default();
     r.merge_stubs(vec![("str_contains", stub_sig)]);
@@ -602,12 +602,12 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     // `registry::stubs::generated_stub_classes()` builds a real one - via
     // `Registry::build` over its own source - rather than
     // constructing a `ClassReflection` literal by hand.
-    let built_in = build_registry(
+    let built_in = (*build_registry(
             "<?php class Imagick { public function getImageWidth() {} public function getImageHeight() {} public function convolveImage($kernel) {} }",
         )
-        .classes
-        .take("Imagick")
-        .unwrap();
+        .class_by_name("Imagick")
+        .unwrap())
+        .clone();
 
     let mut r = Registry::default();
     r.merge_stub_classes(vec![("Imagick".to_string(), built_in)]);
@@ -665,12 +665,12 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
 // `generics.notGeneric` fire on every real, generic use of the class.
 #[test]
 fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_generics() {
-    let built_in = build_registry(
+    let built_in = (*build_registry(
             "<?php /** @template TKey\n * @template TValue\n */ class ArrayIterator implements SeekableIterator, ArrayAccess {}",
         )
-        .classes
-        .take("ArrayIterator")
-        .unwrap();
+        .class_by_name("ArrayIterator")
+        .unwrap())
+        .clone();
     assert_eq!(built_in.templates, vec!["TKey", "TValue"]);
 
     let mut r = Registry::default();
@@ -705,10 +705,10 @@ fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_gene
 // checked against whatever wins this name.
 #[test]
 fn a_conditional_declaration_merges_onto_a_built_in_stub_class() {
-    let built_in = build_registry("<?php class ReflectionConstant { public string $name; }")
-        .classes
-        .take("ReflectionConstant")
-        .unwrap();
+    let built_in = (*build_registry("<?php class ReflectionConstant { public string $name; }")
+        .class_by_name("ReflectionConstant")
+        .unwrap())
+    .clone();
 
     let mut r = Registry::default();
     r.merge_stub_classes(vec![("ReflectionConstant".to_string(), built_in)]);
@@ -775,10 +775,10 @@ fn a_conditional_declaration_does_not_merge_onto_a_real_non_stub_class() {
 // as overriding a `final` method it has no actual relation to.
 #[test]
 fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
-    let built_in = build_registry("<?php class PhpToken implements Stringable {}")
-        .classes
-        .take("PhpToken")
-        .unwrap();
+    let built_in = (*build_registry("<?php class PhpToken implements Stringable {}")
+        .class_by_name("PhpToken")
+        .unwrap())
+    .clone();
 
     let mut r = Registry::default();
     r.merge_stub_classes(vec![("PhpToken".to_string(), built_in)]);

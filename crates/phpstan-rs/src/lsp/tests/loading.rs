@@ -46,13 +46,7 @@ fn starting_the_load_leaves_the_folder_loading_until_the_loop_installs_it() {
     assert!(messages.is_empty(), "nothing to publish: {messages:?}");
     assert!(server.loading.is_empty());
     assert_eq!(server.folders.len(), 1);
-    assert!(
-        server.folders[0]
-            .project
-            .registry()
-            .classes()
-            .contains_key("A")
-    );
+    assert!(server.folders[0].project.registry().has_class("A"));
 }
 
 #[test]
@@ -79,8 +73,8 @@ fn a_document_opened_and_edited_while_the_folder_loads_is_applied_as_last_sent()
 
     let folder = &server.folders[0];
     assert!(folder.open_documents.contains(&path));
-    assert!(!folder.project.registry().classes().contains_key("OnDisk"));
-    assert!(!folder.project.registry().classes().contains_key("First"));
+    assert!(!folder.project.registry().has_class("OnDisk"));
+    assert!(!folder.project.registry().has_class("First"));
     let published = codes_published_for(&messages, &uri.to_string());
     assert!(
         published
@@ -111,7 +105,7 @@ fn a_document_closed_while_the_folder_loads_is_not_applied() {
 
     let folder = &server.folders[0];
     assert!(!folder.open_documents.contains(&path));
-    assert!(folder.project.registry().classes().contains_key("OnDisk"));
+    assert!(folder.project.registry().has_class("OnDisk"));
 }
 
 #[test]
@@ -132,7 +126,7 @@ fn a_watched_file_event_while_the_folder_loads_is_replayed_on_install() {
 
     let folder = &server.folders[0];
     assert!(folder.project.is_loaded(&late));
-    assert!(folder.project.registry().classes().contains_key("Late"));
+    assert!(folder.project.registry().has_class("Late"));
 }
 
 #[test]

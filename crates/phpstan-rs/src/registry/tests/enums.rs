@@ -115,9 +115,9 @@ fn every_enum_implements_unit_enum_and_a_backed_one_also_implements_backed_enum(
     assert!(r.is_subclass_of("Suit", "BackedEnum"));
     assert!(r.is_subclass_of("Pure", "UnitEnum"));
     assert!(!r.is_subclass_of("Pure", "BackedEnum"));
-    assert!(r.classes().get("Pure").unwrap().is_static_method("cases"));
-    assert!(r.classes().get("Suit").unwrap().is_static_method("from"));
-    assert!(r.classes().get("Suit").unwrap().is_static_method("tryFrom"));
+    assert!(r.class_by_name("Pure").unwrap().is_static_method("cases"));
+    assert!(r.class_by_name("Suit").unwrap().is_static_method("from"));
+    assert!(r.class_by_name("Suit").unwrap().is_static_method("tryFrom"));
 }
 
 // A backed enum's ->value is the union of its own case literals, not

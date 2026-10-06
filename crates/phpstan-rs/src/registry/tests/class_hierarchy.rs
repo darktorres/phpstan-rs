@@ -288,8 +288,7 @@ fn inherited_property_hooks_are_registry_results_not_declaration_writes() {
             "#,
     );
     let declared = r
-        .classes
-        .get("ChildHook")
+        .class_by_name("ChildHook")
         .unwrap()
         .properties
         .get("name")
@@ -396,8 +395,7 @@ fn imported_type_constant_results_leave_the_declaration_unchanged() {
         &Type::string()
     );
     assert_ne!(
-        r.classes
-            .get("Target")
+        r.class_by_name("Target")
             .unwrap()
             .properties
             .get("property")
@@ -482,8 +480,7 @@ fn deferred_value_of_property_results_leave_the_declaration_unchanged() {
         &expected
     );
     assert_ne!(
-        r.classes
-            .get("UsesConfig")
+        r.class_by_name("UsesConfig")
             .unwrap()
             .properties
             .get("name")
@@ -596,8 +593,7 @@ fn trait_methods_and_properties_are_flattened_in() {
         Type::string()
     );
     assert!(
-        !r.classes
-            .get("Person")
+        !r.class_by_name("Person")
             .unwrap()
             .properties
             .contains_key("greeting")
@@ -628,8 +624,7 @@ fn trait_constants_are_flattened_in() {
         "#,
     );
     assert!(
-        !r.classes
-            .get("Person")
+        !r.class_by_name("Person")
             .unwrap()
             .consts
             .contains_key("GREETING")

@@ -171,7 +171,7 @@ mod tests {
         );
 
         let function_declaration = registry
-            .function_by_name("configured_guard")
+            .function_declaration_by_name("configured_guard")
             .unwrap()
             .clone();
         let method_declaration = registry.class_by_name("Demo").unwrap().methods["guard"].clone();
@@ -179,7 +179,7 @@ mod tests {
 
         assert!(
             registry
-                .function_by_name("configured_guard")
+                .function_declaration_by_name("configured_guard")
                 .unwrap()
                 .assert
                 .is_empty()
@@ -206,7 +206,9 @@ mod tests {
             1
         );
         assert_eq!(
-            registry.function_by_name("configured_guard").unwrap(),
+            registry
+                .function_declaration_by_name("configured_guard")
+                .unwrap(),
             &function_declaration
         );
         assert_eq!(

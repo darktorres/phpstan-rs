@@ -343,13 +343,7 @@ fn a_created_file_that_is_not_utf8_is_loaded_from_its_bytes() {
     changed(&mut server, &path, lsp_types::FileChangeType::CREATED);
 
     assert!(server.folders[0].project.is_loaded(&path));
-    assert!(
-        server.folders[0]
-            .project
-            .registry()
-            .classes()
-            .contains_key("Odd")
-    );
+    assert!(server.folders[0].project.registry().has_class("Odd"));
 }
 
 #[test]
@@ -363,37 +357,13 @@ fn a_change_on_disk_leaves_an_open_document_as_the_editor_has_it() {
     server.handle_open_or_change(&uri, "<?php class InEditor {}\n", Some(1));
     std::fs::write(&path, "<?php class Changed {}\n").unwrap();
     changed(&mut server, &path, lsp_types::FileChangeType::CHANGED);
-    assert!(
-        server.folders[0]
-            .project
-            .registry()
-            .classes()
-            .contains_key("InEditor")
-    );
-    assert!(
-        !server.folders[0]
-            .project
-            .registry()
-            .classes()
-            .contains_key("Changed")
-    );
+    assert!(server.folders[0].project.registry().has_class("InEditor"));
+    assert!(!server.folders[0].project.registry().has_class("Changed"));
 
     server.workspace_of(&path).close_document(&path);
     changed(&mut server, &path, lsp_types::FileChangeType::CHANGED);
-    assert!(
-        server.folders[0]
-            .project
-            .registry()
-            .classes()
-            .contains_key("Changed")
-    );
-    assert!(
-        !server.folders[0]
-            .project
-            .registry()
-            .classes()
-            .contains_key("InEditor")
-    );
+    assert!(server.folders[0].project.registry().has_class("Changed"));
+    assert!(!server.folders[0].project.registry().has_class("InEditor"));
 }
 
 #[test]

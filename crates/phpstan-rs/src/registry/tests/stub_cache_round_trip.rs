@@ -38,12 +38,12 @@ fn the_resolved_stub_registry_survives_a_round_trip() {
     let registry = project.registry();
     let back = read_back();
 
-    assert_eq!(back.classes.len(), registry.classes().len());
-    assert_eq!(back.functions.len(), registry.functions().len());
-    for (name, class) in registry.classes().iter() {
+    assert_eq!(back.classes.len(), registry.iter_classes().count());
+    assert_eq!(back.functions.len(), registry.iter_functions().count());
+    for (name, class) in registry.iter_classes() {
         assert_eq!(back.classes.get(name), Some(class), "class {name}");
     }
-    for (name, function) in registry.functions().iter() {
+    for (name, function) in registry.iter_functions() {
         assert_eq!(back.functions.get(name), Some(function), "function {name}");
     }
 }
@@ -95,12 +95,20 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
             function accepts_value(string $value): void {}
             "#,
     );
-    let declared = registry.function_by_name("reads_answer").unwrap().clone();
-    let value_of_declaration = registry.function_by_name("accepts_value").unwrap().clone();
+    let declared = registry
+        .function_declaration_by_name("reads_answer")
+        .unwrap()
+        .clone();
+    let value_of_declaration = registry
+        .function_declaration_by_name("accepts_value")
+        .unwrap()
+        .clone();
     let effective = registry.lookup_function("reads_answer").unwrap();
     assert_eq!(effective.params[0].ty, Type::int_literal(42));
     assert_eq!(
-        registry.function_by_name("reads_answer").unwrap(),
+        registry
+            .function_declaration_by_name("reads_answer")
+            .unwrap(),
         &declared
     );
     assert!(value_of_declaration.params[0].ty.contains_deferred());
@@ -109,7 +117,9 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
         Type::string_literal("first".into()).union(Type::string_literal("second".into()))
     );
     assert_eq!(
-        registry.function_by_name("accepts_value").unwrap(),
+        registry
+            .function_declaration_by_name("accepts_value")
+            .unwrap(),
         &value_of_declaration
     );
 
@@ -118,9 +128,12 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
         back.lookup_function("reads_answer").unwrap().params[0].ty,
         Type::int_literal(42)
     );
-    assert_eq!(back.function_by_name("reads_answer").unwrap(), &declared);
     assert_eq!(
-        back.function_by_name("accepts_value").unwrap(),
+        back.function_declaration_by_name("reads_answer").unwrap(),
+        &declared
+    );
+    assert_eq!(
+        back.function_declaration_by_name("accepts_value").unwrap(),
         &value_of_declaration
     );
     assert_eq!(
@@ -407,8 +420,7 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
         assert!(registry.class_method_results.contains_key(&original_ref));
         assert!(
             registry
-                .classes
-                .get("MethodHost")
+                .class_by_name("MethodHost")
                 .unwrap()
                 .methods
                 .get(method)
@@ -439,8 +451,7 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
         );
     }
     let raw_own = registry
-        .classes
-        .get("MethodHost")
+        .class_by_name("MethodHost")
         .unwrap()
         .methods
         .get("own")
@@ -588,8 +599,8 @@ fn the_declarations_as_built_survive_a_round_trip() {
         "the stub registry keeps its declarations as built"
     );
     let back = read_back();
-    let classes = registry.classes();
-    let functions = registry.functions();
+    let classes = registry.classes_for_cache();
+    let functions = registry.functions_for_cache();
     assert_eq!(back.classes.len(), classes.len());
     assert_eq!(back.functions.len(), functions.len());
     for (name, class) in classes.iter() {
@@ -648,8 +659,7 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
         built.freeze();
         let ancestry_names = |registry: &Registry| {
             registry
-                .classes()
-                .iter()
+                .iter_classes()
                 .filter(|(name, _)| registry.class_has_phpstan_ancestry(name))
                 .map(|(name, _)| name.lower().to_string())
                 .collect::<rustc_hash::FxHashSet<_>>()
@@ -659,7 +669,7 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
             ancestry_names(&built),
             "the ID-addressed PHPStan-ancestry verdicts rebuild after a cache read"
         );
-        for (name, _) in built.classes().iter() {
+        for (name, _) in built.iter_classes() {
             assert_eq!(
                 back.ancestor_names_of(name),
                 built.ancestor_names_of(name),
@@ -778,7 +788,11 @@ fn a_conditional_type_survives_the_codec() {
     // Declared after the one variant that is not stored: the codec writes
     // the variant's number.
     let project = Project::new();
-    let ty = &project.registry().functions()["iterator_to_array"].return_type;
+    let ty = &project
+        .registry()
+        .function_by_name("iterator_to_array")
+        .unwrap()
+        .return_type;
     assert!(ty.to_string().contains(" is true ? "), "got {ty}");
     let back: types::Type = decode(&encode(ty).unwrap()).unwrap();
     assert_eq!(&back, ty);

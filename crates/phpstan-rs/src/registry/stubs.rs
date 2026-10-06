@@ -1450,27 +1450,27 @@ pub(crate) fn index_stub_program(
             .map(str::to_string)
             .collect(),
         functions: registry
-            .functions
-            .into_iter()
-            .map(|(name, mut sig)| {
+            .iter_functions()
+            .map(|(name, sig)| {
+                let mut sig = sig.clone();
                 // See `FunctionReflection::is_stub`'s own doc comment: a stub
                 // file's own body is never real - `Registry::
                 // index_and_flatten` has no way to know that on its own,
                 // so this is set here instead, the one place that does.
                 sig.is_stub = true;
-                (name, sig)
+                (name.clone(), sig)
             })
             .collect(),
         classes: registry
-            .classes
-            .into_iter()
-            .map(|(name, mut info)| {
+            .iter_classes()
+            .map(|(name, info)| {
+                let mut info = info.clone();
                 // Same reasoning one level down: every method a stub
                 // class declares has an equally empty, unreal body.
                 for sig in info.methods.values_mut() {
                     sig.is_stub = true;
                 }
-                (name, info)
+                (name.clone(), info)
             })
             .collect(),
         constants: registry.global_constants.into_iter().collect(),

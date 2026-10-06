@@ -42,14 +42,8 @@ fn an_overlay_file_is_read_in_place_of_the_disks() {
         b"<?php class InOverlay {}".to_vec(),
     )]);
     let loaded = session.load().unwrap();
-    assert!(
-        loaded
-            .project
-            .registry()
-            .classes()
-            .contains_key("InOverlay")
-    );
-    assert!(!loaded.project.registry().classes().contains_key("OnDisk"));
+    assert!(loaded.project.registry().has_class("InOverlay"));
+    assert!(!loaded.project.registry().has_class("OnDisk"));
     let path = Path::new("src/A.php");
     assert_eq!(
         loaded.project.content_hash(path),
@@ -79,7 +73,7 @@ fn an_overlay_file_the_disk_does_not_have_is_listed_and_loaded_under_its_role() 
     assert_eq!(context, paths(&["lib/C.php"]));
     let loaded = session.load().unwrap();
     for (name, analysed) in [("A", true), ("B", true), ("C", false)] {
-        assert!(loaded.project.registry().classes().contains_key(name));
+        assert!(loaded.project.registry().has_class(name));
         let found: Vec<bool> = loaded
             .project
             .files
@@ -119,7 +113,7 @@ fn a_file_root_that_only_the_overlay_holds_is_loaded() {
     )
     .with_overlay([(PathBuf::from("virtual.php"), b"<?php class V {}".to_vec())]);
     let loaded = session.load().unwrap();
-    assert!(loaded.project.registry().classes().contains_key("V"));
+    assert!(loaded.project.registry().has_class("V"));
 }
 
 #[test]
@@ -228,9 +222,8 @@ fn a_load_that_parses_as_it_walks_loads_what_a_load_of_the_listing_does() {
         let mut names: Vec<String> = loaded
             .project
             .registry()
-            .classes()
-            .keys()
-            .map(|name| name.to_string())
+            .iter_classes()
+            .map(|(name, _)| name.to_string())
             .collect();
         names.sort();
         names

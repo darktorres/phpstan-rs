@@ -536,24 +536,6 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// A name-keyed snapshot of the selected classes.
-    ///
-    /// Runtime lookup uses `class_by_name` and iteration uses `iter_classes`;
-    /// this owned compatibility view is materialized only for callers that
-    /// need the former whole-table interface.
-    pub fn classes(&self) -> NameTable<ClassReflection> {
-        self.classes_for_cache()
-    }
-
-    /// A name-keyed snapshot of the selected functions.
-    ///
-    /// Runtime lookup uses `function_by_name` and iteration uses
-    /// `iter_functions`; this owned compatibility view is materialized only
-    /// for callers that need the former whole-table interface.
-    pub fn functions(&self) -> FunctionTable {
-        self.functions_for_cache()
-    }
-
     /// Whether these registries share the same class-table base.
     pub(crate) fn shares_class_base(&self, other: &Registry) -> bool {
         self.classes.shares_base(&other.classes)
@@ -885,6 +867,16 @@ impl Registry {
             return Some(result);
         }
         self.function_declaration_by_id(id)
+    }
+
+    /// The as-built function declaration selected for a PHP function name,
+    /// without applying resolved signature results.
+    #[cfg(test)]
+    pub(crate) fn function_declaration_by_name(&self, name: &str) -> Option<&FunctionReflection> {
+        self.function_ids
+            .get(name)
+            .copied()
+            .and_then(|id| self.function_declaration_by_id(id))
     }
 
     /// The active runtime ID selected for a function name.

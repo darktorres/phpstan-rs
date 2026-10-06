@@ -11,7 +11,7 @@ fn configured_function_assertions_reach_the_fast_gate_without_changing_declarati
     let mut registry =
         build_registry(r#"<?php namespace App; function configured_guard($value): void {}"#);
     let declaration = registry
-        .function_by_name("App\\configured_guard")
+        .function_declaration_by_name("App\\configured_guard")
         .unwrap()
         .clone();
     registry.set_assertion_tables(
@@ -32,7 +32,7 @@ fn configured_function_assertions_reach_the_fast_gate_without_changing_declarati
     assert!(registry.names_with_assert_tags.contains("configured_guard"));
     assert!(
         registry
-            .function_by_name("App\\configured_guard")
+            .function_declaration_by_name("App\\configured_guard")
             .unwrap()
             .assert
             .is_empty()
@@ -46,7 +46,9 @@ fn configured_function_assertions_reach_the_fast_gate_without_changing_declarati
         1
     );
     assert_eq!(
-        registry.function_by_name("App\\configured_guard").unwrap(),
+        registry
+            .function_declaration_by_name("App\\configured_guard")
+            .unwrap(),
         &declaration
     );
 }
@@ -60,7 +62,10 @@ fn top_level_deferred_value_of_is_a_function_result_not_a_declaration_write() {
             function accepts_value(string $value): void {}
             "#,
     );
-    let declaration = registry.function_by_name("accepts_value").unwrap().clone();
+    let declaration = registry
+        .function_declaration_by_name("accepts_value")
+        .unwrap()
+        .clone();
     let effective = registry.lookup_function("accepts_value").unwrap();
 
     assert!(declaration.params[0].ty.contains_deferred());
@@ -69,7 +74,9 @@ fn top_level_deferred_value_of_is_a_function_result_not_a_declaration_write() {
         Type::string_literal("first".into()).union(Type::string_literal("second".into()))
     );
     assert_eq!(
-        registry.function_by_name("accepts_value").unwrap(),
+        registry
+            .function_declaration_by_name("accepts_value")
+            .unwrap(),
         &declaration
     );
 }

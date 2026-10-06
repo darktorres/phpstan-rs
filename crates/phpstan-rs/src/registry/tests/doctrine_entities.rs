@@ -37,8 +37,7 @@ fn an_entity_records_its_id_field_scalar_fields_and_repository_class() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\TagEntity")
+        .class_by_name("App\\TagEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -70,8 +69,7 @@ fn a_table_attribute_with_an_explicit_name_is_recorded() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\TagEntity")
+        .class_by_name("App\\TagEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -96,8 +94,7 @@ fn no_table_attribute_at_all_leaves_table_name_none() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\TagEntity")
+        .class_by_name("App\\TagEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -128,8 +125,7 @@ fn a_column_name_argument_overrides_the_property_name() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\TagEntity")
+        .class_by_name("App\\TagEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -165,8 +161,7 @@ fn a_many_to_one_association_resolves_its_target_from_the_native_type() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\ImageEntity")
+        .class_by_name("App\\ImageEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -198,8 +193,7 @@ fn a_one_to_many_collection_association_resolves_its_target_from_target_entity_a
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\CategoryEntity")
+        .class_by_name("App\\CategoryEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -236,8 +230,7 @@ fn a_composite_identifier_records_no_single_id_field() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\ImageCategoryEntity")
+        .class_by_name("App\\ImageCategoryEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -270,8 +263,7 @@ fn a_root_entity_records_its_discriminator_map() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\AnimalEntity")
+        .class_by_name("App\\AnimalEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
@@ -302,8 +294,7 @@ fn an_ordinary_entity_has_no_discriminator_map() {
             "#,
     );
     let entity = r
-        .classes
-        .get("App\\TagEntity")
+        .class_by_name("App\\TagEntity")
         .unwrap()
         .doctrine_entity
         .as_ref()
