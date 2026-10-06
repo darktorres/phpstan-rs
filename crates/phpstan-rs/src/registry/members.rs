@@ -123,11 +123,7 @@ impl<V: Clone> Members<V> {
 
     /// Shares an existing member's lazy value under another name without
     /// decoding or cloning it.
-    pub(crate) fn insert_shared_if_absent(
-        &mut self,
-        name: Name,
-        member: Arc<Lazy<V>>,
-    ) -> bool {
+    pub(crate) fn insert_shared_if_absent(&mut self, name: Name, member: Arc<Lazy<V>>) -> bool {
         if self.map.contains_key(&name) {
             return false;
         }
