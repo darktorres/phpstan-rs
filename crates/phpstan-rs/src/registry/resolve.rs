@@ -7,6 +7,8 @@ use syntax::name::{NameMap, NameSet, OrderedNameMap};
 
 /// Each templated ancestor's template bindings, as seen from one class.
 type AncestorBindings = NameMap<FxHashMap<String, Type>>;
+type DeferredClassConstantTypes = Vec<(usize, Type)>;
+type ResolvedClassUpdate = (ClassId, ClassReflection, DeferredClassConstantTypes);
 
 use crate::registry::Registry;
 use crate::registry::{
@@ -563,29 +565,37 @@ impl Registry {
         self.resolve_class_constant_references();
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
-        let resolved: Vec<(ClassId, ClassReflection)> = class_names
+        let resolved: Vec<ResolvedClassUpdate> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
                 let id = *registry.class_ids.get(name)?;
                 registry
                     .resolved_deferred_class(name)
-                    .map(|info| (id, info))
+                    .map(|(info, constants)| (id, info, constants))
             })
             .collect();
-        for (id, info) in resolved {
+        for (id, info, constants) in resolved {
             if let Some(name) = self.class_name_by_id(id).cloned() {
-                for (slot, constant) in info.consts.values().enumerate() {
-                    self.class_const_types
-                        .insert((id, slot), constant.ty().clone());
+                for (slot, ty) in constants {
+                    self.class_const_types.insert((id, slot), ty);
                 }
                 self.classes.insert(name, info);
             }
         }
+        let class_ids = &self.class_ids;
+        let const_types = &self.class_const_types;
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
             if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
-                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes, None);
+                *ty = resolve_deferred_value_of_with_native_fallback(
+                    taken,
+                    native,
+                    classes,
+                    class_ids,
+                    const_types,
+                    None,
+                );
             }
         };
         let scope = &self.scope;
@@ -616,17 +626,26 @@ impl Registry {
 
     /// `class_name`'s declaration with its deferred types resolved, when it
     /// has any, read against the classes as they are before the pass.
-    fn resolved_deferred_class(&self, class_name: &Name) -> Option<ClassReflection> {
+    fn resolved_deferred_class(
+        &self,
+        class_name: &Name,
+    ) -> Option<(ClassReflection, DeferredClassConstantTypes)> {
         // Only a class with a deferred sentinel somewhere needs its
         // inherited-constant view (the overwhelming majority, stubs
         // included, have none).
         let own_consts = match self.classes.get(class_name) {
-            Some(info) if class_has_deferred_type(info) => {
-                visible_class_consts(class_name, &self.classes)
-            }
+            Some(info) if class_has_deferred_type(info) => visible_class_consts(
+                class_name,
+                &self.classes,
+                &self.class_ids,
+                &self.class_const_types,
+            ),
             _ => return None,
         };
         let mut info = self.classes.get(class_name)?.clone();
+        let class_id = *self.class_ids.get(class_name)?;
+        let class_ids = &self.class_ids;
+        let const_types = &self.class_const_types;
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
             if ty.contains_deferred() {
                 let bound = bind_class_const_self(
@@ -638,6 +657,8 @@ impl Registry {
                     bound,
                     native,
                     classes,
+                    class_ids,
+                    const_types,
                     Some(class_name),
                 );
             }
@@ -677,7 +698,13 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+                prop.ty = resolve_deferred_value_of_in_type(
+                    ty,
+                    &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
+                    Some(class_name),
+                );
             }
             if let Some(doc) = &mut prop.doc_ty
                 && doc.contains_deferred()
@@ -687,7 +714,13 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                *doc = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+                *doc = resolve_deferred_value_of_in_type(
+                    ty,
+                    &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
+                    Some(class_name),
+                );
             }
             if let Some(set_ty) = &prop.set_ty
                 && set_ty.contains_deferred()
@@ -697,25 +730,35 @@ impl Registry {
                 prop.set_ty = Some(resolve_deferred_value_of_in_type(
                     ty,
                     &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
                     Some(class_name),
                 ));
             }
         }
-        for c in info
+        let constants = info
             .consts
-            .values_mut()
-            .filter(|c| c.ty.contains_deferred())
-        {
-            let c = Arc::make_mut(c);
-            if c.ty.contains_deferred() {
-                let ty = bind_class_const_self(
-                    std::mem::replace(&mut c.ty, Type::mixed()),
-                    class_name,
-                    &own_consts,
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, (_, constant))| {
+                let current = self
+                    .class_const_types
+                    .get(&(class_id, slot))
+                    .unwrap_or(&constant.ty);
+                if !current.contains_deferred() {
+                    return None;
+                }
+                let bound = bind_class_const_self(current.clone(), class_name, &own_consts);
+                let ty = resolve_deferred_value_of_in_type(
+                    bound,
+                    &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
+                    Some(class_name),
                 );
-                c.ty = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
-            }
-        }
+                Some((slot, ty))
+            })
+            .collect();
         for bound in info.template_bounds.values_mut() {
             if bound.contains_deferred() {
                 let ty = bind_class_const_self(
@@ -723,7 +766,13 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                *bound = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+                *bound = resolve_deferred_value_of_in_type(
+                    ty,
+                    &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
+                    Some(class_name),
+                );
             }
         }
         // `@extends Lexer<self::T_*>`: what inherited PHPDoc binds to.
@@ -738,10 +787,16 @@ impl Registry {
                     class_name,
                     &own_consts,
                 );
-                *arg = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+                *arg = resolve_deferred_value_of_in_type(
+                    ty,
+                    &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
+                    Some(class_name),
+                );
             }
         }
-        Some(info)
+        Some((info, constants))
     }
 
     /// Resolves every `ClassConstant` inside class constants'
@@ -794,38 +849,31 @@ impl Registry {
                 break;
             }
             for (class_id, const_slot, ty) in updates {
-                self.class_const_types
-                    .insert((class_id, const_slot), ty.clone());
-                let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
-                    continue;
-                };
-                if let Some(sig) = self
-                    .classes
-                    .get_mut(&class_name)
-                    .and_then(|info| info.consts.get_index_mut(const_slot))
-                {
-                    Arc::make_mut(sig).ty = ty;
-                }
+                self.class_const_types.insert((class_id, const_slot), ty);
             }
         }
-        for class_id in with_deferred.iter().flatten() {
-            let Some(class_name) = self.class_name_by_id(*class_id).cloned() else {
+        for class_id in with_deferred.iter().flatten().copied() {
+            let Some(class_name) = self.class_name_by_id(class_id) else {
                 continue;
             };
-            let Some(info) = self.classes.get_mut(&class_name) else {
+            let Some(info) = self.classes.get(class_name) else {
                 continue;
             };
-            for (slot, sig) in info
+            let unresolved: Vec<_> = info
                 .consts
-                .values_mut()
+                .iter()
                 .enumerate()
-                .filter_map(|(slot, sig)| sig.ty.contains_deferred().then_some((slot, sig)))
-            {
-                let sig = Arc::make_mut(sig);
-                let ty =
-                    unresolved_class_const_to_mixed(std::mem::replace(&mut sig.ty, Type::mixed()));
-                self.class_const_types.insert((*class_id, slot), ty.clone());
-                sig.ty = ty;
+                .filter_map(|(slot, (_, sig))| {
+                    let ty = self
+                        .class_const_types
+                        .get(&(class_id, slot))
+                        .unwrap_or(&sig.ty);
+                    ty.contains_deferred()
+                        .then(|| (slot, unresolved_class_const_to_mixed(ty.clone())))
+                })
+                .collect();
+            for (slot, ty) in unresolved {
+                self.class_const_types.insert((class_id, slot), ty);
             }
         }
     }
@@ -840,20 +888,36 @@ impl Registry {
         info: &ClassReflection,
         updates: &mut Vec<(ClassId, usize, Type)>,
     ) -> bool {
-        if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
+        if !info.consts.iter().enumerate().any(|(slot, (_, sig))| {
+            self.class_const_types
+                .get(&(class_id, slot))
+                .unwrap_or(&sig.ty)
+                .contains_deferred()
+        }) {
             return false;
         }
-        let own_consts = visible_class_consts(class_name, &self.classes);
-        for (const_slot, sig) in info.consts.values().enumerate() {
-            if !sig.ty.contains_deferred() {
+        let own_consts = visible_class_consts(
+            class_name,
+            &self.classes,
+            &self.class_ids,
+            &self.class_const_types,
+        );
+        for (const_slot, (_, sig)) in info.consts.iter().enumerate() {
+            let current = self
+                .class_const_types
+                .get(&(class_id, const_slot))
+                .unwrap_or(&sig.ty);
+            if !current.contains_deferred() {
                 continue;
             }
             let step = resolve_deferred_value_of_in_type(
-                bind_class_const_self(sig.ty.clone(), class_name, &own_consts),
+                bind_class_const_self(current.clone(), class_name, &own_consts),
                 &self.classes,
+                &self.class_ids,
+                &self.class_const_types,
                 None,
             );
-            if step != sig.ty {
+            if step != *current {
                 updates.push((class_id, const_slot, step));
             }
         }
@@ -931,6 +995,7 @@ impl Registry {
             // no second chance coming; an empty `aliases` map here makes
             // every `substitute_type_aliases` call below a no-op.
             let aliases = by_class.remove(&class_id).unwrap_or_default();
+            let mut resolved_const_types = Vec::new();
             let substitute = |ty: &mut Type| {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = substitute_type_aliases(taken, &aliases);
@@ -961,10 +1026,18 @@ impl Registry {
                     prop.set_ty = Some(substitute_type_aliases(set_ty, &aliases));
                 }
             }
-            for c in info.consts.values_mut() {
-                let c = Arc::make_mut(c);
-                let ty = std::mem::replace(&mut c.ty, Type::mixed());
-                c.ty = substitute_type_aliases(ty, &aliases);
+            for (slot, (_, c)) in info.consts.iter().enumerate() {
+                let current = self
+                    .class_const_types
+                    .get(&(class_id, slot))
+                    .unwrap_or(&c.ty);
+                let ty = substitute_type_aliases(current.clone(), &aliases);
+                if &ty != current {
+                    resolved_const_types.push((slot, ty));
+                }
+            }
+            for (slot, ty) in resolved_const_types {
+                self.class_const_types.insert((class_id, slot), ty);
             }
             info.type_aliases.extend(aliases);
             info.type_imports.clear();
@@ -1084,7 +1157,13 @@ impl Registry {
         if !ty.contains_deferred() {
             return ty;
         }
-        resolve_deferred_value_of_in_type(ty, &self.classes, None)
+        resolve_deferred_value_of_in_type(
+            ty,
+            &self.classes,
+            &self.class_ids,
+            &self.class_const_types,
+            None,
+        )
     }
 
     /// `resolve_deferred_value_of_now`'s native-fallback-aware sibling.
@@ -1104,7 +1183,14 @@ impl Registry {
         if !ty.contains_deferred() {
             return ty;
         }
-        resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes, None)
+        resolve_deferred_value_of_with_native_fallback(
+            ty,
+            native,
+            &self.classes,
+            &self.class_ids,
+            &self.class_const_types,
+            None,
+        )
     }
 
     /// `class_name`'s concrete binding for each templated ancestor
@@ -1501,9 +1587,16 @@ fn class_namespace(fqn: &str) -> &str {
 fn resolve_deferred_value_of_in_type(
     ty: Type,
     classes: &NameTable<ClassReflection>,
+    class_ids: &NameTable<ClassId>,
+    const_types: &FxHashMap<(ClassId, usize), Type>,
     excluded: Option<&str>,
 ) -> Type {
-    ty.resolve_class_references(&DeclaredConstants { classes, excluded })
+    ty.resolve_class_references(&DeclaredConstants {
+        classes,
+        class_ids,
+        const_types,
+        excluded,
+    })
 }
 
 /// The constants and enum cases of the classes indexed so far, but for
@@ -1512,6 +1605,8 @@ fn resolve_deferred_value_of_in_type(
 /// outcome every other unresolvable one gets.
 struct DeclaredConstants<'a> {
     classes: &'a NameTable<ClassReflection>,
+    class_ids: &'a NameTable<ClassId>,
+    const_types: &'a FxHashMap<(ClassId, usize), Type>,
     excluded: Option<&'a str>,
 }
 
@@ -1537,7 +1632,13 @@ impl types::ClassConstants for DeclaredConstants<'_> {
         {
             return Type::mixed();
         }
-        resolve_class_const_type(class, pattern, self.classes)
+        resolve_class_const_type(
+            class,
+            pattern,
+            self.classes,
+            self.class_ids,
+            self.const_types,
+        )
     }
 }
 
@@ -1556,6 +1657,8 @@ fn resolve_class_const_type(
     class: &Type,
     pattern: &str,
     classes: &NameTable<ClassReflection>,
+    class_ids: &NameTable<ClassId>,
+    const_types: &FxHashMap<(ClassId, usize), Type>,
 ) -> Type {
     let Some((fqn, _)) = class.as_object() else {
         return Type::mixed();
@@ -1564,7 +1667,10 @@ fn resolve_class_const_type(
     if !classes.contains_key(fqn) {
         return Type::mixed();
     }
-    matching_class_const_type(&visible_class_consts(fqn, classes), pattern)
+    matching_class_const_type(
+        &visible_class_consts(fqn, classes, class_ids, const_types),
+        pattern,
+    )
 }
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `prop` contains
@@ -1617,6 +1723,8 @@ fn class_has_deferred_type(info: &ClassReflection) -> bool {
 fn visible_class_consts(
     fqn: &str,
     classes: &NameTable<ClassReflection>,
+    class_ids: &NameTable<ClassId>,
+    const_types: &FxHashMap<(ClassId, usize), Type>,
 ) -> OrderedNameMap<ConstantReflection> {
     let mut consts: OrderedNameMap<ConstantReflection> = OrderedNameMap::default();
     let mut seen: NameSet = NameSet::default();
@@ -1629,9 +1737,14 @@ fn visible_class_consts(
         let Some(info) = classes.get(&name) else {
             continue;
         };
-        for (const_name, sig) in &info.consts {
+        let class_id = class_ids.get(&name).copied();
+        for (slot, (const_name, sig)) in info.consts.iter().enumerate() {
             if !consts.contains_key(const_name) {
-                consts.insert(const_name.clone(), ConstantReflection::clone(sig));
+                let mut constant = ConstantReflection::clone(sig);
+                if let Some(ty) = class_id.and_then(|id| const_types.get(&(id, slot))) {
+                    constant.ty = ty.clone();
+                }
+                consts.insert(const_name.clone(), constant);
             }
         }
         queue.extend(info.extends.iter().cloned());
@@ -1802,9 +1915,11 @@ fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
     native: &Type,
     classes: &NameTable<ClassReflection>,
+    class_ids: &NameTable<ClassId>,
+    const_types: &FxHashMap<(ClassId, usize), Type>,
     excluded: Option<&str>,
 ) -> Type {
-    let resolved = resolve_deferred_value_of_in_type(ty, classes, excluded);
+    let resolved = resolve_deferred_value_of_in_type(ty, classes, class_ids, const_types, excluded);
     if resolved.is_mixed() && !native.is_mixed() {
         native.clone()
     } else {
@@ -2340,6 +2455,8 @@ impl Registry {
                     taken,
                     native,
                     &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
                     None,
                 );
             }

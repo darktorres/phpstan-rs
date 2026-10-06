@@ -451,6 +451,8 @@ pub struct Registry {
     // consumers move to this result table.
     #[serde(skip)]
     pub(crate) class_const_types: FxHashMap<(ClassId, usize), Type>,
+    #[serde(skip)]
+    class_const_types_cache: NameTable<Vec<(u32, Type)>>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
@@ -852,7 +854,6 @@ impl Registry {
     /// them; a no-op before then, while they still are the declarations as
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
-        self.class_const_types.clear();
         if let Some(raw) = &mut self.raw
             && !self.raw_active
         {
@@ -916,6 +917,7 @@ impl Registry {
             global_variables: registry.global_variables().clone(),
         };
         if scope.is_all() {
+            self.class_const_types.clear();
             self.classes = raw.classes.clone();
             self.functions = raw.functions.clone();
             return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
@@ -926,7 +928,14 @@ impl Registry {
             scope.class_keys(),
             body_scope.and_then(scope::Scope::class_keys),
         );
-        self.class_const_types.clear();
+        let changed_class_ids: FxHashSet<ClassId> = self
+            .class_ids
+            .iter()
+            .filter(|(name, _)| scope.has_class(name))
+            .map(|(_, id)| *id)
+            .collect();
+        self.class_const_types
+            .retain(|(id, _), _| !changed_class_ids.contains(id));
         let functions = reset_scoped(
             &mut self.functions,
             &raw.functions,
@@ -979,6 +988,7 @@ impl Registry {
                     .map(|owners| (name.clone(), owners.clone()))
             })
             .collect();
+        let class_const_types = self.class_const_types_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
         self.functions.freeze();
@@ -1057,10 +1067,27 @@ impl Registry {
                 .collect()
         };
         self.member_owners_cache = NameTable::default();
-        // The reflection compatibility copy survives cache/freeze today;
-        // declaration IDs are about to be rebuilt, so discard these runtime
-        // keys rather than retain results under stale IDs.
-        self.class_const_types.clear();
+        self.class_const_types = class_const_types
+            .iter()
+            .flat_map(|(name, results)| {
+                let Some(id) = self.class_ids.get(name).copied() else {
+                    return Vec::new();
+                };
+                results
+                    .iter()
+                    .map(|(slot, ty)| {
+                        (
+                            (
+                                id,
+                                usize::try_from(*slot).expect("usize is at least 32 bits"),
+                            ),
+                            ty.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        self.class_const_types_cache = NameTable::default();
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -1192,6 +1219,8 @@ impl Registry {
             .store(writer, "table:ancestor_names")?;
         self.member_owners_for_cache()
             .store(writer, "table:member_owners")?;
+        self.class_const_types_for_cache()
+            .store(writer, "table:class_const_types")?;
         self.store_tables(writer)?;
         if let Some(raw) = &self.raw {
             raw.classes.store(writer, RAW_CLASSES)?;
@@ -1230,6 +1259,29 @@ impl Registry {
             .collect()
     }
 
+    /// The disk cache uses class names and declaration slots; runtime results
+    /// use generation-checked class IDs and slots.
+    pub(crate) fn class_const_types_for_cache(&self) -> NameTable<Vec<(u32, Type)>> {
+        if !self.class_const_types_cache.is_empty() {
+            return self.class_const_types_cache.clone();
+        }
+        let mut by_name: FxHashMap<Name, Vec<(u32, Type)>> = FxHashMap::default();
+        for ((id, slot), ty) in &self.class_const_types {
+            let name = self
+                .class_name_by_id(*id)
+                .expect("class constant result names an active class");
+            let slot = u32::try_from(*slot).expect("class constant slot range exhausted");
+            by_name
+                .entry(name.clone())
+                .or_default()
+                .push((slot, ty.clone()));
+        }
+        for results in by_name.values_mut() {
+            results.sort_unstable_by_key(|(slot, _)| *slot);
+        }
+        by_name.into_iter().collect()
+    }
+
     /// Whether every stored table, map and set of a registry read back is
     /// in the order a lookup by bisection relies on. A load checks only
     /// that its records are inside the file, so the tests of what is stored
@@ -1241,6 +1293,8 @@ impl Registry {
             .check_order("table:ancestor_names")?;
         self.member_owners_for_cache()
             .check_order("table:member_owners")?;
+        self.class_const_types_for_cache()
+            .check_order("table:class_const_types")?;
         if let Some(raw) = &self.raw {
             raw.classes.check_order(RAW_CLASSES)?;
             raw.functions.check_order(RAW_FUNCTIONS)?;
@@ -1270,6 +1324,7 @@ impl Registry {
         registry.load_tables(reader)?;
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
+        registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
                 classes: NameTable::load(reader, RAW_CLASSES)?,

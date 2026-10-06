@@ -1,9 +1,11 @@
 //! What the stub cache stores must read back: the resolved registry and
 //! the declarations as built, with every class and function entry decoding.
 
+use super::helpers::build_registry;
 use crate::project::Project;
 use crate::registry::Registry;
 use crate::registry::container::{Reader, Writer};
+use types::Type;
 
 /// `registry` stored and read back, and frozen, as a run loads it from the
 /// stub cache.
@@ -43,6 +45,41 @@ fn the_resolved_stub_registry_survives_a_round_trip() {
     for (name, function) in registry.functions().iter() {
         assert_eq!(back.functions.get(name), Some(function), "function {name}");
     }
+}
+
+#[test]
+fn deferred_class_constant_results_survive_freeze_and_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            class Config {
+                const NAME = 'app';
+                const COPY = self::NAME;
+                const COPY_AGAIN = self::COPY;
+            }"#,
+    );
+    let back = round_trip(&registry);
+    let expected = Type::string_literal("app".into());
+
+    assert_eq!(
+        registry.lookup_const_type("Config", "COPY"),
+        Some(&expected)
+    );
+    assert_eq!(
+        registry.lookup_const_type("Config", "COPY_AGAIN"),
+        Some(&expected)
+    );
+    assert_eq!(back.lookup_const_type("Config", "COPY"), Some(&expected));
+    assert_eq!(
+        back.lookup_const_type("Config", "COPY_AGAIN"),
+        Some(&expected)
+    );
+    assert!(
+        back.lookup_const("Config", "COPY")
+            .unwrap()
+            .ty()
+            .contains_deferred(),
+        "the serialized declaration remains the unresolved source"
+    );
 }
 
 #[test]
