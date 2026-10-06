@@ -338,9 +338,13 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   check and Clippy pass. `f6ddfc4f` reuses the trait's shared lazy method
   signature for each composed source method and alias, avoiding reflection
   clones while preserving host-local slots; the alias sharing check and all
-  1,141 library tests pass. Item 4.6 remains open; inherited PHPDoc, the
-  remaining trait composition outputs, constant resolution, other pass
-  results and immutable declaration storage remain. The 4.7 reference, include-graph,
+  1,141 library tests pass. `8efa71a0` translates each classified declaration
+  to an `EffectId` once and runs effect settlement, caller edges, queueing and
+  dependency reads by ID; call-target records still enter as `DeclKey`, and
+  closure effects stay in the fixed point before the final table drops them.
+  All 1,199 crate tests, check, Clippy and formatting pass. Item 4.6 remains
+  open; inherited PHPDoc, the remaining trait-composition outputs, constant
+  resolution, other pass results and immutable declaration storage remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
