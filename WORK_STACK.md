@@ -345,8 +345,13 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `DeclKey`, and argument-position lookup converts a callee back at that
   boundary. Closure effects stay in the fixed point before the final table
   drops them. All 1,199 crate tests, check, Clippy and formatting pass. Item 4.6 remains
-  open; inherited PHPDoc, the remaining trait-composition outputs, constant
-  resolution, other pass results and immutable declaration storage remain. The 4.7 reference, include-graph,
+  open. `da99f22b` keys the parallel trait-composition and inherited-PHPDoc
+  result batches by `ClassId`, resolving it only when the existing serial
+  apply updates the class. This does not yet separate those results from
+  mutable `ClassReflection`. Focused hierarchy and PHPDoc tests, all 1,141
+  library tests and all 1,199 crate tests, check, Clippy and formatting pass.
+  ID-keyed inherited-doc values, remaining trait outputs, constant resolution,
+  other pass results and immutable declaration storage remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
