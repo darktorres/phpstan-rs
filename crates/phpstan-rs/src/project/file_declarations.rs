@@ -18,7 +18,9 @@ use syntax::name::Name;
 use super::declared_classes::DeclaredClass;
 use super::duplicate_class_sites::DuplicateClassSites;
 use super::duplicate_fn_sites::DuplicateFunctionSites;
-use crate::registry::{BuiltDecl, Origin, anonymous_class_decls, built_declaration};
+use crate::registry::{
+    BuiltDecl, FileDecls, FileMember, Origin, anonymous_class_decls, built_declaration,
+};
 
 /// `collect`'s result.
 pub(super) struct FileDeclarations {
@@ -30,6 +32,9 @@ pub(super) struct FileDeclarations {
     /// In walk order, then the anonymous classes, as `build_declarations`
     /// returns them.
     pub(super) built_decls: Vec<BuiltDecl>,
+    /// File-grouped declaration references, used by the id store as it
+    /// moves off per-declaration name-table values.
+    pub(super) file_decls: FileDecls,
     pub(super) duplicate_fn_sites: DuplicateFunctionSites,
     pub(super) duplicate_class_sites: DuplicateClassSites,
     /// The classes it declares unconditionally.
@@ -70,6 +75,7 @@ pub(super) fn collect(
         classes: Vec::new(),
         constants: Vec::new(),
         built_decls: Vec::new(),
+        file_decls: FileDecls::new(),
         duplicate_fn_sites: DuplicateFunctionSites::default(),
         duplicate_class_sites: DuplicateClassSites::default(),
         declared_classes: Vec::new(),
@@ -110,6 +116,33 @@ pub(super) fn collect(
     });
     if has_anonymous_class {
         found.built_decls.extend(anonymous_class_decls(ast, origin));
+    }
+    for decl in &found.built_decls {
+        match decl {
+            BuiltDecl::Class { info, .. } => {
+                let members = info.methods().iter().map(|(name, declaration)| FileMember {
+                    name: name.clone(),
+                    declaration: declaration.clone(),
+                });
+                found.file_decls.add_class(
+                    std::sync::Arc::clone(info),
+                    members,
+                    info.properties().values().map(|item| item.as_ref().clone()),
+                    info.consts().values().map(|item| item.as_ref().clone()),
+                    info.extends()
+                        .iter()
+                        .chain(info.implements())
+                        .chain(info.uses())
+                        .cloned(),
+                );
+            }
+            BuiltDecl::Function { sig, .. } => {
+                found
+                    .file_decls
+                    .add_function(std::sync::Arc::clone(sig), sig.params().iter().cloned());
+            }
+            BuiltDecl::GlobalConst { .. } => {}
+        }
     }
     found
 }

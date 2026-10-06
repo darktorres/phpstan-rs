@@ -187,6 +187,7 @@ fn write_file(
     packages: &composer::PackageIndex,
     p: &mut Printer,
 ) {
+    debug_assert!(state.file_decls.validate().is_ok());
     let FileState {
         kept_ast,
         source_len,
@@ -205,6 +206,7 @@ fn write_file(
         bodies,
         global_facts,
         built_decls,
+        file_decls: _,
         pest_facts,
         declared_classes,
         facts,

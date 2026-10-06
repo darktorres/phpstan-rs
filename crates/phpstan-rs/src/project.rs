@@ -148,6 +148,9 @@ pub(crate) struct FileState {
     // Its declarations as built, which the registry's are rebuilt from when
     // a name they declare changes.
     built_decls: Vec<BuiltDecl>,
+    // Their per-file typed arena storage, retained for id-backed registry
+    // access and shared with the parse cache.
+    file_decls: Arc<crate::registry::FileDecls>,
     // What it binds, when it is a `Pest.php`.
     pest_facts: Option<PestFacts>,
     // The classes it declares unconditionally, as the renamed-argument
@@ -1248,6 +1251,7 @@ impl Project {
             declaration_references,
             ignores,
             built_decls,
+            file_decls,
             anonymous_classes,
             duplicate_fn_sites,
             duplicate_class_sites,
@@ -1305,6 +1309,7 @@ impl Project {
                 bodies,
                 global_facts,
                 built_decls,
+                file_decls,
                 pest_facts,
                 declared_classes,
                 facts,
@@ -3286,6 +3291,9 @@ pub struct ParsedFile {
     // AST node into a ClassReflection/FunctionReflection" work runs here, in
     // parallel, rather than in the sequential insert loop.
     built_decls: Vec<crate::registry::BuiltDecl>,
+    // The declarations' file-grouped arena layout. BuiltDecl remains the
+    // registry's input while its name tables move to declaration ids.
+    file_decls: Arc<crate::registry::FileDecls>,
     // What the file binds, when it is a `Pest.php`.
     pest_facts: Option<PestFacts>,
     // The classes the file declares unconditionally.
@@ -3379,6 +3387,7 @@ pub(crate) fn parse_file_recording<'a>(
         classes,
         constants,
         built_decls,
+        file_decls,
         duplicate_fn_sites,
         duplicate_class_sites,
         declared_classes,
@@ -3405,6 +3414,7 @@ pub(crate) fn parse_file_recording<'a>(
         references,
         declaration_references,
         built_decls,
+        file_decls: Arc::new(file_decls),
         anonymous_classes,
         duplicate_fn_sites,
         duplicate_class_sites,
@@ -3450,6 +3460,7 @@ impl syntax::canonical::Canonical for ParsedFile {
             declaration_references,
             ignores,
             built_decls,
+            file_decls: _,
             pest_facts,
             declared_classes,
             duplicate_fn_sites,

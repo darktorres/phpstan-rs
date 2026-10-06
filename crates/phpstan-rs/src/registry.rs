@@ -71,6 +71,7 @@ pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
+pub(crate) use file_decls::{FileDecls, FileMember};
 pub(crate) use guard::Guard;
 pub(crate) use ids::{ClassId, FnId, IdSource};
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};

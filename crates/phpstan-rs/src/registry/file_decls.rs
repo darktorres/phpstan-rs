@@ -4,6 +4,7 @@
 use la_arena::{Arena, Idx, IdxRange, RawIdx};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::sync::Arc;
 use syntax::name::Name;
 
 use super::ClassReflection;
@@ -52,7 +53,7 @@ pub(crate) struct FileMember {
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
 #[derive(Clone, Debug)]
 pub(crate) struct ClassLayout {
-    pub(crate) declaration: Idx<ClassReflection>,
+    pub(crate) declaration: Idx<Arc<ClassReflection>>,
     pub(crate) members: IdxRange<FileMember>,
     pub(crate) properties: IdxRange<PropertyReflection>,
     pub(crate) constants: IdxRange<ConstantReflection>,
@@ -62,14 +63,14 @@ pub(crate) struct ClassLayout {
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
 #[derive(Clone, Debug)]
 pub(crate) struct FunctionLayout {
-    pub(crate) declaration: Idx<FunctionReflection>,
+    pub(crate) declaration: Idx<Arc<FunctionReflection>>,
     pub(crate) parameters: IdxRange<ParameterReflection>,
 }
 
 #[allow(dead_code)] // Populated and consumed as registry storage migrates in row 4.3.
 pub(crate) struct FileDecls {
-    pub(crate) classes: Arena<ClassReflection>,
-    pub(crate) functions: Arena<FunctionReflection>,
+    pub(crate) classes: Arena<Arc<ClassReflection>>,
+    pub(crate) functions: Arena<Arc<FunctionReflection>>,
     pub(crate) class_layouts: Arena<ClassLayout>,
     pub(crate) function_layouts: Arena<FunctionLayout>,
     pub(crate) members: Arena<FileMember>,
@@ -98,7 +99,7 @@ impl FileDecls {
     #[allow(dead_code)] // Called by the per-file declaration builder during row 4.3.
     pub(crate) fn add_class(
         &mut self,
-        declaration: ClassReflection,
+        declaration: Arc<ClassReflection>,
         members: impl IntoIterator<Item = FileMember>,
         properties: impl IntoIterator<Item = PropertyReflection>,
         constants: impl IntoIterator<Item = ConstantReflection>,
@@ -121,7 +122,7 @@ impl FileDecls {
     #[allow(dead_code)] // Called by the per-file declaration builder during row 4.3.
     pub(crate) fn add_function(
         &mut self,
-        declaration: FunctionReflection,
+        declaration: Arc<FunctionReflection>,
         parameters: impl IntoIterator<Item = ParameterReflection>,
     ) -> Idx<FunctionLayout> {
         let declaration = self.functions.alloc(declaration);
@@ -134,7 +135,7 @@ impl FileDecls {
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
     pub(crate) fn class(&self, layout: Idx<ClassLayout>) -> &ClassReflection {
-        &self.classes[self.class_layouts[layout].declaration]
+        self.classes[self.class_layouts[layout].declaration].as_ref()
     }
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
@@ -159,7 +160,7 @@ impl FileDecls {
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
     pub(crate) fn function(&self, layout: Idx<FunctionLayout>) -> &FunctionReflection {
-        &self.functions[self.function_layouts[layout].declaration]
+        self.functions[self.function_layouts[layout].declaration].as_ref()
     }
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
@@ -168,7 +169,7 @@ impl FileDecls {
     }
 
     #[allow(dead_code)] // Used by the cached per-file arena reader in row 4.3.
-    fn validate(&self) -> Result<(), &'static str> {
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
         for (_, layout) in self.class_layouts.iter() {
             if !idx_is_valid(layout.declaration, self.classes.len())
                 || !range_is_valid(&layout.members, self.members.len())
@@ -193,8 +194,8 @@ impl FileDecls {
 #[allow(dead_code)] // Used once ParsedFile stores its declaration arenas.
 #[derive(Serialize)]
 struct EncodedFileDecls<'a> {
-    classes: Vec<&'a ClassReflection>,
-    functions: Vec<&'a FunctionReflection>,
+    classes: Vec<&'a Arc<ClassReflection>>,
+    functions: Vec<&'a Arc<FunctionReflection>>,
     class_layouts: Vec<EncodedClassLayout>,
     function_layouts: Vec<EncodedFunctionLayout>,
     members: Vec<&'a FileMember>,
@@ -265,8 +266,8 @@ impl<'de> Deserialize<'de> for FileDecls {
     {
         #[derive(Deserialize)]
         struct EncodedFileDecls {
-            classes: Vec<ClassReflection>,
-            functions: Vec<FunctionReflection>,
+            classes: Vec<Arc<ClassReflection>>,
+            functions: Vec<Arc<FunctionReflection>>,
             class_layouts: Vec<EncodedClassLayout>,
             function_layouts: Vec<EncodedFunctionLayout>,
             members: Vec<FileMember>,
@@ -351,13 +352,14 @@ mod tests {
 
         let mut declarations = FileDecls::new();
         let class_layout = declarations.add_class(
-            class.clone(),
+            Arc::new(class.clone()),
             members.clone(),
             properties.clone(),
             constants.clone(),
             names.clone(),
         );
-        let function_layout = declarations.add_function(function.clone(), function.params.clone());
+        let function_layout =
+            declarations.add_function(Arc::new(function.clone()), function.params.clone());
         let encoded = postcard::to_allocvec(&declarations).unwrap();
         let decoded: FileDecls = postcard::from_bytes(&encoded).unwrap();
 
