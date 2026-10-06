@@ -384,12 +384,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            let Some(prop) = self
-                .registry
-                .classes()
-                .get(fqn)
-                .and_then(|info| info.properties().get(name))
-            else {
+            let Some(prop) = self.registry.lookup_property(fqn, name) else {
                 continue;
             };
             if description == "PHPDoc tag @var"

@@ -83,7 +83,7 @@ fn deferred_class_constant_results_survive_freeze_and_cache_round_trip() {
 }
 
 #[test]
-fn inherited_property_hook_results_survive_cache_round_trip() {
+fn inherited_class_property_results_survive_cache_round_trip() {
     let registry = build_registry(
         r#"<?php
             class ParentHook {
@@ -91,6 +91,13 @@ fn inherited_property_hook_results_survive_cache_round_trip() {
             }
             class ChildHook extends ParentHook {
                 public string $name { get => 'child'; }
+            }
+            /** @phpstan-type Imported string */
+            class Source {}
+            /** @phpstan-import-type Imported from Source */
+            class Target {
+                /** @var Imported */
+                public $property;
             }
             "#,
     );
@@ -108,6 +115,21 @@ fn inherited_property_hook_results_survive_cache_round_trip() {
             .unwrap()
             .has_set_hook(),
         "the cached declaration remains the as-built property"
+    );
+    assert_eq!(
+        back.lookup_property("Target", "property").unwrap().ty(),
+        &Type::string()
+    );
+    assert_ne!(
+        back.classes
+            .get("Target")
+            .unwrap()
+            .properties
+            .get("property")
+            .unwrap()
+            .ty(),
+        &Type::string(),
+        "the cached declaration keeps its imported-alias input"
     );
 }
 

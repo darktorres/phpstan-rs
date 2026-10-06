@@ -174,7 +174,7 @@ impl<'a> Checker<'a> {
         // sorted HashMap walk - the AST's `Vec<PropertyDecl>` is already
         // deterministic, unlike the registry's `HashMap`-backed lookup).
         for p in &c.def.properties {
-            if let Some(prop_sig) = info.properties().get(p.name.as_ref()) {
+            if let Some(prop_sig) = self.registry.lookup_property(fqn, p.name.as_ref()) {
                 self.check_generic_bounds(
                     prop_sig.ty(),
                     &format!("PHPDoc tag @var for property {fqn}::${}", p.name),
@@ -266,12 +266,12 @@ impl<'a> Checker<'a> {
         let Some(raw) = &c.doc_comment else {
             return;
         };
-        let Some(info) = self.class_info(fqn) else {
+        if self.registry.lookup_class(fqn).is_none() {
             return;
-        };
+        }
         let block = docblock::parse_shared(raw);
         for tag in &block.properties {
-            let Some(prop_sig) = info.properties().get(tag.name.as_str()) else {
+            let Some(prop_sig) = self.registry.lookup_property(fqn, tag.name.as_str()) else {
                 continue;
             };
             let tag_name = match (tag.readable, tag.writable) {

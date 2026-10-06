@@ -28,11 +28,8 @@ impl<'a> Checker<'a> {
     /// parameter. A promoted property is never `static` (no such syntax
     /// exists), which `own_sig.is_static: false` encodes directly.
     pub(crate) fn check_property_overrides(&mut self, fqn: &str, c: &ClassDef) {
-        let Some(info) = self.class_info(fqn) else {
-            return;
-        };
         for p in &c.properties {
-            let Some(own_sig) = info.properties().get(p.name.as_ref()).cloned() else {
+            let Some(own_sig) = self.registry.lookup_property(fqn, p.name.as_ref()).cloned() else {
                 continue;
             };
             self.check_property_override_attribute(fqn, &p.name, &p.attrs, p.span);
@@ -46,7 +43,11 @@ impl<'a> Checker<'a> {
                 if param.promotion.is_none() {
                     continue;
                 }
-                let Some(own_sig) = info.properties().get(param.name.as_ref()).cloned() else {
+                let Some(own_sig) = self
+                    .registry
+                    .lookup_property(fqn, param.name.as_ref())
+                    .cloned()
+                else {
                     continue;
                 };
                 self.check_property_override_attribute(fqn, &param.name, &param.attrs, param.span);

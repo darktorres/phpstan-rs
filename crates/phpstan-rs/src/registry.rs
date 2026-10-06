@@ -457,9 +457,9 @@ pub struct Registry {
     // declaration that owns the completed property. The underlying
     // PropertyReflection remains the as-built declaration.
     #[serde(skip)]
-    pub(crate) property_hook_results: FxHashMap<ClassId, NameMap<Arc<PropertyReflection>>>,
+    pub(crate) class_property_results: FxHashMap<ClassId, NameMap<Arc<PropertyReflection>>>,
     #[serde(skip)]
-    property_hook_results_cache: NameTable<Vec<(Name, Arc<PropertyReflection>)>>,
+    class_property_results_cache: NameTable<Vec<(Name, Arc<PropertyReflection>)>>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
@@ -738,7 +738,7 @@ impl Registry {
                 .method_dependencies
                 .retain(|method, _| method.class() != id);
             self.class_const_types.retain(|(class, _), _| *class != id);
-            self.property_hook_results.remove(&id);
+            self.class_property_results.remove(&id);
         }
     }
 
@@ -926,7 +926,7 @@ impl Registry {
         };
         if scope.is_all() {
             self.class_const_types.clear();
-            self.property_hook_results.clear();
+            self.class_property_results.clear();
             self.classes = raw.classes.clone();
             self.functions = raw.functions.clone();
             return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
@@ -945,7 +945,7 @@ impl Registry {
             .collect();
         self.class_const_types
             .retain(|(id, _), _| !changed_class_ids.contains(id));
-        self.property_hook_results
+        self.class_property_results
             .retain(|id, _| !changed_class_ids.contains(id));
         let functions = reset_scoped(
             &mut self.functions,
@@ -1000,7 +1000,7 @@ impl Registry {
             })
             .collect();
         let class_const_types = self.class_const_types_for_cache();
-        let property_hook_results = self.property_hook_results_for_cache();
+        let class_property_results = self.class_property_results_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
         self.functions.freeze();
@@ -1100,7 +1100,7 @@ impl Registry {
             })
             .collect();
         self.class_const_types_cache = NameTable::default();
-        self.property_hook_results = property_hook_results
+        self.class_property_results = class_property_results
             .iter()
             .filter_map(|(name, properties)| {
                 self.class_ids
@@ -1109,7 +1109,7 @@ impl Registry {
                     .map(|id| (id, properties.iter().cloned().collect::<NameMap<_>>()))
             })
             .collect();
-        self.property_hook_results_cache = NameTable::default();
+        self.class_property_results_cache = NameTable::default();
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -1243,8 +1243,8 @@ impl Registry {
             .store(writer, "table:member_owners")?;
         self.class_const_types_for_cache()
             .store(writer, "table:class_const_types")?;
-        self.property_hook_results_for_cache()
-            .store(writer, "table:property_hook_results")?;
+        self.class_property_results_for_cache()
+            .store(writer, "table:class_property_results")?;
         self.store_tables(writer)?;
         if let Some(raw) = &self.raw {
             raw.classes.store(writer, RAW_CLASSES)?;
@@ -1306,11 +1306,11 @@ impl Registry {
         by_name.into_iter().collect()
     }
 
-    fn property_hook_results_for_cache(&self) -> NameTable<Vec<(Name, Arc<PropertyReflection>)>> {
-        if !self.property_hook_results_cache.is_empty() {
-            return self.property_hook_results_cache.clone();
+    fn class_property_results_for_cache(&self) -> NameTable<Vec<(Name, Arc<PropertyReflection>)>> {
+        if !self.class_property_results_cache.is_empty() {
+            return self.class_property_results_cache.clone();
         }
-        self.property_hook_results
+        self.class_property_results
             .iter()
             .filter_map(|(id, properties)| {
                 let mut properties: Vec<_> = properties
@@ -1337,8 +1337,8 @@ impl Registry {
             .check_order("table:member_owners")?;
         self.class_const_types_for_cache()
             .check_order("table:class_const_types")?;
-        self.property_hook_results_for_cache()
-            .check_order("table:property_hook_results")?;
+        self.class_property_results_for_cache()
+            .check_order("table:class_property_results")?;
         if let Some(raw) = &self.raw {
             raw.classes.check_order(RAW_CLASSES)?;
             raw.functions.check_order(RAW_FUNCTIONS)?;
@@ -1369,8 +1369,8 @@ impl Registry {
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
         registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;
-        registry.property_hook_results_cache =
-            NameTable::load(reader, "table:property_hook_results")?;
+        registry.class_property_results_cache =
+            NameTable::load(reader, "table:class_property_results")?;
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
                 classes: NameTable::load(reader, RAW_CLASSES)?,
@@ -1434,8 +1434,8 @@ impl Registry {
             .drain()
             .map(|((id, slot), ty)| ((id.with_generation(generation), slot), ty))
             .collect();
-        base.property_hook_results = base
-            .property_hook_results
+        base.class_property_results = base
+            .class_property_results
             .drain()
             .map(|(id, properties)| (id.with_generation(generation), properties))
             .collect();

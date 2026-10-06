@@ -1143,7 +1143,7 @@ impl Registry {
             let id = self.class_ids.get(owner)?;
             if !self.raw_active
                 && let Some(property) = self
-                    .property_hook_results
+                    .class_property_results
                     .get(id)
                     .and_then(|properties| properties.get(prop))
             {
@@ -1173,7 +1173,7 @@ impl Registry {
             let id = self.class_ids.get(owner)?;
             if !self.raw_active
                 && let Some(property) = self
-                    .property_hook_results
+                    .class_property_results
                     .get(id)
                     .and_then(|properties| properties.get(prop))
             {

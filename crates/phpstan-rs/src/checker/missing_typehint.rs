@@ -277,9 +277,7 @@ impl<'a> Checker<'a> {
         for p in properties {
             let Some(ty) = self
                 .registry
-                .classes()
-                .get(fqn)
-                .and_then(|c| c.properties().get(p.name.as_ref()))
+                .lookup_property(fqn, p.name.as_ref())
                 .map(|sig| sig.ty().clone())
             else {
                 continue;

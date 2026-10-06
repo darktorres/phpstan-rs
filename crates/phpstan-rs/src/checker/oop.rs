@@ -638,7 +638,10 @@ impl<'a> Checker<'a> {
             let Some(trait_info) = self.registry.classes().get(trait_name) else {
                 continue;
             };
-            for (prop_name, sig) in trait_info.properties() {
+            for prop_name in trait_info.properties().keys() {
+                let Some(sig) = self.registry.lookup_property(trait_name, prop_name) else {
+                    continue;
+                };
                 if info.resolved_trait_conflicts().contains(prop_name) {
                     continue;
                 }

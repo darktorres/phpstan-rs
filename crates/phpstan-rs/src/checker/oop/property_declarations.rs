@@ -224,9 +224,7 @@ impl<'a> Checker<'a> {
         let has_hooks = view.has_hooks();
         let is_virtual = self
             .registry
-            .classes()
-            .get(registry_name)
-            .and_then(|info| info.properties().get(view.name))
+            .lookup_property(registry_name, view.name)
             .is_some_and(|sig| sig.is_virtual());
         let has_set_visibility = view.write_visibility.is_some();
         let error = if view.is_final && unavailable(PhpFeature::FinalProperties) {

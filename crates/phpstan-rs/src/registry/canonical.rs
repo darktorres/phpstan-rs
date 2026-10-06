@@ -454,8 +454,8 @@ impl CanonicalOver for Registry {
         let base_member_owners = base.member_owners_for_cache();
         let class_const_types = self.class_const_types_for_cache();
         let base_class_const_types = base.class_const_types_for_cache();
-        let property_hook_results = self.property_hook_results_for_cache();
-        let base_property_hook_results = base.property_hook_results_for_cache();
+        let class_property_results = self.class_property_results_for_cache();
+        let base_class_property_results = base.class_property_results_for_cache();
         let effects = self.effects_for_names();
         let base_effects = base.effects_for_names();
         let methods_by_name: rustc_hash::FxHashMap<_, Vec<_>> = self
@@ -513,8 +513,8 @@ impl CanonicalOver for Registry {
             member_owners_cache: _,
             class_const_types: _,
             class_const_types_cache: _,
-            property_hook_results: _,
-            property_hook_results_cache: _,
+            class_property_results: _,
+            class_property_results_cache: _,
             effects: _,
             builtin_methods_running_code,
             base_builtin_methods_running_code,
@@ -617,8 +617,12 @@ impl CanonicalOver for Registry {
                     &Over(&class_const_types, &base_class_const_types, compare),
                 ),
                 (
-                    "property_hook_results",
-                    &Over(&property_hook_results, &base_property_hook_results, compare),
+                    "class_property_results",
+                    &Over(
+                        &class_property_results,
+                        &base_class_property_results,
+                        compare,
+                    ),
                 ),
                 ("effects", &Over(&effects, &base_effects, compare)),
                 (
@@ -691,8 +695,8 @@ canonical_struct!(Registry {
     member_owners,
     class_const_types,
     class_const_types_cache,
-    property_hook_results,
-    property_hook_results_cache,
+    class_property_results,
+    class_property_results_cache,
     member_owners_cache,
     effects,
     methods_by_name,

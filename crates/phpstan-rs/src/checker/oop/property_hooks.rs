@@ -25,14 +25,12 @@ impl<'a> Checker<'a> {
     /// (`Param::hooks`), reusing `check_get_hook`/`check_set_hook` via
     /// scalar `name`/`span`/`type_hint` arguments.
     pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDef) {
-        let Some(info) = self.class_info(fqn) else {
-            return;
-        };
         for p in &c.properties {
             let Some(hooks) = &p.hooks else {
                 continue;
             };
-            let Some(prop_sig) = info.properties().get(p.name.as_ref()).cloned() else {
+            let Some(prop_sig) = self.registry.lookup_property(fqn, p.name.as_ref()).cloned()
+            else {
                 continue;
             };
             if let Some(hook) = &hooks.get {
@@ -57,7 +55,11 @@ impl<'a> Checker<'a> {
                 let Some(hooks) = param.hooks.as_deref() else {
                     continue;
                 };
-                let Some(prop_sig) = info.properties().get(param.name.as_ref()).cloned() else {
+                let Some(prop_sig) = self
+                    .registry
+                    .lookup_property(fqn, param.name.as_ref())
+                    .cloned()
+                else {
                     continue;
                 };
                 if let Some(hook) = &hooks.get {

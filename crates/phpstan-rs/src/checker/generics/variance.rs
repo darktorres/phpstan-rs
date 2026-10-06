@@ -182,7 +182,7 @@ impl<'a> Checker<'a> {
             return;
         }
         for p in &c.properties {
-            let Some(prop_sig) = info.properties().get(p.name.as_ref()) else {
+            let Some(prop_sig) = self.registry.lookup_property(fqn, p.name.as_ref()) else {
                 continue;
             };
             if prop_sig.visibility() == Visibility::Private {
@@ -216,7 +216,7 @@ impl<'a> Checker<'a> {
                 if param.promotion.is_none() {
                     continue;
                 }
-                let Some(prop_sig) = info.properties().get(param.name.as_ref()) else {
+                let Some(prop_sig) = self.registry.lookup_property(fqn, param.name.as_ref()) else {
                     continue;
                 };
                 if prop_sig.visibility() == Visibility::Private {

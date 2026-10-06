@@ -8,7 +8,13 @@ use syntax::name::{NameMap, NameSet, OrderedNameMap};
 /// Each templated ancestor's template bindings, as seen from one class.
 type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 type DeferredClassConstantTypes = Vec<(usize, Type)>;
-type ResolvedClassUpdate = (ClassId, ClassReflection, DeferredClassConstantTypes);
+type ClassPropertyResults = Vec<(Name, Arc<PropertyReflection>)>;
+type ResolvedClassUpdate = (
+    ClassId,
+    ClassReflection,
+    DeferredClassConstantTypes,
+    ClassPropertyResults,
+);
 type VisibleClassConstTypes = OrderedNameMap<Type>;
 
 use crate::registry::Registry;
@@ -492,12 +498,6 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn inherit_property_hooks(&mut self) {
         let class_names = self.scoped_class_names();
-        let scoped_ids: FxHashSet<ClassId> = class_names
-            .iter()
-            .filter_map(|name| self.class_ids.get(name).copied())
-            .collect();
-        self.property_hook_results
-            .retain(|id, _| !scoped_ids.contains(id));
         let max_iterations = class_names.len().max(1);
         for _ in 0..max_iterations {
             if !self.inherit_property_hooks_one_pass() {
@@ -517,7 +517,7 @@ impl Registry {
             };
             for (name, own) in &info.properties {
                 let own = self
-                    .property_hook_results
+                    .class_property_results
                     .get(&class_id)
                     .and_then(|properties| properties.get(name))
                     .unwrap_or(own);
@@ -547,7 +547,7 @@ impl Registry {
         }
         let changed = !updates.is_empty();
         for (class_id, name, merged) in updates {
-            self.property_hook_results
+            self.class_property_results
                 .entry(class_id)
                 .or_default()
                 .insert(name, merged);
@@ -583,14 +583,18 @@ impl Registry {
                 let id = *registry.class_ids.get(name)?;
                 registry
                     .resolved_deferred_class(name)
-                    .map(|(info, constants)| (id, info, constants))
+                    .map(|(info, constants, properties)| (id, info, constants, properties))
             })
             .collect();
-        for (id, info, constants) in resolved {
+        for (id, info, constants, properties) in resolved {
             if let Some(name) = self.class_name_by_id(id).cloned() {
                 for (slot, ty) in constants {
                     self.class_const_types.insert((id, slot), ty);
                 }
+                self.class_property_results
+                    .entry(id)
+                    .or_default()
+                    .extend(properties);
                 self.classes.insert(name, info);
             }
         }
@@ -640,7 +644,11 @@ impl Registry {
     fn resolved_deferred_class(
         &self,
         class_name: &Name,
-    ) -> Option<(ClassReflection, DeferredClassConstantTypes)> {
+    ) -> Option<(
+        ClassReflection,
+        DeferredClassConstantTypes,
+        ClassPropertyResults,
+    )> {
         // Only a class with a deferred sentinel somewhere needs its
         // inherited-constant view (the overwhelming majority, stubs
         // included, have none).
@@ -697,12 +705,17 @@ impl Registry {
                 resolve(out, &Type::mixed(), &self.classes);
             }
         }
-        for prop in info
-            .properties
-            .values_mut()
-            .filter(|prop| property_has_deferred_type(prop))
-        {
-            let prop = Arc::make_mut(prop);
+        let mut properties = Vec::new();
+        for (name, declared) in &info.properties {
+            let current = self
+                .class_property_results
+                .get(&class_id)
+                .and_then(|results| results.get(name))
+                .unwrap_or(declared);
+            if !property_has_deferred_type(current) {
+                continue;
+            }
+            let mut prop = PropertyReflection::clone(current);
             if prop.ty.contains_deferred() {
                 let ty = bind_class_const_self(
                     std::mem::replace(&mut prop.ty, Type::mixed()),
@@ -745,6 +758,9 @@ impl Registry {
                     &self.class_const_types,
                     Some(class_name),
                 ));
+            }
+            if prop != **current {
+                properties.push((name.clone(), Arc::new(prop)));
             }
         }
         let constants = info
@@ -807,7 +823,7 @@ impl Registry {
                 );
             }
         }
-        Some((info, constants))
+        Some((info, constants, properties))
     }
 
     /// Resolves every `ClassConstant` inside class constants'
@@ -1007,6 +1023,7 @@ impl Registry {
             // every `substitute_type_aliases` call below a no-op.
             let aliases = by_class.remove(&class_id).unwrap_or_default();
             let mut resolved_const_types = Vec::new();
+            let mut resolved_properties = Vec::new();
             let substitute = |ty: &mut Type| {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = substitute_type_aliases(taken, &aliases);
@@ -1026,15 +1043,22 @@ impl Registry {
                     substitute(out);
                 }
             }
-            for prop in info.properties.values_mut() {
-                let prop = Arc::make_mut(prop);
-                let ty = std::mem::replace(&mut prop.ty, Type::mixed());
-                prop.ty = substitute_type_aliases(ty, &aliases);
+            for (name, declared) in &info.properties {
+                let current = self
+                    .class_property_results
+                    .get(&class_id)
+                    .and_then(|properties| properties.get(name))
+                    .unwrap_or(declared);
+                let mut prop = PropertyReflection::clone(current);
+                substitute(&mut prop.ty);
                 if let Some(doc) = &mut prop.doc_ty {
                     substitute(doc);
                 }
-                if let Some(set_ty) = prop.set_ty.take() {
-                    prop.set_ty = Some(substitute_type_aliases(set_ty, &aliases));
+                if let Some(set_ty) = &mut prop.set_ty {
+                    substitute(set_ty);
+                }
+                if prop != **current {
+                    resolved_properties.push((name.clone(), Arc::new(prop)));
                 }
             }
             for (slot, (_, c)) in info.consts.iter().enumerate() {
@@ -1050,6 +1074,10 @@ impl Registry {
             for (slot, ty) in resolved_const_types {
                 self.class_const_types.insert((class_id, slot), ty);
             }
+            self.class_property_results
+                .entry(class_id)
+                .or_default()
+                .extend(resolved_properties);
             info.type_aliases.extend(aliases);
             info.type_imports.clear();
             self.classes.insert(class_name, info);
@@ -1120,8 +1148,11 @@ impl Registry {
                     }
                 }
                 for (name, sig) in &mixin_info.properties {
-                    if sig.visibility == Visibility::Public && !info.properties.contains_key(name) {
-                        property_additions.push((class_id, name.clone(), sig.clone()));
+                    if sig.visibility == Visibility::Public
+                        && !info.properties.contains_key(name)
+                        && let Some(sig) = self.lookup_property(mixin_fqn, name)
+                    {
+                        property_additions.push((class_id, name.clone(), Arc::new(sig.clone())));
                     }
                 }
             }
@@ -2036,7 +2067,7 @@ impl Registry {
                         .flatten()
                 }),
         );
-        let property_fixes: Vec<(ClassId, Name, Type)> = classes
+        let property_fixes: Vec<(ClassId, Name, Arc<PropertyReflection>)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
@@ -2045,7 +2076,12 @@ impl Registry {
                 };
                 info.properties
                     .iter()
-                    .filter_map(|(name, prop)| {
+                    .filter_map(|(name, declared)| {
+                        let prop = registry
+                            .class_property_results
+                            .get(&class_id)
+                            .and_then(|properties| properties.get(name))
+                            .unwrap_or(declared);
                         if !prop.has_native_type {
                             return None;
                         }
@@ -2055,22 +2091,18 @@ impl Registry {
                             Some(class),
                             Some(pass),
                         )?;
-                        Some((class_id, name.clone(), ty))
+                        let mut updated = PropertyReflection::clone(prop);
+                        updated.ty = ty;
+                        Some((class_id, name.clone(), Arc::new(updated)))
                     })
                     .collect::<Vec<_>>()
             })
             .collect();
-        for (class_id, name, ty) in property_fixes {
-            let Some(class) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
-            if let Some(prop) = self
-                .classes
-                .get_mut(&class)
-                .and_then(|i| i.properties.get_mut(&name))
-            {
-                Arc::make_mut(prop).ty = ty;
-            }
+        for (class_id, name, property) in property_fixes {
+            self.class_property_results
+                .entry(class_id)
+                .or_default()
+                .insert(name, property);
         }
         for (key, param, ty) in fixes {
             let sig = match key {
@@ -2266,7 +2298,7 @@ impl Registry {
                 ))
             })
             .collect();
-        let property_fixes: Vec<(ClassId, Name, Option<Type>, Option<Type>)> = classes
+        let property_fixes: Vec<(ClassId, Name, Arc<PropertyReflection>)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
@@ -2275,31 +2307,33 @@ impl Registry {
                 };
                 info.properties
                     .iter()
-                    .filter_map(|(name, prop)| {
+                    .filter_map(|(name, declared)| {
+                        let prop = registry
+                            .class_property_results
+                            .get(&class_id)
+                            .and_then(|properties| properties.get(name))
+                            .unwrap_or(declared);
                         let ty = lookup(registry, &prop.ty);
                         let doc = prop.doc_ty.as_ref().and_then(|d| lookup(registry, d));
-                        (ty.is_some() || doc.is_some()).then(|| (class_id, name.clone(), ty, doc))
+                        (ty.is_some() || doc.is_some()).then(|| {
+                            let mut updated = PropertyReflection::clone(prop);
+                            if let Some(ty) = ty {
+                                updated.ty = ty;
+                            }
+                            if doc.is_some() {
+                                updated.doc_ty = doc;
+                            }
+                            (class_id, name.clone(), Arc::new(updated))
+                        })
                     })
                     .collect::<Vec<_>>()
             })
             .collect();
-        for (class_id, name, ty, doc) in property_fixes {
-            let Some(class) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
-            if let Some(prop) = self
-                .classes
-                .get_mut(&class)
-                .and_then(|i| i.properties.get_mut(&name))
-            {
-                let prop = Arc::make_mut(prop);
-                if let Some(ty) = ty {
-                    prop.ty = ty;
-                }
-                if doc.is_some() {
-                    prop.doc_ty = doc;
-                }
-            }
+        for (class_id, name, property) in property_fixes {
+            self.class_property_results
+                .entry(class_id)
+                .or_default()
+                .insert(name, property);
         }
         for (method, fixed) in method_fixes {
             let class_id = method.class();

@@ -333,8 +333,10 @@ impl Project {
                 }
                 add(sig.return_type());
             }
-            for prop in info.properties().values() {
-                add(prop.ty());
+            for property in info.properties().keys() {
+                if let Some(prop) = self.registry.lookup_property(fqn, property) {
+                    add(prop.ty());
+                }
             }
             for name in names {
                 if self.registry.lookup_class(&name).is_some() {

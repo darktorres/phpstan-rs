@@ -77,14 +77,11 @@ impl<'a> Checker<'a> {
         writers: Vec<Name>,
         c: &ClassDef,
     ) {
-        let Some(info) = self.class_info(fqn) else {
-            return;
-        };
         let properties: Vec<SiteProperty> = c
             .properties
             .iter()
             .filter_map(|p| {
-                let sig = info.properties().get(p.name.as_ref())?;
+                let sig = self.registry.lookup_property(fqn, p.name.as_ref())?;
                 if sig.write_visibility() != Visibility::Private
                     || sig.ty().union_members().len() < 2
                 {

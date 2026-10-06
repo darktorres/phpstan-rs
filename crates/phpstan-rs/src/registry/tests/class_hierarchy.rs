@@ -279,6 +279,8 @@ fn imported_type_constant_results_leave_the_declaration_unchanged() {
             class Target {
                 /** @var Imported */
                 public const VALUE = null;
+                /** @var Imported */
+                public $property;
             }
             "#,
     );
@@ -291,6 +293,50 @@ fn imported_type_constant_results_leave_the_declaration_unchanged() {
         r.lookup_const("Target", "VALUE").unwrap().ty(),
         &Type::string(),
         "the declaration keeps its unresolved imported-alias input"
+    );
+    assert_eq!(
+        r.lookup_property("Target", "property").unwrap().ty(),
+        &Type::string()
+    );
+    assert_ne!(
+        r.classes
+            .get("Target")
+            .unwrap()
+            .properties
+            .get("property")
+            .unwrap()
+            .ty(),
+        &Type::string(),
+        "the property declaration keeps its imported-alias input"
+    );
+}
+
+#[test]
+fn deferred_value_of_property_results_leave_the_declaration_unchanged() {
+    let r = build_registry(
+        r#"<?php
+            class Config { const NAME = 'app'; }
+            class UsesConfig {
+                /** @var value-of<Config::NAME> */
+                public $name;
+            }
+            "#,
+    );
+    let expected = Type::value_of(Type::string_literal("app".into()));
+    assert_eq!(
+        r.lookup_property("UsesConfig", "name").unwrap().ty(),
+        &expected
+    );
+    assert_ne!(
+        r.classes
+            .get("UsesConfig")
+            .unwrap()
+            .properties
+            .get("name")
+            .unwrap()
+            .ty(),
+        &expected,
+        "the declaration keeps its deferred value-of input"
     );
 }
 
