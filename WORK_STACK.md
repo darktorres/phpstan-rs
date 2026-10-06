@@ -245,8 +245,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   Source/name lookup is exposed, and syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. Row 9.3 is in progress: the shared `NodeId` is
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
-  indices, and the inference cache is keyed by `ExprId`. A test for per-file
-  name-ID reuse was added in `eee0c503` but has not run. Nodes still use recursive
+  indices, and the inference cache is keyed by `ExprId`. Expression and
+  statement spans now travel in typed-ID-indexed tables through retained
+  project trees (`a42f63ab`); parser tests cover name-ID reuse and span
+  alignment (`eee0c503`, `a42f63ab`) but have not run. Nodes still use recursive
   storage, arena commits are not implemented, and no item gate or full
   validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
