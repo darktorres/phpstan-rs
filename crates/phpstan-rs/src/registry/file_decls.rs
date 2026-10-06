@@ -97,4 +97,39 @@ impl FileDecls {
             parameters,
         })
     }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn class(&self, layout: Idx<ClassLayout>) -> &ClassReflection {
+        &self.classes[self.class_layouts[layout].declaration]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn members(&self, layout: Idx<ClassLayout>) -> &[FileMember] {
+        &self.members[self.class_layouts[layout].members.clone()]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn properties(&self, layout: Idx<ClassLayout>) -> &[PropertyReflection] {
+        &self.properties[self.class_layouts[layout].properties.clone()]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn constants(&self, layout: Idx<ClassLayout>) -> &[ConstantReflection] {
+        &self.constants[self.class_layouts[layout].constants.clone()]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn names(&self, layout: Idx<ClassLayout>) -> &[Name] {
+        &self.names[self.class_layouts[layout].names.clone()]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn function(&self, layout: Idx<FunctionLayout>) -> &FunctionReflection {
+        &self.functions[self.function_layouts[layout].declaration]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
+    pub(crate) fn parameters(&self, layout: Idx<FunctionLayout>) -> &[ParameterReflection] {
+        &self.parameters[self.function_layouts[layout].parameters.clone()]
+    }
 }
