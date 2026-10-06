@@ -30,7 +30,7 @@ fn decode_range<T>(range: (u32, u32)) -> IdxRange<T> {
 }
 
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct FileMember {
     pub(crate) name: Name,
     pub(crate) declaration: FunctionReflection,
@@ -266,5 +266,70 @@ impl<'de> Deserialize<'de> for FileDecls {
             constants: Arena::from_iter(encoded.constants),
             names: Arena::from_iter(encoded.names),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syntax::lexer::Lexer;
+    use syntax::parser::Parser;
+
+    #[test]
+    fn file_declarations_round_trip_with_typed_ranges() {
+        let tokens = Lexer::new(
+            "<?php class Demo { public int $value; public const int MARK = 1; public function run(int $n): int {} } function helper(string $text): bool {}",
+        )
+        .tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let registry = crate::registry::Registry::build(&program);
+        let class = registry.lookup_class("Demo").unwrap().1.clone();
+        let function = registry.lookup_function("helper").unwrap().clone();
+
+        let members = class
+            .methods
+            .iter()
+            .map(|(name, declaration)| FileMember {
+                name: name.clone(),
+                declaration: declaration.clone(),
+            })
+            .collect::<Vec<_>>();
+        let properties = class
+            .properties
+            .iter()
+            .map(|(_, property)| (**property).clone())
+            .collect::<Vec<_>>();
+        let constants = class
+            .consts
+            .iter()
+            .map(|(_, constant)| (**constant).clone())
+            .collect::<Vec<_>>();
+        let names = class
+            .extends
+            .iter()
+            .chain(&class.implements)
+            .chain(&class.uses)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut declarations = FileDecls::new();
+        let class_layout = declarations.add_class(
+            class.clone(),
+            members.clone(),
+            properties.clone(),
+            constants.clone(),
+            names.clone(),
+        );
+        let function_layout = declarations.add_function(function.clone(), function.params.clone());
+        let encoded = postcard::to_allocvec(&declarations).unwrap();
+        let decoded: FileDecls = postcard::from_bytes(&encoded).unwrap();
+
+        assert_eq!(decoded.class(class_layout), &class);
+        assert_eq!(decoded.members(class_layout), members);
+        assert_eq!(decoded.properties(class_layout), properties);
+        assert_eq!(decoded.constants(class_layout), constants);
+        assert_eq!(decoded.names(class_layout), names);
+        assert_eq!(decoded.function(function_layout), &function);
+        assert_eq!(decoded.parameters(function_layout), function.params);
     }
 }
