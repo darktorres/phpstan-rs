@@ -63,44 +63,44 @@ pub const SYNTHETIC_STMT_ID: StmtId = StmtId::from_raw(la_arena::RawIdx::from_u3
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     InlineHtml(Arc<str>),
-    Expression(Expr),
-    Echo(Vec<Expr>),
-    Return(Option<Expr>),
-    Block(Vec<Stmt>),
+    Expression(ExprNode),
+    Echo(Vec<ExprNode>),
+    Return(Option<ExprNode>),
+    Block(Vec<StmtNode>),
     If(IfStmt),
     While {
-        cond: Expr,
-        body: Box<Stmt>,
+        cond: ExprNode,
+        body: Box<StmtNode>,
     },
     DoWhile {
-        body: Box<Stmt>,
-        cond: Expr,
+        body: Box<StmtNode>,
+        cond: ExprNode,
     },
     For {
-        init: Vec<Expr>,
-        cond: Vec<Expr>,
-        step: Vec<Expr>,
-        body: Box<Stmt>,
+        init: Vec<ExprNode>,
+        cond: Vec<ExprNode>,
+        step: Vec<ExprNode>,
+        body: Box<StmtNode>,
     },
     Foreach {
-        subject: Box<Expr>,
-        key: Option<Box<Expr>>,
-        value: Box<Expr>,
+        subject: Box<ExprNode>,
+        key: Option<Box<ExprNode>>,
+        value: Box<ExprNode>,
         by_ref: bool,
-        body: Box<Stmt>,
+        body: Box<StmtNode>,
     },
     // `declare(name=value, ...)`: each directive's name and value, and
     // the statements of a `declare(...) { ... }` or `declare(...): ...
     // enddeclare;` block.
     Declare {
-        directives: Vec<(Ident, Expr)>,
-        body: Option<Vec<Stmt>>,
+        directives: Vec<(Ident, ExprNode)>,
+        body: Option<Vec<StmtNode>>,
     },
     Break(Option<i64>),
     Continue(Option<i64>),
     Global(Vec<GlobalVar>),
     // `unset($a, $b[1], ...)`.
-    Unset(Vec<Expr>),
+    Unset(Vec<ExprNode>),
     FunctionDecl(Box<FunctionDecl>),
     ClassDecl(Box<ClassDecl>),
     Namespace(String),
@@ -116,17 +116,17 @@ pub enum StmtKind {
     // modeled - only its scoping (the variable is defined from here on)
     // matters for a single-call static analysis pass. The name is
     // without its `$`.
-    StaticVar(Vec<(Ident, Option<Expr>)>),
+    StaticVar(Vec<(Ident, Option<ExprNode>)>),
     Switch {
-        subject: Expr,
+        subject: ExprNode,
         cases: Vec<SwitchCase>,
     },
     Try {
-        body: Vec<Stmt>,
+        body: Vec<StmtNode>,
         catches: Vec<CatchClause>,
-        finally: Option<Vec<Stmt>>,
+        finally: Option<Vec<StmtNode>>,
     },
-    Throw(Expr),
+    Throw(ExprNode),
     Goto(Ident),
     // `label:` - a goto target. Control flow through goto/labels isn't
     // modeled (no effect on narrowing, terminal-statement detection,
@@ -138,30 +138,30 @@ pub enum StmtKind {
 /// `else if` is an `else` whose statement is another `if`.
 #[derive(Debug, Clone)]
 pub struct IfStmt {
-    pub cond: Expr,
-    pub then_branch: Box<Stmt>,
+    pub cond: ExprNode,
+    pub then_branch: Box<StmtNode>,
     pub elseifs: Vec<ElseIf>,
-    pub else_branch: Option<Box<Stmt>>,
+    pub else_branch: Option<Box<StmtNode>>,
 }
 
 /// One `elseif (cond) body` of an `if` chain.
 #[derive(Debug, Clone)]
 pub struct ElseIf {
-    pub cond: Expr,
-    pub body: Box<Stmt>,
+    pub cond: ExprNode,
+    pub body: Box<StmtNode>,
     pub span: Span,
 }
 
 impl IfStmt {
     /// Every condition of the chain in order: the `if`'s, then each
     /// `elseif`'s.
-    pub fn conditions(&self) -> impl Iterator<Item = &Expr> {
+    pub fn conditions(&self) -> impl Iterator<Item = &ExprNode> {
         std::iter::once(&self.cond).chain(self.elseifs.iter().map(|e| &e.cond))
     }
 
     /// Every branch body in order: the `if`'s, each `elseif`'s, then the
     /// `else`.
-    pub fn bodies(&self) -> impl Iterator<Item = &Stmt> {
+    pub fn bodies(&self) -> impl Iterator<Item = &StmtNode> {
         std::iter::once(&*self.then_branch)
             .chain(self.elseifs.iter().map(|e| &*e.body))
             .chain(self.else_branch.as_deref())
@@ -170,8 +170,8 @@ impl IfStmt {
 
 #[derive(Debug, Clone)]
 pub struct SwitchCase {
-    pub test: Option<Expr>, // None = `default:`
-    pub body: Vec<Stmt>,
+    pub test: Option<ExprNode>, // None = `default:`
+    pub body: Vec<StmtNode>,
     pub span: Span,
 }
 
@@ -180,7 +180,7 @@ pub struct CatchClause {
     pub types: Vec<QualifiedName>,
     // The bound variable without its `$`; `None` for `catch (Foo) {}`.
     pub var: Option<Ident>,
-    pub body: Vec<Stmt>,
+    pub body: Vec<StmtNode>,
     pub span: Span,
 }
 
@@ -202,7 +202,7 @@ pub struct Param {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Ident,
     pub type_hint: Option<TypeHint>,
-    pub default: Option<Expr>,
+    pub default: Option<ExprNode>,
     pub by_ref: bool,
     pub variadic: bool,
     // The property a constructor parameter promotes to, e.g.
@@ -239,7 +239,7 @@ pub struct GotoLabel {
 pub struct FunctionBody {
     // The opening `{`.
     pub open: Span,
-    pub stmts: Arc<Vec<Stmt>>,
+    pub stmts: Arc<Vec<StmtNode>>,
     // The labels its `goto`s name, outside nested functions and classes;
     // empty for nearly every body.
     pub goto_labels: Box<[GotoLabel]>,
@@ -257,7 +257,7 @@ pub struct FunctionDecl {
     pub params: Vec<Param>,
     pub return_type: Option<TypeHint>,
     // `Arc`, not a plain `Vec` - `registry::FunctionReflection::from_decl` shares
-    // this exact allocation into its own `body: Option<Arc<Vec<Stmt>>>`
+    // this exact allocation into its own `body: Option<Arc<Vec<StmtNode>>>`
     // field (an `Arc` clone, not a deep AST clone) rather than
     // re-materializing an owned copy at that boundary, the same
     // move/share-not-reallocate reasoning as `name`'s own doc comment
@@ -282,7 +282,7 @@ pub struct FunctionDecl {
 
 impl FunctionDecl {
     /// The body's statements; none for a bodiless declaration.
-    pub fn body_stmts(&self) -> &[Stmt] {
+    pub fn body_stmts(&self) -> &[StmtNode] {
         self.body.as_ref().map_or(&[], |body| body.stmts.as_slice())
     }
 
@@ -338,7 +338,7 @@ pub struct PropertyDecl {
     pub is_abstract: bool,
     pub is_final: bool,
     pub type_hint: Option<TypeHint>,
-    pub default: Option<Expr>,
+    pub default: Option<ExprNode>,
     pub doc_comment: Option<Arc<str>>,
     // PHP 8.4 property hooks (`{ get => ...; set(Type $value) { ... } }`).
     // Parsed so the file doesn't fail to parse at all, but the hook bodies
@@ -358,9 +358,9 @@ pub struct PropertyDecl {
 #[derive(Debug, Clone)]
 pub enum PropertyHookBody {
     // `get => expr;` / `set(...) => expr;`
-    Arrow(Expr),
+    Arrow(ExprNode),
     // `get { ... }` / `set(...) { ... }`
-    Block(Vec<Stmt>),
+    Block(Vec<StmtNode>),
     // `get;` / `set(...);` - a hook declared, with no
     // body at all (only legal inside an abstract class/interface). Real
     // PHP distinguishes this from "no hook declared" (`PropertyHooks::
@@ -459,7 +459,7 @@ pub struct ClassConst {
     // The name with the file's namespace, for a global `const`; `None` in
     // a class. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    pub value: Expr,
+    pub value: ExprNode,
     // The `public`/`private`/`protected` modifier a real class's own
     // `const` declaration can carry (PHP 7.1+), needed by
     // `UnusedPrivateConstantRule` to tell a private constant candidate
@@ -631,7 +631,7 @@ pub struct EnumCase {
     pub name: Ident,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
-    pub value: Option<Expr>,
+    pub value: Option<ExprNode>,
     // `#[Attr]` groups preceding this case.
     pub attrs: Vec<Attribute>,
     pub span: Span,
@@ -683,7 +683,7 @@ pub struct Arg {
     // `name:` for a named argument.
     pub name: Option<Ident>,
     pub spread: bool,
-    pub value: Expr,
+    pub value: ExprNode,
 }
 
 /// One element of an `ExprKind::ArrayLiteral` (`[...]`) - `key` is
@@ -694,8 +694,8 @@ pub struct Arg {
 /// statically.
 #[derive(Debug, Clone)]
 pub struct ArrayItem {
-    pub key: Option<Expr>,
-    pub value: Expr,
+    pub key: Option<ExprNode>,
+    pub value: ExprNode,
     pub spread: bool,
     /// `&$x`: the element is a reference to the variable (created as
     /// `null` if it doesn't exist).
@@ -716,10 +716,10 @@ pub enum DestructureSyntax {
 /// (or at the element's position, when there is no key) goes.
 #[derive(Debug, Clone)]
 pub struct DestructureItem {
-    pub key: Option<Expr>,
+    pub key: Option<ExprNode>,
     /// Where the value is written: a variable, property, element, or a
     /// nested pattern. `None` for a skipped slot (`[, $b]`).
-    pub target: Option<Expr>,
+    pub target: Option<ExprNode>,
     /// `&$x`: the target becomes a reference to the element.
     pub by_ref: bool,
 }
@@ -809,7 +809,7 @@ pub struct ClosureUse {
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
     Name(QualifiedName),
-    Expr(Box<Expr>),
+    Expr(Box<ExprNode>),
 }
 
 /// `ExprKind::StaticCall`'s own receiver - `InstanceofTarget`'s identical
@@ -818,11 +818,11 @@ pub enum InstanceofTarget {
 /// case) plus its own name span, or a genuinely dynamic receiver
 /// expression (`$obj::method()`, `(new Foo())::method()`, `self::$
 /// method()` when `$method` isn't itself the receiver but the member
-/// name - only the *receiver* side is ever `Expr` here).
+/// name - only the *receiver* side is ever `ExprNode` here).
 #[derive(Debug, Clone)]
 pub enum StaticTarget {
     Name(Box<QualifiedName>),
-    Expr(Box<Expr>),
+    Expr(Box<ExprNode>),
 }
 
 impl StaticTarget {
@@ -835,7 +835,7 @@ impl StaticTarget {
     }
 
     /// The receiver expression, or `None` for a literal class name.
-    pub fn expr(&self) -> Option<&Expr> {
+    pub fn expr(&self) -> Option<&ExprNode> {
         match self {
             StaticTarget::Name(..) => None,
             StaticTarget::Expr(e) => Some(e),
@@ -1183,7 +1183,7 @@ pub enum GlobalVar {
     /// `global $name;` (the name is without its `$`).
     Name(Ident),
     /// `global ${expr};` / `global $$name;`: the name is computed.
-    Dynamic(Expr),
+    Dynamic(ExprNode),
 }
 
 impl GlobalVar {
@@ -1361,14 +1361,14 @@ impl ObjectOperator {
 pub struct ClosureExpr {
     pub params: Vec<Param>,
     pub uses: Vec<ClosureUse>,
-    pub body: Vec<Stmt>,
+    pub body: Vec<StmtNode>,
     // The labels the body's `goto`s name; see `FunctionBody`.
     pub goto_labels: Box<[GotoLabel]>,
     // Whether the body is a generator; see `FunctionBody`.
     pub is_generator: bool,
     pub is_static: bool,
     pub by_ref: bool,
-    // Boxed: keeps `Expr` small, since expression parsing recurses.
+    // Boxed: keeps `ExprNode` small, since expression parsing recurses.
     pub return_type: Option<Box<TypeHint>>,
     // `#[Attr]` groups on the closure expression itself
     // (`$f = #[Foo] function () {};`), not on any of its parameters.
@@ -1379,7 +1379,7 @@ pub struct ClosureExpr {
 #[derive(Debug, Clone)]
 pub struct ArrowFnExpr {
     pub params: Vec<Param>,
-    pub body: Box<Expr>,
+    pub body: Box<ExprNode>,
     // Whether the body is a generator; see `FunctionBody`.
     pub is_generator: bool,
     pub is_static: bool,
@@ -1391,7 +1391,7 @@ pub struct ArrowFnExpr {
     pub attrs: Vec<Attribute>,
 }
 
-/// An expression, plus the real source span it occupies - see `Stmt`'s
+/// An expression, plus the real source span it occupies - see `StmtNode`'s
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
 pub struct ExprNode {
@@ -1455,19 +1455,19 @@ pub enum ExprKind {
     // `${expr}` - the older "variable variable" syntax: the variable's own
     // name is computed at runtime by evaluating expr, so unlike Variable
     // there's no fixed name here to look up or bind in `locals`.
-    DynamicVariable(Box<Expr>),
+    DynamicVariable(Box<ExprNode>),
     ArrayLiteral(Vec<ArrayItem>),
     // `@expr`: the error-control operator, which silences the warnings
     // evaluating `expr` raises. Its value is `expr`'s.
-    ErrorSuppress(Box<Expr>),
+    ErrorSuppress(Box<ExprNode>),
     // `[...]` or `list(...)` as the target of an assignment or a
     // `foreach`: takes the array apart into the item targets. Only ever
     // the left of an `Assign`, a `foreach` value, or an item target of
     // another pattern.
     Destructure(Vec<DestructureItem>, DestructureSyntax),
-    Unary(UnaryOp, Box<Expr>),
-    Binary(BinOp, Box<Expr>, Box<Expr>),
-    Assign(Box<Expr>, Box<Expr>),
+    Unary(UnaryOp, Box<ExprNode>),
+    Binary(BinOp, Box<ExprNode>, Box<ExprNode>),
+    Assign(Box<ExprNode>, Box<ExprNode>),
     // `$a = &$b;` - reference assignment, only ever valid on a plain
     // `=` (never a compound one). A genuinely distinct variant, not a
     // flag on `Assign`, specifically so a `nullsafe.byRef` check
@@ -1478,11 +1478,11 @@ pub enum ExprKind {
     // `Assign`). Every other consumer that doesn't care about the
     // by-ref distinction folds this into the same arm as `Assign` via
     // an or-pattern.
-    AssignRef(Box<Expr>, Box<Expr>),
-    CompoundAssign(BinOp, Box<Expr>, Box<Expr>),
-    Ternary(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
-    Call(Box<Expr>, Vec<Arg>),
-    New(Box<Expr>, Vec<Arg>),
+    AssignRef(Box<ExprNode>, Box<ExprNode>),
+    CompoundAssign(BinOp, Box<ExprNode>, Box<ExprNode>),
+    Ternary(Box<ExprNode>, Option<Box<ExprNode>>, Box<ExprNode>),
+    Call(Box<ExprNode>, Vec<Arg>),
+    New(Box<ExprNode>, Vec<Arg>),
     // The trailing `bool` is `true` for a nullsafe access (`$x?->prop`),
     // `false` for a plain `$x->prop` - the two are otherwise identical
     // syntactically, but real PHP's `?->` implicitly makes the whole
@@ -1495,16 +1495,16 @@ pub enum ExprKind {
     // access is a `DynamicPropertyAccess`/`DynamicMethodCall` below, not
     // this variant - `$prop`'s own runtime value, not its declared name,
     // is the real member name.
-    PropertyAccess(Box<Expr>, Ident, ObjectOperator),
-    MethodCall(Box<Expr>, Ident, Vec<Arg>, ObjectOperator),
+    PropertyAccess(Box<ExprNode>, Ident, ObjectOperator),
+    MethodCall(Box<ExprNode>, Ident, Vec<Arg>, ObjectOperator),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still
     // worth its own base+name-expr(+args) checking (undefined variables
     // inside the {} can still be caught), even though the accessed
     // member's own type never can be.
-    DynamicPropertyAccess(Box<Expr>, Box<Expr>, ObjectOperator),
-    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>, ObjectOperator),
+    DynamicPropertyAccess(Box<ExprNode>, Box<ExprNode>, ObjectOperator),
+    DynamicMethodCall(Box<ExprNode>, Box<ExprNode>, Vec<Arg>, ObjectOperator),
     /// `Foo::BAR`.
     ClassConstFetch(StaticTarget, Ident),
     /// `Foo::class` (any case).
@@ -1512,70 +1512,70 @@ pub enum ExprKind {
     /// `Foo::$bar`; the name is without its `$`.
     StaticPropertyFetch(StaticTarget, Ident),
     /// `Foo::${expr}` / `Foo::$$name`: the property name is computed.
-    DynamicStaticPropertyFetch(StaticTarget, Box<Expr>),
+    DynamicStaticPropertyFetch(StaticTarget, Box<ExprNode>),
     /// `Foo::{$expr}` (PHP 8.3): the constant name is computed.
-    DynamicClassConstFetch(StaticTarget, Box<Expr>),
+    DynamicClassConstFetch(StaticTarget, Box<ExprNode>),
     // `Name` mirrors `InstanceofTarget::Name`'s own (name, name-span)
     // shape exactly - a `Foo::method()` receiver, unchanged from before
-    // this variant existed. `Expr` is a real, non-`Name` receiver
+    // this variant existed. `ExprNode` is a real, non-`Name` receiver
     // expression (`$obj::method()`) - previously discarded into a
     // permanent `"?"` sentinel string at parse time; now the real,
-    // already-parsed receiver `Expr` survives into the AST, letting
+    // already-parsed receiver `ExprNode` survives into the AST, letting
     // `check_static_call` resolve its inferred type and check the call
     // against it, the same way a literal class name already is.
     StaticCall(StaticTarget, Ident, Vec<Arg>),
     /// `Foo::$name()` / `Foo::{$expr}()`: the method name is computed.
-    DynamicStaticCall(StaticTarget, Box<Expr>, Vec<Arg>),
-    Index(Box<Expr>, Option<Box<Expr>>),
+    DynamicStaticCall(StaticTarget, Box<ExprNode>, Vec<Arg>),
+    Index(Box<ExprNode>, Option<Box<ExprNode>>),
     Name(QualifiedName),
-    Instanceof(Box<Expr>, InstanceofTarget),
-    Cast(CastSpelling, Box<Expr>),
-    Grouping(Box<Expr>),
+    Instanceof(Box<ExprNode>, InstanceofTarget),
+    Cast(CastSpelling, Box<ExprNode>),
+    Grouping(Box<ExprNode>),
     // `clone $x` / PHP 8.5's `clone($x, $overrides)` (the second field is
     // the property-overrides array, when present). Both produce an object
     // of the same type as the first operand, so infer_expr treats them
     // identically - the overrides themselves aren't otherwise modeled.
-    Clone(Box<Expr>, Option<Box<Expr>>),
+    Clone(Box<ExprNode>, Option<Box<ExprNode>>),
     // `foo(...)` / `$obj->method(...)` (PHP 8.1): a reference to the
     // callable itself, not a call - wraps a Call/MethodCall/StaticCall
     // that was parsed with an empty argument list specifically because of
     // this syntax, so it's never mistaken for (and argument-count-checked
     // as) a real zero-argument call.
-    FirstClassCallable(Box<Expr>),
+    FirstClassCallable(Box<ExprNode>),
     // `` `cmd $interpolated` ``: runs the command, as `shell_exec()` does.
     // Holds the command string.
-    ShellExec(Box<Expr>),
+    ShellExec(Box<ExprNode>),
     // `isset($a, $b, ...)`: whether every operand is set and not null.
-    Isset(Vec<Expr>),
+    Isset(Vec<ExprNode>),
     // `empty(expr)`: whether the operand is unset or falsy.
-    Empty(Box<Expr>),
+    Empty(Box<ExprNode>),
     // `print expr`, which evaluates to `1`.
-    Print(Box<Expr>),
+    Print(Box<ExprNode>),
     // `exit`/`die`: `None` written bare, `Some` with its parenthesized
     // arguments (PHP 8.4 makes both functions of `string|int $status`).
     Exit(ExitKind, Option<Vec<Arg>>),
     // `eval(code)`.
-    Eval(Box<Expr>),
+    Eval(Box<ExprNode>),
     // `include`/`include_once`/`require`/`require_once path`.
-    Include(IncludeKind, Box<Expr>),
+    Include(IncludeKind, Box<ExprNode>),
     // `throw` as an expression (PHP 8.0+): valid in match arms, ternary
     // branches, ??'s right side, arrow function bodies, etc - as opposed
     // to StmtKind::Throw, a bare `throw expr;` statement, which is still
     // dispatched separately and takes priority at statement position.
-    Throw(Box<Expr>),
+    Throw(Box<ExprNode>),
     NewAnonymousClass(Box<AnonymousClass>),
     // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
     // enclosing function a generator.
-    Yield(Option<Box<Expr>>, Option<Box<Expr>>),
+    Yield(Option<Box<ExprNode>>, Option<Box<ExprNode>>),
     // `yield from $generator;`
-    YieldFrom(Box<Expr>),
-    Interpolated(Vec<Expr>),
-    // Boxed: keeps `Expr` small, since expression parsing recurses.
+    YieldFrom(Box<ExprNode>),
+    Interpolated(Vec<ExprNode>),
+    // Boxed: keeps `ExprNode` small, since expression parsing recurses.
     Closure(Box<ClosureExpr>),
     ArrowFn(Box<ArrowFnExpr>),
     // The arms in written order, `default` among them.
     Match {
-        subject: Box<Expr>,
+        subject: Box<ExprNode>,
         arms: Vec<MatchArm>,
     },
 }
@@ -1584,20 +1584,20 @@ pub enum ExprKind {
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     // `None` for the `default` arm.
-    pub conditions: Option<Vec<Expr>>,
-    pub body: Expr,
+    pub conditions: Option<Vec<ExprNode>>,
+    pub body: ExprNode,
     pub span: Span,
 }
 
 impl MatchArm {
     /// A non-default arm's conditions and body.
-    pub fn conditioned(&self) -> Option<(&Vec<Expr>, &Expr)> {
+    pub fn conditioned(&self) -> Option<(&Vec<ExprNode>, &ExprNode)> {
         Some((self.conditions.as_ref()?, &self.body))
     }
 }
 
 /// The body of a `match`'s `default` arm.
-pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
+pub fn match_default(arms: &[MatchArm]) -> Option<&ExprNode> {
     arms.iter()
         .find(|arm| arm.conditions.is_none())
         .map(|arm| &arm.body)
@@ -1611,7 +1611,7 @@ pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
 /// since a format string is never legitimately written as a bare number.
 /// Purely syntactic: a concatenation with a variable operand is never
 /// resolved here even if a caller's type tracking knows it's a literal
-/// value, since this function only sees the raw `Expr`.
+/// value, since this function only sees the raw `ExprNode`.
 pub fn literal_string_value(e: &ExprNode) -> Option<std::borrow::Cow<'_, str>> {
     let e = e.peeled();
     crate::stack::guard(|| match &e.kind {
