@@ -327,8 +327,15 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   resolves. The full 1,141-test library suite, check, and Clippy pass. Other
   pass results and immutable declaration storage remain. `d3c4d0d9` changes
   the ancestor-closure and member-owner builds to collect directly into
-  ID-keyed maps and parallel-merges scoped updates. This advances 4.7; its
-  reference, include-graph, purity, and property-write relations remain open.
+  ID-keyed maps and parallel-merges scoped updates. `5b69c001` stores settled
+  function and method effects under `FnId` and `MethodRef`, keeping synthetic
+  property-hook effects named until they have property slots; canonical output
+  and change snapshots translate effects back to names, and base switches
+  retag their IDs. Its settling graph still uses `DeclKey`. The library suite
+  (1,141 tests), check, and Clippy pass. Item 4.6 remains open; inherited
+  PHPDoc, trait composition, constant resolution, other pass results and
+  immutable declaration storage remain. The 4.7 reference, include-graph,
+  purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
