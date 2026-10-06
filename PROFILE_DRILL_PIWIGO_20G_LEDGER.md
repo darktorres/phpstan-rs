@@ -132,7 +132,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 3.V | §11 | Validation: the builds, the tests and the fixtures; 3.4 is validated with item 9 | 3.2 | val | DONE (2026-10-05: gate workspace build and `cargo test --workspace` passed; oracle scoped and all-on corpus runs passed; fixtures: 3,857 passed, 50 failed, the same existing failure count recorded at 2.V; no dump comparison) |
 | **4** | **item 4** | **The registry by declaration ids** | | | |
 | 4.1 | review row 4 | Make the registry's fields private first, so readers go through its API | — | perf | DONE (e06503ad; four public declaration tables are private behind read-only accessors, all callers use the API, and registry-internal stub extraction still moves its owned tables) |
-| 4.2 | Three ranges | Each store's ids fall in three ranges, one per source; accessors dispatch by range | 4.1 | perf | OPEN |
+| 4.2 | Three ranges | Each store's ids fall in three ranges, one per source; accessors dispatch by range | 4.1 | perf | DONE (1b8f79aa; stub IDs follow frozen base order, project IDs are assigned during serial insertion, and name lookups now return ids; `cargo check -p phpstan-rs --lib --tests` and `cargo clippy -p phpstan-rs --all-targets` passed) |
 | 4.3 | `FileDecls` | A file's declarations stored together in `la-arena`'s typed arenas (new dependency); members and parameters as ranges | 4.2 | perf | OPEN |
 | 4.4 | Generations | Ids carry a generation; the id space has one too; a debug build checks it on read | 4.2 | perf | OPEN |
 | 4.5 | Member lists | One entry per member a class has, traits' and aliases included; `MethodRef` is (class, slot) | 4.3 | sem | OPEN |

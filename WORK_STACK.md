@@ -231,15 +231,16 @@ memory. What it gathered beyond that, new checks and changes to what the
 analysis finds that the optimization does not need, is deferred until after
 O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
-- **State: building, item 4.2.** Items 0-2 are closed. Item 3's
+- **State: building, item 4.3.** Items 0-2 are closed. Item 3's
   implementation is done (3.1-3.2); its validation at 3.V passed the gate
   workspace build, workspace tests, and the scoped and all-on oracle corpus
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
   existing failure count recorded at 2.V. The 3.4 scratch-store row remains
-  with item 9. The next task is to make the four public declaration tables
-  private behind `Registry` read accessors, row 4.1 (`e06503ad`, preserving
-  owned stub-table extraction). Row 4.2 is
-  next: separate stub, context-base and project declaration id ranges. The plan was committed at
+  with item 9. Row 4.1 made the four public declaration tables private behind
+  `Registry` read accessors (`e06503ad`, preserving owned stub-table
+  extraction). Row 4.2 added stub, context-base and project ID ranges
+  (`1b8f79aa`); `cargo check -p phpstan-rs --lib --tests` and Clippy passed.
+  Row 4.3 is next: store each file's declarations in typed arenas. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
@@ -259,7 +260,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   starting state (0.1) found four false-report bugs, fixed in item 0
   before the baseline (rows 0.1a-0.1f), and added the implicit calls, now
   part of item 0. The latest completed implementation is row 3.2 at
-  `dfa2cebe`; row 4.1 is committed at `e06503ad`.
+  `dfa2cebe`; row 4.1 is committed at `e06503ad` and row 4.2 at `1b8f79aa`.
 - **Item 0's validation (0.11)** is under way: the tests, fixtures and
   runtime oracle pass, and the edit replay over Piwigo and every vendor
   project found the stale diagnostics and registry state the plan's "Found
