@@ -356,7 +356,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   class-constant fixed-point queue and update records; constant slots and
   writes to the reflection remain name-keyed. ID-keyed inherited-doc values,
   remaining trait outputs, constant-resolution values, other pass results and
-  immutable declaration storage remain. The 4.7 reference, include-graph,
+  immutable declaration storage remain. `9ccaef59` carries class IDs through
+  deferred type-import and mixin result batches; mixin method outputs share the
+  source's lazy signature handles. All 1,199 crate tests, check, Clippy and
+  formatting pass. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
