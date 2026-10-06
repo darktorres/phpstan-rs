@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `ac719727`. Counts below were read from the files on
+State as of 2026-10-06, `0ddfa7ed`. Counts below were read from the files on
 that date.
 
 ## Where to resume
@@ -384,11 +384,13 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   trait composition, and advances the stub-container version to 8; the focused
   inherited-trait-property test and all 1,143 crate tests, 275 syntax tests,
   check, Clippy and formatting pass. `a2ce1d81` adds and tests
-  `OrderedNameMap::get_index`, the name-to-slot operation needed to resolve
-  constant slots without a scan; its focused syntax test, formatting check and
-  diff check pass. The ledger records it at 4.6. Next: move resolved class
-  constant types to ID-and-slot results, covering deferred `value-of`, Registry
-  readers, cache freeze/load, base switches and scoped edits. The 4.7 reference,
+  `OrderedNameMap::get_index`; `0ddfa7ed` adds
+  `lookup_const_with_owner_and_slot`, preserving existing APIs while returning
+  the declaring class and stable slot. Direct/inherited slot tests, library
+  check, Clippy, formatting and diff checks pass. The ledger records both at
+  4.6. Next: move resolved class constant types to ID-and-slot results,
+  covering deferred `value-of`, Registry readers, cache freeze/load, base
+  switches and scoped edits. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
