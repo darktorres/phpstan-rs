@@ -129,7 +129,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 3.1 | keep / drop | `keeps_tree(role, open)` in the load and in `update_file`; one state shape for a context file, the cached one | 1.4 | perf | DONE (8e75ba79) |
 | 3.2 | drop, read buffer | The drop runs on the allocating worker. Context files are read into the worker's reusable buffer | 3.1 | perf | DONE (725e4264) |
 | 3.3 | `ast_of` | `ast_of` reads the overlay before the disk | 1.4 | sem | DEFERRED (after O3, not optimization) |
-| 3.V | §11 | Validation: the builds, the tests and the fixtures; 3.4 is validated with item 9 | 3.2 | val | OPEN |
+| 3.V | §11 | Validation: the builds, the tests and the fixtures; 3.4 is validated with item 9 | 3.2 | val | DONE (2026-10-05: gate workspace build and `cargo test --workspace` passed; oracle scoped and all-on corpus runs passed; fixtures: 3,857 passed, 50 failed, the same existing failure count recorded at 2.V; no dump comparison) |
 | **4** | **item 4** | **The registry by declaration ids** | | | |
 | 4.1 | review row 4 | Make the registry's fields private first, so readers go through its API | — | perf | OPEN |
 | 4.2 | Three ranges | Each store's ids fall in three ranges, one per source; accessors dispatch by range | 4.1 | perf | OPEN |
