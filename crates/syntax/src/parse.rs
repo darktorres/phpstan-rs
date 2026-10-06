@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::ast::{GotoLabel, Stmt};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
-use crate::name::{Name, NameCache};
+use crate::name::{Name, NameCache, NameId};
 use crate::parser::{ParseError, Parser};
 use crate::references::FileReferences;
 use crate::span::LineIndex;
@@ -32,6 +32,13 @@ pub struct ParsedFile {
     pub goto_labels: Box<[GotoLabel]>,
     /// What the file refers to.
     pub references: FileReferences,
+}
+
+impl ParsedFile {
+    /// Resolves a file-local name id to the shared interned name.
+    pub fn name(&self, id: NameId) -> Option<&Name> {
+        self.names.get(id.index())
+    }
 }
 
 /// A file's source: text already known to be UTF-8, or bytes, which are
