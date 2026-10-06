@@ -274,19 +274,36 @@ pub(crate) struct DeclKey {
     pub(in crate::registry) member: String,
 }
 
+/// The kind of synthetic property hook represented by a property slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PropertyHookKind {
+    Get,
+    Set,
+}
+
 /// A settled body effect addressed by its declaration, without hashing the
-/// declaration's class or member name on every lookup. Synthetic property
-/// hooks do not yet have a property slot, so they retain their folded key.
+/// declaration's class or member name on every lookup. Property slots are
+/// assigned by sorting a class's effective property names, so they are stable
+/// across declaration insertion order and cache reconstruction.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum EffectId {
     Function(crate::registry::FnId),
     Method(crate::registry::MethodRef),
+    PropertyHook {
+        class: crate::registry::ClassId,
+        slot: u32,
+        kind: PropertyHookKind,
+    },
+    Closure {
+        caller: Box<EffectId>,
+        ordinal: u32,
+    },
     Named(DeclKey),
 }
 
 impl EffectId {
     fn is_closure(&self) -> bool {
-        matches!(self, EffectId::Named(key) if key.is_closure())
+        matches!(self, EffectId::Closure { .. })
     }
 
     pub(crate) fn with_generation(self, generation: u32) -> EffectId {
@@ -296,6 +313,15 @@ impl EffectId {
                 method.class().with_generation(generation),
                 method.slot(),
             )),
+            EffectId::PropertyHook { class, slot, kind } => EffectId::PropertyHook {
+                class: class.with_generation(generation),
+                slot,
+                kind,
+            },
+            EffectId::Closure { caller, ordinal } => EffectId::Closure {
+                caller: Box::new(caller.with_generation(generation)),
+                ordinal,
+            },
             EffectId::Named(key) => EffectId::Named(key),
         }
     }
@@ -381,7 +407,7 @@ impl DeclKey {
 
     /// Whether this is a closure's key (`DeclKey::closure`).
     fn is_closure(&self) -> bool {
-        self.member.contains('{')
+        closure_parent(self).is_some()
     }
 
     /// The name the builtin table knows the declaration by: a function's,
@@ -392,6 +418,20 @@ impl DeclKey {
             None => self.member.clone(),
         }
     }
+}
+
+/// Splits a synthetic closure name into the caller declaration and the
+/// body's ordinal within it. Closure names are created only by `closure`.
+fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
+    let start = key.member.rfind("{closure#")?;
+    let ordinal = key.member[start + 9..].strip_suffix('}')?.parse().ok()?;
+    Some((
+        DeclKey {
+            class: key.class.clone(),
+            member: key.member[..start].to_string(),
+        },
+        ordinal,
+    ))
 }
 
 fn function_key(name: &str) -> DeclKey {
@@ -806,13 +846,43 @@ fn classifications_by_id<'r>(
 
 impl Registry {
     pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
+        if let Some((caller, ordinal)) = closure_parent(key) {
+            return EffectId::Closure {
+                caller: Box::new(self.effect_id_for(&caller)),
+                ordinal,
+            };
+        }
         match key.class.as_deref() {
             None => self
                 .function_ids
                 .get(key.member.as_str())
                 .copied()
                 .map_or_else(|| EffectId::Named(key.clone()), EffectId::Function),
-            Some(_) if key.member.starts_with('$') => EffectId::Named(key.clone()),
+            Some(class) if key.member.starts_with('$') => {
+                let hook = self.property_names(class).find_map(|property| {
+                    [
+                        (false, PropertyHookKind::Get),
+                        (true, PropertyHookKind::Set),
+                    ]
+                    .into_iter()
+                    .find(|(set, _)| hook_member(Some(property), *set) == key.member)
+                    .map(|(_, kind)| (property, kind))
+                });
+                let Some((property, kind)) = hook else {
+                    return EffectId::Named(key.clone());
+                };
+                let Some(class_id) = self.class_ids.get(class).copied() else {
+                    return EffectId::Named(key.clone());
+                };
+                let Some(slot) = self.property_slot(class, property.as_str()) else {
+                    return EffectId::Named(key.clone());
+                };
+                EffectId::PropertyHook {
+                    class: class_id,
+                    slot,
+                    kind,
+                }
+            }
             Some(class) => {
                 let method = self.class_ids.get(class).and_then(|id| {
                     self.member_slot(class, key.member.as_str())
@@ -821,6 +891,24 @@ impl Registry {
                 method.map_or_else(|| EffectId::Named(key.clone()), EffectId::Method)
             }
         }
+    }
+
+    /// A class-local property slot assigned in spelling order. Effective
+    /// names are sorted because NameMap iteration order can differ between a
+    /// source build and a cache-backed registry.
+    fn property_slot(&self, class: &str, property: &str) -> Option<u32> {
+        let mut properties: Vec<&str> = self.property_names(class).map(Name::as_str).collect();
+        properties.sort_unstable();
+        properties
+            .binary_search(&property)
+            .ok()
+            .and_then(|slot| u32::try_from(slot).ok())
+    }
+
+    fn property_name_for_slot(&self, class: &str, slot: u32) -> Option<Name> {
+        let mut properties: Vec<Name> = self.property_names(class).cloned().collect();
+        properties.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+        properties.get(usize::try_from(slot).ok()?).cloned()
     }
 
     fn effect_decl_key(&self, id: &EffectId) -> Option<DeclKey> {
@@ -833,6 +921,16 @@ impl Registry {
                 let member = self.member_entry_by_ref(*method)?;
                 Some(method_key(class.as_str(), member.name.as_str()))
             }
+            EffectId::PropertyHook { class, slot, kind } => {
+                let class_name = self.class_name_by_id(*class)?;
+                let property = self.property_name_for_slot(class_name.as_str(), *slot)?;
+                Some(hook_key(
+                    class_name.as_str(),
+                    property.as_str(),
+                    *kind == PropertyHookKind::Set,
+                ))
+            }
+            EffectId::Closure { .. } => None,
             EffectId::Named(key) => Some(key.clone()),
         }
     }
@@ -941,7 +1039,7 @@ impl Registry {
         });
         // A closure's effect is taken where it runs; no call names it. Keep
         // its result through settlement, then omit it from the registry.
-        effects.retain(|id, _| !matches!(id, EffectId::Named(key) if key.is_closure()));
+        effects.retain(|id, _| !id.is_closure());
         self.effects = effects;
     }
 
@@ -3754,3 +3852,135 @@ syntax::canonical_enum!(Storage {
         var,
     },
 });
+
+#[cfg(test)]
+mod effect_id_tests {
+    use super::*;
+    use crate::registry::container::{Reader, Writer};
+    use syntax::{lexer::Lexer, parser::Parser};
+
+    fn registry(source: &str) -> Registry {
+        let tokens = Lexer::new(source).tokenize_with_spans();
+        let mut program = Parser::new(tokens).parse_program().unwrap();
+        crate::stub_attributes::apply_stub_attributes(&mut program);
+        Registry::build(&program)
+    }
+
+    fn cache_round_trip(registry: &Registry) -> Registry {
+        let mut writer = Writer::new();
+        registry.store(&mut writer).expect("stores");
+        let reader = Reader::new(writer.finish()).expect("stored registry is a whole file");
+        let mut back = Registry::load(&reader).expect("reads back");
+        back.check_stored().expect("stored tables are ordered");
+        back.freeze();
+        back
+    }
+
+    #[test]
+    fn closures_are_addressed_by_their_caller_id_and_ordinal() {
+        let registry = registry(
+            r#"<?php
+                function work(): void {}
+                class Worker { public function run(): void {} }
+            "#,
+        );
+        let function = function_key("work");
+        let first = registry.effect_id_for(&function.closure(0));
+        let second = registry.effect_id_for(&function.closure(1));
+        assert_eq!(
+            first,
+            EffectId::Closure {
+                caller: Box::new(registry.effect_id_for(&function)),
+                ordinal: 0,
+            }
+        );
+        assert_ne!(first, second);
+
+        let method = method_key("Worker", "run");
+        let nested = registry.effect_id_for(&method.closure(3).closure(1));
+        assert_eq!(
+            nested,
+            EffectId::Closure {
+                caller: Box::new(EffectId::Closure {
+                    caller: Box::new(registry.effect_id_for(&method)),
+                    ordinal: 3,
+                }),
+                ordinal: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn property_hook_effect_ids_use_sorted_class_local_slots_and_round_trip_names() {
+        let mut registry = registry(
+            r#"<?php
+                class Hooks {
+                    public int $z { get {} }
+                    public int $plain;
+                    public int $a { get {} set {} }
+                }
+            "#,
+        );
+        let get_a = hook_key("Hooks", "a", false);
+        let set_a = hook_key("Hooks", "a", true);
+        let get_z = hook_key("Hooks", "z", false);
+        let get_a_id = registry.effect_id_for(&get_a);
+        let set_a_id = registry.effect_id_for(&set_a);
+        let get_z_id = registry.effect_id_for(&get_z);
+        assert_eq!(
+            get_a_id,
+            EffectId::PropertyHook {
+                class: registry.class_ids["Hooks"],
+                slot: 0,
+                kind: PropertyHookKind::Get,
+            }
+        );
+        assert_eq!(
+            set_a_id,
+            EffectId::PropertyHook {
+                class: registry.class_ids["Hooks"],
+                slot: 0,
+                kind: PropertyHookKind::Set,
+            }
+        );
+        assert_eq!(
+            get_z_id,
+            EffectId::PropertyHook {
+                class: registry.class_ids["Hooks"],
+                slot: 2,
+                kind: PropertyHookKind::Get,
+            }
+        );
+
+        registry
+            .effects
+            .insert(get_a_id.clone(), Settled::of(Effect::nothing()));
+        let names = registry.effects_for_names();
+        assert!(names.contains_key(&get_a));
+        registry.rebuild_effect_ids(names);
+        assert_eq!(
+            registry.effects.get(&get_a_id),
+            Some(&Settled::of(Effect::nothing()))
+        );
+        assert_eq!(
+            get_a_id.clone().with_generation(77),
+            EffectId::PropertyHook {
+                class: registry.class_ids["Hooks"].with_generation(77),
+                slot: 0,
+                kind: PropertyHookKind::Get,
+            }
+        );
+
+        let back = cache_round_trip(&registry);
+        let back_id = back.effect_id_for(&get_a);
+        assert!(matches!(
+            &back_id,
+            EffectId::PropertyHook {
+                slot: 0,
+                kind: PropertyHookKind::Get,
+                ..
+            }
+        ));
+        assert_eq!(back.effect_decl_key(&back_id), Some(get_a));
+    }
+}
