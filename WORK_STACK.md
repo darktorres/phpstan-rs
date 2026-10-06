@@ -424,8 +424,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   switches preserve it; the container format advances to version 12. Trait
   self-reference, subclass lookup and cache checks pass with all 1,148 crate
   tests, 275 syntax tests, check, Clippy, formatting and diff checks. Item 4.6
-  remains active: trait methods and other deferred/member outputs still mutate
-  declarations. The 4.7 reference,
+  remains active. Commit `07b88079` moves composed methods/aliases and PHPDoc
+  `@method` signatures into a `ClassId`-keyed result table. Deferred constant
+  types, imported aliases, inherited PHPDoc and method type fixes write overlays;
+  checker, purity/effects, architecture, dead-member, named-argument and LSP
+  readers use Registry lookups. The result survives freeze/cache round trips
+  (container format 13). The full crate suite (1,149 library, 3 binary and 44
+  CLI tests), 275 syntax tests, check, Clippy, formatting and diff checks pass.
+  Item 4.6 remains open for other result fields and immutable declaration storage. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
