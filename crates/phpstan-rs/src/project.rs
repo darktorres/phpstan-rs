@@ -766,6 +766,11 @@ impl Project {
         let mut base = Project::with_registry(registry);
         base.phpstan_pinned = with_phpstan;
         base.finish_loading();
+        base.registry.resolve_stub_deferred_types();
+        debug_assert!(
+            !base.registry.has_deferred_types(),
+            "the embedded stub registry must not store deferred types"
+        );
         base.registry
     }
 
@@ -1885,7 +1890,99 @@ impl Project {
                 }
             }
         }
+        #[cfg(debug_assertions)]
+        self.report_stub_scope(changed, index);
         Scope::from_ids(classes, functions, removed_classes, removed_functions)
+    }
+
+    /// Reports, for each changed declaration, the stub keys pulled into this
+    /// finishing-pass scope. This second walk is debug-only and does not
+    /// affect the scope that the pass runs on.
+    #[cfg(debug_assertions)]
+    fn report_stub_scope(&self, changed: &crate::registry::ChangedNames, index: &ReferenceIndex) {
+        let mut frontier = Vec::new();
+        frontier.extend(
+            changed
+                .classes
+                .iter()
+                .map(|name| (deps::RefKey::class_text(name), name.clone())),
+        );
+        frontier.extend(
+            changed
+                .functions
+                .iter()
+                .map(|name| (deps::RefKey::function_text(name), name.clone())),
+        );
+        frontier.extend(
+            changed
+                .constants
+                .keys()
+                .map(|name| (deps::RefKey::constant_text(name), name.clone())),
+        );
+
+        let mut seen: FxHashSet<(deps::RefKey, String)> = FxHashSet::default();
+        let mut expanded: FxHashSet<(FileId, String)> = FxHashSet::default();
+        let mut stub_files: FxHashMap<String, StubFileSet> = FxHashMap::default();
+        let mut keys_by_cause: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+
+        while let Some((key, cause)) = frontier.pop() {
+            if !seen.insert((key.clone(), cause.clone())) {
+                continue;
+            }
+            for file in index.get(&key).into_iter().flatten() {
+                if !expanded.insert((*file, cause.clone())) {
+                    continue;
+                }
+                let Some(state) = self.files.get_by_id(*file) else {
+                    continue;
+                };
+                for name in state.classes.iter().chain(&state.anonymous_classes) {
+                    let key = deps::RefKey::class(name);
+                    frontier.push((key, cause.clone()));
+                }
+                for name in &state.functions {
+                    frontier.push((deps::RefKey::function(name), cause.clone()));
+                }
+            }
+            if let Some(stub_key) = key.stub_key() {
+                for file in stubs::stub_dependent_files(stub_key) {
+                    stub_files
+                        .entry(cause.clone())
+                        .or_default()
+                        .add_closure(file, |file| {
+                            for (is_class, name) in stubs::stub_file_names(file) {
+                                let key = if is_class {
+                                    deps::RefKey::class_text(name)
+                                } else {
+                                    deps::RefKey::function_text(name)
+                                };
+                                keys_by_cause
+                                    .entry(cause.clone())
+                                    .or_default()
+                                    .insert(format!("{key:?}"));
+                                if index.contains_key(&key) {
+                                    frontier.push((key, cause.clone()));
+                                }
+                            }
+                        });
+                }
+            }
+        }
+
+        if keys_by_cause.is_empty() {
+            return;
+        }
+        let mut causes: Vec<_> = keys_by_cause.into_iter().collect();
+        causes.sort_by(|(left, _), (right, _)| left.cmp(right));
+        eprintln!("finishing scope stub keys by changed name:");
+        for (cause, keys) in causes {
+            let mut keys: Vec<_> = keys.into_iter().collect();
+            keys.sort();
+            eprintln!("  {cause}: {} keys", keys.len());
+            for key in keys {
+                eprintln!("    {key}");
+            }
+        }
     }
 
     /// Finalizes an initial load (trait flattening).

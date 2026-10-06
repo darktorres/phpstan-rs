@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -269,6 +269,8 @@ pub struct Registry {
     #[serde(skip)]
     function_results_cache: FunctionTable,
     #[serde(skip)]
+    deferred_function_results: FxHashMap<FnId, OnceLock<Option<FunctionReflection>>>,
+    #[serde(skip)]
     classes: NameTable<ClassReflection>,
     // Immutable declarations selected by the Registry's active ID space.
     // The name tables remain the insertion/cache boundary while declarations
@@ -488,6 +490,10 @@ pub struct Registry {
     pub(crate) class_type_results: FxHashMap<ClassId, ClassTypeResults>,
     #[serde(skip)]
     class_type_results_cache: NameTable<ClassTypeResults>,
+    #[serde(skip)]
+    deferred_class_results: FxHashMap<ClassId, OnceLock<Option<resolve::DeferredClassResults>>>,
+    #[serde(skip)]
+    deferred_types_ready: bool,
     #[serde(skip)]
     class_reference_results: FxHashMap<ClassId, ClassReferenceResults>,
     #[serde(skip)]
@@ -751,6 +757,9 @@ impl Registry {
         if let Some(results) = self.class_type_results.get(&id) {
             bounds.extend(results.template_bounds.clone());
         }
+        if let Some(results) = self.deferred_class_result(id) {
+            bounds.extend(results.types.template_bounds.clone());
+        }
         bounds
     }
 
@@ -766,6 +775,12 @@ impl Registry {
     }
 
     pub(crate) fn effective_extends_args(&self, id: ClassId) -> Vec<Type> {
+        if let Some(args) = self
+            .deferred_class_result(id)
+            .and_then(|results| results.types.extends_args.as_ref())
+        {
+            return args.clone();
+        }
         if let Some(args) = self
             .class_type_results
             .get(&id)
@@ -796,6 +811,9 @@ impl Registry {
             .unwrap_or_default();
         if let Some(results) = self.class_type_results.get(&id) {
             args.extend(results.implements_args.clone());
+        }
+        if let Some(results) = self.deferred_class_result(id) {
+            args.extend(results.types.implements_args.clone());
         }
         args
     }
@@ -870,6 +888,16 @@ impl Registry {
     /// The selected immutable function signature addressed by its Registry ID.
     pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
         self.debug_check_id_generation(id.generation());
+        if self.deferred_types_ready && id.source() != Some(IdSource::Stub) {
+            if let Some(result) = self.function_results.get(&id) {
+                return Some(result);
+            }
+            if let Some(cell) = self.deferred_function_results.get(&id)
+                && let Some(result) = cell.get_or_init(|| self.resolved_deferred_function(id))
+            {
+                return Some(result);
+            }
+        }
         if let Some(result) = self.function_results.get(&id) {
             return Some(result);
         }
@@ -1132,6 +1160,9 @@ impl Registry {
     /// them; a no-op before then, while they still are the declarations as
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
+        self.deferred_types_ready = false;
+        self.deferred_function_results.clear();
+        self.deferred_class_results.clear();
         // Declarations remain as built. Finishing results are reset by ID.
         self.stub_effect_results.clear();
     }
@@ -2089,6 +2120,12 @@ impl Registry {
     /// Writes the registry into `writer`: its tables as sections of their
     /// own, and the rest of it, encoded, as one.
     pub(crate) fn store(&self, writer: &mut container::Writer) -> Result<(), String> {
+        let mut ready = self.clone();
+        ready.materialize_deferred_types_for_cache();
+        ready.store_materialized(writer)
+    }
+
+    fn store_materialized(&self, writer: &mut container::Writer) -> Result<(), String> {
         let mut effects: Vec<_> = self.effects_for_names().into_iter().collect();
         effects.sort_unstable_by(|(left, _), (right, _)| {
             left.class

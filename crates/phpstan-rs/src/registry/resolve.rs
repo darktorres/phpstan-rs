@@ -1,21 +1,30 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Arc, OnceLock};
+use std::{cell::RefCell, thread_local};
 use syntax::name::{FoldedMap, Name};
 use syntax::name::{NameMap, NameSet, OrderedNameMap};
 
 /// Each templated ancestor's template bindings, as seen from one class.
 type AncestorBindings = NameMap<FxHashMap<String, Type>>;
-type DeferredClassConstantTypes = Vec<(usize, Type)>;
-type ClassPropertyResults = Vec<(Name, Arc<PropertyReflection>)>;
-type ClassMethodResults = Vec<(MethodRef, FunctionReflection)>;
-type ResolvedClassUpdate = (
-    ClassId,
-    ClassMethodResults,
-    DeferredClassConstantTypes,
-    ClassPropertyResults,
-    ClassTypeResults,
-);
+
+thread_local! {
+    /// A deferred class can need another class's resolved constants while it
+    /// resolves its own types. Cycles fall back to the declaration currently
+    /// being built; the outer resolution memoizes the completed result.
+    static RESOLVING_DEFERRED_CLASSES: RefCell<FxHashSet<ClassId>> = RefCell::new(FxHashSet::default());
+}
+pub(crate) type DeferredClassConstantTypes = Vec<(usize, Type)>;
+pub(crate) type ClassPropertyResults = Vec<(Name, Arc<PropertyReflection>)>;
+pub(crate) type ClassMethodResults = Vec<(MethodRef, FunctionReflection)>;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DeferredClassResults {
+    pub(crate) methods: ClassMethodResults,
+    pub(crate) constants: DeferredClassConstantTypes,
+    pub(crate) properties: ClassPropertyResults,
+    pub(crate) types: ClassTypeResults,
+}
 type ImportedTypeClassUpdate = (
     ClassId,
     NameMap<Type>,
@@ -636,83 +645,270 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
-        let class_names = self.scoped_class_names();
-        let scoped_class_ids: FxHashSet<ClassId> = class_names
-            .iter()
-            .filter_map(|name| self.class_ids.get(name).copied())
-            .collect();
-        self.class_type_results
-            .retain(|id, _| !scoped_class_ids.contains(id));
-        let registry: &Registry = self;
-        let resolved: Vec<ResolvedClassUpdate> = class_names
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .filter_map(|name| {
-                let id = *registry.class_ids.get(name)?;
-                registry.resolved_deferred_class(name).map(
-                    |(methods, constants, properties, type_results)| {
-                        (id, methods, constants, properties, type_results)
-                    },
-                )
+        self.deferred_function_results.clear();
+        for id in self.function_ids.values().copied() {
+            if id.source() != Some(crate::registry::IdSource::Stub) {
+                self.deferred_function_results.insert(id, OnceLock::new());
+            }
+        }
+        self.deferred_class_results.clear();
+        for id in self.class_ids.values().copied() {
+            if id.source() != Some(crate::registry::IdSource::Stub) {
+                self.deferred_class_results.insert(id, OnceLock::new());
+            }
+        }
+        self.deferred_types_ready = true;
+    }
+
+    /// Stub declarations are the immutable base shared by projects. Resolve
+    /// their deferred types once while that base is built, then keep the
+    /// serialized stub records free of deferred sentinels.
+    pub(crate) fn resolve_stub_deferred_types(&mut self) {
+        let class_updates: Vec<_> = self
+            .class_ids
+            .values()
+            .copied()
+            .filter(|id| id.source() == Some(crate::registry::IdSource::Stub))
+            .filter_map(|id| {
+                let name = self.class_name_by_id(id)?.clone();
+                let (methods, constants, properties, types) =
+                    self.resolved_deferred_class(&name)?;
+                Some((id, methods, constants, properties, types))
             })
             .collect();
-        for (id, methods, constants, properties, type_results) in resolved {
+        for (id, methods, constants, properties, types) in class_updates {
             for (slot, ty) in constants {
-                self.set_class_const_type(id, slot, ty);
+                self.class_const_types.insert((id, slot), ty);
             }
             for (name, property) in properties {
                 self.set_property_result(id, name, property);
             }
-            for (method_ref, method) in methods {
-                self.set_method_result(method_ref, method);
+            for (method, signature) in methods {
+                self.set_method_result(method, signature);
             }
-            if !type_results.is_empty() {
-                self.class_type_results.insert(id, type_results);
+            if !types.is_empty() {
+                self.class_type_results.insert(id, types);
             }
         }
+
+        let function_updates: Vec<_> = self
+            .function_ids
+            .values()
+            .copied()
+            .filter(|id| id.source() == Some(crate::registry::IdSource::Stub))
+            .filter_map(|id| {
+                self.resolved_deferred_function(id)
+                    .map(|result| (id, result))
+            })
+            .collect();
+        for (id, signature) in function_updates {
+            self.function_results.insert(id, signature);
+        }
+    }
+
+    /// Materializes the lazy type results on a registry clone before it is
+    /// written to the cache. Normal analysis remains on demand; the cache
+    /// itself stores the same effective records as a frozen base.
+    pub(crate) fn materialize_deferred_types_for_cache(&mut self) {
+        let class_updates: Vec<_> = self
+            .class_ids
+            .values()
+            .copied()
+            .filter_map(|id| {
+                let result = if id.source() == Some(crate::registry::IdSource::Stub) {
+                    let name = self.class_name_by_id(id)?.clone();
+                    let (methods, constants, properties, types) =
+                        self.resolved_deferred_class(&name)?;
+                    DeferredClassResults {
+                        methods,
+                        constants,
+                        properties,
+                        types,
+                    }
+                } else {
+                    self.deferred_class_result(id)?.clone()
+                };
+                Some((id, result))
+            })
+            .collect();
+        for (id, result) in class_updates {
+            for (slot, ty) in result.constants {
+                self.set_class_const_type(id, slot, ty);
+            }
+            for (name, property) in result.properties {
+                self.set_property_result(id, name, property);
+            }
+            for (method, signature) in result.methods {
+                self.set_method_result(method, signature);
+            }
+            if !result.types.is_empty() {
+                self.class_type_results.insert(id, result.types);
+            }
+        }
+
+        let function_updates: Vec<_> = self
+            .function_ids
+            .values()
+            .copied()
+            .filter_map(|id| self.function_by_id(id).cloned().map(|result| (id, result)))
+            .collect();
+        for (id, result) in function_updates {
+            let declaration = self.function_declaration_by_id(id);
+            if declaration.is_some_and(|declaration| declaration != &result) {
+                self.function_results.insert(id, result);
+            }
+        }
+    }
+
+    /// The deferred result for a non-stub function, built only when a
+    /// reader asks for its signature.
+    pub(crate) fn resolved_deferred_function(&self, id: FnId) -> Option<FunctionReflection> {
+        let current = self
+            .function_results
+            .get(&id)
+            .or_else(|| self.function_declaration_by_id(id))?;
+        let mut resolved = current.clone();
         let resolve = |ty: &mut Type, native: &Type| {
             if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = resolve_deferred_value_of_with_native_fallback(taken, native, self, None);
             }
         };
-        let mut function_updates = Vec::new();
-        for name in self.scoped_function_names().iter() {
-            let Some(id) = self.function_ids.get(name).copied() else {
-                continue;
-            };
-            let Some(current) = self.function_by_id(id).cloned() else {
-                continue;
-            };
-            if !function_has_deferred_type(&current) {
-                continue;
-            }
-            let mut sig = current.clone();
-            for param in &mut sig.params {
-                resolve(&mut param.ty, &param.ty_native);
-                let native = param.ty_native.clone();
-                for extra in [
-                    &mut param.doc_ty,
-                    &mut param.out_ty,
-                    &mut param.closure_this_type,
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    resolve(extra, &native);
-                }
-            }
-            resolve(&mut sig.return_type, &sig.return_type_native);
-            if let Some(doc_ty) = &mut sig.return_doc_ty {
-                resolve(doc_ty, &sig.return_type_native);
-            }
-            if sig != current {
-                function_updates.push((id, sig));
+        for param in &mut resolved.params {
+            resolve(&mut param.ty, &param.ty_native);
+            let native = param.ty_native.clone();
+            for extra in [
+                &mut param.doc_ty,
+                &mut param.out_ty,
+                &mut param.closure_this_type,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                resolve(extra, &native);
             }
         }
-        for (id, result) in function_updates {
-            self.function_results.insert(id, result);
+        resolve(&mut resolved.return_type, &resolved.return_type_native);
+        if let Some(doc_ty) = &mut resolved.return_doc_ty {
+            resolve(doc_ty, &resolved.return_type_native);
         }
+        if let Some(out) = &mut resolved.self_out {
+            resolve(out, &Type::mixed());
+        }
+        (resolved != *current).then_some(resolved)
+    }
+
+    /// The deferred result for a class, memoized on its first effective
+    /// type read. Built-in stubs cannot contain deferred types and have no
+    /// cell, so reading one never walks and decodes its methods to find out.
+    pub(crate) fn deferred_class_result(&self, id: ClassId) -> Option<&DeferredClassResults> {
+        if !self.deferred_types_ready || id.source() == Some(crate::registry::IdSource::Stub) {
+            return None;
+        }
+        let cell = self.deferred_class_results.get(&id)?;
+        if let Some(result) = cell.get() {
+            return result.as_ref();
+        }
+        let entered =
+            RESOLVING_DEFERRED_CLASSES.with(|resolving| resolving.borrow_mut().insert(id));
+        if !entered {
+            return None;
+        }
+        let result = self.class_name_by_id(id).and_then(|name| {
+            let (methods, constants, properties, types) = self.resolved_deferred_class(name)?;
+            Some(DeferredClassResults {
+                methods,
+                constants,
+                properties,
+                types,
+            })
+        });
+        RESOLVING_DEFERRED_CLASSES.with(|resolving| {
+            resolving.borrow_mut().remove(&id);
+        });
+        let _ = cell.set(result);
+        cell.get().and_then(Option::as_ref)
+    }
+
+    pub(crate) fn class_const_type_result(&self, id: ClassId, slot: usize) -> Option<&Type> {
+        self.class_const_types.get(&(id, slot)).or_else(|| {
+            self.deferred_class_result(id)?
+                .constants
+                .iter()
+                .find(|(candidate, _)| *candidate == slot)
+                .map(|(_, ty)| ty)
+        })
+    }
+
+    /// Whether any declaration currently selected by this registry contains
+    /// a deferred value-of type. Used when the embedded stub base is built;
+    /// the on-demand path relies on stubs having none.
+    pub(crate) fn has_deferred_types(&self) -> bool {
+        let signature_has_deferred = |signature: &FunctionReflection| {
+            signature.return_type.contains_deferred()
+                || signature
+                    .return_doc_ty
+                    .as_ref()
+                    .is_some_and(Type::contains_deferred)
+                || signature
+                    .self_out
+                    .as_ref()
+                    .is_some_and(Type::contains_deferred)
+                || signature.params.iter().any(|parameter| {
+                    parameter.ty.contains_deferred()
+                        || parameter
+                            .doc_ty
+                            .as_ref()
+                            .is_some_and(Type::contains_deferred)
+                        || parameter
+                            .out_ty
+                            .as_ref()
+                            .is_some_and(Type::contains_deferred)
+                        || parameter
+                            .closure_this_type
+                            .as_ref()
+                            .is_some_and(Type::contains_deferred)
+                })
+        };
+        self.function_ids
+            .values()
+            .any(|id| self.function_by_id(*id).is_some_and(signature_has_deferred))
+            || self.classes_by_id().any(|(id, name, class)| {
+                let signature_has_deferred =
+                    class.methods.iter().any(|(method_name, signature)| {
+                        let effective = self
+                            .member_slot(name, method_name)
+                            .map(|slot| MethodRef::new(id, slot))
+                            .and_then(|method| self.method_result(method))
+                            .unwrap_or(signature);
+                        signature_has_deferred(effective)
+                    });
+                let property_has_deferred = self.property_names(name).any(|property_name| {
+                    self.property_result_by_name(id, property_name)
+                        .or_else(|| class.properties.get(property_name).map(Arc::as_ref))
+                        .is_some_and(property_has_deferred_type)
+                });
+                let constant_has_deferred = class.consts.iter().any(|(constant_name, constant)| {
+                    class
+                        .consts
+                        .get_index(constant_name)
+                        .and_then(|slot| self.class_const_type_result(id, slot))
+                        .unwrap_or(&constant.ty)
+                        .contains_deferred()
+                });
+                signature_has_deferred
+                    || self
+                        .effective_extends_args(id)
+                        .iter()
+                        .chain(self.effective_implements_args(id).values().flatten())
+                        .any(Type::contains_deferred)
+                    || self
+                        .effective_template_bounds(id)
+                        .values()
+                        .any(Type::contains_deferred)
+                    || property_has_deferred
+                    || constant_has_deferred
+            })
     }
 
     /// `class_name`'s declaration with its deferred types resolved, when it
@@ -727,18 +923,57 @@ impl Registry {
         ClassTypeResults,
     )> {
         // Only a class with a deferred sentinel somewhere needs its
-        // inherited-constant view (the overwhelming majority, stubs
-        // included, have none).
+        // inherited-constant view.
         let class_id = *self.class_ids.get(class_name)?;
+        let signature_has_deferred = |signature: &FunctionReflection| {
+            signature.return_type.contains_deferred()
+                || signature
+                    .return_doc_ty
+                    .as_ref()
+                    .is_some_and(Type::contains_deferred)
+                || signature
+                    .self_out
+                    .as_ref()
+                    .is_some_and(Type::contains_deferred)
+                || signature.params.iter().any(|parameter| {
+                    parameter.ty.contains_deferred()
+                        || parameter
+                            .doc_ty
+                            .as_ref()
+                            .is_some_and(Type::contains_deferred)
+                        || parameter
+                            .out_ty
+                            .as_ref()
+                            .is_some_and(Type::contains_deferred)
+                        || parameter
+                            .closure_this_type
+                            .as_ref()
+                            .is_some_and(Type::contains_deferred)
+                })
+        };
         let own_consts = match self.class_by_id(class_id) {
             Some(info)
-                if class_has_deferred_type(
-                    info,
-                    self.method_results_for_class(class_id)
-                        .any(|(_, method)| function_has_deferred_type(method)),
-                ) || self
-                    .property_results_for_class(class_id)
-                    .any(|(_, prop)| property_has_deferred_type(prop))
+                if info.methods.values().any(&signature_has_deferred)
+                    || self
+                        .raw_method_results_for_class(class_id)
+                        .any(|(_, method)| signature_has_deferred(method))
+                    || info
+                        .extends_args
+                        .iter()
+                        .chain(info.implements_args.values().flatten())
+                        .any(Type::contains_deferred)
+                    || info
+                        .properties
+                        .values()
+                        .any(|property| property_has_deferred_type(property))
+                    || info
+                        .consts
+                        .values()
+                        .any(|constant| constant.ty.contains_deferred())
+                    || info.template_bounds.values().any(Type::contains_deferred)
+                    || self
+                        .raw_property_results_for_class(class_id)
+                        .any(|(_, prop)| property_has_deferred_type(prop))
                     || self
                         .class_constant_results_for_class(class_id)
                         .any(|(_, _, constant)| constant.ty.contains_deferred()) =>
@@ -796,7 +1031,7 @@ impl Registry {
                 method_results.push((MethodRef::new(class_id, slot), resolved));
             }
         }
-        for (method, current) in self.method_results_for_class(class_id) {
+        for (method, current) in self.raw_method_results_for_class(class_id) {
             let mut resolved = current.clone();
             resolve_signature(&mut resolved);
             if resolved != *current {
@@ -806,7 +1041,8 @@ impl Registry {
         let mut properties = Vec::new();
         for name in self.property_names(class_name) {
             let Some(current) = self
-                .property_result_by_name(class_id, name)
+                .property_result_raw_shared_by_name(class_id, name)
+                .map(Arc::as_ref)
                 .or_else(|| info.properties.get(name).map(Arc::as_ref))
             else {
                 continue;
@@ -1823,39 +2059,6 @@ fn property_has_deferred_type(prop: &PropertyReflection) -> bool {
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `sig` contains
 /// a deferred sentinel.
-fn function_has_deferred_type(sig: &FunctionReflection) -> bool {
-    sig.return_type.contains_deferred()
-        || [&sig.return_doc_ty, &sig.self_out]
-            .into_iter()
-            .flatten()
-            .any(Type::contains_deferred)
-        || sig.params.iter().any(|p| {
-            p.ty.contains_deferred()
-                || [&p.doc_ty, &p.out_ty, &p.closure_this_type]
-                    .into_iter()
-                    .flatten()
-                    .any(Type::contains_deferred)
-        })
-}
-
-/// Whether any type `resolve_deferred_value_of` rewrites on `info`
-/// contains a deferred sentinel - lets that pass skip a class outright.
-fn class_has_deferred_type(info: &ClassReflection, method_results_have_deferred: bool) -> bool {
-    info.methods.values().any(function_has_deferred_type)
-        || method_results_have_deferred
-        || info
-            .extends_args
-            .iter()
-            .chain(info.implements_args.values().flatten())
-            .any(Type::contains_deferred)
-        || info
-            .properties
-            .values()
-            .any(|p| property_has_deferred_type(p))
-        || info.consts.values().any(|c| c.ty.contains_deferred())
-        || info.template_bounds.values().any(Type::contains_deferred)
-}
-
 fn class_constant_entries<'a>(
     registry: &'a Registry,
     info: &'a ClassReflection,

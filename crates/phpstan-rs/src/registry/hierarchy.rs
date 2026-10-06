@@ -149,11 +149,52 @@ impl Registry {
         class: super::ClassId,
         property: &str,
     ) -> Option<&Arc<PropertyReflection>> {
+        self.deferred_class_result(class)
+            .and_then(|results| {
+                results
+                    .properties
+                    .iter()
+                    .find(|(name, _)| name.as_str() == property)
+                    .map(|(_, property)| property)
+            })
+            .or_else(|| self.property_result_raw_shared_by_name(class, property))
+    }
+
+    pub(crate) fn property_result_raw_shared_by_name(
+        &self,
+        class: super::ClassId,
+        property: &str,
+    ) -> Option<&Arc<PropertyReflection>> {
         let slot = self.property_ref_by_name(class, property)?;
         self.class_property_results.get(&slot)
     }
 
     pub(crate) fn property_results_for_class(
+        &self,
+        class: super::ClassId,
+    ) -> impl Iterator<Item = (super::PropertyRef, &Arc<PropertyReflection>)> {
+        let resolved = self
+            .deferred_class_result(class)
+            .into_iter()
+            .flat_map(move |results| {
+                results
+                    .properties
+                    .iter()
+                    .filter_map(move |(name, property)| {
+                        self.property_ref_by_name(class, name)
+                            .map(|reference| (reference, property))
+                    })
+            });
+        resolved.chain(
+            self.class_property_results
+                .iter()
+                .filter_map(move |(property, value)| {
+                    (property.class() == class).then_some((*property, value))
+                }),
+        )
+    }
+
+    pub(crate) fn raw_property_results_for_class(
         &self,
         class: super::ClassId,
     ) -> impl Iterator<Item = (super::PropertyRef, &Arc<PropertyReflection>)> {
@@ -243,12 +284,44 @@ impl Registry {
     }
 
     pub(crate) fn method_result(&self, method: super::MethodRef) -> Option<&FunctionReflection> {
-        self.class_method_results
-            .get(&method)
-            .map(|signature| signature.get())
+        self.deferred_class_result(method.class())
+            .and_then(|results| {
+                results
+                    .methods
+                    .iter()
+                    .find(|(candidate, _)| *candidate == method)
+                    .map(|(_, signature)| signature)
+            })
+            .or_else(|| {
+                self.class_method_results
+                    .get(&method)
+                    .map(|signature| signature.get())
+            })
     }
 
     pub(crate) fn method_results_for_class(
+        &self,
+        class: super::ClassId,
+    ) -> impl Iterator<Item = (super::MethodRef, &FunctionReflection)> {
+        let resolved = self
+            .deferred_class_result(class)
+            .into_iter()
+            .flat_map(move |results| {
+                results
+                    .methods
+                    .iter()
+                    .map(|(method, signature)| (*method, signature))
+            });
+        resolved.chain(
+            self.class_method_results
+                .iter()
+                .filter_map(move |(method, signature)| {
+                    (method.class() == class).then(|| (*method, signature.get()))
+                }),
+        )
+    }
+
+    pub(crate) fn raw_method_results_for_class(
         &self,
         class: super::ClassId,
     ) -> impl Iterator<Item = (super::MethodRef, &FunctionReflection)> {
@@ -1622,7 +1695,7 @@ impl Registry {
         let resolved = self
             .class_ids
             .get(&owner)
-            .and_then(|id| self.class_const_types.get(&(*id, slot)));
+            .and_then(|id| self.class_const_type_result(*id, slot));
         Some((owner, resolved.unwrap_or_else(|| constant.ty())))
     }
 
