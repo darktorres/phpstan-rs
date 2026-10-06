@@ -575,8 +575,13 @@ impl<V> OrderedNameMap<V> {
         self.position(key).map(|at| &mut self.entries[at].1)
     }
 
-    /// The value at an ordered position. Positions remain stable when an
-    /// existing entry is updated; new entries append to the end.
+    /// The value at an ordered position.
+    pub fn get_index_value(&self, index: usize) -> Option<&V> {
+        self.entries.get(index).map(|(_, value)| value)
+    }
+
+    /// The mutable value at an ordered position. Positions remain stable
+    /// when an existing entry is updated; new entries append to the end.
     pub fn get_index_mut(&mut self, index: usize) -> Option<&mut V> {
         self.entries.get_mut(index).map(|(_, value)| value)
     }
@@ -1621,6 +1626,8 @@ mod tests {
 
         assert_eq!(map.get_index("first"), Some(0));
         assert_eq!(map.get_index("second"), Some(1));
+        assert_eq!(map.get_index_value(0), Some(&1));
+        assert_eq!(map.get_index_value(2), None);
 
         *map.get_index_mut(0).unwrap() = 10;
         map.insert(Interner::global().name("first"), 11);

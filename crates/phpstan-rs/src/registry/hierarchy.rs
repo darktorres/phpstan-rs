@@ -1189,7 +1189,7 @@ impl Registry {
         } else {
             None
         };
-        let constant = from_file.or_else(|| info.consts.get(const_name).map(|c| &**c))?;
+        let constant = from_file.or_else(|| info.consts.get_index_value(slot).map(|c| &**c))?;
         Some((owner.clone(), slot, constant))
     }
 
