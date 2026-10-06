@@ -333,7 +333,7 @@ impl Project {
                 }
                 add(sig.return_type());
             }
-            for property in info.properties().keys() {
+            for property in self.registry.property_names(fqn) {
                 if let Some(prop) = self.registry.lookup_property(fqn, property) {
                     add(prop.ty());
                 }

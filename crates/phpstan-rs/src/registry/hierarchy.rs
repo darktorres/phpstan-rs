@@ -460,6 +460,15 @@ impl Registry {
                     property_owner.insert(name.clone(), current.clone());
                 }
             }
+            if let Some(id) = self.class_ids.get(current)
+                && let Some(properties) = self.class_property_results.get(id)
+            {
+                for name in properties.keys() {
+                    if !property_owner.contains_key(name) {
+                        property_owner.insert(name.clone(), current.clone());
+                    }
+                }
+            }
             for name in info.consts.keys() {
                 if !const_owner.contains_key(name) {
                     const_owner.insert(name.clone(), current.clone());
@@ -987,10 +996,19 @@ impl Registry {
             let Some(current_info) = self.classes.get(&current) else {
                 continue;
             };
-            if current_info.is_final_property(property) {
+            let property_result = self
+                .class_ids
+                .get(&current)
+                .and_then(|id| self.class_property_results.get(id))
+                .and_then(|properties| properties.get(property));
+            if property_result.is_some_and(|property| property.is_final())
+                || current_info.is_final_property(property)
+            {
                 return Some((current, false));
             }
-            if current_info.is_final_property_by_phpdoc(property) {
+            if property_result.is_some_and(|property| property.is_final_by_phpdoc())
+                || current_info.is_final_property_by_phpdoc(property)
+            {
                 return Some((current, true));
             }
             stack.extend(current_info.extends.iter().cloned());
@@ -1151,6 +1169,29 @@ impl Registry {
             }
             self.classes.get(owner)?.properties.get(prop).map(|p| &**p)
         })
+    }
+
+    /// Iterates a class's declared properties, including composed and
+    /// resolved entries held in the Registry result table. A result that
+    /// replaces a declaration keeps its place in the declaration map; only
+    /// result-only names are appended.
+    pub fn property_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
+        let declared = self.classes.get(class).map(|info| &info.properties);
+        let results = if self.raw_active {
+            None
+        } else {
+            self.class_ids
+                .get(class)
+                .and_then(|id| self.class_property_results.get(id))
+        };
+        declared
+            .into_iter()
+            .flat_map(|properties| properties.keys())
+            .chain(results.into_iter().flat_map(move |properties| {
+                properties.keys().filter(move |name| {
+                    !declared.is_some_and(|declared| declared.contains_key(*name))
+                })
+            }))
     }
 
     /// Same as `lookup_property`, but also returns the declaring

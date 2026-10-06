@@ -638,7 +638,7 @@ impl<'a> Checker<'a> {
             let Some(trait_info) = self.registry.classes().get(trait_name) else {
                 continue;
             };
-            for prop_name in trait_info.properties().keys() {
+            for prop_name in self.registry.property_names(trait_name) {
                 let Some(sig) = self.registry.lookup_property(trait_name, prop_name) else {
                     continue;
                 };

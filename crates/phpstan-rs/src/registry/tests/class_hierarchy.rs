@@ -160,17 +160,12 @@ fn a_final_trait_property_keeps_its_flag_on_the_using_class() {
             trait T { final public int $id; }
             class Host { use T; }
             class Child extends Host { public int $id; }
+            class Grandchild extends Host {}
             "#,
     );
-    assert!(
-        r.classes
-            .get("Host")
-            .unwrap()
-            .properties
-            .get("id")
-            .unwrap()
-            .is_final()
-    );
+    assert!(!r.classes.get("Host").unwrap().properties.contains_key("id"));
+    assert!(r.lookup_property("Host", "id").unwrap().is_final());
+    assert!(r.lookup_property("Grandchild", "id").unwrap().is_final());
     assert_eq!(
         r.find_final_ancestor_property("Child", "id")
             .map(|(name, by_phpdoc)| (name.to_string(), by_phpdoc)),
@@ -441,6 +436,14 @@ fn trait_methods_and_properties_are_flattened_in() {
         r.lookup_method("Person", "greet").unwrap().return_type,
         Type::string()
     );
+    assert!(
+        !r.classes
+            .get("Person")
+            .unwrap()
+            .properties
+            .contains_key("greeting")
+    );
+    assert!(r.property_names("Person").any(|name| name == "greeting"));
     assert_eq!(
         r.lookup_property("Person", "greeting").unwrap().ty,
         Type::string()

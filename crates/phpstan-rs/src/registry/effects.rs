@@ -556,7 +556,10 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry
                     .push(class_id);
             }
         }
-        for (property, declared) in info.properties.iter() {
+        for property in registry.property_names(class) {
+            let Some(declared) = registry.lookup_property(class, property) else {
+                continue;
+            };
             for (set, body) in [
                 (false, declared.get_hook_body),
                 (true, declared.set_hook_body),
@@ -910,18 +913,21 @@ impl Registry {
         let hooks: Vec<(&Name, &Name, &PropertyReflection, bool)> = registry
             .classes()
             .own_iter()
-            .flat_map(|(class, info)| {
-                info.properties
-                    .iter()
-                    .flat_map(move |(property, declared)| {
-                        [
-                            (false, declared.get_hook_body),
-                            (true, declared.set_hook_body),
-                        ]
+            .flat_map(|(class, _)| {
+                registry.property_names(class).flat_map(move |property| {
+                    registry
+                        .lookup_property(class, property)
                         .into_iter()
-                        .filter(|(_, body)| *body)
-                        .map(move |(set, _)| (class, property, &**declared, set))
-                    })
+                        .flat_map(move |declared| {
+                            [
+                                (false, declared.get_hook_body),
+                                (true, declared.set_hook_body),
+                            ]
+                            .into_iter()
+                            .filter(|(_, body)| *body)
+                            .map(move |(set, _)| (class, property, declared, set))
+                        })
+                })
             })
             .collect();
         classified.par_extend(
@@ -2201,9 +2207,9 @@ impl Reach<'_> {
         };
         let member = hook_member(property.map(Name::as_str), set);
         for declaring in registry.classes_declaring(&member) {
-            let Some(info) = registry.classes().get(declaring.as_str()) else {
+            if registry.classes().get(declaring.as_str()).is_none() {
                 continue;
-            };
+            }
             // How an object of each of the holder's classes is one of the
             // declaring class: `Some(true)` when it always is, `Some(false)`
             // when it may be through a class below both.
@@ -2230,16 +2236,18 @@ impl Reach<'_> {
                     .collect()
             });
             let declarations: Vec<(&Name, &PropertyReflection)> = match property {
-                Some(property) => info
-                    .properties
-                    .get(property)
-                    .map(|declared| (property, &**declared))
+                Some(property) => registry
+                    .lookup_property(declaring, property)
+                    .map(|declared| (property, declared))
                     .into_iter()
                     .collect(),
-                None => info
-                    .properties
-                    .iter()
-                    .map(|(name, declared)| (name, &**declared))
+                None => registry
+                    .property_names(declaring)
+                    .filter_map(|name| {
+                        registry
+                            .lookup_property(declaring, name)
+                            .map(|declared| (name, declared))
+                    })
                     .collect(),
             };
             for (name, declared) in declarations {

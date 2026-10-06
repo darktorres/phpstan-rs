@@ -153,8 +153,8 @@ impl Registry {
     /// reborrowing `self` as a shared `&Registry` for the duration of the
     /// parallel `filter_map` (ends before the apply loop takes `&mut
     /// self` again). Method entries reuse their shared lazy signature
-    /// handles; properties and constants already reuse their reflection
-    /// Arcs.
+    /// handles; property results reuse their reflection Arcs and constants
+    /// reuse their reflection Arcs.
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             ClassId,
@@ -189,6 +189,7 @@ impl Registry {
                 let mut added_method_names = FoldedMap::default();
                 let mut next_method_slot = own.member_order.len();
                 let mut properties = Vec::new();
+                let mut added_property_names = NameSet::default();
                 let mut consts = Vec::new();
                 let mut added_const_names = NameSet::default();
                 let mut next_const_slot = own.consts.len();
@@ -253,13 +254,40 @@ impl Registry {
                                 shared_sig,
                             ));
                         }
-                        properties.extend(
-                            trait_info
-                                .properties
-                                .iter()
-                                .filter(|(n, _)| !own.properties.contains_key(*n))
-                                .map(|(n, s)| (n.clone(), s.clone())),
-                        );
+                        for (name, declared) in &trait_info.properties {
+                            if own.properties.contains_key(name)
+                                || registry
+                                    .class_property_results
+                                    .get(&class_id)
+                                    .is_some_and(|results| results.contains_key(name))
+                                || !added_property_names.insert(name.clone())
+                            {
+                                continue;
+                            }
+                            let trait_id = registry.class_ids.get(trait_name).copied();
+                            let property = trait_id
+                                .and_then(|id| registry.class_property_results.get(&id))
+                                .and_then(|results| results.get(name))
+                                .unwrap_or(declared);
+                            properties.push((name.clone(), Arc::clone(property)));
+                        }
+                        if let Some(trait_id) = registry.class_ids.get(trait_name)
+                            && let Some(results) = registry.class_property_results.get(trait_id)
+                        {
+                            for (name, property) in results {
+                                if trait_info.properties.contains_key(name)
+                                    || own.properties.contains_key(name)
+                                    || registry
+                                        .class_property_results
+                                        .get(&class_id)
+                                        .is_some_and(|own_results| own_results.contains_key(name))
+                                    || !added_property_names.insert(name.clone())
+                                {
+                                    continue;
+                                }
+                                properties.push((name.clone(), Arc::clone(property)));
+                            }
+                        }
                         // PHP 8.2+ trait constants - composed into the
                         // using class exactly like a trait's methods/
                         // properties already are just above: a `self::`
@@ -311,12 +339,6 @@ impl Registry {
                         changed = true;
                     }
                 }
-                for (name, sig) in properties {
-                    if !info.properties.contains_key(&name) {
-                        info.properties.insert(name, sig);
-                        changed = true;
-                    }
-                }
                 for (slot, name, sig) in consts {
                     if !info.consts.contains_key(&name) {
                         debug_assert_eq!(info.consts.len(), slot);
@@ -324,6 +346,19 @@ impl Registry {
                         changed = true;
                     }
                 }
+            }
+            let own_properties = self.class_property_results.entry(class_id).or_default();
+            for (name, property) in properties {
+                if own_properties.contains_key(&name)
+                    || self
+                        .classes
+                        .get(&class_name)
+                        .is_some_and(|info| info.properties.contains_key(&name))
+                {
+                    continue;
+                }
+                own_properties.insert(name, property);
+                changed = true;
             }
         }
         changed
@@ -515,12 +550,10 @@ impl Registry {
             let Some(parent) = info.extends.first() else {
                 continue;
             };
-            for (name, own) in &info.properties {
-                let own = self
-                    .class_property_results
-                    .get(&class_id)
-                    .and_then(|properties| properties.get(name))
-                    .unwrap_or(own);
+            for name in self.property_names(class_name) {
+                let Some(own) = self.lookup_property(class_name, name) else {
+                    continue;
+                };
                 let Some((_, inherited)) = self.lookup_property_with_owner(parent, name) else {
                     continue;
                 };
@@ -652,17 +685,29 @@ impl Registry {
         // Only a class with a deferred sentinel somewhere needs its
         // inherited-constant view (the overwhelming majority, stubs
         // included, have none).
+        let class_id = *self.class_ids.get(class_name)?;
         let own_consts = match self.classes.get(class_name) {
-            Some(info) if class_has_deferred_type(info) => visible_class_consts(
-                class_name,
-                &self.classes,
-                &self.class_ids,
-                &self.class_const_types,
-            ),
+            Some(info)
+                if class_has_deferred_type(info)
+                    || self
+                        .class_property_results
+                        .get(&class_id)
+                        .is_some_and(|properties| {
+                            properties
+                                .iter()
+                                .any(|(_, prop)| property_has_deferred_type(prop))
+                        }) =>
+            {
+                visible_class_consts(
+                    class_name,
+                    &self.classes,
+                    &self.class_ids,
+                    &self.class_const_types,
+                )
+            }
             _ => return None,
         };
         let mut info = self.classes.get(class_name)?.clone();
-        let class_id = *self.class_ids.get(class_name)?;
         let class_ids = &self.class_ids;
         let const_types = &self.class_const_types;
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
@@ -706,12 +751,15 @@ impl Registry {
             }
         }
         let mut properties = Vec::new();
-        for (name, declared) in &info.properties {
-            let current = self
+        for name in self.property_names(class_name) {
+            let Some(current) = self
                 .class_property_results
                 .get(&class_id)
                 .and_then(|results| results.get(name))
-                .unwrap_or(declared);
+                .or_else(|| info.properties.get(name))
+            else {
+                continue;
+            };
             if !property_has_deferred_type(current) {
                 continue;
             }
@@ -1043,12 +1091,24 @@ impl Registry {
                     substitute(out);
                 }
             }
-            for (name, declared) in &info.properties {
-                let current = self
-                    .class_property_results
-                    .get(&class_id)
-                    .and_then(|properties| properties.get(name))
-                    .unwrap_or(declared);
+            let existing_properties = self.class_property_results.get(&class_id);
+            let property_names: NameSet = info
+                .properties
+                .keys()
+                .chain(
+                    existing_properties
+                        .into_iter()
+                        .flat_map(|properties| properties.keys()),
+                )
+                .cloned()
+                .collect();
+            for name in property_names {
+                let Some(current) = existing_properties
+                    .and_then(|properties| properties.get(&name))
+                    .or_else(|| info.properties.get(&name))
+                else {
+                    continue;
+                };
                 let mut prop = PropertyReflection::clone(current);
                 substitute(&mut prop.ty);
                 if let Some(doc) = &mut prop.doc_ty {
@@ -1058,7 +1118,7 @@ impl Registry {
                     substitute(set_ty);
                 }
                 if prop != **current {
-                    resolved_properties.push((name.clone(), Arc::new(prop)));
+                    resolved_properties.push((name, Arc::new(prop)));
                 }
             }
             for (slot, (_, c)) in info.consts.iter().enumerate() {
@@ -1115,6 +1175,7 @@ impl Registry {
                 continue;
             };
             let mut added_method_names = FoldedMap::default();
+            let own_property_names: NameSet = self.property_names(class_name).cloned().collect();
             let mut next_method_slot = info.member_order.len();
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
@@ -1147,11 +1208,11 @@ impl Registry {
                         ));
                     }
                 }
-                for (name, sig) in &mixin_info.properties {
-                    if sig.visibility == Visibility::Public
-                        && !info.properties.contains_key(name)
-                        && let Some(sig) = self.lookup_property(mixin_fqn, name)
-                    {
+                for name in self.property_names(mixin_fqn) {
+                    let Some(sig) = self.lookup_property(mixin_fqn, name) else {
+                        continue;
+                    };
+                    if sig.visibility == Visibility::Public && !own_property_names.contains(name) {
                         property_additions.push((class_id, name.clone(), Arc::new(sig.clone())));
                     }
                 }
@@ -1177,9 +1238,21 @@ impl Registry {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
-            if let Some(info) = self.classes.get_mut(&class_name) {
-                info.properties.entry(name).or_insert(sig);
+            if self
+                .classes
+                .get(&class_name)
+                .is_some_and(|info| info.properties.contains_key(&name))
+                || self
+                    .class_property_results
+                    .get(&class_id)
+                    .is_some_and(|properties| properties.contains_key(&name))
+            {
+                continue;
             }
+            self.class_property_results
+                .entry(class_id)
+                .or_default()
+                .insert(name, sig);
         }
     }
 
@@ -2070,18 +2143,14 @@ impl Registry {
         let property_fixes: Vec<(ClassId, Name, Arc<PropertyReflection>)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .flat_map_iter(|(class, info)| {
+            .flat_map_iter(|(class, _info)| {
                 let Some(class_id) = registry.class_ids.get(*class).copied() else {
                     return Vec::new();
                 };
-                info.properties
-                    .iter()
-                    .filter_map(|(name, declared)| {
-                        let prop = registry
-                            .class_property_results
-                            .get(&class_id)
-                            .and_then(|properties| properties.get(name))
-                            .unwrap_or(declared);
+                registry
+                    .property_names(class)
+                    .filter_map(|name| {
+                        let prop = registry.lookup_property(class, name)?;
                         if !prop.has_native_type {
                             return None;
                         }
@@ -2301,18 +2370,14 @@ impl Registry {
         let property_fixes: Vec<(ClassId, Name, Arc<PropertyReflection>)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .flat_map_iter(|(class, info)| {
+            .flat_map_iter(|(class, _info)| {
                 let Some(class_id) = registry.class_ids.get(*class).copied() else {
                     return Vec::new();
                 };
-                info.properties
-                    .iter()
-                    .filter_map(|(name, declared)| {
-                        let prop = registry
-                            .class_property_results
-                            .get(&class_id)
-                            .and_then(|properties| properties.get(name))
-                            .unwrap_or(declared);
+                registry
+                    .property_names(class)
+                    .filter_map(|name| {
+                        let prop = registry.lookup_property(class, name)?;
                         let ty = lookup(registry, &prop.ty);
                         let doc = prop.doc_ty.as_ref().and_then(|d| lookup(registry, d));
                         (ty.is_some() || doc.is_some()).then(|| {

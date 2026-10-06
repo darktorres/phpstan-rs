@@ -99,6 +99,8 @@ fn inherited_class_property_results_survive_cache_round_trip() {
                 /** @var Imported */
                 public $property;
             }
+            trait HasIdentifier { final public int $id; }
+            class TraitHost { use HasIdentifier; }
             "#,
     );
     let back = round_trip(&registry);
@@ -131,6 +133,16 @@ fn inherited_class_property_results_survive_cache_round_trip() {
         &Type::string(),
         "the cached declaration keeps its imported-alias input"
     );
+    assert!(
+        !back
+            .classes
+            .get("TraitHost")
+            .unwrap()
+            .properties
+            .contains_key("id"),
+        "trait properties stay out of the host declaration"
+    );
+    assert!(back.lookup_property("TraitHost", "id").unwrap().is_final());
 }
 
 #[test]

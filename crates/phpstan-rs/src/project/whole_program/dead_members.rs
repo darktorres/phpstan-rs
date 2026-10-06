@@ -236,7 +236,10 @@ pub(crate) fn find_dead_members<'a>(
             }
             dead.push((fqn.to_string(), name.to_string(), MemberKind::Method));
         }
-        for (name, sig) in info.properties() {
+        for name in registry.property_names(fqn) {
+            let Some(sig) = registry.lookup_property(fqn, name) else {
+                continue;
+            };
             let is_enum_builtin = info.kind() == ClassKind::Enum
                 && (name.as_ref() == "name" || name.as_ref() == "value");
             if !is_visible(&sig.visibility()) || is_enum_builtin || is_used(name) {
