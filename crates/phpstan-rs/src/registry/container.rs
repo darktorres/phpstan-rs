@@ -341,6 +341,7 @@ pub(super) type DecodedEntries =
     Mutex<FxHashMap<(std::any::TypeId, u64), Arc<dyn std::any::Any + Send + Sync>>>;
 
 /// Why a file wasn't read.
+#[derive(Debug)]
 pub(crate) enum Unreadable {
     /// Not a file of this layout, or damaged: the cache rebuilds it.
     Damaged,
