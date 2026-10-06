@@ -113,26 +113,32 @@ impl Registry {
             self.purity_results = PurityResults::default();
             return;
         }
-        let function_ids: FxHashSet<FnId> = scope
-            .function_keys()
+        let mut function_ids: FxHashSet<FnId> = scope
+            .function_ids()
+            .unwrap_or_else(|| self.function_ids.iter().map(|(_, id)| *id).collect())
             .into_iter()
-            .flatten()
-            .filter_map(|key| {
-                self.function_ids
-                    .get(&super::name_table::FoldedKey(key))
-                    .copied()
-            })
             .collect();
-        let class_ids: FxHashSet<ClassId> = scope
-            .class_keys()
+        function_ids.extend(
+            scope
+                .function_keys()
+                .into_iter()
+                .flatten()
+                .filter_map(|key| {
+                    self.function_ids
+                        .get(&super::name_table::FoldedKey(key))
+                        .copied()
+                }),
+        );
+        let mut class_ids: FxHashSet<ClassId> = scope
+            .class_ids()
+            .unwrap_or_else(|| self.class_ids.iter().map(|(_, id)| *id).collect())
             .into_iter()
-            .flatten()
-            .filter_map(|key| {
-                self.class_ids
-                    .get(&super::name_table::FoldedKey(key))
-                    .copied()
-            })
             .collect();
+        class_ids.extend(scope.class_keys().into_iter().flatten().filter_map(|key| {
+            self.class_ids
+                .get(&super::name_table::FoldedKey(key))
+                .copied()
+        }));
         self.purity_results
             .pure_functions
             .retain(|id| !function_ids.contains(id));

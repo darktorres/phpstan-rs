@@ -871,7 +871,7 @@ impl Registry {
         }
     }
 
-    fn effect_decl_key(&self, id: &EffectId) -> Option<DeclKey> {
+    pub(crate) fn effect_decl_key(&self, id: &EffectId) -> Option<DeclKey> {
         match id {
             EffectId::Function(id) => self
                 .function_name_by_id(*id)

@@ -4,18 +4,148 @@
 
 use std::sync::{Arc, Mutex};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::Name;
 
-use crate::registry::Registry;
 use crate::registry::name_table::FoldedKey;
+use crate::registry::{ClassId, FnId, IdSource, Registry};
 
-/// The classes and functions the finishing passes resolve, by lowercased
-/// name; `None` for every one.
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
+struct Segment {
+    source: IdSource,
+    generation: u32,
+}
+
+trait DeclarationId: Copy {
+    fn source(self) -> Option<IdSource>;
+    fn local(self) -> u32;
+    fn generation(self) -> u32;
+    fn from_parts(source: IdSource, local: u32, generation: u32) -> Self;
+}
+
+macro_rules! declaration_id_impl {
+    ($id:ty) => {
+        impl DeclarationId for $id {
+            fn source(self) -> Option<IdSource> {
+                self.source()
+            }
+            fn local(self) -> u32 {
+                self.local()
+            }
+            fn generation(self) -> u32 {
+                self.generation()
+            }
+            fn from_parts(source: IdSource, local: u32, generation: u32) -> Self {
+                <$id>::from_parts(source, local, generation)
+            }
+        }
+    };
+}
+
+declaration_id_impl!(ClassId);
+declaration_id_impl!(FnId);
+
+/// A compact set of declaration IDs. Local IDs are dense within an ID
+/// source and generation, so each segment is a plain vector of machine words.
+#[derive(Debug, Clone, Default)]
+struct IdBitSet {
+    segments: FxHashMap<Segment, Box<[u64]>>,
+}
+
+impl IdBitSet {
+    fn from_ids<I, T>(ids: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: DeclarationId,
+    {
+        let mut words: FxHashMap<Segment, Vec<u64>> = FxHashMap::default();
+        for id in ids {
+            let Some(source) = id.source() else { continue };
+            let segment = Segment {
+                source,
+                generation: id.generation(),
+            };
+            let local = id.local() as usize;
+            let bucket = words.entry(segment).or_default();
+            bucket.resize(bucket.len().max(local / 64 + 1), 0);
+            bucket[local / 64] |= 1u64 << (local % 64);
+        }
+        Self {
+            segments: words
+                .into_iter()
+                .map(|(key, words)| (key, words.into_boxed_slice()))
+                .collect(),
+        }
+    }
+
+    fn contains<T: DeclarationId>(&self, id: T) -> bool {
+        let Some(source) = id.source() else {
+            return false;
+        };
+        let Some(words) = self.segments.get(&Segment {
+            source,
+            generation: id.generation(),
+        }) else {
+            return false;
+        };
+        let local = id.local() as usize;
+        words
+            .get(local / 64)
+            .is_some_and(|word| word & (1u64 << (local % 64)) != 0)
+    }
+
+    fn ids<T: DeclarationId>(&self) -> Vec<T> {
+        let mut ids = Vec::new();
+        for (segment, words) in &self.segments {
+            for (bucket, word) in words.iter().copied().enumerate() {
+                let mut bits = word;
+                while bits != 0 {
+                    let bit = bits.trailing_zeros() as usize;
+                    let local = bucket * 64 + bit;
+                    if local <= u32::MAX as usize {
+                        ids.push(T::from_parts(
+                            segment.source,
+                            local as u32,
+                            segment.generation,
+                        ));
+                    }
+                    bits &= bits - 1;
+                }
+            }
+        }
+        ids
+    }
+
+    fn minus(&self, other: &Self) -> Self {
+        let mut segments = FxHashMap::default();
+        for (segment, words) in &self.segments {
+            let theirs = other.segments.get(segment);
+            let remaining: Vec<u64> = words
+                .iter()
+                .enumerate()
+                .map(|(i, word)| {
+                    word & !theirs.and_then(|words| words.get(i)).copied().unwrap_or(0)
+                })
+                .collect();
+            if remaining.iter().any(|word| *word != 0) {
+                segments.insert(*segment, remaining.into_boxed_slice());
+            }
+        }
+        Self { segments }
+    }
+}
+
+/// The declarations the finishing passes resolve, as ID bitsets; `None`
+/// means every declaration. Name keys are retained for removed declarations
+/// and direct name-selected compatibility scopes.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Scope {
-    classes: Option<Arc<FxHashSet<String>>>,
-    functions: Option<Arc<FxHashSet<String>>>,
+    classes: Option<Arc<IdBitSet>>,
+    functions: Option<Arc<IdBitSet>>,
+    // Names here are compatibility selectors for direct name-based callers
+    // and, for ID scopes, declarations removed before their ID can be read.
+    class_keys: Option<Arc<FxHashSet<String>>>,
+    function_keys: Option<Arc<FxHashSet<String>>>,
     // Which scope: `0` for every class and function, otherwise a number
     // no other scope has, kept by a clone.
     id: u64,
@@ -39,10 +169,12 @@ impl Scope {
         functions: impl IntoIterator<Item = &'a str>,
     ) -> Scope {
         Scope {
-            classes: Some(Arc::new(
+            classes: Some(Arc::new(IdBitSet::default())),
+            functions: Some(Arc::new(IdBitSet::default())),
+            class_keys: Some(Arc::new(
                 classes.into_iter().map(str::to_ascii_lowercase).collect(),
             )),
-            functions: Some(Arc::new(
+            function_keys: Some(Arc::new(
                 functions.into_iter().map(str::to_ascii_lowercase).collect(),
             )),
             id: next_id(),
@@ -50,6 +182,7 @@ impl Scope {
     }
 
     /// Only `classes` and `functions`, already lowercased as `of` does.
+    #[allow(dead_code)] // Kept for name-selected compatibility scopes.
     pub(crate) fn from_keys(classes: FxHashSet<String>, functions: FxHashSet<String>) -> Scope {
         debug_assert!(
             classes
@@ -59,32 +192,85 @@ impl Scope {
             "a scope's keys are lowercased"
         );
         Scope {
-            classes: Some(Arc::new(classes)),
-            functions: Some(Arc::new(functions)),
+            classes: Some(Arc::new(IdBitSet::default())),
+            functions: Some(Arc::new(IdBitSet::default())),
+            class_keys: Some(Arc::new(classes)),
+            function_keys: Some(Arc::new(functions)),
+            id: next_id(),
+        }
+    }
+
+    /// A scope whose active declarations are selected by their runtime IDs.
+    /// `removed_*` retains names for declarations deleted before this scope
+    /// was built, so stale derived results can still be cleared.
+    pub(crate) fn from_ids(
+        classes: impl IntoIterator<Item = ClassId>,
+        functions: impl IntoIterator<Item = FnId>,
+        removed_classes: FxHashSet<String>,
+        removed_functions: FxHashSet<String>,
+    ) -> Scope {
+        Scope {
+            classes: Some(Arc::new(IdBitSet::from_ids(classes))),
+            functions: Some(Arc::new(IdBitSet::from_ids(functions))),
+            class_keys: Some(Arc::new(removed_classes)),
+            function_keys: Some(Arc::new(removed_functions)),
             id: next_id(),
         }
     }
 
     pub(crate) fn is_all(&self) -> bool {
-        self.classes.is_none() && self.functions.is_none()
+        self.classes.is_none()
+            && self.functions.is_none()
+            && self.class_keys.is_none()
+            && self.function_keys.is_none()
     }
 
     pub(crate) fn has_class(&self, name: &str) -> bool {
-        self.classes.as_ref().is_none_or(|classes| {
+        self.class_keys.as_ref().is_some_and(|classes| {
             crate::registry::with_function_key(name, |key| classes.contains(key))
-        })
+        }) || (self.classes.is_none() && self.class_keys.is_none())
     }
 
     pub(crate) fn has_function(&self, name: &str) -> bool {
-        self.functions.as_ref().is_none_or(|functions| {
+        self.function_keys.as_ref().is_some_and(|functions| {
             crate::registry::with_function_key(name, |key| functions.contains(key))
-        })
+        }) || (self.functions.is_none() && self.function_keys.is_none())
     }
 
-    /// What `self` has that `other` hasn't; both are named sets.
+    pub(crate) fn has_class_id(&self, id: ClassId) -> bool {
+        self.classes
+            .as_ref()
+            .is_some_and(|classes| classes.contains(id))
+            || (self.classes.is_none() && self.class_keys.is_none())
+    }
+
+    pub(crate) fn has_function_id(&self, id: FnId) -> bool {
+        self.functions
+            .as_ref()
+            .is_some_and(|functions| functions.contains(id))
+            || (self.functions.is_none() && self.function_keys.is_none())
+    }
+
+    pub(crate) fn class_ids(&self) -> Option<Vec<ClassId>> {
+        self.classes.as_ref().map(|ids| ids.ids())
+    }
+
+    pub(crate) fn function_ids(&self) -> Option<Vec<FnId>> {
+        self.functions.as_ref().map(|ids| ids.ids())
+    }
+
+    pub(crate) fn class_keys(&self) -> Option<&FxHashSet<String>> {
+        self.class_keys.as_deref()
+    }
+
+    pub(crate) fn function_keys(&self) -> Option<&FxHashSet<String>> {
+        self.function_keys.as_deref()
+    }
+
+    /// What `self` has that `other` hasn't, for the ID and name selectors.
     pub(crate) fn minus(&self, other: &Scope) -> Scope {
-        type Keys = Option<Arc<FxHashSet<String>>>;
-        let diff = |ours: &Keys, theirs: &Keys| -> Keys {
+        type Names = Option<Arc<FxHashSet<String>>>;
+        let diff = |ours: &Names, theirs: &Names| -> Names {
             ours.as_ref().map(|ours| {
                 Arc::new(
                     ours.iter()
@@ -95,30 +281,28 @@ impl Scope {
             })
         };
         Scope {
-            classes: diff(&self.classes, &other.classes),
-            functions: diff(&self.functions, &other.functions),
+            classes: match (&self.classes, &other.classes) {
+                (Some(ours), Some(theirs)) => Some(Arc::new(ours.minus(theirs))),
+                (Some(_), None) if other.class_keys.is_none() => {
+                    Some(Arc::new(IdBitSet::default()))
+                }
+                (None, Some(_)) => None,
+                (None, None) => None,
+                (Some(ours), None) => Some(Arc::clone(ours)),
+            },
+            functions: match (&self.functions, &other.functions) {
+                (Some(ours), Some(theirs)) => Some(Arc::new(ours.minus(theirs))),
+                (Some(_), None) if other.function_keys.is_none() => {
+                    Some(Arc::new(IdBitSet::default()))
+                }
+                (None, Some(_)) => None,
+                (None, None) => None,
+                (Some(ours), None) => Some(Arc::clone(ours)),
+            },
+            class_keys: diff(&self.class_keys, &other.class_keys),
+            function_keys: diff(&self.function_keys, &other.function_keys),
             id: next_id(),
         }
-    }
-
-    /// The lowercased class names, when not every class.
-    pub(crate) fn class_keys(&self) -> Option<&FxHashSet<String>> {
-        self.classes.as_deref()
-    }
-
-    /// `class_keys`, shared: the same set, in the same order.
-    pub(crate) fn shared_class_keys(&self) -> Option<Arc<FxHashSet<String>>> {
-        self.classes.clone()
-    }
-
-    /// The lowercased function names, when not every function.
-    pub(crate) fn function_keys(&self) -> Option<&FxHashSet<String>> {
-        self.functions.as_deref()
-    }
-
-    /// `function_keys`, shared: the same set, in the same order.
-    pub(crate) fn shared_function_keys(&self) -> Option<Arc<FxHashSet<String>>> {
-        self.functions.clone()
     }
 }
 
@@ -184,22 +368,55 @@ impl std::fmt::Debug for ScopedNames {
 }
 
 impl Registry {
+    fn scoped_class_ids_vec(&self) -> Vec<ClassId> {
+        let mut ids = self.scope.class_ids().unwrap_or_else(|| {
+            if self.scope.is_all() {
+                self.class_ids.iter().map(|(_, id)| *id).collect()
+            } else {
+                Vec::new()
+            }
+        });
+        if let Some(keys) = self.scope.class_keys() {
+            ids.extend(keys.iter().filter_map(|key| {
+                self.class_ids
+                    .get_with_name(&FoldedKey(key))
+                    .map(|(_, id)| *id)
+            }));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    fn scoped_function_ids_vec(&self) -> Vec<FnId> {
+        let mut ids = self.scope.function_ids().unwrap_or_else(|| {
+            if self.scope.is_all() {
+                self.function_ids.iter().map(|(_, id)| *id).collect()
+            } else {
+                Vec::new()
+            }
+        });
+        if let Some(keys) = self.scope.function_keys() {
+            ids.extend(keys.iter().filter_map(|key| {
+                self.function_ids
+                    .get_with_name(&FoldedKey(key))
+                    .map(|(_, id)| *id)
+            }));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     /// The declared names of the classes in the passes' scope. Made once
     /// for as long as the scope and the class names stay as they are.
     pub(crate) fn scoped_class_names(&self) -> Arc<[Name]> {
         self.scoped_names
             .classes(&self.scope, self.class_ids.version(), || {
-                match self.scope.class_keys() {
-                    None => self.class_ids.keys().cloned().collect(),
-                    Some(keys) => keys
-                        .iter()
-                        .filter_map(|key| {
-                            self.class_ids
-                                .get_with_name(&FoldedKey(key))
-                                .map(|(name, _)| name.clone())
-                        })
-                        .collect(),
-                }
+                self.scoped_class_ids_vec()
+                    .into_iter()
+                    .filter_map(|id| self.class_name_by_id(id).cloned())
+                    .collect()
             })
     }
 
@@ -208,51 +425,34 @@ impl Registry {
     pub(crate) fn scoped_function_names(&self) -> Arc<[Name]> {
         self.scoped_names
             .functions(&self.scope, self.function_ids.version(), || {
-                match self.scope.function_keys() {
-                    None => self.function_ids.keys().cloned().collect(),
-                    Some(keys) => keys
-                        .iter()
-                        .filter_map(|key| {
-                            self.function_ids
-                                .get_with_name(&FoldedKey(key))
-                                .map(|(name, _)| name.clone())
-                        })
-                        .collect(),
-                }
+                self.scoped_function_ids_vec()
+                    .into_iter()
+                    .filter_map(|id| self.function_name_by_id(id).cloned())
+                    .collect()
             })
     }
 
     /// The classes in the passes' scope, with their declared names.
     pub(crate) fn scoped_classes(&self) -> Vec<(&Name, &crate::registry::ClassReflection)> {
-        match self.scope.class_keys() {
-            None => self.iter_classes().collect(),
-            Some(keys) => keys
-                .iter()
-                .filter_map(|key| {
-                    self.class_ids
-                        .get_with_name(&FoldedKey(key))
-                        .and_then(|(name, id)| self.class_by_id(*id).map(|class| (name, class)))
-                })
-                .collect(),
-        }
+        self.scoped_class_ids_vec()
+            .into_iter()
+            .filter_map(|id| {
+                let name = self.class_name_by_id(id)?;
+                self.class_by_id(id).map(|class| (name, class))
+            })
+            .collect()
     }
 
     /// The functions in the passes' scope, with their declared names.
     pub(crate) fn scoped_functions(&self) -> Vec<(&Name, &crate::registry::FunctionReflection)> {
-        match self.scope.function_keys() {
-            None => self.iter_functions().collect(),
-            Some(keys) => keys
-                .iter()
-                .filter_map(|key| {
-                    self.function_ids
-                        .get_with_name(&FoldedKey(key))
-                        .and_then(|(name, id)| {
-                            self.function_declaration_by_id(*id)
-                                .map(|function| (name, function))
-                        })
-                })
-                .collect(),
-        }
+        self.scoped_function_ids_vec()
+            .into_iter()
+            .filter_map(|id| {
+                let name = self.function_name_by_id(id)?;
+                self.function_declaration_by_id(id)
+                    .map(|function| (name, function))
+            })
+            .collect()
     }
 
     /// The scope's class names no class is registered under any more,
@@ -273,19 +473,39 @@ impl Registry {
     /// one after another.
     pub(crate) fn warm(&self, scope: &Scope) {
         use rayon::prelude::*;
-        let classes: Vec<&String> = scope.class_keys().into_iter().flatten().collect();
+        let classes = scope.class_keys().into_iter().flatten().collect::<Vec<_>>();
         classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
                 self.class_ids.get_with_name(&FoldedKey(key));
             });
-        let functions: Vec<&String> = scope.function_keys().into_iter().flatten().collect();
+        let functions = scope
+            .function_keys()
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
                 self.function_ids.get_with_name(&FoldedKey(key));
+            });
+        scope
+            .class_ids()
+            .unwrap_or_default()
+            .into_par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .for_each(|id| {
+                self.class_by_id(id);
+            });
+        scope
+            .function_ids()
+            .unwrap_or_default()
+            .into_par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .for_each(|id| {
+                self.function_declaration_by_id(id);
             });
     }
 
@@ -302,15 +522,57 @@ impl Registry {
     }
 }
 
-/// The names in scope; not the scope's number, which tells one apart
-/// within a run.
+/// A stable representation of the selected IDs and compatibility names.
 impl syntax::canonical::Canonical for Scope {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
-        let Scope {
-            classes,
-            functions,
-            id: _,
-        } = self;
-        p.node("Scope", &[("classes", classes), ("functions", functions)]);
+        let class_ids: Option<Vec<(u8, u32, u32)>> = self.classes.as_ref().map(|ids| {
+            let mut ids: Vec<_> = ids
+                .ids::<ClassId>()
+                .into_iter()
+                .map(|id| {
+                    (
+                        match id.source() {
+                            Some(IdSource::Stub) => 0,
+                            Some(IdSource::Context) => 1,
+                            Some(IdSource::Project) => 2,
+                            None => 3,
+                        },
+                        id.generation(),
+                        id.local(),
+                    )
+                })
+                .collect();
+            ids.sort_unstable();
+            ids
+        });
+        let function_ids: Option<Vec<(u8, u32, u32)>> = self.functions.as_ref().map(|ids| {
+            let mut ids: Vec<_> = ids
+                .ids::<FnId>()
+                .into_iter()
+                .map(|id| {
+                    (
+                        match id.source() {
+                            Some(IdSource::Stub) => 0,
+                            Some(IdSource::Context) => 1,
+                            Some(IdSource::Project) => 2,
+                            None => 3,
+                        },
+                        id.generation(),
+                        id.local(),
+                    )
+                })
+                .collect();
+            ids.sort_unstable();
+            ids
+        });
+        p.node(
+            "Scope",
+            &[
+                ("class_ids", &class_ids),
+                ("classes", &self.class_keys),
+                ("function_ids", &function_ids),
+                ("functions", &self.function_keys),
+            ],
+        );
     }
 }

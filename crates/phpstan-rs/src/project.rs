@@ -15,7 +15,8 @@ use crate::pest_config::{PestConfig, PestFacts};
 use crate::registry::scope::Scope;
 use crate::registry::stubs;
 use crate::registry::{
-    BodySource, BuiltDecl, ClassId, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
+    BodySource, BuiltDecl, ClassId, DeclKind, FileBodies, FnId, GlobalFacts, Origin, Provenance,
+    Registry,
 };
 use composer::dir_table::{DirTable, EntryKind};
 use declared_classes::DeclaredClass;
@@ -1486,12 +1487,38 @@ impl Project {
         changed: &crate::registry::ChangedNames,
         index: &FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     ) -> Scope {
-        let mut classes: FxHashSet<String> = changed.classes.clone();
-        let mut functions: FxHashSet<String> = changed.functions.clone();
-        let mut frontier: Vec<deps::RefKey> = classes
+        let mut classes: FxHashSet<ClassId> = changed
+            .classes
+            .iter()
+            .filter_map(|name| self.registry.class_id(name))
+            .collect();
+        let mut functions: FxHashSet<FnId> = changed
+            .functions
+            .iter()
+            .filter_map(|name| self.registry.function_id(name))
+            .collect();
+        let mut removed_classes: FxHashSet<String> = changed
+            .classes
+            .iter()
+            .filter(|name| self.registry.class_id(name).is_none())
+            .cloned()
+            .collect();
+        let mut removed_functions: FxHashSet<String> = changed
+            .functions
+            .iter()
+            .filter(|name| self.registry.function_id(name).is_none())
+            .cloned()
+            .collect();
+        let mut frontier: Vec<deps::RefKey> = changed
+            .classes
             .iter()
             .map(|c| deps::RefKey::class_text(c))
-            .chain(functions.iter().map(|f| deps::RefKey::function_text(f)))
+            .chain(
+                changed
+                    .functions
+                    .iter()
+                    .map(|f| deps::RefKey::function_text(f)),
+            )
             .chain(
                 changed
                     .constants
@@ -1519,15 +1546,27 @@ impl Project {
                 };
                 for name in state.classes.iter().chain(&state.anonymous_classes) {
                     let text = name.lower().trim_start_matches('\\');
-                    if !classes.contains(text) {
-                        classes.insert(text.to_string());
+                    if let Some(id) = self.registry.class_id(text) {
+                        if classes.insert(id) {
+                            frontier.push(deps::RefKey::class(name));
+                        }
+                    } else if removed_classes.insert(text.to_string()) {
+                        // A changed declaration may have disappeared between
+                        // the dependency index and the active registry.
+                        // Keep its key for cleanup and still expand its
+                        // dependents so removed symbols propagate transitively.
                         frontier.push(deps::RefKey::class(name));
                     }
                 }
                 for name in &state.functions {
                     let text = name.lower().trim_start_matches('\\');
-                    if !functions.contains(text) {
-                        functions.insert(text.to_string());
+                    if let Some(id) = self.registry.function_id(text) {
+                        if functions.insert(id) {
+                            frontier.push(deps::RefKey::function(name));
+                        }
+                    } else if removed_functions.insert(text.to_string()) {
+                        // Keep the removed declaration's name for stale state
+                        // cleanup and continue expanding its dependents.
                         frontier.push(deps::RefKey::function(name));
                     }
                 }
@@ -1541,15 +1580,20 @@ impl Project {
                 for file in stubs::stub_dependent_files(stub_key) {
                     stub_files.add_closure(file, |file| {
                         for (is_class, name) in stubs::stub_file_names(file) {
-                            let set = if is_class {
-                                &mut classes
+                            let inserted = if is_class {
+                                if let Some(id) = self.registry.class_id(name) {
+                                    classes.insert(id)
+                                } else {
+                                    removed_classes.insert(name.to_string())
+                                }
+                            } else if let Some(id) = self.registry.function_id(name) {
+                                functions.insert(id)
                             } else {
-                                &mut functions
+                                removed_functions.insert(name.to_string())
                             };
-                            if set.contains(name) {
+                            if !inserted {
                                 continue;
                             }
-                            set.insert(name.to_string());
                             let key = if is_class {
                                 deps::RefKey::class_text(name)
                             } else {
@@ -1568,20 +1612,23 @@ impl Project {
         // they are mid-way through the passes, as a load resolves them
         // together, never from their finished entries: those are in scope
         // too, read from the declarations as built.
-        let mut copied_from: Vec<String> = classes.iter().cloned().collect();
-        while let Some(class) = copied_from.pop() {
-            let Some(info) = self.registry.class_by_name(class.as_str()) else {
+        let mut copied_from: Vec<ClassId> = classes.iter().copied().collect();
+        while let Some(class_id) = copied_from.pop() {
+            let Some(info) = self.registry.class_by_id(class_id) else {
                 continue;
             };
             for name in info.copies_from() {
                 let text = name.lower().trim_start_matches('\\');
-                if !classes.contains(text) {
-                    classes.insert(text.to_string());
-                    copied_from.push(text.to_string());
+                if let Some(id) = self.registry.class_id(text)
+                    && classes.insert(id)
+                {
+                    copied_from.push(id);
+                } else if self.registry.class_id(text).is_none() {
+                    removed_classes.insert(text.to_string());
                 }
             }
         }
-        Scope::from_keys(classes, functions)
+        Scope::from_ids(classes, functions, removed_classes, removed_functions)
     }
 
     /// Finalizes an initial load (trait flattening).

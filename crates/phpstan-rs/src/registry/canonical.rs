@@ -759,6 +759,7 @@ canonical_struct!(ChangedNames {
     function_ids_before,
     function_declarations_before,
     function_results_before,
+    class_ids_before,
     class_declarations_before,
     class_results_before,
 });

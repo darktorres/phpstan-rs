@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::{Name, OrderedNameMap};
 
@@ -123,7 +124,8 @@ pub(crate) const PASS_CHUNK: usize = 32;
 pub(crate) struct ChangedNames {
     pub(crate) classes: FxHashSet<String>,
     pub(crate) functions: FxHashSet<String>,
-    class_declarations_before: FxHashMap<String, (Option<ClassId>, Option<Arc<ClassReflection>>)>,
+    class_ids_before: FxHashMap<String, Option<ClassId>>,
+    class_declarations_before: FxHashMap<ClassId, Arc<ClassReflection>>,
     // Prior function state for names changed since the last finish. Keep the
     // values by declaration ID so removal or rebinding does not lose the
     // old winner before `changed_since` compares it.
@@ -150,14 +152,19 @@ fn differs<V: PartialEq>(now: Option<&V>, before: Option<&Detached<V>>) -> bool 
 
 /// What `Registry::end_declaration_changes` returns.
 pub(crate) struct ResolvedSnapshot {
-    // The entries of the scope's keys, in the order of iterating the keys:
-    // the key sets are shared with the scope, never changed.
-    class_keys: Option<Arc<FxHashSet<String>>>,
-    function_keys: Option<Arc<FxHashSet<String>>>,
-    functions: Vec<Option<Detached<FunctionReflection>>>,
-    function_results: Vec<Option<FunctionReflection>>,
+    // Keep the identities selected by the scope. Names are needed only when
+    // a changed declaration is converted to a dependency key.
+    class_ids: FxHashSet<ClassId>,
+    functions: FxHashMap<
+        FnId,
+        (
+            Name,
+            Option<Detached<FunctionReflection>>,
+            Option<FunctionReflection>,
+        ),
+    >,
     class_results: FxHashMap<ClassId, (Name, ClassResultOverlay)>,
-    effects: FxHashMap<effects::DeclKey, effects::Settled>,
+    effects: FxHashMap<effects::EffectId, (Option<effects::DeclKey>, effects::Settled)>,
     global_variables: syntax::name::NameMap<Type>,
 }
 
@@ -568,6 +575,11 @@ impl Registry {
         Some((*id, name, self.class_by_id(*id)?))
     }
 
+    /// The active runtime ID selected for a class name.
+    pub(crate) fn class_id(&self, name: &str) -> Option<ClassId> {
+        self.class_ids.get(name).copied()
+    }
+
     /// The selected class declaration for a PHP class name, through its ID.
     pub fn class_by_name(&self, name: &str) -> Option<&ClassReflection> {
         self.class(name).map(|(_, _, declaration)| declaration)
@@ -872,6 +884,11 @@ impl Registry {
         self.function_declaration_by_id(id)
     }
 
+    /// The active runtime ID selected for a function name.
+    pub(crate) fn function_id(&self, name: &str) -> Option<FnId> {
+        self.function_ids.get(name).copied()
+    }
+
     /// The immutable as-built function declaration. A resolved signature,
     /// when present, is read separately from `function_results`.
     pub(crate) fn function_declaration_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
@@ -1127,30 +1144,131 @@ impl Registry {
             self.resolved_declarations = keep_raw;
             return None;
         }
-        let function_keys = body_scope.and_then(scope::Scope::shared_function_keys);
-        let function_results_before: Vec<Option<FunctionReflection>> = function_keys
-            .as_ref()
-            .map(|keys| {
-                keys.iter()
-                    .map(|name| {
-                        if changed.is_some_and(|changed| changed.functions.contains(name)) {
-                            changed
-                                .and_then(|changed| changed.function_ids_before.get(name))
-                                .and_then(|id| changed?.function_results_before.get(id))
-                                .cloned()
-                        } else {
-                            self.function_ids
-                                .get(name)
-                                .and_then(|id| self.function_results.get(id))
-                                .cloned()
-                        }
+        let mut snapshot_class_ids = FxHashSet::default();
+        let mut snapshot_function_ids = FxHashSet::default();
+        if let Some(body_scope) = body_scope {
+            if let Some(ids) = body_scope.class_ids() {
+                snapshot_class_ids.extend(ids);
+            } else if body_scope.is_all() {
+                snapshot_class_ids.extend(self.class_ids.values().copied());
+            }
+            if let Some(ids) = body_scope.function_ids() {
+                snapshot_function_ids.extend(ids);
+            } else if body_scope.is_all() {
+                snapshot_function_ids.extend(self.function_ids.values().copied());
+            }
+            for name in body_scope.class_keys().into_iter().flatten() {
+                if let Some(id) = self.class_ids.get(name.as_str()) {
+                    snapshot_class_ids.insert(*id);
+                }
+            }
+            for name in body_scope.function_keys().into_iter().flatten() {
+                if let Some(id) = self.function_ids.get(name.as_str()) {
+                    snapshot_function_ids.insert(*id);
+                }
+                if let Some(id) = changed.and_then(|changed| changed.function_ids_before.get(name))
+                {
+                    snapshot_function_ids.insert(*id);
+                }
+            }
+        }
+        // A changed declaration may already have been removed or rebound in
+        // the active ID table. Keep its previous ID in the snapshot so the
+        // comparison still reports the old winner.
+        if let (Some(body_scope), Some(changed)) = (body_scope, changed) {
+            for (name, old_id) in &changed.function_ids_before {
+                if body_scope.is_all()
+                    || self
+                        .function_ids
+                        .get(name.as_str())
+                        .is_some_and(|id| snapshot_function_ids.contains(id))
+                {
+                    snapshot_function_ids.insert(*old_id);
+                }
+            }
+            if let Some(names) = body_scope.function_keys() {
+                for name in names {
+                    if let Some(id) = changed.function_ids_before.get(name) {
+                        snapshot_function_ids.insert(*id);
+                    }
+                }
+            }
+            for (name, old_id) in &changed.class_ids_before {
+                if body_scope.is_all()
+                    || self
+                        .class_ids
+                        .get(name.as_str())
+                        .is_some_and(|id| snapshot_class_ids.contains(id))
+                {
+                    if let Some(old_id) = old_id {
+                        snapshot_class_ids.insert(*old_id);
+                    }
+                }
+            }
+            if let Some(names) = body_scope.class_keys() {
+                for name in names {
+                    if let Some(Some(id)) = changed.class_ids_before.get(name) {
+                        snapshot_class_ids.insert(*id);
+                    }
+                }
+            }
+        }
+        let active_function_names: FxHashMap<FnId, Name> = self
+            .function_ids
+            .iter()
+            .map(|(name, id)| (*id, name.clone()))
+            .collect();
+        let functions_before: FxHashMap<
+            FnId,
+            (
+                Name,
+                Option<Detached<FunctionReflection>>,
+                Option<FunctionReflection>,
+            ),
+        > = snapshot_function_ids
+            .into_iter()
+            .filter_map(|id| {
+                let name = active_function_names.get(&id).cloned().or_else(|| {
+                    changed.and_then(|changed| {
+                        changed
+                            .function_ids_before
+                            .iter()
+                            .find_map(|(name, changed_id)| {
+                                (*changed_id == id).then(|| Name::from(name))
+                            })
                     })
-                    .collect()
+                })?;
+                let declaration = changed
+                    .and_then(|changed| changed.function_declarations_before.get(&id))
+                    .cloned()
+                    .or_else(|| self.function_declarations.get(&id).cloned());
+                let result = changed
+                    .and_then(|changed| changed.function_results_before.get(&id))
+                    .cloned()
+                    .or_else(|| self.function_results.get(&id).cloned());
+                Some((id, (name, declaration.map(Detached::Own), result)))
             })
-            .unwrap_or_default();
+            .collect();
         let mut class_results_before = FxHashMap::default();
-        if let Some(class_keys) = body_scope.and_then(scope::Scope::class_keys) {
-            for key in class_keys.iter() {
+        if let Some(body_scope) = body_scope {
+            let active_class_names: FxHashMap<ClassId, Name> = self
+                .class_ids
+                .iter()
+                .map(|(name, id)| (*id, name.clone()))
+                .collect();
+            for id in body_scope.class_ids().into_iter().flatten() {
+                let Some(class_name) = active_class_names.get(&id) else {
+                    continue;
+                };
+                class_results_before.insert(
+                    id,
+                    (
+                        class_name.clone(),
+                        self.class_result_overlay(id, self.class_by_id(id)),
+                    ),
+                );
+            }
+            for key in body_scope.class_keys().into_iter().flatten() {
                 let Some((class_name, id)) = self.class_ids.get_with_name(key) else {
                     continue;
                 };
@@ -1166,12 +1284,31 @@ impl Registry {
         if let Some(changed) = changed {
             class_results_before.extend(changed.class_results_before.clone());
         }
-        let snapshot = |functions, registry: &Registry| ResolvedSnapshot {
-            class_keys: body_scope.and_then(scope::Scope::shared_class_keys),
-            function_keys: function_keys.clone(),
-            functions,
-            function_results: function_results_before.clone(),
-            effects: registry.effects_for_names(),
+        snapshot_class_ids.extend(class_results_before.keys().copied());
+        let snapshot = |registry: &Registry| ResolvedSnapshot {
+            class_ids: snapshot_class_ids.clone(),
+            functions: functions_before
+                .iter()
+                .map(|(id, (name, declaration, result))| {
+                    (
+                        *id,
+                        (
+                            name.clone(),
+                            declaration.as_ref().map(|declaration| {
+                                Detached::Own(Arc::clone(match declaration {
+                                    Detached::Own(value) => value,
+                                }))
+                            }),
+                            result.clone(),
+                        ),
+                    )
+                })
+                .collect(),
+            effects: registry
+                .effects
+                .iter()
+                .map(|(id, settled)| (id.clone(), (registry.effect_decl_key(id), settled.clone())))
+                .collect(),
             global_variables: registry.global_variables().clone(),
             class_results: class_results_before.clone(),
         };
@@ -1188,12 +1325,12 @@ impl Registry {
             self.imported_type_aliases.clear();
             self.class_type_results.clear();
             self.class_reference_results.clear();
-            return body_scope.map(|_| snapshot(Vec::new(), self));
+            return body_scope.map(|_| snapshot(self));
         }
         let changed_class_ids: FxHashSet<ClassId> = self
             .class_ids
             .iter()
-            .filter(|(name, _)| scope.has_class(name))
+            .filter(|(name, id)| scope.has_class_id(**id) || scope.has_class(name))
             .map(|(_, id)| *id)
             .collect();
         self.class_const_types
@@ -1216,36 +1353,16 @@ impl Registry {
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_reference_results
             .retain(|id, _| !changed_class_ids.contains(id));
-        let functions = function_keys
-            .as_ref()
-            .into_iter()
-            .flat_map(|keys| keys.iter())
-            .map(|key| {
-                if changed.is_some_and(|changed| changed.functions.contains(key)) {
-                    changed
-                        .and_then(|changed| changed.function_ids_before.get(key))
-                        .and_then(|id| changed?.function_declarations_before.get(id))
-                        .cloned()
-                        .map(Detached::Own)
-                } else {
-                    self.function_ids
-                        .get(key)
-                        .and_then(|id| self.function_declarations.get(id))
-                        .cloned()
-                        .map(Detached::Own)
-                }
-            })
-            .collect();
         let changed_function_ids: FxHashSet<FnId> = self
             .function_ids
             .iter()
-            .filter(|(name, _)| scope.has_function(name))
+            .filter(|(name, id)| scope.has_function_id(**id) || scope.has_function(name))
             .map(|(_, id)| *id)
             .collect();
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
         self.stub_effect_results.clear();
-        body_scope.map(|_| snapshot(functions, self))
+        body_scope.map(|_| snapshot(self))
     }
 
     /// Takes from `base`, the stub base the registry now stands on, what
@@ -1590,12 +1707,14 @@ impl Registry {
             let key = name.to_ascii_lowercase();
             if self.changed.classes.insert(key.clone()) {
                 let id = self.class_ids.get(name).copied();
-                let declaration_snapshot = id
-                    .and_then(|id| self.class_by_id(id).cloned())
-                    .map(Arc::new);
-                self.changed
-                    .class_declarations_before
-                    .insert(key.clone(), (id, declaration_snapshot.clone()));
+                let declaration_snapshot =
+                    id.and_then(|id| self.class_declarations.get(&id).cloned());
+                self.changed.class_ids_before.insert(key.clone(), id);
+                if let (Some(id), Some(declaration)) = (id, declaration_snapshot.as_ref()) {
+                    self.changed
+                        .class_declarations_before
+                        .insert(id, Arc::clone(declaration));
+                }
                 if let Some(id) = id {
                     let overlay = self.class_result_overlay(id, declaration_snapshot.as_deref());
                     self.changed
@@ -1714,51 +1833,76 @@ impl Registry {
         use crate::deps::RefKey;
         let mut keys = FxHashSet::default();
         for name in &changed.classes {
-            let old = changed.class_declarations_before.get(name);
+            let old_id = changed.class_ids_before.get(name).copied().flatten();
+            let old = old_id.and_then(|id| changed.class_declarations_before.get(&id));
             let now_id = self.class_ids.get(name.as_str()).copied();
             let now = now_id.and_then(|id| self.class_by_id(id));
-            if old.is_some_and(|(id, declaration)| *id != now_id || declaration.as_deref() != now)
-                || (old.is_none() && now.is_some())
-            {
+            let declaration_changed = match (old, now) {
+                (Some(old), Some(now)) => {
+                    Arc::as_ptr(old) != now as *const ClassReflection && old.as_ref() != now
+                }
+                (None, None) => false,
+                _ => true,
+            };
+            if old_id != now_id || declaration_changed {
                 keys.insert(RefKey::class_text(name));
             }
         }
         for name in self.changed_class_results(before).into_values() {
             keys.insert(RefKey::class_text(name.as_str()));
         }
-        let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
-        debug_assert_eq!(function_keys.clone().count(), before.functions.len());
-        debug_assert_eq!(before.functions.len(), before.function_results.len());
-        for ((key, old), old_result) in function_keys
-            .zip(&before.functions)
-            .zip(&before.function_results)
-        {
-            let new_result = self
-                .function_ids
-                .get(key)
-                .and_then(|id| self.function_results.get(id));
-            if differs(
-                self.function_ids
-                    .get(key)
-                    .and_then(|id| self.function_declaration_by_id(*id)),
-                old.as_ref(),
-            ) || old_result.as_ref() != new_result
-            {
-                keys.insert(RefKey::function_text(key));
+        for name in &changed.functions {
+            let old_id = changed.function_ids_before.get(name).copied();
+            let old = old_id.and_then(|id| changed.function_declarations_before.get(&id));
+            let now_id = self.function_ids.get(name.as_str()).copied();
+            let now = now_id.and_then(|id| self.function_declaration_by_id(id));
+            let declaration_changed = match (old, now) {
+                (Some(old), Some(now)) => {
+                    Arc::as_ptr(old) != now as *const FunctionReflection && old.as_ref() != now
+                }
+                (None, None) => false,
+                _ => true,
+            };
+            if old_id != now_id || declaration_changed {
+                keys.insert(RefKey::function_text(name));
             }
         }
+        let changed_functions: Vec<Name> = before
+            .functions
+            .par_iter()
+            .filter_map(|(id, (name, old, old_result))| {
+                let declaration = self.function_declaration_by_id(*id);
+                let result = self.function_results.get(id);
+                (differs(declaration, old.as_ref()) || old_result.as_ref() != result)
+                    .then(|| name.clone())
+            })
+            .collect();
+        keys.extend(
+            changed_functions
+                .iter()
+                .map(|name| RefKey::function_text(name.as_str())),
+        );
         for (name, old) in &changed.constants {
             if self.global_constants.get(name.as_str()) != old.as_ref() {
                 keys.insert(RefKey::constant_text(name));
             }
         }
-        let effects = self.effects_for_names();
-        let decls = before
-            .effects
-            .keys()
-            .chain(effects.keys())
-            .filter(|key| before.effects.get(*key) != effects.get(*key));
-        for key in decls {
+        let mut effect_ids: FxHashSet<_> = before.effects.keys().cloned().collect();
+        effect_ids.extend(self.effects.keys().cloned());
+        let effect_names: Vec<_> = effect_ids
+            .into_par_iter()
+            .filter_map(|id| {
+                let old = before.effects.get(&id);
+                let now = self.effects.get(&id);
+                (old.map(|(_, settled)| settled) != now)
+                    .then(|| {
+                        now.and_then(|_| self.effect_decl_key(&id))
+                            .or_else(|| old.and_then(|(key, _)| key.clone()))
+                    })
+                    .flatten()
+            })
+            .collect();
+        for key in effect_names {
             keys.insert(match &key.class {
                 Some(class) => RefKey::class_text(class),
                 None => RefKey::function_text(&key.member),
@@ -1768,19 +1912,19 @@ impl Registry {
     }
 
     fn changed_class_results(&self, before: &ResolvedSnapshot) -> FxHashMap<ClassId, Name> {
-        let mut ids: FxHashSet<ClassId> = before.class_results.keys().copied().collect();
-        ids.extend(
-            before
-                .class_keys
-                .iter()
-                .flat_map(|keys| keys.iter())
-                .filter_map(|key| self.class_ids.get(key).copied()),
-        );
-        ids.into_iter()
+        let active_class_names: FxHashMap<ClassId, Name> = self
+            .class_ids
+            .iter()
+            .map(|(name, id)| (*id, name.clone()))
+            .collect();
+        before
+            .class_ids
+            .par_iter()
             .filter_map(|id| {
+                let id = *id;
                 let old = before.class_results.get(&id);
-                let name = self
-                    .class_name_by_id(id)
+                let name = active_class_names
+                    .get(&id)
                     .cloned()
                     .or_else(|| old.map(|(name, _)| name.clone()))?;
                 let current = self.class_by_id(id).map(|declaration| {

@@ -979,11 +979,18 @@ mod tests {
         assert_eq!(registry.functions.get("helper"), Some(&edited));
         assert_eq!(before.functions.len(), 1);
         assert_eq!(
-            before.functions[0].as_ref().unwrap().get().return_type,
+            before.functions[&function_id]
+                .1
+                .as_ref()
+                .unwrap()
+                .get()
+                .return_type,
             Type::int()
         );
-        assert_eq!(before.function_results.len(), 1);
-        assert_eq!(before.function_results[0].as_ref(), Some(&prior_result));
+        assert_eq!(
+            before.functions[&function_id].2.as_ref(),
+            Some(&prior_result)
+        );
         assert!(
             !registry
                 .changed_since(&before, &crate::registry::ChangedNames::default())

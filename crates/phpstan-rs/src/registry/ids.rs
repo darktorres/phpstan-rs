@@ -20,6 +20,10 @@ macro_rules! declaration_id {
         }
 
         impl $name {
+            pub(crate) fn from_parts(source: IdSource, local: u32, generation: u32) -> Self {
+                Self::new(source, local, generation)
+            }
+
             pub(crate) fn stub(local: u32) -> Self {
                 Self::new(IdSource::Stub, local, 0)
             }

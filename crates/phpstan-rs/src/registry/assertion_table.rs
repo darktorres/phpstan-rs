@@ -61,12 +61,12 @@ impl Registry {
             match (&entry.function, &entry.class, &entry.method) {
                 (Some(function), _, _) => {
                     let function = function.trim_start_matches('\\');
-                    if !self.scope.has_function(function) {
-                        continue;
-                    }
                     let Some((id, _, declaration)) = self.function(function) else {
                         continue;
                     };
+                    if !self.scope.has_function_id(id) && !self.scope.has_function(function) {
+                        continue;
+                    }
                     let mut result = declaration.clone();
                     if add_assertion(&mut result, &entry) {
                         self.function_results.insert(id, result);
@@ -77,7 +77,7 @@ impl Registry {
                     else {
                         continue;
                     };
-                    if !self.scope.has_class(canonical) {
+                    if !self.scope.has_class_id(id) && !self.scope.has_class(canonical) {
                         continue;
                     }
                     let Some(slot) = self.member_slot(canonical, method) else {
