@@ -54,6 +54,12 @@ pub type ExprId = la_arena::Idx<ExprNode>;
 /// A typed index into a parsed file's statement arena.
 pub type StmtId = la_arena::Idx<StmtNode>;
 
+/// The file-owned storage addressed by [`ExprId`].
+pub type ExprArena = la_arena::Arena<ExprNode>;
+
+/// The file-owned storage addressed by [`StmtId`].
+pub type StmtArena = la_arena::Arena<StmtNode>;
+
 /// The identity used for an expression synthesized outside a parsed file.
 pub const SYNTHETIC_EXPR_ID: ExprId = ExprId::from_raw(la_arena::RawIdx::from_u32(u32::MAX));
 
