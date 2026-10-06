@@ -742,7 +742,7 @@ impl Registry {
         // round: no later round gives another class one.
         let mut with_deferred: Option<Vec<ClassId>> = None;
         for _ in 0..MAX_ROUNDS {
-            let mut updates: Vec<(ClassId, Name, Type)> = Vec::new();
+            let mut updates: Vec<(ClassId, usize, Type)> = Vec::new();
             match &with_deferred {
                 None => {
                     let mut found = Vec::new();
@@ -776,14 +776,14 @@ impl Registry {
             if updates.is_empty() {
                 break;
             }
-            for (class_id, const_name, ty) in updates {
+            for (class_id, const_slot, ty) in updates {
                 let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                     continue;
                 };
                 if let Some(sig) = self
                     .classes
                     .get_mut(&class_name)
-                    .and_then(|info| info.consts.get_mut(&const_name))
+                    .and_then(|info| info.consts.values_mut().nth(const_slot))
                 {
                     Arc::make_mut(sig).ty = ty;
                 }
@@ -816,13 +816,13 @@ impl Registry {
         class_id: ClassId,
         class_name: &Name,
         info: &ClassReflection,
-        updates: &mut Vec<(ClassId, Name, Type)>,
+        updates: &mut Vec<(ClassId, usize, Type)>,
     ) -> bool {
         if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
             return false;
         }
         let own_consts = visible_class_consts(class_name, &self.classes);
-        for (const_name, sig) in &info.consts {
+        for (const_slot, sig) in info.consts.values().enumerate() {
             if !sig.ty.contains_deferred() {
                 continue;
             }
@@ -832,7 +832,7 @@ impl Registry {
                 None,
             );
             if step != sig.ty {
-                updates.push((class_id, const_name.clone(), step));
+                updates.push((class_id, const_slot, step));
             }
         }
         true
