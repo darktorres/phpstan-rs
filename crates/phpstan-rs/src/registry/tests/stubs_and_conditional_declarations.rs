@@ -34,8 +34,8 @@ fn unconditional_class_wins_over_a_later_conditional_stub() {
                 class X { public function stub() {} }
             }"#,
     );
-    assert!(r.classes["X"].methods.contains_key("real"));
-    assert!(!r.classes["X"].methods.contains_key("stub"));
+    assert!(r.class_by_name("X").unwrap().methods.contains_key("real"));
+    assert!(!r.class_by_name("X").unwrap().methods.contains_key("stub"));
 }
 
 #[test]
@@ -50,8 +50,8 @@ fn unconditional_class_wins_over_an_earlier_conditional_stub() {
             }
             class X { public function real() {} }"#,
     );
-    assert!(r.classes["X"].methods.contains_key("real"));
-    assert!(!r.classes["X"].methods.contains_key("stub"));
+    assert!(r.class_by_name("X").unwrap().methods.contains_key("real"));
+    assert!(!r.class_by_name("X").unwrap().methods.contains_key("stub"));
 }
 
 // A stub file meant to override one method of an already-known class
@@ -73,12 +73,29 @@ fn two_unconditional_class_declarations_merge_instead_of_replacing() {
                 public function convolveImage($kernel, $channel = 1) {}
             }"#,
     );
-    assert!(r.classes["Imagick"].methods.contains_key("getImageWidth"));
-    assert!(r.classes["Imagick"].methods.contains_key("cropImage"));
-    assert!(r.classes["Imagick"].consts.contains_key("FILTER_LANCZOS"));
+    assert!(
+        r.class_by_name("Imagick")
+            .unwrap()
+            .methods
+            .contains_key("getImageWidth")
+    );
+    assert!(
+        r.class_by_name("Imagick")
+            .unwrap()
+            .methods
+            .contains_key("cropImage")
+    );
+    assert!(
+        r.class_by_name("Imagick")
+            .unwrap()
+            .consts
+            .contains_key("FILTER_LANCZOS")
+    );
     // The override's own signature wins for the one method both share.
     assert_eq!(
-        r.classes["Imagick"].methods["convolveImage"].params.len(),
+        r.class_by_name("Imagick").unwrap().methods["convolveImage"]
+            .params
+            .len(),
         2,
         "the second declaration's own convolveImage() (2 params) should win over the first's (1 param)"
     );
@@ -95,8 +112,18 @@ fn two_unconditional_class_declarations_with_disjoint_methods_union_both() {
             class X { public function fromFirst() {} }
             class X { public function fromSecond() {} }"#,
     );
-    assert!(r.classes["X"].methods.contains_key("fromFirst"));
-    assert!(r.classes["X"].methods.contains_key("fromSecond"));
+    assert!(
+        r.class_by_name("X")
+            .unwrap()
+            .methods
+            .contains_key("fromFirst")
+    );
+    assert!(
+        r.class_by_name("X")
+            .unwrap()
+            .methods
+            .contains_key("fromSecond")
+    );
 }
 
 #[test]
@@ -110,9 +137,22 @@ fn a_merged_class_keeps_its_extends_when_the_second_declaration_has_none() {
             class X extends Base { public function fromFirst() {} }
             class X { public function fromSecond() {} }"#,
     );
-    assert_eq!(r.classes["X"].extends, vec![Name::from("Base")]);
-    assert!(r.classes["X"].methods.contains_key("fromFirst"));
-    assert!(r.classes["X"].methods.contains_key("fromSecond"));
+    assert_eq!(
+        r.class_by_name("X").unwrap().extends,
+        vec![Name::from("Base")]
+    );
+    assert!(
+        r.class_by_name("X")
+            .unwrap()
+            .methods
+            .contains_key("fromFirst")
+    );
+    assert!(
+        r.class_by_name("X")
+            .unwrap()
+            .methods
+            .contains_key("fromSecond")
+    );
 }
 
 #[test]
@@ -126,13 +166,23 @@ fn re_indexing_an_unconditional_class_after_removal_does_not_panic() {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     let mut r = Registry::build(&program);
-    assert!(r.classes["X"].methods.contains_key("original"));
+    assert!(
+        r.class_by_name("X")
+            .unwrap()
+            .methods
+            .contains_key("original")
+    );
 
     r.remove_declarations(&[], &["X".into()]);
-    assert!(!r.classes.contains_key("X"));
+    assert!(!r.has_class("X"));
 
     r.index(&program, &Origin::Unknown, false);
-    assert!(r.classes["X"].methods.contains_key("original"));
+    assert!(
+        r.class_by_name("X")
+            .unwrap()
+            .methods
+            .contains_key("original")
+    );
 }
 
 // Two unconditional declarations of the same function name must merge,
@@ -148,7 +198,7 @@ fn two_unconditional_function_declarations_with_different_arities_merge() {
             function strtr(string $str, array $replace_pairs): string {}
         "#,
     );
-    let sig = &r.functions["strtr"];
+    let sig = &r.function_by_name("strtr").unwrap();
     assert_eq!(sig.params.len(), 3);
     assert_eq!(sig.params[0].name, "str", "later declaration's name wins");
     assert_eq!(sig.params[0].ty, Type::string());
@@ -178,7 +228,7 @@ fn two_unconditional_function_declarations_with_a_disjoint_type_at_one_position_
             function f(string $x): string {}
         "#,
     );
-    let sig = &r.functions["f"];
+    let sig = &r.function_by_name("f").unwrap();
     assert_eq!(sig.params.len(), 1);
     assert_eq!(
         sig.params[0].ty,
@@ -196,13 +246,13 @@ fn re_indexing_an_unconditional_function_after_removal_does_not_panic() {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     let mut r = Registry::build(&program);
-    assert_eq!(r.functions["f"].params[0].ty, Type::int());
+    assert_eq!(r.function_by_name("f").unwrap().params[0].ty, Type::int());
 
     r.remove_declarations(&["f".into()], &[]);
-    assert!(!r.functions.contains_key("f"));
+    assert!(!r.has_function("f"));
 
     r.index(&program, &Origin::Unknown, false);
-    assert_eq!(r.functions["f"].params[0].ty, Type::int());
+    assert_eq!(r.function_by_name("f").unwrap().params[0].ty, Type::int());
 }
 
 #[test]
@@ -215,8 +265,8 @@ fn class_declared_inside_an_if_else_guard_is_still_indexed() {
                 class OldWidget {}
             }"#,
     );
-    assert!(r.classes.contains_key("Widget"));
-    assert!(r.classes.contains_key("OldWidget"));
+    assert!(r.has_class("Widget"));
+    assert!(r.has_class("OldWidget"));
 }
 
 #[test]
@@ -256,7 +306,10 @@ fn merge_stubs_does_not_override_user_functions() {
             is_magic: false,
         },
     )]);
-    assert_eq!(r.functions["strlen"].return_type, Type::int());
+    assert_eq!(
+        r.function_by_name("strlen").unwrap().return_type,
+        Type::int()
+    );
 }
 
 // `Project::new` merges stubs before any project file is indexed (the
@@ -278,7 +331,10 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
 
     let mut r = Registry::default();
     r.merge_stubs(vec![("str_contains", stub_sig)]);
-    assert_eq!(r.functions["str_contains"].params[0].ty, Type::string());
+    assert_eq!(
+        r.function_by_name("str_contains").unwrap().params[0].ty,
+        Type::string()
+    );
 
     let tokens = Lexer::new(
         r#"<?php
@@ -292,7 +348,7 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
     r.index(&program, &Origin::Unknown, false);
 
     assert_eq!(
-        r.functions["str_contains"].params[0].ty,
+        r.function_by_name("str_contains").unwrap().params[0].ty,
         Type::union_of(vec![Type::string(), Type::null()]),
         "the polyfill's own nullable native param type must win over the stub's non-nullable one"
     );
@@ -329,7 +385,7 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(
-        r.functions["grapheme_strrev"].params.len(),
+        r.function_by_name("grapheme_strrev").unwrap().params.len(),
         1,
         "the zero-param shim must not have displaced the (arity-matching) stub"
     );
@@ -345,11 +401,14 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(
-        r.functions["grapheme_strrev"].params.len(),
+        r.function_by_name("grapheme_strrev").unwrap().params.len(),
         1,
         "the real, arity-matching declaration must still be able to win afterward"
     );
-    assert_eq!(r.functions["grapheme_strrev"].params[0].name, "string");
+    assert_eq!(
+        r.function_by_name("grapheme_strrev").unwrap().params[0].name,
+        "string"
+    );
 }
 
 // The identical arity-mismatch shape one level down from the two tests
@@ -376,7 +435,13 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
-    assert_eq!(r.functions["trigger_deprecation"].params.len(), 0);
+    assert_eq!(
+        r.function_by_name("trigger_deprecation")
+            .unwrap()
+            .params
+            .len(),
+        0
+    );
 
     let tokens = Lexer::new(
         r#"<?php
@@ -389,7 +454,10 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(
-        r.functions["trigger_deprecation"].params.len(),
+        r.function_by_name("trigger_deprecation")
+            .unwrap()
+            .params
+            .len(),
         4,
         "the real, correctly-typed declaration must win over the earlier 0-param shim"
     );
@@ -407,7 +475,10 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(
-        r.functions["trigger_deprecation"].params.len(),
+        r.function_by_name("trigger_deprecation")
+            .unwrap()
+            .params
+            .len(),
         4,
         "the real declaration must not be displaced by a later, worse shim"
     );
@@ -445,7 +516,7 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(
-        r.functions["ctype_punct"].return_type,
+        r.function_by_name("ctype_punct").unwrap().return_type,
         Type::bool(),
         "the untyped variant must not have displaced the stub's own bool return type"
     );
@@ -461,8 +532,14 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
-    assert_eq!(r.functions["ctype_punct"].return_type, Type::bool());
-    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::mixed());
+    assert_eq!(
+        r.function_by_name("ctype_punct").unwrap().return_type,
+        Type::bool()
+    );
+    assert_eq!(
+        r.function_by_name("ctype_punct").unwrap().params[0].ty,
+        Type::mixed()
+    );
 }
 
 // A vendored, unconditional, bare (guard-free) duplicate of a stub
@@ -504,7 +581,7 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
     r.index(&program, &Origin::Unknown, false);
 
     assert_eq!(
-        r.functions["str_contains"].params[0].ty,
+        r.function_by_name("str_contains").unwrap().params[0].ty,
         Type::union_of(vec![Type::string(), Type::null()]),
         "the real polyfill's own nullable params must still win despite the intervening unconditional duplicate"
     );
@@ -534,8 +611,18 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
 
     let mut r = Registry::default();
     r.merge_stub_classes(vec![("Imagick".to_string(), built_in)]);
-    assert!(r.classes["Imagick"].methods.contains_key("getImageWidth"));
-    assert!(r.classes["Imagick"].methods.contains_key("getImageHeight"));
+    assert!(
+        r.class_by_name("Imagick")
+            .unwrap()
+            .methods
+            .contains_key("getImageWidth")
+    );
+    assert!(
+        r.class_by_name("Imagick")
+            .unwrap()
+            .methods
+            .contains_key("getImageHeight")
+    );
 
     let tokens = Lexer::new(
         "<?php class Imagick { public function convolveImage($kernel, $channel = 1) {} }",
@@ -545,12 +632,22 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     r.index(&program, &Origin::Unknown, false);
 
     assert!(
-        r.classes["Imagick"].methods.contains_key("getImageWidth"),
+        r.class_by_name("Imagick")
+            .unwrap()
+            .methods
+            .contains_key("getImageWidth"),
         "the override must not discard the built-in class's other real methods"
     );
-    assert!(r.classes["Imagick"].methods.contains_key("getImageHeight"));
+    assert!(
+        r.class_by_name("Imagick")
+            .unwrap()
+            .methods
+            .contains_key("getImageHeight")
+    );
     assert_eq!(
-        r.classes["Imagick"].methods["convolveImage"].params.len(),
+        r.class_by_name("Imagick").unwrap().methods["convolveImage"]
+            .params
+            .len(),
         2,
         "the override's own convolveImage() (2 params) should win over the built-in's (1 param)"
     );
@@ -589,7 +686,7 @@ fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_gene
     r.index(&program, &Origin::Unknown, true);
 
     assert_eq!(
-        r.classes["ArrayIterator"].templates,
+        r.class_by_name("ArrayIterator").unwrap().templates,
         vec!["TKey", "TValue"],
         "an analyzed re-declaration must not discard the built-in stub's own templates"
     );
@@ -634,13 +731,15 @@ fn a_conditional_declaration_merges_onto_a_built_in_stub_class() {
     r.index(&program, &Origin::Unknown, false);
 
     assert!(
-        r.classes["ReflectionConstant"]
+        r.class_by_name("ReflectionConstant")
+            .unwrap()
             .properties
             .contains_key("value"),
         "the polyfill's own $value property must become visible"
     );
     assert!(
-        r.classes["ReflectionConstant"]
+        r.class_by_name("ReflectionConstant")
+            .unwrap()
             .properties
             .contains_key("name"),
         "the built-in stub's own $name property must survive the merge"
@@ -663,8 +762,8 @@ fn a_conditional_declaration_does_not_merge_onto_a_real_non_stub_class() {
                 class X { public function stub() {} }
             }"#,
     );
-    assert!(r.classes["X"].methods.contains_key("real"));
-    assert!(!r.classes["X"].methods.contains_key("stub"));
+    assert!(r.class_by_name("X").unwrap().methods.contains_key("real"));
+    assert!(!r.class_by_name("X").unwrap().methods.contains_key("stub"));
 }
 
 // A conditional class declaration's `extends` (e.g. `class PhpToken
@@ -697,12 +796,12 @@ fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
     r.index(&program, &Origin::Unknown, false);
 
     assert!(
-        r.classes["PhpToken"].extends.is_empty(),
+        r.class_by_name("PhpToken").unwrap().extends.is_empty(),
         "the built-in stub declared no extends of its own - the conditional \
          declaration's real-but-never-taken extends must not be adopted"
     );
     assert_eq!(
-        r.classes["PhpToken"].implements,
+        r.class_by_name("PhpToken").unwrap().implements,
         vec![Name::from("Stringable")],
         "the built-in stub's own implements must survive unchanged"
     );
@@ -735,7 +834,7 @@ fn two_method_declarations_with_different_arities_in_one_class_body_merge() {
             }
         "#,
     );
-    let sig = &r.classes["DatePeriod"].methods["__construct"];
+    let sig = &r.class_by_name("DatePeriod").unwrap().methods["__construct"];
     assert_eq!(
         sig.params.len(),
         4,
@@ -769,7 +868,7 @@ fn two_method_declarations_with_different_arities_in_one_enum_body_merge() {
             }
         "#,
     );
-    let sig = &r.classes["E"].methods["m"];
+    let sig = &r.class_by_name("E").unwrap().methods["m"];
     assert_eq!(
         sig.params.len(),
         2,

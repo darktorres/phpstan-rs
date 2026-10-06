@@ -188,13 +188,13 @@ impl Registry {
     /// for as long as the scope and the class names stay as they are.
     pub(crate) fn scoped_class_names(&self) -> Arc<[Name]> {
         self.scoped_names
-            .classes(&self.scope, self.classes.version(), || {
+            .classes(&self.scope, self.class_ids.version(), || {
                 match self.scope.class_keys() {
-                    None => self.classes.keys().cloned().collect(),
+                    None => self.class_ids.keys().cloned().collect(),
                     Some(keys) => keys
                         .iter()
                         .filter_map(|key| {
-                            self.classes
+                            self.class_ids
                                 .get_with_name(&FoldedKey(key))
                                 .map(|(name, _)| name.clone())
                         })
@@ -207,13 +207,13 @@ impl Registry {
     /// once like the classes'.
     pub(crate) fn scoped_function_names(&self) -> Arc<[Name]> {
         self.scoped_names
-            .functions(&self.scope, self.functions.version(), || {
+            .functions(&self.scope, self.function_ids.version(), || {
                 match self.scope.function_keys() {
-                    None => self.functions.keys().cloned().collect(),
+                    None => self.function_ids.keys().cloned().collect(),
                     Some(keys) => keys
                         .iter()
                         .filter_map(|key| {
-                            self.functions
+                            self.function_ids
                                 .get_with_name(&FoldedKey(key))
                                 .map(|(name, _)| name.clone())
                         })
@@ -225,10 +225,14 @@ impl Registry {
     /// The classes in the passes' scope, with their declared names.
     pub(crate) fn scoped_classes(&self) -> Vec<(&Name, &crate::registry::ClassReflection)> {
         match self.scope.class_keys() {
-            None => self.classes.iter().collect(),
+            None => self.iter_classes().collect(),
             Some(keys) => keys
                 .iter()
-                .filter_map(|key| self.classes.get_with_name(&FoldedKey(key)))
+                .filter_map(|key| {
+                    self.class_ids
+                        .get_with_name(&FoldedKey(key))
+                        .and_then(|(name, id)| self.class_by_id(*id).map(|class| (name, class)))
+                })
                 .collect(),
         }
     }
@@ -236,10 +240,17 @@ impl Registry {
     /// The functions in the passes' scope, with their declared names.
     pub(crate) fn scoped_functions(&self) -> Vec<(&Name, &crate::registry::FunctionReflection)> {
         match self.scope.function_keys() {
-            None => self.functions.iter().collect(),
+            None => self.iter_functions().collect(),
             Some(keys) => keys
                 .iter()
-                .filter_map(|key| self.functions.get_with_name(&FoldedKey(key)))
+                .filter_map(|key| {
+                    self.function_ids
+                        .get_with_name(&FoldedKey(key))
+                        .and_then(|(name, id)| {
+                            self.function_declaration_by_id(*id)
+                                .map(|function| (name, function))
+                        })
+                })
                 .collect(),
         }
     }
@@ -251,7 +262,7 @@ impl Registry {
             .class_keys()
             .into_iter()
             .flatten()
-            .filter(|key| !self.classes.contains_key(&FoldedKey(key)))
+            .filter(|key| !self.class_ids.contains_key(&FoldedKey(key)))
             .cloned()
             .collect()
     }
@@ -267,14 +278,14 @@ impl Registry {
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
-                self.classes.get_with_name(&FoldedKey(key));
+                self.class_ids.get_with_name(&FoldedKey(key));
             });
         let functions: Vec<&String> = scope.function_keys().into_iter().flatten().collect();
         functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
-                self.functions.get_with_name(&FoldedKey(key));
+                self.function_ids.get_with_name(&FoldedKey(key));
             });
     }
 

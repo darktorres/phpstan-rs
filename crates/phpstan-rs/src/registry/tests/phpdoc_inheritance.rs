@@ -552,5 +552,5 @@ fn a_class_that_is_its_own_ancestor_does_not_stop_the_others_inheriting() {
         list_item_type(&method(&r, "Child", "f").return_type),
         Type::int()
     );
-    assert!(r.classes.contains_key("LoopA") && r.classes.contains_key("LoopB"));
+    assert!(r.has_class("LoopA") && r.has_class("LoopB"));
 }

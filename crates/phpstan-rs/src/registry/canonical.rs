@@ -427,6 +427,8 @@ impl<T: CanonicalOver + ?Sized> CanonicalOver for Arc<T> {
 /// a base holds none of.
 impl CanonicalOver for Registry {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
+        let classes_for_display = self.classes_for_cache();
+        let functions_for_display = self.functions_for_cache();
         let ancestor_names = self.ancestor_names_for_cache();
         let base_ancestor_names = base.ancestor_names_for_cache();
         let member_owners = self.member_owners_for_cache();
@@ -458,13 +460,13 @@ impl CanonicalOver for Registry {
             purity_results: _,
             function_results: _,
             function_results_cache: _,
-            classes,
+            classes: _,
             class_declarations: _,
             class_ids: _,
             project_class_names: _,
             configured_assertions,
             configured_class_argument_returns,
-            functions,
+            functions: _,
             function_declarations: _,
             function_ids: _,
             project_function_names: _,
@@ -527,13 +529,19 @@ impl CanonicalOver for Registry {
         p.node(
             "Registry",
             &[
-                ("classes", &Over(classes, &base.classes, compare)),
+                (
+                    "classes",
+                    &Over(&classes_for_display, &base.classes, compare),
+                ),
                 ("configured_assertions", configured_assertions),
                 (
                     "configured_class_argument_returns",
                     configured_class_argument_returns,
                 ),
-                ("functions", &Over(functions, &base.functions, compare)),
+                (
+                    "functions",
+                    &Over(&functions_for_display, &base.functions, compare),
+                ),
                 (
                     "global_constants",
                     &Over(global_constants, &base.global_constants, compare),

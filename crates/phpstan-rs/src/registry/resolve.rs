@@ -31,7 +31,7 @@ impl Registry {
     /// before graph walks, while keeping source spellings on declarations.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
-        let declared = self.classes.declared_names();
+        let declared = self.class_ids.declared_names();
         let canonicalize = |name: &mut Name| {
             if let Some(canonical) = declared.get(name) {
                 *name = canonical.clone();
@@ -318,9 +318,6 @@ impl Registry {
 
         let mut changed = false;
         for (class_id, methods, properties, consts) in additions {
-            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
             for (method_ref, entry, sig) in methods {
                 debug_assert_eq!(method_ref.class(), class_id);
                 let inserted = self.add_member_entry(class_id, entry);
@@ -334,8 +331,7 @@ impl Registry {
             for (name, property) in properties {
                 if self.property_result_by_name(class_id, &name).is_some()
                     || self
-                        .classes
-                        .get(&class_name)
+                        .class_by_id(class_id)
                         .is_some_and(|info| info.properties.contains_key(&name))
                 {
                     continue;
@@ -348,8 +344,7 @@ impl Registry {
                     .class_constant_result_by_name(class_id, &name)
                     .is_some()
                     || self
-                        .classes
-                        .get(&class_name)
+                        .class_by_id(class_id)
                         .is_some_and(|info| info.consts.contains_key(&name))
                 {
                     continue;
@@ -1276,12 +1271,8 @@ impl Registry {
             }
         }
         for (class_id, name, sig) in property_additions {
-            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
             if self
-                .classes
-                .get(&class_name)
+                .class_by_id(class_id)
                 .is_some_and(|info| info.properties.contains_key(&name))
                 || self.property_result_by_name(class_id, &name).is_some()
             {

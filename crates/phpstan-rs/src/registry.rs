@@ -69,7 +69,7 @@ pub use init_flow::InitFlow;
 pub use members::Members;
 pub use name_map::{NameMap, NameSet};
 pub use name_table::NameTable;
-pub(crate) use name_table::{Detached, FoldedKey, Lazy};
+pub(crate) use name_table::{Detached, Lazy};
 pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
@@ -529,14 +529,22 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// The project's indexed classes, keyed by PHP's case-insensitive class name.
-    pub fn classes(&self) -> &NameTable<ClassReflection> {
-        &self.classes
+    /// A name-keyed snapshot of the selected classes.
+    ///
+    /// Runtime lookup uses `class_by_name` and iteration uses `iter_classes`;
+    /// this owned compatibility view is materialized only for callers that
+    /// need the former whole-table interface.
+    pub fn classes(&self) -> NameTable<ClassReflection> {
+        self.classes_for_cache()
     }
 
-    /// The project's indexed functions, keyed by PHP's case-insensitive function name.
-    pub fn functions(&self) -> &FunctionTable {
-        &self.functions
+    /// A name-keyed snapshot of the selected functions.
+    ///
+    /// Runtime lookup uses `function_by_name` and iteration uses
+    /// `iter_functions`; this owned compatibility view is materialized only
+    /// for callers that need the former whole-table interface.
+    pub fn functions(&self) -> FunctionTable {
+        self.functions_for_cache()
     }
 
     /// Whether these registries share the same class-table base.
@@ -882,7 +890,19 @@ impl Registry {
     }
 
     fn ensure_class_id(&mut self, name: &Name) {
-        if self.class_ids.contains_key(name) {
+        if let Some(existing_id) = self.class_ids.get(name).copied() {
+            if existing_id.source() == Some(IdSource::Project) {
+                return;
+            }
+            let declaration = self.class_declarations.get(&existing_id).cloned();
+            let local = u32::try_from(self.project_class_names.len())
+                .expect("project class id range exhausted");
+            let id = ClassId::project_in_generation(local, self.id_generation);
+            self.class_ids.insert(name.clone(), id);
+            self.project_class_names.push(name.clone());
+            if let Some(declaration) = declaration {
+                self.class_declarations.insert(id, declaration);
+            }
             return;
         }
         let local = u32::try_from(self.project_class_names.len())
@@ -893,7 +913,19 @@ impl Registry {
     }
 
     fn ensure_function_id(&mut self, name: &Name) {
-        if self.function_ids.contains_key(name) {
+        if let Some(existing_id) = self.function_ids.get(name).copied() {
+            if existing_id.source() == Some(IdSource::Project) {
+                return;
+            }
+            let declaration = self.function_declarations.get(&existing_id).cloned();
+            let local = u32::try_from(self.project_function_names.len())
+                .expect("project function id range exhausted");
+            let id = FnId::project_in_generation(local, self.id_generation);
+            self.function_ids.insert(name.clone(), id);
+            self.project_function_names.push(name.clone());
+            if let Some(declaration) = declaration {
+                self.function_declarations.insert(id, declaration);
+            }
             return;
         }
         let local = u32::try_from(self.project_function_names.len())
@@ -1126,7 +1158,7 @@ impl Registry {
                     *id,
                     (
                         class_name.clone(),
-                        self.class_result_overlay(*id, self.classes.get(class_name)),
+                        self.class_result_overlay(*id, self.class_by_id(*id)),
                     ),
                 );
             }
@@ -1196,8 +1228,10 @@ impl Registry {
                         .cloned()
                         .map(Detached::Own)
                 } else {
-                    self.functions
-                        .get_shared(&FoldedKey(key))
+                    self.function_ids
+                        .get(key)
+                        .and_then(|id| self.function_declarations.get(id))
+                        .cloned()
                         .map(Detached::Own)
                 }
             })
@@ -1230,6 +1264,11 @@ impl Registry {
     /// Makes the class, function and derived tables a shared base, for
     /// clones of the registry to share rather than copy.
     pub(crate) fn freeze(&mut self) {
+        // A frozen base and its on-disk form use a compact name-keyed table.
+        // Build that projection from the authoritative selected ID stores so
+        // freezing a Registry also preserves project-owned declarations.
+        self.classes = self.classes_for_cache();
+        self.functions = self.functions_for_cache();
         // IDs may be reassigned from project to stub space below. The next
         // effect pass rebuilds this ephemeral memo against the frozen IDs.
         self.stub_effect_results.clear();
@@ -1643,7 +1682,7 @@ impl Registry {
             }
             if let Some(id) = self.function_ids.get(name).copied() {
                 self.changed.function_ids_before.insert(key, id);
-                if let Some(declaration) = self.functions.get_shared(name) {
+                if let Some(declaration) = self.function_declarations.get(&id).cloned() {
                     self.changed
                         .function_declarations_before
                         .insert(id, declaration);
@@ -1698,8 +1737,12 @@ impl Registry {
                 .function_ids
                 .get(key)
                 .and_then(|id| self.function_results.get(id));
-            if differs(self.functions.get(&FoldedKey(key)), old.as_ref())
-                || old_result.as_ref() != new_result
+            if differs(
+                self.function_ids
+                    .get(key)
+                    .and_then(|id| self.function_declaration_by_id(*id)),
+                old.as_ref(),
+            ) || old_result.as_ref() != new_result
             {
                 keys.insert(RefKey::function_text(key));
             }
@@ -1825,6 +1868,9 @@ impl Registry {
             .store(writer, CLASS_REFERENCES)?;
         self.imported_type_aliases_for_cache()
             .store(writer, "table:imported_type_aliases")?;
+        self.classes_for_cache().store(writer, "table:classes")?;
+        self.functions_for_cache()
+            .store(writer, "table:functions")?;
         self.store_tables(writer)?;
         writer.section(REST, &stub_cache::encode(self)?)
     }
@@ -1843,6 +1889,35 @@ impl Registry {
                     .map(|ancestors| (name.clone(), ancestors.names(self)))
             })
             .collect()
+    }
+
+    /// Stable name-keyed projection used only by the on-disk cache. Runtime
+    /// declaration reads resolve through the selected IDs and Arc stores.
+    fn classes_for_cache(&self) -> NameTable<ClassReflection> {
+        if self.class_ids.is_empty() {
+            return self.classes.clone();
+        }
+        let mut classes = NameTable::default();
+        for (name, id) in self.class_ids.iter() {
+            if let Some(declaration) = self.class_declarations.get(id) {
+                classes.insert_shared(name.clone(), declaration.clone());
+            }
+        }
+        classes
+    }
+
+    /// Stable as-built name-keyed function projection for the on-disk cache.
+    fn functions_for_cache(&self) -> FunctionTable {
+        if self.function_ids.is_empty() {
+            return self.functions.clone();
+        }
+        let mut functions = FunctionTable::default();
+        for (name, id) in self.function_ids.iter() {
+            if let Some(declaration) = self.function_declarations.get(id) {
+                functions.insert_shared(name.clone(), declaration.clone());
+            }
+        }
+        functions
     }
 
     fn member_owners_for_cache(&self) -> NameTable<hierarchy::ClassOwners> {
@@ -2051,6 +2126,8 @@ impl Registry {
     #[cfg(test)]
     pub(crate) fn check_stored(&self) -> Result<(), String> {
         self.check_tables()?;
+        self.classes_for_cache().check_order("table:classes")?;
+        self.functions_for_cache().check_order("table:functions")?;
         self.ancestor_names_for_cache()
             .check_order("table:ancestor_names")?;
         self.member_owners_for_cache()
@@ -2098,6 +2175,8 @@ impl Registry {
         let rest = reader.section(REST)?;
         let mut registry: Registry = stub_cache::decode(&reader.buffer()[rest])?;
         registry.load_tables(reader)?;
+        registry.classes = NameTable::load(reader, "table:classes")?;
+        registry.functions = FunctionTable::load(reader, "table:functions")?;
         registry.effects_cache = Some(stub_cache::decode(
             &reader.buffer()[reader.section(EFFECTS)?],
         )?);
@@ -2123,8 +2202,6 @@ impl Registry {
     }
 
     stored_tables!(
-        classes,
-        functions,
         built_in_stub_classes,
         subtype_children,
         trait_users,
@@ -2270,9 +2347,8 @@ impl Registry {
     /// built-in stub declares no entity), in the order of their names.
     pub(crate) fn index_doctrine_entities(&mut self) {
         let mut entities: Vec<(&Name, &crate::registry::class_info::DoctrineEntity)> = self
-            .classes
-            .own_iter()
-            .filter_map(|(class_name, info)| Some((class_name, info.doctrine_entity.as_ref()?)))
+            .own_classes_by_id()
+            .filter_map(|(_, class_name, info)| Some((class_name, info.doctrine_entity.as_ref()?)))
             .collect();
         entities.sort_unstable_by(|(a, _), (b, _)| {
             (a.lower(), a.as_str()).cmp(&(b.lower(), b.as_str()))
@@ -2307,7 +2383,7 @@ impl Registry {
         table: &str,
     ) -> Option<&crate::registry::class_info::DoctrineEntity> {
         let class_name = self.doctrine_entity_index().by_table.get(table)?;
-        self.classes.get(class_name)?.doctrine_entity.as_ref()
+        self.class_by_name(class_name)?.doctrine_entity.as_ref()
     }
 
     /// The entity that names `repository_fqn` as its own

@@ -5,7 +5,11 @@ use super::helpers::*;
 use crate::registry::{AttributeValue, ReflectionAttribute};
 
 fn class_attributes(src: &str, class: &str) -> Vec<ReflectionAttribute> {
-    build_registry(src).classes[class].attributes.clone()
+    build_registry(src)
+        .class_by_name(class)
+        .unwrap()
+        .attributes
+        .clone()
 }
 
 #[test]

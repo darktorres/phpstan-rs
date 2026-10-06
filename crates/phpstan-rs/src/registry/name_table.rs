@@ -556,6 +556,13 @@ impl<V> NameTable<V> {
         self.base.as_ref().map_or(0, |base| base.len())
     }
 
+    /// Whether this table has an immutable shared base, including an empty
+    /// one. Builders use this to keep the mutable name table at the cache
+    /// boundary while runtime overlays stay ID-addressed.
+    pub(crate) fn is_frozen(&self) -> bool {
+        self.base.is_some()
+    }
+
     /// The name at `index` in this table's immutable base.
     pub(crate) fn base_name(&self, index: usize) -> Option<&Name> {
         self.base.as_ref()?.name_at(index)

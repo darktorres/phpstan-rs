@@ -187,15 +187,18 @@ impl Registry {
                 name,
                 conditional: true,
                 ..
-            } => !self.built_in_stub_classes.contains_key(name) && self.classes.contains_key(name),
+            } => {
+                !self.built_in_stub_classes.contains_key(name) && self.class_by_name(name).is_some()
+            }
             BuiltDecl::Function {
                 name,
                 conditional: true,
                 sig,
                 ..
             } => self
-                .functions
+                .function_ids
                 .get(name)
+                .and_then(|id| self.function_declaration_by_id(*id))
                 .is_some_and(|existing| !better_conditional_function_declaration(sig, existing)),
             _ => false,
         };
@@ -210,6 +213,25 @@ impl Registry {
                     self.record_changed_function(name);
                 }
                 BuiltDecl::GlobalConst { name, .. } => self.record_changed_constant(name),
+            }
+            // Keep the name tables as a short-lived merge/build boundary.
+            // The selected declaration itself lives in the ID map; placing
+            // it here only lets the established merge policy operate on the
+            // previous winner, including a declaration inherited from the
+            // frozen stub base.
+            if let Some(name) = &class_source
+                && let Some(id) = self.class_ids.get(name).copied()
+                && let Some(declaration) = self.class_declarations.get(&id)
+            {
+                self.classes
+                    .insert_shared(name.clone(), declaration.clone());
+            }
+            if let Some(name) = &function_source
+                && let Some(id) = self.function_ids.get(name).copied()
+                && let Some(declaration) = self.function_declarations.get(&id)
+            {
+                self.functions
+                    .insert_shared(name.clone(), declaration.clone());
             }
         }
         match decl {
@@ -494,11 +516,17 @@ impl Registry {
                 self.class_declarations.insert(id, declaration);
                 self.ensure_property_topology(id);
             }
+            if let Some(name) = &class_source {
+                self.classes.remove(name.as_str());
+            }
             if let Some(name) = &function_source
                 && let Some(id) = self.function_ids.get(&name).copied()
                 && let Some(declaration) = self.functions.get_shared(name)
             {
                 self.function_declarations.insert(id, declaration);
+            }
+            if let Some(name) = &function_source {
+                self.functions.remove(name.as_str());
             }
         }
     }
@@ -509,7 +537,7 @@ impl Registry {
     /// empty.
     pub(crate) fn index_assert_tagged_names(&mut self) {
         let mut names = (*self.base_assert_tagged).clone();
-        for (name, declaration) in self.functions.own_iter() {
+        for (_, name, declaration) in self.own_functions_by_id() {
             let sig = self.lookup_function(name).unwrap_or(declaration);
             if !sig.assert.is_empty() {
                 names.insert(Name::from(name.rsplit('\\').next().unwrap_or(name)));
@@ -525,7 +553,7 @@ impl Registry {
                 names.insert(Name::from(name.rsplit('\\').next().unwrap_or(name)));
             }
         }
-        for class in self.classes.own_iter().map(|(class, _)| class) {
+        for (_, class, _) in self.own_classes_by_id() {
             for method in self.method_names(class) {
                 let Some(sig) = self.lookup_own_method(class, method) else {
                     continue;
@@ -615,14 +643,20 @@ impl Registry {
         for (name, sig) in stubs {
             let name: Name = name.into();
             self.record_changed_function(&name);
-            self.ensure_function_id(&name);
             self.unconditionally_declared_functions
                 .insert(folded_key(&name));
             self.stub_provided_functions.insert(folded_key(&name));
-            self.functions.insert_if_absent(name.clone(), sig);
-            if let Some(id) = self.function_ids.get(&name).copied()
-                && let Some(declaration) = self.functions.get_shared(&name)
-            {
+            if self.function_by_name(&name).is_none() {
+                self.ensure_function_id(&name);
+                let id = *self
+                    .function_ids
+                    .get(&name)
+                    .expect("function ID was just ensured");
+                let declaration = Arc::new(sig);
+                if !self.functions.is_frozen() {
+                    self.functions
+                        .insert_shared(name.clone(), declaration.clone());
+                }
                 self.function_declarations.insert(id, declaration);
             }
         }
@@ -653,21 +687,21 @@ impl Registry {
             self.ensure_class_id(&name);
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
-            let class_name = name.clone();
-            match self.classes.take(&name) {
-                Some(existing) => {
-                    self.classes.insert(name, info.merge(existing));
-                }
-                None => {
-                    self.classes.insert(name, info);
-                }
+            let id = *self
+                .class_ids
+                .get(&name)
+                .expect("class ID was just ensured");
+            let selected = match self.class_declarations.get(&id) {
+                Some(existing) => info.merge(Arc::unwrap_or_clone(existing.clone())),
+                None => info,
+            };
+            let declaration = Arc::new(selected);
+            if !self.classes.is_frozen() {
+                self.classes
+                    .insert_shared(name.clone(), declaration.clone());
             }
-            if let Some(id) = self.class_ids.get(&class_name).copied()
-                && let Some(declaration) = self.classes.get_shared(&class_name)
-            {
-                self.class_declarations.insert(id, declaration);
-                self.ensure_property_topology(id);
-            }
+            self.class_declarations.insert(id, declaration);
+            self.ensure_property_topology(id);
         }
     }
 

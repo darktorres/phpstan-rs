@@ -339,7 +339,7 @@ fn a_doc_class_the_registry_never_saw_is_kept_on_a_native_interface_hint() {
             }
             "#,
     );
-    let ty = &r.classes["App\\Rule"].methods["processNode"].params[0].ty;
+    let ty = &r.class_by_name("App\\Rule").unwrap().methods["processNode"].params[0].ty;
     assert_eq!(ty.to_string(), "Vendor\\CollectedDataNode");
 }
 
@@ -359,7 +359,8 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
             final class Shape extends Coll {}
             "#,
     );
-    let Some((_, args)) = r.classes["ProbeTb\\Shape"].extends_args[0].as_object() else {
+    let Some((_, args)) = r.class_by_name("ProbeTb\\Shape").unwrap().extends_args[0].as_object()
+    else {
         panic!("expected a generic parent");
     };
     let case = |c: &str| Type::enum_case("ProbeTb\\Id".into(), c.into());
@@ -367,7 +368,7 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
     assert!(!r.accepts(&case("ITERABLE"), &case("ARRAY")).yes());
     assert!(
         r.accepts(
-            &r.classes["ProbeTb\\Generic"].template_bounds["T"],
+            &r.class_by_name("ProbeTb\\Generic").unwrap().template_bounds["T"],
             &args[0]
         )
         .yes()

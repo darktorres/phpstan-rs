@@ -10,7 +10,7 @@ fn an_ordinary_class_has_no_doctrine_entity() {
             class Foo {}
             "#,
     );
-    assert!(r.classes.get("Foo").unwrap().doctrine_entity.is_none());
+    assert!(r.class_by_name("Foo").unwrap().doctrine_entity.is_none());
 }
 
 #[test]

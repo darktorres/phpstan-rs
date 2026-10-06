@@ -231,7 +231,7 @@ memory. What it gathered beyond that, new checks and changes to what the
 analysis finds that the optimization does not need, is deferred until after
 O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
-- **State: building, item 4.6.** Items 0-2 are closed. Item 3's
+- **State: item 4.6 implementation complete; item 4.7 next.** Items 0-2 are closed. Item 3's
   implementation is done (3.1-3.2); its validation at 3.V passed the gate
   workspace build, workspace tests, and the scoped and all-on oracle corpus
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
@@ -240,7 +240,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `Registry` read accessors (`e06503ad`, preserving owned stub-table
   extraction). Row 4.2 added stub, context-base and project ID ranges
   (`1b8f79aa`); `cargo check -p phpstan-rs --lib --tests` and Clippy passed.
-  Row 4.3 is under way: the pinned `la-arena` dependency, typed per-file
+  Row 4.3 is complete: the pinned `la-arena` dependency, typed per-file
   arenas, and class/member/property/constant/name and function/parameter
   range layouts and accessors are in place (`b7651f06`, `105f4b2b`); an arena
   serialization codec is in `00321546`, with a typed-range round-trip test
@@ -439,7 +439,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   invalidation preserve the results. Incremental snapshots compare old
   function overlays, and the assertion fast-gate indexes effective signatures.
   The focused cache, incremental and fast-gate tests and all 1,153 library
-  tests pass; check, formatting and diff checks pass. Item 4.6 remains open. The current working diff moves composed constant results to `(ClassId, slot)`, converts effect classifications to `EffectId` before the worklist, keys project property-write facts by writer `ClassId` and `PropertyRef`, and routes production declaration readers through ID-backed Registry APIs. The old raw class reset/swap path is gone. Remaining 4.6 storage work: `classes`/`functions` still retain name-keyed reflection values alongside ID-addressed declaration maps; `EffectId::Named(DeclKey)` remains for unresolved declarations. Name-keyed snapshots are tracked with 4.8; global-variable/include-graph relations remain under 4.7. Formatting, diff check, and `CARGO_INCREMENTAL=0 cargo check -p phpstan-rs --lib --tests` pass on the current tree; this increment’s full tests have not been run. The plan was committed at
+  tests pass; check, formatting and diff checks pass. The 4.6 implementation is complete in commit `d28d22a1` plus the current Registry storage diff. Runtime results now use `FnId`, `MethodRef`, `PropertyRef`, `ClassId`, or `(ClassId, slot)`, including composed constants, effect classifications, and project property-write facts. Active declarations are held in ID-keyed Arc stores; name tables are limited to insertion/merge and cache projection, and production reads use ID-backed lookup/iteration APIs. Project declarations receive their own IDs when shadowing stub IDs; removal reveals the shared base. `freeze()` and cache serialization reconstruct stable name projections. The public `classes()`/`functions()` compatibility accessors return owned snapshots; hot readers use `class_by_name`/`function_by_name`/`iter_*`. The old raw class reset/swap path is gone. `EffectId::Named(DeclKey)` remains only for targets with no active declaration ID. Snapshot conversion remains item 4.8; global-variable/include-graph work remains item 4.7. Formatting, diff check, and `CARGO_INCREMENTAL=0 cargo check -p phpstan-rs --lib --tests` pass; tests were not run for this storage increment. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per

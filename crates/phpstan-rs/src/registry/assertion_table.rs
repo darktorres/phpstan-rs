@@ -170,12 +170,25 @@ mod tests {
             Vec::new(),
         );
 
-        let function_declaration = registry.functions["configured_guard"].clone();
-        let method_declaration = registry.classes["Demo"].methods["guard"].clone();
+        let function_declaration = registry
+            .function_by_name("configured_guard")
+            .unwrap()
+            .clone();
+        let method_declaration = registry.class_by_name("Demo").unwrap().methods["guard"].clone();
         registry.apply_assertion_table();
 
-        assert!(registry.functions["configured_guard"].assert.is_empty());
-        assert!(registry.classes["Demo"].methods["guard"].assert.is_empty());
+        assert!(
+            registry
+                .function_by_name("configured_guard")
+                .unwrap()
+                .assert
+                .is_empty()
+        );
+        assert!(
+            registry.class_by_name("Demo").unwrap().methods["guard"]
+                .assert
+                .is_empty()
+        );
         assert_eq!(
             registry
                 .lookup_function("configured_guard")
@@ -192,9 +205,12 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(registry.functions["configured_guard"], function_declaration);
         assert_eq!(
-            registry.classes["Demo"].methods["guard"],
+            registry.function_by_name("configured_guard").unwrap(),
+            &function_declaration
+        );
+        assert_eq!(
+            registry.class_by_name("Demo").unwrap().methods["guard"],
             method_declaration
         );
     }

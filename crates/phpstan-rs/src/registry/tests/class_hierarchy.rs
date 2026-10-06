@@ -17,10 +17,10 @@ fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {
             }
             "#,
     );
-    let iface = r.classes.get("Iface").unwrap();
+    let iface = r.class_by_name("Iface").unwrap();
     assert_eq!(iface.kind, ClassKind::Interface);
 
-    let base = r.classes.get("Base").unwrap();
+    let base = r.class_by_name("Base").unwrap();
     assert_eq!(base.kind, ClassKind::Class);
     assert!(base.is_abstract);
     assert!(!base.is_final);
@@ -41,11 +41,14 @@ fn method_native_exclusion_is_a_result_not_a_declaration_write() {
             }
             "#,
     );
-    let declaration = r.classes["Demo"].methods["accept"].clone();
+    let declaration = r.class_by_name("Demo").unwrap().methods["accept"].clone();
     let effective = r.lookup_own_method("Demo", "accept").unwrap();
 
     assert_ne!(declaration.params[0].ty, effective.params[0].ty);
-    assert_eq!(r.classes["Demo"].methods["accept"], declaration);
+    assert_eq!(
+        r.class_by_name("Demo").unwrap().methods["accept"],
+        declaration
+    );
 }
 
 #[test]
@@ -59,11 +62,14 @@ fn method_constant_named_types_are_results_not_declaration_writes() {
             }
             "#,
     );
-    let declaration = r.classes["Demo"].methods["accept"].clone();
+    let declaration = r.class_by_name("Demo").unwrap().methods["accept"].clone();
     let effective = r.lookup_own_method("Demo", "accept").unwrap();
 
     assert_ne!(declaration.params[0].ty, effective.params[0].ty);
-    assert_eq!(r.classes["Demo"].methods["accept"], declaration);
+    assert_eq!(
+        r.class_by_name("Demo").unwrap().methods["accept"],
+        declaration
+    );
 }
 
 #[test]
@@ -93,7 +99,7 @@ fn a_final_private_method_is_not_recorded_as_final() {
             class Base { final private function __clone() {} }
             "#,
     );
-    let base = r.classes.get("Base").unwrap();
+    let base = r.class_by_name("Base").unwrap();
     assert!(!base.is_final_method("__clone"));
 }
 
@@ -106,7 +112,7 @@ fn a_trait_using_another_trait_is_flattened_transitively() {
             class Foo { use Combined; }
             "#,
     );
-    let foo = r.classes.get("Foo").unwrap();
+    let foo = r.class_by_name("Foo").unwrap();
     assert!(!foo.methods.contains_key("greet"));
     assert!(!foo.methods.contains_key("extra"));
     assert!(r.lookup_own_method("Foo", "greet").is_some());
@@ -123,7 +129,7 @@ fn a_three_level_trait_chain_is_flattened_transitively() {
             class Deep { use C2; }
             "#,
     );
-    let deep = r.classes.get("Deep").unwrap();
+    let deep = r.class_by_name("Deep").unwrap();
     assert!(!deep.methods.contains_key("m1"));
     assert!(!deep.methods.contains_key("m2"));
     assert!(!deep.methods.contains_key("m3"));
@@ -147,7 +153,7 @@ fn a_trait_as_alias_registers_the_method_under_its_new_name_too() {
             }
             "#,
     );
-    let c = r.classes.get("C").unwrap();
+    let c = r.class_by_name("C").unwrap();
     assert!(!c.methods.contains_key("hello"));
     assert!(!c.methods.contains_key("helloA"));
     assert!(!c.methods.contains_key("helloB"));
@@ -168,7 +174,7 @@ fn an_unqualified_trait_as_alias_resolves_against_the_used_trait() {
             }
             "#,
     );
-    let y = r.classes.get("Y").unwrap();
+    let y = r.class_by_name("Y").unwrap();
     assert!(!y.methods.contains_key("greet"));
     assert!(!y.methods.contains_key("greetAlias"));
     assert!(r.lookup_own_method("Y", "greet").is_some());
@@ -226,7 +232,7 @@ fn trait_mixin_and_phpdoc_members_live_in_host_topology() {
             class Host { use TraitMethods { fromTrait as traitAlias; } }
             "#,
     );
-    let host = r.classes.get("Host").unwrap();
+    let host = r.class_by_name("Host").unwrap();
     let declaration_methods: Vec<_> = host.methods.keys().map(|name| name.to_string()).collect();
     assert!(declaration_methods.is_empty(), "{declaration_methods:?}");
 
@@ -254,7 +260,12 @@ fn a_final_trait_property_keeps_its_flag_on_the_using_class() {
             class Grandchild extends Host {}
             "#,
     );
-    assert!(!r.classes.get("Host").unwrap().properties.contains_key("id"));
+    assert!(
+        !r.class_by_name("Host")
+            .unwrap()
+            .properties
+            .contains_key("id")
+    );
     assert!(r.lookup_property("Host", "id").unwrap().is_final());
     assert!(r.lookup_property("Grandchild", "id").unwrap().is_final());
     assert_eq!(
@@ -395,7 +406,7 @@ fn imported_type_constant_results_leave_the_declaration_unchanged() {
         &Type::string(),
         "the property declaration keeps its imported-alias input"
     );
-    let target = r.classes.get("Target").unwrap();
+    let target = r.class_by_name("Target").unwrap();
     assert!(target.type_aliases().is_empty());
     assert_eq!(target.type_imports().len(), 1);
     assert_eq!(
@@ -425,7 +436,7 @@ fn class_deferred_generic_types_are_results_not_declaration_writes() {
     let expected =
         Type::string_literal("first".into()).union(Type::string_literal("second".into()));
 
-    assert!(registry.classes["Bounded"].template_bounds["T"].contains_deferred());
+    assert!(registry.class_by_name("Bounded").unwrap().template_bounds["T"].contains_deferred());
     assert_eq!(
         registry
             .effective_template_bounds_by_name("Bounded")
@@ -433,14 +444,18 @@ fn class_deferred_generic_types_are_results_not_declaration_writes() {
         Some(&expected)
     );
 
-    assert!(registry.classes["ChildGeneric"].extends_args[0].contains_deferred());
+    assert!(registry.class_by_name("ChildGeneric").unwrap().extends_args[0].contains_deferred());
     assert_eq!(
         registry.effective_extends_args_by_name("ChildGeneric"),
         vec![expected.clone()]
     );
 
     assert!(
-        registry.classes["ContractUser"].implements_args["GenericContract"][0].contains_deferred()
+        registry
+            .class_by_name("ContractUser")
+            .unwrap()
+            .implements_args["GenericContract"][0]
+            .contains_deferred()
     );
     assert_eq!(
         registry

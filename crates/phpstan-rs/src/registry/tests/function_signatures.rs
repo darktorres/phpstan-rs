@@ -10,7 +10,10 @@ use super::helpers::*;
 fn configured_function_assertions_reach_the_fast_gate_without_changing_declarations() {
     let mut registry =
         build_registry(r#"<?php namespace App; function configured_guard($value): void {}"#);
-    let declaration = registry.functions["App\\configured_guard"].clone();
+    let declaration = registry
+        .function_by_name("App\\configured_guard")
+        .unwrap()
+        .clone();
     registry.set_assertion_tables(
         vec![crate::assertion_tables::AssertionEntry {
             class: None,
@@ -28,7 +31,9 @@ fn configured_function_assertions_reach_the_fast_gate_without_changing_declarati
 
     assert!(registry.names_with_assert_tags.contains("configured_guard"));
     assert!(
-        registry.functions["App\\configured_guard"]
+        registry
+            .function_by_name("App\\configured_guard")
+            .unwrap()
             .assert
             .is_empty()
     );
@@ -40,7 +45,10 @@ fn configured_function_assertions_reach_the_fast_gate_without_changing_declarati
             .len(),
         1
     );
-    assert_eq!(registry.functions["App\\configured_guard"], declaration);
+    assert_eq!(
+        registry.function_by_name("App\\configured_guard").unwrap(),
+        &declaration
+    );
 }
 
 #[test]
@@ -52,7 +60,7 @@ fn top_level_deferred_value_of_is_a_function_result_not_a_declaration_write() {
             function accepts_value(string $value): void {}
             "#,
     );
-    let declaration = registry.functions["accepts_value"].clone();
+    let declaration = registry.function_by_name("accepts_value").unwrap().clone();
     let effective = registry.lookup_function("accepts_value").unwrap();
 
     assert!(declaration.params[0].ty.contains_deferred());
@@ -60,7 +68,10 @@ fn top_level_deferred_value_of_is_a_function_result_not_a_declaration_write() {
         effective.params[0].ty,
         Type::string_literal("first".into()).union(Type::string_literal("second".into()))
     );
-    assert_eq!(registry.functions["accepts_value"], declaration);
+    assert_eq!(
+        registry.function_by_name("accepts_value").unwrap(),
+        &declaration
+    );
 }
 
 #[test]
@@ -70,14 +81,14 @@ fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
     // *explicit* mixed (`vendor/phpstan-src/src/Type/
     // ParserNodeTypeToPHPStanType.php`).
     let r = build_registry(r#"<?php function g(mixed $m): void {}"#);
-    let sig = r.functions.get("g").unwrap();
+    let sig = r.function_by_name("g").unwrap();
     assert!(sig.params[0].ty.is_explicit_mixed());
 }
 
 #[test]
 fn an_untyped_parameter_resolves_to_implicit_mixed() {
     let r = build_registry(r#"<?php function g($m): void {}"#);
-    let sig = r.functions.get("g").unwrap();
+    let sig = r.function_by_name("g").unwrap();
     assert!(sig.params[0].ty.is_implicit_mixed());
 }
 
@@ -176,7 +187,7 @@ fn phpdoc_types_an_otherwise_untyped_function() {
             function double($x) { return $x * 2; }
         "#,
     );
-    let sig = &r.functions["double"];
+    let sig = &r.function_by_name("double").unwrap();
     assert_eq!(sig.params[0].ty, Type::int());
     assert_eq!(sig.return_type, Type::int());
 }
@@ -197,7 +208,7 @@ fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
             ) {}
         "#,
     );
-    let sig = &r.functions["pg_query"];
+    let sig = &r.function_by_name("pg_query").unwrap();
     assert_eq!(sig.params.len(), 2, "the legacy duplicate must be dropped");
     assert_eq!(sig.params[0].name, "connection");
     assert_eq!(
@@ -224,7 +235,7 @@ fn two_separate_duplicated_parameter_pairs_both_collapse() {
             ) {}
         "#,
     );
-    let sig = &r.functions["sqlite3_open"];
+    let sig = &r.function_by_name("sqlite3_open").unwrap();
     assert_eq!(sig.params.len(), 3);
     assert_eq!(sig.params[1].name, "flags");
     assert_eq!(sig.params[1].ty, Type::int());
@@ -248,7 +259,7 @@ fn a_duplicated_parameter_in_the_middle_of_the_list_doesn_t_shift_later_ones() {
             ) {}
         "#,
     );
-    let sig = &r.functions["fsockopen"];
+    let sig = &r.function_by_name("fsockopen").unwrap();
     assert_eq!(sig.params.len(), 5);
     assert_eq!(
         sig.params
@@ -262,7 +273,7 @@ fn a_duplicated_parameter_in_the_middle_of_the_list_doesn_t_shift_later_ones() {
 #[test]
 fn a_function_with_no_duplicate_parameters_is_unaffected() {
     let r = build_registry(r#"<?php function f(int $a, string $b) {}"#);
-    let sig = &r.functions["f"];
+    let sig = &r.function_by_name("f").unwrap();
     assert_eq!(sig.params.len(), 2);
     assert_eq!(sig.params[0].name, "a");
     assert_eq!(sig.params[1].name, "b");
@@ -285,7 +296,7 @@ fn a_language_level_type_aware_override_wins_over_a_matching_stale_param_tag() {
         "#,
     );
     assert_eq!(
-        r.functions["ini_set"].params[1].ty,
+        r.function_by_name("ini_set").unwrap().params[1].ty,
         Type::union_of(vec![
             Type::string(),
             Type::int(),
@@ -313,7 +324,7 @@ fn a_language_level_type_aware_override_wins_even_when_the_stale_doc_type_is_res
         "#,
     );
     assert_eq!(
-        r.functions["finfo_file"].params[0].ty,
+        r.function_by_name("finfo_file").unwrap().params[0].ty,
         Type::object("finfo".into(), Vec::new())
     );
 }
@@ -333,12 +344,12 @@ fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock()
         "#,
     );
     assert_eq!(
-        r.functions["earlier"].params[0].ty,
+        r.function_by_name("earlier").unwrap().params[0].ty,
         Type::resource(false),
         "earlier's own docblock must be untouched by later's override"
     );
     assert_eq!(
-        r.functions["later"].params[0].ty,
+        r.function_by_name("later").unwrap().params[0].ty,
         Type::object("finfo".into(), Vec::new()),
         "later's override must still win via the native-hint-only path"
     );
@@ -356,7 +367,10 @@ fn a_stale_false_member_is_dropped_when_the_native_hint_no_longer_allows_it() {
             function imagesx(): int {}
         "#,
     );
-    assert_eq!(r.functions["imagesx"].return_type, Type::int());
+    assert_eq!(
+        r.function_by_name("imagesx").unwrap().return_type,
+        Type::int()
+    );
 }
 
 // A native hint that itself keeps `false` must *not* have it stripped
@@ -371,7 +385,7 @@ fn a_false_member_the_native_hint_still_allows_is_kept() {
         "#,
     );
     assert_eq!(
-        r.functions["f"].return_type,
+        r.function_by_name("f").unwrap().return_type,
         Type::union_of(vec![Type::int(), Type::bool_literal(false)])
     );
 }
@@ -389,7 +403,10 @@ fn a_stale_object_member_is_dropped_when_the_native_hint_is_void() {
             function make14(): void {}
         "#,
     );
-    assert_eq!(r.functions["make14"].return_type, Type::void());
+    assert_eq!(
+        r.function_by_name("make14").unwrap().return_type,
+        Type::void()
+    );
 }
 
 // `never` must be exempted from the native-`void` exclusion above -
@@ -410,7 +427,10 @@ fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
             }
         "#,
     );
-    assert_eq!(r.functions["alwaysThrows15"].return_type, Type::never());
+    assert_eq!(
+        r.function_by_name("alwaysThrows15").unwrap().return_type,
+        Type::never()
+    );
 }
 
 // A PHPStan/Psalm callable-shape doc member (`Closure(Tv): bool`) parses
@@ -431,7 +451,9 @@ fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closur
             function f(null|Closure $predicate = null) {}
         "#,
     );
-    let members = r.functions["f"].params[0].ty.union_members();
+    let members = r.function_by_name("f").unwrap().params[0]
+        .ty
+        .union_members();
     assert_eq!(
         members.len(),
         2,
@@ -458,7 +480,9 @@ fn a_doc_union_refining_one_native_union_member_keeps_the_others_untouched() {
             function f(array|string $keys) {}
         "#,
     );
-    let members = r.functions["f"].params[0].ty.union_members();
+    let members = r.function_by_name("f").unwrap().params[0]
+        .ty
+        .union_members();
     assert_eq!(
         members.len(),
         2,
@@ -500,7 +524,7 @@ fn an_array_doc_member_with_a_template_key_is_not_discarded() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["f"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["f"];
     let ty = &sig.params[0].ty;
     let names = |t: Option<Type>| {
         t.filter(Type::is_template).map(|t| {
@@ -543,7 +567,7 @@ fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["f"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["f"];
     assert_eq!(
         sig.params[0].ty,
         Type::array(Type::object("Bar".into(), Vec::new()), Type::string())
@@ -562,7 +586,7 @@ fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
         "#,
     );
     assert_eq!(
-        r.functions["f"].return_type,
+        r.function_by_name("f").unwrap().return_type,
         Type::union_of(vec![Type::resource(false), Type::bool_literal(false)])
     );
 }
@@ -586,7 +610,7 @@ fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
         "#,
     );
     assert_eq!(
-        r.classes["ActivityService"].methods["getRepository"].return_type,
+        r.class_by_name("ActivityService").unwrap().methods["getRepository"].return_type,
         Type::object("ActivityRepository".into(), Vec::new())
     );
 }
@@ -602,7 +626,7 @@ fn phpdoc_wins_over_a_conflicting_native_hint() {
         "#,
     );
     assert_eq!(
-        r.functions["f"].params[0].ty,
+        r.function_by_name("f").unwrap().params[0].ty,
         Type::array(Type::benevolent_array_key(), Type::int())
     );
 }
@@ -694,8 +718,11 @@ fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
 #[test]
 fn missing_doc_comment_falls_back_to_native_hint() {
     let r = build_registry(r#"<?php function f(string $s): string { return $s; }"#);
-    assert_eq!(r.functions["f"].params[0].ty, Type::string());
-    assert_eq!(r.functions["f"].return_type, Type::string());
+    assert_eq!(
+        r.function_by_name("f").unwrap().params[0].ty,
+        Type::string()
+    );
+    assert_eq!(r.function_by_name("f").unwrap().return_type, Type::string());
 }
 
 // `@phpstan-assert`-family tags - PHPStan's custom-assertion-function
@@ -714,7 +741,7 @@ fn an_assert_if_true_tag_naming_a_this_property_resolves() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["hasBar"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["hasBar"];
     assert_eq!(sig.assert_if_true.len(), 1);
     let info = &sig.assert_if_true[0];
     assert!(info.negated);
@@ -737,7 +764,7 @@ fn an_assert_if_false_tag_resolves() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["isNull"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["isNull"];
     assert_eq!(sig.assert_if_false.len(), 1);
     assert_eq!(
         sig.assert_if_false[0].target,
@@ -753,7 +780,7 @@ fn an_unconditional_assert_tag_on_the_function_s_own_docblock_resolves() {
             function assertIsString($actual): void {}
         "#,
     );
-    let sig = &r.functions["assertIsString"];
+    let sig = &r.function_by_name("assertIsString").unwrap();
     assert_eq!(sig.assert.len(), 1);
     assert!(!sig.assert[0].negated);
     assert_eq!(sig.assert[0].ty, Type::string());
@@ -774,7 +801,7 @@ fn a_bare_this_target_resolves() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["isAfter"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["isAfter"];
     assert_eq!(sig.assert_if_true[0].target, AssertTarget::ThisSelf);
 }
 
@@ -790,7 +817,7 @@ fn a_target_naming_a_nonexistent_parameter_classifies_as_not_found() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["f"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["f"];
     assert_eq!(sig.assert_if_true.len(), 1);
     assert_eq!(
         sig.assert_if_true[0].target,
@@ -810,7 +837,7 @@ fn a_method_call_target_classifies_as_unknown_not_misclassified() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["isValid"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["isValid"];
     assert_eq!(sig.assert_if_false.len(), 1);
     assert_eq!(
         sig.assert_if_false[0].target,
@@ -828,7 +855,7 @@ fn an_equality_assertion_is_recorded_with_its_form() {
             }
         "#,
     );
-    let sig = &r.classes["Foo"].methods["f"];
+    let sig = &r.class_by_name("Foo").unwrap().methods["f"];
     assert_eq!(sig.assert.len(), 1);
     assert!(sig.assert[0].equality);
 }

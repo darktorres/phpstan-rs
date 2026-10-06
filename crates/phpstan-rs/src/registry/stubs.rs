@@ -740,7 +740,7 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
         let mut program = parsed.stmts;
         crate::stub_attributes::apply_stub_attributes(&mut program);
         let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
-        for (name, stub) in registry.classes {
+        for (name, stub) in registry.iter_classes() {
             let Some((_, info)) = classes
                 .iter_mut()
                 .find(|(n, _)| n.eq_ignore_ascii_case(&name))

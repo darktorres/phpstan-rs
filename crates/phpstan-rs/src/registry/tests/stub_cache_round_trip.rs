@@ -95,25 +95,34 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
             function accepts_value(string $value): void {}
             "#,
     );
-    let declared = registry.functions["reads_answer"].clone();
-    let value_of_declaration = registry.functions["accepts_value"].clone();
+    let declared = registry.function_by_name("reads_answer").unwrap().clone();
+    let value_of_declaration = registry.function_by_name("accepts_value").unwrap().clone();
     let effective = registry.lookup_function("reads_answer").unwrap();
     assert_eq!(effective.params[0].ty, Type::int_literal(42));
-    assert_eq!(registry.functions["reads_answer"], declared);
+    assert_eq!(
+        registry.function_by_name("reads_answer").unwrap(),
+        &declared
+    );
     assert!(value_of_declaration.params[0].ty.contains_deferred());
     assert_eq!(
         registry.lookup_function("accepts_value").unwrap().params[0].ty,
         Type::string_literal("first".into()).union(Type::string_literal("second".into()))
     );
-    assert_eq!(registry.functions["accepts_value"], value_of_declaration);
+    assert_eq!(
+        registry.function_by_name("accepts_value").unwrap(),
+        &value_of_declaration
+    );
 
     let back = round_trip(&registry);
     assert_eq!(
         back.lookup_function("reads_answer").unwrap().params[0].ty,
         Type::int_literal(42)
     );
-    assert_eq!(back.functions["reads_answer"], declared);
-    assert_eq!(back.functions["accepts_value"], value_of_declaration);
+    assert_eq!(back.function_by_name("reads_answer").unwrap(), &declared);
+    assert_eq!(
+        back.function_by_name("accepts_value").unwrap(),
+        &value_of_declaration
+    );
     assert_eq!(
         back.lookup_function("accepts_value").unwrap().params[0].ty,
         Type::string_literal("first".into()).union(Type::string_literal("second".into()))
@@ -220,7 +229,7 @@ fn imported_type_alias_results_survive_freeze_and_cache_round_trip() {
             }
             "#,
     );
-    let target = registry.classes.get("AliasTarget").unwrap();
+    let target = registry.class_by_name("AliasTarget").unwrap();
     assert!(target.type_aliases().is_empty());
     assert_eq!(target.type_imports().len(), 1);
     assert_eq!(
@@ -231,7 +240,7 @@ fn imported_type_alias_results_survive_freeze_and_cache_round_trip() {
     );
 
     let back = round_trip(&registry);
-    let target = back.classes.get("AliasTarget").unwrap();
+    let target = back.class_by_name("AliasTarget").unwrap();
     assert!(target.type_aliases().is_empty());
     assert_eq!(target.type_imports().len(), 1);
     assert_eq!(
@@ -350,17 +359,20 @@ fn class_deferred_generic_type_results_survive_cache_round_trip() {
         Type::string_literal("first".into()).union(Type::string_literal("second".into()));
     let back = round_trip(&registry);
 
-    assert!(back.classes["Bounded"].template_bounds["T"].contains_deferred());
+    assert!(back.class_by_name("Bounded").unwrap().template_bounds["T"].contains_deferred());
     assert_eq!(
         back.effective_template_bounds_by_name("Bounded").get("T"),
         Some(&expected)
     );
-    assert!(back.classes["ChildGeneric"].extends_args[0].contains_deferred());
+    assert!(back.class_by_name("ChildGeneric").unwrap().extends_args[0].contains_deferred());
     assert_eq!(
         back.effective_extends_args_by_name("ChildGeneric"),
         vec![expected.clone()]
     );
-    assert!(back.classes["ContractUser"].implements_args["GenericContract"][0].contains_deferred());
+    assert!(
+        back.class_by_name("ContractUser").unwrap().implements_args["GenericContract"][0]
+            .contains_deferred()
+    );
     assert_eq!(
         back.effective_implements_args_by_name("ContractUser")
             .get("GenericContract"),
@@ -461,8 +473,14 @@ fn mixin_and_phpdoc_method_topology_survives_freeze_and_cache_round_trip() {
         .map(|entry| entry.name.to_string())
         .collect();
     assert_eq!(original_names, ["fromTag", "fromMixin"]);
-    assert!(registry.classes["MethodHost"].methods.is_empty());
-    assert!(back.classes["MethodHost"].methods.is_empty());
+    assert!(
+        registry
+            .class_by_name("MethodHost")
+            .unwrap()
+            .methods
+            .is_empty()
+    );
+    assert!(back.class_by_name("MethodHost").unwrap().methods.is_empty());
     for name in &original_names {
         assert_eq!(
             registry.member_slot("MethodHost", name),
@@ -491,9 +509,12 @@ fn trait_method_effects_use_host_method_results_and_survive_cache_round_trip() {
             class EffectHost { use WritesOwnProperty; }
         "#,
     );
-    let declaration = registry.classes["WritesOwnProperty"].methods["writeValue"].clone();
+    let declaration =
+        registry.class_by_name("WritesOwnProperty").unwrap().methods["writeValue"].clone();
     assert!(
-        registry.classes["EffectHost"]
+        registry
+            .class_by_name("EffectHost")
+            .unwrap()
             .methods
             .get("writeValue")
             .is_none()
@@ -511,7 +532,8 @@ fn trait_method_effects_use_host_method_results_and_survive_cache_round_trip() {
             .is_some_and(|storages| storages.contains(&expected))
     );
     assert_eq!(
-        registry.classes["WritesOwnProperty"].methods["writeValue"], declaration,
+        registry.class_by_name("WritesOwnProperty").unwrap().methods["writeValue"],
+        declaration,
         "effect settlement leaves the trait declaration unchanged"
     );
 
@@ -523,7 +545,7 @@ fn trait_method_effects_use_host_method_results_and_survive_cache_round_trip() {
             .is_some_and(|storages| storages.contains(&expected))
     );
     assert_eq!(
-        back.classes["WritesOwnProperty"].methods["writeValue"],
+        back.class_by_name("WritesOwnProperty").unwrap().methods["writeValue"],
         declaration
     );
 }
@@ -566,12 +588,14 @@ fn the_declarations_as_built_survive_a_round_trip() {
         "the stub registry keeps its declarations as built"
     );
     let back = read_back();
-    assert_eq!(back.classes.len(), registry.classes.len());
-    assert_eq!(back.functions.len(), registry.functions.len());
-    for (name, class) in registry.classes.iter() {
+    let classes = registry.classes();
+    let functions = registry.functions();
+    assert_eq!(back.classes.len(), classes.len());
+    assert_eq!(back.functions.len(), functions.len());
+    for (name, class) in classes.iter() {
         assert_eq!(back.classes.get(name), Some(class), "class {name}");
     }
-    for (name, function) in registry.functions.iter() {
+    for (name, function) in functions.iter() {
         assert_eq!(back.functions.get(name), Some(function), "function {name}");
     }
 }
