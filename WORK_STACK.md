@@ -365,7 +365,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   inherited-PHPDoc fill by `MethodRef` inside the class batch. The full crate
   suite, check, Clippy and formatting pass. `3e6a1772` keys deferred class
   constant updates by `ClassId` and constant slot. The full 1,199-test suite,
-  check, Clippy and formatting pass. The 4.7 reference, include-graph,
+  check, Clippy and formatting pass. `6f6f53da` assigns composed methods and
+  aliases their host `MethodRef` during collection, then verifies the slot on
+  insertion. Reflection-order fixtures and all 1,199 crate tests, check,
+  Clippy and formatting pass. Trait property/constant outputs and the 4.7
+  reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
