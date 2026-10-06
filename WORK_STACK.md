@@ -350,8 +350,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   apply updates the class. This does not yet separate those results from
   mutable `ClassReflection`. Focused hierarchy and PHPDoc tests, all 1,141
   library tests and all 1,199 crate tests, check, Clippy and formatting pass.
-  ID-keyed inherited-doc values, remaining trait outputs, constant resolution,
-  other pass results and immutable declaration storage remain. The 4.7 reference, include-graph,
+  `7a1558ed` keys inherited property-hook updates and deferred class-type
+  resolution outputs by `ClassId` too; their values still apply into mutable
+  `ClassReflection`. ID-keyed inherited-doc values, remaining trait outputs,
+  constant resolution, other pass results and immutable declaration storage
+  remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
