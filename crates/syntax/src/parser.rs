@@ -7,11 +7,35 @@ use crate::name_resolution::Resolution;
 use crate::span::{LineIndex, Span};
 use crate::token::{Keyword, Token};
 
-/// A parse failure: malformed syntax.
+/// Parse failure details.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ParseError {
+pub struct ParseErrorData {
     pub message: String,
     pub span: Span,
+}
+
+/// A parse failure: malformed syntax.
+///
+/// Keep this boxed because parser results otherwise carry the message and
+/// span beside every large recursive syntax node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParseError(Box<ParseErrorData>);
+
+impl ParseError {
+    pub(crate) fn new(message: impl Into<String>, span: Span) -> Self {
+        Self(Box::new(ParseErrorData {
+            message: message.into(),
+            span,
+        }))
+    }
+}
+
+impl std::ops::Deref for ParseError {
+    type Target = ParseErrorData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl std::fmt::Display for ParseError {

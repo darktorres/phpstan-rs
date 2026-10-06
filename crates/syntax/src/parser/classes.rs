@@ -62,10 +62,10 @@ impl Parser<'_> {
                     } else {
                         "abstract"
                     };
-                    return Err(ParseError {
-                        message: format!("Cannot use the {word} modifier on an anonymous class"),
-                        span: self.current_span(),
-                    });
+                    return Err(ParseError::new(
+                        format!("Cannot use the {word} modifier on an anonymous class"),
+                        self.current_span(),
+                    ));
                 }
                 _ => break,
             }
@@ -539,13 +539,13 @@ impl Parser<'_> {
             Token::Keyword(Keyword::Interface) => ClassKind::Interface,
             Token::Keyword(Keyword::Trait) => ClassKind::Trait,
             other => {
-                return Err(ParseError {
-                    message: format!(
+                return Err(ParseError::new(
+                    format!(
                         "parse error: expected class/interface/trait, found {:?}",
                         other
                     ),
-                    span: self.last_span,
-                });
+                    self.last_span,
+                ));
             }
         };
         let name = self.expect_ident_spanned()?;

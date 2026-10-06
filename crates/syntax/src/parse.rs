@@ -169,10 +169,7 @@ pub fn parse_watching<'a>(
         .into_lex_end()
         .expect("a parser of a lexer ends with the lexer's record");
     if let Some(error) = warnings.iter().find(|w| w.is_error) {
-        return Err(ParseError {
-            message: error.message.clone(),
-            span: error.span,
-        });
+        return Err(ParseError::new(error.message.clone(), error.span));
     }
     let stmts = parsed?;
     facts.has_anonymous_class = has_anonymous_class;

@@ -87,10 +87,10 @@ impl Parser<'_> {
                 break;
             }
             if assoc == Assoc::None && applied_non_associative == Some(power) {
-                return Err(ParseError {
-                    message: format!("syntax error, unexpected token \"{:?}\"", self.peek()),
-                    span: self.current_span(),
-                });
+                return Err(ParseError::new(
+                    format!("syntax error, unexpected token \"{:?}\"", self.peek()),
+                    self.current_span(),
+                ));
             }
             lhs = match infix {
                 Infix::Binary(op) => {
@@ -132,10 +132,7 @@ impl Parser<'_> {
         if let ExprKind::Ternary(_, then, _) = &cond.kind
             && !(then.is_none() && short)
         {
-            return Err(ParseError {
-                message: "Unparenthesized `a ? b : c ? d : e` is not supported; use either `(a ? b : c) ? d : e` or `a ? b : (c ? d : e)`".to_string(),
-                span: self.current_span(),
-            });
+            return Err(ParseError::new("Unparenthesized `a ? b : c ? d : e` is not supported; use either `(a ? b : c) ? d : e` or `a ? b : (c ? d : e)`".to_string(), self.current_span()));
         }
         self.skip(); // ?
         if short {
@@ -350,9 +347,11 @@ impl Parser<'_> {
             _ => return Ok(lhs),
         };
         let op_span = self.current_span();
-        let unexpected = |token: &str| ParseError {
-            message: format!("syntax error, unexpected token \"{token}\""),
-            span: op_span,
+        let unexpected = |token: &str| {
+            ParseError::new(
+                format!("syntax error, unexpected token \"{token}\""),
+                op_span,
+            )
         };
         let is_pattern = matches!(
             lhs.kind,
@@ -374,10 +373,10 @@ impl Parser<'_> {
         let amp_span = self.current_span();
         let is_ref = op.is_none() && self.eat(&Token::Amp);
         if is_ref && is_pattern {
-            return Err(ParseError {
-                message: "syntax error, unexpected token \"&\"".to_string(),
-                span: amp_span,
-            });
+            return Err(ParseError::new(
+                "syntax error, unexpected token \"&\"".to_string(),
+                amp_span,
+            ));
         }
         let lhs = if is_pattern {
             self.as_pattern(lhs, true)?
@@ -404,18 +403,18 @@ impl Parser<'_> {
             ExprKind::ArrayLiteral(items) => {
                 let items = std::mem::take(items);
                 if self.long_arrays.contains(&target.id) {
-                    return Err(ParseError {
-                        message: if top {
+                    return Err(ParseError::new(
+                        if top {
                             format!("syntax error, unexpected {:?}", self.peek())
                         } else {
                             "Cannot assign to array(), use [] instead".to_string()
                         },
-                        span: if top {
+                        if top {
                             self.current_span()
                         } else {
                             target.span
                         },
-                    });
+                    ));
                 }
                 let items = self.destructure_items(items, DestructureSyntax::Short, target.span)?;
                 Ok(Expr {
@@ -440,10 +439,7 @@ impl Parser<'_> {
         syntax: DestructureSyntax,
         span: Span,
     ) -> Result<Vec<DestructureItem>, ParseError> {
-        let error = |message: &str, span: Span| ParseError {
-            message: message.to_string(),
-            span,
-        };
+        let error = |message: &str, span: Span| ParseError::new(message.to_string(), span);
         let keyed = items.iter().any(|item| item.key.is_some());
         let mut pattern = Vec::with_capacity(items.len());
         for item in items {

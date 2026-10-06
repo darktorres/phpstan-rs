@@ -18,10 +18,10 @@ impl Parser<'_> {
                 let placeholder = self.expr(ExprKind::Literal(Literal::Null), span.start);
                 self.pattern_only.push((
                     placeholder.id,
-                    ParseError {
-                        message: "Cannot use empty array elements in arrays".to_string(),
+                    ParseError::new(
+                        "Cannot use empty array elements in arrays".to_string(),
                         span,
-                    },
+                    ),
                 ));
                 items.push(ArrayItem {
                     key: None,
@@ -36,20 +36,20 @@ impl Parser<'_> {
             let amp_span = self.current_span();
             let by_ref = self.eat(&Token::Amp);
             if spread && by_ref {
-                return Err(ParseError {
-                    message: "syntax error, unexpected token \"&\"".to_string(),
-                    span: amp_span,
-                });
+                return Err(ParseError::new(
+                    "syntax error, unexpected token \"&\"".to_string(),
+                    amp_span,
+                ));
             }
             let first = self.parse_expression()?;
             let arrow_span = self.current_span();
             if self.eat(&Token::FatArrow) {
                 // `...$a` has no key.
                 if spread || by_ref {
-                    return Err(ParseError {
-                        message: "syntax error, unexpected token \"=>\"".to_string(),
-                        span: arrow_span,
-                    });
+                    return Err(ParseError::new(
+                        "syntax error, unexpected token \"=>\"".to_string(),
+                        arrow_span,
+                    ));
                 }
                 let by_ref = self.eat(&Token::Amp);
                 let value = self.parse_expression()?;
@@ -278,13 +278,13 @@ impl Parser<'_> {
                 let list = self.expr(ExprKind::Destructure(items, DestructureSyntax::List), start);
                 self.pattern_only.push((
                     list.id,
-                    ParseError {
-                        message: format!(
+                    ParseError::new(
+                        format!(
                             "syntax error, unexpected {:?}, expecting \"=\"",
                             self.peek()
                         ),
-                        span: self.current_span(),
-                    },
+                        self.current_span(),
+                    ),
                 ));
                 list
             }
@@ -570,13 +570,13 @@ impl Parser<'_> {
                     let (args, is_first_class_callable) = self.parse_args()?;
                     // `isset` takes one or more variables, spelled out.
                     if args.is_empty() || is_first_class_callable {
-                        return Err(ParseError {
-                            message: "syntax error, unexpected token \")\"".to_string(),
-                            span: Span {
+                        return Err(ParseError::new(
+                            "syntax error, unexpected token \")\"".to_string(),
+                            Span {
                                 start: paren.start,
                                 end: self.previous_end(),
                             },
-                        });
+                        ));
                     }
                     let operands = args.into_iter().map(|a| a.value).collect();
                     self.expr(ExprKind::Isset(operands), start)
@@ -584,20 +584,20 @@ impl Parser<'_> {
                     let paren = self.current_span();
                     let (args, _) = self.parse_args()?;
                     let Some(operand) = args.into_iter().next() else {
-                        return Err(ParseError {
-                            message: "parse error: empty() needs an operand".to_string(),
-                            span: paren,
-                        });
+                        return Err(ParseError::new(
+                            "parse error: empty() needs an operand".to_string(),
+                            paren,
+                        ));
                     };
                     self.expr(ExprKind::Empty(Box::new(operand.value)), start)
                 } else if name.eq_ignore_ascii_case("eval") && self.check(&Token::LParen) {
                     let paren = self.current_span();
                     let (args, _) = self.parse_args()?;
                     let Some(code) = args.into_iter().next() else {
-                        return Err(ParseError {
-                            message: "parse error: eval() needs the code to evaluate".to_string(),
-                            span: paren,
-                        });
+                        return Err(ParseError::new(
+                            "parse error: eval() needs the code to evaluate".to_string(),
+                            paren,
+                        ));
                     };
                     self.expr(ExprKind::Eval(Box::new(code.value)), start)
                 } else {
@@ -609,13 +609,13 @@ impl Parser<'_> {
                 }
             }
             other => {
-                return Err(ParseError {
-                    message: format!(
+                return Err(ParseError::new(
+                    format!(
                         "parse error: unexpected token in expression: {:?} at {}",
                         other, self.pos
                     ),
-                    span: self.current_span(),
-                });
+                    self.current_span(),
+                ));
             }
         })
     }

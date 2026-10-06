@@ -144,15 +144,15 @@ impl Parser<'_> {
 
     pub(crate) fn expect(&mut self, t: &Token) -> Result<(), ParseError> {
         if !self.eat(t) {
-            return Err(ParseError {
-                message: format!(
+            return Err(ParseError::new(
+                format!(
                     "parse error: expected {:?}, found {:?} at token {}",
                     t,
                     self.peek(),
                     self.pos
                 ),
-                span: self.current_span(),
-            });
+                self.current_span(),
+            ));
         }
         Ok(())
     }
@@ -176,10 +176,7 @@ impl Parser<'_> {
             Token::Identifier(_) | Token::Keyword(_) => Ok(self.take_name_segment().unwrap()),
             other => {
                 let message = format!("parse error: expected identifier, found {:?}", other);
-                Err(ParseError {
-                    message,
-                    span: self.current_span(),
-                })
+                Err(ParseError::new(message, self.current_span()))
             }
         }
     }
@@ -221,10 +218,10 @@ impl Parser<'_> {
         let span = self.current_span();
         match self.take_token() {
             Token::Variable(s) => Ok(s),
-            other => Err(ParseError {
-                message: format!("parse error: expected variable, found {:?}", other),
+            other => Err(ParseError::new(
+                format!("parse error: expected variable, found {:?}", other),
                 span,
-            }),
+            )),
         }
     }
 

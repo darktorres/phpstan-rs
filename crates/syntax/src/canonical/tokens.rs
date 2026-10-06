@@ -154,7 +154,14 @@ impl Canonical for crate::lexer::SyntaxMarks {
     }
 }
 
-canonical_struct!(ParseError { message, span });
+impl Canonical for ParseError {
+    fn canonical(&self, p: &mut Printer) {
+        p.node(
+            "ParseError",
+            &[("message", &self.message), ("span", &self.span)],
+        );
+    }
+}
 
 /// `line:col`.
 impl Canonical for LineCol {

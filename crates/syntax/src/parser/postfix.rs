@@ -72,13 +72,13 @@ impl Parser<'_> {
                     let name = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => self.take_ident().unwrap(),
                         other => {
-                            return Err(ParseError {
-                                message: format!(
+                            return Err(ParseError::new(
+                                format!(
                                     "parse error: expected property/method name, found {:?}",
                                     other
                                 ),
-                                span: self.current_span(),
-                            });
+                                self.current_span(),
+                            ));
                         }
                     };
                     if self.check(&Token::LParen) {
@@ -161,13 +161,10 @@ impl Parser<'_> {
                             StaticMember::Dynamic(self.parse_primary()?)
                         }
                         other => {
-                            return Err(ParseError {
-                                message: format!(
-                                    "parse error: expected static member, found {:?}",
-                                    other
-                                ),
-                                span: self.current_span(),
-                            });
+                            return Err(ParseError::new(
+                                format!("parse error: expected static member, found {:?}", other),
+                                self.current_span(),
+                            ));
                         }
                     };
                     if self.check(&Token::LParen) {

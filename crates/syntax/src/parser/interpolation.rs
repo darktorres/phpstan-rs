@@ -45,21 +45,21 @@ impl Parser<'_> {
                     // `{$x = 1}`: PHP's grammar takes a variable there, not
                     // any expression.
                     if !is_variable_chain(&parsed) {
-                        return Err(ParseError {
-                            message: "syntax error, a string's {$...} holds a variable, not an expression"
+                        return Err(ParseError::new(
+                            "syntax error, a string's {$...} holds a variable, not an expression"
                                 .to_string(),
-                            span: parsed.span,
-                        });
+                            parsed.span,
+                        ));
                     }
                     // `{$a b}`: the braces hold one expression.
                     if !sub.at_eof() {
-                        return Err(ParseError {
-                            message: format!(
+                        return Err(ParseError::new(
+                            format!(
                                 "syntax error, unexpected {:?} in string interpolation",
                                 sub.peek()
                             ),
-                            span: sub.current_span(),
-                        });
+                            sub.current_span(),
+                        ));
                     }
                     self.next_expr_id.set(sub.next_expr_id.get());
                     self.next_stmt_id.set(sub.next_stmt_id.get());

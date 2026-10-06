@@ -212,19 +212,19 @@ impl Parser<'_> {
 
         let (key, by_ref, amp_span, value) = if self.check(&Token::FatArrow) {
             if by_ref_first {
-                return Err(ParseError {
-                    message: "Key element cannot be a reference".to_string(),
-                    span: first_amp,
-                });
+                return Err(ParseError::new(
+                    "Key element cannot be a reference".to_string(),
+                    first_amp,
+                ));
             }
             if matches!(
                 first.kind,
                 ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
             ) {
-                return Err(ParseError {
-                    message: "Cannot use list as key element".to_string(),
-                    span: first.span,
-                });
+                return Err(ParseError::new(
+                    "Cannot use list as key element".to_string(),
+                    first.span,
+                ));
             }
             self.skip();
             let amp_span = self.current_span();
@@ -239,10 +239,10 @@ impl Parser<'_> {
             ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
         );
         if by_ref && is_pattern {
-            return Err(ParseError {
-                message: "syntax error, unexpected token \"&\"".to_string(),
-                span: amp_span,
-            });
+            return Err(ParseError::new(
+                "syntax error, unexpected token \"&\"".to_string(),
+                amp_span,
+            ));
         }
         let value = self.as_pattern(value, true)?;
 
