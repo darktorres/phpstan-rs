@@ -243,7 +243,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   now carry typed `NameId`s; synthetic/list-parsed identifiers can omit
   them. They still retain their `Name` handle pending reader migration.
   Source/name lookup is exposed, and syntax depends on `la-arena` with typed
-  `ExprId`/`StmtId` aliases. Row 9.3 is in progress: the shared `NodeId` is
+  `ExprId`/`StmtId` aliases. Those IDs now target `ExprNode`/`StmtNode`
+  (`9763cc81`), while their fields still use recursive storage. Row 9.3 is in
+  progress: the shared `NodeId` is
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
   indices, and the inference cache is keyed by `ExprId` alone during a
   file's active expression check. Commit `36ad3c08` removes the address key
