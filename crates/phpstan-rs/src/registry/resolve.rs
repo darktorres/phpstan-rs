@@ -143,13 +143,13 @@ impl Registry {
     /// until the sequential apply loop afterward, so it parallelizes by
     /// reborrowing `self` as a shared `&Registry` for the duration of the
     /// parallel `filter_map` (ends before the apply loop takes `&mut
-    /// self` again) - the actual cost here (cloning every trait method/
-    /// property signature into `methods`/`properties`) is what scales
-    /// with corpus size, not the cheap, still-sequential apply step.
+    /// self` again). Method entries reuse their shared lazy signature
+    /// handles; properties and constants already reuse their reflection
+    /// Arcs.
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             Name,
-            Vec<(Name, FunctionReflection)>,
+            Vec<(Name, Arc<super::Lazy<FunctionReflection>>)>,
             Vec<(Name, Arc<PropertyReflection>)>,
             Vec<(Name, Arc<ConstantReflection>)>,
             NameSet,
@@ -192,7 +192,7 @@ impl Registry {
                 for trait_name in uses {
                     if let Some(trait_info) = registry.classes().get(trait_name) {
                         for name in &trait_info.member_order {
-                            let Some(sig) = trait_info.methods.get(name) else {
+                            let Some(shared_sig) = trait_info.methods.shared_get(name) else {
                                 continue;
                             };
                             // PHP exposes an adapted alias immediately
@@ -210,13 +210,13 @@ impl Registry {
                                 if selected_trait == Some(trait_name)
                                     && !own_method_names.contains_key(&alias.alias)
                                 {
-                                    methods.push((alias.alias.clone(), sig.clone()));
+                                    methods.push((alias.alias.clone(), Arc::clone(&shared_sig)));
                                 }
                             }
                             if own_method_names.contains_key(name) {
                                 continue;
                             }
-                            methods.push((name.clone(), sig.clone()));
+                            methods.push((name.clone(), shared_sig));
                             if trait_info.abstract_methods.contains(name) {
                                 abstract_from_traits.insert(name.clone());
                             }
@@ -274,7 +274,7 @@ impl Registry {
         {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
-                    if info.methods.insert_if_absent(name.clone(), sig) {
+                    if info.methods.insert_shared_if_absent(name.clone(), sig) {
                         info.register_member_name(name);
                         changed = true;
                     }

@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use std::sync::Arc;
 use syntax::ast::ClassKind;
 
 #[test]
@@ -81,6 +82,7 @@ fn a_trait_as_alias_registers_the_method_under_its_new_name_too() {
             class C {
                 use A, B {
                     A::hello insteadof B;
+                    A::hello as helloA;
                     B::hello as helloB;
                 }
             }
@@ -88,7 +90,11 @@ fn a_trait_as_alias_registers_the_method_under_its_new_name_too() {
     );
     let c = r.classes.get("C").unwrap();
     assert!(c.methods.contains_key("hello"));
+    assert!(c.methods.contains_key("helloA"));
     assert!(c.methods.contains_key("helloB"));
+    let source = c.methods.shared_get("hello").unwrap();
+    let alias = c.methods.shared_get("helloA").unwrap();
+    assert!(Arc::ptr_eq(&source, &alias));
 }
 
 #[test]
