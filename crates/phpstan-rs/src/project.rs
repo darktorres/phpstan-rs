@@ -4256,7 +4256,7 @@ impl ReferenceIndex {
         let shards: Vec<_> = buckets
             .into_par_iter()
             .map(|entries| {
-                let mut shard = FxHashMap::default();
+                let mut shard: FxHashMap<deps::RefKey, FileIdPostingList> = FxHashMap::default();
                 shard.reserve(entries.len());
                 for (key, file) in entries {
                     match shard.get_mut(&key) {

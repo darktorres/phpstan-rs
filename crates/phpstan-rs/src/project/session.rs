@@ -178,12 +178,11 @@ impl LoadStates {
     }
 }
 
-/// A file listed, with its parse where the walk that listed it made it.
+/// A file listed by the walk, with its path hash for numbering.
 struct Walked {
     path: PathBuf,
     /// The hash of the path in a `FileTable`, where the walk built it.
     hash: Option<u64>,
-    read: Option<Read>,
 }
 
 /// Where the walks of a listing's roots end in the list they are appended
@@ -250,11 +249,7 @@ fn paths_of(walked: Vec<Walked>) -> Vec<PathBuf> {
 
 impl Walked {
     fn bare(path: PathBuf) -> Self {
-        Walked {
-            path,
-            hash: None,
-            read: None,
-        }
+        Walked { path, hash: None }
     }
 }
 
@@ -265,17 +260,14 @@ struct Parse<'a> {
     states: &'a LoadStates,
 }
 
-/// What a walk of one directory for files is: where it lists, what it
-/// finds and leaves out, and whether it parses what it finds, as context
-/// files or as analysed ones.
+/// What a walk of one directory for files is: where it lists and what it
+/// finds and leaves out.
 #[derive(Clone, Copy)]
 struct Scan<'a> {
     table: &'a DirTable,
-    parse: Option<Parse<'a>>,
     listed: Listed,
     pruned: &'a [&'a str],
     skip_dir: Option<&'a (dyn Fn(&Path) -> bool + Sync)>,
-    context: bool,
 }
 
 /// A file's, or a directory's, absolute path and package owner.
@@ -1141,8 +1133,8 @@ impl Session {
     pub fn listing(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
         let table = self.listings();
         (
-            paths_of(self.analysed_listing(&table, Listed::Php, None)),
-            paths_of(self.context_listing(&table, Listed::Php, None)),
+            paths_of(self.analysed_listing(&table, Listed::Php)),
+            paths_of(self.context_listing(&table, Listed::Php)),
         )
     }
 
@@ -1241,11 +1233,9 @@ impl Session {
     fn collect_files(&self, scan: Scan, dir: &Path, out: &mut Vec<Walked>) {
         let Scan {
             table,
-            parse,
             listed,
             pruned,
             skip_dir,
-            context,
         } = scan;
         let walked = self.root.join(dir);
         let wanted = |dir: &Path, name: &std::ffi::OsStr| match listed {
@@ -1255,15 +1245,7 @@ impl Session {
         let skip = skip_dir.map(|skip| move |path: &Path| skip(&self.absolute(path)));
         // A walk that goes into a root with analysed files below it finds
         // them too, and parses only the files that are context.
-        let by_role = context && skip_dir.is_some();
-        let make = |path: &Path| {
-            let parse = parse.filter(|_| {
-                !by_role
-                    || self.settings.roles.classify(&self.absolute(path)).role
-                        == super::roles::Role::Context
-            })?;
-            Some(self.parse_listed(parse, path, context))
-        };
+        let make = |_path: &Path| None::<Read>;
         let found = self.pool.install(|| {
             super::Walk {
                 table,
@@ -1277,10 +1259,9 @@ impl Session {
             .files(&walked, dir)
         });
         let start = out.len();
-        out.extend(found.into_iter().map(|(path, hash, read)| Walked {
+        out.extend(found.into_iter().map(|(path, hash, _read)| Walked {
             path,
             hash: Some(hash),
-            read,
         }));
         if self.overlay.is_empty() {
             return;
@@ -1456,8 +1437,8 @@ impl Session {
         reference: Option<&Path>,
     ) -> Result<FrontEndDump, String> {
         let table = self.listings();
-        let analysed = paths_of(self.analysed_listing(&table, Listed::Run, None));
-        let context = paths_of(self.context_listing(&table, Listed::Run, None));
+        let analysed = paths_of(self.analysed_listing(&table, Listed::Run));
+        let context = paths_of(self.context_listing(&table, Listed::Run));
         let mut files: Vec<(&'static str, &PathBuf)> = context
             .iter()
             .map(|path| ("context", path))
@@ -1745,18 +1726,13 @@ impl Session {
 
     /// The files the load analyses, in path order.
     fn analysed_files(&self) -> Vec<PathBuf> {
-        paths_of(self.analysed_listing(&self.listings(), Listed::Php, None))
+        paths_of(self.analysed_listing(&self.listings(), Listed::Php))
     }
 
     /// The files under the analysed paths that `listed` finds, in path order,
     /// each once: a path another contains is not walked again. They come
     /// parsed when `parse` is given.
-    fn analysed_listing(
-        &self,
-        table: &DirTable,
-        listed: Listed,
-        parse: Option<Parse>,
-    ) -> Vec<Walked> {
+    fn analysed_listing(&self, table: &DirTable, listed: Listed) -> Vec<Walked> {
         let mut files = Vec::new();
         let mut runs = Runs::default();
         let mut roots = super::roles::outermost(&self.dirs, |dir| self.absolute(dir));
@@ -1764,11 +1740,9 @@ impl Session {
         for dir in roots {
             let scan = Scan {
                 table,
-                parse,
                 listed,
                 pruned: self.pruned,
                 skip_dir: None,
-                context: false,
             };
             self.collect_files(scan, dir, &mut files);
             runs.end(files.len());
@@ -1781,12 +1755,7 @@ impl Session {
     /// finds, in path order, each once and none that an analysed path
     /// contains: such a file is analysed, and listed by `analysed_listing`.
     /// They come parsed when `parse` is given, those a walk found.
-    fn context_listing(
-        &self,
-        table: &DirTable,
-        listed: Listed,
-        parse: Option<Parse>,
-    ) -> Vec<Walked> {
+    fn context_listing(&self, table: &DirTable, listed: Listed) -> Vec<Walked> {
         // The vendor context was being found while the analysed files were
         // listed.
         let mut scan_dirs = self.scan_dirs.clone();
@@ -1825,11 +1794,9 @@ impl Session {
             let skip = |absolute: &Path| roles.holds_only_analysed(absolute);
             let scan = Scan {
                 table,
-                parse,
                 listed,
                 pruned: &[],
                 skip_dir: holds_analysed.then_some(&skip),
-                context: true,
             };
             self.collect_files(scan, dir, &mut files);
             if holds_analysed {
@@ -1839,7 +1806,7 @@ impl Session {
             runs.end(files.len());
         }
         runs.join(&mut files);
-        // A file both listed and walked keeps the parse the walk made.
+        // A file both listed and walked keeps the walk's path hash.
         place_explicit(files, explicit)
     }
 
@@ -1851,12 +1818,8 @@ impl Session {
         let mut project = Project::new();
         self.configure(&mut project, keeps_as_built);
         let states = LoadStates::new(self.pool.current_num_threads());
-        let parse = Parse {
-            project: &project,
-            states: &states,
-        };
-        let analyze_files = self.analysed_listing(&table, Listed::Php, Some(parse));
-        let context_files = self.context_listing(&table, Listed::Php, Some(parse));
+        let analyze_files = self.analysed_listing(&table, Listed::Php);
+        let context_files = self.context_listing(&table, Listed::Php);
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
@@ -1967,23 +1930,16 @@ impl Session {
         analyze: Vec<Walked>,
     ) -> Added {
         let pool = &self.pool;
-        let shared: &Project = project;
         let context_len = context.len();
         let total = context_len + analyze.len();
         let mut combined_files = Vec::with_capacity(total);
         let mut hashes = Vec::with_capacity(total);
-        let mut reads = Vec::with_capacity(total);
         for walked in context.into_iter().chain(analyze) {
             combined_files.push(walked.path);
             hashes.push(walked.hash);
-            reads.push(walked.read);
         }
         let context_files = &combined_files[..context_len];
         let analyze_files = &combined_files[context_len..];
-        let parse = Parse {
-            project: shared,
-            states,
-        };
         // Assign IDs before parsing so each declaration records its file
         // directly. The ID list is in the same context-then-analysed order
         // used by the merge and declaration prefix sums below.
@@ -1994,16 +1950,14 @@ impl Session {
                 .map(|(path, hash)| (path.as_path(), *hash)),
         );
         let numbers = project.number_files(numbering);
+        let parse = Parse { project, states };
         let mut combined_parsed: Vec<Read> = pool.install(|| {
             combined_files
                 .par_iter()
-                .zip(reads.into_par_iter())
                 .zip(numbers.par_iter())
                 .enumerate()
-                .map(|(index, ((path, read), &file_id))| {
-                    read.unwrap_or_else(|| {
-                        self.parse_listed(parse, path, index < context_len, file_id)
-                    })
+                .map(|(index, (path, &file_id))| {
+                    self.parse_listed(parse, path, index < context_len, file_id)
                 })
                 .collect()
         });

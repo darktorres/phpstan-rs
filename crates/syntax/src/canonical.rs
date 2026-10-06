@@ -562,7 +562,7 @@ macro_rules! canonical_struct {
     ($ty:ident { $($field:ident),* $(,)? } $(skip { $($skipped:ident),* $(,)? })?) => {
         impl $crate::canonical::Canonical for $ty {
             fn canonical(&self, p: &mut $crate::canonical::Printer) {
-                let $ty { $($field,)* $($($skipped: _,)*)? } = self;
+                let $ty { $($field,)* $($($skipped: _,)* ..)? } = self;
                 p.node(
                     stringify!($ty),
                     &[$((stringify!($field), $field as &dyn $crate::canonical::Canonical)),*],

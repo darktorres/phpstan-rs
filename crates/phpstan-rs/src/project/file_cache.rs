@@ -214,7 +214,7 @@ impl CachedFile {
 
     /// The parse of the file at `path` this was stored from, without its
     /// tree and its ignore comments, which only an analysed file reads.
-    pub(super) fn into_parsed(self, path: &Path, content_hash: ContentHash) -> Option<ParsedFile> {
+    pub(super) fn into_parsed(self, _path: &Path, content_hash: ContentHash) -> Option<ParsedFile> {
         debug_assert!(syntax::references::ref_keys_are_sorted(&self.references));
         debug_assert!(syntax::references::ref_keys_are_sorted(
             &self.declaration_references

@@ -222,11 +222,11 @@ impl DuplicateFunctionIndex {
 
 impl syntax::canonical::Canonical for DuplicateFunctionIndex {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
-        let sites: FxHashMap<_, _> = self.iter().map(|(name, sites)| (name, sites)).collect();
-        p.node(
-            "DuplicateFunctionIndex",
-            &[("sites", &syntax::canonical::MapOfSets(&sites))],
-        );
+        let sites: FxHashMap<_, _> = self
+            .iter()
+            .map(|(name, sites)| (name, syntax::canonical::AsSet(sites.as_slice())))
+            .collect();
+        p.node("DuplicateFunctionIndex", &[("sites", &sites)]);
     }
 }
 

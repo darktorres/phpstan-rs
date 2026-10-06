@@ -507,8 +507,14 @@ impl syntax::canonical::Canonical for UseSiteIndex {
             .by_target
             .iter()
             .flat_map(|shard| shard.iter())
+            .map(|(target, sites)| (target, syntax::canonical::AsSet(sites.as_slice())))
             .collect();
-        let by_file: FxHashMap<_, _> = self.by_file.iter().flat_map(|shard| shard.iter()).collect();
+        let by_file: FxHashMap<_, _> = self
+            .by_file
+            .iter()
+            .flat_map(|shard| shard.iter())
+            .map(|(path, sites)| (path, syntax::canonical::AsSet(sites.as_slice())))
+            .collect();
         let fallbacks: FxHashMap<_, _> = self
             .fallbacks
             .iter()
@@ -517,8 +523,8 @@ impl syntax::canonical::Canonical for UseSiteIndex {
         p.node(
             "UseSiteIndex",
             &[
-                ("by_target", &syntax::canonical::MapOfSets(&by_target)),
-                ("by_file", &syntax::canonical::MapOfSets(&by_file)),
+                ("by_target", &by_target),
+                ("by_file", &by_file),
                 ("fallbacks", &fallbacks),
             ],
         );

@@ -93,6 +93,7 @@ fn print_registry_dump(
         next_project_class_local: _,
         next_project_function_local: _,
         path_ranks: _,
+        ..
     } = project;
     crate::file_id::printing_paths(files.paths_by_id(), || {
         section(p, "files");
