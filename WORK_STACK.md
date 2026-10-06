@@ -391,11 +391,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   library check, Clippy, formatting and diff checks pass. `c4a849df` adds a
   `(ClassId, slot) -> Type` result table, populates it from deferred class
   constant/value-of resolution, and routes type-sensitive checker, global
-  variable and LSP readers through Registry. All 1,143 crate tests and 275
-  syntax tests, check, Clippy, formatting and diff checks pass. The table still
-  duplicates reflection writes, is runtime-only, and falls back to reflected
-  values after cache loads; next remove those writes and persist the table by
-  stable class names and slots, preserving base switches and scoped edits. The 4.7 reference,
+  variable and LSP readers through Registry. `a255d3ea` removes the remaining
+  deferred constant and imported-type writes to `ConstantReflection.ty`; the
+  result table persists by class name and ordered slot, is restored after freeze,
+  and remains correct across scoped edits and base switches. Stub-container
+  layout version is 9. The imported-alias regression and cache round-trip pass;
+  all 1,145 crate tests and 275 syntax tests, check, Clippy, formatting and diff
+  checks pass. Item 4.6 is still active: trait-composed property results and
+  other pass outputs still mutate declaration reflections. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
