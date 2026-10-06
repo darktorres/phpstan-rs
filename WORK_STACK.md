@@ -237,7 +237,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
   existing failure count recorded at 2.V. The 3.4 scratch-store row remains
   with item 9. The next task is to make the four public declaration tables
-  private behind `Registry` read accessors, row 4.1 (`332b11a0`). Row 4.2 is
+  private behind `Registry` read accessors, row 4.1 (`e06503ad`, preserving
+  owned stub-table extraction). Row 4.2 is
   next: separate stub, context-base and project declaration id ranges. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
@@ -258,7 +259,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   starting state (0.1) found four false-report bugs, fixed in item 0
   before the baseline (rows 0.1a-0.1f), and added the implicit calls, now
   part of item 0. The latest completed implementation is row 3.2 at
-  `dfa2cebe`; row 4.1 is committed at `332b11a0`.
+  `dfa2cebe`; row 4.1 is committed at `e06503ad`.
 - **Item 0's validation (0.11)** is under way: the tests, fixtures and
   runtime oracle pass, and the edit replay over Piwigo and every vendor
   project found the stale diagnostics and registry state the plan's "Found
