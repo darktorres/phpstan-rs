@@ -196,6 +196,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parser_errors_are_pointer_sized() {
+        assert_eq!(
+            std::mem::size_of::<ParseError>(),
+            std::mem::size_of::<usize>()
+        );
+    }
+
+    #[test]
     fn a_leading_zero_literal_with_an_8_or_9_is_a_parse_error() {
         let error = parse(b"<?php $x = 08;").unwrap_err();
         assert_eq!(error.message, "Invalid numeric literal");
