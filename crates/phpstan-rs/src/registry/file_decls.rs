@@ -91,6 +91,8 @@ pub(crate) struct FileDecls {
     pub(crate) functions: Arena<Arc<FunctionReflection>>,
     pub(crate) class_layouts: Arena<ClassLayout>,
     pub(crate) function_layouts: Arena<FunctionLayout>,
+    class_by_ptr: FxHashMap<usize, Idx<ClassLayout>>,
+    function_by_ptr: FxHashMap<usize, Idx<FunctionLayout>>,
     pub(crate) members: Arena<FileMember>,
     /// Case-folded member name to the file-local member slot. The class
     /// layout index is part of the key because each class has its own
@@ -110,6 +112,8 @@ impl FileDecls {
             functions: Arena::new(),
             class_layouts: Arena::new(),
             function_layouts: Arena::new(),
+            class_by_ptr: FxHashMap::default(),
+            function_by_ptr: FxHashMap::default(),
             members: Arena::new(),
             member_slots: FxHashMap::default(),
             parameters: Arena::new(),
@@ -147,6 +151,8 @@ impl FileDecls {
             constants,
             names,
         });
+        let declaration_ptr = Arc::as_ptr(&self.classes[declaration]) as usize;
+        assert!(self.class_by_ptr.insert(declaration_ptr, layout).is_none());
         self.index_members(layout);
         layout
     }
@@ -159,10 +165,35 @@ impl FileDecls {
     ) -> Idx<FunctionLayout> {
         let declaration = self.functions.alloc(declaration);
         let parameters = self.parameters.alloc_many(parameters);
-        self.function_layouts.alloc(FunctionLayout {
+        let layout = self.function_layouts.alloc(FunctionLayout {
             declaration,
             parameters,
-        })
+        });
+        let declaration_ptr = Arc::as_ptr(&self.functions[declaration]) as usize;
+        assert!(
+            self.function_by_ptr
+                .insert(declaration_ptr, layout)
+                .is_none()
+        );
+        layout
+    }
+
+    pub(crate) fn class_layout_for(
+        &self,
+        declaration: &Arc<ClassReflection>,
+    ) -> Option<Idx<ClassLayout>> {
+        self.class_by_ptr
+            .get(&(Arc::as_ptr(declaration) as usize))
+            .copied()
+    }
+
+    pub(crate) fn function_layout_for(
+        &self,
+        declaration: &Arc<FunctionReflection>,
+    ) -> Option<Idx<FunctionLayout>> {
+        self.function_by_ptr
+            .get(&(Arc::as_ptr(declaration) as usize))
+            .copied()
     }
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
@@ -426,6 +457,37 @@ impl<'de> Deserialize<'de> for FileDecls {
             .map(|member| member.ok_or_else(|| D::Error::custom("class member range is missing")))
             .collect::<Result<Vec<_>, _>>()?;
         let members = Arena::from_iter(members);
+        let mut class_by_ptr = FxHashMap::default();
+        for (layout, class_layout) in class_layouts.iter() {
+            let declaration = &classes[class_layout.declaration];
+            if class_by_ptr
+                .insert(Arc::as_ptr(declaration) as usize, layout)
+                .is_some()
+            {
+                return Err(D::Error::custom("class declaration has multiple layouts"));
+            }
+        }
+        let function_layouts = Arena::from_iter(encoded.function_layouts.into_iter().map(
+            |layout| FunctionLayout {
+                declaration: decode_idx(layout.declaration),
+                parameters: decode_range(layout.parameters),
+            },
+        ));
+        let mut function_by_ptr = FxHashMap::default();
+        for (layout, function_layout) in function_layouts.iter() {
+            if !idx_is_valid(function_layout.declaration, encoded.functions.len()) {
+                return Err(D::Error::custom("function declaration index is invalid"));
+            }
+            let declaration = &encoded.functions[encode_idx(function_layout.declaration) as usize];
+            if function_by_ptr
+                .insert(Arc::as_ptr(declaration) as usize, layout)
+                .is_some()
+            {
+                return Err(D::Error::custom(
+                    "function declaration has multiple layouts",
+                ));
+            }
+        }
         let mut member_slots = FxHashMap::default();
         for (layout, class_layout) in class_layouts.iter() {
             let (start, end) = encode_range(&class_layout.members);
@@ -444,12 +506,9 @@ impl<'de> Deserialize<'de> for FileDecls {
             classes,
             functions: Arena::from_iter(encoded.functions),
             class_layouts,
-            function_layouts: Arena::from_iter(encoded.function_layouts.into_iter().map(
-                |layout| FunctionLayout {
-                    declaration: decode_idx(layout.declaration),
-                    parameters: decode_range(layout.parameters),
-                },
-            )),
+            function_layouts,
+            class_by_ptr,
+            function_by_ptr,
             members,
             member_slots,
             parameters: Arena::from_iter(encoded.parameters),
@@ -516,6 +575,10 @@ mod tests {
         let decoded: FileDecls = postcard::from_bytes(&encoded).unwrap();
 
         assert_eq!(decoded.class(class_layout), &class);
+        assert_eq!(
+            decoded.class_layout_for(decoded.classes.iter().next().unwrap().1),
+            Some(class_layout)
+        );
         let decoded_members = decoded.members(class_layout);
         assert_eq!(decoded_members.len(), members.len());
         assert_eq!(decoded.member(class_layout, "RUN").unwrap().name, "run");
@@ -538,6 +601,82 @@ mod tests {
         assert_eq!(decoded.constants(class_layout), constants);
         assert_eq!(decoded.names(class_layout), names);
         assert_eq!(decoded.function(function_layout), &function);
+        assert_eq!(
+            decoded.function_layout_for(decoded.functions.iter().next().unwrap().1),
+            Some(function_layout)
+        );
         assert_eq!(decoded.parameters(function_layout), function.params);
+    }
+
+    #[test]
+    fn project_ids_retain_winning_file_declaration_locations() {
+        let tokens = Lexer::new(
+            "<?php class Demo { public function run(int $n): int {} } function helper(string $text): bool {}",
+        )
+        .tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let built = crate::registry::Registry::build(&program);
+        let class = Arc::new(built.lookup_class("Demo").unwrap().1.clone());
+        let function = Arc::new(built.lookup_function("helper").unwrap().clone());
+        let class_members = class
+            .methods()
+            .shared_iter()
+            .map(|(name, declaration)| FileMember::from_shared(name.clone(), declaration));
+        let mut declarations = FileDecls::new();
+        declarations.add_class(
+            Arc::clone(&class),
+            class_members,
+            class.properties().values().map(Arc::clone),
+            class.consts().values().map(Arc::clone),
+            class
+                .extends()
+                .iter()
+                .chain(class.implements())
+                .chain(class.uses())
+                .cloned(),
+        );
+        declarations.add_function(Arc::clone(&function), function.params().iter().cloned());
+        let declarations = Arc::new(declarations);
+
+        let mut registry = crate::registry::Registry::default();
+        registry.insert_built_decl_from_file(
+            crate::registry::BuiltDecl::Class {
+                name: Name::from("Demo"),
+                conditional: false,
+                guard: None,
+                info: Arc::clone(&class),
+                namespace: Name::from(""),
+            },
+            true,
+            Some(&declarations),
+        );
+        registry.insert_built_decl_from_file(
+            crate::registry::BuiltDecl::Function {
+                name: Name::from("helper"),
+                conditional: false,
+                guard: None,
+                sig: Arc::clone(&function),
+                site: 0,
+            },
+            true,
+            Some(&declarations),
+        );
+
+        let class_id = registry.class("demo").unwrap().0;
+        let function_id = registry.function("HELPER").unwrap().0;
+        assert!(std::ptr::eq(
+            registry.file_class_by_id(class_id).unwrap(),
+            registry.class("Demo").unwrap().2
+        ));
+        assert!(std::ptr::eq(
+            registry.file_function_by_id(function_id).unwrap(),
+            registry.function("helper").unwrap().2
+        ));
+        let mut merged = registry.clone();
+        merged.merge_stub_classes(vec![(Name::from("Demo"), (*class).clone())]);
+        assert!(merged.file_class_by_id(class_id).is_none());
+        registry.remove_declarations(&[Name::from("helper")], &[Name::from("Demo")]);
+        assert!(registry.file_class_by_id(class_id).is_none());
+        assert!(registry.file_function_by_id(function_id).is_none());
     }
 }

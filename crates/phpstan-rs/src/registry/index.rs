@@ -8,7 +8,8 @@ use crate::registry::class_info::MemberSpans;
 use crate::registry::guard::{Guard, GuardExpr};
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
-    ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
+    ClassDeclAt, ClassReflection, FileDecls, FunctionDeclAt, FunctionReflection, folded_key,
+    function_key, infer_const_type,
 };
 use syntax::ast::{Expr, Stmt, Visibility};
 use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
@@ -162,6 +163,17 @@ impl Registry {
     /// collision outright, never merge with a pre-existing context/stub
     /// entry the way two context-only declarations legitimately do.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+        self.insert_built_decl_from_file(decl, analyzed, None);
+    }
+
+    /// Applies one built declaration while retaining its per-file arena
+    /// address if that declaration directly wins the registry name.
+    pub(crate) fn insert_built_decl_from_file(
+        &mut self,
+        decl: BuiltDecl,
+        analyzed: bool,
+        file: Option<&Arc<FileDecls>>,
+    ) {
         // A guard the configured PHP versions rule out is a declaration that
         // never runs: it changes nothing, and is not a change. One they
         // always satisfy declares as if it stood unguarded.
@@ -169,6 +181,32 @@ impl Registry {
             Guard::Never => return,
             Guard::Always => decl.made_unconditional(),
             Guard::Maybe => decl,
+        };
+        let class_source = match &decl {
+            BuiltDecl::Class { name, info, .. } => Some((
+                name.clone(),
+                Arc::clone(info),
+                file.and_then(|file| {
+                    file.class_layout_for(info).map(|layout| ClassDeclAt {
+                        file: Arc::clone(file),
+                        layout,
+                    })
+                }),
+            )),
+            _ => None,
+        };
+        let function_source = match &decl {
+            BuiltDecl::Function { name, sig, .. } => Some((
+                name.clone(),
+                Arc::clone(sig),
+                file.and_then(|file| {
+                    file.function_layout_for(sig).map(|layout| FunctionDeclAt {
+                        file: Arc::clone(file),
+                        layout,
+                    })
+                }),
+            )),
+            _ => None,
         };
         // A name is changed when its entry is: a conditional declaration the
         // existing entry outranks leaves the table as it was.
@@ -473,6 +511,35 @@ impl Registry {
                 register_global_constant(&mut self.global_constants, name, ty);
             }
         }
+
+        // A merged value no longer has a single file-local declaration.
+        // A conditional declaration that left the entry untouched keeps
+        // the old locator; otherwise retain a locator only when the exact
+        // per-file Arc is what the name table selected.
+        if !leaves_entry {
+            if let Some((name, info, source)) = class_source
+                && let Some(id) = self.class_ids.get(&name).copied()
+                && id.source() == Some(super::IdSource::Project)
+            {
+                let slot = id.local() as usize;
+                self.project_class_decls[slot] = self
+                    .classes
+                    .get_shared(&name)
+                    .filter(|current| Arc::ptr_eq(current, &info))
+                    .and(source);
+            }
+            if let Some((name, sig, source)) = function_source
+                && let Some(id) = self.function_ids.get(&name).copied()
+                && id.source() == Some(super::IdSource::Project)
+            {
+                let slot = id.local() as usize;
+                self.project_function_decls[slot] = self
+                    .functions
+                    .get_shared(&name)
+                    .filter(|current| Arc::ptr_eq(current, &sig))
+                    .and(source);
+            }
+        }
     }
 
     /// Indexes `names_with_assert_tags` from the resolved declarations:
@@ -604,6 +671,14 @@ impl Registry {
             let name: Name = name.into();
             self.record_changed_class(&name);
             self.ensure_class_id(&name);
+            if let Some(id) = self
+                .class_ids
+                .get(&name)
+                .copied()
+                .filter(|id| id.source() == Some(super::IdSource::Project))
+            {
+                self.project_class_decls[id.local() as usize] = None;
+            }
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
             match self.classes.take(&name) {

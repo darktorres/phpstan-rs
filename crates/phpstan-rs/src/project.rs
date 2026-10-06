@@ -164,6 +164,15 @@ pub(crate) struct FileState {
     content_hash: source::ContentHash,
 }
 
+struct DeclarationSource<'a> {
+    analyzed: bool,
+    load_order: u64,
+    path: &'a Path,
+    declarations: &'a [BuiltDecl],
+    file_decls: &'a Arc<crate::registry::FileDecls>,
+    pending: bool,
+}
+
 /// A file's tree: the one it kept, or one parsed again.
 pub(crate) enum AstRef<'a> {
     Kept(&'a [Stmt]),
@@ -1205,7 +1214,11 @@ impl Project {
     ) {
         self.begin_declaration_changes();
         for decl in &parsed.built_decls {
-            self.registry.insert_built_decl(decl.clone(), analyzed);
+            self.registry.insert_built_decl_from_file(
+                decl.clone(),
+                analyzed,
+                Some(&parsed.file_decls),
+            );
         }
         // `record_phpstan_class_file` no-ops unless the name is
         // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
@@ -1424,25 +1437,29 @@ impl Project {
     fn switch_to_phpstan_base(&mut self) {
         self.registry.switch_base(Project::phpstan_base().clone());
         self.begin_declaration_changes();
-        let mut sources: Vec<(bool, u64, &Path, &[BuiltDecl])> = self
+        let mut sources: Vec<DeclarationSource<'_>> = self
             .files
             .iter()
-            .map(|(path, state)| {
-                (
-                    state.analyzed,
-                    state.load_order,
-                    path.as_path(),
-                    state.built_decls.as_slice(),
-                )
+            .map(|(path, state)| DeclarationSource {
+                analyzed: state.analyzed,
+                load_order: state.load_order,
+                path: path.as_path(),
+                declarations: &state.built_decls,
+                file_decls: &state.file_decls,
+                pending: false,
             })
             .collect();
-        sources.sort_by_key(|source| (source.0, source.1));
-        for (analyzed, _, path, decls) in sources {
-            for decl in decls {
+        sources.sort_by_key(|source| (source.analyzed, source.load_order));
+        for source in sources {
+            for decl in source.declarations {
                 if let BuiltDecl::Class { name, .. } = decl {
-                    self.registry.record_phpstan_class_file(name, path);
+                    self.registry.record_phpstan_class_file(name, source.path);
                 }
-                self.registry.insert_built_decl(decl.clone(), analyzed);
+                self.registry.insert_built_decl_from_file(
+                    decl.clone(),
+                    source.analyzed,
+                    Some(source.file_decls),
+                );
             }
         }
     }
@@ -1753,7 +1770,7 @@ impl Project {
     fn rebuild_declarations(
         &mut self,
         names: &DeclaredNames,
-        pending: Option<(&Path, &[BuiltDecl], bool, u64)>,
+        pending: Option<DeclarationSource<'_>>,
     ) {
         self.begin_declaration_changes();
         self.registry
@@ -1799,25 +1816,24 @@ impl Project {
                     .iter()
                     .any(|n| constant_keys.contains(n.as_str()))
         };
-        let mut sources: Vec<(bool, u64, &Path, &[BuiltDecl], bool)> = self
+        let mut sources: Vec<DeclarationSource<'_>> = self
             .files
             .iter()
             .filter(|(_, state)| declares_one(state))
-            .map(|(path, state)| {
-                (
-                    state.analyzed,
-                    state.load_order,
-                    path.as_path(),
-                    state.built_decls.as_slice(),
-                    false,
-                )
+            .map(|(path, state)| DeclarationSource {
+                analyzed: state.analyzed,
+                load_order: state.load_order,
+                path: path.as_path(),
+                declarations: &state.built_decls,
+                file_decls: &state.file_decls,
+                pending: false,
             })
             .collect();
-        if let Some((path, decls, analyzed, load_order)) = pending {
-            sources.push((analyzed, load_order, path, decls, true));
+        if let Some(pending) = pending {
+            sources.push(pending);
         }
-        sources.sort_by_key(|source| (source.0, source.1));
-        for (analyzed, _, path, decls, is_pending) in sources {
+        sources.sort_by_key(|source| (source.analyzed, source.load_order));
+        for source in sources {
             // Of a file already loaded, only the declarations being
             // rebuilt are inserted again; the pending file's all are.
             let rebuilt = |kind: DeclKind, name: &str| match kind {
@@ -1825,15 +1841,19 @@ impl Project {
                 DeclKind::Function => function_keys.contains(&name.to_ascii_lowercase()),
                 DeclKind::Constant => constant_keys.contains(name),
             };
-            for decl in decls {
+            for decl in source.declarations {
                 let (kind, name) = decl.kind_and_name();
-                if !is_pending && !rebuilt(kind, name) {
+                if !source.pending && !rebuilt(kind, name) {
                     continue;
                 }
                 if let BuiltDecl::Class { name, .. } = decl {
-                    self.registry.record_phpstan_class_file(name, path);
+                    self.registry.record_phpstan_class_file(name, source.path);
                 }
-                self.registry.insert_built_decl(decl.clone(), analyzed);
+                self.registry.insert_built_decl_from_file(
+                    decl.clone(),
+                    source.analyzed,
+                    Some(source.file_decls),
+                );
             }
         }
     }
@@ -2011,7 +2031,14 @@ impl Project {
         }
         self.rebuild_declarations(
             &rebuilt,
-            Some((path, &parsed.built_decls, analyzed, load_order)),
+            Some(DeclarationSource {
+                analyzed,
+                load_order,
+                path,
+                declarations: &parsed.built_decls,
+                file_decls: &parsed.file_decls,
+                pending: true,
+            }),
         );
         let id = self.files.id_for(path);
         let len = text.len();

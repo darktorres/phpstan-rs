@@ -453,11 +453,13 @@ impl CanonicalOver for Registry {
             classes,
             class_ids: _,
             project_class_names: _,
+            project_class_decls: _,
             configured_assertions,
             configured_class_argument_returns,
             functions,
             function_ids: _,
             project_function_names: _,
+            project_function_decls: _,
             global_constants,
             global_variables,
             phpstan_class_files,
@@ -647,8 +649,10 @@ canonical_struct!(Registry {
 } skip {
     class_ids,
     project_class_names,
+    project_class_decls,
     function_ids,
     project_function_names,
+    project_function_decls,
     // What the last lookups of the names in scope made of `scope` and the
     // tables.
     scoped_names,

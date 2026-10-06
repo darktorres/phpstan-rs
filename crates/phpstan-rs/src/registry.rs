@@ -71,7 +71,7 @@ pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
-pub(crate) use file_decls::{FileDecls, FileMember};
+pub(crate) use file_decls::{ClassLayout, FileDecls, FileMember, FunctionLayout};
 pub(crate) use guard::{Guard, GuardExpr};
 pub(crate) use ids::{ClassId, FnId, IdSource};
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
@@ -224,6 +224,35 @@ struct RawDeclarations {
     functions: FunctionTable,
 }
 
+/// The winning project declaration's address inside its parsed file.
+#[derive(Clone)]
+struct ClassDeclAt {
+    file: Arc<FileDecls>,
+    layout: la_arena::Idx<ClassLayout>,
+}
+
+impl std::fmt::Debug for ClassDeclAt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClassDeclAt")
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone)]
+struct FunctionDeclAt {
+    file: Arc<FileDecls>,
+    layout: la_arena::Idx<FunctionLayout>,
+}
+
+impl std::fmt::Debug for FunctionDeclAt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FunctionDeclAt")
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
     #[serde(skip)]
@@ -232,6 +261,8 @@ pub struct Registry {
     class_ids: NameTable<ClassId>,
     #[serde(skip)]
     project_class_names: Vec<Name>,
+    #[serde(skip)]
+    project_class_decls: Vec<Option<ClassDeclAt>>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     #[serde(skip)]
@@ -244,6 +275,8 @@ pub struct Registry {
     function_ids: NameTable<FnId>,
     #[serde(skip)]
     project_function_names: Vec<Name>,
+    #[serde(skip)]
+    project_function_decls: Vec<Option<FunctionDeclAt>>,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -477,6 +510,22 @@ impl Registry {
         }
     }
 
+    /// The immutable declaration as built in its file, when this project id
+    /// still names one unmerged file declaration. Resolved or merged values
+    /// remain available through `class_by_id` until the Registry finishes its
+    /// id-store migration.
+    #[allow(dead_code)] // Consumed by the subsequent id-backed pass migration.
+    pub(crate) fn file_class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
+        if id.source()? != IdSource::Project {
+            return None;
+        }
+        let declaration = self
+            .project_class_decls
+            .get(id.local() as usize)?
+            .as_ref()?;
+        Some(declaration.file.class(declaration.layout))
+    }
+
     /// The id and declaration selected for `name` by PHP's function-name rules.
     pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
         let (name, declaration) = self.functions.get_with_name(name)?;
@@ -504,6 +553,20 @@ impl Registry {
         }
     }
 
+    /// The immutable function declaration as built in its file, when this
+    /// project id still names one unmerged file declaration.
+    #[allow(dead_code)] // Consumed by the subsequent id-backed pass migration.
+    pub(crate) fn file_function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
+        if id.source()? != IdSource::Project {
+            return None;
+        }
+        let declaration = self
+            .project_function_decls
+            .get(id.local() as usize)?
+            .as_ref()?;
+        Some(declaration.file.function(declaration.layout))
+    }
+
     fn ensure_class_id(&mut self, name: &Name) {
         if self.class_ids.contains_key(name) {
             return;
@@ -513,6 +576,7 @@ impl Registry {
         let id = ClassId::project(local);
         self.class_ids.insert(name.clone(), id);
         self.project_class_names.push(name.clone());
+        self.project_class_decls.push(None);
     }
 
     fn ensure_function_id(&mut self, name: &Name) {
@@ -524,25 +588,30 @@ impl Registry {
         let id = FnId::project(local);
         self.function_ids.insert(name.clone(), id);
         self.project_function_names.push(name.clone());
+        self.project_function_decls.push(None);
     }
 
     fn remove_project_class_id(&mut self, name: &Name) {
-        if self
+        if let Some(id) = self
             .class_ids
             .get(name)
-            .is_some_and(|id| id.source() == Some(IdSource::Project))
+            .copied()
+            .filter(|id| id.source() == Some(IdSource::Project))
         {
             self.class_ids.remove(name);
+            self.project_class_decls[id.local() as usize] = None;
         }
     }
 
     fn remove_project_function_id(&mut self, name: &Name) {
-        if self
+        if let Some(id) = self
             .function_ids
             .get(name)
-            .is_some_and(|id| id.source() == Some(IdSource::Project))
+            .copied()
+            .filter(|id| id.source() == Some(IdSource::Project))
         {
             self.function_ids.remove(name);
+            self.project_function_decls[id.local() as usize] = None;
         }
     }
 
@@ -757,6 +826,7 @@ impl Registry {
         self.functions.freeze();
         self.class_ids = NameTable::default();
         self.project_class_names.clear();
+        self.project_class_decls.clear();
         for index in 0..self.classes.base_len() {
             let local = u32::try_from(index).expect("stub class id range exhausted");
             let name = self
@@ -768,6 +838,7 @@ impl Registry {
         self.class_ids.freeze();
         self.function_ids = NameTable::default();
         self.project_function_names.clear();
+        self.project_function_decls.clear();
         for index in 0..self.functions.base_len() {
             let local = u32::try_from(index).expect("stub function id range exhausted");
             let name = self
