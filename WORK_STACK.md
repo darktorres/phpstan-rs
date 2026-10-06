@@ -239,10 +239,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   with item 9. Item 9.2 is in progress: syntax parse results now own their
   source bytes and the lexer's distinct names in first-use order; retained
   project trees carry both alongside the AST, while cache-only context
-  entries and dropped context trees release them. `NameId` lookup is exposed
-  for the upcoming node conversion. No item gate or full validation has run for
-  item 9. AST nodes still use boxed/vector children and `Name` handles; the
-  source copy is interim until payloads become source ranges. Row 4.1 made
+  entries and dropped context trees release them. `NameId` and source-span
+  lookup are exposed for the upcoming node conversion. No item gate or full
+  validation has run for item 9. AST nodes still use boxed/vector children
+  and `Name` handles; the source copy is interim until payloads become source
+  ranges. Row 4.1 made
   the four public declaration tables private behind
   `Registry` read accessors (`e06503ad`, preserving owned stub-table
   extraction). Row 4.2 added stub, context-base and project ID ranges

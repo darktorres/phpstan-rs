@@ -35,6 +35,11 @@ pub struct ParsedFile {
 }
 
 impl ParsedFile {
+    /// Reads an in-file byte range, such as a source-backed AST payload.
+    pub fn source_slice(&self, span: crate::span::Span) -> Option<&[u8]> {
+        self.source.get(span.start as usize..span.end as usize)
+    }
+
     /// Resolves a file-local name id to the shared interned name.
     pub fn name(&self, id: NameId) -> Option<&Name> {
         self.names.get(id.index())
