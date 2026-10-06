@@ -1,25 +1,29 @@
-//! Node identity: every `Stmt` and `Expr` of one parsed file has its own id.
+//! Parsed statements and expressions reserve indices in their typed arenas.
 
 use super::super::*;
 use super::helpers::*;
 use crate::visit::{Visitor, walk_expr, walk_stmt};
 
 /// Every statement's and expression's id.
-struct Ids(Vec<NodeId>);
+#[derive(Default)]
+struct Ids {
+    statements: Vec<StmtId>,
+    expressions: Vec<ExprId>,
+}
 
 impl<'ast> Visitor<'ast> for Ids {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        self.0.push(stmt.id);
+        self.statements.push(stmt.id);
         walk_stmt(self, stmt);
     }
     fn visit_expr(&mut self, e: &'ast Expr) {
-        self.0.push(e.id);
+        self.expressions.push(e.id);
         walk_expr(self, e);
     }
 }
 
 #[test]
-fn every_statement_and_expression_has_a_distinct_id() {
+fn statements_and_expressions_have_dense_typed_ids() {
     let program = parse(
         r#"<?php
             $a = 1 + 2;
@@ -28,12 +32,14 @@ fn every_statement_and_expression_has_a_distinct_id() {
             foreach ([1, 2] as $k => $v) { $a += $v; }
         "#,
     );
-    let mut ids = Ids(Vec::new());
+    let mut ids = Ids::default();
     crate::visit::walk_stmts(&mut ids, &program);
-    let mut ids = ids.0;
-    let count = ids.len();
-    ids.sort();
-    ids.dedup();
-    assert_eq!(ids.len(), count, "duplicate node ids");
-    assert!(ids.iter().all(|id| *id != NodeId::SYNTHETIC));
+    ids.statements.sort_by_key(|id| u32::from(id.into_raw()));
+    ids.expressions.sort_by_key(|id| u32::from(id.into_raw()));
+    for (expected, id) in ids.statements.iter().enumerate() {
+        assert_eq!(u32::from(id.into_raw()) as usize, expected);
+    }
+    for (expected, id) in ids.expressions.iter().enumerate() {
+        assert_eq!(u32::from(id.into_raw()) as usize, expected);
+    }
 }

@@ -47,17 +47,18 @@ pub struct Parser<'a> {
     // The file's lines, which the parser asks about the lines tokens and
     // doc comments are on.
     pub(crate) line_index: Arc<LineIndex>,
-    // The id the next node built gets - see `NodeId`.
-    pub(crate) next_node_id: std::cell::Cell<u32>,
+    // The next indices to allocate when each node is committed to its arena.
+    pub(crate) next_expr_id: std::cell::Cell<u32>,
+    pub(crate) next_stmt_id: std::cell::Cell<u32>,
     // What names in the tree are interned into.
     pub(crate) interner: &'static Interner,
     // Errors that stand unless the node they're keyed by turns out to be
     // part of a destructuring target: a skipped array slot (`[, $b]`) and
     // a `list(...)`. Which it is is only known once the outermost `[...]`
     // is followed by `=`, so they wait until then.
-    pub(crate) pattern_only: Vec<(NodeId, ParseError)>,
+    pub(crate) pattern_only: Vec<(ExprId, ParseError)>,
     // The `array(...)` literals, which can't be destructuring targets.
-    pub(crate) long_arrays: rustc_hash::FxHashSet<NodeId>,
+    pub(crate) long_arrays: rustc_hash::FxHashSet<ExprId>,
     // Whether the parse has built an anonymous class (`new class`).
     pub(crate) saw_anonymous_class: bool,
     // Where the parse first met each syntax only some PHP versions accept.
@@ -200,7 +201,8 @@ impl<'a> Parser<'a> {
             last_end: 0,
             last_span: Span::default(),
             line_index,
-            next_node_id: std::cell::Cell::new(0),
+            next_expr_id: std::cell::Cell::new(0),
+            next_stmt_id: std::cell::Cell::new(0),
             interner: Interner::global(),
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
@@ -563,11 +565,20 @@ impl Parser<'_> {
         }
     }
 
-    /// A fresh id for the node being built.
-    pub(crate) fn node_id(&self) -> NodeId {
-        let id = self.next_node_id.get();
-        self.next_node_id.set(id + 1);
-        NodeId::new(id)
+    /// Reserves the index the next expression will have in its typed arena.
+    pub(crate) fn expr_id(&self) -> ExprId {
+        let id = self.next_expr_id.get();
+        self.next_expr_id
+            .set(id.checked_add(1).expect("expression arena exhausted"));
+        ExprId::from_raw(la_arena::RawIdx::from_u32(id))
+    }
+
+    /// Reserves the index the next statement will have in its typed arena.
+    pub(crate) fn stmt_id(&self) -> StmtId {
+        let id = self.next_stmt_id.get();
+        self.next_stmt_id
+            .set(id.checked_add(1).expect("statement arena exhausted"));
+        StmtId::from_raw(la_arena::RawIdx::from_u32(id))
     }
 
     /// Builds a `Stmt` spanning from `start` (the position captured before
@@ -615,7 +626,7 @@ impl Parser<'_> {
             self.saw_nested_declaration.set(true);
         }
         Stmt {
-            id: self.node_id(),
+            id: self.stmt_id(),
             kind,
             span: Span {
                 start,
@@ -629,7 +640,7 @@ impl Parser<'_> {
     /// Same as `stmt`, for expressions.
     pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> Expr {
         Expr {
-            id: self.node_id(),
+            id: self.expr_id(),
             kind,
             span: Span {
                 start,

@@ -243,8 +243,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   now carry typed `NameId`s; synthetic/list-parsed identifiers can omit
   them. They still retain their `Name` handle pending reader migration.
   Source/name lookup is exposed, and syntax depends on `la-arena` with typed
-  `ExprId`/`StmtId` aliases. No item gate or full validation has run for item
-  9. AST children still use boxed/vector storage
+  `ExprId`/`StmtId` aliases. Row 9.3 is in progress: the shared `NodeId` is
+  removed; the parser reserves distinct typed expression/statement indices,
+  and the inference cache is keyed by `ExprId`. Nodes still use recursive
+  storage, arena commits are not implemented, and no item gate or full
+  validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
   ranges. Row 4.1 made
   the four public declaration tables private behind

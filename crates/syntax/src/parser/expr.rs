@@ -499,7 +499,7 @@ impl Parser<'_> {
 
     /// Drops the error waiting on `id` being part of a destructuring
     /// target; whether there was one.
-    fn take_pattern_only(&mut self, id: NodeId) -> bool {
+    fn take_pattern_only(&mut self, id: ExprId) -> bool {
         let before = self.pattern_only.len();
         self.pattern_only.retain(|(pending, _)| *pending != id);
         self.pattern_only.len() != before

@@ -21,12 +21,12 @@ impl Parser<'_> {
         for part in parts {
             match part {
                 StringPart::Literal(s, span) => exprs.push(Expr {
-                    id: self.node_id(),
+                    id: self.expr_id(),
                     kind: ExprKind::Literal(Literal::String(s)),
                     span,
                 }),
                 StringPart::SimpleVar(name, span) => exprs.push(Expr {
-                    id: self.node_id(),
+                    id: self.expr_id(),
                     kind: ExprKind::Variable(name),
                     span,
                 }),
@@ -39,7 +39,8 @@ impl Parser<'_> {
                     // The fragment's names are read in the namespace and
                     // imports where it sits.
                     *sub.ctx.borrow_mut() = self.ctx.borrow().clone();
-                    sub.next_node_id.set(self.next_node_id.get());
+                    sub.next_expr_id.set(self.next_expr_id.get());
+                    sub.next_stmt_id.set(self.next_stmt_id.get());
                     *sub.recorder.borrow_mut() = self.recorder.borrow().fork();
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;
@@ -62,7 +63,8 @@ impl Parser<'_> {
                             span: sub.current_span(),
                         });
                     }
-                    self.next_node_id.set(sub.next_node_id.get());
+                    self.next_expr_id.set(sub.next_expr_id.get());
+                    self.next_stmt_id.set(sub.next_stmt_id.get());
                     self.recorder.borrow_mut().absorb(sub.take_references());
                     exprs.push(parsed);
                 }
@@ -80,7 +82,7 @@ impl Parser<'_> {
                     end,
                 } => {
                     let var_expr = Expr {
-                        id: self.node_id(),
+                        id: self.expr_id(),
                         kind: ExprKind::Variable(var),
                         span: Span {
                             start: var_start,
@@ -89,7 +91,7 @@ impl Parser<'_> {
                     };
                     let arrow_len = if nullsafe { 3 } else { 2 };
                     exprs.push(Expr {
-                        id: self.node_id(),
+                        id: self.expr_id(),
                         kind: ExprKind::PropertyAccess(
                             Box::new(var_expr),
                             self.ident(
@@ -116,7 +118,7 @@ impl Parser<'_> {
                     end,
                 } => {
                     let var_expr = Expr {
-                        id: self.node_id(),
+                        id: self.expr_id(),
                         kind: ExprKind::Variable(var),
                         span: Span {
                             start: var_start,
@@ -131,7 +133,7 @@ impl Parser<'_> {
                         }
                     };
                     let key_expr = Expr {
-                        id: self.node_id(),
+                        id: self.expr_id(),
                         kind: key_kind,
                         span: Span {
                             start: var_end,
@@ -139,7 +141,7 @@ impl Parser<'_> {
                         },
                     };
                     exprs.push(Expr {
-                        id: self.node_id(),
+                        id: self.expr_id(),
                         kind: ExprKind::Index(Box::new(var_expr), Some(Box::new(key_expr))),
                         span: Span {
                             start: var_start,

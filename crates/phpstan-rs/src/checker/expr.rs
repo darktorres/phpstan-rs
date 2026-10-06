@@ -4507,7 +4507,7 @@ impl<'a> Checker<'a> {
         question: InferQuestion,
         answer: impl FnOnce() -> Type,
     ) -> Type {
-        if e.id == NodeId::SYNTHETIC || self.infer_cache.borrow().is_none() {
+        if e.id == syntax::ast::SYNTHETIC_EXPR_ID || self.infer_cache.borrow().is_none() {
             return syntax::stack::guard(answer);
         }
         let addr = std::ptr::from_ref(e) as usize;
@@ -6046,7 +6046,7 @@ fn forwards_static_binding(target: &StaticTarget) -> bool {
 
 fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> Expr {
     Expr {
-        id: NodeId::SYNTHETIC,
+        id: syntax::ast::SYNTHETIC_EXPR_ID,
         kind: ExprKind::StaticCall(
             target.clone(),
             Ident {
@@ -6076,7 +6076,7 @@ fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
         )
     };
     Expr {
-        id: NodeId::SYNTHETIC,
+        id: syntax::ast::SYNTHETIC_EXPR_ID,
         kind,
         span,
     }

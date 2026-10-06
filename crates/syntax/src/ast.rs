@@ -4,27 +4,6 @@ use crate::name::Name;
 use crate::php_string::PhpString;
 use crate::span::Span;
 
-/// A syntax node's identity within one parsed file: the parser numbers
-/// every `Stmt` and `Expr` densely from 0 in the order it builds them, so a
-/// side table can be a plain vector indexed by `NodeId::index`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NodeId(u32);
-
-impl NodeId {
-    /// The id of a node built outside the parser (a probe or a rewritten
-    /// expression), which no side table has an entry for.
-    pub const SYNTHETIC: NodeId = NodeId(u32::MAX);
-
-    pub(crate) fn new(index: u32) -> NodeId {
-        debug_assert!(index != u32::MAX, "node ids exhausted");
-        NodeId(index)
-    }
-
-    pub fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
 /// One `Name(args)` entry inside an attribute group
 /// (`#[Name(args), ...]`). `name` is the raw class name as written,
 /// resolved by the checker (not here). `args` reuses `Arg`'s call-argument
@@ -45,7 +24,7 @@ pub struct Attribute {
 /// concerns - "what kind of statement" and "where it is" - stay separate).
 #[derive(Debug, Clone)]
 pub struct Stmt {
-    pub id: NodeId,
+    pub id: StmtId,
     pub kind: StmtKind,
     pub span: Span,
     // The raw text of a `/** ... */` doc comment immediately preceding this
@@ -72,6 +51,12 @@ pub type ExprId = la_arena::Idx<Expr>;
 
 /// A typed index into a parsed file's statement arena.
 pub type StmtId = la_arena::Idx<Stmt>;
+
+/// The identity used for an expression synthesized outside a parsed file.
+pub const SYNTHETIC_EXPR_ID: ExprId = ExprId::from_raw(la_arena::RawIdx::from_u32(u32::MAX));
+
+/// The identity used for a statement synthesized outside a parsed file.
+pub const SYNTHETIC_STMT_ID: StmtId = StmtId::from_raw(la_arena::RawIdx::from_u32(u32::MAX));
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
@@ -160,7 +145,6 @@ pub struct IfStmt {
 /// One `elseif (cond) body` of an `if` chain.
 #[derive(Debug, Clone)]
 pub struct ElseIf {
-    pub id: NodeId,
     pub cond: Expr,
     pub body: Box<Stmt>,
     pub span: Span,
@@ -1409,7 +1393,7 @@ pub struct ArrowFnExpr {
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
 pub struct Expr {
-    pub id: NodeId,
+    pub id: ExprId,
     pub kind: ExprKind,
     pub span: Span,
 }

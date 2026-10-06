@@ -905,7 +905,7 @@ pub(crate) enum InferQuestion {
 mod access_attributes;
 /// A method call statement's callee as the check of the call resolved it.
 pub(crate) struct StatementMethodCall {
-    pub(crate) id: syntax::ast::NodeId,
+    pub(crate) id: syntax::ast::ExprId,
     /// The class that declares the method.
     pub(crate) owner: syntax::name::Name,
     /// The receiver's type before the call.

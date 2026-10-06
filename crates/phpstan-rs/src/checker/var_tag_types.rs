@@ -538,7 +538,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let variable = Expr {
-                id: NodeId::SYNTHETIC,
+                id: syntax::ast::SYNTHETIC_EXPR_ID,
                 kind: ExprKind::Variable(name.as_str().into()),
                 span: stmt.span,
             };

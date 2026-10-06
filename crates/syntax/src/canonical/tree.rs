@@ -124,7 +124,7 @@ canonical_struct!(IfStmt {
     else_branch,
 });
 
-canonical_struct!(ElseIf { cond, body, span } skip { id });
+canonical_struct!(ElseIf { cond, body, span });
 
 canonical_struct!(SwitchCase { test, body, span });
 

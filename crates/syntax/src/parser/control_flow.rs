@@ -57,7 +57,6 @@ impl Parser<'_> {
             let cond = self.parse_paren_condition()?;
             let body = Box::new(self.parse_braced_or_single()?);
             elseifs.push(ElseIf {
-                id: self.node_id(),
                 cond,
                 body,
                 span: Span {
@@ -101,7 +100,6 @@ impl Parser<'_> {
             let cond = self.parse_paren_condition()?;
             let body = Box::new(self.parse_alt_branch()?);
             elseifs.push(ElseIf {
-                id: self.node_id(),
                 cond,
                 body,
                 span: Span {

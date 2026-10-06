@@ -10,7 +10,8 @@
 
 use types::Type;
 
-use super::{InferQuestion, NodeId};
+use super::InferQuestion;
+use syntax::ast::ExprId;
 
 const NO_ENTRY: u32 = u32::MAX;
 
@@ -44,7 +45,7 @@ pub(crate) struct InferCache {
     // The map this replaces, kept beside it in a test build, which asserts
     // that each lookup answers as the map does.
     #[cfg(test)]
-    shadow: rustc_hash::FxHashMap<(usize, NodeId, u64, InferQuestion), Type>,
+    shadow: rustc_hash::FxHashMap<(usize, ExprId, u64, InferQuestion), Type>,
 }
 
 impl Default for InferCache {
@@ -65,7 +66,7 @@ impl InferCache {
     pub(crate) fn get(
         &self,
         addr: usize,
-        id: NodeId,
+        id: ExprId,
         version: u64,
         question: InferQuestion,
     ) -> Option<&Type> {
@@ -82,11 +83,11 @@ impl InferCache {
     fn find(
         &self,
         addr: usize,
-        id: NodeId,
+        id: ExprId,
         version: u64,
         question: InferQuestion,
     ) -> Option<&Type> {
-        let slot = self.slots.get(id.index())?;
+        let slot = self.slots.get(u32::from(id.into_raw()) as usize)?;
         if slot.generation != self.generation {
             return None;
         }
@@ -105,12 +106,12 @@ impl InferCache {
     pub(crate) fn insert(
         &mut self,
         addr: usize,
-        id: NodeId,
+        id: ExprId,
         version: u64,
         question: InferQuestion,
         ty: Type,
     ) {
-        let index = id.index();
+        let index = u32::from(id.into_raw()) as usize;
         if index >= self.slots.len() {
             self.slots.resize(index + 1 + index / 4, EMPTY);
         }

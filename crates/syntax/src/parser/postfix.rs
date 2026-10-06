@@ -176,7 +176,7 @@ impl Parser<'_> {
                             StaticMember::Name(n) => ExprKind::StaticCall(target, n, args),
                             StaticMember::Variable(v, span) => {
                                 let name = Expr {
-                                    id: self.node_id(),
+                                    id: self.expr_id(),
                                     kind: ExprKind::Variable(v),
                                     span,
                                 };
