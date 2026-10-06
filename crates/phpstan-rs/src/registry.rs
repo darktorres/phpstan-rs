@@ -921,6 +921,12 @@ impl Registry {
         self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
         self.base_builtin_methods_running_code =
             Arc::new(self.builtin_methods_running_code.clone());
+        let phpstan_ancestry_names: FxHashSet<Name> = self
+            .class_ids
+            .iter()
+            .filter(|(_, id)| self.phpstan_ancestry.contains(id))
+            .map(|(name, _)| name.clone())
+            .collect();
         self.classes.freeze();
         self.functions.freeze();
         self.class_ids = NameTable::default();
@@ -953,6 +959,16 @@ impl Registry {
             );
         }
         self.function_ids.freeze();
+        if phpstan_ancestry_names.is_empty() {
+            // Cached registries omit runtime ids and this derived set; walk
+            // the hierarchy only for that path.
+            self.rebuild_phpstan_ancestry_ids();
+        } else {
+            self.phpstan_ancestry = phpstan_ancestry_names
+                .iter()
+                .filter_map(|name| self.class_ids.get(name).copied())
+                .collect();
+        }
         self.built_in_stub_classes.freeze();
         self.ancestor_names.freeze();
         self.subtype_children.freeze();

@@ -117,6 +117,19 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
         let mut built = Project::built_stubs(with_phpstan);
         let back = round_trip(&built);
         built.freeze();
+        let ancestry_names = |registry: &Registry| {
+            registry
+                .classes()
+                .iter()
+                .filter(|(name, _)| registry.class_has_phpstan_ancestry(name))
+                .map(|(name, _)| name.lower().to_string())
+                .collect::<rustc_hash::FxHashSet<_>>()
+        };
+        assert_eq!(
+            ancestry_names(&back),
+            ancestry_names(&built),
+            "the ID-addressed PHPStan-ancestry verdicts rebuild after a cache read"
+        );
         let (stored, back) = (printed(&built), printed(&back));
         if let Some(line) = stored
             .lines()

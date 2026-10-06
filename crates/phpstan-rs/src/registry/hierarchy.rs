@@ -138,6 +138,23 @@ impl Registry {
         false
     }
 
+    /// Rebuilds the ID-addressed PHPStan-ancestry verdicts after loading a
+    /// cached registry, whose declaration IDs are assigned when it freezes.
+    pub(crate) fn rebuild_phpstan_ancestry_ids(&mut self) {
+        let class_names: Vec<_> = self.classes.iter().map(|(name, _)| name).collect();
+        let registry: &Registry = self;
+        self.phpstan_ancestry = class_names
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter_map(|name| {
+                registry
+                    .class_reaches_phpstan_name(name)
+                    .then(|| registry.class_ids.get(name).copied())
+                    .flatten()
+            })
+            .collect();
+    }
+
     /// Whether `class` has a name under `PHPStan\` among what it extends,
     /// implements or uses, transitively: the gate of the rules that read
     /// the PHPStan API's use from a class that is part of an extension.
