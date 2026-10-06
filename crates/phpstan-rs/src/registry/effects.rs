@@ -1534,7 +1534,7 @@ impl Registry {
 fn settle(
     registry: &Registry,
     classified: &FxHashMap<EffectId, IdClassification<'_>>,
-    outside: impl Fn(&EffectId) -> Settled,
+    outside: impl Fn(&EffectId) -> Settled + Sync,
 ) -> FxHashMap<EffectId, Settled> {
     let mut settled: FxHashMap<EffectId, Settled> = classified
         .iter()
@@ -1564,62 +1564,85 @@ fn settle(
     let mut passed_to: FxHashSet<(&EffectId, &EffectId)> = FxHashSet::default();
     let mut queue: std::collections::VecDeque<&EffectId> = classified.keys().collect();
     let mut queued: FxHashSet<&EffectId> = queue.iter().copied().collect();
-    while let Some(key) = queue.pop_front() {
-        queued.remove(key);
-        let classification = &classified[key];
-        let before = &settled[key];
-        if before.effect.is_anything() {
-            continue;
+    while !queue.is_empty() {
+        // Every member of a wave reads the same settled snapshot. Its own
+        // result and newly discovered argument edges are collected locally;
+        // the merge below is serial, so no two workers write shared state.
+        let wave: Vec<&EffectId> = queue.drain(..).collect();
+        for key in &wave {
+            queued.remove(*key);
         }
-        let mut now = before.clone();
-        let mut read: Vec<EffectId> = Vec::new();
-        let get = |callee: &EffectId| match settled.get(callee) {
-            Some(found) => found.clone(),
-            None => outside(callee),
-        };
-        for (callee, transfer, site) in &classification.calls {
-            let found = get(callee);
-            now.effect.join(&found.effect.transferred(transfer));
-            for condition in &found.runs {
-                if callee.is_closure() {
-                    // What a closure the body wrote runs of the body's
-                    // parameters is the body's to run.
-                    now.runs.insert(condition.through(transfer));
-                    continue;
+        let updates: Vec<(&EffectId, Settled, Vec<EffectId>)> = wave
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter_map(|key| {
+                let key = *key;
+                let classification = &classified[key];
+                let before = &settled[key];
+                if before.effect.is_anything() {
+                    return None;
                 }
-                run_passed(
-                    registry,
-                    site.map(|site| &classification.sites[site as usize]),
-                    callee,
-                    transfer,
-                    condition,
-                    &get,
-                    &mut now,
-                    &mut read,
-                );
-                if now.effect.is_anything() {
-                    break;
+                let mut now = before.clone();
+                let mut read: Vec<EffectId> = Vec::new();
+                let get = |callee: &EffectId| match settled.get(callee) {
+                    Some(found) => found.clone(),
+                    None => outside(callee),
+                };
+                for (callee, transfer, site) in &classification.calls {
+                    let found = get(callee);
+                    now.effect.join(&found.effect.transferred(transfer));
+                    for condition in &found.runs {
+                        if callee.is_closure() {
+                            // What a closure the body wrote runs of the body's
+                            // parameters is the body's to run.
+                            now.runs.insert(condition.through(transfer));
+                            continue;
+                        }
+                        run_passed(
+                            registry,
+                            site.map(|site| &classification.sites[site as usize]),
+                            callee,
+                            transfer,
+                            condition,
+                            &get,
+                            &mut now,
+                            &mut read,
+                        );
+                        if now.effect.is_anything() {
+                            break;
+                        }
+                    }
+                    if now.effect.is_anything() {
+                        break;
+                    }
+                }
+                Some((key, now, read))
+            })
+            .collect();
+
+        for (key, now, read) in updates {
+            for found in read {
+                if let Some((found, _)) = classified.get_key_value(&found)
+                    && passed_to.insert((found, key))
+                {
+                    // Keep caller edges borrowed from `classified`'s stable keys.
+                    callers.entry(found).or_default().push(key);
+                    // The callee may have advanced earlier in this same
+                    // wave, after this caller read the wave's old snapshot.
+                    // Revisit the caller once the new edge is visible.
+                    if queued.insert(key) {
+                        queue.push_back(key);
+                    }
                 }
             }
-            if now.effect.is_anything() {
-                break;
+            if now == settled[key] {
+                continue;
             }
-        }
-        for found in read {
-            if let Some((found, _)) = classified.get_key_value(&found)
-                && passed_to.insert((found, key))
-            {
-                // Keep caller edges borrowed from `classified`'s stable keys.
-                callers.entry(found).or_default().push(key);
-            }
-        }
-        if now == settled[key] {
-            continue;
-        }
-        settled.insert(key.clone(), now);
-        for caller in callers.get(key).into_iter().flatten() {
-            if queued.insert(caller) {
-                queue.push_back(caller);
+            settled.insert(key.clone(), now);
+            for caller in callers.get(key).into_iter().flatten() {
+                if queued.insert(caller) {
+                    queue.push_back(caller);
+                }
             }
         }
     }

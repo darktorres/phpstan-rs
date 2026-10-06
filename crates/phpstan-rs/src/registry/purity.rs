@@ -254,21 +254,15 @@ impl Registry {
     /// satisfied it either.
     fn run_purity_fixed_point(&mut self, candidates: &PurityCandidates) {
         let candidate_count = candidates.functions.len() + candidates.methods.len();
-        let signature = |index: usize| -> &FunctionReflection {
-            match index.checked_sub(candidates.functions.len()) {
-                None => self
-                    .function_by_id(candidates.functions[index])
-                    .expect("a candidate function is declared"),
-                Some(i) => self
-                    .method_by_ref(candidates.methods[i])
-                    .expect("a candidate method is declared"),
-            }
-        };
-        // Which candidate each signature is, found by address before any
-        // is changed.
-        let mut index_of: FxHashMap<*const FunctionReflection, usize> = FxHashMap::default();
-        for index in 0..candidate_count {
-            index_of.insert(std::ptr::from_ref(signature(index)), index);
+        let mut index_of: FxHashMap<PurityDependency, usize> = FxHashMap::default();
+        for (index, id) in candidates.functions.iter().copied().enumerate() {
+            index_of.insert(PurityDependency::Function(id), index);
+        }
+        for (index, method) in candidates.methods.iter().copied().enumerate() {
+            index_of.insert(
+                PurityDependency::Method(method),
+                candidates.functions.len() + index,
+            );
         }
         let mut waiting = vec![0usize; candidate_count];
         let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); candidate_count];
@@ -287,12 +281,7 @@ impl Registry {
                     continue;
                 }
                 not_pure += 1;
-                let target = match dep {
-                    PurityDependency::Function(id) => self.function_by_id(*id),
-                    PurityDependency::Method(method) => self.method_by_ref(*method),
-                };
-                if let Some(&target) = target.and_then(|sig| index_of.get(&std::ptr::from_ref(sig)))
-                {
+                if let Some(&target) = index_of.get(dep) {
                     dependents[target].push(index);
                 }
             }
@@ -302,9 +291,18 @@ impl Registry {
             }
         }
         let mut pure: Vec<usize> = Vec::new();
-        while let Some(index) = ready.pop() {
-            pure.push(index);
-            for &dependent in &dependents[index] {
+        while !ready.is_empty() {
+            // Process one worklist wave against immutable reverse edges.
+            // Rayon collects this indexed wave in order; the serial merge
+            // gives each waiting count one writer and keeps results stable.
+            let wave = std::mem::take(&mut ready);
+            pure.extend(wave.iter().copied());
+            let released: Vec<usize> = wave
+                .par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .flat_map_iter(|&index| dependents[index].iter().copied())
+                .collect();
+            for dependent in released {
                 waiting[dependent] -= 1;
                 if waiting[dependent] == 0 {
                     ready.push(dependent);

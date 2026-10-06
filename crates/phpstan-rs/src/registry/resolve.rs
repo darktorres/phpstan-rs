@@ -16,6 +16,13 @@ type ResolvedClassUpdate = (
     ClassPropertyResults,
     ClassTypeResults,
 );
+type ImportedTypeClassUpdate = (
+    ClassId,
+    NameMap<Type>,
+    Vec<(usize, Type)>,
+    ClassPropertyResults,
+    ClassMethodResults,
+);
 type VisibleClassConstTypes = OrderedNameMap<Type>;
 
 use crate::registry::Registry;
@@ -917,40 +924,63 @@ impl Registry {
         // round: no later round gives another class one.
         let mut with_deferred: Option<Vec<ClassId>> = None;
         for _ in 0..MAX_ROUNDS {
-            let mut updates: Vec<(ClassId, usize, Type)> = Vec::new();
-            match &with_deferred {
+            let updates: Vec<(ClassId, usize, Type)> = match &with_deferred {
                 None => {
-                    let mut found = Vec::new();
-                    for (class_name, _info) in self.scoped_classes() {
-                        let Some(class_id) = self.class_ids.get(class_name).copied() else {
-                            continue;
-                        };
-                        let Some(info) = self.class_by_id(class_id) else {
-                            continue;
-                        };
-                        if self.constant_reference_updates(class_id, class_name, info, &mut updates)
-                        {
-                            found.push(class_id);
-                        }
-                    }
-                    with_deferred = Some(found);
-                }
-                Some(ids) => {
-                    for class_id in ids {
-                        let Some(class_name) = self.class_name_by_id(*class_id).cloned() else {
-                            continue;
-                        };
-                        if let Some(info) = self.class_by_id(*class_id) {
-                            self.constant_reference_updates(
-                                *class_id,
+                    let class_names = self.scoped_class_names();
+                    let class_ids: Vec<ClassId> = class_names
+                        .iter()
+                        .filter_map(|name| self.class_ids.get(name).copied())
+                        .collect();
+                    let registry: &Registry = self;
+                    let resolved: Vec<(ClassId, Vec<(ClassId, usize, Type)>)> = class_ids
+                        .par_iter()
+                        .with_min_len(crate::registry::PASS_CHUNK)
+                        .filter_map(|&class_id| {
+                            let class_name = registry.class_name_by_id(class_id)?.clone();
+                            let info = registry.class_by_id(class_id)?;
+                            let mut updates = Vec::new();
+                            let found = registry.constant_reference_updates(
+                                class_id,
                                 &class_name,
                                 info,
                                 &mut updates,
                             );
-                        }
+                            found.then_some((class_id, updates))
+                        })
+                        .collect();
+                    let mut found = Vec::with_capacity(resolved.len());
+                    let mut updates = Vec::new();
+                    for (class_id, mut class_updates) in resolved {
+                        found.push(class_id);
+                        updates.append(&mut class_updates);
                     }
+                    with_deferred = Some(found);
+                    updates
                 }
-            }
+                Some(ids) => {
+                    let registry: &Registry = self;
+                    ids.par_iter()
+                        .with_min_len(crate::registry::PASS_CHUNK)
+                        .flat_map_iter(|&class_id| {
+                            let Some(class_name) = registry.class_name_by_id(class_id).cloned()
+                            else {
+                                return Vec::new();
+                            };
+                            let Some(info) = registry.class_by_id(class_id) else {
+                                return Vec::new();
+                            };
+                            let mut updates = Vec::new();
+                            registry.constant_reference_updates(
+                                class_id,
+                                &class_name,
+                                info,
+                                &mut updates,
+                            );
+                            updates
+                        })
+                        .collect()
+                }
+            };
             if updates.is_empty() {
                 break;
             }
@@ -958,24 +988,33 @@ impl Registry {
                 self.set_class_const_type(class_id, const_slot, ty);
             }
         }
-        for class_id in with_deferred.iter().flatten().copied() {
-            let Some(info) = self.class_by_id(class_id) else {
-                continue;
-            };
-            let unresolved: Vec<_> = class_constant_entries(self, info, class_id)
-                .into_iter()
-                .filter_map(|(slot, _, sig)| {
-                    let ty = self
-                        .class_const_types
-                        .get(&(class_id, slot))
-                        .unwrap_or(&sig.ty);
-                    ty.contains_deferred()
-                        .then(|| (slot, unresolved_class_const_to_mixed(ty.clone())))
-                })
-                .collect();
-            for (slot, ty) in unresolved {
-                self.set_class_const_type(class_id, slot, ty);
-            }
+        let registry: &Registry = self;
+        let unresolved: Vec<(ClassId, usize, Type)> = with_deferred
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>()
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .flat_map_iter(|&class_id| {
+                let Some(info) = registry.class_by_id(class_id) else {
+                    return Vec::new();
+                };
+                class_constant_entries(registry, info, class_id)
+                    .into_iter()
+                    .filter_map(|(slot, _, sig)| {
+                        let ty = registry
+                            .class_const_types
+                            .get(&(class_id, slot))
+                            .unwrap_or(&sig.ty);
+                        ty.contains_deferred()
+                            .then(|| (class_id, slot, unresolved_class_const_to_mixed(ty.clone())))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (class_id, slot, ty) in unresolved {
+            self.set_class_const_type(class_id, slot, ty);
         }
     }
 
@@ -1046,135 +1085,152 @@ impl Registry {
     /// referencing each other.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_type_imports(&mut self) {
-        let mut classes_with_imports: Vec<ClassId> = Vec::new();
-        let mut resolved: Vec<(ClassId, Name, Type)> = Vec::new();
-        for (class_name, _info) in self.scoped_classes() {
-            let Some(class_id) = self.class_ids.get(class_name).copied() else {
-                continue;
-            };
-            let Some(references) = self.class_references(class_id) else {
-                continue;
-            };
-            if references.type_imports.is_empty() {
-                continue;
-            }
-            classes_with_imports.push(class_id);
-            for imp in references.type_imports {
-                let source_key = syntax::name_resolution::qualify(
-                    class_namespace(&imp.source_class_fqn),
-                    &imp.source_alias_name,
-                );
-                let source_id = self.class_ids.get(&imp.source_class_fqn).copied();
-                let source_aliases = source_id.map(|id| self.effective_type_aliases(id));
-                if let Some(ty) = source_aliases
-                    .as_ref()
-                    .and_then(|aliases| aliases.get(source_key.as_str()))
-                {
-                    resolved.push((class_id, imp.local_key.clone(), ty.clone()));
+        // Imports are references to arbitrary classes, not just ancestors.
+        // Resolve each target class independently against the completed
+        // declaration/index tables, then apply its result as one ID-keyed
+        // batch below.
+        let class_names = self.scoped_class_names();
+        let class_ids: Vec<ClassId> = class_names
+            .iter()
+            .filter_map(|name| self.class_ids.get(name).copied())
+            .collect();
+        let registry: &Registry = self;
+        let imports: Vec<(ClassId, NameMap<Type>)> = class_ids
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter_map(|&class_id| {
+                let references = registry.class_references(class_id)?;
+                if references.type_imports.is_empty() {
+                    return None;
                 }
-            }
-        }
-        if classes_with_imports.is_empty() {
-            return;
-        }
-        let mut by_class: FxHashMap<ClassId, NameMap<Type>> = FxHashMap::default();
-        for (class_id, local_key, ty) in resolved {
-            by_class.entry(class_id).or_default().insert(local_key, ty);
-        }
-        for class_id in classes_with_imports {
-            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
-            let Some(info) = self.class_by_id(class_id) else {
-                continue;
-            };
-            // Keep even an empty result: it records that the class's import
-            // set was resolved and leaves the declaration's imports intact.
-            let aliases = by_class.remove(&class_id).unwrap_or_default();
-            let mut resolved_const_types = Vec::new();
-            let mut resolved_properties = Vec::new();
-            let substitute = |ty: &mut Type| {
-                let taken = std::mem::replace(ty, Type::mixed());
-                *ty = substitute_type_aliases(taken, &aliases);
-            };
-            let substitute_signature = |sig: &mut FunctionReflection| {
-                for param in &mut sig.params {
-                    substitute(&mut param.ty);
-                    if let Some(doc_ty) = &mut param.doc_ty {
-                        substitute(doc_ty);
+                let mut aliases = NameMap::default();
+                for imp in references.type_imports {
+                    let source_key = syntax::name_resolution::qualify(
+                        class_namespace(&imp.source_class_fqn),
+                        &imp.source_alias_name,
+                    );
+                    let source_id = registry.class_ids.get(&imp.source_class_fqn).copied();
+                    let source_aliases = source_id.map(|id| registry.effective_type_aliases(id));
+                    if let Some(ty) = source_aliases
+                        .as_ref()
+                        .and_then(|aliases| aliases.get(source_key.as_str()))
+                    {
+                        aliases.insert(imp.local_key.clone(), ty.clone());
                     }
                 }
-                substitute(&mut sig.return_type);
-                if let Some(doc_ty) = &mut sig.return_doc_ty {
-                    substitute(doc_ty);
-                }
-                if let Some(out) = &mut sig.self_out {
-                    substitute(out);
-                }
-            };
-            let mut resolved_methods = Vec::new();
-            for name in info.methods.keys() {
-                let current = info.methods.get(name).expect("method key exists");
-                let mut resolved = current.clone();
-                substitute_signature(&mut resolved);
-                if resolved != *current
-                    && let Some(slot) = self.member_slot(class_name.as_ref(), name)
-                {
-                    resolved_methods.push((MethodRef::new(class_id, slot), resolved));
-                }
-            }
-            for (method, current) in self.method_results_for_class(class_id) {
-                let mut resolved = current.clone();
-                substitute_signature(&mut resolved);
-                if resolved != *current {
-                    resolved_methods.push((method, resolved));
-                }
-            }
-            let property_names: NameSet = info
-                .properties
-                .keys()
-                .chain(
-                    self.property_results_for_class(class_id)
-                        .filter_map(|(property, _)| self.property_name_by_ref(property)),
-                )
-                .cloned()
+                Some((class_id, aliases))
+            })
+            .collect();
+        if imports.is_empty() {
+            return;
+        }
+        let registry: &Registry = self;
+        let updates: Vec<ImportedTypeClassUpdate> =
+            imports
+                .into_par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .map(|(class_id, aliases)| {
+                    let Some(class_name) = registry.class_name_by_id(class_id).cloned() else {
+                        return (class_id, aliases, Vec::new(), Vec::new(), Vec::new());
+                    };
+                    let Some(info) = registry.class_by_id(class_id) else {
+                        return (class_id, aliases, Vec::new(), Vec::new(), Vec::new());
+                    };
+                    // Keep even an empty result: it records that the class's
+                    // import set was resolved and leaves declaration imports intact.
+                    let mut resolved_const_types = Vec::new();
+                    let mut resolved_properties = Vec::new();
+                    let substitute = |ty: &mut Type| {
+                        let taken = std::mem::replace(ty, Type::mixed());
+                        *ty = substitute_type_aliases(taken, &aliases);
+                    };
+                    let substitute_signature = |sig: &mut FunctionReflection| {
+                        for param in &mut sig.params {
+                            substitute(&mut param.ty);
+                            if let Some(doc_ty) = &mut param.doc_ty {
+                                substitute(doc_ty);
+                            }
+                        }
+                        substitute(&mut sig.return_type);
+                        if let Some(doc_ty) = &mut sig.return_doc_ty {
+                            substitute(doc_ty);
+                        }
+                        if let Some(out) = &mut sig.self_out {
+                            substitute(out);
+                        }
+                    };
+                    let mut resolved_methods = Vec::new();
+                    for name in info.methods.keys() {
+                        let current = info.methods.get(name).expect("method key exists");
+                        let mut resolved = current.clone();
+                        substitute_signature(&mut resolved);
+                        if resolved != *current
+                            && let Some(slot) = registry.member_slot(class_name.as_ref(), name)
+                        {
+                            resolved_methods.push((MethodRef::new(class_id, slot), resolved));
+                        }
+                    }
+                    for (method, current) in registry.method_results_for_class(class_id) {
+                        let mut resolved = current.clone();
+                        substitute_signature(&mut resolved);
+                        if resolved != *current {
+                            resolved_methods.push((method, resolved));
+                        }
+                    }
+                    let property_names: NameSet =
+                        info.properties
+                            .keys()
+                            .chain(registry.property_results_for_class(class_id).filter_map(
+                                |(property, _)| registry.property_name_by_ref(property),
+                            ))
+                            .cloned()
+                            .collect();
+                    for name in property_names {
+                        let Some(current) = registry
+                            .property_result_by_name(class_id, &name)
+                            .or_else(|| info.properties.get(&name).map(Arc::as_ref))
+                        else {
+                            continue;
+                        };
+                        let mut prop = PropertyReflection::clone(current);
+                        substitute(&mut prop.ty);
+                        if let Some(doc) = &mut prop.doc_ty {
+                            substitute(doc);
+                        }
+                        if let Some(set_ty) = &mut prop.set_ty {
+                            substitute(set_ty);
+                        }
+                        if prop != *current {
+                            resolved_properties.push((name, Arc::new(prop)));
+                        }
+                    }
+                    for (slot, _, c) in class_constant_entries(registry, info, class_id) {
+                        let current = registry
+                            .class_const_types
+                            .get(&(class_id, slot))
+                            .unwrap_or(&c.ty);
+                        let ty = substitute_type_aliases(current.clone(), &aliases);
+                        if &ty != current {
+                            resolved_const_types.push((slot, ty));
+                        }
+                    }
+                    (
+                        class_id,
+                        aliases,
+                        resolved_const_types,
+                        resolved_properties,
+                        resolved_methods,
+                    )
+                })
                 .collect();
-            for name in property_names {
-                let Some(current) = self
-                    .property_result_by_name(class_id, &name)
-                    .or_else(|| info.properties.get(&name).map(Arc::as_ref))
-                else {
-                    continue;
-                };
-                let mut prop = PropertyReflection::clone(current);
-                substitute(&mut prop.ty);
-                if let Some(doc) = &mut prop.doc_ty {
-                    substitute(doc);
-                }
-                if let Some(set_ty) = &mut prop.set_ty {
-                    substitute(set_ty);
-                }
-                if prop != *current {
-                    resolved_properties.push((name, Arc::new(prop)));
-                }
-            }
-            for (slot, _, c) in class_constant_entries(self, &info, class_id) {
-                let current = self
-                    .class_const_types
-                    .get(&(class_id, slot))
-                    .unwrap_or(&c.ty);
-                let ty = substitute_type_aliases(current.clone(), &aliases);
-                if &ty != current {
-                    resolved_const_types.push((slot, ty));
-                }
-            }
-            for (slot, ty) in resolved_const_types {
+        for (class_id, aliases, constants, properties, methods) in updates {
+            for (slot, ty) in constants {
                 self.set_class_const_type(class_id, slot, ty);
             }
-            for (name, property) in resolved_properties {
+            for (name, property) in properties {
                 self.set_property_result(class_id, name, property);
             }
-            for (method, result) in resolved_methods {
+            for (method, result) in methods {
                 self.set_method_result(method, result);
             }
             self.imported_type_aliases

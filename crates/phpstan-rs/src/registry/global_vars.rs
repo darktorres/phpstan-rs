@@ -371,10 +371,16 @@ fn resolve_global_scope_files(
 ) -> FxHashSet<FileId> {
     // Each file's path with `/` separators, grouped by file name: an
     // include's target can only be a file of its last segment's name.
-    let mut by_file_name: FxHashMap<String, Vec<(FileId, String)>> = FxHashMap::default();
-    for (id, path, _) in files {
-        let text = path.to_string_lossy().replace('\\', "/");
-        let name = text.rsplit('/').next().unwrap_or_default().to_string();
+    // Normalize paths independently, then index borrowed names and paths.
+    // Keeping the basename as a slice avoids the second path-sized String
+    // allocation the old index made for every file.
+    let file_paths: Vec<(FileId, String)> = files
+        .par_iter()
+        .map(|(id, path, _)| (*id, path.to_string_lossy().replace('\\', "/")))
+        .collect();
+    let mut by_file_name: FxHashMap<&str, Vec<(FileId, &str)>> = FxHashMap::default();
+    for (id, text) in &file_paths {
+        let name = text.rsplit('/').next().unwrap_or_default();
         by_file_name.entry(name).or_default().push((*id, text));
     }
 
@@ -388,28 +394,36 @@ fn resolve_global_scope_files(
     // "excluded" outcome that shape is supposed to get).
     let mut has_any_incoming: FxHashSet<FileId> = FxHashSet::default();
 
-    for (source, site) in include_sites {
-        let Some(suffix) = &site.suffix else {
-            continue;
-        };
-        if suffix.is_empty() {
-            continue;
-        }
-        let suffix = suffix.trim_start_matches('/');
-        let name = suffix.rsplit('/').next().unwrap_or_default();
-        let matches: Vec<FileId> = by_file_name
-            .get(name)
-            .into_iter()
-            .flatten()
-            .filter(|(_, text)| text_ends_with_suffix(text, suffix))
-            .map(|(id, _)| *id)
-            .collect();
-        let [target] = matches[..] else {
-            continue;
-        };
+    // Each include site is resolved independently against the filename
+    // index. The resulting relation is ID-addressed before the serial graph
+    // bookkeeping and reachability walk.
+    let resolved_edges: Vec<(FileId, FileId, bool)> = include_sites
+        .par_iter()
+        .filter_map(|(source, site)| {
+            let suffix = site.suffix.as_deref()?;
+            if suffix.is_empty() {
+                return None;
+            }
+            let suffix = suffix.trim_start_matches('/');
+            let name = suffix.rsplit('/').next().unwrap_or_default();
+            let mut matches = by_file_name
+                .get(name)?
+                .iter()
+                .filter(|(_, text)| text_ends_with_suffix(text, suffix));
+            let (target, _) = *matches.next()?;
+            // An ambiguous suffix is not a resolved edge, matching the
+            // previous exact-one-match rule without allocating a Vec.
+            matches
+                .next()
+                .is_none()
+                .then_some((*source, target, site.top_level))
+        })
+        .collect();
+
+    for (source, target, top_level) in resolved_edges {
         has_any_incoming.insert(target);
-        if site.top_level {
-            top_level_edges.entry(*source).or_default().push(target);
+        if top_level {
+            top_level_edges.entry(source).or_default().push(target);
         }
     }
 
