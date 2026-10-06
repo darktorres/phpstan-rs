@@ -281,7 +281,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   tests; Clippy and the library check pass too. During raw as-built access,
   `Registry::class`/`function` now resolve through their IDs and use the file
   locators for unmerged project declarations; resolved and merged entries
-  keep the legacy table value.
+  keep the legacy table value. Raw `lookup_method` and
+  `lookup_method_with_owner` now use the file's folded member index too,
+  with fallback where declarations were merged.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
@@ -305,7 +307,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   part of item 0. Item 3's latest implementation is row 3.2 at `dfa2cebe`;
   item 4.1 is committed at `e06503ad`, 4.2 at `1b8f79aa`, and item 4.3's
   active arena increments are recorded in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`
-  through `0e4538fa`.
+  through `e22c002f`.
 - **Item 0's validation (0.11)** is under way: the tests, fixtures and
   runtime oracle pass, and the edit replay over Piwigo and every vendor
   project found the stale diagnostics and registry state the plan's "Found
