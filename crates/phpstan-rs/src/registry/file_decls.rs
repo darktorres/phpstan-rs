@@ -264,6 +264,25 @@ impl FileDecls {
         Some(&self.members[*slot])
     }
 
+    pub(crate) fn member_slot(&self, layout: Idx<ClassLayout>, name: &str) -> Option<u16> {
+        let slot = self
+            .member_slots
+            .get(&(encode_idx(layout), name.to_ascii_lowercase()))?;
+        let start = encode_idx(self.class_layouts[layout].members.start());
+        u16::try_from(encode_idx(*slot).checked_sub(start)?).ok()
+    }
+
+    pub(crate) fn member_at_slot(
+        &self,
+        layout: Idx<ClassLayout>,
+        slot: u16,
+    ) -> Option<&FileMember> {
+        let range = &self.class_layouts[layout].members;
+        let (start, end) = encode_range(range);
+        let index = start.checked_add(u32::from(slot))?;
+        (index < end).then(|| &self.members[decode_idx(index)])
+    }
+
     fn index_members(&mut self, layout: Idx<ClassLayout>) {
         let class = encode_idx(layout);
         let (start, end) = encode_range(&self.class_layouts[layout].members);
@@ -929,6 +948,14 @@ mod tests {
         ));
         assert!(std::ptr::eq(
             registry.lookup_method("Demo", "RUN").unwrap(),
+            registry.file_method_by_class_id(class_id, "run").unwrap()
+        ));
+        let method_ref = registry
+            .file_method_ref_by_class_id(class_id, "RUN")
+            .unwrap();
+        assert_eq!(method_ref.class(), class_id);
+        assert!(std::ptr::eq(
+            registry.file_method_by_ref(method_ref).unwrap(),
             registry.file_method_by_class_id(class_id, "run").unwrap()
         ));
         assert!(std::ptr::eq(

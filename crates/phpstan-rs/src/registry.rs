@@ -73,7 +73,7 @@ pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
 pub(crate) use file_decls::{ClassLayout, FileDecls, FileMember, FunctionLayout};
 pub(crate) use guard::{Guard, GuardExpr};
-pub(crate) use ids::{ClassId, FnId, IdSource};
+pub(crate) use ids::{ClassId, FnId, IdSource, MethodRef};
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
@@ -554,6 +554,29 @@ impl Registry {
         id: ClassId,
         method: &str,
     ) -> Option<&FunctionReflection> {
+        let method_ref = self.file_method_ref_by_class_id(id, method)?;
+        self.file_method_by_ref(method_ref)
+    }
+
+    pub(crate) fn file_method_ref_by_class_id(
+        &self,
+        id: ClassId,
+        method: &str,
+    ) -> Option<MethodRef> {
+        self.debug_check_id_generation(id.generation());
+        if id.source()? != IdSource::Project {
+            return None;
+        }
+        let declaration = self
+            .project_class_decls
+            .get(id.local() as usize)?
+            .as_ref()?;
+        let slot = declaration.file.member_slot(declaration.layout, method)?;
+        Some(MethodRef::new(id, slot))
+    }
+
+    pub(crate) fn file_method_by_ref(&self, method: MethodRef) -> Option<&FunctionReflection> {
+        let id = method.class();
         self.debug_check_id_generation(id.generation());
         if id.source()? != IdSource::Project {
             return None;
@@ -565,7 +588,7 @@ impl Registry {
         Some(
             declaration
                 .file
-                .member(declaration.layout, method)?
+                .member_at_slot(declaration.layout, method.slot())?
                 .declaration
                 .get(),
         )

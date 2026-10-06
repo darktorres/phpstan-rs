@@ -78,6 +78,27 @@ macro_rules! declaration_id {
 declaration_id!(ClassId);
 declaration_id!(FnId);
 
+/// A method's slot in one class's declaration-ordered member list.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct MethodRef {
+    class: ClassId,
+    slot: u16,
+}
+
+impl MethodRef {
+    pub(crate) fn new(class: ClassId, slot: u16) -> Self {
+        Self { class, slot }
+    }
+
+    pub(crate) fn class(self) -> ClassId {
+        self.class
+    }
+
+    pub(crate) fn slot(self) -> u16 {
+        self.slot
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ClassId, FnId, IdSource, LOCAL_LIMIT};
