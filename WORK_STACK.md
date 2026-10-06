@@ -293,8 +293,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   validation row, then O3). Reading the
   starting state (0.1) found four false-report bugs, fixed in item 0
   before the baseline (rows 0.1a-0.1f), and added the implicit calls, now
-  part of item 0. The latest completed implementation is row 3.2 at
-  `dfa2cebe`; row 4.1 is committed at `e06503ad` and row 4.2 at `1b8f79aa`.
+  part of item 0. Item 3's latest implementation is row 3.2 at `dfa2cebe`;
+  item 4.1 is committed at `e06503ad`, 4.2 at `1b8f79aa`, and item 4.3's
+  active arena increments are recorded in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`
+  through `d2e477e5`.
 - **Item 0's validation (0.11)** is under way: the tests, fixtures and
   runtime oracle pass, and the edit replay over Piwigo and every vendor
   project found the stale diagnostics and registry state the plan's "Found
