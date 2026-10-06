@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-03, `48669123`. Counts below were read from the files on
+State as of 2026-10-06, `ac719727`. Counts below were read from the files on
 that date.
 
 ## Where to resume
@@ -383,10 +383,15 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   PHPDoc-final property facts on each `PropertyReflection`, carries them through
   trait composition, and advances the stub-container version to 8; the focused
   inherited-trait-property test and all 1,143 crate tests, 275 syntax tests,
-  check, Clippy and formatting pass. The 4.7 reference, include-graph,
-  purity, and property-write relations remain open.
-  Registry name tables and resolution still read legacy declaration values;
-  their migration remains open. The plan was committed at
+  check, Clippy and formatting pass. `a2ce1d81` adds and tests
+  `OrderedNameMap::get_index`, the name-to-slot operation needed to resolve
+  constant slots without a scan; its focused syntax test, formatting check and
+  diff check pass. The ledger records it at 4.6. Next: move resolved class
+  constant types to ID-and-slot results, covering deferred `value-of`, Registry
+  readers, cache freeze/load, base switches and scoped edits. The 4.7 reference,
+  include-graph, purity, and property-write relations remain open. Registry name
+  tables and resolution still read legacy declaration values; their migration
+  remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
