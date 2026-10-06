@@ -450,6 +450,18 @@ impl CanonicalOver for Registry {
         let base_member_owners = base.member_owners_for_cache();
         let effects = self.effects_for_names();
         let base_effects = base.effects_for_names();
+        let methods_by_name: rustc_hash::FxHashMap<_, Vec<_>> = self
+            .methods_by_name
+            .iter()
+            .map(|(method, ids)| {
+                (
+                    method.clone(),
+                    ids.iter()
+                        .filter_map(|id| self.class_name_by_id(*id).cloned())
+                        .collect(),
+                )
+            })
+            .collect();
         let Registry {
             id_generation: _,
             purity_results: _,
@@ -494,7 +506,7 @@ impl CanonicalOver for Registry {
             effects: _,
             builtin_methods_running_code,
             base_builtin_methods_running_code,
-            methods_by_name,
+            methods_by_name: _,
             unset_properties,
             global_sites,
         } = self;
@@ -605,7 +617,7 @@ impl CanonicalOver for Registry {
                         compare,
                     ),
                 ),
-                ("methods_by_name", methods_by_name),
+                ("methods_by_name", &methods_by_name),
                 ("unset_properties", unset_properties),
                 ("global_sites", global_sites),
             ],
@@ -648,7 +660,6 @@ canonical_struct!(Registry {
     recorded_parents,
     builtin_methods_running_code,
     base_builtin_methods_running_code,
-    methods_by_name,
     unset_properties,
     global_sites,
 } skip {
@@ -660,6 +671,7 @@ canonical_struct!(Registry {
     member_owners,
     member_owners_cache,
     effects,
+    methods_by_name,
     class_ids,
     project_class_names,
     project_class_decls,

@@ -538,15 +538,18 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// and by the name of any property's. Each name's classes are sorted, so
 /// what is made of them does not depend on the order the classes were
 /// declared in.
-fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
-    let mut by_name: FxHashMap<String, Vec<Name>> = FxHashMap::default();
+fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry::ClassId>> {
+    let mut by_name: FxHashMap<String, Vec<crate::registry::ClassId>> = FxHashMap::default();
     for (class, info) in registry.classes().own_iter() {
+        let Some(class_id) = registry.class_ids.get(class).copied() else {
+            continue;
+        };
         for (method, sig) in info.methods.iter() {
             if !sig.is_stub {
                 by_name
                     .entry(method.to_ascii_lowercase())
                     .or_default()
-                    .push(class.clone());
+                    .push(class_id);
             }
         }
         for (property, declared) in info.properties.iter() {
@@ -559,15 +562,19 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<Name>> {
                 }
                 for member in [hook_member(Some(property), set), hook_member(None, set)] {
                     let classes = by_name.entry(member).or_default();
-                    if classes.last() != Some(class) {
-                        classes.push(class.clone());
+                    if classes.last() != Some(&class_id) {
+                        classes.push(class_id);
                     }
                 }
             }
         }
     }
     for classes in by_name.values_mut() {
-        classes.sort_unstable_by(|a, b| (a.lower(), a.as_str()).cmp(&(b.lower(), b.as_str())));
+        classes.sort_unstable_by(|a, b| {
+            let a = registry.class_name_by_id(*a).expect("active class ID");
+            let b = registry.class_name_by_id(*b).expect("active class ID");
+            (a.lower(), a.as_str()).cmp(&(b.lower(), b.as_str()))
+        });
     }
     by_name
 }
@@ -1173,7 +1180,7 @@ impl Registry {
             {
                 out.push(method_key(&owner, method));
             }
-            let declaring = self.classes_declaring(method);
+            let declaring: Vec<&Name> = self.classes_declaring(method).collect();
             if below.len() < declaring.len() {
                 out.extend(
                     below
@@ -1198,10 +1205,12 @@ impl Registry {
     }
 
     /// The loaded classes declaring `method` with a body.
-    fn classes_declaring(&self, method: &str) -> &[Name] {
+    fn classes_declaring(&self, method: &str) -> impl Iterator<Item = &Name> {
         self.methods_by_name
             .get(&method.to_ascii_lowercase())
-            .map_or(&[], Vec::as_slice)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.class_name_by_id(*id))
     }
 
     /// Every loaded declaration of `method` with a body, and every `__call`
@@ -1219,11 +1228,9 @@ impl Registry {
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
         let declaring = self
             .classes_declaring(method)
-            .iter()
             .map(|class| (class, method));
         let magic = ["__call", "__callStatic"].into_iter().flat_map(|magic| {
             self.classes_declaring(magic)
-                .iter()
                 .map(move |class| (class, magic))
         });
         for (class, method) in declaring.chain(magic) {
@@ -2018,7 +2025,7 @@ impl Reach<'_> {
                     Some(class) => {
                         named_classes(self.registry, self.ctx.class(), class).unwrap_or_default()
                     }
-                    None => self.registry.classes_declaring("__construct").to_vec(),
+                    None => self.registry.classes_declaring("__construct").cloned().collect(),
                 };
                 classes
                     .iter()

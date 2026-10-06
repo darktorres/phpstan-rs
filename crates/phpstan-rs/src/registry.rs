@@ -461,7 +461,7 @@ pub struct Registry {
     // The loaded classes declaring each method name with a body, lowercased,
     // as the last finish found them (`registry::effects`).
     #[serde(skip)]
-    methods_by_name: Arc<FxHashMap<String, Vec<syntax::name::Name>>>,
+    methods_by_name: Arc<FxHashMap<String, Vec<ClassId>>>,
     // The properties the loaded files unset, as the last finish found them
     // (`registry::effects`).
     #[serde(skip)]
