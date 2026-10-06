@@ -24,6 +24,7 @@
 //! (`UseSiteIndex::replace_members`).
 
 use rustc_hash::FxHashMap;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
@@ -86,29 +87,123 @@ pub(crate) struct FunctionSite<'a> {
 /// directions: `by_target` answers "where is X used" (`references`'s own
 /// query shape); `by_file` answers "what did this file contribute"
 /// (`remove_file`'s own undo shape).
-#[derive(Default)]
 pub(crate) struct UseSiteIndex {
-    by_target: FxHashMap<RefTarget, Vec<(PathBuf, Span)>>,
-    by_file: FxHashMap<PathBuf, Vec<(RefTarget, Span)>>,
+    by_target: Vec<FxHashMap<RefTarget, Vec<(PathBuf, Span)>>>,
+    by_file: Vec<FxHashMap<PathBuf, Vec<(RefTarget, Span)>>>,
     // For each global function name, the namespaced names unqualified
     // calls are recorded under that fall back to it.
-    fallbacks: FxHashMap<String, rustc_hash::FxHashSet<String>>,
+    fallbacks: Vec<FxHashMap<String, rustc_hash::FxHashSet<String>>>,
+}
+
+const USE_SITE_SHARDS: usize = 32;
+
+fn site_shard<K: Hash + ?Sized>(key: &K) -> usize {
+    let mut hasher = rustc_hash::FxHasher::default();
+    key.hash(&mut hasher);
+    (hasher.finish() >> (u64::BITS - 5)) as usize
+}
+
+impl Default for UseSiteIndex {
+    fn default() -> Self {
+        Self {
+            by_target: (0..USE_SITE_SHARDS).map(|_| FxHashMap::default()).collect(),
+            by_file: (0..USE_SITE_SHARDS).map(|_| FxHashMap::default()).collect(),
+            fallbacks: (0..USE_SITE_SHARDS).map(|_| FxHashMap::default()).collect(),
+        }
+    }
 }
 
 impl UseSiteIndex {
+    pub(crate) fn extend_files(&mut self, files: Vec<(PathBuf, Vec<(Span, RefTarget)>)>) {
+        use rayon::prelude::*;
+
+        struct Buckets {
+            targets: [Vec<(RefTarget, (PathBuf, Span))>; USE_SITE_SHARDS],
+            files: [Vec<(PathBuf, (RefTarget, Span))>; USE_SITE_SHARDS],
+            fallbacks: [Vec<(String, String)>; USE_SITE_SHARDS],
+        }
+
+        let per_file: Vec<Buckets> = files
+            .into_par_iter()
+            .map(|(path, sites)| {
+                let mut buckets = Buckets {
+                    targets: std::array::from_fn(|_| Vec::new()),
+                    files: std::array::from_fn(|_| Vec::new()),
+                    fallbacks: std::array::from_fn(|_| Vec::new()),
+                };
+                for (span, target) in sites {
+                    let target = target.folded();
+                    buckets.targets[site_shard(&target)]
+                        .push((target.clone(), (path.clone(), span)));
+                    buckets.files[site_shard(&path)].push((path.clone(), (target.clone(), span)));
+                    if let RefTarget::UnqualifiedFunction(namespaced) = target {
+                        let global = last_segment(&namespaced).to_owned();
+                        buckets.fallbacks[site_shard(&global)].push((global, namespaced));
+                    }
+                }
+                buckets
+            })
+            .collect();
+
+        let mut targets: [Vec<(RefTarget, (PathBuf, Span))>; USE_SITE_SHARDS] =
+            std::array::from_fn(|_| Vec::new());
+        let mut by_file: [Vec<(PathBuf, (RefTarget, Span))>; USE_SITE_SHARDS] =
+            std::array::from_fn(|_| Vec::new());
+        let mut fallbacks: [Vec<(String, String)>; USE_SITE_SHARDS] =
+            std::array::from_fn(|_| Vec::new());
+        for mut file_buckets in per_file {
+            for (target, source) in targets.iter_mut().zip(&mut file_buckets.targets) {
+                target.append(source);
+            }
+            for (target, source) in by_file.iter_mut().zip(&mut file_buckets.files) {
+                target.append(source);
+            }
+            for (target, source) in fallbacks.iter_mut().zip(&mut file_buckets.fallbacks) {
+                target.append(source);
+            }
+        }
+
+        // The three tables partition by different keys, so assemble each
+        // independently after the per-file parallel bucketing above.
+        self.by_target
+            .par_iter_mut()
+            .zip(targets.into_par_iter())
+            .for_each(|(shard, entries)| {
+                for (target, site) in entries {
+                    shard.entry(target).or_default().push(site);
+                }
+            });
+        self.by_file
+            .par_iter_mut()
+            .zip(by_file.into_par_iter())
+            .for_each(|(shard, entries)| {
+                for (path, site) in entries {
+                    shard.entry(path).or_default().push(site);
+                }
+            });
+        self.fallbacks
+            .par_iter_mut()
+            .zip(fallbacks.into_par_iter())
+            .for_each(|(shard, entries)| {
+                for (global, namespaced) in entries {
+                    shard.entry(global).or_default().insert(namespaced);
+                }
+            });
+    }
+
     pub(crate) fn insert(&mut self, path: &Path, target: RefTarget, span: Span) {
         let target = target.folded();
         if let RefTarget::UnqualifiedFunction(namespaced) = &target {
-            self.fallbacks
+            self.fallbacks[site_shard(last_segment(namespaced))]
                 .entry(last_segment(namespaced).to_string())
                 .or_default()
                 .insert(namespaced.clone());
         }
-        self.by_target
+        self.by_target[site_shard(&target)]
             .entry(target.clone())
             .or_default()
             .push((path.to_path_buf(), span));
-        self.by_file
+        self.by_file[site_shard(path)]
             .entry(path.to_path_buf())
             .or_default()
             .push((target, span));
@@ -119,7 +214,7 @@ impl UseSiteIndex {
     /// `path` (a no-op before anything was ever inserted for it, in
     /// particular before Tier 2's own index is first built at all).
     pub(crate) fn remove_file(&mut self, path: &Path) {
-        let Some(entries) = self.by_file.remove(path) else {
+        let Some(entries) = self.by_file[site_shard(path)].remove(path) else {
             return;
         };
         for (target, span) in entries {
@@ -130,12 +225,13 @@ impl UseSiteIndex {
     /// Replaces the member sites `path` contributed with `members`, those
     /// its last check found, keeping its class and function sites.
     pub(crate) fn replace_members(&mut self, path: &Path, members: Vec<(Span, String, String)>) {
-        if let Some(entries) = self.by_file.get_mut(path) {
+        let file_shard = site_shard(path);
+        if let Some(entries) = self.by_file[file_shard].get_mut(path) {
             let dropped: Vec<(RefTarget, Span)> = entries
                 .extract_if(.., |(target, _)| matches!(target, RefTarget::Member(..)))
                 .collect();
             if entries.is_empty() {
-                self.by_file.remove(path);
+                self.by_file[file_shard].remove(path);
             }
             for (target, span) in dropped {
                 self.unlink(path, &target, span);
@@ -148,18 +244,20 @@ impl UseSiteIndex {
 
     /// Drops `path`'s site `span` from `target`'s.
     fn unlink(&mut self, path: &Path, target: &RefTarget, span: Span) {
-        let Some(sites) = self.by_target.get_mut(target) else {
+        let target_shard = site_shard(target);
+        let Some(sites) = self.by_target[target_shard].get_mut(target) else {
             return;
         };
         sites.retain(|(p, s)| !(p == path && *s == span));
         if sites.is_empty() {
-            self.by_target.remove(target);
+            self.by_target[target_shard].remove(target);
             if let RefTarget::UnqualifiedFunction(namespaced) = target {
                 let global = last_segment(namespaced);
-                if let Some(names) = self.fallbacks.get_mut(global) {
+                let fallback_shard = site_shard(global);
+                if let Some(names) = self.fallbacks[fallback_shard].get_mut(global) {
                     names.remove(namespaced);
                     if names.is_empty() {
-                        self.fallbacks.remove(global);
+                        self.fallbacks[fallback_shard].remove(global);
                     }
                 }
             }
@@ -169,8 +267,9 @@ impl UseSiteIndex {
     /// The sites recorded for `target` itself, its names compared as PHP
     /// compares them. A function's are `function_references`.
     pub(crate) fn references(&self, target: &RefTarget) -> &[(PathBuf, Span)] {
-        self.by_target
-            .get(&target.clone().folded())
+        let target = target.clone().folded();
+        self.by_target[site_shard(&target)]
+            .get(&target)
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
@@ -180,7 +279,12 @@ impl UseSiteIndex {
     /// other function of their two.
     pub(crate) fn function_references(&self, name: &str) -> Vec<FunctionSite<'_>> {
         let key = name.to_ascii_lowercase();
-        let sites = |target: &RefTarget| self.by_target.get(target).into_iter().flatten();
+        let sites = |target: &RefTarget| {
+            self.by_target[site_shard(target)]
+                .get(target)
+                .into_iter()
+                .flatten()
+        };
         let mut out: Vec<FunctionSite<'_>> = sites(&RefTarget::Function(key.clone()))
             .map(|(path, span)| FunctionSite {
                 path,
@@ -188,9 +292,9 @@ impl UseSiteIndex {
                 other: None,
             })
             .collect();
-        if let Some((RefTarget::UnqualifiedFunction(namespaced), found)) = self
-            .by_target
-            .get_key_value(&RefTarget::UnqualifiedFunction(key.clone()))
+        if let Some((RefTarget::UnqualifiedFunction(namespaced), found)) = self.by_target
+            [site_shard(&RefTarget::UnqualifiedFunction(key.clone()))]
+        .get_key_value(&RefTarget::UnqualifiedFunction(key.clone()))
         {
             let global = last_segment(namespaced);
             out.extend(found.iter().map(|(path, span)| FunctionSite {
@@ -199,7 +303,11 @@ impl UseSiteIndex {
                 other: Some(global),
             }));
         }
-        for namespaced in self.fallbacks.get(&key).into_iter().flatten() {
+        for namespaced in self.fallbacks[site_shard(&key)]
+            .get(&key)
+            .into_iter()
+            .flatten()
+        {
             out.extend(
                 sites(&RefTarget::UnqualifiedFunction(namespaced.clone())).map(|(path, span)| {
                     FunctionSite {
@@ -395,18 +503,58 @@ syntax::canonical_enum!(RefTarget {
 /// files were indexed in.
 impl syntax::canonical::Canonical for UseSiteIndex {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
-        let UseSiteIndex {
-            by_target,
-            by_file,
-            fallbacks,
-        } = self;
+        let by_target: FxHashMap<_, _> = self
+            .by_target
+            .iter()
+            .flat_map(|shard| shard.iter())
+            .collect();
+        let by_file: FxHashMap<_, _> = self.by_file.iter().flat_map(|shard| shard.iter()).collect();
+        let fallbacks: FxHashMap<_, _> = self
+            .fallbacks
+            .iter()
+            .flat_map(|shard| shard.iter())
+            .collect();
         p.node(
             "UseSiteIndex",
             &[
-                ("by_target", &syntax::canonical::MapOfSets(by_target)),
-                ("by_file", &syntax::canonical::MapOfSets(by_file)),
-                ("fallbacks", fallbacks),
+                ("by_target", &syntax::canonical::MapOfSets(&by_target)),
+                ("by_file", &syntax::canonical::MapOfSets(&by_file)),
+                ("fallbacks", &fallbacks),
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod sharded_index_tests {
+    use super::*;
+
+    #[test]
+    fn parallel_file_merge_and_removal_keep_both_index_directions() {
+        let first = PathBuf::from("first.php");
+        let second = PathBuf::from("second.php");
+        let target = RefTarget::Function("greet".to_owned());
+        let span = Span::new(4, 9);
+        let mut index = UseSiteIndex::default();
+        index.extend_files(vec![
+            (first.clone(), vec![(span, target.clone())]),
+            (second.clone(), vec![(span, target.clone())]),
+        ]);
+
+        let sites = index.references(&target);
+        assert_eq!(sites.len(), 2);
+        assert!(
+            sites
+                .iter()
+                .any(|(path, found)| path == &first && *found == span)
+        );
+        assert!(
+            sites
+                .iter()
+                .any(|(path, found)| path == &second && *found == span)
+        );
+
+        index.remove_file(&first);
+        assert_eq!(index.sites(&target), vec![(second.as_path(), span)]);
     }
 }

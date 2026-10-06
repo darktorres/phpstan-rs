@@ -1558,6 +1558,12 @@ Exact, except the member-order effects listed in §11.
 
 Exact.
 
+**Implementation update (2026-10-06).** Project declarations now carry `FileId` in `Origin::File`; `FileTable` no longer retains declaration `Arc<Path>`s or an address-to-id map. The full load assigns IDs before parsing, and the per-file cache stores an origin marker that resolves against the current `FileId` context. That context travels with nested lazy records, so methods decoded later receive the current ID too. Paths are projected from the project file table only where diagnostics and LSP locations need them.
+
+**Implementation update (2026-10-06).** Item 5.3 now reduces class and function declarations independently by folded name, in parallel and in load order within each name. Conditional winner selection, class/function merges and their marker/site/change metadata use the existing serial policy inside each name group; the disjoint reduced results are then applied. Reference, duplicate-site, use-site, global-constant and PHPStan-file contributions are sharded by their own keys. Shard selection uses the top hash bits; per-file state and stale-file facts use `FileId`.
+
+**Sequencing update (2026-10-06).** The cache-container work originally listed under item 6 (steps 3, 5 and 6) is pulled forward into item 5 rows 5.8-5.9. The ID-backed registry should establish its on-disk representation while its writers are being refactored; the cache is private and rebuildable, so no compatibility projection or old-layout read is required. Item 6 continues with deferred type resolution and its diagnostic work after item 5's validation.
+
 **Saving.** ≈0.06 G of instructions: the two path sorts (20.7 M each) where they go, and `closure_scope`'s text keys (16.5 M). The insert's 145.1 M (`insert_built_decl` 52.5 M, `register_references` 92.6 M) leaves the serial path, which is wall time. What the posting lists save on inserts is not separated in this profile.
 
 **Memory.**
@@ -1616,7 +1622,7 @@ Exact.
      - Decoding a lazy record later sets the context again, from the record's own handle.
    - **Integrity is checked per record.**
      - Each record carries its own CRC, checked before it is decoded. The header's CRC covers only the sections read eagerly. Today one whole-file CRC is checked at load (`container.rs:224-232`), and a record decoded later is not covered by it.
-     - A mismatch or a decode error is recoverable: it is logged, the cache is rebuilt by the next process, and the declaration reads as missing for now. Today a decode failure panics (`decode_entry`).
+     - A mismatch or a decode error is recoverable: it is logged, the cache is rebuilt by the next process, and the declaration reads as missing for now. Invalidation compares the open file's identity with the file still at the cache path before unlinking, so a delayed failure from a stale reader cannot delete a healthy replacement. Today a decode failure panics (`decode_entry`).
    - **No `unsafe`, and no mapping.**
      - The workspace denies `unsafe_code` (`Cargo.toml:42`), and `UNSAFE_PLAN.md` moves towards forbidding it.
      - A mapped file is undefined behaviour if it is modified "in or out of process" (`memmap2` `lib.rs:141-147`). Truncation by another program, or a prune by another machine sharing the cache directory over NFS, would raise SIGBUS in a running server.

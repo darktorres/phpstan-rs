@@ -63,6 +63,7 @@ fn print_registry_dump(
         files,
         dependents,
         signature_dependents,
+        defer_reference_index: _,
         registry,
         // The configuration, given; what it makes is in the tables.
         sql: _,
@@ -89,6 +90,9 @@ fn print_registry_dump(
         include_probes,
         escapes,
         named_argument_calls,
+        next_project_class_local: _,
+        next_project_function_local: _,
+        path_ranks: _,
     } = project;
     crate::file_id::printing_paths(files.paths_by_id(), || {
         section(p, "files");
@@ -207,6 +211,7 @@ fn write_file(
         global_facts,
         built_decls,
         file_decls: _,
+        declaration_ids: _,
         pest_facts,
         declared_classes,
         facts,

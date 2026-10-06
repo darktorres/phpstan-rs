@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
+use crate::file_id::FileId;
 use syntax::ast::ClassKind;
 use syntax::name::Name;
 use syntax::span::Span;
@@ -93,6 +94,140 @@ impl DuplicateClassSites {
     }
 }
 
+/// Project-wide class declaration sites addressed by FileId. The cached,
+/// parse-local `DuplicateClassSites` above retains paths until numbering.
+pub(crate) struct DuplicateClassIndex {
+    shards: Vec<FxHashMap<String, Vec<IndexedClassDeclSite>>>,
+}
+
+const DUPLICATE_CLASS_INDEX_SHARDS: usize = 32;
+
+fn duplicate_class_shard(name: &str) -> usize {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = rustc_hash::FxHasher::default();
+    name.hash(&mut hasher);
+    (hasher.finish() >> (u64::BITS - 5)) as usize
+}
+
+impl Default for DuplicateClassIndex {
+    fn default() -> Self {
+        Self {
+            shards: (0..DUPLICATE_CLASS_INDEX_SHARDS)
+                .map(|_| FxHashMap::default())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct IndexedClassDeclSite {
+    pub(crate) file: FileId,
+    pub(crate) span: Span,
+    pub(crate) kind: ClassKind,
+    pub(crate) is_stub: bool,
+}
+
+impl DuplicateClassIndex {
+    pub(crate) fn extend_files(&mut self, files: Vec<(FileId, DuplicateClassSites)>) {
+        use rayon::prelude::*;
+
+        let per_file: Vec<[Vec<(String, IndexedClassDeclSite)>; DUPLICATE_CLASS_INDEX_SHARDS]> =
+            files
+                .into_par_iter()
+                .map(|(file, sites)| {
+                    let mut buckets = std::array::from_fn(|_| Vec::new());
+                    for (name, sites) in sites.sites {
+                        let bucket = &mut buckets[duplicate_class_shard(&name)];
+                        bucket.extend(sites.into_iter().map(|site| {
+                            (
+                                name.clone(),
+                                IndexedClassDeclSite {
+                                    file,
+                                    span: site.span,
+                                    kind: site.kind,
+                                    is_stub: site.is_stub,
+                                },
+                            )
+                        }));
+                    }
+                    buckets
+                })
+                .collect();
+        let mut buckets: [Vec<(String, IndexedClassDeclSite)>; DUPLICATE_CLASS_INDEX_SHARDS] =
+            std::array::from_fn(|_| Vec::new());
+        for mut file_buckets in per_file {
+            for (bucket, file_bucket) in buckets.iter_mut().zip(&mut file_buckets) {
+                bucket.append(file_bucket);
+            }
+        }
+        self.shards
+            .par_iter_mut()
+            .zip(buckets.into_par_iter())
+            .for_each(|(shard, entries)| {
+                shard.reserve(entries.len());
+                for (name, site) in entries {
+                    shard.entry(name).or_insert_with(Vec::new).push(site);
+                }
+            })
+    }
+
+    pub(crate) fn merge_file(&mut self, file: FileId, other: DuplicateClassSites) {
+        for (name, sites) in other.sites {
+            self.shards[duplicate_class_shard(&name)]
+                .entry(name)
+                .or_default()
+                .extend(sites.into_iter().map(|site| IndexedClassDeclSite {
+                    file,
+                    span: site.span,
+                    kind: site.kind,
+                    is_stub: site.is_stub,
+                }));
+        }
+    }
+
+    pub(crate) fn remove_file(&mut self, file: FileId, removed_classes: &[Name]) {
+        for name in removed_classes {
+            let shard = duplicate_class_shard(name.as_str());
+            if let Some(sites) = self.shards[shard].get_mut(name.as_str()) {
+                sites.retain(|site| site.file != file);
+                if sites.is_empty() {
+                    self.shards[shard].remove(name.as_str());
+                }
+            }
+        }
+    }
+
+    pub(crate) fn paths_of(&self, name: &str) -> impl Iterator<Item = FileId> + '_ {
+        self.shards[duplicate_class_shard(name)]
+            .get(name)
+            .into_iter()
+            .flatten()
+            .map(|site| site.file)
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<IndexedClassDeclSite>)> {
+        self.shards.iter().flat_map(|shard| shard.iter())
+    }
+}
+
+impl syntax::canonical::Canonical for DuplicateClassIndex {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let sites: FxHashMap<_, _> = self.iter().map(|(name, sites)| (name, sites)).collect();
+        p.node(
+            "DuplicateClassIndex",
+            &[("sites", &syntax::canonical::MapOfSets(&sites))],
+        );
+    }
+}
+
+syntax::canonical_struct!(IndexedClassDeclSite {
+    file,
+    span,
+    kind,
+    is_stub,
+});
+
 syntax::canonical_struct!(ClassDeclSite {
     path,
     span,
@@ -109,5 +244,42 @@ impl syntax::canonical::Canonical for DuplicateClassSites {
             "DuplicateClassSites",
             &[("sites", &syntax::canonical::MapOfSets(sites))],
         );
+    }
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+    use syntax::span::Span;
+
+    fn sites(path: &str) -> DuplicateClassSites {
+        DuplicateClassSites {
+            sites: FxHashMap::from_iter([(
+                "Shared".to_owned(),
+                vec![ClassDeclSite {
+                    path: PathBuf::from(path),
+                    span: Span::new(1, 2),
+                    kind: ClassKind::Class,
+                    is_stub: false,
+                }],
+            )]),
+        }
+    }
+
+    #[test]
+    fn parallel_index_build_preserves_sites_and_incremental_removal() {
+        let first = FileId::new(3);
+        let second = FileId::new(7);
+        let mut index = DuplicateClassIndex::default();
+        index.extend_files(vec![
+            (first, sites("first.php")),
+            (second, sites("second.php")),
+        ]);
+        let mut files: Vec<_> = index.paths_of("Shared").collect();
+        files.sort_unstable();
+        assert_eq!(files, vec![first, second]);
+
+        index.remove_file(first, &[Name::from("Shared")]);
+        assert_eq!(index.paths_of("Shared").collect::<Vec<_>>(), vec![second]);
     }
 }

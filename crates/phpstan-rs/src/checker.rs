@@ -599,6 +599,7 @@ pub struct Checker<'a> {
     pub(crate) line_index: Arc<LineIndex>,
     // The file being checked, for resolving `include`/`require` paths.
     pub(crate) current_file: Option<std::path::PathBuf>,
+    pub(crate) current_file_id: Option<crate::file_id::FileId>,
     // `current_file` as an absolute path (`Project::absolute_path`), what
     // PHP's `__FILE__` holds.
     pub(crate) current_file_absolute: Option<std::path::PathBuf>,
@@ -1180,6 +1181,7 @@ impl<'a> Checker<'a> {
             pest_hook_properties: NameSet::default(),
             line_index: Arc::default(),
             current_file: None,
+            current_file_id: None,
             current_file_absolute: None,
             include_guarded_paths: FxHashSet::default(),
             include_path_dirs: Vec::new(),
@@ -1255,6 +1257,10 @@ impl<'a> Checker<'a> {
     /// See `current_file`.
     pub fn set_current_file(&mut self, path: &std::path::Path) {
         self.current_file = Some(path.to_path_buf());
+    }
+
+    pub(crate) fn set_current_file_id(&mut self, id: crate::file_id::FileId) {
+        self.current_file_id = Some(id);
     }
 
     pub(crate) fn set_current_file_absolute(&mut self, path: std::path::PathBuf) {

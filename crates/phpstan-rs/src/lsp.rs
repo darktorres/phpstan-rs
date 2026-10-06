@@ -1341,21 +1341,21 @@ impl Workspace {
         let registry = self.project.registry();
         match &resolved {
             navigation::Resolved::Class(fqn) => {
-                let (target_path, span) = registry.class_declaration(fqn)?;
+                let (file_id, span) = registry.class_declaration(fqn)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, span),
+                    self.location(self.project.path_for_file(file_id), span),
                 ))
             }
             navigation::Resolved::Function(fqn) => {
-                let (target_path, span) = registry.function_declaration(fqn)?;
+                let (file_id, span) = registry.function_declaration(fqn)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, span),
+                    self.location(self.project.path_for_file(file_id), span),
                 ))
             }
             navigation::Resolved::Member(owner, name) => {
-                let (target_path, span) = registry.member_declaration(owner, name)?;
+                let (file_id, span) = registry.member_declaration(owner, name)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, span),
+                    self.location(self.project.path_for_file(file_id), span),
                 ))
             }
             // A `Union`/`Intersection` receiver can resolve `member`
@@ -1378,8 +1378,8 @@ impl Workspace {
                 let owners = resolve_member_owners(registry, &ty, member);
                 let mut locs: Vec<Location> = Vec::new();
                 for owner in &owners {
-                    if let Some((target_path, span)) = registry.member_declaration(owner, member) {
-                        locs.push(self.location(target_path, span));
+                    if let Some((file_id, span)) = registry.member_declaration(owner, member) {
+                        locs.push(self.location(self.project.path_for_file(file_id), span));
                     }
                 }
                 match locs.len() {
@@ -1449,8 +1449,8 @@ impl Workspace {
         let registry = self.project.registry();
         let mut locs: Vec<Location> = Vec::new();
         for class in &classes {
-            if let Some((target_path, span)) = registry.class_declaration(class) {
-                locs.push(self.location(target_path, span));
+            if let Some((file_id, span)) = registry.class_declaration(class) {
+                locs.push(self.location(self.project.path_for_file(file_id), span));
             }
         }
         match locs.len() {
@@ -1569,8 +1569,8 @@ impl Workspace {
                         registry.member_declaration(owner, name)
                     }
                 };
-                if let Some((p, span)) = decl {
-                    locations.push(self.location(p, span));
+                if let Some((file_id, span)) = decl {
+                    locations.push(self.location(self.project.path_for_file(file_id), span));
                 }
             }
         }
@@ -1609,14 +1609,14 @@ impl Workspace {
                 self.project
                     .registry()
                     .class_declaration(fqn)
-                    .map(|(p, s)| (p.to_path_buf(), s)),
+                    .map(|(file_id, s)| (self.project.path_for_file(file_id).to_path_buf(), s)),
             ),
             navigation::Resolved::Function(fqn) => (
                 use_sites::RefTarget::Function(fqn.clone()),
                 self.project
                     .registry()
                     .function_declaration(fqn)
-                    .map(|(p, s)| (p.to_path_buf(), s)),
+                    .map(|(file_id, s)| (self.project.path_for_file(file_id).to_path_buf(), s)),
             ),
             _ => return None,
         };

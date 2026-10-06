@@ -12,7 +12,9 @@
 //! macro call, not the crate root - a relative path here would resolve
 //! against the wrong directory once `include!`-ed into `lib.rs`.
 
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 fn collect_php_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -142,6 +144,46 @@ fn main() {
         &phpstan_stub_files,
         &vendor.join("phpstan-src/stubs"),
     );
+
+    // Keep the cache identity tied to exactly the files embedded above.
+    // Hash paths as well as contents so renames cannot reuse another
+    // embedded source's identity. `phpstan-rs` combines this with its own
+    // build hash when naming both cache kinds.
+    let mut hasher = DefaultHasher::new();
+    for (kind, files, root) in [
+        (
+            "phpstorm-stubs",
+            &phpstorm_files,
+            vendor.join("phpstorm-stubs"),
+        ),
+        (
+            "phpstan-src",
+            &phpstan_src_files,
+            vendor.join("phpstan-src/src"),
+        ),
+        (
+            "phpstan-stubs",
+            &phpstan_stub_files,
+            vendor.join("phpstan-src/stubs"),
+        ),
+    ] {
+        kind.hash(&mut hasher);
+        for path in files {
+            path.strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .hash(&mut hasher);
+            fs::read(path)
+                .unwrap_or_else(|error| {
+                    panic!("reading embedded source {}: {error}", path.display())
+                })
+                .hash(&mut hasher);
+        }
+    }
+    generated.push_str(&format!(
+        "pub const SOURCES_HASH: &str = {:?};\n",
+        format_args!("{:016x}", hasher.finish()).to_string()
+    ));
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("stub_sources.rs"), generated).unwrap();

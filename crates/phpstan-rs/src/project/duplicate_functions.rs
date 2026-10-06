@@ -22,13 +22,14 @@
 //! comment for the concrete reason (phpstorm-stubs' own real `strtr`
 //! two-declaration overload split).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::project::duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
+use crate::file_id::FileId;
+use crate::project::duplicate_fn_sites::{DuplicateFunctionIndex, IndexedFnDeclSite};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::span::LineIndex;
 
-fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
+fn sites_differ(a: &IndexedFnDeclSite, b: &IndexedFnDeclSite) -> bool {
     a.param_hints != b.param_hints || a.return_hint != b.return_hint
 }
 
@@ -42,10 +43,11 @@ fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
 /// `index` holds the lines of `path`, and `line_in` answers for any loaded
 /// file the line of an offset.
 pub(crate) fn check_duplicate_function_declarations(
-    path: &Path,
+    file: FileId,
     index: &LineIndex,
     line_in: &dyn Fn(&Path, u32) -> u32,
-    sites: &DuplicateFunctionSites,
+    path_for: &dyn Fn(FileId) -> Option<PathBuf>,
+    sites: &DuplicateFunctionIndex,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for (name, decl_sites) in sites.iter() {
@@ -55,16 +57,21 @@ pub(crate) fn check_duplicate_function_declarations(
         // Sorted for determinism - which pairs get compared, and the
         // location list's own order, must not depend on `FxHashMap`
         // file-load-order.
-        let mut sorted: Vec<&FnDeclSite> = decl_sites.iter().collect();
-        sorted.sort_by(|a, b| (&a.path, a.span.start).cmp(&(&b.path, b.span.start)));
+        let mut sorted: Vec<(PathBuf, &IndexedFnDeclSite)> = decl_sites
+            .iter()
+            .filter_map(|site| Some((path_for(site.file)?, site)))
+            .collect();
+        sorted.sort_by(|(a_path, a), (b_path, b)| {
+            (a_path, a.span.start).cmp(&(b_path, b.span.start))
+        });
 
         // Adjacent sites with the identical native signature form one
         // "real duplicate" group; a signature difference starts a fresh
         // group (the phpstorm-stubs version-split idiom, not a bug).
-        let mut groups: Vec<Vec<&FnDeclSite>> = Vec::new();
+        let mut groups: Vec<Vec<(PathBuf, &IndexedFnDeclSite)>> = Vec::new();
         for s in sorted {
             match groups.last_mut() {
-                Some(group) if !sites_differ(group.last().unwrap(), s) => group.push(s),
+                Some(group) if !sites_differ(group.last().unwrap().1, s.1) => group.push(s),
                 _ => groups.push(vec![s]),
             }
         }
@@ -75,12 +82,14 @@ pub(crate) fn check_duplicate_function_declarations(
             }
             let location_list = group
                 .iter()
-                .map(|s| format!("- {}:{}", s.path.display(), line_in(&s.path, s.span.start)))
+                .map(|(path, site)| {
+                    format!("- {}:{}", path.display(), line_in(path, site.span.start))
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             let message = format!("Function {name} declared multiple times:\n{location_list}");
-            for s in &group {
-                if s.path != path {
+            for (_, s) in &group {
+                if s.file != file {
                     continue;
                 }
                 diagnostics.push(

@@ -1208,12 +1208,16 @@ impl StubIndex {
         for (records, section) in records.into_iter().zip(INDEX_RECORDS) {
             records.store(writer, section)?;
         }
-        writer.section("index:rest", &crate::registry::stub_cache::encode(self)?)
+        let rest = writer.encode(self)?;
+        writer.section("index:rest", &rest)
     }
 
     fn load(reader: &Reader) -> Result<StubIndex, String> {
         let rest = reader.section("index:rest")?;
-        let mut index: StubIndex = crate::registry::stub_cache::decode(&reader.buffer()[rest])?;
+        let names = reader.names().clone();
+        let mut index: StubIndex = syntax::name::with_cache_name_table(&names, || {
+            crate::registry::stub_cache::decode(&reader.buffer()[rest])
+        })?;
         let [a, b, c, d, e, f] = INDEX_PACKED.map(|section| Packed::load(reader, section));
         index.dependents = a?;
         index.function_extensions = b?;

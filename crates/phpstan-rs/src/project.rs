@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -53,8 +54,8 @@ pub(crate) mod test_support;
 pub(crate) mod use_sites;
 mod whole_program;
 
-use duplicate_class_sites::DuplicateClassSites;
-use duplicate_fn_sites::DuplicateFunctionSites;
+use duplicate_class_sites::{DuplicateClassIndex, DuplicateClassSites};
+use duplicate_fn_sites::{DuplicateFunctionIndex, DuplicateFunctionSites};
 use use_sites::UseSiteIndex;
 
 /// The files `Project::walk_affected` has reached, with what it has walked,
@@ -115,10 +116,10 @@ pub(crate) struct FileState {
     constants: Vec<Name>,
     // Whether it declares or references a `PHPStan\` name.
     mentions_phpstan: bool,
-    references: FxHashSet<deps::RefKey>,
+    references: Box<[deps::RefKey]>,
     // The names its declarations themselves mention
     // (`deps::declaration_referenced_names`).
-    declaration_references: FxHashSet<deps::RefKey>,
+    declaration_references: Box<[deps::RefKey]>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text). Only an analysed file's are read,
     // so they are kept with its tree, and a context file's of a batch run
@@ -151,6 +152,8 @@ pub(crate) struct FileState {
     // Their per-file typed arena storage, retained for id-backed registry
     // access and shared with the parse cache.
     file_decls: Arc<crate::registry::FileDecls>,
+    // Stable project-local class/function ids, parallel to `built_decls`.
+    declaration_ids: Vec<(Option<u32>, Option<u32>)>,
     // What it binds, when it is a `Pest.php`.
     pest_facts: Option<PestFacts>,
     // The classes it declares unconditionally, as the renamed-argument
@@ -169,6 +172,7 @@ struct DeclarationSource<'a> {
     load_order: u64,
     path: &'a Path,
     declarations: &'a [BuiltDecl],
+    declaration_ids: &'a [(Option<u32>, Option<u32>)],
     pending: bool,
 }
 
@@ -235,13 +239,13 @@ impl FileState {
 /// The loaded files' function and method bodies, found by provenance.
 impl BodySource for file_table::FileTable<FileState> {
     fn summary(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::BodySummary>> {
-        self.get_by_origin(provenance.file()?)?
+        self.get_by_id(provenance.file_id()?)?
             .bodies
             .summary(provenance.declaration_span())
     }
 
     fn init_flow(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::InitFlow>> {
-        self.get_by_origin(provenance.file()?)?
+        self.get_by_id(provenance.file_id()?)?
             .bodies
             .init_flow(provenance.declaration_span())
     }
@@ -251,7 +255,7 @@ impl BodySource for file_table::FileTable<FileState> {
         provenance: &Provenance,
         set: bool,
     ) -> Option<crate::registry::bodies::HookBody<'_>> {
-        self.get_by_origin(provenance.file()?)?
+        self.get_by_id(provenance.file_id()?)?
             .bodies
             .hook_summary(provenance.declaration_span(), set)
     }
@@ -276,10 +280,16 @@ impl BodySource for file_table::FileTable<FileState> {
 /// and registry entries are untouched.
 pub struct Project {
     files: file_table::FileTable<FileState>,
-    dependents: FxHashMap<deps::RefKey, FxHashSet<FileId>>,
+    dependents: ReferenceIndex,
     // `dependents` for the names files' declarations themselves mention
     // (`deps::declaration_referenced_names`).
-    signature_dependents: FxHashMap<deps::RefKey, FxHashSet<FileId>>,
+    signature_dependents: ReferenceIndex,
+    defer_reference_index: bool,
+    pending_use_sites: Vec<(PathBuf, Vec<(Span, use_sites::RefTarget)>)>,
+    pending_built_declarations: Vec<(crate::registry::BuiltDecl, bool, Option<u32>, Option<u32>)>,
+    pending_global_constants: Vec<crate::registry::BuiltDecl>,
+    pending_phpstan_class_files: Vec<(u64, u32, Name, PathBuf)>,
+    pending_stale_files: Vec<FileId>,
     registry: Registry,
     sql: sql::context::SqlContext,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
@@ -322,6 +332,13 @@ pub struct Project {
     // How many files hold a place in the load order, which is dense: the
     // places are `0..next_load_order`, the context files' first.
     next_load_order: u64,
+    // Path-order rank, indexed by the stable FileId slot. Rebuilt once after
+    // a load or edit so whole-program merges compare integers.
+    path_ranks: Vec<usize>,
+    // Monotonic high-water marks for project-local declaration ids. Deleted
+    // ids are never recycled, so stale handles can never alias new symbols.
+    next_project_class_local: u32,
+    next_project_function_local: u32,
     // The files loaded or edited since the finishing passes last walked
     // them for global variables.
     globals_stale: FxHashSet<FileId>,
@@ -334,14 +351,18 @@ pub struct Project {
     // `duplicate_class_sites` below uses: its own gate is at the check
     // side, `RulesSettings::check_duplicate_function_declarations`, not the
     // indexing side. See `DuplicateFunctionSites`'s own doc comment.
-    duplicate_fn_sites: DuplicateFunctionSites,
+    duplicate_fn_sites: DuplicateFunctionIndex,
     // The class-like counterpart to `duplicate_fn_sites` above - always
     // populated too (its own gate is at the check side,
     // `RulesSettings::check_duplicate_class_declarations`, not the indexing
     // side, so an opt-out project pays only the cost of an unused table,
     // not a missing one it might later want turned on incrementally).
     // See `DuplicateClassSites`'s own doc comment.
-    duplicate_class_sites: DuplicateClassSites,
+    duplicate_class_sites: DuplicateClassIndex,
+    // Initial loads collect parse-local duplicate sites and build the
+    // project-wide, FileId-keyed indexes in parallel at the batch boundary.
+    pending_duplicate_fn_sites: Vec<(FileId, DuplicateFunctionSites)>,
+    pending_duplicate_class_sites: Vec<(FileId, DuplicateClassSites)>,
     // `textDocument/references`/`textDocument/rename`'s own whole-project
     // use-site index - see `use_sites`'s own module doc comment for the
     // two-tier split. Tier 1 (class/function references) is one product of
@@ -751,8 +772,14 @@ impl Project {
     fn with_registry(registry: Registry) -> Self {
         Project {
             files: file_table::FileTable::default(),
-            dependents: FxHashMap::default(),
-            signature_dependents: FxHashMap::default(),
+            dependents: ReferenceIndex::default(),
+            signature_dependents: ReferenceIndex::default(),
+            defer_reference_index: false,
+            pending_use_sites: Vec::new(),
+            pending_built_declarations: Vec::new(),
+            pending_global_constants: Vec::new(),
+            pending_phpstan_class_files: Vec::new(),
+            pending_stale_files: Vec::new(),
             registry,
             sql: sql::context::SqlContext::default(),
             pest_config: PestConfig::default(),
@@ -768,9 +795,14 @@ impl Project {
             unchecked: Vec::new(),
             phpstan_pinned: false,
             next_load_order: 0,
+            path_ranks: Vec::new(),
+            next_project_class_local: 0,
+            next_project_function_local: 0,
             globals_stale: FxHashSet::default(),
-            duplicate_fn_sites: DuplicateFunctionSites::default(),
-            duplicate_class_sites: DuplicateClassSites::default(),
+            duplicate_fn_sites: DuplicateFunctionIndex::default(),
+            duplicate_class_sites: DuplicateClassIndex::default(),
+            pending_duplicate_fn_sites: Vec::new(),
+            pending_duplicate_class_sites: Vec::new(),
             use_sites: UseSiteIndex::default(),
             member_index: MemberIndex::Unbuilt,
             ast_cache: Mutex::default(),
@@ -1200,6 +1232,10 @@ impl Project {
         numbers
     }
 
+    pub(crate) fn path_for_file(&self, id: FileId) -> &Path {
+        self.files.path(id)
+    }
+
     /// `install_parsed_file`, for the file `id` numbers `path` as, `len`
     /// bytes long: `source` is empty unless the project keeps the text.
     pub(crate) fn insert_numbered_file(
@@ -1213,31 +1249,65 @@ impl Project {
         declaration_ids: Vec<(Option<u32>, Option<u32>)>,
     ) {
         self.begin_declaration_changes();
+        let load_order = self.next_load_order;
+        self.next_load_order += 1;
         debug_assert_eq!(parsed.built_decls.len(), declaration_ids.len());
-        for (decl, (class_local, function_local)) in parsed.built_decls.iter().zip(declaration_ids)
+        for (decl, &(class_local, function_local)) in
+            parsed.built_decls.iter().zip(&declaration_ids)
         {
-            self.registry.insert_built_decl_with_ids(
-                decl.clone(),
-                analyzed,
-                class_local,
-                function_local,
-            );
+            self.advance_project_declaration_ids(class_local, function_local);
+            if self.defer_reference_index {
+                match decl {
+                    crate::registry::BuiltDecl::GlobalConst { .. } => {
+                        self.pending_global_constants.push(decl.clone());
+                    }
+                    _ => self.pending_built_declarations.push((
+                        decl.clone(),
+                        analyzed,
+                        class_local,
+                        function_local,
+                    )),
+                }
+            } else {
+                self.registry.insert_built_decl_with_ids(
+                    decl.clone(),
+                    analyzed,
+                    class_local,
+                    function_local,
+                );
+            }
         }
         // `record_phpstan_class_file` no-ops unless the name is
         // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
         // ordinary corpus.
-        for name in &parsed.classes {
-            self.registry.record_phpstan_class_file(name, path);
+        if self.defer_reference_index {
+            self.pending_phpstan_class_files.extend(
+                parsed
+                    .classes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, name)| crate::registry::is_phpstan_namespace(name.as_str()))
+                    .map(|(sequence, name)| {
+                        (
+                            load_order,
+                            u32::try_from(sequence).expect("a file has too many classes"),
+                            name.clone(),
+                            path.to_path_buf(),
+                        )
+                    }),
+            );
+        } else {
+            for name in &parsed.classes {
+                self.registry.record_phpstan_class_file(name, path);
+            }
         }
-        let load_order = self.next_load_order;
-        self.next_load_order += 1;
         let placed = Placed {
             id,
             path,
             analyzed,
             load_order,
         };
-        self.install_parsed_file(placed, parsed, source, len);
+        self.install_parsed_file(placed, parsed, declaration_ids, source, len);
     }
 
     /// Holds `parsed`, the parse of the file `placed` says, and indexes
@@ -1248,6 +1318,7 @@ impl Project {
         &mut self,
         placed: Placed<'_>,
         parsed: ParsedFile,
+        declaration_ids: Vec<(Option<u32>, Option<u32>)>,
         source: String,
         len: usize,
     ) {
@@ -1275,13 +1346,15 @@ impl Project {
             global_facts,
             pest_facts,
             declared_classes,
-            origin_path,
             facts,
             line_index,
             class_fn_refs,
             owner,
             content_hash,
+            ..
         } = parsed;
+        let references = sorted_ref_keys(references);
+        let declaration_references = sorted_ref_keys(declaration_references);
         let keeps_tree = self.keeps_tree(path, analyzed);
         debug_assert!(
             ast.is_some() || !keeps_tree,
@@ -1291,23 +1364,41 @@ impl Project {
             ast.as_deref()
                 .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, &source))
         });
-        for (span, target) in class_fn_refs {
-            self.use_sites.insert(path, target, span);
+        if self.defer_reference_index {
+            self.pending_use_sites
+                .push((path.to_path_buf(), class_fn_refs));
+        } else {
+            for (span, target) in class_fn_refs {
+                self.use_sites.insert(path, target, span);
+            }
         }
-        self.duplicate_fn_sites.merge(duplicate_fn_sites);
-        self.duplicate_class_sites.merge(duplicate_class_sites);
-        self.files.bind_origin(id, &origin_path);
-        register_references(&mut self.dependents, id, &references);
-        register_references(&mut self.signature_dependents, id, &declaration_references);
+        if self.defer_reference_index {
+            self.pending_duplicate_fn_sites
+                .push((id, duplicate_fn_sites));
+            self.pending_duplicate_class_sites
+                .push((id, duplicate_class_sites));
+        } else {
+            self.duplicate_fn_sites.merge_file(id, duplicate_fn_sites);
+            self.duplicate_class_sites
+                .merge_file(id, duplicate_class_sites);
+        }
+        if !self.defer_reference_index {
+            register_references(&mut self.dependents, id, &references);
+            register_references(&mut self.signature_dependents, id, &declaration_references);
+        }
         let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
-        self.globals_stale.insert(id);
+        if self.defer_reference_index {
+            self.pending_stale_files.push(id);
+        } else {
+            self.globals_stale.insert(id);
+        }
         self.files.insert_at(
             id,
             FileState {
                 kept_ast: ast.filter(|_| keeps_tree),
                 source_len: len,
                 load_order,
-                mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
+                mentions_phpstan: mentions_phpstan(&functions, &classes, references.iter()),
                 functions,
                 classes,
                 constants,
@@ -1326,6 +1417,7 @@ impl Project {
                 global_facts,
                 built_decls,
                 file_decls,
+                declaration_ids,
                 pest_facts,
                 declared_classes,
                 facts,
@@ -1335,11 +1427,177 @@ impl Project {
         );
     }
 
+    fn advance_project_declaration_ids(
+        &mut self,
+        class_local: Option<u32>,
+        function_local: Option<u32>,
+    ) {
+        if let Some(local) = class_local {
+            self.next_project_class_local = self.next_project_class_local.max(
+                local
+                    .checked_add(1)
+                    .expect("project class id range exhausted"),
+            );
+        }
+        if let Some(local) = function_local {
+            self.next_project_function_local = self.next_project_function_local.max(
+                local
+                    .checked_add(1)
+                    .expect("project function id range exhausted"),
+            );
+        }
+    }
+
+    /// Reuses each declaration's old id for the same kind, folded name and
+    /// occurrence in this file. New declarations receive ids above the
+    /// project's high-water marks; removals never make an id reusable.
+    fn declaration_ids_for_edit(
+        &mut self,
+        declarations: &[BuiltDecl],
+        previous: Option<&UnindexedFile>,
+    ) -> Vec<(Option<u32>, Option<u32>)> {
+        let mut old_by_key: FxHashMap<(u8, String), Vec<u32>> = FxHashMap::default();
+        if let Some(previous) = previous {
+            for (decl, &(class_local, function_local)) in
+                previous.built_decls.iter().zip(&previous.declaration_ids)
+            {
+                let (tag, name, local) = match decl {
+                    BuiltDecl::Class { name, .. } => (0, name, class_local),
+                    BuiltDecl::Function { name, .. } => (1, name, function_local),
+                    BuiltDecl::GlobalConst { .. } => continue,
+                };
+                if let Some(local) = local {
+                    old_by_key
+                        .entry((tag, name.to_ascii_lowercase()))
+                        .or_default()
+                        .push(local);
+                }
+            }
+        }
+        let mut occurrences: FxHashMap<(u8, String), usize> = FxHashMap::default();
+        declarations
+            .iter()
+            .map(|decl| {
+                let (tag, name) = match decl {
+                    BuiltDecl::Class { name, .. } => (0, name),
+                    BuiltDecl::Function { name, .. } => (1, name),
+                    BuiltDecl::GlobalConst { .. } => return (None, None),
+                };
+                let key = (tag, name.to_ascii_lowercase());
+                let occurrence = occurrences.entry(key.clone()).or_default();
+                let old = old_by_key
+                    .get(&key)
+                    .and_then(|locals| locals.get(*occurrence))
+                    .copied();
+                *occurrence += 1;
+                match tag {
+                    0 => {
+                        let local = old.unwrap_or_else(|| {
+                            let local = self.next_project_class_local;
+                            self.next_project_class_local = local
+                                .checked_add(1)
+                                .expect("project class id range exhausted");
+                            local
+                        });
+                        self.advance_project_declaration_ids(Some(local), None);
+                        (Some(local), None)
+                    }
+                    _ => {
+                        let local = old.unwrap_or_else(|| {
+                            let local = self.next_project_function_local;
+                            self.next_project_function_local = local
+                                .checked_add(1)
+                                .expect("project function id range exhausted");
+                            local
+                        });
+                        self.advance_project_declaration_ids(None, Some(local));
+                        (None, Some(local))
+                    }
+                }
+            })
+            .collect()
+    }
+
     /// Whether the tree of the file `path` is kept: an analysed file's is,
     /// and so is any file's that an editor has open. The tree of any other
     /// is dropped, on the thread that parsed it where a load parses it.
     pub(crate) fn keeps_tree(&self, path: &Path, analyzed: bool) -> bool {
         analyzed || self.open.contains(path)
+    }
+
+    pub(crate) fn rebuild_path_ranks(&mut self) {
+        let mut ordered: Vec<(FileId, PathBuf)> = self
+            .files
+            .iter_with_ids()
+            .map(|(id, path, _)| (id, path.clone()))
+            .collect();
+        composer::path_order::sort_by_path(&mut ordered, |(_, path)| path);
+        self.path_ranks
+            .resize(self.files.paths_by_id().len(), usize::MAX);
+        for (rank, (id, _)) in ordered.into_iter().enumerate() {
+            self.path_ranks[id.index()] = rank;
+        }
+    }
+
+    pub(crate) fn begin_reference_index_batch(&mut self) {
+        self.defer_reference_index = true;
+        self.pending_use_sites.clear();
+        self.pending_built_declarations.clear();
+        self.pending_global_constants.clear();
+        self.pending_phpstan_class_files.clear();
+        self.pending_stale_files.clear();
+        self.pending_duplicate_fn_sites.clear();
+        self.pending_duplicate_class_sites.clear();
+    }
+
+    pub(crate) fn finish_reference_index_batch(&mut self) {
+        let files: Vec<_> = self
+            .files
+            .iter_with_ids()
+            .map(|(file, _, state)| {
+                (
+                    file,
+                    state.references.as_ref(),
+                    state.declaration_references.as_ref(),
+                )
+            })
+            .collect();
+        let functions: Vec<_> = files
+            .par_iter()
+            .map(|(file, references, _)| (*file, references.to_vec()))
+            .collect();
+        let signatures: Vec<_> = files
+            .par_iter()
+            .map(|(file, _, references)| (*file, references.to_vec()))
+            .collect();
+        self.dependents = ReferenceIndex::from_file_refs(functions);
+        self.signature_dependents = ReferenceIndex::from_file_refs(signatures);
+        self.use_sites
+            .extend_files(std::mem::take(&mut self.pending_use_sites));
+        self.duplicate_fn_sites
+            .extend_files(std::mem::take(&mut self.pending_duplicate_fn_sites));
+        self.duplicate_class_sites
+            .extend_files(std::mem::take(&mut self.pending_duplicate_class_sites));
+        self.registry
+            .insert_built_declarations_batch(std::mem::take(&mut self.pending_built_declarations));
+        self.registry
+            .insert_built_global_constants_batch(std::mem::take(
+                &mut self.pending_global_constants,
+            ));
+        self.registry
+            .record_phpstan_class_files_batch(std::mem::take(
+                &mut self.pending_phpstan_class_files,
+            ));
+        self.globals_stale
+            .extend(std::mem::take(&mut self.pending_stale_files));
+        self.defer_reference_index = false;
+    }
+
+    fn path_rank(&self, path: &Path) -> usize {
+        self.files
+            .id_of(path)
+            .and_then(|id| self.path_ranks.get(id.index()).copied())
+            .unwrap_or(usize::MAX)
     }
 
     /// Whether a file's class and function use sites are indexed as it
@@ -1448,31 +1706,15 @@ impl Project {
                 load_order: state.load_order,
                 path: path.as_path(),
                 declarations: &state.built_decls,
+                declaration_ids: &state.declaration_ids,
                 pending: false,
             })
             .collect();
         sources.sort_by_key(|source| (source.analyzed, source.load_order));
-        let mut next_class_local = 0u32;
-        let mut next_function_local = 0u32;
         for source in sources {
-            for decl in source.declarations {
-                let (class_local, function_local) = match decl {
-                    BuiltDecl::Class { .. } => {
-                        let local = next_class_local;
-                        next_class_local = next_class_local
-                            .checked_add(1)
-                            .expect("project class id range exhausted");
-                        (Some(local), None)
-                    }
-                    BuiltDecl::Function { .. } => {
-                        let local = next_function_local;
-                        next_function_local = next_function_local
-                            .checked_add(1)
-                            .expect("project function id range exhausted");
-                        (None, Some(local))
-                    }
-                    BuiltDecl::GlobalConst { .. } => (None, None),
-                };
+            for (decl, &(class_local, function_local)) in
+                source.declarations.iter().zip(source.declaration_ids)
+            {
                 if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, source.path);
                 }
@@ -1516,7 +1758,7 @@ impl Project {
     fn closure_scope(
         &self,
         changed: &crate::registry::ChangedNames,
-        index: &FxHashMap<deps::RefKey, FxHashSet<FileId>>,
+        index: &ReferenceIndex,
     ) -> Scope {
         let mut classes: FxHashSet<ClassId> = changed
             .classes
@@ -1540,23 +1782,7 @@ impl Project {
             .filter(|name| self.registry.function_id(name).is_none())
             .cloned()
             .collect();
-        let mut frontier: Vec<deps::RefKey> = changed
-            .classes
-            .iter()
-            .map(|c| deps::RefKey::class_text(c))
-            .chain(
-                changed
-                    .functions
-                    .iter()
-                    .map(|f| deps::RefKey::function_text(f)),
-            )
-            .chain(
-                changed
-                    .constants
-                    .keys()
-                    .map(|c| deps::RefKey::constant_text(c)),
-            )
-            .collect();
+        let mut frontier = self.registry.changed_frontier(changed);
         let mut seen: FxHashSet<deps::RefKey> = FxHashSet::default();
         // Each file is expanded once: what it contributes to the scope is
         // its declared names, whichever name led to it.
@@ -1757,12 +1983,14 @@ impl Project {
         // A trait is checked as each class using it: its file is checked
         // again when one of them changed, came or went.
         if let Some(before) = &before {
-            for name in self.registry.traits_of_changed_classes(before) {
+            for name in self
+                .registry
+                .traits_of_changed_classes(before, changed.as_ref())
+            {
                 let file = self
                     .registry
                     .class_by_name(&name)
-                    .and_then(|info| info.provenance().file())
-                    .and_then(|origin| self.files.id_by_origin(origin));
+                    .and_then(|info| info.provenance().file_id());
                 walk.affected.extend(file);
             }
         }
@@ -1810,10 +2038,8 @@ impl Project {
             .collect();
         self.registry.remove_declarations(&old.functions, &classes);
         self.use_sites.remove_file(path);
-        self.duplicate_fn_sites
-            .remove_declarations(path, &old.functions);
-        self.duplicate_class_sites
-            .remove_declarations(path, &old.classes);
+        self.duplicate_fn_sites.remove_file(id, &old.functions);
+        self.duplicate_class_sites.remove_file(id, &old.classes);
         unregister_references(&mut self.dependents, id, &old.references);
         unregister_references(
             &mut self.signature_dependents,
@@ -1826,6 +2052,8 @@ impl Project {
             functions: old.functions,
             classes: old.classes,
             constants: old.constants,
+            built_decls: old.built_decls,
+            declaration_ids: old.declaration_ids,
         })
     }
 
@@ -1893,6 +2121,7 @@ impl Project {
                 load_order: state.load_order,
                 path: path.as_path(),
                 declarations: &state.built_decls,
+                declaration_ids: &state.declaration_ids,
                 pending: false,
             })
             .collect();
@@ -1908,7 +2137,9 @@ impl Project {
                 DeclKind::Function => function_keys.contains(&name.to_ascii_lowercase()),
                 DeclKind::Constant => constant_keys.contains(name),
             };
-            for decl in source.declarations {
+            for (decl, &(class_local, function_local)) in
+                source.declarations.iter().zip(source.declaration_ids)
+            {
                 let (kind, name) = decl.kind_and_name();
                 if !source.pending && !rebuilt(kind, name) {
                     continue;
@@ -1916,8 +2147,12 @@ impl Project {
                 if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, source.path);
                 }
-                self.registry
-                    .insert_built_decl(decl.clone(), source.analyzed);
+                self.registry.insert_built_decl_with_ids(
+                    decl.clone(),
+                    source.analyzed,
+                    class_local,
+                    function_local,
+                );
             }
         }
     }
@@ -1999,7 +2234,10 @@ impl Project {
             self.escapes.remove(path);
         }
         let calls = std::mem::take(&mut check.named_argument_calls);
-        if self.is_analyzed(path) && !calls.is_empty() {
+        if self.settings.rules.check_renamed_named_arguments
+            && self.is_analyzed(path)
+            && !calls.is_empty()
+        {
             self.named_argument_calls.insert(path.to_path_buf(), calls);
         } else {
             self.named_argument_calls.remove(path);
@@ -2064,7 +2302,9 @@ impl Project {
         // specifically needs the AST from *before* the very edit that
         // introduced its own trigger) reads it for as long as the file
         // keeps failing to parse.
-        let parsed = parse_file(path, new_source, classified.is_stub)?;
+        let file_id = self.files.id_for(path);
+        let parsed =
+            parse_file_with_names_and_file_id(path, new_source, classified.is_stub, None, file_id)?;
         // An identical edit cannot change what another file reads from
         // this declaration. Keep the registry IDs and result overlays
         // stable, and recheck only the edited file for the caller's
@@ -2083,6 +2323,7 @@ impl Project {
         };
         let previous = self.unindex_file(path);
         let appeared = previous.is_none();
+        let declaration_ids = self.declaration_ids_for_edit(&parsed.built_decls, previous.as_ref());
 
         // A file already loaded keeps its role, which an edit does not
         // change; a new one takes the role its roots give it, as a load
@@ -2112,6 +2353,7 @@ impl Project {
                 load_order,
                 path,
                 declarations: &parsed.built_decls,
+                declaration_ids: &declaration_ids,
                 pending: true,
             }),
         );
@@ -2128,7 +2370,8 @@ impl Project {
             analyzed,
             load_order,
         };
-        self.install_parsed_file(placed, parsed, source, len);
+        self.install_parsed_file(placed, parsed, declaration_ids, source, len);
+        self.rebuild_path_ranks();
         let mut affected = self.finish_declarations();
 
         affected.insert(path.to_path_buf());
@@ -2193,6 +2436,9 @@ impl Project {
         }
         let any_removed = !places.is_empty();
         self.close_load_order(places);
+        if any_removed {
+            self.rebuild_path_ranks();
+        }
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         affected.extend(self.including(paths));
         if any_removed {
@@ -2215,7 +2461,11 @@ impl Project {
             .classes
             .iter()
             .flat_map(|name| self.duplicate_class_sites.paths_of(name));
-        functions.chain(classes).map(Path::to_path_buf).collect()
+        functions
+            .chain(classes)
+            .filter(|&id| self.files.get_by_id(id).is_some())
+            .map(|id| self.files.path(id).to_path_buf())
+            .collect()
     }
 
     /// The files to recheck once the classes, functions and constants
@@ -2578,7 +2828,7 @@ impl Project {
                 sources.push((path, std::mem::take(&mut check.property_assign_facts)));
             }
         }
-        sources.sort_by(|a, b| a.0.cmp(b.0));
+        sources.sort_by_key(|(path, _)| self.path_rank(path));
         let mut merged: PropertyAssignFacts = FxHashMap::default();
         for (_, facts) in sources {
             for (writer, props) in facts {
@@ -2625,6 +2875,9 @@ impl Project {
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_current_file(path);
+        if let Some(id) = self.files.id_of(path) {
+            checker.set_current_file_id(id);
+        }
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
         checker.set_closure_rebind_possible(
@@ -2688,19 +2941,24 @@ impl Project {
         let Some(file) = self.files.get(path) else {
             return diagnostics;
         };
+        let Some(file_id) = self.files.id_of(path) else {
+            return diagnostics;
+        };
         if self.settings.rules.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
-                path,
+                file_id,
                 &file.line_index,
                 &|path, offset| self.line_in(path, offset),
+                &|id| Some(self.files.path(id).to_path_buf()),
                 &self.duplicate_fn_sites,
             ));
         }
         if self.settings.rules.check_duplicate_class_declarations {
             diagnostics.extend(duplicate_classes::check_duplicate_class_declarations(
-                path,
+                file_id,
                 &file.line_index,
                 &|path, offset| self.line_in(path, offset),
+                &|id| Some(self.files.path(id).to_path_buf()),
                 &self.duplicate_class_sites,
             ));
         }
@@ -2998,10 +3256,10 @@ impl Project {
                 &escaped,
             );
             for (fqn, case) in dead {
-                let Some((path, span)) = self.registry.constant_declaration(&fqn, &case) else {
+                let Some((file_id, span)) = self.registry.constant_declaration(&fqn, &case) else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.files.path(file_id).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     span,
@@ -3137,10 +3395,10 @@ impl Project {
                         self.registry.constant_declaration(&owner, &name)
                     }
                 };
-                let Some((path, span)) = declaration else {
+                let Some((file_id, span)) = declaration else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.files.path(file_id).to_path_buf();
                 let (noun, identifier) = match kind {
                     whole_program::dead_members::MemberKind::Method => ("Method", "method.unused"),
                     whole_program::dead_members::MemberKind::Property => {
@@ -3167,14 +3425,14 @@ impl Project {
                 .iter()
                 .map(|(path, file)| (path, file.declared_classes.as_slice()))
                 .collect();
-            programs.sort_by(|a, b| a.0.cmp(b.0));
+            programs.sort_by_key(|(path, _)| self.path_rank(path));
             let overrides = whole_program::renamed_named_arguments::renamed_parameter_overrides(
                 &self.registry,
                 programs.into_iter().flat_map(|(_, classes)| classes),
             );
             let mut calls: Vec<(&PathBuf, &checker::NamedArgumentCallFacts)> =
                 self.named_argument_calls.iter().collect();
-            calls.sort_by(|a, b| a.0.cmp(b.0));
+            calls.sort_by_key(|(path, _)| self.path_rank(path));
             let calls = whole_program::renamed_named_arguments::merge_named_argument_calls(calls);
             let collisions =
                 whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
@@ -3427,8 +3685,6 @@ pub struct ParsedFile {
     bodies: FileBodies,
     // What it assigns to globals.
     global_facts: Arc<GlobalFacts>,
-    // The path the file's declarations name it by.
-    origin_path: Arc<Path>,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
@@ -3472,6 +3728,16 @@ pub fn parse_file_with_names<'a>(
     parse_file_recording(path, source, is_stub, names, None)
 }
 
+pub(crate) fn parse_file_with_names_and_file_id<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    names: Option<&mut syntax::name::NameCache>,
+    file_id: FileId,
+) -> Result<ParsedFile, ParseError> {
+    parse_file_recording_with_file_id(path, source, is_stub, names, None, file_id)
+}
+
 /// `parse_file_with_names`, filling `record` when given.
 pub(crate) fn parse_file_recording<'a>(
     path: &Path,
@@ -3479,6 +3745,35 @@ pub(crate) fn parse_file_recording<'a>(
     is_stub: bool,
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
+) -> Result<ParsedFile, ParseError> {
+    parse_file_recording_with_origin(
+        path,
+        source,
+        is_stub,
+        names,
+        record,
+        Origin::Path(Arc::from(path)),
+    )
+}
+
+pub(crate) fn parse_file_recording_with_file_id<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    names: Option<&mut syntax::name::NameCache>,
+    record: Option<&mut ParseRecord>,
+    file_id: FileId,
+) -> Result<ParsedFile, ParseError> {
+    parse_file_recording_with_origin(path, source, is_stub, names, record, Origin::File(file_id))
+}
+
+fn parse_file_recording_with_origin<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    names: Option<&mut syntax::name::NameCache>,
+    record: Option<&mut ParseRecord>,
+    origin: Origin,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let content_hash = source::ContentHash::of_source(source);
@@ -3490,8 +3785,6 @@ pub(crate) fn parse_file_recording<'a>(
         facts,
         line_index,
     } = parse_recording(path, source, names, record)?;
-    let origin_path: Arc<Path> = Arc::from(path);
-    let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
         functions,
         classes,
@@ -3533,7 +3826,6 @@ pub(crate) fn parse_file_recording<'a>(
         global_facts,
         pest_facts,
         declared_classes,
-        origin_path,
         facts,
         line_index,
         class_fn_refs: None,
@@ -3578,7 +3870,6 @@ impl syntax::canonical::Canonical for ParsedFile {
             duplicate_class_sites,
             bodies,
             global_facts,
-            origin_path,
             facts,
             line_index: _,
             class_fn_refs,
@@ -3604,7 +3895,6 @@ impl syntax::canonical::Canonical for ParsedFile {
                 ("duplicate_class_sites", duplicate_class_sites),
                 ("bodies", bodies),
                 ("global_facts", global_facts),
-                ("origin_path", origin_path),
                 ("facts", facts),
                 ("class_fn_refs", class_fn_refs),
                 ("owner", owner),
@@ -3843,17 +4133,19 @@ struct UnindexedFile {
     functions: Vec<Name>,
     classes: Vec<Name>,
     constants: Vec<Name>,
+    built_decls: Vec<BuiltDecl>,
+    declaration_ids: Vec<(Option<u32>, Option<u32>)>,
 }
 
 /// Whether a file declaring `functions` and `classes` and referencing
 /// `references` names anything in `PHPStan\`.
-fn mentions_phpstan(
+fn mentions_phpstan<'a>(
     functions: &[Name],
     classes: &[Name],
-    references: &FxHashSet<deps::RefKey>,
+    references: impl IntoIterator<Item = &'a deps::RefKey>,
 ) -> bool {
     let is_phpstan = |name: &Name| name.lower().starts_with("phpstan\\");
-    references.iter().any(|r| is_phpstan(r.name()))
+    references.into_iter().any(|r| is_phpstan(r.name()))
         || functions.iter().chain(classes).any(is_phpstan)
 }
 
@@ -3885,38 +4177,282 @@ pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<Name>, Vec<Name>) {
     (functions, classes)
 }
 
-fn register_references(
-    dependents: &mut FxHashMap<deps::RefKey, FxHashSet<FileId>>,
-    file: FileId,
-    references: &FxHashSet<deps::RefKey>,
-) {
-    for name in references {
-        // The name is copied only for the first file to reference it.
-        match dependents.get_mut(name) {
-            Some(files) => {
-                files.insert(file);
-            }
+/// A sorted reverse-index posting list. Most names are referenced by one
+/// file, so keep that common case inline and allocate only for shared refs.
+enum FileIdPostingList {
+    One(FileId),
+    Many(Vec<FileId>),
+}
+
+const REFERENCE_INDEX_SHARDS: usize = 32;
+
+/// The reverse-reference map split by the hash of its own `RefKey`. A
+/// load can prepare each file's shard buckets concurrently and merge those
+/// buckets independently; incremental edits route directly to one shard.
+struct ReferenceIndex {
+    shards: Vec<FxHashMap<deps::RefKey, FileIdPostingList>>,
+}
+
+impl Default for ReferenceIndex {
+    fn default() -> Self {
+        Self {
+            shards: (0..REFERENCE_INDEX_SHARDS)
+                .map(|_| FxHashMap::default())
+                .collect(),
+        }
+    }
+}
+
+impl ReferenceIndex {
+    fn shard(key: &deps::RefKey) -> usize {
+        let mut hasher = rustc_hash::FxHasher::default();
+        key.hash(&mut hasher);
+        (hasher.finish() >> (u64::BITS - 5)) as usize
+    }
+
+    fn get(&self, key: &deps::RefKey) -> Option<&FileIdPostingList> {
+        self.shards[Self::shard(key)].get(key)
+    }
+
+    fn contains_key(&self, key: &deps::RefKey) -> bool {
+        self.get(key).is_some()
+    }
+
+    fn insert(&mut self, key: deps::RefKey, file: FileId) {
+        let shard = &mut self.shards[Self::shard(&key)];
+        match shard.get_mut(&key) {
+            Some(files) => files.insert(file),
             None => {
-                dependents.insert(name.clone(), FxHashSet::from_iter([file]));
+                shard.insert(key, FileIdPostingList::One(file));
             }
         }
+    }
+
+    fn remove(&mut self, key: &deps::RefKey, file: FileId) {
+        let shard = &mut self.shards[Self::shard(key)];
+        if shard.get_mut(key).is_some_and(|files| files.remove(file)) {
+            shard.remove(key);
+        }
+    }
+
+    fn from_file_refs(files: Vec<(FileId, Vec<deps::RefKey>)>) -> Self {
+        let per_file: Vec<[Vec<(deps::RefKey, FileId)>; REFERENCE_INDEX_SHARDS]> = files
+            .into_par_iter()
+            .map(|(file, references)| {
+                let mut buckets = std::array::from_fn(|_| Vec::new());
+                for key in references {
+                    buckets[Self::shard(&key)].push((key, file));
+                }
+                buckets
+            })
+            .collect();
+        let mut buckets: [Vec<(deps::RefKey, FileId)>; REFERENCE_INDEX_SHARDS] =
+            std::array::from_fn(|_| Vec::new());
+        for mut file_buckets in per_file {
+            for (bucket, file_bucket) in buckets.iter_mut().zip(&mut file_buckets) {
+                bucket.append(file_bucket);
+            }
+        }
+        let shards: Vec<_> = buckets
+            .into_par_iter()
+            .map(|entries| {
+                let mut shard = FxHashMap::default();
+                shard.reserve(entries.len());
+                for (key, file) in entries {
+                    match shard.get_mut(&key) {
+                        Some(files) => files.insert(file),
+                        None => {
+                            shard.insert(key, FileIdPostingList::One(file));
+                        }
+                    }
+                }
+                shard
+            })
+            .collect();
+        Self { shards }
+    }
+}
+
+impl syntax::canonical::Canonical for ReferenceIndex {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        p.node("ReferenceIndex", &[("shards", &self.shards)]);
+    }
+}
+
+impl FileIdPostingList {
+    fn insert(&mut self, file: FileId) {
+        match self {
+            Self::One(existing) if *existing == file => {}
+            Self::One(existing) => {
+                let mut files = vec![*existing, file];
+                files.sort_unstable();
+                *self = Self::Many(files);
+            }
+            Self::Many(files) => match files.binary_search(&file) {
+                Ok(_) => {}
+                Err(at) => files.insert(at, file),
+            },
+        }
+    }
+
+    /// Removes `file`, returning true when the posting list is now empty.
+    fn remove(&mut self, file: FileId) -> bool {
+        let (empty, only) = match self {
+            Self::One(existing) => return *existing == file,
+            Self::Many(files) => {
+                if let Ok(at) = files.binary_search(&file) {
+                    files.remove(at);
+                }
+                (files.is_empty(), (files.len() == 1).then(|| files[0]))
+            }
+        };
+        if empty {
+            true
+        } else {
+            if let Some(only) = only {
+                *self = Self::One(only);
+            }
+            false
+        }
+    }
+
+    fn iter(&self) -> FileIdPostingIter<'_> {
+        match self {
+            Self::One(file) => FileIdPostingIter::One(Some(file)),
+            Self::Many(files) => FileIdPostingIter::Many(files.iter()),
+        }
+    }
+}
+
+enum FileIdPostingIter<'a> {
+    One(Option<&'a FileId>),
+    Many(std::slice::Iter<'a, FileId>),
+}
+
+impl<'a> Iterator for FileIdPostingIter<'a> {
+    type Item = &'a FileId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::One(file) => file.take(),
+            Self::Many(files) => files.next(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a FileIdPostingList {
+    type Item = &'a FileId;
+    type IntoIter = FileIdPostingIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl syntax::canonical::Canonical for FileIdPostingList {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let files: Vec<_> = self.iter().copied().collect();
+        p.node("FileIdPostingList", &[("files", &files)]);
+    }
+}
+
+fn register_references(dependents: &mut ReferenceIndex, file: FileId, references: &[deps::RefKey]) {
+    for name in references {
+        dependents.insert(name.clone(), file);
     }
 }
 
 fn unregister_references(
-    dependents: &mut FxHashMap<deps::RefKey, FxHashSet<FileId>>,
+    dependents: &mut ReferenceIndex,
     file: FileId,
-    references: &FxHashSet<deps::RefKey>,
+    references: &[deps::RefKey],
 ) {
     for name in references {
-        if let Some(files) = dependents.get_mut(name) {
-            files.remove(&file);
-            if files.is_empty() {
-                dependents.remove(name);
-            }
-        }
+        dependents.remove(name, file);
     }
+}
+
+fn sorted_ref_keys(keys: FxHashSet<deps::RefKey>) -> Box<[deps::RefKey]> {
+    let mut keys: Vec<_> = keys.into_iter().collect();
+    syntax::references::sort_ref_keys(&mut keys);
+    keys.into_boxed_slice()
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod posting_list_tests {
+    use super::*;
+
+    #[test]
+    fn reverse_posting_lists_keep_one_inline_and_many_sorted() {
+        let first = FileId::new(4);
+        let second = FileId::new(2);
+        let mut files = FileIdPostingList::One(first);
+        files.insert(second);
+        files.insert(first);
+        assert_eq!(files.iter().copied().collect::<Vec<_>>(), [second, first]);
+        assert!(!files.remove(second));
+        assert_eq!(files.iter().copied().collect::<Vec<_>>(), [first]);
+        assert!(files.remove(first));
+    }
+
+    #[test]
+    fn reference_keys_have_a_stable_equality_compatible_order() {
+        let mut keys = vec![
+            deps::RefKey::function(&Name::from("zeta")),
+            deps::RefKey::class(&Name::from("Zulu")),
+            deps::RefKey::class(&Name::from("alpha")),
+            deps::RefKey::class(&Name::from("ALPHA")),
+        ];
+        keys.pop(); // Simulate the parse-time set's equality-based deduplication.
+        syntax::references::sort_ref_keys(&mut keys);
+        assert!(syntax::references::ref_keys_are_sorted(&keys));
+        assert_eq!(keys[0].name().as_str(), "alpha");
+        assert_eq!(keys[1].name().as_str(), "Zulu");
+        assert!(matches!(keys[2], deps::RefKey::Function(_)));
+    }
+
+    #[test]
+    fn parallel_reference_index_build_and_edits_keep_sorted_file_postings() {
+        let first = FileId::new(1);
+        let second = FileId::new(7);
+        let class = deps::RefKey::class(&Name::from("Demo"));
+        let folded = deps::RefKey::class(&Name::from("dEMO"));
+        let mut index = ReferenceIndex::from_file_refs(vec![
+            (first, vec![class.clone()]),
+            (second, vec![folded]),
+        ]);
+        assert_eq!(
+            index
+                .get(&class)
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            [first, second]
+        );
+        let new_file = FileId::new(9);
+        index.insert(class.clone(), new_file);
+        assert_eq!(
+            index
+                .get(&class)
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            [first, second, new_file]
+        );
+        index.remove(&class, second);
+        assert_eq!(
+            index
+                .get(&class)
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            [first, new_file]
+        );
+    }
+}

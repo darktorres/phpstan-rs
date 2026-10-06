@@ -26,3 +26,32 @@ include!(concat!(env!("OUT_DIR"), "/stub_sources.rs"));
 
 /// The checked-in symbol index.
 pub static INDEX: &str = include_str!("../index.tsv");
+
+#[cfg(test)]
+mod tests {
+    use std::hash::{Hash, Hasher};
+
+    use super::*;
+
+    #[test]
+    fn sources_hash_covers_exactly_the_embedded_files() {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for (kind, paths, sources) in [
+            (
+                "phpstorm-stubs",
+                PHPSTORM_STUBS_PATHS,
+                PHPSTORM_STUBS_SOURCES,
+            ),
+            ("phpstan-src", PHPSTAN_SRC_PATHS, PHPSTAN_SRC_SOURCES),
+            ("phpstan-stubs", PHPSTAN_STUB_PATHS, PHPSTAN_STUB_SOURCES),
+        ] {
+            kind.hash(&mut hasher);
+            assert_eq!(paths.len(), sources.len());
+            for (path, source) in paths.iter().zip(sources) {
+                path.hash(&mut hasher);
+                source.as_bytes().hash(&mut hasher);
+            }
+        }
+        assert_eq!(format!("{:016x}", hasher.finish()), SOURCES_HASH);
+    }
+}

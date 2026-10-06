@@ -24,6 +24,7 @@ use crate::checker::settings::EngineSettings;
 use crate::ext::disallowed_calls::DisallowedCallsSettings;
 use crate::ext::mockstan::MockstanSettings;
 use crate::ext::sql::SqlSettings;
+use crate::file_id::FileId;
 use crate::parent_calls::{self, ClassShapeSettings};
 use crate::registry::settings::ReflectionSettings;
 use crate::rules_settings::RulesSettings;
@@ -1326,7 +1327,7 @@ impl Session {
     /// Reads and parses the file at `path`, as a load does each file it
     /// lists: a context file when `context`, which the per-file cache
     /// serves, and everything its use sites, owner and cache entry need.
-    fn parse_listed(&self, parse: Parse, path: &Path, context: bool) -> Read {
+    fn parse_listed(&self, parse: Parse, path: &Path, context: bool, file_id: FileId) -> Read {
         let shared = parse.project;
         let index_use_sites = shared.indexes_use_sites();
         parse.states.with(|state| {
@@ -1342,6 +1343,7 @@ impl Session {
                 state,
                 context && !held && !keeps_tree,
                 index_use_sites,
+                file_id,
             );
             if let Read::Loaded(file) = &mut read {
                 shared.index_use_sites(&mut file.parsed, &file.source);
@@ -1374,6 +1376,7 @@ impl Session {
         state: &mut LoadState,
         cacheable: bool,
         index_use_sites: bool,
+        file_id: FileId,
     ) -> Read {
         let LoadState { names, buf, .. } = state;
         if self.read_into(path, absolute, buf).is_err() {
@@ -1387,7 +1390,7 @@ impl Session {
             None
         };
         if let Some(key) = &cache_key
-            && let Some(cached) = file_cache::load(key)
+            && let Some(cached) = file_cache::load(key, file_id)
         {
             let len = cached.len;
             if let Some(parsed) = cached.into_parsed(path, content_hash) {
@@ -1409,8 +1412,12 @@ impl Session {
             Err(_) => String::from_utf8_lossy(bytes).len(),
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
-            Ok(text) => super::parse_file_with_names(path, text, is_stub, Some(names)),
-            Err(_) => super::parse_file_with_names(path, bytes, is_stub, Some(names)),
+            Ok(text) => {
+                super::parse_file_with_names_and_file_id(path, text, is_stub, Some(names), file_id)
+            }
+            Err(_) => {
+                super::parse_file_with_names_and_file_id(path, bytes, is_stub, Some(names), file_id)
+            }
         })) else {
             return Read::Unread;
         };
@@ -1977,33 +1984,30 @@ impl Session {
             project: shared,
             states,
         };
-        // The files are numbered while they parse.
-        let (mut combined_parsed, numbering): (Vec<Read>, _) = pool.install(|| {
-            rayon::join(
-                || {
-                    combined_files
-                        .par_iter()
-                        .zip(reads.into_par_iter())
-                        .enumerate()
-                        .map(|(index, (path, read))| {
-                            read.unwrap_or_else(|| {
-                                self.parse_listed(parse, path, index < context_len)
-                            })
-                        })
-                        .collect()
-                },
-                || {
-                    super::file_table::FileTable::with_paths(
-                        combined_files
-                            .iter()
-                            .zip(&hashes)
-                            .map(|(path, hash)| (path.as_path(), *hash)),
-                    )
-                },
-            )
+        // Assign IDs before parsing so each declaration records its file
+        // directly. The ID list is in the same context-then-analysed order
+        // used by the merge and declaration prefix sums below.
+        let numbering = super::file_table::FileTable::with_paths(
+            combined_files
+                .iter()
+                .zip(&hashes)
+                .map(|(path, hash)| (path.as_path(), *hash)),
+        );
+        let numbers = project.number_files(numbering);
+        let mut combined_parsed: Vec<Read> = pool.install(|| {
+            combined_files
+                .par_iter()
+                .zip(reads.into_par_iter())
+                .zip(numbers.par_iter())
+                .enumerate()
+                .map(|(index, ((path, read), &file_id))| {
+                    read.unwrap_or_else(|| {
+                        self.parse_listed(parse, path, index < context_len, file_id)
+                    })
+                })
+                .collect()
         });
         file_cache::trim();
-        let numbers = project.number_files(numbering);
         // Reserve declaration ids by file before the serial merge. Each
         // file owns a contiguous class range and a contiguous function
         // range, both in the established context-then-analysed load order.
@@ -2072,6 +2076,7 @@ impl Session {
         };
         let mut skipped_context = 0usize;
         let mut context_failures = Vec::new();
+        project.begin_reference_index_batch();
         for (((path, &id), parsed), declaration_ids) in context_files
             .iter()
             .zip(context_numbers)
@@ -2142,6 +2147,8 @@ impl Session {
                 Read::Unread => skipped_analyze += 1,
             }
         }
+        project.finish_reference_index_batch();
+        project.rebuild_path_ranks();
         Added {
             analyze_sizes,
             skipped_analyze,

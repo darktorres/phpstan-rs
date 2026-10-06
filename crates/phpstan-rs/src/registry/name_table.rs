@@ -9,7 +9,7 @@ use rustc_hash::FxHashSet;
 use std::sync::{Arc, OnceLock};
 use syntax::name::{FoldKey, FoldedMap, FoldedSet, Name};
 
-use super::container::{Buffer, Reader, Stored, Writer};
+use super::container::{Buffer, Reader, Stored, StoredEntry, Writer};
 
 /// A name's lookup key: the name ASCII-lowercased, as PHP compares class
 /// and function names.
@@ -168,13 +168,13 @@ fn next_version() -> u64 {
 }
 
 /// What decodes a stored entry.
-type Decoder<V> = fn(&[u8]) -> V;
+type Decoder<V> = fn(&[u8], Option<&syntax::name::CacheNameTable>) -> V;
 
 /// What decodes the entries of a stored base: each by the offset of its
 /// bytes in the file, and by what those bytes are.
 struct Decode<V>(DecodeEntry<V>);
 
-type DecodeEntry<V> = Arc<dyn Fn(usize, &[u8]) -> Arc<V> + Send + Sync>;
+type DecodeEntry<V> = Arc<dyn Fn(StoredEntry) -> Option<Arc<V>> + Send + Sync>;
 
 impl<V> std::fmt::Debug for Decode<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -198,15 +198,16 @@ pub(crate) struct Base<V> {
 /// A base's names in order.
 #[derive(Debug)]
 enum Keys {
-    /// The records of a stored table in the file's buffer: each four
-    /// little-endian `u32`s, the name's offset and length, then the
-    /// entry's. `index` is a hash index over them: little-endian `u32`s, a
+    /// The records of a stored table in the eager buffer: a name index, a
+    /// `u64` entry offset and length, and a CRC. `index` is a hash index over
+    /// them: little-endian `u32`s, a
     /// power of two of them, each the number of a record plus one, or zero
     /// for a free place.
     Stored {
         buffer: Buffer,
         records: Range<usize>,
         index: Range<usize>,
+        names: syntax::name::CacheNameTable,
     },
     Built(Vec<Name>),
 }
@@ -253,25 +254,23 @@ fn index_places(records: usize) -> usize {
     (records * 2).next_power_of_two().max(2)
 }
 
-/// What a base keeps of one entry once it is read: the name as a `Name`,
-/// for a stored one, and the decoded value.
+/// What a base keeps of one entry once it is read: its decoded value. A
+/// stored name is interned once in the container's shared name table.
 #[derive(Debug)]
 struct Slot<V> {
-    name: OnceLock<Name>,
-    value: OnceLock<Arc<V>>,
+    value: OnceLock<Option<Arc<V>>>,
 }
 
 impl<V> Default for Slot<V> {
     fn default() -> Self {
         Slot {
-            name: OnceLock::new(),
             value: OnceLock::new(),
         }
     }
 }
 
-/// The bytes of one record of a stored table.
-const RECORD_LEN: usize = 16;
+/// The bytes of one record: name index, entry offset and length, record CRC.
+const RECORD_LEN: usize = 24;
 
 impl Keys {
     fn len(&self) -> usize {
@@ -281,8 +280,8 @@ impl Keys {
         }
     }
 
-    /// The record `i` of a stored table: the ranges of its name and entry.
-    fn record(&self, i: usize) -> (Range<usize>, Range<usize>) {
+    /// The record `i` of a stored table: its name index and entry range.
+    fn record(&self, i: usize) -> (usize, StoredEntry) {
         let Keys::Stored {
             buffer, records, ..
         } = self
@@ -290,32 +289,26 @@ impl Keys {
             unreachable!("only a stored table has records")
         };
         let at = records.start + i * RECORD_LEN;
-        let field = |n: usize| {
-            u32::from_le_bytes(buffer[at + n * 4..at + n * 4 + 4].try_into().unwrap()) as usize
-        };
-        (field(0)..field(0) + field(1), field(2)..field(2) + field(3))
-    }
-
-    /// The range of the stored name `i`: only its offset and length are
-    /// read, of the record's four.
-    fn name_range(&self, i: usize) -> Range<usize> {
-        let Keys::Stored {
-            buffer, records, ..
-        } = self
-        else {
-            unreachable!("only a stored table has records")
-        };
-        let at = records.start + i * RECORD_LEN;
-        let field = |n: usize| {
-            u32::from_le_bytes(buffer[at + n * 4..at + n * 4 + 4].try_into().unwrap()) as usize
-        };
-        field(0)..field(0) + field(1)
+        let name = u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
+        let offset = u64::from_le_bytes(buffer[at + 4..at + 12].try_into().unwrap());
+        let len = u64::from_le_bytes(buffer[at + 12..at + 20].try_into().unwrap());
+        let checksum = u32::from_le_bytes(buffer[at + 20..at + 24].try_into().unwrap());
+        (
+            name,
+            StoredEntry {
+                span: super::container::Span { offset, len },
+                checksum,
+            },
+        )
     }
 
     /// The bytes of name `i`.
     fn bytes(&self, i: usize) -> &[u8] {
         match self {
-            Keys::Stored { buffer, .. } => &buffer[self.name_range(i)],
+            Keys::Stored { names, .. } => names
+                .text(self.record(i).0 as u32)
+                .expect("a stored name index is valid")
+                .as_bytes(),
             Keys::Built(names) => names[i].as_str().as_bytes(),
         }
     }
@@ -323,9 +316,9 @@ impl Keys {
     /// The name `i` as text.
     fn text(&self, i: usize) -> &str {
         match self {
-            Keys::Stored { .. } => {
-                std::str::from_utf8(self.bytes(i)).expect("a stored name is text")
-            }
+            Keys::Stored { names, .. } => names
+                .text(self.record(i).0 as u32)
+                .expect("a stored name index is valid"),
             Keys::Built(names) => names[i].as_str(),
         }
     }
@@ -374,7 +367,7 @@ impl<V> Base<V> {
             names.push(name);
             let slot = Slot::default();
             slot.value
-                .set(value)
+                .set(Some(value))
                 .unwrap_or_else(|_| unreachable!("a new slot is empty"));
             slots.push(slot);
         }
@@ -463,31 +456,34 @@ impl<V> Base<V> {
     pub(super) fn name(&self, i: usize) -> &Name {
         match &self.keys {
             Keys::Built(names) => &names[i],
-            Keys::Stored { .. } => self.slots[i]
-                .name
-                .get_or_init(|| Name::from(self.keys.text(i))),
+            Keys::Stored { names, .. } => names
+                .interned(self.keys.record(i).0 as u32)
+                .expect("a stored name index is valid"),
         }
     }
 
     /// Entry `i`, decoded the first time it is read.
-    pub(super) fn value(&self, i: usize) -> &V {
-        self.value_shared(i)
+    pub(super) fn value(&self, i: usize) -> Option<&V> {
+        self.value_shared(i).map(Arc::as_ref)
     }
 
     /// Entry `i` as the pointer the base holds it by, decoded the first time
     /// it is read.
-    pub(super) fn value_shared(&self, i: usize) -> &Arc<V> {
-        self.slots[i].value.get_or_init(|| {
-            let decode = self
-                .decode
-                .as_ref()
-                .expect("a slot built decoded holds its value");
-            let Keys::Stored { buffer, .. } = &self.keys else {
-                unreachable!("a slot built decoded holds its value")
-            };
-            let (_, entry) = self.keys.record(i);
-            (decode.0)(entry.start, &buffer[entry])
-        })
+    pub(super) fn value_shared(&self, i: usize) -> Option<&Arc<V>> {
+        self.slots[i]
+            .value
+            .get_or_init(|| {
+                let decode = self
+                    .decode
+                    .as_ref()
+                    .expect("a slot built decoded holds its value");
+                let Keys::Stored { .. } = &self.keys else {
+                    unreachable!("a slot built decoded holds its value")
+                };
+                let (_, entry) = self.keys.record(i);
+                decode.0(entry)
+            })
+            .as_ref()
     }
 }
 
@@ -497,7 +493,11 @@ impl<V> Base<V> {
 pub(crate) struct Lazy<V> {
     value: OnceLock<V>,
     // The entry encoded, with what decodes it; `None` once built decoded.
-    encoded: Option<(Arc<Vec<u8>>, Decoder<V>)>,
+    encoded: Option<(
+        Arc<Vec<u8>>,
+        Decoder<V>,
+        Option<syntax::name::CacheNameTable>,
+    )>,
 }
 
 impl<V: Clone> Clone for Lazy<V> {
@@ -530,11 +530,11 @@ impl<V> Lazy<V> {
 
     pub(crate) fn get(&self) -> &V {
         self.value.get_or_init(|| {
-            let (bytes, decode) = self
+            let (bytes, decode, names) = self
                 .encoded
                 .as_ref()
                 .expect("a slot built decoded holds its value");
-            decode(bytes)
+            decode(bytes, names.as_ref())
         })
     }
 }
@@ -580,7 +580,7 @@ impl<V> NameTable<V> {
             return None;
         }
         let i = base.find(key)?;
-        Some((base.name(i), base.value(i)))
+        Some((base.name(i), base.value(i)?))
     }
 
     /// `base_get` for a key in any case: no lowercase copy of it is made.
@@ -590,7 +590,7 @@ impl<V> NameTable<V> {
             return None;
         }
         let i = base.find_by(key)?;
-        Some((base.name(i), base.value(i)))
+        Some((base.name(i), base.value(i)?))
     }
 
     pub fn get<K: TableKey + ?Sized>(&self, name: &K) -> Option<&V> {
@@ -736,7 +736,10 @@ impl<V> NameTable<V> {
             return;
         };
         if let Some(i) = base.find(key) {
-            let (declared, value) = (base.name(i).clone(), Arc::clone(base.value_shared(i)));
+            let Some(value) = base.value_shared(i) else {
+                return;
+            };
+            let (declared, value) = (base.name(i).clone(), Arc::clone(value));
             self.hidden.insert(declared.clone());
             self.entries.insert(declared, value);
         }
@@ -752,7 +755,8 @@ impl<V> NameTable<V> {
             if self.hidden.contains(key) {
                 return None;
             }
-            base.find(key).map(|i| Arc::clone(base.value_shared(i)))
+            base.find(key)
+                .and_then(|i| base.value_shared(i).map(Arc::clone))
         })
     }
 
@@ -920,7 +924,9 @@ impl<V: Clone> NameTable<V> {
             for i in 0..base.len() {
                 let name = base.name(i);
                 if !self.hidden.contains(name.lower()) {
-                    all.push((name.clone(), Arc::clone(base.value_shared(i))));
+                    if let Some(value) = base.value_shared(i) {
+                        all.push((name.clone(), Arc::clone(value)));
+                    }
                 }
             }
         }
@@ -959,7 +965,9 @@ impl<'a, V> Iterator for Iter<'a, V> {
         for i in positions {
             let name = base.name(i);
             if !self.hidden.contains(name.lower()) {
-                return Some((name, base.value(i)));
+                if let Some(value) = base.value(i) {
+                    return Some((name, value));
+                }
             }
         }
         None
@@ -989,7 +997,9 @@ impl<V: Clone> IntoIterator for NameTable<V> {
             for i in 0..base.len() {
                 let name = base.name(i);
                 if !self.hidden.contains(name.lower()) {
-                    all.push((name.clone(), base.value(i).clone()));
+                    if let Some(value) = base.value(i) {
+                        all.push((name.clone(), value.clone()));
+                    }
                 }
             }
         }
@@ -1064,12 +1074,13 @@ pub(super) fn store_entries<V: serde::Serialize>(
     let mut names: Vec<&str> = Vec::with_capacity(rows.len());
     for (name, value) in rows {
         names.push(if fold { name.lower() } else { name.as_str() });
-        let encoded = super::stub_cache::encode(value)?;
+        let encoded = writer.encode(value)?;
         let name = writer.name(name.as_str())?;
         let entry = writer.entry(&encoded)?;
-        for field in [name.offset, name.len, entry.offset, entry.len] {
-            records.extend_from_slice(&field.to_le_bytes());
-        }
+        records.extend_from_slice(&name.to_le_bytes());
+        records.extend_from_slice(&entry.span.offset.to_le_bytes());
+        records.extend_from_slice(&entry.span.len.to_le_bytes());
+        records.extend_from_slice(&entry.checksum.to_le_bytes());
     }
     writer.section(section, &records)?;
     let mut index = vec![0u32; index_places(names.len())];
@@ -1085,7 +1096,8 @@ pub(super) fn store_entries<V: serde::Serialize>(
     writer.section(&format!("{section}:index"), &index)
 }
 
-/// The base `store_entries` wrote as section `section`, read in place.
+/// The base `store_entries` wrote as section `section`, with eager keys and
+/// lazy record values.
 pub(super) fn load_base<V: serde::de::DeserializeOwned + Send + Sync + 'static>(
     reader: &Reader,
     section: &str,
@@ -1104,14 +1116,17 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned + Send + Sync + 'static>(
         buffer,
         records,
         index,
+        names: reader.names().clone(),
     };
     validate(&keys, section)?;
     let slots = (0..keys.len()).map(|_| Slot::default()).collect();
     // An entry another table of the file stores with the same bytes (the
     // writer writes equal bytes once) is decoded once for them all.
     let shared = Arc::clone(reader.decoded());
-    let decode = Decode(Arc::new(move |offset: usize, bytes: &[u8]| {
-        let key = (std::any::TypeId::of::<V>(), offset);
+    let names = reader.names().clone();
+    let source = reader.source();
+    let decode = Decode(Arc::new(move |entry: StoredEntry| {
+        let key = (std::any::TypeId::of::<V>(), entry.span.offset);
         let lock = || {
             shared
                 .lock()
@@ -1120,12 +1135,29 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned + Send + Sync + 'static>(
         if let Some(found) = lock().get(&key)
             && let Ok(value) = Arc::clone(found).downcast::<V>()
         {
-            return value;
+            return Some(value);
         }
-        let value = Arc::new(decode_entry::<V>(bytes));
+        let bytes = match source.read_entry(entry) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("phpstan-rs: {error}; rebuilding the cache next run");
+                return None;
+            }
+        };
+        let value = match try_decode_entry::<V>(&bytes, Some(&names)) {
+            Ok(value) => Arc::new(value),
+            Err(error) => {
+                source.invalidate();
+                eprintln!(
+                    "phpstan-rs: cache record at {} no longer decodes ({error}); rebuilding the cache next run",
+                    entry.span.offset
+                );
+                return None;
+            }
+        };
         let kept: Arc<dyn std::any::Any + Send + Sync> = value.clone();
         lock().entry(key).or_insert(kept);
-        value
+        Some(value)
     }));
     Ok(Base {
         keys,
@@ -1141,12 +1173,18 @@ pub(super) fn load_base<V: serde::de::DeserializeOwned + Send + Sync + 'static>(
 /// checksum holds, so only a bug in `store_entries` could break it, and the
 /// tests of the stored registry check every table (`check_order`).
 fn validate(keys: &Keys, section: &str) -> Result<(), String> {
-    let Keys::Stored { buffer, .. } = keys else {
+    let Keys::Stored { .. } = keys else {
         return Ok(());
     };
     for i in 0..keys.len() {
         let (name, entry) = keys.record(i);
-        if name.end > buffer.len() || entry.end > buffer.len() {
+        let Keys::Stored { names, .. } = keys else {
+            unreachable!()
+        };
+        if name >= names.len()
+            || entry.span.offset < super::container::HEADER_LEN as u64
+            || entry.span.offset.checked_add(entry.span.len).is_none()
+        {
             return Err(format!("{section}'s record {i} points outside the file"));
         }
     }
@@ -1158,14 +1196,12 @@ impl<V> Base<V> {
     /// Whether the names of a stored base are text in strictly increasing
     /// order.
     pub(super) fn check_order(&self, section: &str) -> Result<(), String> {
-        let Keys::Stored { buffer, .. } = &self.keys else {
+        let Keys::Stored { .. } = &self.keys else {
             return Ok(());
         };
         let mut previous: Option<&str> = None;
         for i in 0..self.keys.len() {
-            let (name, _) = self.keys.record(i);
-            let text = std::str::from_utf8(&buffer[name])
-                .map_err(|_| format!("{section}'s name {i} is not text"))?;
+            let text = self.keys.text(i);
             let key = if self.fold {
                 text.to_ascii_lowercase()
             } else {
@@ -1210,12 +1246,8 @@ impl<V: PartialEq> PartialEq for Lazy<V> {
 impl<V: serde::Serialize> serde::Serialize for Lazy<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
-        // A value not read since it was stored is written as it was.
-        if self.value.get().is_none()
-            && let Some((bytes, _)) = &self.encoded
-        {
-            return serializer.serialize_bytes(bytes);
-        }
+        // Cache records refer to their own file's name table by index, so a
+        // record from another cache file must be decoded and re-encoded.
         let bytes = super::stub_cache::encode(self.get()).map_err(S::Error::custom)?;
         Bytes(bytes).serialize(serializer)
     }
@@ -1226,15 +1258,34 @@ impl<'de, V: serde::de::DeserializeOwned> serde::Deserialize<'de> for Lazy<V> {
         let bytes = Bytes::deserialize(deserializer)?;
         Ok(Lazy {
             value: OnceLock::new(),
-            encoded: Some((Arc::new(bytes.0), decode_entry::<V> as Decoder<V>)),
+            encoded: Some((
+                Arc::new(bytes.0),
+                decode_entry::<V>,
+                syntax::name::current_cache_name_table(),
+            )),
         })
     }
 }
 
 /// One encoded entry, read back.
-fn decode_entry<V: serde::de::DeserializeOwned>(bytes: &[u8]) -> V {
-    super::stub_cache::decode(bytes)
-        .unwrap_or_else(|e| panic!("a stored registry entry no longer decodes: {e}"))
+fn decode_entry<V: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    names: Option<&syntax::name::CacheNameTable>,
+) -> V {
+    try_decode_entry(bytes, names)
+        .unwrap_or_else(|error| panic!("a stored registry entry no longer decodes: {error}"))
+}
+
+fn try_decode_entry<V: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    names: Option<&syntax::name::CacheNameTable>,
+) -> Result<V, String> {
+    let decode = || super::stub_cache::decode(bytes);
+    let decoded = match names {
+        Some(names) => syntax::name::with_cache_name_table(names, decode),
+        None => decode(),
+    };
+    decoded
 }
 
 /// Bytes serialized as one byte string.
@@ -1369,6 +1420,48 @@ mod tests {
             Ok(reader) => reader,
             Err(_) => panic!("a written file reads"),
         }
+    }
+
+    #[test]
+    fn a_corrupt_record_reads_as_missing_and_does_not_panic() {
+        let mut writer = Writer::new();
+        let name = writer.name("One").unwrap();
+        let value = writer.encode(&17u32).unwrap();
+        let entry = writer.entry(&value).unwrap();
+        let mut record = Vec::new();
+        record.extend_from_slice(&name.to_le_bytes());
+        record.extend_from_slice(&entry.span.offset.to_le_bytes());
+        record.extend_from_slice(&entry.span.len.to_le_bytes());
+        record.extend_from_slice(&entry.checksum.to_le_bytes());
+        writer.section("t", &record).unwrap();
+        let mut index = vec![0u32; index_places(1)];
+        let mask = index.len() - 1;
+        index[hash_key(b"one") & mask] = 1;
+        let index: Vec<u8> = index.iter().flat_map(|slot| slot.to_le_bytes()).collect();
+        writer.section("t:index", &index).unwrap();
+
+        let mut bytes = writer.finish();
+        bytes[entry.span.offset as usize] ^= 1;
+        let reader = Reader::new(bytes).expect("a lazy record is checked on access");
+        let table = NameTable::<u32>::load(&reader, "t").unwrap();
+        assert_eq!(table.get("one"), None);
+    }
+
+    #[test]
+    fn nested_lazy_names_use_the_container_name_table() {
+        let expected = Name::from("Nested\\CachedName");
+        let mut writer = Writer::new();
+        let lazy = Lazy::decoded(expected.clone());
+        let bytes = writer.encode(&lazy).unwrap();
+        writer.section("value", &bytes).unwrap();
+        let reader = Reader::new(writer.finish()).expect("a written file reads");
+        let range = reader.section("value").unwrap();
+        let names = reader.names().clone();
+        let decoded: Lazy<Name> = syntax::name::with_cache_name_table(&names, || {
+            postcard::from_bytes(&reader.buffer()[range]).unwrap()
+        });
+
+        assert_eq!(decoded.get(), &expected);
     }
 
     #[test]
@@ -1567,9 +1660,10 @@ mod tests {
         let entry = writer.entry(&[0]).unwrap();
         let mut records = Vec::new();
         for name in [a, b] {
-            for field in [name.offset, name.len, entry.offset, entry.len] {
-                records.extend_from_slice(&field.to_le_bytes());
-            }
+            records.extend_from_slice(&name.to_le_bytes());
+            records.extend_from_slice(&entry.span.offset.to_le_bytes());
+            records.extend_from_slice(&entry.span.len.to_le_bytes());
+            records.extend_from_slice(&entry.checksum.to_le_bytes());
         }
         writer.section("t", &records).unwrap();
         writer.section("t:index", &[0u8; 16]).unwrap();

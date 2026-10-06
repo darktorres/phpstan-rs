@@ -56,7 +56,8 @@ impl<'a> Checker<'a> {
         span: Span,
         args: &[Arg],
     ) {
-        if *visibility == Visibility::Private {
+        if !self.settings.rules.check_renamed_named_arguments || *visibility == Visibility::Private
+        {
             return;
         }
         if self

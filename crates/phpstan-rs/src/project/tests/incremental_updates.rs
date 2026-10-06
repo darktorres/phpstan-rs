@@ -4,6 +4,77 @@
 use super::super::test_support::Files;
 use super::super::*;
 
+fn declaration_id(project: &Project, path: &Path, name: &str) -> Option<u32> {
+    let file = project.files.get(path)?;
+    file.built_decls.iter().zip(&file.declaration_ids).find_map(
+        |(decl, &(class_id, function_id))| match decl {
+            crate::registry::BuiltDecl::Class { name: declared, .. }
+                if declared.eq_ignore_ascii_case(name) =>
+            {
+                class_id
+            }
+            crate::registry::BuiltDecl::Function { name: declared, .. }
+                if declared.eq_ignore_ascii_case(name) =>
+            {
+                function_id
+            }
+            _ => None,
+        },
+    )
+}
+
+#[test]
+fn edited_declarations_keep_ids_and_new_declarations_do_not_reuse_them() {
+    let path = PathBuf::from("ids.php");
+    let mut project = Files::new()
+        .context(
+            &path,
+            "<?php class Kept {} function kept_fn() {} class Removed {}",
+        )
+        .load();
+    let kept_class = declaration_id(&project, &path, "Kept").unwrap();
+    let kept_function = declaration_id(&project, &path, "kept_fn").unwrap();
+    let removed_class = declaration_id(&project, &path, "Removed").unwrap();
+
+    project
+        .update_file(
+            &path,
+            "<?php class AddedFirst {} class kEpT { public int $x; } function KEPT_FN() {}",
+        )
+        .unwrap();
+
+    assert_eq!(
+        declaration_id(&project, &path, "Kept"),
+        Some(kept_class),
+        "declarations after edit: {:?}",
+        project.files[&path]
+            .built_decls
+            .iter()
+            .map(crate::registry::BuiltDecl::kind_and_name)
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        declaration_id(&project, &path, "kept_fn"),
+        Some(kept_function)
+    );
+    let added_class = declaration_id(&project, &path, "AddedFirst").unwrap();
+    assert_ne!(added_class, kept_class);
+
+    project
+        .update_file(
+            &path,
+            "<?php class AddedFirst {} class Replacement {} function KEPT_FN() {}",
+        )
+        .unwrap();
+    let replacement = declaration_id(&project, &path, "Replacement").unwrap();
+    assert_ne!(replacement, removed_class);
+    assert_eq!(
+        declaration_id(&project, &path, "kept_fn"),
+        Some(kept_function)
+    );
+}
+
 #[test]
 fn updating_one_file_does_not_disturb_another_files_registry_entries() {
     let mut project = Files::new()

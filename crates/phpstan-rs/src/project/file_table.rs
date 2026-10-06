@@ -3,9 +3,8 @@
 use std::ffi::OsStr;
 use std::hash::Hasher;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::FxHasher;
 
 use crate::file_id::FileId;
 
@@ -65,17 +64,12 @@ pub(crate) struct FileTable<V> {
     ids: hashbrown::HashTable<FileId>,
     slots: Vec<Slot<V>>,
     len: usize,
-    // The file by the address of the `Arc<Path>` its declarations name it
-    // by (`bind_origin`): an `Arc` kept in the slot, so its address stays
-    // that file's.
-    by_origin: FxHashMap<usize, FileId>,
 }
 
 struct Slot<V> {
     path: PathBuf,
     hash: u64,
     value: Option<V>,
-    origins: Vec<Arc<Path>>,
 }
 
 impl<V> Default for FileTable<V> {
@@ -84,7 +78,6 @@ impl<V> Default for FileTable<V> {
             ids: hashbrown::HashTable::new(),
             slots: Vec::new(),
             len: 0,
-            by_origin: FxHashMap::default(),
         }
     }
 }
@@ -147,7 +140,6 @@ impl<V> FileTable<V> {
             path: path.to_path_buf(),
             hash,
             value: None,
-            origins: Vec::new(),
         });
         let slots = &self.slots;
         self.ids
@@ -158,36 +150,6 @@ impl<V> FileTable<V> {
     /// The path `id` numbers, whether or not its file is held.
     pub(crate) fn path(&self, id: FileId) -> &Path {
         &self.slots[id.index()].path
-    }
-
-    /// Notes that declarations naming their file by `origin` are `id`'s.
-    pub(crate) fn bind_origin(&mut self, id: FileId, origin: &Arc<Path>) {
-        let address = Arc::as_ptr(origin).cast::<u8>() as usize;
-        if self.by_origin.insert(address, id).is_none() {
-            self.slots[id.index()].origins.push(Arc::clone(origin));
-        }
-    }
-
-    /// The file `path` is, when it is the `Arc<Path>` of a declaration
-    /// bound by `bind_origin` - found by address, hashing nothing - and
-    /// otherwise by what the path spells.
-    pub(crate) fn get_by_origin(&self, path: &Path) -> Option<&V> {
-        let address = std::ptr::from_ref(path).cast::<u8>() as usize;
-        match self.by_origin.get(&address) {
-            Some(id) => self.get_by_id(*id),
-            None => self.get(path),
-        }
-    }
-
-    /// The number of the file `origin` names, found as `get_by_origin`
-    /// finds it.
-    pub(crate) fn id_by_origin(&self, origin: &Path) -> Option<FileId> {
-        let address = std::ptr::from_ref(origin).cast::<u8>() as usize;
-        let id = match self.by_origin.get(&address) {
-            Some(id) => *id,
-            None => self.id_of(origin)?,
-        };
-        self.get_by_id(id).map(|_| id)
     }
 
     pub(crate) fn get(&self, path: &Path) -> Option<&V> {
@@ -219,19 +181,12 @@ impl<V> FileTable<V> {
         previous
     }
 
-    /// Takes the file `path` out, with the origins bound to it: what its
-    /// declarations named it by is gone with it, and a file of the same
-    /// path that comes back binds its own.
+    /// Takes the file `path` out while retaining its stable number.
     pub(crate) fn remove(&mut self, path: &Path) -> Option<V> {
         let id = self.id_of(path)?;
-        let slot = &mut self.slots[id.index()];
-        let removed = slot.value.take();
+        let removed = self.slots[id.index()].value.take();
         if removed.is_some() {
             self.len -= 1;
-            for origin in slot.origins.drain(..) {
-                self.by_origin
-                    .remove(&(Arc::as_ptr(&origin).cast::<u8>() as usize));
-            }
         }
         removed
     }
@@ -315,24 +270,6 @@ mod tests {
         assert_eq!(table.get_by_id(a), Some(&3));
         assert_eq!(table.insert(PathBuf::from("/a.php"), 4), Some(3));
         assert_eq!(table.len(), 2);
-    }
-
-    #[test]
-    fn a_bound_origin_finds_its_file_by_address_and_another_by_its_path() {
-        let mut table: FileTable<u32> = FileTable::default();
-        let id = table.id_for(Path::new("/a.php"));
-        table.insert(PathBuf::from("/a.php"), 1);
-        let origin: Arc<Path> = Arc::from(Path::new("/a.php"));
-        table.bind_origin(id, &origin);
-        assert_eq!(table.get_by_origin(&origin), Some(&1));
-        // Another allocation spelling the same path is found by its text.
-        let spelled: Arc<Path> = Arc::from(Path::new("/a.php"));
-        assert_eq!(table.get_by_origin(&spelled), Some(&1));
-        let unknown: Arc<Path> = Arc::from(Path::new("/b.php"));
-        assert_eq!(table.get_by_origin(&unknown), None);
-        // A file removed is not found by its origin.
-        table.remove(Path::new("/a.php"));
-        assert_eq!(table.get_by_origin(&origin), None);
     }
 
     #[test]

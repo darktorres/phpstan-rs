@@ -15,11 +15,11 @@ fn classes_and_members_are_recorded_without_retain_source() {
         .load();
 
     let registry = project.registry();
-    let (path, span) = registry.class_declaration("Foo").expect("Foo");
-    assert_eq!(path, Path::new("a.php"));
+    let (file_id, span) = registry.class_declaration("Foo").expect("Foo");
+    assert_eq!(project.path_for_file(file_id), Path::new("a.php"));
     assert_eq!(span.start, 12);
-    let (path, _) = registry.method_declaration("Foo", "bar").expect("bar");
-    assert_eq!(path, Path::new("a.php"));
+    let (file_id, _) = registry.method_declaration("Foo", "bar").expect("bar");
+    assert_eq!(project.path_for_file(file_id), Path::new("a.php"));
     assert_eq!(
         registry.class_by_name("Foo").unwrap().methods()["bar"]
             .provenance()
@@ -50,7 +50,7 @@ fn a_builtin_records_its_extension_and_no_file() {
     let info = &project.registry().class_by_name("ArrayObject").unwrap();
     assert!(info.provenance().is_builtin());
     assert_eq!(info.provenance().extension_name(), Some("SPL"));
-    assert_eq!(info.provenance().file(), None);
+    assert_eq!(info.provenance().file_id(), None);
 }
 
 #[test]

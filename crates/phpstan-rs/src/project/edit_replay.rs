@@ -489,9 +489,10 @@ where
                     continue;
                 };
                 let declared = declared.to_string();
-                let Some(path) = info.provenance().file().map(Path::to_path_buf) else {
+                let Some(file_id) = info.provenance().file_id() else {
                     continue;
                 };
+                let path = self.project.files.path(file_id).to_path_buf();
                 if path == naming
                     || !self.project.is_analyzed(&path)
                     || self.draw == Draw::Script && self.used.contains(&path)

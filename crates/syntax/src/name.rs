@@ -13,9 +13,12 @@
 //! by two interners could be equal text and different allocations, which
 //! an identity comparison cannot allow.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::rc::Rc;
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use rustc_hash::FxHasher;
 
@@ -34,6 +37,143 @@ struct NameData {
 /// An interned name; see the module documentation.
 #[derive(Clone)]
 pub struct Name(Arc<NameData>);
+
+/// A cache writer's per-file table of interned names.
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct CacheNameEncoder(Rc<RefCell<CacheNameEncoderData>>);
+
+#[derive(Default)]
+struct CacheNameEncoderData {
+    indexes: HashMap<String, u32>,
+    names: Vec<String>,
+}
+
+impl CacheNameEncoder {
+    /// The per-file index of `text`, adding it on first use.
+    pub fn index(&self, text: &str) -> Result<u32, String> {
+        let mut data = self.0.borrow_mut();
+        if let Some(index) = data.indexes.get(text) {
+            return Ok(*index);
+        }
+        let index = u32::try_from(data.names.len())
+            .map_err(|_| "a cache file has too many distinct names".to_string())?;
+        data.names.push(text.to_owned());
+        data.indexes.insert(text.to_owned(), index);
+        Ok(index)
+    }
+
+    /// The names in index order, for the cache's eager name section.
+    pub fn names(&self) -> Vec<String> {
+        self.0.borrow().names.clone()
+    }
+}
+
+/// A cache reader's names, each interned into the global `Name` table once.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct CacheNameTable {
+    texts: Arc<Vec<String>>,
+    names: Arc<Vec<OnceLock<Name>>>,
+    // Optional opaque identity carried alongside nested lazy records. The
+    // cache reader owns its meaning; syntax only preserves it in clones.
+    context: Option<u64>,
+}
+
+impl CacheNameTable {
+    pub fn new(texts: Vec<String>) -> CacheNameTable {
+        let names = (0..texts.len()).map(|_| OnceLock::new()).collect();
+        CacheNameTable {
+            texts: Arc::new(texts),
+            names: Arc::new(names),
+            context: None,
+        }
+    }
+
+    pub fn text(&self, index: u32) -> Option<&str> {
+        self.texts.get(index as usize).map(String::as_str)
+    }
+
+    pub fn len(&self) -> usize {
+        self.texts.len()
+    }
+
+    pub fn name(&self, index: u32) -> Option<Name> {
+        self.interned(index).cloned()
+    }
+
+    pub fn interned(&self, index: u32) -> Option<&Name> {
+        let index = index as usize;
+        let text = self.texts.get(index)?;
+        Some(self.names[index].get_or_init(|| Name::from(text.as_str())))
+    }
+
+    pub fn texts(&self) -> &Arc<Vec<String>> {
+        &self.texts
+    }
+
+    pub fn set_context(&mut self, context: u64) {
+        self.context = Some(context);
+    }
+
+    pub fn context(&self) -> Option<u64> {
+        self.context
+    }
+}
+
+#[derive(Clone)]
+enum CacheNameContext {
+    Encode(CacheNameEncoder),
+    Decode(CacheNameTable),
+}
+
+thread_local! {
+    static CACHE_NAME_CONTEXT: RefCell<Option<CacheNameContext>> = const { RefCell::new(None) };
+}
+
+/// Runs serialization with the cache writer's current name table.
+#[doc(hidden)]
+pub fn with_cache_name_encoder<T>(encoder: &CacheNameEncoder, f: impl FnOnce() -> T) -> T {
+    with_cache_name_context(CacheNameContext::Encode(encoder.clone()), f)
+}
+
+/// Runs deserialization with a cache file's name table.
+#[doc(hidden)]
+pub fn with_cache_name_table<T>(table: &CacheNameTable, f: impl FnOnce() -> T) -> T {
+    with_cache_name_context(CacheNameContext::Decode(table.clone()), f)
+}
+
+/// The name table active while a lazy cached record is decoded.
+#[doc(hidden)]
+pub fn current_cache_name_table() -> Option<CacheNameTable> {
+    CACHE_NAME_CONTEXT.with(|context| match context.borrow().as_ref() {
+        Some(CacheNameContext::Decode(table)) => Some(table.clone()),
+        _ => None,
+    })
+}
+
+/// The per-file name encoder active while a nested cache value is encoded.
+#[doc(hidden)]
+pub fn current_cache_name_encoder() -> Option<CacheNameEncoder> {
+    CACHE_NAME_CONTEXT.with(|context| match context.borrow().as_ref() {
+        Some(CacheNameContext::Encode(encoder)) => Some(encoder.clone()),
+        _ => None,
+    })
+}
+
+fn with_cache_name_context<T>(context: CacheNameContext, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<CacheNameContext>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            CACHE_NAME_CONTEXT.with(|context| *context.borrow_mut() = previous);
+        }
+    }
+
+    let previous = CACHE_NAME_CONTEXT.with(|slot| slot.replace(Some(context)));
+    let _restore = Restore(previous);
+    f()
+}
 
 impl Name {
     /// A name of `text`, whose `text_hash` the caller has made.
@@ -179,16 +319,43 @@ impl fmt::Display for Name {
     }
 }
 
-/// A name serializes as its text, and deserializes into the global
-/// interner.
+/// Outside the cache codec a name serializes as text. Within a cache codec
+/// it is a per-file `u32` index into the cache's intern table.
 impl serde::Serialize for Name {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0.text)
+        use serde::ser::Error;
+        let context = CACHE_NAME_CONTEXT.with(|context| context.borrow().clone());
+        if let Some(CacheNameContext::Encode(encoder)) = context {
+            let index = encoder.index(&self.0.text).map_err(S::Error::custom)?;
+            serializer.serialize_u32(index)
+        } else {
+            serializer.serialize_str(&self.0.text)
+        }
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Name {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Name, D::Error> {
+        if let Some(CacheNameContext::Decode(table)) =
+            CACHE_NAME_CONTEXT.with(|context| context.borrow().clone())
+        {
+            struct Index(CacheNameTable);
+            impl serde::de::Visitor<'_> for Index {
+                type Value = Name;
+
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("an index into the cache's name table")
+                }
+
+                fn visit_u32<E: serde::de::Error>(self, index: u32) -> Result<Name, E> {
+                    self.0.name(index).ok_or_else(|| {
+                        E::custom(format!("cache name index {index} is out of bounds"))
+                    })
+                }
+            }
+            return deserializer.deserialize_u32(Index(table));
+        }
+
         struct Text;
         impl serde::de::Visitor<'_> for Text {
             type Value = Name;

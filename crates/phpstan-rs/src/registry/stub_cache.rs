@@ -10,22 +10,42 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use super::container::{Reader, Unreadable, Writer};
 
-/// The key every cache file carries in its name.
-const KEY: &str = env!("PHPSTAN_RS_SOURCE_HASH");
+/// The key every cache file carries in its name. The crate hash covers the
+/// analyzer and vendored runtime sources; `SOURCES_HASH` covers exactly the
+/// PHP files embedded by `stub-sources`, including PHPStan's `.stub` files.
+pub(crate) fn cache_key() -> &'static str {
+    static KEY: OnceLock<String> = OnceLock::new();
+    KEY.get_or_init(|| {
+        format!(
+            "{}-{}",
+            env!("PHPSTAN_RS_SOURCE_HASH"),
+            stub_sources::SOURCES_HASH
+        )
+    })
+}
 
 /// `value` as the cache stores it: a compact encoding that does not
 /// describe itself, so what reads it back must be what wrote it. Types nest
 /// deeply, which `Type`'s own impls guard the stack for.
 pub(super) fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, String> {
-    postcard::to_allocvec(value).map_err(|e| e.to_string())
+    let encode = || postcard::to_allocvec(value).map_err(|e| e.to_string());
+    match syntax::name::current_cache_name_encoder() {
+        Some(names) => syntax::name::with_cache_name_encoder(&names, encode),
+        None => encode(),
+    }
 }
 
 /// What `encode` wrote.
 pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
-    postcard::from_bytes(bytes).map_err(|e| e.to_string())
+    let decode = || postcard::from_bytes(bytes).map_err(|e| e.to_string());
+    match syntax::name::current_cache_name_table() {
+        Some(names) => syntax::name::with_cache_name_table(&names, decode),
+        None => decode(),
+    }
 }
 
 /// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` under
@@ -44,15 +64,15 @@ pub(crate) fn cache_dir() -> Option<PathBuf> {
 }
 
 fn path(name: &str) -> Option<PathBuf> {
-    Some(cache_dir()?.join(format!("{name}-{KEY}.cbor")))
+    Some(cache_dir()?.join(format!("{name}-{}.cbor", cache_key())))
 }
 
 /// The file stored under `name` for this build, if it can be read: the
 /// bytes of a file whole by its checksum and of this layout, else `None`,
 /// for the caller to build it again.
 pub(crate) fn load_container(name: &str) -> Option<Reader> {
-    let bytes = fs::read(path(name)?).ok()?;
-    match Reader::new(bytes) {
+    let path = path(name)?;
+    match Reader::open(&path) {
         Ok(reader) => Some(reader),
         Err(Unreadable::Damaged) => None,
         Err(Unreadable::Inconsistent(reason)) => {
@@ -80,7 +100,7 @@ pub(crate) fn store_container(name: &str, writer: Writer) {
     if fs::create_dir_all(dir).is_err() {
         return;
     }
-    let temporary = dir.join(format!("{name}-{KEY}.{}.tmp", std::process::id()));
+    let temporary = dir.join(format!("{name}-{}.{}.tmp", cache_key(), std::process::id()));
     let written = fs::write(&temporary, writer.finish()).is_ok();
     if !written || fs::rename(&temporary, &target).is_err() {
         let _ = fs::remove_file(&temporary);
@@ -95,10 +115,13 @@ const VALUE: &str = "value";
 /// What `store` stored under `name` for this build, if it can be read.
 pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
     let reader = load_container(name)?;
+    let names = reader.names().clone();
     let decoded = reader
         .section(VALUE)
         .map_err(|e| e.to_string())
-        .and_then(|range| decode(&reader.buffer()[range]));
+        .and_then(|range| {
+            syntax::name::with_cache_name_table(&names, || decode(&reader.buffer()[range]))
+        });
     match decoded {
         Ok(value) => Some(value),
         Err(error) => {
@@ -115,10 +138,10 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
 
 /// Stores `value` under `name` for this build, as a file of one section.
 pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
-    let Ok(body) = encode(value) else {
+    let mut writer = Writer::new();
+    let Ok(body) = writer.encode(value) else {
         return;
     };
-    let mut writer = Writer::new();
     if writer.section(VALUE, &body).is_ok() {
         store_container(name, writer);
     }

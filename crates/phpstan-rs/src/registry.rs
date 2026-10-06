@@ -42,11 +42,15 @@ mod stub_cache;
 pub(crate) use stub_cache::cache_dir;
 pub(crate) mod summaries;
 pub(crate) use stub_cache::{
-    load as load_cached, load_container, store as store_cached, store_container,
+    cache_key, load as load_cached, load_container, store as store_cached, store_container,
 };
 pub mod settings;
 pub mod stubs;
 mod type_node;
+
+pub(crate) use container::{
+    Reader as CacheReader, Unreadable as CacheUnreadable, Writer as CacheWriter,
+};
 
 pub(crate) use anonymous_class::{anonymous_class_decls, name_anonymous_classes};
 pub use bodies::{BodySource, FileBodies, NoBodies};
@@ -82,7 +86,8 @@ pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_c
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 use property_topology::PropertyTopology;
-pub use provenance::{Origin, Provenance};
+pub(crate) use provenance::Origin;
+pub use provenance::Provenance;
 pub(crate) use purity::{PurityResults, collect_impure_points, is_non_overridable};
 pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
 pub(crate) use type_node::{mentions_mixed, parse_type_node};
@@ -126,11 +131,13 @@ pub(crate) struct ChangedNames {
     pub(crate) functions: FxHashSet<String>,
     class_ids_before: FxHashMap<String, Option<ClassId>>,
     class_declarations_before: FxHashMap<ClassId, Arc<ClassReflection>>,
+    class_names_before: FxHashMap<String, Name>,
     // Prior function state for names changed since the last finish. Keep the
     // values by declaration ID so removal or rebinding does not lose the
     // old winner before `changed_since` compares it.
     function_ids_before: FxHashMap<String, FnId>,
     function_declarations_before: FxHashMap<FnId, Arc<FunctionReflection>>,
+    function_names_before: FxHashMap<String, Name>,
     function_results_before: FxHashMap<FnId, FunctionReflection>,
     // Class result tables are removed as soon as an edited declaration is
     // reindexed, so keep that winner's prior result by its old declaration ID.
@@ -1727,10 +1734,16 @@ impl Registry {
         if self.resolved_declarations {
             let key = name.to_ascii_lowercase();
             if self.changed.classes.insert(key.clone()) {
-                let id = self.class_ids.get(name).copied();
+                let found = self.class_ids.get_with_name(name);
+                let id = found.map(|(_, id)| *id);
                 let declaration_snapshot =
                     id.and_then(|id| self.class_declarations.get(&id).cloned());
                 self.changed.class_ids_before.insert(key.clone(), id);
+                if let Some((declared_name, _)) = found {
+                    self.changed
+                        .class_names_before
+                        .insert(key.clone(), declared_name.clone());
+                }
                 if let (Some(id), Some(declaration)) = (id, declaration_snapshot.as_ref()) {
                     self.changed
                         .class_declarations_before
@@ -1820,8 +1833,12 @@ impl Registry {
             if !self.changed.functions.insert(key.clone()) {
                 return;
             }
-            if let Some(id) = self.function_ids.get(name).copied() {
+            if let Some((declared_name, id)) = self.function_ids.get_with_name(name) {
+                let id = *id;
                 self.changed.function_ids_before.insert(key, id);
+                self.changed
+                    .function_names_before
+                    .insert(name.to_ascii_lowercase(), declared_name.clone());
                 if let Some(declaration) = self.function_declarations.get(&id).cloned() {
                     self.changed
                         .function_declarations_before
@@ -1932,6 +1949,51 @@ impl Registry {
         keys
     }
 
+    /// The class and function dependency keys named by the declarations
+    /// whose ids changed. Existing names come from their prior ID entries;
+    /// added names come from the active ID table. Constants remain name
+    /// keyed because they do not have declaration ids.
+    pub(crate) fn changed_frontier(&self, changed: &ChangedNames) -> Vec<crate::deps::RefKey> {
+        let mut frontier = Vec::new();
+        for name in &changed.classes {
+            let old = changed
+                .class_names_before
+                .get(name)
+                .map(crate::deps::RefKey::class);
+            let current = self
+                .class_ids
+                .get(name.as_str())
+                .copied()
+                .and_then(|id| self.class_name_by_id(id))
+                .map(crate::deps::RefKey::class);
+            if let Some(key) = old.or(current) {
+                frontier.push(key);
+            }
+        }
+        for name in &changed.functions {
+            let old = changed
+                .function_names_before
+                .get(name)
+                .map(crate::deps::RefKey::function);
+            let current = self
+                .function_ids
+                .get(name.as_str())
+                .copied()
+                .and_then(|id| self.function_name_by_id(id))
+                .map(crate::deps::RefKey::function);
+            if let Some(key) = old.or(current) {
+                frontier.push(key);
+            }
+        }
+        frontier.extend(
+            changed
+                .constants
+                .keys()
+                .map(|name| crate::deps::RefKey::constant_text(name)),
+        );
+        frontier
+    }
+
     fn changed_class_results(&self, before: &ResolvedSnapshot) -> FxHashMap<ClassId, Name> {
         let active_class_names: FxHashMap<ClassId, Name> = self
             .class_ids
@@ -1962,8 +2024,33 @@ impl Registry {
     /// The traits the classes whose resolved form differs from `before`'s
     /// use, before the change and after it: a trait is checked as each class
     /// using it, so its file is checked again when one of them changes.
-    pub(crate) fn traits_of_changed_classes(&self, before: &ResolvedSnapshot) -> Vec<Name> {
+    pub(crate) fn traits_of_changed_classes(
+        &self,
+        before: &ResolvedSnapshot,
+        changed: Option<&ChangedNames>,
+    ) -> Vec<Name> {
         let mut traits: Vec<Name> = Vec::new();
+        if let Some(changed) = changed {
+            for name in &changed.classes {
+                let old_id = changed.class_ids_before.get(name).copied().flatten();
+                let now_id = self.class_ids.get(name.as_str()).copied();
+                for used in old_id
+                    .and_then(|id| changed.class_declarations_before.get(&id))
+                    .into_iter()
+                    .flat_map(|declaration| declaration.uses.iter())
+                    .chain(
+                        now_id
+                            .and_then(|id| self.class_by_id(id))
+                            .into_iter()
+                            .flat_map(|declaration| declaration.uses.iter()),
+                    )
+                {
+                    if !traits.contains(used) {
+                        traits.push(used.clone());
+                    }
+                }
+            }
+        }
         let result_changes = self.changed_class_results(before);
         for (id, _) in result_changes {
             let old = before
@@ -2008,7 +2095,8 @@ impl Registry {
                 .cmp(&right.class)
                 .then_with(|| left.member.cmp(&right.member))
         });
-        writer.section(EFFECTS, &stub_cache::encode(&effects)?)?;
+        let encoded_effects = writer.encode(&effects)?;
+        writer.section(EFFECTS, &encoded_effects)?;
         self.ancestor_names_for_cache()
             .store(writer, "table:ancestor_names")?;
         self.member_owners_for_cache()
@@ -2033,11 +2121,38 @@ impl Registry {
             .store(writer, CLASS_REFERENCES)?;
         self.imported_type_aliases_for_cache()
             .store(writer, "table:imported_type_aliases")?;
-        self.classes_for_cache().store(writer, "table:classes")?;
-        self.functions_for_cache()
-            .store(writer, "table:functions")?;
+        // Serialize the selected ID stores directly. Building temporary
+        // name-keyed NameTables here duplicated every declaration solely to
+        // satisfy the old cache shape.
+        let classes: Vec<_> = if self.class_ids.is_empty() {
+            self.classes.iter().collect()
+        } else {
+            self.class_ids
+                .iter()
+                .filter_map(|(name, id)| {
+                    self.class_declarations
+                        .get(id)
+                        .map(|declaration| (name, declaration.as_ref()))
+                })
+                .collect()
+        };
+        name_table::store_entries(writer, "table:classes", classes, true)?;
+        let functions: Vec<_> = if self.function_ids.is_empty() {
+            self.functions.iter().collect()
+        } else {
+            self.function_ids
+                .iter()
+                .filter_map(|(name, id)| {
+                    self.function_declarations
+                        .get(id)
+                        .map(|declaration| (name, declaration.as_ref()))
+                })
+                .collect()
+        };
+        name_table::store_entries(writer, "table:functions", functions, true)?;
         self.store_tables(writer)?;
-        writer.section(REST, &stub_cache::encode(self)?)
+        let rest = writer.encode(self)?;
+        writer.section(REST, &rest)
     }
 
     /// The on-disk cache keeps names stable; runtime hierarchy lookups use
@@ -2056,8 +2171,9 @@ impl Registry {
             .collect()
     }
 
-    /// Stable name-keyed projection used only by the on-disk cache. Runtime
-    /// declaration reads resolve through the selected IDs and Arc stores.
+    /// A name-keyed view used when a frozen base or canonical comparison
+    /// needs to expose the selected declarations as a table. Cache writes
+    /// serialize the ID stores directly.
     fn classes_for_cache(&self) -> NameTable<ClassReflection> {
         if self.class_ids.is_empty() {
             return self.classes.clone();
@@ -2071,7 +2187,8 @@ impl Registry {
         classes
     }
 
-    /// Stable as-built name-keyed function projection for the on-disk cache.
+    /// As-built name-keyed function view for a frozen base or canonical
+    /// comparison. Cache writes serialize the ID store directly.
     fn functions_for_cache(&self) -> FunctionTable {
         if self.function_ids.is_empty() {
             return self.functions.clone();
@@ -2338,13 +2455,17 @@ impl Registry {
     /// The registry `store` wrote, its tables read in place.
     pub(crate) fn load(reader: &container::Reader) -> Result<Registry, String> {
         let rest = reader.section(REST)?;
-        let mut registry: Registry = stub_cache::decode(&reader.buffer()[rest])?;
+        let names = reader.names().clone();
+        let mut registry: Registry = syntax::name::with_cache_name_table(&names, || {
+            stub_cache::decode(&reader.buffer()[rest])
+        })?;
         registry.load_tables(reader)?;
         registry.classes = NameTable::load(reader, "table:classes")?;
         registry.functions = FunctionTable::load(reader, "table:functions")?;
-        registry.effects_cache = Some(stub_cache::decode(
-            &reader.buffer()[reader.section(EFFECTS)?],
-        )?);
+        let effects = reader.section(EFFECTS)?;
+        registry.effects_cache = Some(syntax::name::with_cache_name_table(&names, || {
+            stub_cache::decode(&reader.buffer()[effects])
+        })?);
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
         registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;

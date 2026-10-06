@@ -1,6 +1,7 @@
 //! What a file references, recorded by the parser as it resolves names and
 //! reads doc comments, so no walk of the tree has to find them.
 
+use std::hash::Hasher;
 use std::sync::Arc;
 
 use rustc_hash::FxHashSet;
@@ -82,6 +83,63 @@ impl RefKey {
             RefKey::GlobalVar(_) => 3,
         }
     }
+}
+
+/// Sorts a file's distinct reference keys in a stable, hash-friendly order:
+/// kind, the key's own hash, then its PHP-folded bytes. Equal keys compare
+/// equal under the same rules as `RefKey`'s `Eq` and `Hash` implementations.
+pub fn sort_ref_keys(keys: &mut [RefKey]) {
+    keys.sort_unstable_by(|a, b| {
+        let mut ah = rustc_hash::FxHasher::default();
+        let mut bh = rustc_hash::FxHasher::default();
+        std::hash::Hash::hash(a, &mut ah);
+        std::hash::Hash::hash(b, &mut bh);
+        a.tag()
+            .cmp(&b.tag())
+            .then_with(|| ah.finish().cmp(&bh.finish()))
+            .then_with(|| ref_key_folded_cmp(a, b))
+    });
+}
+
+pub fn ref_keys_are_sorted(keys: &[RefKey]) -> bool {
+    keys.windows(2).all(|pair| {
+        pair[0].tag() < pair[1].tag()
+            || (pair[0].tag() == pair[1].tag()
+                && ref_key_order_cmp(&pair[0], &pair[1]) != std::cmp::Ordering::Greater)
+    })
+}
+
+fn ref_key_order_cmp(a: &RefKey, b: &RefKey) -> std::cmp::Ordering {
+    use std::hash::{Hash, Hasher};
+    let mut ah = rustc_hash::FxHasher::default();
+    let mut bh = rustc_hash::FxHasher::default();
+    a.hash(&mut ah);
+    b.hash(&mut bh);
+    ah.finish()
+        .cmp(&bh.finish())
+        .then_with(|| ref_key_folded_cmp(a, b))
+}
+
+fn ref_key_folded_cmp(a: &RefKey, b: &RefKey) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (RefKey::Class(a), RefKey::Class(b)) | (RefKey::Function(a), RefKey::Function(b)) => {
+            a.lower().as_bytes().cmp(b.lower().as_bytes())
+        }
+        (RefKey::Constant(a), RefKey::Constant(b)) => {
+            let (a_namespace, a_name) = constant_parts(a);
+            let (b_namespace, b_name) = constant_parts(b);
+            cmp_ascii_folded(a_namespace, b_namespace).then_with(|| a_name.cmp(b_name))
+        }
+        (RefKey::GlobalVar(a), RefKey::GlobalVar(b)) => a.as_bytes().cmp(b.as_bytes()),
+        _ => Ordering::Equal,
+    }
+}
+
+fn cmp_ascii_folded(a: &str, b: &str) -> std::cmp::Ordering {
+    a.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(b.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
 /// `name` without a leading `\`.

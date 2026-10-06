@@ -8,6 +8,7 @@ use syntax::name::Name;
 
 use syntax::span::Span;
 
+use crate::file_id::FileId;
 use crate::registry::Registry;
 
 /// The source a declaration was indexed from.
@@ -15,12 +16,15 @@ use crate::registry::Registry;
 // the derived hash.
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Debug, Clone, Default, Eq, Hash)]
-pub enum Origin {
+pub(crate) enum Origin {
     /// Not recorded: a registry built from bare source.
     #[default]
     Unknown,
     /// A project file, analysed or loaded for context.
-    File(Arc<Path>),
+    File(FileId),
+    /// A path for a standalone parse which has not been assigned to a
+    /// project's file table (for example, a front-end dump).
+    Path(Arc<Path>),
     /// A phpstorm-stubs file (its path below the stubs root): a PHP
     /// built-in, of the extension named by its directory.
     Builtin {
@@ -42,6 +46,7 @@ impl PartialEq for Origin {
         match (self, other) {
             (Origin::Unknown, Origin::Unknown) => true,
             (Origin::File(a), Origin::File(b)) => a == b,
+            (Origin::Path(a), Origin::Path(b)) => a == b,
             (
                 Origin::Builtin { file, extension },
                 Origin::Builtin {
@@ -60,7 +65,8 @@ impl PartialEq for Origin {
 #[derive(serde::Serialize, serde::Deserialize)]
 enum OriginData {
     Unknown,
-    File(Arc<Path>),
+    File,
+    Path(Arc<Path>),
     /// The index of the file in `PHPSTORM_STUBS_PATHS`, whose extension is
     /// the one at the same index.
     Builtin(u32),
@@ -101,7 +107,8 @@ impl TryFrom<&Origin> for OriginData {
             std::sync::LazyLock::new(|| embedded_index(stub_sources::PHPSTAN_SRC_PATHS));
         Ok(match origin {
             Origin::Unknown => OriginData::Unknown,
-            Origin::File(path) => OriginData::File(Arc::clone(path)),
+            Origin::File(_) => OriginData::File,
+            Origin::Path(path) => OriginData::Path(Arc::clone(path)),
             Origin::Builtin { file, extension } => {
                 let index = *BUILTIN
                     .get(file)
@@ -126,7 +133,18 @@ impl TryFrom<OriginData> for Origin {
     fn try_from(data: OriginData) -> Result<Origin, String> {
         Ok(match data {
             OriginData::Unknown => Origin::Unknown,
-            OriginData::File(path) => Origin::File(path),
+            OriginData::File => Origin::File(
+                syntax::name::current_cache_name_table()
+                    .and_then(|table| table.context())
+                    .and_then(|context| usize::try_from(context).ok())
+                    .filter(|context| u32::try_from(*context).is_ok())
+                    .map(FileId::new)
+                    .or_else(|| ORIGIN_FILE_ID.with(|id| id.get()))
+                    .ok_or_else(|| {
+                        "a project file origin needs a file-id decode context".to_string()
+                    })?,
+            ),
+            OriginData::Path(path) => Origin::Path(path),
             OriginData::Builtin(index) => Origin::Builtin {
                 file: stub_sources::PHPSTORM_STUBS_PATHS
                     .get(index as usize)
@@ -142,6 +160,25 @@ impl TryFrom<OriginData> for Origin {
             },
         })
     }
+}
+
+thread_local! {
+    static ORIGIN_FILE_ID: std::cell::Cell<Option<FileId>> = const { std::cell::Cell::new(None) };
+}
+
+/// Decodes a per-file cache's project origins against the ID assigned to
+/// that path in the current project. Cache files deliberately store only a
+/// file-origin marker, never a project-local ID that could be stale next run.
+pub(crate) fn with_origin_file_id<R>(id: FileId, f: impl FnOnce() -> R) -> R {
+    struct Restore(Option<FileId>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ORIGIN_FILE_ID.with(|slot| slot.set(self.0));
+        }
+    }
+    let previous = ORIGIN_FILE_ID.with(|slot| slot.replace(Some(id)));
+    let _restore = Restore(previous);
+    f()
 }
 
 /// An embedded stub file's extension, as the embedded table holds it.
@@ -171,7 +208,7 @@ pub struct Provenance {
 }
 
 impl Provenance {
-    pub fn new(origin: Origin, span: Span) -> Provenance {
+    pub(crate) fn new(origin: Origin, span: Span) -> Provenance {
         Provenance {
             origin,
             span,
@@ -180,7 +217,7 @@ impl Provenance {
     }
 
     /// A member's, declared by `class`.
-    pub fn member(origin: Origin, span: Span, class: Name) -> Provenance {
+    pub(crate) fn member(origin: Origin, span: Span, class: Name) -> Provenance {
         Provenance {
             origin,
             span,
@@ -188,15 +225,23 @@ impl Provenance {
         }
     }
 
-    pub fn origin(&self) -> &Origin {
+    pub(crate) fn origin(&self) -> &Origin {
         &self.origin
     }
 
     /// The project file declaring it; `None` for a built-in, PHPStan's
     /// own source, or an unrecorded origin.
-    pub fn file(&self) -> Option<&Path> {
+    pub(crate) fn file_id(&self) -> Option<FileId> {
         match &self.origin {
-            Origin::File(path) => Some(path),
+            Origin::File(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// An unnumbered standalone parse's path, when it has one.
+    pub(crate) fn path(&self) -> Option<&Path> {
+        match &self.origin {
+            Origin::Path(path) => Some(path),
             _ => None,
         }
     }
@@ -226,29 +271,29 @@ impl Provenance {
     }
 
     /// The project file declaring it, and its name's span there.
-    fn in_file(&self) -> Option<(&Path, Span)> {
-        self.file().map(|file| (file, self.span))
+    fn in_file(&self) -> Option<(FileId, Span)> {
+        self.file_id().map(|file| (file, self.span))
     }
 }
 
 impl Registry {
     /// Where a project file declares class-like `fqn`.
-    pub fn class_declaration(&self, fqn: &str) -> Option<(&Path, Span)> {
+    pub(crate) fn class_declaration(&self, fqn: &str) -> Option<(FileId, Span)> {
         self.class(fqn)?.2.provenance.in_file()
     }
 
     /// Where a project file declares function `fqn`.
-    pub fn function_declaration(&self, fqn: &str) -> Option<(&Path, Span)> {
+    pub(crate) fn function_declaration(&self, fqn: &str) -> Option<(FileId, Span)> {
         self.function(fqn)?.2.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s method `name`.
-    pub fn method_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub(crate) fn method_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.class(owner)?.2.methods.get(name)?.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s property `name`.
-    pub fn property_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub(crate) fn property_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.class(owner)?
             .2
             .properties
@@ -258,13 +303,13 @@ impl Registry {
     }
 
     /// Where a project file declares `owner`'s constant or enum case `name`.
-    pub fn constant_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub(crate) fn constant_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.class(owner)?.2.consts.get(name)?.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s member `name` of unknown
     /// kind: a constant or enum case, else a property, else a method.
-    pub fn member_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub(crate) fn member_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.constant_declaration(owner, name)
             .or_else(|| self.property_declaration(owner, name))
             .or_else(|| self.method_declaration(owner, name))
@@ -335,7 +380,8 @@ syntax::canonical_struct!(Provenance {
 
 syntax::canonical_enum!(Origin {
     Unknown,
-    File(path),
+    File(id),
+    Path(path),
     Builtin { file, extension },
     Phpstan { file },
 });

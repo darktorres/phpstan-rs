@@ -38,15 +38,9 @@ use super::use_sites::RefTarget;
 use super::{Arc, ParsedFile};
 use crate::deps::RefKey;
 use crate::pest_config::PestFacts;
-use crate::registry::{BuiltDecl, FileBodies, GlobalFacts};
-
-/// The build's source hash: an entry carries it in its path.
-const BUILD: &str = env!("PHPSTAN_RS_SOURCE_HASH");
-
-const MAGIC: [u8; 8] = *b"PRSFILE1";
-
-/// Magic, the payload's length, its checksum.
-const HEADER_LEN: usize = 8 + 8 + 4;
+use crate::registry::{
+    BuiltDecl, CacheReader, CacheUnreadable, CacheWriter, FileBodies, GlobalFacts,
+};
 
 /// How large the cache may grow, in megabytes, unless
 /// `PHPSTAN_RS_FILE_CACHE_MB` says otherwise.
@@ -67,7 +61,11 @@ fn directory() -> Option<&'static Path> {
             if std::env::var_os("PHPSTAN_RS_NO_FILE_CACHE").is_some() {
                 return None;
             }
-            Some(crate::registry::cache_dir()?.join("files").join(BUILD))
+            Some(
+                crate::registry::cache_dir()?
+                    .join("files")
+                    .join(crate::registry::cache_key()),
+            )
         })
         .as_deref()
 }
@@ -95,6 +93,24 @@ pub(super) struct CachedFile {
     facts: FileFacts,
     line_index: Arc<LineIndex>,
     class_fn_refs: Option<Vec<(Span, RefTarget)>>,
+    /// Runtime-only identity for the cache's single project-file origin.
+    #[serde(skip, default)]
+    origin_file_id: Option<crate::file_id::FileId>,
+}
+
+fn encode_cached_file(cached: &CachedFile) -> Result<Vec<u8>, String> {
+    let mut writer = CacheWriter::new();
+    let record = writer.encode(cached)?;
+    writer.section("file", &record)?;
+    Ok(writer.finish())
+}
+
+fn decode_cached_file(reader: &CacheReader) -> Result<CachedFile, String> {
+    let range = reader.section("file")?;
+    let names = reader.names().clone();
+    syntax::name::with_cache_name_table(&names, || {
+        postcard::from_bytes(&reader.buffer()[range]).map_err(|error| error.to_string())
+    })
 }
 
 /// The per-declaration data the registry needs alongside the reflection
@@ -159,14 +175,19 @@ impl From<&BuiltDecl> for CachedBuiltDecl {
 impl CachedFile {
     /// What `parsed`, of a file `len` long, is stored as.
     pub(super) fn of(parsed: &ParsedFile, len: usize) -> CachedFile {
+        let mut references: Vec<_> = parsed.references.iter().cloned().collect();
+        let mut declaration_references: Vec<_> =
+            parsed.declaration_references.iter().cloned().collect();
+        syntax::references::sort_ref_keys(&mut references);
+        syntax::references::sort_ref_keys(&mut declaration_references);
         CachedFile {
             len,
             lex_warnings: parsed.lex_warnings.clone(),
             functions: parsed.functions.clone(),
             classes: parsed.classes.clone(),
             constants: parsed.constants.clone(),
-            references: parsed.references.iter().cloned().collect(),
-            declaration_references: parsed.declaration_references.iter().cloned().collect(),
+            references,
+            declaration_references,
             built_decls: parsed
                 .built_decls
                 .iter()
@@ -183,12 +204,21 @@ impl CachedFile {
             facts: parsed.facts,
             line_index: Arc::clone(&parsed.line_index),
             class_fn_refs: parsed.class_fn_refs.clone(),
+            origin_file_id: parsed.built_decls.iter().find_map(|decl| match decl {
+                BuiltDecl::Class { info, .. } => info.provenance().file_id(),
+                BuiltDecl::Function { sig, .. } => sig.provenance().file_id(),
+                BuiltDecl::GlobalConst { .. } => None,
+            }),
         }
     }
 
     /// The parse of the file at `path` this was stored from, without its
     /// tree and its ignore comments, which only an analysed file reads.
     pub(super) fn into_parsed(self, path: &Path, content_hash: ContentHash) -> Option<ParsedFile> {
+        debug_assert!(syntax::references::ref_keys_are_sorted(&self.references));
+        debug_assert!(syntax::references::ref_keys_are_sorted(
+            &self.declaration_references
+        ));
         let references: FxHashSet<RefKey> = self.references.into_iter().collect();
         let declaration_references: FxHashSet<RefKey> =
             self.declaration_references.into_iter().collect();
@@ -261,7 +291,6 @@ impl CachedFile {
             duplicate_class_sites: self.duplicate_class_sites,
             bodies: self.bodies,
             global_facts: self.global_facts,
-            origin_path: Arc::from(path),
             facts: self.facts,
             line_index: self.line_index,
             class_fn_refs: self.class_fn_refs,
@@ -299,19 +328,26 @@ pub(super) fn key(bytes: &[u8], path: &Path, is_stub: bool, index_use_sites: boo
 }
 
 /// The entry under `key`, when there is one that is whole.
-pub(super) fn load(key: &Key) -> Option<CachedFile> {
-    let mut file = fs::File::open(&key.file).ok()?;
-    let modified = file.metadata().ok().and_then(|m| m.modified().ok());
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes).ok()?;
-    let payload = payload(&bytes)?;
-    match postcard::from_bytes::<CachedFile>(payload) {
+pub(super) fn load(key: &Key, file_id: crate::file_id::FileId) -> Option<CachedFile> {
+    let modified = fs::metadata(&key.file).ok().and_then(|m| m.modified().ok());
+    let mut reader = match CacheReader::open(&key.file) {
+        Ok(reader) => reader,
+        Err(CacheUnreadable::Damaged) => return None,
+        Err(CacheUnreadable::Inconsistent(reason)) => {
+            eprintln!("phpstan-rs: the stored file cache is inconsistent ({reason}); reparsing");
+            return None;
+        }
+    };
+    reader.set_cache_context(file_id.index() as u64);
+    match crate::registry::provenance::with_origin_file_id(file_id, || decode_cached_file(&reader))
+    {
         Ok(cached) => {
             if modified
                 .and_then(|modified| modified.elapsed().ok())
                 .is_some_and(|age| age > REFRESH_AFTER)
             {
-                let _ = file.set_modified(SystemTime::now());
+                let _ =
+                    fs::File::open(&key.file).and_then(|file| file.set_modified(SystemTime::now()));
             }
             Some(cached)
         }
@@ -324,32 +360,25 @@ pub(super) fn load(key: &Key) -> Option<CachedFile> {
     }
 }
 
-/// The payload of an entry that is whole.
-fn payload(bytes: &[u8]) -> Option<&[u8]> {
-    let header = bytes.get(..HEADER_LEN)?;
-    if header[..8] != MAGIC {
-        return None;
-    }
-    let len = u64::from_le_bytes(header[8..16].try_into().ok()?) as usize;
-    let checksum = u32::from_le_bytes(header[16..20].try_into().ok()?);
-    let payload = bytes.get(HEADER_LEN..)?;
-    (payload.len() == len && crc32fast::hash(payload) == checksum).then_some(payload)
-}
-
 /// Stores `cached` under `key`, through a temporary file renamed into place
 /// so a concurrent run never reads a partial entry. A failure leaves the
 /// file to be parsed again next time.
 pub(super) fn store(key: &Key, cached: &CachedFile) {
-    let Ok(payload) = postcard::to_allocvec(cached) else {
+    let Ok(container) = encode_cached_file(cached) else {
         return;
     };
     // What is stored reads back as what was.
     #[cfg(debug_assertions)]
     {
-        let decoded: CachedFile = postcard::from_bytes(&payload).expect("what is stored decodes");
+        let reader = CacheReader::new(container.clone()).expect("what is stored is whole");
+        let decode = || decode_cached_file(&reader).expect("what is stored decodes");
+        let decoded = match cached.origin_file_id {
+            Some(file_id) => crate::registry::provenance::with_origin_file_id(file_id, decode),
+            None => decode(),
+        };
         assert_eq!(
-            postcard::to_allocvec(&decoded).ok().as_deref(),
-            Some(payload.as_slice()),
+            encode_cached_file(&decoded).ok().as_deref(),
+            Some(container.as_slice()),
             "a stored file does not read back as what was stored"
         );
     }
@@ -364,13 +393,8 @@ pub(super) fn store(key: &Key, cached: &CachedFile) {
         std::process::id(),
         std::thread::current().id()
     ));
-    let mut entry = Vec::with_capacity(HEADER_LEN + payload.len());
-    entry.extend_from_slice(&MAGIC);
-    entry.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-    entry.extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
-    entry.extend_from_slice(&payload);
     let written = fs::File::create(&temporary)
-        .and_then(|mut file| file.write_all(&entry))
+        .and_then(|mut file| file.write_all(&container))
         .is_ok();
     if !written || fs::rename(&temporary, &key.file).is_err() {
         let _ = fs::remove_file(&temporary);
@@ -499,25 +523,6 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_is_whole_only_with_its_magic_length_and_checksum() {
-        let payload = b"the payload";
-        let mut entry = Vec::new();
-        entry.extend_from_slice(&MAGIC);
-        entry.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-        entry.extend_from_slice(&crc32fast::hash(payload).to_le_bytes());
-        entry.extend_from_slice(payload);
-        assert_eq!(payload_of(&entry), Some(&payload[..]));
-        assert_eq!(payload_of(&entry[..entry.len() - 1]), None);
-        let mut damaged = entry.clone();
-        *damaged.last_mut().unwrap() ^= 1;
-        assert_eq!(payload_of(&damaged), None);
-        let mut other = entry.clone();
-        other[0] = b'X';
-        assert_eq!(payload_of(&other), None);
-        assert_eq!(payload_of(&[]), None);
-    }
-
-    #[test]
     fn cached_file_round_trip_keeps_declaration_arenas() {
         let source = "<?php class Demo { public int $value; public const int MARK = 1; public function zebra(): void {} public function run(int $n): int {} public function alpha(): void {} } function helper(string $text): bool {} const GLOBAL_MARK = true;";
         let path = Path::new("cache-round-trip.php");
@@ -525,8 +530,9 @@ mod tests {
         let parsed = parse_file_recording(path, source, false, Some(&mut names), None).unwrap();
         let content_hash = parsed.content_hash;
         let cached = CachedFile::of(&parsed, source.len());
-        let bytes = postcard::to_allocvec(&cached).unwrap();
-        let cached: CachedFile = postcard::from_bytes(&bytes).unwrap();
+        let bytes = encode_cached_file(&cached).unwrap();
+        let reader = CacheReader::new(bytes).unwrap();
+        let cached = decode_cached_file(&reader).unwrap();
         let restored = cached.into_parsed(path, content_hash).unwrap();
 
         assert_eq!(restored.file_decls.classes.len(), 1);
@@ -579,7 +585,31 @@ mod tests {
         assert!(mismatched.into_parsed(path, content_hash).is_none());
     }
 
-    fn payload_of(bytes: &[u8]) -> Option<&[u8]> {
-        payload(bytes)
+    #[test]
+    fn cached_project_origins_rebind_to_the_current_file_id() {
+        let source = "<?php class Demo { function zebra(): void {} }";
+        let path = Path::new("cache-origin-id.php");
+        let old_id = crate::file_id::FileId::new(17);
+        let new_id = crate::file_id::FileId::new(3);
+        let parsed = super::super::parse_file_recording_with_file_id(
+            path, source, false, None, None, old_id,
+        )
+        .unwrap();
+        let cached = CachedFile::of(&parsed, source.len());
+        let bytes = encode_cached_file(&cached).unwrap();
+        let mut reader = CacheReader::new(bytes).unwrap();
+        reader.set_cache_context(new_id.index() as u64);
+        let cached = crate::registry::provenance::with_origin_file_id(new_id, || {
+            decode_cached_file(&reader).unwrap()
+        });
+        let restored = cached.into_parsed(path, parsed.content_hash).unwrap();
+        let BuiltDecl::Class { info, .. } = &restored.built_decls[0] else {
+            panic!("the first declaration should be Demo");
+        };
+        assert_eq!(info.provenance().file_id(), Some(new_id));
+        assert_eq!(
+            info.methods().get("zebra").unwrap().provenance().file_id(),
+            Some(new_id)
+        );
     }
 }

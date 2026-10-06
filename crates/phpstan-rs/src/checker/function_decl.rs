@@ -214,8 +214,8 @@ impl<'a> Checker<'a> {
         let slot_file = self
             .registry
             .function_by_name(f.fq_name())
-            .and_then(|slot| slot.provenance().file());
-        let same_file = match (self.current_file.as_deref(), slot_file) {
+            .and_then(|slot| slot.provenance().file_id());
+        let same_file = match (self.current_file_id, slot_file) {
             (Some(current), Some(slot)) => current == slot,
             _ => true,
         };

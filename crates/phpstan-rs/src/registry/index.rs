@@ -8,7 +8,7 @@ use crate::registry::class_info::MemberSpans;
 use crate::registry::guard::{Guard, GuardExpr};
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
-    ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
+    ClassId, ClassReflection, FnId, FunctionReflection, folded_key, function_key, infer_const_type,
 };
 use syntax::ast::{Expr, Stmt, Visibility};
 use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
@@ -545,6 +545,373 @@ impl Registry {
         }
     }
 
+    /// Reduces declarations independently by their own case-folded symbol
+    /// key. Each key keeps source order within its group; unrelated class
+    /// and function names are resolved on worker threads and their disjoint
+    /// final slots are applied after the parallel phase.
+    pub(crate) fn insert_built_declarations_batch(
+        &mut self,
+        declarations: Vec<(BuiltDecl, bool, Option<u32>, Option<u32>)>,
+    ) {
+        use rayon::prelude::*;
+        use std::hash::{Hash, Hasher};
+
+        const SHARDS: usize = 32;
+        const SHARD_BITS: u32 = 5;
+        type Input = (usize, BuiltDecl, bool, Option<u32>, Option<u32>);
+        let per_worker: Vec<[Vec<Input>; SHARDS]> = declarations
+            .into_par_iter()
+            .enumerate()
+            .fold(
+                || std::array::from_fn(|_| Vec::new()),
+                |mut buckets, (order, (declaration, analyzed, class_local, function_local))| {
+                    let (kind, name) = match &declaration {
+                        BuiltDecl::Class { name, .. } => (b'c', name),
+                        BuiltDecl::Function { name, .. } => (b'f', name),
+                        BuiltDecl::GlobalConst { .. } => {
+                            panic!("global constants use their own batched merge")
+                        }
+                    };
+                    let mut hasher = rustc_hash::FxHasher::default();
+                    kind.hash(&mut hasher);
+                    name.lower().hash(&mut hasher);
+                    let shard = (hasher.finish() >> (u64::BITS - SHARD_BITS)) as usize;
+                    buckets[shard].push((
+                        order,
+                        declaration,
+                        analyzed,
+                        class_local,
+                        function_local,
+                    ));
+                    buckets
+                },
+            )
+            .collect();
+        let mut buckets: [Vec<Input>; SHARDS] = std::array::from_fn(|_| Vec::new());
+        for mut worker_buckets in per_worker {
+            for (bucket, worker_bucket) in buckets.iter_mut().zip(&mut worker_buckets) {
+                bucket.append(worker_bucket);
+            }
+        }
+
+        enum Update {
+            Class {
+                name: Name,
+                id: ClassId,
+                declaration: Arc<ClassReflection>,
+                unconditional: bool,
+                changed: bool,
+            },
+            Function {
+                name: Name,
+                id: FnId,
+                declaration: Arc<FunctionReflection>,
+                unconditional: bool,
+                stub_provided: bool,
+                site: Option<Option<u32>>,
+                changed: bool,
+            },
+        }
+
+        let updates: Vec<Vec<Update>> = buckets
+            .into_par_iter()
+            .map(|mut entries| {
+                entries.sort_unstable_by_key(|entry| entry.0);
+                let mut groups: FxHashMap<(u8, String), Vec<Input>> = FxHashMap::default();
+                for entry in entries {
+                    let (kind, name) = match &entry.1 {
+                        BuiltDecl::Class { name, .. } => (b'c', name),
+                        BuiltDecl::Function { name, .. } => (b'f', name),
+                        BuiltDecl::GlobalConst { .. } => unreachable!(),
+                    };
+                    groups
+                        .entry((kind, name.lower().to_owned()))
+                        .or_default()
+                        .push(entry);
+                }
+
+                groups
+                    .into_iter()
+                    .map(|((kind, _), mut entries)| {
+                        entries.sort_unstable_by_key(|entry| entry.0);
+                        let name = match &entries[0].1 {
+                            BuiltDecl::Class { name, .. } | BuiltDecl::Function { name, .. } => {
+                                name.clone()
+                            }
+                            BuiltDecl::GlobalConst { .. } => unreachable!(),
+                        };
+                        let mut isolated = if kind == b'c' {
+                            self.isolated_class_slot(&name)
+                        } else {
+                            self.isolated_function_slot(&name)
+                        };
+                        for (_, declaration, analyzed, class_local, function_local) in entries {
+                            isolated.insert_built_decl_with_ids(
+                                declaration,
+                                analyzed,
+                                class_local,
+                                function_local,
+                            );
+                        }
+
+                        if kind == b'c' {
+                            let Some(id) = isolated.class_ids.get(&name).copied() else {
+                                return None;
+                            };
+                            let Some(declaration) = isolated.class_declarations.get(&id).cloned()
+                            else {
+                                return None;
+                            };
+                            Some(Update::Class {
+                                name: name.clone(),
+                                id,
+                                declaration,
+                                unconditional: isolated
+                                    .unconditionally_declared_classes
+                                    .contains(&name),
+                                changed: isolated.changed.classes.contains(name.lower()),
+                            })
+                        } else {
+                            let Some(id) = isolated.function_ids.get(&name).copied() else {
+                                return None;
+                            };
+                            let Some(declaration) =
+                                isolated.function_declarations.get(&id).cloned()
+                            else {
+                                return None;
+                            };
+                            let folded = function_key(name.as_str());
+                            Some(Update::Function {
+                                name: name.clone(),
+                                id,
+                                declaration,
+                                unconditional: isolated
+                                    .unconditionally_declared_functions
+                                    .contains(folded.as_ref()),
+                                stub_provided: isolated
+                                    .stub_provided_functions
+                                    .contains(folded.as_ref()),
+                                site: isolated.function_decl_sites.get(folded.as_ref()).copied(),
+                                changed: isolated.changed.functions.contains(name.lower()),
+                            })
+                        }
+                    })
+                    .flatten()
+                    .collect()
+            })
+            .collect();
+
+        for update in updates.into_iter().flatten() {
+            match update {
+                Update::Class {
+                    name,
+                    id,
+                    declaration,
+                    unconditional,
+                    changed,
+                } => {
+                    if changed {
+                        self.record_changed_class(&name);
+                    }
+                    self.class_ids.insert(name.clone(), id);
+                    self.class_declarations.insert(id, declaration.clone());
+                    if id.source() == Some(crate::registry::IdSource::Project) {
+                        if self.project_class_names.len() <= id.local() as usize {
+                            self.project_class_names
+                                .resize_with(id.local() as usize + 1, || None);
+                        }
+                        self.project_class_names[id.local() as usize] = Some(name.clone());
+                    }
+                    self.classes.remove(name.as_str());
+                    if unconditional {
+                        self.unconditionally_declared_classes.insert(name.clone());
+                    } else {
+                        self.unconditionally_declared_classes.remove(name.as_str());
+                    }
+                    if changed {
+                        self.ensure_property_topology(id);
+                    }
+                }
+                Update::Function {
+                    name,
+                    id,
+                    declaration,
+                    unconditional,
+                    stub_provided,
+                    site,
+                    changed,
+                } => {
+                    if changed {
+                        self.record_changed_function(&name);
+                    }
+                    self.function_ids.insert(name.clone(), id);
+                    self.function_declarations.insert(id, declaration);
+                    if id.source() == Some(crate::registry::IdSource::Project) {
+                        if self.project_function_names.len() <= id.local() as usize {
+                            self.project_function_names
+                                .resize_with(id.local() as usize + 1, || None);
+                        }
+                        self.project_function_names[id.local() as usize] = Some(name.clone());
+                    }
+                    self.functions.remove(name.as_str());
+                    let folded = folded_key(&name);
+                    if unconditional {
+                        self.unconditionally_declared_functions
+                            .insert(folded.clone());
+                    } else {
+                        self.unconditionally_declared_functions
+                            .remove(folded.as_str());
+                    }
+                    if stub_provided {
+                        self.stub_provided_functions.insert(folded.clone());
+                    } else {
+                        self.stub_provided_functions.remove(folded.as_str());
+                    }
+                    match site {
+                        Some(site) => {
+                            self.function_decl_sites.insert(folded, site);
+                        }
+                        None => {
+                            self.function_decl_sites.remove(folded.as_str());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn isolated_class_slot(&self, name: &Name) -> Registry {
+        let mut isolated = Registry::default();
+        isolated.php_versions = self.php_versions;
+        isolated.id_generation = self.id_generation;
+        isolated.resolved_declarations = self.resolved_declarations;
+        if let Some(id) = self.class_ids.get(name).copied() {
+            isolated.class_ids.insert(name.clone(), id);
+            if let Some(declaration) = self.classes.get_shared(name) {
+                isolated.class_declarations.insert(id, declaration.clone());
+                isolated.classes.insert_shared(name.clone(), declaration);
+            }
+            if id.source() == Some(crate::registry::IdSource::Project) {
+                isolated
+                    .project_class_names
+                    .resize_with(id.local() as usize + 1, || None);
+                isolated.project_class_names[id.local() as usize] = Some(name.clone());
+            }
+        }
+        if self.unconditionally_declared_classes.contains(name) {
+            isolated
+                .unconditionally_declared_classes
+                .insert(name.clone());
+        }
+        if self.built_in_stub_classes.contains_key(name) {
+            isolated.built_in_stub_classes.insert(name.clone(), ());
+        }
+        isolated
+    }
+
+    fn isolated_function_slot(&self, name: &Name) -> Registry {
+        let mut isolated = Registry::default();
+        isolated.php_versions = self.php_versions;
+        isolated.id_generation = self.id_generation;
+        isolated.resolved_declarations = self.resolved_declarations;
+        let folded = function_key(name.as_str());
+        if let Some(id) = self.function_ids.get(name).copied() {
+            isolated.function_ids.insert(name.clone(), id);
+            if let Some(declaration) = self.functions.get_shared(name) {
+                isolated
+                    .function_declarations
+                    .insert(id, declaration.clone());
+                isolated.functions.insert_shared(name.clone(), declaration);
+            }
+            if id.source() == Some(crate::registry::IdSource::Project) {
+                isolated
+                    .project_function_names
+                    .resize_with(id.local() as usize + 1, || None);
+                isolated.project_function_names[id.local() as usize] = Some(name.clone());
+            }
+        }
+        if self
+            .unconditionally_declared_functions
+            .contains(folded.as_ref())
+        {
+            isolated
+                .unconditionally_declared_functions
+                .insert(folded_key(name));
+        }
+        if self.stub_provided_functions.contains(folded.as_ref()) {
+            isolated.stub_provided_functions.insert(folded_key(name));
+        }
+        if let Some(site) = self.function_decl_sites.get(folded.as_ref()).copied() {
+            isolated.function_decl_sites.insert(folded_key(name), site);
+        }
+        isolated
+    }
+
+    /// Merges a load's global constants by name in parallel. Constant
+    /// collisions use the associative "any disagreement becomes Mixed"
+    /// policy, so independent names can be reduced in their own hash shard
+    /// before each final value is applied to the Registry.
+    pub(crate) fn insert_built_global_constants_batch(&mut self, declarations: Vec<BuiltDecl>) {
+        use rayon::prelude::*;
+
+        const SHARDS: usize = 32;
+        const SHARD_BITS: u32 = 5;
+        let php_versions = self.php_versions;
+        let per_worker: Vec<[Vec<(Name, Type)>; SHARDS]> = declarations
+            .into_par_iter()
+            .fold(
+                || std::array::from_fn(|_| Vec::new()),
+                |mut buckets, declaration| {
+                    let BuiltDecl::GlobalConst { name, guard, ty } = declaration else {
+                        return buckets;
+                    };
+                    if guard
+                        .as_ref()
+                        .is_some_and(|guard| matches!(guard.on(php_versions), Guard::Never))
+                    {
+                        return buckets;
+                    }
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = rustc_hash::FxHasher::default();
+                    name.hash(&mut hasher);
+                    let shard = (hasher.finish() >> (u64::BITS - SHARD_BITS)) as usize;
+                    buckets[shard].push((name, ty));
+                    buckets
+                },
+            )
+            .collect();
+        let mut buckets: [Vec<(Name, Type)>; SHARDS] = std::array::from_fn(|_| Vec::new());
+        for mut worker_buckets in per_worker {
+            for (bucket, worker_bucket) in buckets.iter_mut().zip(&mut worker_buckets) {
+                bucket.append(worker_bucket);
+            }
+        }
+        let merged: Vec<Vec<(Name, Type)>> = buckets
+            .into_par_iter()
+            .map(|entries| {
+                let mut values: FxHashMap<Name, Type> = FxHashMap::default();
+                values.reserve(entries.len());
+                for (name, ty) in entries {
+                    match values.get_mut(&name) {
+                        Some(existing) if *existing == ty && !ty.is_mixed() => {}
+                        Some(existing) => *existing = Type::mixed(),
+                        None => {
+                            values.insert(name, ty);
+                        }
+                    }
+                }
+                values.into_iter().collect()
+            })
+            .collect();
+
+        for shard in merged {
+            for (name, ty) in shard {
+                self.record_changed_constant(&name);
+                register_global_constant(&mut self.global_constants, name, ty);
+            }
+        }
+    }
+
     /// Indexes `names_with_assert_tags` from the resolved declarations:
     /// the base's names, and the bare name of each function and the name
     /// of each method the registry holds itself whose `assert` list is not
@@ -637,6 +1004,57 @@ impl Registry {
         }
         self.phpstan_class_files
             .insert(name.to_string(), path.to_path_buf());
+    }
+
+    /// Records PHPStan declarations from a full load. Entries are grouped
+    /// by their own name hash, reduced in source load order within each
+    /// shard, then applied as independent name updates.
+    pub(crate) fn record_phpstan_class_files_batch(
+        &mut self,
+        declarations: Vec<(u64, u32, Name, std::path::PathBuf)>,
+    ) {
+        use rayon::prelude::*;
+        use std::hash::{Hash, Hasher};
+
+        const SHARDS: usize = 32;
+        const SHARD_BITS: u32 = 5;
+        let per_worker: Vec<[Vec<(u64, u32, Name, std::path::PathBuf)>; SHARDS]> = declarations
+            .into_par_iter()
+            .fold(
+                || std::array::from_fn(|_| Vec::new()),
+                |mut buckets, declaration| {
+                    let mut hasher = rustc_hash::FxHasher::default();
+                    declaration.2.hash(&mut hasher);
+                    let shard = (hasher.finish() >> (u64::BITS - SHARD_BITS)) as usize;
+                    buckets[shard].push(declaration);
+                    buckets
+                },
+            )
+            .collect();
+        let mut buckets: [Vec<(u64, u32, Name, std::path::PathBuf)>; SHARDS] =
+            std::array::from_fn(|_| Vec::new());
+        for mut worker_buckets in per_worker {
+            for (bucket, worker_bucket) in buckets.iter_mut().zip(&mut worker_buckets) {
+                bucket.append(worker_bucket);
+            }
+        }
+        let reduced: Vec<Vec<(Name, std::path::PathBuf)>> = buckets
+            .into_par_iter()
+            .map(|mut entries| {
+                entries
+                    .sort_unstable_by_key(|(load_order, sequence, _, _)| (*load_order, *sequence));
+                let mut latest: FxHashMap<Name, std::path::PathBuf> = FxHashMap::default();
+                for (_, _, name, path) in entries {
+                    latest.insert(name, path);
+                }
+                latest.into_iter().collect()
+            })
+            .collect();
+        for shard in reduced {
+            for (name, path) in shard {
+                self.phpstan_class_files.insert(name, path);
+            }
+        }
     }
 
     /// User-defined symbols always win: a stub only fills in a name that
@@ -1040,4 +1458,103 @@ fn better_conditional_function_declaration(
         return true;
     }
     conditional_declaration_may_replace_stub(new_sig, existing)
+}
+
+#[cfg(test)]
+mod phpstan_class_file_batch_tests {
+    use super::*;
+
+    #[test]
+    fn phpstan_class_file_batch_keeps_the_last_source_in_load_order() {
+        let name = Name::from("PHPStan\\Rules\\Rule");
+        let mut registry = Registry::default();
+        registry.record_phpstan_class_files_batch(vec![
+            (1, 0, name.clone(), "context.php".into()),
+            (4, 0, name.clone(), "later.php".into()),
+            (3, 0, name.clone(), "middle.php".into()),
+        ]);
+
+        assert_eq!(
+            registry.phpstan_class_files.get(&name),
+            Some(&std::path::PathBuf::from("later.php"))
+        );
+    }
+}
+
+#[cfg(test)]
+mod declaration_batch_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn sharded_declaration_merge_matches_load_order_winners_and_overloads() {
+        let parsed = [
+            crate::project::parse_file(
+                Path::new("context.php"),
+                "<?php class Shared { public function fromContext(): void {} } function target(string $value): string {} class ContextOnly {}",
+                false,
+            )
+            .unwrap(),
+            crate::project::parse_file(
+                Path::new("analyzed.php"),
+                "<?php class Shared { public function fromAnalyzed(): void {} } function target(int $value): int {} class AnalyzedOnly {}",
+                false,
+            )
+            .unwrap(),
+        ];
+
+        let mut next_class = 0u32;
+        let mut next_function = 0u32;
+        let mut declarations = Vec::new();
+        for (file, parsed) in parsed.iter().enumerate() {
+            for declaration in &parsed.built_decls {
+                let (class_local, function_local) = match declaration {
+                    BuiltDecl::Class { .. } => {
+                        let local = next_class;
+                        next_class += 1;
+                        (Some(local), None)
+                    }
+                    BuiltDecl::Function { .. } => {
+                        let local = next_function;
+                        next_function += 1;
+                        (None, Some(local))
+                    }
+                    BuiltDecl::GlobalConst { .. } => (None, None),
+                };
+                declarations.push((declaration.clone(), file == 1, class_local, function_local));
+            }
+        }
+
+        let mut serial = Registry::default();
+        for (declaration, analyzed, class_local, function_local) in &declarations {
+            serial.insert_built_decl_with_ids(
+                declaration.clone(),
+                *analyzed,
+                *class_local,
+                *function_local,
+            );
+        }
+        let mut batched = Registry::default();
+        batched.insert_built_declarations_batch(declarations);
+
+        for name in ["Shared", "ContextOnly", "AnalyzedOnly"] {
+            assert_eq!(serial.class_id(name), batched.class_id(name));
+            assert_eq!(serial.class_by_name(name), batched.class_by_name(name));
+        }
+        assert_eq!(serial.function_id("target"), batched.function_id("target"));
+        assert_eq!(
+            serial.function_by_name("target"),
+            batched.function_by_name("target")
+        );
+        assert_eq!(
+            serial.function_decl_sites.get("target"),
+            batched.function_decl_sites.get("target")
+        );
+        assert_eq!(
+            serial.unconditionally_declared_functions.contains("target"),
+            batched
+                .unconditionally_declared_functions
+                .contains("target")
+        );
+    }
 }

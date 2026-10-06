@@ -640,8 +640,8 @@ impl Project {
             .classes_by_id()
             .filter(|(_, _, info)| {
                 info.provenance()
-                    .file()
-                    .and_then(|path| self.files.get(path))
+                    .file_id()
+                    .and_then(|id| self.files.get_by_id(id))
                     .is_some_and(|f| f.analyzed)
             })
             .filter(|(_, _, info)| info.kind() == ClassKind::Class && !info.is_abstract())
