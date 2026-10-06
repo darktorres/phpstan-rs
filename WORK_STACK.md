@@ -231,7 +231,7 @@ memory. What it gathered beyond that, new checks and changes to what the
 analysis finds that the optimization does not need, is deferred until after
 O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
-- **State: building, item 4.3.** Items 0-2 are closed. Item 3's
+- **State: building, item 4.5.** Items 0-2 are closed. Item 3's
   implementation is done (3.1-3.2); its validation at 3.V passed the gate
   workspace build, workspace tests, and the scoped and all-on oracle corpus
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
@@ -289,11 +289,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   the decoded class. Raw hierarchy lookups for properties and constants use
   these exact-case per-file indexes when available. The focused locator test,
   full library suite (1,137 tests), library check, and Clippy pass.
-  Row 4.4 is also complete: declaration IDs carry a generation, base switches
+  Rows 4.3 and 4.4 are complete: the file arena/cache path, locators and raw
+  declaration/member/property/constant reads are in place (`a8ff7ef3` closes
+  4.3; the previously resolved name tables stay compatibility storage until
+  rows 4.6-4.8). Declaration IDs carry a generation, base switches
   increment the registry generation and retag the replacement's IDs, and
-  debug reads reject stale IDs. The focused stale-ID test and all 1,139
+  debug reads reject stale IDs (`ac7ff5f9`). The focused stale-ID test and all 1,139
   library tests pass; the library check and Clippy pass. Row 4.3 remains open
-  while resolved registry storage and pass outputs are migrated.
+  at the broader item validation row 4.V, which follows 4.8.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
