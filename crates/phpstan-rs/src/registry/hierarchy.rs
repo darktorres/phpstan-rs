@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use crate::registry::name_table::TableKey;
 use crate::registry::{
-    ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
+    ClassId, ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
 };
 use crate::registry::{Lazy, NameTable, Registry};
 use syntax::ast::ClassKind;
@@ -144,8 +144,8 @@ impl Registry {
     /// Known for the classes the passes have been over, which is every
     /// class a project declares.
     pub(crate) fn class_has_phpstan_ancestry(&self, class: &str) -> bool {
-        let class = self.lookup_class(class).map_or(class, |(k, _)| k);
-        self.phpstan_ancestry.contains_key(class)
+        self.class(class)
+            .is_some_and(|(id, ..)| self.phpstan_ancestry.contains(&id))
     }
 
     /// Rebuilds `self.ancestor_names` (see `is_subclass_of`) from
@@ -171,15 +171,15 @@ impl Registry {
                 )
             })
             .collect();
-        let with_phpstan_ancestry = |entries: &[(Name, NameSet, bool)]| {
+        let with_phpstan_ancestry = |registry: &Registry, entries: &[(Name, NameSet, bool)]| {
             entries
                 .iter()
                 .filter(|(_, _, reaches)| *reaches)
-                .map(|(name, ..)| (name.clone(), ()))
-                .collect::<NameTable<()>>()
+                .filter_map(|(name, ..)| registry.class_ids.get(name).copied())
+                .collect::<FxHashSet<ClassId>>()
         };
         if self.scope.is_all() {
-            self.phpstan_ancestry = with_phpstan_ancestry(&ancestor_names);
+            self.phpstan_ancestry = with_phpstan_ancestry(self, &ancestor_names);
             let ancestor_names = ancestor_names
                 .into_iter()
                 .map(|(name, ancestors, _)| (name, ancestors));
@@ -188,16 +188,20 @@ impl Registry {
             self.trait_users = NameTable::default();
             self.recorded_parents = NameTable::default();
         } else {
+            let active_ids: FxHashSet<ClassId> = self.class_ids.values().copied().collect();
+            self.phpstan_ancestry.retain(|id| active_ids.contains(id));
             for name in self.scoped_removed_class_keys() {
                 self.ancestor_names.remove(&name);
-                self.phpstan_ancestry.remove(&name);
                 self.unrecord_parents(&name);
             }
             for (name, ancestors, reaches) in ancestor_names {
+                let Some(id) = self.class_ids.get(&name).copied() else {
+                    continue;
+                };
                 if reaches {
-                    self.phpstan_ancestry.insert(name.clone(), ());
+                    self.phpstan_ancestry.insert(id);
                 } else {
-                    self.phpstan_ancestry.remove(&name);
+                    self.phpstan_ancestry.remove(&id);
                 }
                 self.ancestor_names.insert(name, ancestors);
             }

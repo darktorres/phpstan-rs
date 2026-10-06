@@ -478,7 +478,7 @@ impl CanonicalOver for Registry {
             names_with_assert_tags,
             base_assert_tagged,
             ancestor_names,
-            phpstan_ancestry,
+            phpstan_ancestry: _,
             subtype_children,
             trait_users,
             recorded_parents,
@@ -565,10 +565,6 @@ impl CanonicalOver for Registry {
                     &Over(ancestor_names, &base.ancestor_names, compare),
                 ),
                 (
-                    "phpstan_ancestry",
-                    &Over(phpstan_ancestry, &base.phpstan_ancestry, compare),
-                ),
-                (
                     "subtype_children",
                     &Over(subtype_children, &base.subtype_children, compare),
                 ),
@@ -632,7 +628,6 @@ canonical_struct!(Registry {
     names_with_assert_tags,
     base_assert_tagged,
     ancestor_names,
-    phpstan_ancestry,
     subtype_children,
     trait_users,
     recorded_parents,
@@ -646,6 +641,7 @@ canonical_struct!(Registry {
 } skip {
     id_generation,
     purity_results,
+    phpstan_ancestry,
     class_ids,
     project_class_names,
     project_class_decls,

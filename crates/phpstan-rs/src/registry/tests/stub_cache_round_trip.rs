@@ -94,7 +94,6 @@ fn every_stored_table_reads_back_with_its_names_and_values() {
     same_table!(
         built_in_stub_classes,
         ancestor_names,
-        phpstan_ancestry,
         subtype_children,
         trait_users,
         recorded_parents,
