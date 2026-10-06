@@ -231,7 +231,7 @@ memory. What it gathered beyond that, new checks and changes to what the
 analysis finds that the optimization does not need, is deferred until after
 O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
-- **State: building, item 4.5.** Items 0-2 are closed. Item 3's
+- **State: building, item 4.6.** Items 0-2 are closed. Item 3's
   implementation is done (3.1-3.2); its validation at 3.V passed the gate
   workspace build, workspace tests, and the scoped and all-on oracle corpus
   runs. The fixture suite reported 3,857 passed and 50 failed, matching the
@@ -297,11 +297,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   debug reads reject stale IDs (`ac7ff5f9`). The focused stale-ID test and all 1,139
   library tests pass; the library check and Clippy pass. Item validation row
   4.V follows 4.8.
-  Item 4.5 has started: raw direct-method lookups now resolve a typed
-  `MethodRef` `(ClassId, slot)` over the declaration-ordered file member
-  range (`9ae10e46`). The focused locator test, all 1,139 library tests,
-  library check, and Clippy pass. Trait-composed methods and aliases still
-  need their resolved per-class member lists.
+  Item 4.5 is complete (`9ae10e46`, `8c9b69c3`, `9f94a0ec`): each class
+  carries a declaration-ordered method list with a folded slot index, and
+  `MethodRef` addresses `(ClassId, u16 slot)`. Trait methods, aliases,
+  PHPDoc methods and mixin additions enter the list. The PHP 8.5.4 reflection
+  oracle confirms own methods precede trait methods and aliases precede their
+  source methods. Focused order/lookup tests, all 1,140 library tests, check,
+  and Clippy pass. Item 4.6 is next: freeze declarations after build and
+  move pass results into ID-addressed tables.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
