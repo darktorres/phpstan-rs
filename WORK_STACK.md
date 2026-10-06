@@ -417,9 +417,15 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   architecture, dead-member and LSP readers. Deferred type passes include
   composed properties; host declarations remain as built. The hierarchy and
   cache round-trip fixtures pass with all 1,148 crate tests, 275 syntax tests,
-  check, Clippy, formatting and diff checks. Item 4.6 remains active: trait
-  methods/constants and other pass outputs still mutate declarations. The
-  4.7 reference,
+  check, Clippy, formatting and diff checks. `78613439` stores trait-composed
+  constants in an ordered class-ID result table with stable slots; constant
+  owner/name/slot lookups and deferred type resolution read the table while
+  host declarations remain unchanged. Cache round trips, freeze and base
+  switches preserve it; the container format advances to version 12. Trait
+  self-reference, subclass lookup and cache checks pass with all 1,148 crate
+  tests, 275 syntax tests, check, Clippy, formatting and diff checks. Item 4.6
+  remains active: trait methods and other deferred/member outputs still mutate
+  declarations. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
