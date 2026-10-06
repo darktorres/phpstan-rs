@@ -13,7 +13,7 @@ pub(crate) enum IdSource {
 
 macro_rules! declaration_id {
     ($name:ident) => {
-        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         pub(crate) struct $name {
             raw: u32,
             generation: u32,
@@ -79,7 +79,7 @@ declaration_id!(ClassId);
 declaration_id!(FnId);
 
 /// A method's slot in one class's declaration-ordered member list.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct MethodRef {
     class: ClassId,
     slot: u16,

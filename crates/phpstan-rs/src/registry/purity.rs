@@ -38,7 +38,6 @@
 use crate::registry::bodies::BodySource;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use syntax::name::Name;
 
 use crate::registry::summaries::PurityCall;
 use crate::registry::{ClassId, FnId, FunctionReflection, MethodRef, Registry};
@@ -48,18 +47,14 @@ use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
-/// case a fixed point grows outward from; `None` (not this type, see
-/// `FunctionReflection::purity_dependencies`) means "can never be proven
-/// effect-free, no matter what". Both variants store a lower-cased key
-/// (matching real PHPStan's own `functionKey`/`methodKey`, which
-/// `strtolower`s both parts) - so the same declaration referenced under
-/// different call-site casing always resolves to the same graph node.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-pub enum PurityDependency {
-    Function(Name),
-    Method(Name, Name),
+/// case a fixed point grows outward from; `None` in the Registry's
+/// dependency table means "can never be proven effect-free, no matter
+/// what". Edges carry declaration IDs, so name folding happens once at
+/// resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PurityDependency {
+    Function(FnId),
+    Method(MethodRef),
 }
 
 /// The functions and methods `classify_purity` found a body with
@@ -67,14 +62,16 @@ pub enum PurityDependency {
 /// declaration in scope starts with no dependencies and none is pure.
 #[derive(Default)]
 struct PurityCandidates {
-    functions: Vec<Name>,
-    methods: Vec<(Name, Name)>,
+    functions: Vec<FnId>,
+    methods: Vec<MethodRef>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct PurityResults {
     pub(crate) pure_functions: FxHashSet<FnId>,
     pub(crate) pure_methods: FxHashSet<MethodRef>,
+    pub(crate) function_dependencies: FxHashMap<FnId, Option<Vec<PurityDependency>>>,
+    pub(crate) method_dependencies: FxHashMap<MethodRef, Option<Vec<PurityDependency>>>,
 }
 
 impl Registry {
@@ -142,9 +139,15 @@ impl Registry {
         self.purity_results
             .pure_methods
             .retain(|method| !class_ids.contains(&method.class()));
+        self.purity_results
+            .function_dependencies
+            .retain(|id, _| !function_ids.contains(id));
+        self.purity_results
+            .method_dependencies
+            .retain(|method, _| !class_ids.contains(&method.class()));
     }
 
-    /// Populates `purity_dependencies` on every function/method this
+    /// Populates the ID-keyed dependency table for every function/method this
     /// project's own registry has a real body for - gated the same way
     /// real PHPStan's own `*WithoutImpurePointsCollector`s gate before
     /// ever calling `resolveDependencies`: no by-reference parameter (a
@@ -159,9 +162,8 @@ impl Registry {
     /// starts "maybe pure" until its own body says otherwise.
     /// `classify_body` only ever *reads* the registry (resolving
     /// `$this`/`self`/`parent`/`static`/plain-function call targets, see
-    /// its own doc comment) - the write
-    /// (`...purity_dependencies = deps`) happens after, per function/
-    /// method, to a disjoint key, so this parallelizes with the same
+    /// its own doc comment) - the result-table write happens after, per
+    /// function/method, to a disjoint key, so this parallelizes with the same
     /// reborrow-as-`&Registry` technique `flatten_traits_one_pass`/
     /// `flatten_phpdoc_inheritance_one_pass` already use. Two separate
     /// parallel passes (functions, then class methods) rather than one
@@ -173,33 +175,36 @@ impl Registry {
         let mut candidates = PurityCandidates::default();
         let function_names = self.scoped_function_names();
         let registry: &Registry = self;
-        let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
+        let function_deps: Vec<(FnId, Option<Vec<PurityDependency>>)> = function_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
-                let sig = &registry.functions()[name];
+                let (id, _, sig) = registry.function(name)?;
                 if !purity_gate_passes(sig, false) {
                     return None;
                 }
                 let deps = classify_summary(bodies, &sig.provenance, None, registry)?;
-                Some((name.clone(), deps))
+                Some((id, deps))
             })
             .collect();
-        for (name, deps) in function_deps {
+        for (id, deps) in function_deps {
             let has_deps = deps.is_some();
-            self.functions.get_mut(&name).unwrap().purity_dependencies = deps;
+            self.purity_results.function_dependencies.insert(id, deps);
             if has_deps {
-                candidates.functions.push(name);
+                candidates.functions.push(id);
             }
         }
 
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
-        let method_deps: Vec<(Name, Name, Option<Vec<PurityDependency>>)> = class_names
+        let method_deps: Vec<(MethodRef, Option<Vec<PurityDependency>>)> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map(|class_name| {
                 let mut per_class = Vec::new();
+                let Some(class_id) = registry.class_ids.get(class_name).copied() else {
+                    return per_class;
+                };
                 for (method_name, sig) in registry.classes()[class_name].methods.iter() {
                     if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
                         continue;
@@ -209,22 +214,25 @@ impl Registry {
                     else {
                         continue;
                     };
-                    per_class.push((class_name.clone(), method_name.clone(), deps));
+                    let Some(slot) = registry.classes()[class_name]
+                        .member_slots
+                        .get(method_name)
+                        .copied()
+                    else {
+                        continue;
+                    };
+                    per_class.push((MethodRef::new(class_id, slot), deps));
                 }
                 per_class
             })
             .collect();
-        for (class_name, method_name, deps) in method_deps {
+        for (method_ref, deps) in method_deps {
             let has_deps = deps.is_some();
-            self.classes
-                .get_mut(&class_name)
-                .unwrap()
-                .methods
-                .get_mut(&method_name)
-                .unwrap()
-                .purity_dependencies = deps;
+            self.purity_results
+                .method_dependencies
+                .insert(method_ref, deps);
             if has_deps {
-                candidates.methods.push((class_name, method_name));
+                candidates.methods.push(method_ref);
             }
         }
         candidates
@@ -249,14 +257,12 @@ impl Registry {
         let candidate_count = candidates.functions.len() + candidates.methods.len();
         let signature = |index: usize| -> &FunctionReflection {
             match index.checked_sub(candidates.functions.len()) {
-                None => &self.functions[&candidates.functions[index]],
-                Some(i) => {
-                    let (class, method) = &candidates.methods[i];
-                    self.classes[class]
-                        .methods
-                        .get(method)
-                        .expect("a candidate method is declared")
-                }
+                None => self
+                    .function_by_id(candidates.functions[index])
+                    .expect("a candidate function is declared"),
+                Some(i) => self
+                    .file_method_by_ref(candidates.methods[i])
+                    .expect("a candidate method is declared"),
             }
         };
         // Which candidate each signature is, found by address before any
@@ -269,8 +275,11 @@ impl Registry {
         let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); candidate_count];
         let mut ready: Vec<usize> = Vec::new();
         for (index, wait) in waiting.iter_mut().enumerate() {
-            let sig = signature(index);
-            let Some(deps) = &sig.purity_dependencies else {
+            let dependencies = match index.checked_sub(candidates.functions.len()) {
+                None => &self.purity_results.function_dependencies[&candidates.functions[index]],
+                Some(i) => &self.purity_results.method_dependencies[&candidates.methods[i]],
+            };
+            let Some(deps) = dependencies else {
                 continue;
             };
             let mut not_pure = 0;
@@ -280,11 +289,8 @@ impl Registry {
                 }
                 not_pure += 1;
                 let target = match dep {
-                    PurityDependency::Function(name) => self.functions.get(name),
-                    PurityDependency::Method(class, method) => self
-                        .classes
-                        .get(class)
-                        .and_then(|info| info.methods.get(method)),
+                    PurityDependency::Function(id) => self.function_by_id(*id),
+                    PurityDependency::Method(method) => self.file_method_by_ref(*method),
                 };
                 if let Some(&target) = target.and_then(|sig| index_of.get(&std::ptr::from_ref(sig)))
                 {
@@ -309,15 +315,14 @@ impl Registry {
         for index in pure {
             match index.checked_sub(candidates.functions.len()) {
                 None => {
-                    if let Some(id) = self.function_ids.get(&candidates.functions[index]) {
-                        self.purity_results.pure_functions.insert(*id);
-                    }
+                    self.purity_results
+                        .pure_functions
+                        .insert(candidates.functions[index]);
                 }
                 Some(i) => {
-                    let (class, method) = &candidates.methods[i];
-                    if let Some(method_ref) = self.method_ref(class, method) {
-                        self.purity_results.pure_methods.insert(method_ref);
-                    }
+                    self.purity_results
+                        .pure_methods
+                        .insert(candidates.methods[i]);
                 }
             }
         }
@@ -325,8 +330,8 @@ impl Registry {
 
     fn dependency_is_pure(&self, dep: &PurityDependency) -> bool {
         match dep {
-            PurityDependency::Function(name) => self.function_is_pure(name),
-            PurityDependency::Method(class, method) => self.method_is_pure(class, method),
+            PurityDependency::Function(id) => self.purity_results.pure_functions.contains(id),
+            PurityDependency::Method(method) => self.purity_results.pure_methods.contains(method),
         }
     }
 }
@@ -414,8 +419,12 @@ fn resolve_purity_calls(
                     let declared = registry
                         .lookup_function_with_name(resolved)
                         .map_or(resolved, |(declared, _)| declared);
-                    deps.push(PurityDependency::Function(Name::from(declared)));
-                    false
+                    if let Some((id, _, _)) = registry.function(declared) {
+                        deps.push(PurityDependency::Function(id));
+                        false
+                    } else {
+                        true
+                    }
                 }
                 None => true,
             },
@@ -494,7 +503,10 @@ fn resolve_this_method_call(
     if !is_non_overridable(registry, class, &owner, method, sig) {
         return true;
     }
-    deps.push(PurityDependency::Method(owner.clone(), Name::from(method)));
+    let Some(method_ref) = registry.method_ref(&owner, method) else {
+        return true;
+    };
+    deps.push(PurityDependency::Method(method_ref));
     false
 }
 
@@ -560,7 +572,10 @@ fn resolve_static_call(
     let Some((owner, _)) = resolved else {
         return true;
     };
-    deps.push(PurityDependency::Method(owner, Name::from(method)));
+    let Some(method_ref) = registry.method_ref(&owner, method) else {
+        return true;
+    };
+    deps.push(PurityDependency::Method(method_ref));
     false
 }
 
@@ -584,10 +599,10 @@ fn resolve_new(target_class: &str, registry: &Registry, deps: &mut Vec<PurityDep
     if !info.methods.contains_key("__construct") {
         return true;
     }
-    deps.push(PurityDependency::Method(
-        Name::from(owner),
-        Name::from("__construct"),
-    ));
+    let Some(method_ref) = registry.method_ref(owner, "__construct") else {
+        return true;
+    };
+    deps.push(PurityDependency::Method(method_ref));
     false
 }
 

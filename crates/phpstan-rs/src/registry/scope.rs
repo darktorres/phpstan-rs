@@ -290,26 +290,6 @@ impl Registry {
     /// resolved otherwise.
     pub(crate) fn clear_purity(&mut self, scope: &Scope) {
         self.clear_purity_results(scope);
-        for key in scope.function_keys().into_iter().flatten() {
-            let Some((name, sig)) = self.functions.get_with_name(&FoldedKey(key)) else {
-                continue;
-            };
-            if sig.has_purity() {
-                let name = name.clone();
-                self.functions.get_mut(&name).unwrap().clear_purity();
-            }
-        }
-        for key in scope.class_keys().into_iter().flatten() {
-            let Some((name, info)) = self.classes.get_with_name(&FoldedKey(key)) else {
-                continue;
-            };
-            if info.methods.values().any(|m| m.has_purity()) {
-                let name = name.clone();
-                for method in self.classes.get_mut(&name).unwrap().methods.values_mut() {
-                    method.clear_purity();
-                }
-            }
-        }
     }
 
     /// Sets which classes and functions the next finishing passes resolve.

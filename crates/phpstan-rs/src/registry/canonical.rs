@@ -26,7 +26,7 @@ use crate::registry::name_table::NameTable;
 use crate::registry::{
     AssertInfo, AssertTarget, ChangedNames, ClassReflection, ConstantReflection,
     DoctrineEntityIndex, FunctionReflection, ParameterReflection, PropertyReflection,
-    PurityDependency, RawDeclarations, Registry,
+    RawDeclarations, Registry,
 };
 
 canonical_struct!(ClassReflection {
@@ -194,7 +194,6 @@ canonical_struct!(FunctionReflection {
     assert_if_true,
     assert_if_false,
     assert,
-    purity_dependencies,
     declared_pure,
     is_stub,
     is_magic,
@@ -219,11 +218,6 @@ canonical_enum!(AssertTarget {
     ThisProp(name),
     NotFound(name),
     Unknown(name),
-});
-
-canonical_enum!(PurityDependency {
-    Function(name),
-    Method(class, method),
 });
 
 canonical_enum!(GuardExpr {

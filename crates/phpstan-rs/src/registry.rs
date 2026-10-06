@@ -78,7 +78,6 @@ pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_c
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub use provenance::{Origin, Provenance};
-pub use purity::PurityDependency;
 pub(crate) use purity::{PurityResults, collect_impure_points, is_non_overridable};
 pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
 pub(crate) use type_node::{mentions_mixed, parse_type_node};
@@ -695,6 +694,9 @@ impl Registry {
             self.purity_results
                 .pure_methods
                 .retain(|method| method.class() != id);
+            self.purity_results
+                .method_dependencies
+                .retain(|method, _| method.class() != id);
         }
     }
 
@@ -708,6 +710,7 @@ impl Registry {
             self.function_ids.remove(name);
             self.project_function_decls[id.local() as usize] = None;
             self.purity_results.pure_functions.remove(&id);
+            self.purity_results.function_dependencies.remove(&id);
         }
     }
 

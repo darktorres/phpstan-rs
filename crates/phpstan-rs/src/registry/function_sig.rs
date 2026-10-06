@@ -150,7 +150,6 @@ impl Clone for FunctionReflection {
             assert_if_true,
             assert_if_false,
             assert,
-            purity_dependencies,
             declared_pure,
             is_stub,
             is_magic,
@@ -179,7 +178,6 @@ impl Clone for FunctionReflection {
             assert_if_true: clone_vec(assert_if_true),
             assert_if_false: clone_vec(assert_if_false),
             assert: clone_vec(assert),
-            purity_dependencies: purity_dependencies.clone(),
             declared_pure: *declared_pure,
             is_stub: *is_stub,
             is_magic: *is_magic,
@@ -319,12 +317,6 @@ pub struct FunctionReflection {
     pub(in crate::registry) assert_if_true: Vec<AssertInfo>,
     pub(in crate::registry) assert_if_false: Vec<AssertInfo>,
     pub(in crate::registry) assert: Vec<AssertInfo>,
-    // `None` until `Registry::resolve_transitive_purity` classifies
-    // this body; stays `None` for a bodyless signature or one the
-    // classifier can never prove effect-free. `Some(vec![])` is the
-    // fixed point's base case: no dependencies, unconditionally
-    // effect-free.
-    pub(in crate::registry) purity_dependencies: Option<Vec<crate::registry::PurityDependency>>,
     // Whether its doc declares it pure (`@phpstan-pure`, `@psalm-pure`,
     // `@pure`, `@phan-side-effect-free`): what a stub with no behaviour
     // seen of it is taken to write (`Registry::stub_effect`).
@@ -468,18 +460,6 @@ impl FunctionReflection {
 
     pub fn assert(&self) -> &Vec<AssertInfo> {
         &self.assert
-    }
-
-    pub fn purity_dependencies(&self) -> &Option<Vec<crate::registry::PurityDependency>> {
-        &self.purity_dependencies
-    }
-
-    pub(in crate::registry) fn has_purity(&self) -> bool {
-        self.purity_dependencies.is_some()
-    }
-
-    pub(in crate::registry) fn clear_purity(&mut self) {
-        self.purity_dependencies = None;
     }
 
     pub fn is_stub(&self) -> bool {
@@ -906,7 +886,6 @@ impl FunctionReflection {
             assert_if_true,
             assert_if_false,
             assert,
-            purity_dependencies: None,
             declared_pure: doc.as_ref().is_some_and(|d| d.pure),
             is_stub: false,
             is_magic: false,
@@ -1065,7 +1044,6 @@ impl FunctionReflection {
             // before `Registry::resolve_transitive_purity` ever runs -
             // both sides are always `None`/`false` at this point, same
             // as any other not-yet-classified signature.
-            purity_dependencies: None,
             // Pure only when both declarations say so.
             declared_pure: self.declared_pure && other.declared_pure,
             // `||`, not `&&`: merging a stub-derived signature with a
