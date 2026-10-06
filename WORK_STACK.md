@@ -245,8 +245,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `ParsedFile::ident_name` now resolves parser IDs through the file table
   (`8607a515`). Source/name lookup is exposed, and syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. Those IDs now target `ExprNode`/`StmtNode`
-  (`9763cc81`), and expression visitor/canonical readers use `ExprNode`
-  directly (`a2baf3cb`); its fields still use recursive storage. Row 9.3 is in
+  (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
+  and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); their fields still use
+  recursive storage. Row 9.3 is in
   progress: the shared `NodeId` is
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
   indices, and the inference cache is keyed by `ExprId` alone during a
