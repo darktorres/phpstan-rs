@@ -99,9 +99,35 @@ impl MethodRef {
     }
 }
 
+/// A property's stable slot in one class's declaration-ordered member list.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct PropertyRef {
+    class: ClassId,
+    slot: u32,
+}
+
+impl PropertyRef {
+    pub(crate) fn new(class: ClassId, slot: u32) -> Self {
+        Self { class, slot }
+    }
+
+    pub(crate) fn class(self) -> ClassId {
+        self.class
+    }
+
+    pub(crate) fn slot(self) -> u32 {
+        self.slot
+    }
+
+    pub(crate) fn with_generation(mut self, generation: u32) -> Self {
+        self.class = self.class.with_generation(generation);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ClassId, FnId, IdSource, LOCAL_LIMIT};
+    use super::{ClassId, FnId, IdSource, LOCAL_LIMIT, PropertyRef};
 
     #[test]
     fn each_source_has_a_distinct_range_for_both_id_kinds() {
@@ -144,5 +170,26 @@ mod tests {
             FnId::project_in_generation(3, 0),
             FnId::project_in_generation(3, 1)
         );
+    }
+
+    #[test]
+    fn property_ref_preserves_its_class_and_slot() {
+        let class = ClassId::project_in_generation(41, 3);
+        let property = PropertyRef::new(class, u32::MAX);
+
+        assert_eq!(property.class(), class);
+        assert_eq!(property.slot(), u32::MAX);
+    }
+
+    #[test]
+    fn retagging_a_property_ref_changes_only_its_class_generation() {
+        let original = PropertyRef::new(ClassId::project_in_generation(41, 3), 7);
+        let retagged = original.with_generation(9);
+
+        assert_eq!(retagged.class().source(), Some(IdSource::Project));
+        assert_eq!(retagged.class().local(), 41);
+        assert_eq!(retagged.class().generation(), 9);
+        assert_eq!(retagged.slot(), 7);
+        assert_ne!(retagged, original);
     }
 }
