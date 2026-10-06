@@ -2,6 +2,7 @@
 //! their declaration kind, so member and parameter ranges cannot be confused.
 
 use la_arena::{Arena, Idx, IdxRange, RawIdx};
+use rustc_hash::FxHashMap;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::Arc;
@@ -91,6 +92,10 @@ pub(crate) struct FileDecls {
     pub(crate) class_layouts: Arena<ClassLayout>,
     pub(crate) function_layouts: Arena<FunctionLayout>,
     pub(crate) members: Arena<FileMember>,
+    /// Case-folded member name to the file-local member slot. The class
+    /// layout index is part of the key because each class has its own
+    /// member namespace while all members share one typed arena.
+    member_slots: FxHashMap<(u32, String), Idx<FileMember>>,
     pub(crate) parameters: Arena<ParameterReflection>,
     pub(crate) properties: Arena<Arc<PropertyReflection>>,
     pub(crate) constants: Arena<Arc<ConstantReflection>>,
@@ -106,6 +111,7 @@ impl FileDecls {
             class_layouts: Arena::new(),
             function_layouts: Arena::new(),
             members: Arena::new(),
+            member_slots: FxHashMap::default(),
             parameters: Arena::new(),
             properties: Arena::new(),
             constants: Arena::new(),
@@ -134,13 +140,15 @@ impl FileDecls {
         let properties = self.properties.alloc_many(properties);
         let constants = self.constants.alloc_many(constants);
         let names = self.names.alloc_many(names);
-        self.class_layouts.alloc(ClassLayout {
+        let layout = self.class_layouts.alloc(ClassLayout {
             declaration,
             members,
             properties,
             constants,
             names,
-        })
+        });
+        self.index_members(layout);
+        layout
     }
 
     #[allow(dead_code)] // Called by the per-file declaration builder during row 4.3.
@@ -165,6 +173,29 @@ impl FileDecls {
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
     pub(crate) fn members(&self, layout: Idx<ClassLayout>) -> &[FileMember] {
         &self.members[self.class_layouts[layout].members.clone()]
+    }
+
+    /// A member's file-local slot by PHP's case-insensitive method-name
+    /// rules.
+    #[allow(dead_code)] // Used as Registry member lookups migrate to FileDecls.
+    pub(crate) fn member(&self, layout: Idx<ClassLayout>, name: &str) -> Option<&FileMember> {
+        let slot = self
+            .member_slots
+            .get(&(encode_idx(layout), name.to_ascii_lowercase()))?;
+        Some(&self.members[*slot])
+    }
+
+    fn index_members(&mut self, layout: Idx<ClassLayout>) {
+        let class = encode_idx(layout);
+        let (start, end) = encode_range(&self.class_layouts[layout].members);
+        for raw in start..end {
+            let slot = decode_idx::<FileMember>(raw);
+            let name = self.members[slot].name.lower().to_owned();
+            assert!(
+                self.member_slots.insert((class, name), slot).is_none(),
+                "duplicate folded method in class layout"
+            );
+        }
     }
 
     #[allow(dead_code)] // Used by registry accessors as method parameters move to FileDecls.
@@ -207,6 +238,21 @@ impl FileDecls {
                 || !range_is_valid(&layout.names, self.names.len())
             {
                 return Err("class layout refers outside its file declaration arenas");
+            }
+        }
+        for ((class, name), member) in &self.member_slots {
+            let layout = decode_idx::<ClassLayout>(*class);
+            if !idx_is_valid(layout, self.class_layouts.len()) {
+                return Err("member index refers outside class layouts");
+            }
+            let layout = &self.class_layouts[layout];
+            let (start, end) = encode_range(&layout.members);
+            let member_index = encode_idx(*member);
+            if !range_is_valid(&layout.members, self.members.len())
+                || !(start..end).contains(&member_index)
+                || self.members[*member].name.lower() != name
+            {
+                return Err("member index points outside its class member range");
             }
         }
         for (_, member) in self.members.iter() {
@@ -379,6 +425,21 @@ impl<'de> Deserialize<'de> for FileDecls {
             .into_iter()
             .map(|member| member.ok_or_else(|| D::Error::custom("class member range is missing")))
             .collect::<Result<Vec<_>, _>>()?;
+        let members = Arena::from_iter(members);
+        let mut member_slots = FxHashMap::default();
+        for (layout, class_layout) in class_layouts.iter() {
+            let (start, end) = encode_range(&class_layout.members);
+            for raw in start..end {
+                let slot = decode_idx::<FileMember>(raw);
+                let name = members[slot].name.lower().to_owned();
+                if member_slots
+                    .insert((encode_idx(layout), name), slot)
+                    .is_some()
+                {
+                    return Err(D::Error::custom("duplicate folded class member"));
+                }
+            }
+        }
         let declarations = FileDecls {
             classes,
             functions: Arena::from_iter(encoded.functions),
@@ -389,7 +450,8 @@ impl<'de> Deserialize<'de> for FileDecls {
                     parameters: decode_range(layout.parameters),
                 },
             )),
-            members: Arena::from_iter(members),
+            members,
+            member_slots,
             parameters: Arena::from_iter(encoded.parameters),
             properties: Arena::from_iter(encoded.properties),
             constants: Arena::from_iter(encoded.constants),
@@ -456,6 +518,7 @@ mod tests {
         assert_eq!(decoded.class(class_layout), &class);
         let decoded_members = decoded.members(class_layout);
         assert_eq!(decoded_members.len(), members.len());
+        assert_eq!(decoded.member(class_layout, "RUN").unwrap().name, "run");
         assert_eq!(decoded_members[0].name, members[0].name);
         assert_eq!(
             decoded_members[0].declaration.get(),

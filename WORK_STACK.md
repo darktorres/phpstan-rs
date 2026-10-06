@@ -255,7 +255,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   Method entries share `Members`' existing `Arc<Lazy<FunctionReflection>>`;
   their serialized layout writes each method once and restores the shared
   handle from the enclosing class. Their parameter ranges are in the file's
-  parameter arena too.
+  parameter arena too. Each class's methods now also have a case-folded
+  file-local slot index, rebuilt when the cached arena is decoded and
+  checked against its typed member range; the focused arena round-trip test
+  checks uppercase lookup after decoding. Its test and `cargo clippy -p
+  phpstan-rs --all-targets` pass.
   The cache stores class/function declaration metadata beside the arena
   values, then reconstructs `BuiltDecl` with the same `Arc`; mismatched
   metadata is rejected so loading falls back to parsing. The end-to-end cache
