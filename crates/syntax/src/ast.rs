@@ -67,6 +67,12 @@ pub struct Stmt {
     pub doc_line: Option<u32>,
 }
 
+/// A typed index into a parsed file's expression arena.
+pub type ExprId = la_arena::Idx<Expr>;
+
+/// A typed index into a parsed file's statement arena.
+pub type StmtId = la_arena::Idx<Stmt>;
+
 #[derive(Debug, Clone)]
 pub enum StmtKind {
     InlineHtml(Arc<str>),

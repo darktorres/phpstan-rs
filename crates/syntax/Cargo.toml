@@ -12,6 +12,7 @@ name = "syntax"
 arbitrary = { version = "=1.4.2", features = ["derive"], optional = true }
 hotpath.workspace = true
 hashbrown.workspace = true
+la-arena.workspace = true
 memchr.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
