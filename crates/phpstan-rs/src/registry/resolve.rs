@@ -29,92 +29,65 @@ use syntax::ast::{ClassKind, Visibility};
 use types::{self, Type};
 
 impl Registry {
-    /// PHP resolves class/interface/trait/enum names case-insensitively
-    /// (the same rationale `Registry::lookup_function`'s doc comment
-    /// gives for functions), but every internal registry graph-walk
-    /// (`flatten_traits`, `flatten_phpdoc_inheritance`, the ancestor/
-    /// interface-satisfaction walks in `registry/hierarchy.rs`, ...) does
-    /// a plain, exact-case `self.classes.get(name)`. Rather than thread a
-    /// case-insensitive fallback through every one of those call sites,
-    /// this runs once, right after indexing finishes and before any of
-    /// those graph-walks - a single O(classes) rewrite pass that
-    /// canonicalizes every reference-shaped field on each `ClassReflection`
-    /// (`extends`, `implements`, `uses`, `mixins`, each
-    /// `TraitAlias::trait_name`, each `ResolvedTypeImport::
-    /// source_class_fqn`) to the real declared key's own case, wherever
-    /// the differently-cased reference resolves at all. A reference that
-    /// still doesn't resolve after lowercasing is left untouched - a
-    /// genuine typo, which the existing `class.notFound`-family checks
-    /// already catch; this function only ever narrows what "resolves"
-    /// means, never widens it. Every internal `self.classes.
-    /// get(&current)`-style lookup stays a plain, allocation-free
-    /// `HashMap` lookup, now simply correct because the stored string is
-    /// always canonical. Building `canonical_by_lower` stays a single
-    /// sequential pass - only the per-class rewrite below is
-    /// parallelized, since it's the part whose cost actually scales with
-    /// how many reference-shaped fields each class has. Each class's own
-    /// rewrite touches only its own `ClassReflection` and reads only the
-    /// immutable `declared_names` view of the classes as they were when the pass began - no
-    /// other class is ever read or written, so `values_mut()` directly
-    /// (no remove/reinsert dance) is sound to run concurrently.
+    /// Resolves class relationship references to the declared spelling once,
+    /// before graph walks, while keeping source spellings on declarations.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
         let declared = self.classes.declared_names();
         let canonicalize = |name: &mut Name| {
-            if let Some(canonical) = declared.get(name)
-                && canonical.as_ref() != name.as_ref()
-            {
+            if let Some(canonical) = declared.get(name) {
                 *name = canonical.clone();
             }
         };
-        let differs = |name: &Name| {
-            declared
-                .get(name)
-                .is_some_and(|canonical| canonical.as_ref() != name.as_ref())
-        };
-        let names_a_differing_case = |info: &ClassReflection| {
-            info.extends
-                .iter()
-                .chain(&info.implements)
-                .chain(&info.uses)
-                .chain(&info.mixins)
-                .any(differs)
-                || info
-                    .trait_aliases
-                    .iter()
-                    .filter_map(|alias| alias.trait_name.as_ref())
-                    .any(differs)
-                || info
-                    .type_imports
-                    .iter()
-                    .any(|import| differs(&import.source_class_fqn))
-        };
-        let scope = &self.scope;
-        self.classes
-            .iter_mut_scoped_where(scope.class_keys(), names_a_differing_case)
-            .map(|(_, info)| info)
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .for_each(|info| {
-                for name in info
-                    .extends
-                    .iter_mut()
-                    .chain(info.implements.iter_mut())
-                    .chain(info.uses.iter_mut())
-                    .chain(info.mixins.iter_mut())
-                {
+        let class_names = self.scoped_class_names();
+        let scoped_ids: FxHashSet<_> = class_names
+            .iter()
+            .filter_map(|name| self.class_ids.get(name).copied())
+            .collect();
+        self.class_reference_results
+            .retain(|id, _| !scoped_ids.contains(id));
+        for class_name in class_names {
+            let Some(id) = self.class_ids.get(&class_name).copied() else {
+                continue;
+            };
+            let Some(class) = self.class_by_id(id) else {
+                continue;
+            };
+            let mut references = crate::registry::ClassReferenceResults {
+                extends: class.extends.clone(),
+                implements: class.implements.clone(),
+                uses: class.uses.clone(),
+                mixins: class.mixins.clone(),
+                trait_aliases: class.trait_aliases.clone(),
+                type_imports: class.type_imports.clone(),
+            };
+            for name in references
+                .extends
+                .iter_mut()
+                .chain(&mut references.implements)
+                .chain(&mut references.uses)
+                .chain(&mut references.mixins)
+            {
+                canonicalize(name);
+            }
+            for alias in &mut references.trait_aliases {
+                if let Some(name) = &mut alias.trait_name {
                     canonicalize(name);
                 }
-                for alias in &mut info.trait_aliases {
-                    if let Some(trait_name) = &mut alias.trait_name {
-                        canonicalize(trait_name);
-                    }
-                }
-                for import in &mut info.type_imports {
-                    canonicalize(&mut import.source_class_fqn);
-                }
-            });
+            }
+            for import in &mut references.type_imports {
+                canonicalize(&mut import.source_class_fqn);
+            }
+            if references.extends != class.extends
+                || references.implements != class.implements
+                || references.uses != class.uses
+                || references.mixins != class.mixins
+                || references.trait_aliases != class.trait_aliases
+                || references.type_imports != class.type_imports
+            {
+                self.class_reference_results.insert(id, references);
+            }
+        }
     }
 
     /// A `use TraitName;` can reference a trait declared later in the same
@@ -174,7 +147,8 @@ impl Registry {
             .filter_map(|class_name| {
                 let class_id = *registry.class_ids.get(class_name)?;
                 let own = &registry.classes()[class_name];
-                let (uses, trait_aliases) = (&own.uses, &own.trait_aliases);
+                let references = registry.class_references(class_id)?;
+                let (uses, trait_aliases) = (&references.uses, &references.trait_aliases);
                 if uses.is_empty() && trait_aliases.is_empty() {
                     return None;
                 }
@@ -528,51 +502,52 @@ impl Registry {
     /// when a class is among its own ancestors. Parents outside
     /// `class_names` are not counted: they are not resolved again.
     fn hierarchy_levels(&self, class_names: &[Name]) -> Option<Vec<Vec<usize>>> {
-        let scoped: FxHashSet<&str> = class_names.iter().map(|name| name.lower()).collect();
-        let mut depth: FxHashMap<&str, usize> = FxHashMap::default();
-        let mut visiting: FxHashSet<&str> = FxHashSet::default();
-        // Explicit stack: a chain of ancestors can be as long as the
-        // classes are many. An entry expanded holds the class it read.
+        let scoped: FxHashSet<String> = class_names
+            .iter()
+            .map(|name| name.lower().to_owned())
+            .collect();
+        let mut depth: FxHashMap<String, usize> = FxHashMap::default();
+        let mut visiting: FxHashSet<String> = FxHashSet::default();
         for start in class_names {
-            let mut stack: Vec<(&Name, Option<&ClassReflection>)> = vec![(start, None)];
+            let mut stack: Vec<(Name, bool)> = vec![(start.clone(), false)];
             while let Some((name, expanded)) = stack.pop() {
-                let key = name.lower();
-                if depth.contains_key(key) {
+                let key = name.lower().to_owned();
+                if depth.contains_key(&key) {
                     continue;
                 }
-                let info = match expanded {
-                    Some(info) => info,
-                    None => {
-                        let Some(info) = self.classes.get(name) else {
-                            depth.insert(key, 0);
-                            continue;
-                        };
-                        info
-                    }
+                let Some(references) = self.class_references_by_name(&name) else {
+                    depth.insert(key, 0);
+                    continue;
                 };
-                let parents = || {
-                    info.extends
+                if !expanded {
+                    let parents: Vec<Name> = references
+                        .extends
                         .iter()
-                        .chain(&info.implements)
-                        .chain(&info.uses)
+                        .chain(references.implements)
+                        .chain(references.uses)
                         .filter(|parent| scoped.contains(parent.lower()))
-                };
-                if expanded.is_none() {
-                    if !visiting.insert(key) {
+                        .cloned()
+                        .collect();
+                    if !visiting.insert(key.clone()) {
                         return None;
                     }
-                    stack.push((name, Some(info)));
-                    for parent in parents() {
+                    stack.push((name, true));
+                    for parent in parents {
                         if visiting.contains(parent.lower()) {
                             return None;
                         }
                         if !depth.contains_key(parent.lower()) {
-                            stack.push((parent, None));
+                            stack.push((parent, false));
                         }
                     }
                 } else {
-                    visiting.remove(key);
-                    let level = parents()
+                    visiting.remove(&key);
+                    let level = references
+                        .extends
+                        .iter()
+                        .chain(references.implements)
+                        .chain(references.uses)
+                        .filter(|parent| scoped.contains(parent.lower()))
                         .map(|parent| depth.get(parent.lower()).map_or(0, |d| d + 1))
                         .max()
                         .unwrap_or(0);
@@ -611,7 +586,10 @@ impl Registry {
             let Some(class_id) = self.class_ids.get(class_name).copied() else {
                 continue;
             };
-            let Some(parent) = info.extends.first() else {
+            let Some(parent) = self
+                .class_references(class_id)
+                .and_then(|references| references.extends.first().cloned())
+            else {
                 continue;
             };
             for name in self.property_names(class_name) {
@@ -693,7 +671,7 @@ impl Registry {
             .collect();
         for (id, methods, constants, properties, type_results) in resolved {
             for (slot, ty) in constants {
-                self.class_const_types.insert((id, slot), ty);
+                self.set_class_const_type(id, slot, ty);
             }
             self.class_property_results
                 .entry(id)
@@ -803,6 +781,7 @@ impl Registry {
                         &self.class_ids,
                         &self.class_const_types,
                         &self.class_constant_results,
+                        &self.class_reference_results,
                     )
                 }
                 _ => return None,
@@ -896,6 +875,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     Some(class_name),
                 );
             }
@@ -913,6 +893,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     Some(class_name),
                 );
             }
@@ -927,6 +908,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     Some(class_name),
                 ));
             }
@@ -951,6 +933,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     Some(class_name),
                 );
                 Some((slot, ty))
@@ -966,6 +949,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     Some(class_name),
                 );
                 if resolved != *bound {
@@ -988,6 +972,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     Some(class_name),
                 );
             }
@@ -1010,6 +995,7 @@ impl Registry {
                         &self.class_ids,
                         &self.class_const_types,
                         &self.class_constant_results,
+                        &self.class_reference_results,
                         Some(class_name),
                     );
                 }
@@ -1073,7 +1059,7 @@ impl Registry {
                 break;
             }
             for (class_id, const_slot, ty) in updates {
-                self.class_const_types.insert((class_id, const_slot), ty);
+                self.set_class_const_type(class_id, const_slot, ty);
             }
         }
         for class_id in with_deferred.iter().flatten().copied() {
@@ -1096,7 +1082,7 @@ impl Registry {
                     })
                     .collect();
             for (slot, ty) in unresolved {
-                self.class_const_types.insert((class_id, slot), ty);
+                self.set_class_const_type(class_id, slot, ty);
             }
         }
     }
@@ -1126,6 +1112,7 @@ impl Registry {
             &self.class_ids,
             &self.class_const_types,
             &self.class_constant_results,
+            &self.class_reference_results,
         );
         for (const_slot, _, sig) in constants {
             let current = self
@@ -1141,6 +1128,7 @@ impl Registry {
                 &self.class_ids,
                 &self.class_const_types,
                 &self.class_constant_results,
+                &self.class_reference_results,
                 None,
             );
             if step != *current {
@@ -1179,15 +1167,18 @@ impl Registry {
     pub(crate) fn resolve_deferred_type_imports(&mut self) {
         let mut classes_with_imports: Vec<ClassId> = Vec::new();
         let mut resolved: Vec<(ClassId, Name, Type)> = Vec::new();
-        for (class_name, info) in self.scoped_classes() {
-            if info.type_imports.is_empty() {
-                continue;
-            }
+        for (class_name, _info) in self.scoped_classes() {
             let Some(class_id) = self.class_ids.get(class_name).copied() else {
                 continue;
             };
+            let Some(references) = self.class_references(class_id) else {
+                continue;
+            };
+            if references.type_imports.is_empty() {
+                continue;
+            }
             classes_with_imports.push(class_id);
-            for imp in &info.type_imports {
+            for imp in &references.type_imports {
                 let source_key = syntax::name_resolution::qualify(
                     class_namespace(&imp.source_class_fqn),
                     &imp.source_alias_name,
@@ -1301,7 +1292,7 @@ impl Registry {
                 }
             }
             for (slot, ty) in resolved_const_types {
-                self.class_const_types.insert((class_id, slot), ty);
+                self.set_class_const_type(class_id, slot, ty);
             }
             self.class_property_results
                 .entry(class_id)
@@ -1341,14 +1332,17 @@ impl Registry {
             Arc<super::Lazy<FunctionReflection>>,
         )> = Vec::new();
         let mut property_additions: Vec<(ClassId, Name, Arc<PropertyReflection>)> = Vec::new();
-        for (class_name, info) in self.scoped_classes() {
+        for (class_name, _info) in self.scoped_classes() {
             let Some(class_id) = self.class_ids.get(class_name).copied() else {
+                continue;
+            };
+            let Some(references) = self.class_references(class_id) else {
                 continue;
             };
             let mut added_method_names = FoldedMap::default();
             let own_property_names: NameSet = self.property_names(class_name).cloned().collect();
             let mut next_method_slot = self.member_entries(class_name).count();
-            for mixin_fqn in &info.mixins {
+            for mixin_fqn in &references.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
                 };
@@ -1443,6 +1437,7 @@ impl Registry {
             &self.class_ids,
             &self.class_const_types,
             &self.class_constant_results,
+            &self.class_reference_results,
             None,
         )
     }
@@ -1471,6 +1466,7 @@ impl Registry {
             &self.class_ids,
             &self.class_const_types,
             &self.class_constant_results,
+            &self.class_reference_results,
             None,
         )
     }
@@ -1612,7 +1608,6 @@ impl Registry {
                 let class_name = &class_names[index];
                 let class_id = *registry.class_ids.get(class_name)?;
                 let mut per_class: Vec<Backfill> = Vec::new();
-                let info = registry.classes().get(class_name)?;
                 // What `lookup_ancestor_method_with_owner` reads, read once
                 // per class and only when a method needs it: the maps of
                 // its parents' methods to their owners, and the owners
@@ -1627,8 +1622,9 @@ impl Registry {
                     if !needs_param && !needs_return {
                         continue;
                     }
-                    let parent_maps = parent_maps
-                        .get_or_insert_with(|| registry.parent_method_owner_maps(info).collect());
+                    let parent_maps = parent_maps.get_or_insert_with(|| {
+                        registry.parent_method_owner_maps(class_name).collect()
+                    });
                     if parent_maps.is_empty() {
                         // No ancestor has a method: none of the rest does.
                         break;
@@ -1863,6 +1859,7 @@ fn resolve_deferred_value_of_in_type(
     class_ids: &NameTable<ClassId>,
     const_types: &FxHashMap<(ClassId, usize), Type>,
     constant_results: &FxHashMap<ClassId, ClassConstantResults>,
+    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
     excluded: Option<&str>,
 ) -> Type {
     ty.resolve_class_references(&DeclaredConstants {
@@ -1870,6 +1867,7 @@ fn resolve_deferred_value_of_in_type(
         class_ids,
         const_types,
         constant_results,
+        class_references,
         excluded,
     })
 }
@@ -1883,6 +1881,7 @@ struct DeclaredConstants<'a> {
     class_ids: &'a NameTable<ClassId>,
     const_types: &'a FxHashMap<(ClassId, usize), Type>,
     constant_results: &'a FxHashMap<ClassId, ClassConstantResults>,
+    class_reference_results: &'a FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
     excluded: Option<&'a str>,
 }
 
@@ -1898,7 +1897,12 @@ impl types::ClassConstants for DeclaredConstants<'_> {
         if self.is_excluded(class) {
             return Type::mixed();
         }
-        resolve_value_of_target(class, self.classes)
+        resolve_value_of_target(
+            class,
+            self.classes,
+            &self.class_ids,
+            &self.class_reference_results,
+        )
     }
 
     fn class_constants(&self, class: &Type, pattern: &str) -> Type {
@@ -1915,6 +1919,7 @@ impl types::ClassConstants for DeclaredConstants<'_> {
             self.class_ids,
             self.const_types,
             self.constant_results,
+            self.class_reference_results,
         )
     }
 }
@@ -1937,6 +1942,7 @@ fn resolve_class_const_type(
     class_ids: &NameTable<ClassId>,
     const_types: &FxHashMap<(ClassId, usize), Type>,
     constant_results: &FxHashMap<ClassId, ClassConstantResults>,
+    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
 ) -> Type {
     let Some((fqn, _)) = class.as_object() else {
         return Type::mixed();
@@ -1946,7 +1952,14 @@ fn resolve_class_const_type(
         return Type::mixed();
     }
     matching_class_const_type(
-        &visible_class_consts(fqn, classes, class_ids, const_types, constant_results),
+        &visible_class_consts(
+            fqn,
+            classes,
+            class_ids,
+            const_types,
+            constant_results,
+            class_references,
+        ),
         pattern,
     )
 }
@@ -2029,6 +2042,7 @@ fn visible_class_consts(
     class_ids: &NameTable<ClassId>,
     const_types: &FxHashMap<(ClassId, usize), Type>,
     constant_results: &FxHashMap<ClassId, ClassConstantResults>,
+    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
 ) -> VisibleClassConstTypes {
     let mut consts = VisibleClassConstTypes::default();
     let mut seen: NameSet = NameSet::default();
@@ -2051,8 +2065,13 @@ fn visible_class_consts(
                 consts.insert(const_name.clone(), ty.clone());
             }
         }
-        queue.extend(info.extends.iter().cloned());
-        queue.extend(info.implements.iter().cloned());
+        if let Some(references) = class_id.and_then(|id| class_references.get(&id)) {
+            queue.extend(references.extends.iter().cloned());
+            queue.extend(references.implements.iter().cloned());
+        } else {
+            queue.extend(info.extends.iter().cloned());
+            queue.extend(info.implements.iter().cloned());
+        }
     }
     consts
 }
@@ -2162,9 +2181,14 @@ fn unresolved_class_const_to_mixed(ty: Type) -> Type {
 /// PHPStan computes independently - reused directly, not recomputed.
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
-fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection>) -> Type {
+fn resolve_value_of_target(
+    target_fqn: &str,
+    classes: &NameTable<ClassReflection>,
+    class_ids: &NameTable<ClassId>,
+    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
+) -> Type {
     // Any enum's case values, whichever enum it turns out to be.
-    if is_enum_interface(target_fqn, classes, 0) {
+    if is_enum_interface(target_fqn, classes, class_ids, class_references, 0) {
         return Type::union_of(vec![Type::int(), Type::string()]);
     }
     let Some(info) = classes.get(target_fqn) else {
@@ -2181,19 +2205,29 @@ fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection
 
 /// Whether `fqn` is `UnitEnum`, `BackedEnum` or an interface extending
 /// one, which only enums implement.
-fn is_enum_interface(fqn: &str, classes: &NameTable<ClassReflection>, depth: usize) -> bool {
+fn is_enum_interface(
+    fqn: &str,
+    classes: &NameTable<ClassReflection>,
+    class_ids: &NameTable<ClassId>,
+    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
+    depth: usize,
+) -> bool {
     let fqn = fqn.trim_start_matches('\\');
     if fqn.eq_ignore_ascii_case("UnitEnum") || fqn.eq_ignore_ascii_case("BackedEnum") {
         return true;
     }
     depth < 32
         && classes.get(fqn).is_some_and(|info| {
-            info.kind == ClassKind::Interface
-                && info
-                    .extends
-                    .iter()
-                    .chain(&info.implements)
-                    .any(|parent| is_enum_interface(parent, classes, depth + 1))
+            info.kind == ClassKind::Interface && {
+                let references = class_ids.get(fqn).and_then(|id| class_references.get(id));
+                let (extends, implements) = references
+                    .map_or((&info.extends, &info.implements), |references| {
+                        (&references.extends, &references.implements)
+                    });
+                extends.iter().chain(implements).any(|parent| {
+                    is_enum_interface(parent, classes, class_ids, class_references, depth + 1)
+                })
+            }
         })
 }
 
@@ -2218,6 +2252,7 @@ fn resolve_deferred_value_of_with_native_fallback(
     class_ids: &NameTable<ClassId>,
     const_types: &FxHashMap<(ClassId, usize), Type>,
     constant_results: &FxHashMap<ClassId, ClassConstantResults>,
+    class_references: &FxHashMap<ClassId, crate::registry::ClassReferenceResults>,
     excluded: Option<&str>,
 ) -> Type {
     let resolved = resolve_deferred_value_of_in_type(
@@ -2226,6 +2261,7 @@ fn resolve_deferred_value_of_with_native_fallback(
         class_ids,
         const_types,
         constant_results,
+        class_references,
         excluded,
     );
     if resolved.is_mixed() && !native.is_mixed() {
@@ -2746,6 +2782,7 @@ impl Registry {
                     &self.class_ids,
                     &self.class_const_types,
                     &self.class_constant_results,
+                    &self.class_reference_results,
                     None,
                 );
             }

@@ -225,8 +225,8 @@ impl<'a> Checker<'a> {
         self.registry
             .classes_using_trait(trait_fqn)
             .iter()
-            .filter_map(|host| self.registry.classes().get(host))
-            .flat_map(|info| info.trait_aliases().iter())
+            .filter_map(|host| self.registry.class_references_by_name(host))
+            .flat_map(|references| references.trait_aliases.iter())
             .any(|a| {
                 syntax::ast::is_constructor_name(&a.alias)
                     && a.method.eq_ignore_ascii_case(method)

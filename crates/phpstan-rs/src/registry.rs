@@ -12,6 +12,7 @@ mod assertion_table;
 pub mod bodies;
 pub(crate) mod canonical;
 mod class_info;
+use class_info::{ResolvedTypeImport, TraitAlias};
 mod container;
 mod effects;
 mod file_decls;
@@ -120,6 +121,7 @@ pub(crate) const PASS_CHUNK: usize = 32;
 pub(crate) struct ChangedNames {
     pub(crate) classes: FxHashSet<String>,
     pub(crate) functions: FxHashSet<String>,
+    class_declarations_before: FxHashMap<String, (Option<ClassId>, Option<Arc<ClassReflection>>)>,
     // Prior function state for names changed since the last finish. Keep the
     // values by declaration ID so removal or rebinding does not lose the
     // old winner before `changed_since` compares it.
@@ -128,48 +130,9 @@ pub(crate) struct ChangedNames {
     function_results_before: FxHashMap<FnId, FunctionReflection>,
     // Class result tables are removed as soon as an edited declaration is
     // reindexed, so keep that winner's prior result by its old declaration ID.
-    class_results_before: FxHashMap<Name, (ClassId, ClassResultOverlay)>,
+    class_results_before: FxHashMap<ClassId, (Name, ClassResultOverlay)>,
     // With each constant's type before its first change.
     pub(crate) constants: FxHashMap<String, Option<Type>>,
-}
-
-/// `scope_keys`' entries of `resolved` reset to `raw`'s (or removed with
-/// them). Returns, for each of `snapshot_keys` in order, what `resolved`
-/// held under it: taken out where the key is reset, copied where it is not.
-fn reset_scoped<V: Clone>(
-    resolved: &mut NameTable<V>,
-    raw: &NameTable<V>,
-    scope_keys: Option<&FxHashSet<String>>,
-    snapshot_keys: Option<&FxHashSet<String>>,
-) -> Vec<Option<Detached<V>>> {
-    let reset = |resolved: &mut NameTable<V>, key: &String| {
-        let old = resolved.detach(&FoldedKey(key));
-        if let Some((name, _)) = raw.get_with_name(&FoldedKey(key))
-            && let Some(value) = raw.get_shared(&FoldedKey(key))
-        {
-            resolved.insert_shared(name.clone(), value);
-        }
-        old
-    };
-    let mut before = Vec::new();
-    let mut reset_count = 0;
-    for key in snapshot_keys.into_iter().flatten() {
-        before.push(if scope_keys.is_some_and(|keys| keys.contains(key)) {
-            reset_count += 1;
-            reset(resolved, key)
-        } else {
-            resolved.get_shared(&FoldedKey(key)).map(Detached::Own)
-        });
-    }
-    // Scope keys the snapshot has none of, and every one without a snapshot.
-    if reset_count < scope_keys.map_or(0, FxHashSet::len) {
-        for key in scope_keys.into_iter().flatten() {
-            if !snapshot_keys.is_some_and(|keys| keys.contains(key)) {
-                reset(resolved, key);
-            }
-        }
-    }
-    before
 }
 
 /// Whether the resolved entry `now` differs from the one `before` took out:
@@ -188,21 +151,31 @@ pub(crate) struct ResolvedSnapshot {
     // The entries of the scope's keys, in the order of iterating the keys:
     // the key sets are shared with the scope, never changed.
     class_keys: Option<Arc<FxHashSet<String>>>,
-    classes: Vec<Option<Detached<ClassReflection>>>,
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
     function_results: Vec<Option<FunctionReflection>>,
-    class_results: FxHashMap<Name, (ClassId, ClassResultOverlay)>,
+    class_results: FxHashMap<ClassId, (Name, ClassResultOverlay)>,
     effects: FxHashMap<effects::DeclKey, effects::Settled>,
     global_variables: syntax::name::NameMap<Type>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-struct ClassReferences {
-    extends: Vec<Name>,
-    implements: Vec<Name>,
-    uses: Vec<Name>,
-    mixins: Vec<Name>,
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ClassReferenceResults {
+    pub(crate) extends: Vec<Name>,
+    pub(crate) implements: Vec<Name>,
+    pub(crate) uses: Vec<Name>,
+    pub(crate) mixins: Vec<Name>,
+    pub(crate) trait_aliases: Vec<TraitAlias>,
+    pub(crate) type_imports: Vec<ResolvedTypeImport>,
+}
+
+pub(crate) struct ClassReferences<'a> {
+    pub(crate) extends: &'a [Name],
+    pub(crate) implements: &'a [Name],
+    pub(crate) uses: &'a [Name],
+    pub(crate) mixins: &'a [Name],
+    pub(crate) trait_aliases: &'a [TraitAlias],
+    pub(crate) type_imports: &'a [ResolvedTypeImport],
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -214,7 +187,7 @@ struct ClassResultOverlay {
     const_types: Vec<(usize, Type)>,
     types: Option<ClassTypeResults>,
     imported_aliases: Option<Vec<(Name, Type)>>,
-    references: ClassReferences,
+    references: ClassReferenceResults,
 }
 
 /// Class-level generic types completed after class constants are available.
@@ -237,7 +210,7 @@ impl ClassTypeResults {
 /// The sections a stored registry is in: one per table, the declarations as
 /// built, and the rest.
 const REST: &str = "rest";
-const RAW_CLASSES: &str = "table:raw.classes";
+const CLASS_REFERENCES: &str = "table:class_references";
 
 /// `Registry::store_tables` and `load_tables` for the tables named: each a
 /// section called `table:<field>`.
@@ -262,12 +235,6 @@ macro_rules! stored_tables {
             Ok(())
         }
     };
-}
-
-/// `Registry::raw`.
-#[derive(Debug, Clone)]
-struct RawDeclarations {
-    classes: NameTable<ClassReflection>,
 }
 
 /// The winning project declaration's address inside its parsed file.
@@ -377,17 +344,9 @@ pub struct Registry {
     // declared in.
     #[serde(skip)]
     doctrine_entity_index: Arc<DoctrineEntityIndex>,
-    // `classes` and `functions` as indexing and the stub merges built
-    // them, before the finishing passes resolved them - kept so the
-    // passes can run again from scratch after declarations change
-    // (`keep_raw_declarations`).
-    #[serde(skip)]
-    raw: Option<Box<RawDeclarations>>,
-    // Whether `classes` and `functions` hold the declarations as built,
-    // swapped with `raw`'s resolved ones while declarations change
-    // (`begin_declaration_changes`).
-    #[serde(skip)]
-    raw_active: bool,
+    // Whether finishing passes have completed at least once; persisted so
+    // incremental tracking remains active after loading the cache.
+    resolved_declarations: bool,
     // The names declarations changed under since the finishing passes
     // last ran, once they have.
     #[serde(skip)]
@@ -504,6 +463,8 @@ pub struct Registry {
     #[serde(skip)]
     pub(crate) class_const_types: FxHashMap<(ClassId, usize), Type>,
     #[serde(skip)]
+    class_const_types_by_id: FxHashMap<ClassId, Vec<(usize, Type)>>,
+    #[serde(skip)]
     class_const_types_cache: NameTable<Vec<(u32, Type)>>,
     // Constants composed from traits, keyed by the using class and their
     // stable class-constant slot. The ClassReflection keeps only declarations.
@@ -530,6 +491,10 @@ pub struct Registry {
     pub(crate) class_type_results: FxHashMap<ClassId, ClassTypeResults>,
     #[serde(skip)]
     class_type_results_cache: NameTable<ClassTypeResults>,
+    #[serde(skip)]
+    class_reference_results: FxHashMap<ClassId, ClassReferenceResults>,
+    #[serde(skip)]
+    class_reference_results_cache: NameTable<ClassReferenceResults>,
     // Resolved `@phpstan-import-type` aliases, keyed by the importing
     // declaration. `ClassReflection::type_aliases` contains local aliases
     // only and remains the immutable declaration source.
@@ -627,13 +592,41 @@ impl Registry {
                 if self.class_ids.get(name) != Some(&id) {
                     return None;
                 }
-                if self.raw_active
-                    && let Some(declaration) = self.file_class_by_id(id)
-                {
+                if let Some(declaration) = self.file_class_by_id(id) {
                     return Some(declaration);
                 }
                 self.classes.get(name)
             }
+        }
+    }
+
+    pub(crate) fn class_references(&self, id: ClassId) -> Option<ClassReferences<'_>> {
+        let declaration = self.class_by_id(id)?;
+        let results = self.class_reference_results.get(&id);
+        Some(ClassReferences {
+            extends: results.map_or(&declaration.extends, |refs| &refs.extends),
+            implements: results.map_or(&declaration.implements, |refs| &refs.implements),
+            uses: results.map_or(&declaration.uses, |refs| &refs.uses),
+            mixins: results.map_or(&declaration.mixins, |refs| &refs.mixins),
+            trait_aliases: results.map_or(&declaration.trait_aliases, |refs| &refs.trait_aliases),
+            type_imports: results.map_or(&declaration.type_imports, |refs| &refs.type_imports),
+        })
+    }
+
+    pub(crate) fn class_references_by_name(&self, name: &str) -> Option<ClassReferences<'_>> {
+        self.class_ids
+            .get(name)
+            .copied()
+            .and_then(|id| self.class_references(id))
+    }
+
+    pub(crate) fn set_class_const_type(&mut self, id: ClassId, slot: usize, ty: Type) {
+        self.class_const_types.insert((id, slot), ty.clone());
+        let entries = self.class_const_types_by_id.entry(id).or_default();
+        if let Some((_, previous)) = entries.iter_mut().find(|(existing, _)| *existing == slot) {
+            *previous = ty;
+        } else {
+            entries.push((slot, ty));
         }
     }
 
@@ -645,9 +638,7 @@ impl Registry {
             .class_by_id(id)
             .map(|class| class.type_aliases().clone())
             .unwrap_or_default();
-        if !self.raw_active
-            && let Some(imported) = self.imported_type_aliases.get(&id)
-        {
+        if let Some(imported) = self.imported_type_aliases.get(&id) {
             aliases.extend(imported.clone());
         }
         aliases
@@ -668,9 +659,7 @@ impl Registry {
             .class_by_id(id)
             .map(|class| class.template_bounds().clone())
             .unwrap_or_default();
-        if !self.raw_active
-            && let Some(results) = self.class_type_results.get(&id)
-        {
+        if let Some(results) = self.class_type_results.get(&id) {
             bounds.extend(results.template_bounds.clone());
         }
         bounds
@@ -685,11 +674,10 @@ impl Registry {
     }
 
     pub(crate) fn effective_extends_args(&self, id: ClassId) -> Vec<Type> {
-        if !self.raw_active
-            && let Some(args) = self
-                .class_type_results
-                .get(&id)
-                .and_then(|results| results.extends_args.as_ref())
+        if let Some(args) = self
+            .class_type_results
+            .get(&id)
+            .and_then(|results| results.extends_args.as_ref())
         {
             return args.clone();
         }
@@ -711,9 +699,7 @@ impl Registry {
             .class_by_id(id)
             .map(|class| class.implements_args().clone())
             .unwrap_or_default();
-        if !self.raw_active
-            && let Some(results) = self.class_type_results.get(&id)
-        {
+        if let Some(results) = self.class_type_results.get(&id) {
             args.extend(results.implements_args.clone());
         }
         args
@@ -822,9 +808,7 @@ impl Registry {
     /// unmerged project declaration from its file arena.
     pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
         self.debug_check_id_generation(id.generation());
-        if !self.raw_active
-            && let Some(result) = self.function_results.get(&id)
-        {
+        if let Some(result) = self.function_results.get(&id) {
             return Some(result);
         }
         match id.source()? {
@@ -841,9 +825,7 @@ impl Registry {
                 if self.function_ids.get(name) != Some(&id) {
                     return None;
                 }
-                if self.raw_active
-                    && let Some(declaration) = self.file_function_by_id(id)
-                {
+                if let Some(declaration) = self.file_function_by_id(id) {
                     return Some(declaration);
                 }
                 self.functions.get(name)
@@ -915,6 +897,7 @@ impl Registry {
                 .method_dependencies
                 .retain(|method, _| method.class() != id);
             self.class_const_types.retain(|(class, _), _| *class != id);
+            self.class_const_types_by_id.remove(&id);
             self.class_constant_results.remove(&id);
             self.class_method_results.remove(&id);
             self.class_member_topology.remove(&id);
@@ -1045,18 +1028,13 @@ impl Registry {
     /// them; a no-op before then, while they still are the declarations as
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
-        if let Some(raw) = &mut self.raw
-            && !self.raw_active
-        {
-            std::mem::swap(&mut self.classes, &mut raw.classes);
-            self.raw_active = true;
-        }
+        // Declarations remain as built. Finishing results are reset by ID.
     }
 
     /// Whether the finishing passes have resolved declarations that are
     /// kept apart from the declarations as built.
     pub(crate) fn has_resolved_declarations(&self) -> bool {
-        self.raw.is_some()
+        self.resolved_declarations
     }
 
     /// Takes the names declarations changed under since the last
@@ -1085,19 +1063,9 @@ impl Registry {
         keep_raw: bool,
         changed: Option<&ChangedNames>,
     ) -> Option<ResolvedSnapshot> {
-        let Some(raw) = &mut self.raw else {
-            if keep_raw {
-                self.raw = Some(Box::new(RawDeclarations {
-                    classes: self.classes.clone(),
-                }));
-            }
+        if !self.resolved_declarations {
+            self.resolved_declarations = keep_raw;
             return None;
-        };
-        // While declarations change, the resolved class table sits in `raw`.
-        let swap_back = self.raw_active;
-        if swap_back {
-            std::mem::swap(&mut self.classes, &mut raw.classes);
-            self.raw_active = false;
         }
         let function_keys = body_scope.and_then(scope::Scope::shared_function_keys);
         let function_results_before: Vec<Option<FunctionReflection>> = function_keys
@@ -1127,9 +1095,9 @@ impl Registry {
                     continue;
                 };
                 class_results_before.insert(
-                    class_name.clone(),
+                    *id,
                     (
-                        *id,
+                        class_name.clone(),
                         self.class_result_overlay(*id, self.classes.get(class_name)),
                     ),
                 );
@@ -1138,9 +1106,8 @@ impl Registry {
         if let Some(changed) = changed {
             class_results_before.extend(changed.class_results_before.clone());
         }
-        let snapshot = |classes, functions, registry: &Registry| ResolvedSnapshot {
+        let snapshot = |functions, registry: &Registry| ResolvedSnapshot {
             class_keys: body_scope.and_then(scope::Scope::shared_class_keys),
-            classes,
             function_keys: function_keys.clone(),
             functions,
             function_results: function_results_before.clone(),
@@ -1150,21 +1117,17 @@ impl Registry {
         };
         if scope.is_all() {
             self.class_const_types.clear();
+            self.class_const_types_by_id.clear();
             self.function_results.clear();
             self.class_constant_results.clear();
             self.class_method_results.clear();
             self.class_member_topology.clear();
             self.class_property_results.clear();
             self.imported_type_aliases.clear();
-            self.classes = raw.classes.clone();
-            return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
+            self.class_type_results.clear();
+            self.class_reference_results.clear();
+            return body_scope.map(|_| snapshot(Vec::new(), self));
         }
-        let classes = reset_scoped(
-            &mut self.classes,
-            &raw.classes,
-            scope.class_keys(),
-            body_scope.and_then(scope::Scope::class_keys),
-        );
         let changed_class_ids: FxHashSet<ClassId> = self
             .class_ids
             .iter()
@@ -1173,6 +1136,8 @@ impl Registry {
             .collect();
         self.class_const_types
             .retain(|(id, _), _| !changed_class_ids.contains(id));
+        self.class_const_types_by_id
+            .retain(|id, _| !changed_class_ids.contains(id));
         self.class_constant_results
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_method_results
@@ -1182,6 +1147,10 @@ impl Registry {
         self.class_property_results
             .retain(|id, _| !changed_class_ids.contains(id));
         self.imported_type_aliases
+            .retain(|id, _| !changed_class_ids.contains(id));
+        self.class_type_results
+            .retain(|id, _| !changed_class_ids.contains(id));
+        self.class_reference_results
             .retain(|id, _| !changed_class_ids.contains(id));
         let functions = function_keys
             .as_ref()
@@ -1209,7 +1178,7 @@ impl Registry {
             .collect();
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
-        body_scope.map(|_| snapshot(classes, functions, self))
+        body_scope.map(|_| snapshot(functions, self))
     }
 
     /// Takes from `base`, the stub base the registry now stands on, what
@@ -1262,6 +1231,7 @@ impl Registry {
         let class_member_topology = self.class_member_topology_for_cache();
         let class_property_results = self.class_property_results_for_cache();
         let class_type_results = self.class_type_results_for_cache();
+        let class_reference_results = self.class_reference_results_for_cache();
         let imported_type_aliases = self.imported_type_aliases_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
@@ -1374,6 +1344,13 @@ impl Registry {
                     .collect::<Vec<_>>()
             })
             .collect();
+        self.class_const_types_by_id.clear();
+        for ((id, slot), ty) in &self.class_const_types {
+            self.class_const_types_by_id
+                .entry(*id)
+                .or_default()
+                .push((*slot, ty.clone()));
+        }
         self.class_const_types_cache = NameTable::default();
         self.class_constant_results = class_constant_results
             .iter()
@@ -1441,6 +1418,16 @@ impl Registry {
             })
             .collect();
         self.class_type_results_cache = NameTable::default();
+        self.class_reference_results = class_reference_results
+            .iter()
+            .filter_map(|(name, refs)| {
+                self.class_ids
+                    .get(name)
+                    .copied()
+                    .map(|id| (id, refs.clone()))
+            })
+            .collect();
+        self.class_reference_results_cache = NameTable::default();
         self.imported_type_aliases = imported_type_aliases
             .iter()
             .filter_map(|(name, aliases)| {
@@ -1470,28 +1457,24 @@ impl Registry {
         self.subtype_children.freeze();
         self.trait_users.freeze();
         self.recorded_parents.freeze();
-        if let Some(raw) = &mut self.raw {
-            raw.classes.freeze();
-        }
     }
 
     pub(crate) fn record_changed_class(&mut self, name: &str) {
-        if self.raw.is_some() {
+        if self.resolved_declarations {
             let key = name.to_ascii_lowercase();
-            if self.changed.classes.insert(key.clone())
-                && let Some((class_name, id)) = self.class_ids.get_with_name(name)
-            {
-                let declaration = if self.raw_active {
-                    self.raw
-                        .as_ref()
-                        .and_then(|raw| raw.classes.get(class_name))
-                } else {
-                    self.classes.get(class_name)
-                };
-                let overlay = self.class_result_overlay(*id, declaration);
+            if self.changed.classes.insert(key.clone()) {
+                let id = self.class_ids.get(name).copied();
+                let declaration = id.and_then(|id| self.class_by_id(id));
+                let declaration_snapshot = declaration.cloned().map(Arc::new);
                 self.changed
-                    .class_results_before
-                    .insert(class_name.clone(), (*id, overlay));
+                    .class_declarations_before
+                    .insert(key.clone(), (id, declaration_snapshot));
+                if let Some(id) = id {
+                    let overlay = self.class_result_overlay(id, declaration);
+                    self.changed
+                        .class_results_before
+                        .insert(id, (Name::from(name), overlay));
+                }
             }
         }
     }
@@ -1509,11 +1492,11 @@ impl Registry {
             .map(|(name, signature)| (name.clone(), signature.clone()))
             .collect();
         methods.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        let mut const_types: Vec<_> = self
-            .class_const_types
-            .iter()
-            .filter_map(|((class, slot), ty)| (*class == id).then(|| (*slot, ty.clone())))
-            .collect();
+        let mut const_types = self
+            .class_const_types_by_id
+            .get(&id)
+            .cloned()
+            .unwrap_or_default();
         const_types.sort_unstable_by_key(|(slot, _)| *slot);
         let properties = self.class_property_results.get(&id).map(|properties| {
             let mut properties: Vec<_> = properties
@@ -1539,17 +1522,26 @@ impl Registry {
             const_types,
             types: self.class_type_results.get(&id).cloned(),
             imported_aliases,
-            references: declaration.map_or_else(ClassReferences::default, |info| ClassReferences {
-                extends: info.extends.clone(),
-                implements: info.implements.clone(),
-                uses: info.uses.clone(),
-                mixins: info.mixins.clone(),
-            }),
+            references: self
+                .class_reference_results
+                .get(&id)
+                .cloned()
+                .or_else(|| {
+                    declaration.map(|info| ClassReferenceResults {
+                        extends: info.extends.clone(),
+                        implements: info.implements.clone(),
+                        uses: info.uses.clone(),
+                        mixins: info.mixins.clone(),
+                        trait_aliases: info.trait_aliases.clone(),
+                        type_imports: info.type_imports.clone(),
+                    })
+                })
+                .unwrap_or_default(),
         }
     }
 
     pub(crate) fn record_changed_function(&mut self, name: &str) {
-        if self.raw.is_some() {
+        if self.resolved_declarations {
             let key = name.to_ascii_lowercase();
             if !self.changed.functions.insert(key.clone()) {
                 return;
@@ -1571,7 +1563,7 @@ impl Registry {
     }
 
     fn record_changed_constant(&mut self, name: &str) {
-        if self.raw.is_some() && !self.changed.constants.contains_key(name) {
+        if self.resolved_declarations && !self.changed.constants.contains_key(name) {
             let before = self.global_constants.get(name).cloned();
             self.changed.constants.insert(name.to_string(), before);
         }
@@ -1587,14 +1579,17 @@ impl Registry {
     ) -> FxHashSet<crate::deps::RefKey> {
         use crate::deps::RefKey;
         let mut keys = FxHashSet::default();
-        let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
-        debug_assert_eq!(class_keys.clone().count(), before.classes.len());
-        for (key, old) in class_keys.zip(&before.classes) {
-            if differs(self.classes.get(&FoldedKey(key)), old.as_ref()) {
-                keys.insert(RefKey::class_text(key));
+        for name in &changed.classes {
+            let old = changed.class_declarations_before.get(name);
+            let now_id = self.class_ids.get(name.as_str()).copied();
+            let now = now_id.and_then(|id| self.class_by_id(id));
+            if old.is_some_and(|(id, declaration)| *id != now_id || declaration.as_deref() != now)
+                || (old.is_none() && now.is_some())
+            {
+                keys.insert(RefKey::class_text(name));
             }
         }
-        for name in self.changed_class_results(before) {
+        for name in self.changed_class_results(before).into_values() {
             keys.insert(RefKey::class_text(name.as_str()));
         }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
@@ -1634,28 +1629,29 @@ impl Registry {
         keys
     }
 
-    fn changed_class_results(&self, before: &ResolvedSnapshot) -> FxHashSet<Name> {
-        let mut names: FxHashSet<Name> = before.class_results.keys().cloned().collect();
-        names.extend(
+    fn changed_class_results(&self, before: &ResolvedSnapshot) -> FxHashMap<ClassId, Name> {
+        let mut ids: FxHashSet<ClassId> = before.class_results.keys().copied().collect();
+        ids.extend(
             before
                 .class_keys
                 .iter()
                 .flat_map(|keys| keys.iter())
-                .filter_map(|key| {
-                    self.class_ids
-                        .get_with_name(key)
-                        .map(|(name, _)| name.clone())
-                }),
+                .filter_map(|key| self.class_ids.get(key).copied()),
         );
-        names
-            .into_iter()
-            .filter(|name| {
-                let old = before.class_results.get(name);
-                let current = self
-                    .class_ids
-                    .get(name)
-                    .map(|id| (*id, self.class_result_overlay(*id, self.classes.get(name))));
-                old != current.as_ref()
+        ids.into_iter()
+            .filter_map(|id| {
+                let old = before.class_results.get(&id);
+                let name = self
+                    .class_name_by_id(id)
+                    .cloned()
+                    .or_else(|| old.map(|(name, _)| name.clone()))?;
+                let current = self.class_by_id(id).map(|declaration| {
+                    (
+                        name.clone(),
+                        self.class_result_overlay(id, Some(declaration)),
+                    )
+                });
+                (old != current.as_ref()).then_some((id, name))
             })
             .collect()
     }
@@ -1666,52 +1662,16 @@ impl Registry {
     pub(crate) fn traits_of_changed_classes(&self, before: &ResolvedSnapshot) -> Vec<Name> {
         let mut traits: Vec<Name> = Vec::new();
         let result_changes = self.changed_class_results(before);
-        let class_keys = before.class_keys.iter().flat_map(|keys| keys.iter());
-        for (key, old) in class_keys.zip(&before.classes) {
-            let now = self.classes.get(&FoldedKey(key));
-            let result_changed = result_changes
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case(key));
-            if !differs(now, old.as_ref()) && !result_changed {
-                continue;
-            }
-            for used in before
+        for (id, _) in result_changes {
+            let old = before
                 .class_results
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(key))
-                .map(|(_, result)| result)
+                .get(&id)
+                .map(|(_, result)| &result.references);
+            let now = self.class_references(id);
+            for used in old
                 .into_iter()
-                .flat_map(|result| result.references.uses.iter())
-                .chain(now.into_iter().flat_map(|info| info.uses.iter()))
-                .chain(
-                    old.as_ref()
-                        .into_iter()
-                        .flat_map(|info| info.get().uses.iter()),
-                )
-            {
-                if !traits.contains(used) {
-                    traits.push(used.clone());
-                }
-            }
-        }
-        for name in result_changes {
-            if before.class_keys.as_ref().is_some_and(|keys| {
-                keys.iter()
-                    .any(|key| key.eq_ignore_ascii_case(name.as_ref()))
-            }) {
-                continue;
-            }
-            for used in before
-                .class_results
-                .get(&name)
-                .into_iter()
-                .flat_map(|(_, result)| result.references.uses.iter())
-                .chain(
-                    self.classes
-                        .get(&name)
-                        .into_iter()
-                        .flat_map(|info| info.uses.iter()),
-                )
+                .flat_map(|references| references.uses.iter())
+                .chain(now.iter().flat_map(|references| references.uses.iter()))
             {
                 if !traits.contains(used) {
                     traits.push(used.clone());
@@ -1739,10 +1699,6 @@ impl Registry {
     /// Writes the registry into `writer`: its tables as sections of their
     /// own, and the rest of it, encoded, as one.
     pub(crate) fn store(&self, writer: &mut container::Writer) -> Result<(), String> {
-        debug_assert!(
-            !self.raw_active,
-            "the declarations as built are stored with the resolved ones"
-        );
         self.ancestor_names_for_cache()
             .store(writer, "table:ancestor_names")?;
         self.member_owners_for_cache()
@@ -1761,12 +1717,11 @@ impl Registry {
             .store(writer, "table:class_property_results")?;
         self.class_type_results_for_cache()
             .store(writer, "table:class_type_results")?;
+        self.class_reference_results_for_cache()
+            .store(writer, CLASS_REFERENCES)?;
         self.imported_type_aliases_for_cache()
             .store(writer, "table:imported_type_aliases")?;
         self.store_tables(writer)?;
-        if let Some(raw) = &self.raw {
-            raw.classes.store(writer, RAW_CLASSES)?;
-        }
         writer.section(REST, &stub_cache::encode(self)?)
     }
 
@@ -1946,6 +1901,19 @@ impl Registry {
             .collect()
     }
 
+    fn class_reference_results_for_cache(&self) -> NameTable<ClassReferenceResults> {
+        if !self.class_reference_results_cache.is_empty() {
+            return self.class_reference_results_cache.clone();
+        }
+        self.class_reference_results
+            .iter()
+            .filter_map(|(id, refs)| {
+                self.class_name_by_id(*id)
+                    .map(|name| (name.clone(), refs.clone()))
+            })
+            .collect()
+    }
+
     /// Whether every stored table, map and set of a registry read back is
     /// in the order a lookup by bisection relies on. A load checks only
     /// that its records are inside the file, so the tests of what is stored
@@ -1971,11 +1939,10 @@ impl Registry {
             .check_order("table:class_property_results")?;
         self.class_type_results_for_cache()
             .check_order("table:class_type_results")?;
+        self.class_reference_results_for_cache()
+            .check_order(CLASS_REFERENCES)?;
         self.imported_type_aliases_for_cache()
             .check_order("table:imported_type_aliases")?;
-        if let Some(raw) = &self.raw {
-            raw.classes.check_order(RAW_CLASSES)?;
-        }
         Ok(())
     }
 
@@ -2012,13 +1979,9 @@ impl Registry {
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
         registry.class_type_results_cache = NameTable::load(reader, "table:class_type_results")?;
+        registry.class_reference_results_cache = NameTable::load(reader, CLASS_REFERENCES)?;
         registry.imported_type_aliases_cache =
             NameTable::load(reader, "table:imported_type_aliases")?;
-        if reader.has_section(RAW_CLASSES) {
-            registry.raw = Some(Box::new(RawDeclarations {
-                classes: NameTable::load(reader, RAW_CLASSES)?,
-            }));
-        }
         Ok(registry)
     }
 
@@ -2081,6 +2044,13 @@ impl Registry {
             .drain()
             .map(|((id, slot), ty)| ((id.with_generation(generation), slot), ty))
             .collect();
+        base.class_const_types_by_id.clear();
+        for ((id, slot), ty) in &base.class_const_types {
+            base.class_const_types_by_id
+                .entry(*id)
+                .or_default()
+                .push((*slot, ty.clone()));
+        }
         base.function_results = base
             .function_results
             .drain()
@@ -2110,6 +2080,11 @@ impl Registry {
             .class_type_results
             .drain()
             .map(|(id, results)| (id.with_generation(generation), results))
+            .collect();
+        base.class_reference_results = base
+            .class_reference_results
+            .drain()
+            .map(|(id, refs)| (id.with_generation(generation), refs))
             .collect();
         base.imported_type_aliases = base
             .imported_type_aliases

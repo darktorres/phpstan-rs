@@ -107,9 +107,8 @@ impl Registry {
             .into_iter()
             .flat_map(|info| info.member_order.iter())
             .chain(
-                (!self.raw_active)
-                    .then(|| self.class_ids.get(class))
-                    .flatten()
+                self.class_ids
+                    .get(class)
                     .and_then(|id| self.class_member_topology.get(id))
                     .into_iter()
                     .flat_map(|topology| topology.entries.iter()),
@@ -121,12 +120,10 @@ impl Registry {
             .get(class)
             .and_then(|info| info.member_slots.get(method).copied())
             .or_else(|| {
-                (!self.raw_active).then_some(()).and_then(|_| {
-                    self.class_ids
-                        .get(class)
-                        .and_then(|id| self.class_member_topology.get(id))
-                        .and_then(|topology| topology.slots.get(method).copied())
-                })
+                self.class_ids
+                    .get(class)
+                    .and_then(|id| self.class_member_topology.get(id))
+                    .and_then(|topology| topology.slots.get(method).copied())
             })
     }
 
@@ -135,9 +132,6 @@ impl Registry {
         let slot = usize::from(method.slot());
         if let Some(entry) = info.member_order.get(slot) {
             return Some(entry);
-        }
-        if self.raw_active {
-            return None;
         }
         self.class_member_topology
             .get(&method.class())?
@@ -284,23 +278,23 @@ impl Registry {
     fn class_extends_implements_closure(&self, class: &Name) -> AncestorIds {
         // The names walked are borrowed from the classes (or `class`), and
         // one is copied only the first time it is found.
-        let mut seen: FxHashSet<&Name> = FxHashSet::default();
-        let mut stack: Vec<&Name> = vec![class];
+        let mut seen: FxHashSet<Name> = FxHashSet::default();
+        let mut stack: Vec<Name> = vec![class.clone()];
         let mut result = AncestorIds::default();
         while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
+            if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(current) else {
+            let Some(references) = self.class_references_by_name(&current) else {
                 continue;
             };
-            for parent in info.extends.iter().chain(info.implements.iter()) {
+            for parent in references.extends.iter().chain(references.implements) {
                 if let Some(id) = self.class_ids.get(parent) {
                     result.ids.insert(*id);
                 } else {
                     result.unresolved.insert(parent.clone());
                 }
-                stack.push(parent);
+                stack.push(parent.clone());
             }
         }
         result
@@ -310,25 +304,25 @@ impl Registry {
     /// implements or uses, transitively, a trait's own `uses` included: what
     /// `all_ancestor_names` collects, stopping at the first.
     fn class_reaches_phpstan_name(&self, class: &Name) -> bool {
-        let mut seen: FxHashSet<&Name> = FxHashSet::default();
-        let mut stack: Vec<&Name> = vec![class];
+        let mut seen: FxHashSet<Name> = FxHashSet::default();
+        let mut stack: Vec<Name> = vec![class.clone()];
         while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
+            if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(current) else {
+            let Some(references) = self.class_references_by_name(&current) else {
                 continue;
             };
-            for parent in info
+            for parent in references
                 .extends
                 .iter()
-                .chain(info.implements.iter())
-                .chain(info.uses.iter())
+                .chain(references.implements)
+                .chain(references.uses)
             {
                 if crate::registry::is_phpstan_namespace(parent) {
                     return true;
                 }
-                stack.push(parent);
+                stack.push(parent.clone());
             }
         }
         false
@@ -417,7 +411,7 @@ impl Registry {
             );
         }
         for name in class_names.iter() {
-            let Some(info) = self.classes.get(name) else {
+            let Some(references) = self.class_references_by_name(name) else {
                 self.unrecord_parents(name);
                 continue;
             };
@@ -427,19 +421,19 @@ impl Registry {
                     declared == name
                         && supertypes
                             .iter()
-                            .eq(info.extends.iter().chain(info.implements.iter()))
-                        && *traits == info.uses
+                            .eq(references.extends.iter().chain(references.implements))
+                        && traits.as_slice() == references.uses
                 },
             ) {
                 continue;
             }
-            let supertypes: Vec<Name> = info
+            let supertypes: Vec<Name> = references
                 .extends
                 .iter()
-                .chain(info.implements.iter())
+                .chain(references.implements)
                 .cloned()
                 .collect();
-            let traits: Vec<Name> = info.uses.clone();
+            let traits: Vec<Name> = references.uses.to_vec();
             self.unrecord_parents(name);
             for parent in &supertypes {
                 self.subtype_children
@@ -531,7 +525,9 @@ impl Registry {
             if info.is_immutable {
                 return true;
             }
-            stack.extend(info.extends.iter().cloned());
+            if let Some(references) = self.class_references_by_name(&current) {
+                stack.extend(references.extends.iter().cloned());
+            }
         }
         false
     }
@@ -544,27 +540,26 @@ impl Registry {
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
     pub(crate) fn all_ancestor_names(&self, class: &str) -> NameSet {
-        let start = Name::from(class);
-        let mut seen: FxHashSet<&Name> = FxHashSet::default();
-        let mut stack: Vec<&Name> = vec![&start];
+        let mut seen: FxHashSet<Name> = FxHashSet::default();
+        let mut stack: Vec<Name> = vec![Name::from(class)];
         let mut result = NameSet::default();
         while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
+            if !seen.insert(current.clone()) {
                 continue;
             }
-            let Some(info) = self.classes.get(current) else {
+            let Some(references) = self.class_references_by_name(&current) else {
                 continue;
             };
-            for parent in info
+            for parent in references
                 .extends
                 .iter()
-                .chain(info.implements.iter())
-                .chain(info.uses.iter())
+                .chain(references.implements)
+                .chain(references.uses)
             {
                 if !result.contains(parent) {
                     result.insert(parent.clone());
                 }
-                stack.push(parent);
+                stack.push(parent.clone());
             }
         }
         result
@@ -626,9 +621,9 @@ impl Registry {
         let mut method_owner = FoldedMap::default();
         let mut property_owner = NameMap::default();
         let mut const_owner = NameMap::default();
-        let mut seen: FxHashSet<&Name> = FxHashSet::default();
-        let mut queue: VecDeque<&Name> = VecDeque::new();
-        queue.push_back(class);
+        let mut seen: FxHashSet<Name> = FxHashSet::default();
+        let mut queue: VecDeque<Name> = VecDeque::new();
+        queue.push_back(class.clone());
         while let Some(current) = queue.pop_front() {
             if !seen.insert(current) {
                 continue;
@@ -669,8 +664,10 @@ impl Registry {
                     }
                 }
             }
-            for parent in info.extends.iter().chain(info.implements.iter()) {
-                queue.push_back(parent);
+            if let Some(references) = self.class_references_by_name(current) {
+                for parent in references.extends.iter().chain(references.implements) {
+                    queue.push_back(parent.clone());
+                }
             }
         }
         (method_owner, property_owner, const_owner)
@@ -728,9 +725,8 @@ impl Registry {
         let with_mixins: FxHashSet<String> = class_names
             .iter()
             .filter(|name| {
-                self.classes
-                    .get(name)
-                    .is_some_and(|info| !info.mixins.is_empty())
+                self.class_references_by_name(name)
+                    .is_some_and(|references| !references.mixins.is_empty())
             })
             .map(|name| name.to_ascii_lowercase())
             .collect();
@@ -749,8 +745,14 @@ impl Registry {
                     if !seen.insert(current.clone()) {
                         continue;
                     }
-                    if let Some(info) = self.classes.get(&current) {
-                        queue.extend(info.extends.iter().chain(&info.implements).cloned());
+                    if let Some(references) = self.class_references_by_name(&current) {
+                        queue.extend(
+                            references
+                                .extends
+                                .iter()
+                                .chain(references.implements)
+                                .cloned(),
+                        );
                     }
                 }
                 false
@@ -794,12 +796,11 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<&FunctionReflection> {
-        if !self.raw_active
-            && let Some(result) = self
-                .class_ids
-                .get(class)
-                .and_then(|id| self.class_method_results.get(id))
-                .and_then(|methods| methods.get(method))
+        if let Some(result) = self
+            .class_ids
+            .get(class)
+            .and_then(|id| self.class_method_results.get(id))
+            .and_then(|methods| methods.get(method))
         {
             return Some(result);
         }
@@ -811,12 +812,11 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<std::sync::Arc<super::Lazy<FunctionReflection>>> {
-        if !self.raw_active
-            && let Some(result) = self
-                .class_ids
-                .get(class)
-                .and_then(|id| self.class_method_results.get(id))
-                .and_then(|methods| methods.shared_get(method))
+        if let Some(result) = self
+            .class_ids
+            .get(class)
+            .and_then(|id| self.class_method_results.get(id))
+            .and_then(|methods| methods.shared_get(method))
         {
             return Some(result);
         }
@@ -834,14 +834,7 @@ impl Registry {
         // class and function names: the owners hold one entry for each
         // method, by the most derived declaration's spelling.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
-        if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_method_by_class_id(*id, declared))
-                .or_else(|| self.lookup_own_method(owner, declared))
-        } else {
-            self.lookup_own_method(owner, declared)
-        }
+        self.lookup_own_method(owner, declared)
     }
 
     /// The real declared spelling `lookup_method`/`lookup_method_with_
@@ -887,8 +880,7 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, Name)> {
-        let info = self.classes.get(class)?;
-        self.parent_method_owner_maps(info).find_map(|owners| {
+        self.parent_method_owner_maps(class).find_map(|owners| {
             let (name, owner) = owners.get_key_value(method)?;
             (name.as_ref() != method).then(|| (owner.clone(), name.clone()))
         })
@@ -908,14 +900,7 @@ impl Registry {
     ) -> Option<(Name, &FunctionReflection)> {
         // See `lookup_method`.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
-        let sig = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_method_by_class_id(*id, declared))
-                .or_else(|| self.lookup_own_method(owner, declared))
-        } else {
-            self.lookup_own_method(owner, declared)
-        }?;
+        let sig = self.lookup_own_method(owner, declared)?;
         Some((owner.clone(), sig))
     }
 
@@ -928,36 +913,29 @@ impl Registry {
     /// not a single walk merged across all the parents at once.
     pub(crate) fn parent_method_owner_maps<'a: 'i, 'i>(
         &'a self,
-        info: &'i ClassReflection,
+        class: &'i str,
     ) -> impl Iterator<Item = &'a FoldedMap<Name>> + 'i {
-        info.extends
-            .iter()
-            .chain(info.implements.iter())
-            .filter_map(|parent| self.method_owners(parent))
+        self.class_references_by_name(class)
+            .into_iter()
+            .flat_map(|references| references.extends.iter().chain(references.implements))
+            .filter_map(|parent| self.method_owners(&parent))
     }
 
     /// The ancestor of `info` that owns its method `method`, the first
     /// parent in `parent_method_owner_maps` order that has one.
-    pub(crate) fn ancestor_method_owner(
-        &self,
-        info: &ClassReflection,
-        method: &str,
-    ) -> Option<&Name> {
-        self.parent_method_owner_maps(info)
+    pub(crate) fn ancestor_method_owner(&self, class: &str, method: &str) -> Option<&Name> {
+        self.parent_method_owner_maps(class)
             .find_map(|owners| owners.get(method))
     }
 
     /// The ancestor of `info` that owns its property `prop`: only
     /// `extends` is tried, since real PHP interfaces can't declare
     /// properties at all.
-    pub(crate) fn ancestor_property_owner(
-        &self,
-        info: &ClassReflection,
-        prop: &str,
-    ) -> Option<&Name> {
-        info.extends
-            .iter()
-            .filter_map(|parent| self.property_owners(parent))
+    pub(crate) fn ancestor_property_owner(&self, class: &str, prop: &str) -> Option<&Name> {
+        self.class_references_by_name(class)
+            .into_iter()
+            .flat_map(|references| references.extends.iter())
+            .filter_map(|parent| self.property_owners(&parent))
             .find_map(|owners| owners.get(prop))
     }
 
@@ -970,7 +948,7 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, &FunctionReflection)> {
-        let owner = self.ancestor_method_owner(self.classes.get(class)?, method)?;
+        let owner = self.ancestor_method_owner(class, method)?;
         let sig = self.lookup_own_method(owner, method)?;
         Some((owner.clone(), sig))
     }
@@ -1007,7 +985,7 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(Name, &FunctionReflection, bool)> {
-        let info = self.classes.get(class)?;
+        let references = self.class_references_by_name(class)?;
         // 1. Immediately-implemented interfaces - walks each interface's
         //    *own* ancestor chain too (`lookup_method_with_owner`, not a
         //    bare `.methods.get`), not just its own direct declaration
@@ -1015,7 +993,7 @@ impl Registry {
         //    `ExtensionInterface extends SubscriberInterface`, where
         //    `subscribedEvents()` is declared only on the *grandparent*
         //    interface).
-        for iface in &info.implements {
+        for iface in &references.implements {
             if let Some((owner, sig)) = self.lookup_method_with_owner(iface, method) {
                 return Some((owner, sig, true));
             }
@@ -1025,7 +1003,7 @@ impl Registry {
         //    (real PHPStan's own equivalent gate,
         //    `supportsAbstractTraitMethods`, is PHP 8.0+, a bar every
         //    realistic target version already clears).
-        for used in &info.uses {
+        for used in &references.uses {
             if self
                 .classes
                 .get(used)
@@ -1037,7 +1015,7 @@ impl Registry {
         }
         // 3. Ordinary `extends` chain (existing, already-correct
         //    recursive walk).
-        for parent in &info.extends {
+        for parent in &references.extends {
             if let Some((owner, sig)) = self.lookup_method_with_owner(parent, method) {
                 return Some((owner, sig, true));
             }
@@ -1070,7 +1048,11 @@ impl Registry {
         &self,
         class: &str,
     ) -> Option<(Name, &FunctionReflection)> {
-        let mut current = self.classes.get(class)?.extends.first()?.clone();
+        let mut current = self
+            .class_references_by_name(class)?
+            .extends
+            .first()?
+            .clone();
         for _ in 0..self.classes.len().max(1) {
             let info = self.classes.get(&current)?;
             if info.is_consistent_constructor {
@@ -1078,7 +1060,11 @@ impl Registry {
                     .lookup_own_method(&current, "__construct")
                     .map(|sig| (current.clone(), sig));
             }
-            current = info.extends.first()?.clone();
+            current = self
+                .class_references_by_name(&current)?
+                .extends
+                .first()?
+                .clone();
         }
         None
     }
@@ -1106,10 +1092,10 @@ impl Registry {
     /// this only answers the one yes/no question the override-attribute
     /// check needs.
     pub fn trait_declares_abstract_method(&self, class: &str, method: &str) -> bool {
-        let Some(info) = self.classes.get(class) else {
+        let Some(references) = self.class_references_by_name(class) else {
             return false;
         };
-        info.uses.iter().any(|used_trait| {
+        references.uses.iter().any(|used_trait| {
             self.classes
                 .get(used_trait)
                 .is_some_and(|_| self.method_is_abstract(used_trait, method))
@@ -1132,14 +1118,14 @@ impl Registry {
     /// *nothing* is found) makes the unresolved-vs-absent distinction
     /// matter.
     pub fn has_unresolvable_ancestor(&self, class: &str) -> bool {
-        let Some(info) = self.classes.get(class) else {
+        let Some(references) = self.class_references_by_name(class) else {
             return false;
         };
         let mut seen = FxHashSet::default();
-        let mut queue: VecDeque<Name> = info
+        let mut queue: VecDeque<Name> = references
             .extends
             .iter()
-            .chain(info.implements.iter())
+            .chain(references.implements)
             .cloned()
             .collect();
         while let Some(current) = queue.pop_front() {
@@ -1149,13 +1135,15 @@ impl Registry {
             let Some(current_info) = self.classes.get(&current) else {
                 return true;
             };
-            queue.extend(
-                current_info
-                    .extends
-                    .iter()
-                    .chain(current_info.implements.iter())
-                    .cloned(),
-            );
+            if let Some(references) = self.class_references_by_name(&current) {
+                queue.extend(
+                    references
+                        .extends
+                        .iter()
+                        .chain(references.implements)
+                        .cloned(),
+                );
+            }
         }
         false
     }
@@ -1168,7 +1156,7 @@ impl Registry {
         class: &str,
         prop: &str,
     ) -> Option<(Name, &PropertyReflection)> {
-        let owner = self.ancestor_property_owner(self.classes.get(class)?, prop)?;
+        let owner = self.ancestor_property_owner(class, prop)?;
         let sig = self
             .classes
             .get(owner)?
@@ -1192,9 +1180,8 @@ impl Registry {
     /// if/elseif order: `method.parentMethodFinal` vs.
     /// `method.parentMethodFinalByPhpDoc`).
     pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<(Name, bool)> {
-        let info = self.classes.get(class)?;
         let mut seen = FxHashSet::default();
-        let mut stack: Vec<Name> = info.extends.clone();
+        let mut stack: Vec<Name> = self.class_references_by_name(class)?.extends.to_vec();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -1208,7 +1195,9 @@ impl Registry {
             if self.method_is_final_by_phpdoc(&current, method) {
                 return Some((current, true));
             }
-            stack.extend(current_info.extends.iter().cloned());
+            if let Some(references) = self.class_references_by_name(&current) {
+                stack.extend(references.extends.iter().cloned());
+            }
         }
         None
     }
@@ -1223,9 +1212,8 @@ impl Registry {
         class: &str,
         property: &str,
     ) -> Option<(Name, bool)> {
-        let info = self.classes.get(class)?;
         let mut seen = FxHashSet::default();
-        let mut stack: Vec<Name> = info.extends.clone();
+        let mut stack: Vec<Name> = self.class_references_by_name(class)?.extends.to_vec();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -1248,7 +1236,9 @@ impl Registry {
             {
                 return Some((current, true));
             }
-            stack.extend(current_info.extends.iter().cloned());
+            if let Some(references) = self.class_references_by_name(&current) {
+                stack.extend(references.extends.iter().cloned());
+            }
         }
         None
     }
@@ -1277,8 +1267,11 @@ impl Registry {
             let Some(info) = self.classes.get(&c) else {
                 continue;
             };
-            class_queue.extend(info.extends.iter().cloned());
-            let mut iface_queue: VecDeque<Name> = info.implements.iter().cloned().collect();
+            let Some(references) = self.class_references_by_name(&c) else {
+                continue;
+            };
+            class_queue.extend(references.extends.iter().cloned());
+            let mut iface_queue: VecDeque<Name> = references.implements.iter().cloned().collect();
             while let Some(iface) = iface_queue.pop_front() {
                 if !seen_ifaces.insert(iface.clone()) {
                     continue;
@@ -1289,7 +1282,9 @@ impl Registry {
                 if let Some(sig) = self.lookup_own_method(&iface, method) {
                     result.push((iface.clone(), sig));
                 }
-                iface_queue.extend(iface_info.extends.iter().cloned());
+                if let Some(references) = self.class_references_by_name(&iface) {
+                    iface_queue.extend(references.extends.iter().cloned());
+                }
             }
         }
         result
@@ -1336,8 +1331,10 @@ impl Registry {
                         .map(|entry| entry.name.clone()),
                 );
             }
-            for parent in info.extends.iter().chain(info.implements.iter()) {
-                stack.push(parent.clone());
+            if let Some(references) = self.class_references_by_name(&current) {
+                for parent in references.extends.iter().chain(references.implements) {
+                    stack.push(parent.clone());
+                }
             }
         }
         let mut required: Vec<Name> = required.into_iter().collect();
@@ -1371,8 +1368,10 @@ impl Registry {
             {
                 return true;
             }
-            for parent in info.extends.iter().chain(info.implements.iter()) {
-                stack.push(parent.clone());
+            if let Some(references) = self.class_references_by_name(&current) {
+                for parent in references.extends.iter().chain(references.implements) {
+                    stack.push(parent.clone());
+                }
             }
         }
         false
@@ -1385,25 +1384,12 @@ impl Registry {
     /// `precompute_member_owners`'s own doc comment.
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertyReflection> {
         let owner = self.property_owners(class)?.get(prop)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_property_by_class_id(*id, prop))
-        } else {
-            None
-        };
-        from_file.or_else(|| {
-            let id = self.class_ids.get(owner)?;
-            if !self.raw_active
-                && let Some(property) = self
-                    .class_property_results
-                    .get(id)
-                    .and_then(|properties| properties.get(prop))
-            {
-                return Some(&**property);
-            }
-            self.classes.get(owner)?.properties.get(prop).map(|p| &**p)
-        })
+        let id = self.class_ids.get(owner)?;
+        self.class_property_results
+            .get(id)
+            .and_then(|properties| properties.get(prop))
+            .map(|property| &**property)
+            .or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))
     }
 
     /// Iterates a class's declared properties, including composed and
@@ -1412,13 +1398,10 @@ impl Registry {
     /// result-only names are appended.
     pub fn property_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
         let declared = self.classes.get(class).map(|info| &info.properties);
-        let results = if self.raw_active {
-            None
-        } else {
-            self.class_ids
-                .get(class)
-                .and_then(|id| self.class_property_results.get(id))
-        };
+        let results = self
+            .class_ids
+            .get(class)
+            .and_then(|id| self.class_property_results.get(id));
         declared
             .into_iter()
             .flat_map(|properties| properties.keys())
@@ -1438,25 +1421,13 @@ impl Registry {
         prop: &str,
     ) -> Option<(Name, &PropertyReflection)> {
         let owner = self.property_owners(class)?.get(prop)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_property_by_class_id(*id, prop))
-        } else {
-            None
-        };
-        let sig = from_file.or_else(|| {
-            let id = self.class_ids.get(owner)?;
-            if !self.raw_active
-                && let Some(property) = self
-                    .class_property_results
-                    .get(id)
-                    .and_then(|properties| properties.get(prop))
-            {
-                return Some(&**property);
-            }
-            self.classes.get(owner)?.properties.get(prop).map(|p| &**p)
-        })?;
+        let id = self.class_ids.get(owner)?;
+        let sig = self
+            .class_property_results
+            .get(id)
+            .and_then(|properties| properties.get(prop))
+            .map(|property| &**property)
+            .or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))?;
         Some((owner.clone(), sig))
     }
 
@@ -1464,30 +1435,18 @@ impl Registry {
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstantReflection> {
         let owner = self.const_owners(class)?.get(const_name)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_constant_by_class_id(*id, const_name))
-        } else {
-            None
-        };
-        from_file.or_else(|| {
-            (!self.raw_active)
-                .then(|| {
-                    let id = self.class_ids.get(owner)?;
-                    self.class_constant_results
-                        .get(id)?
-                        .get(const_name)
-                        .map(|(_, constant)| &**constant)
-                })
-                .flatten()
-                .or_else(|| {
-                    self.classes
-                        .get(owner)?
-                        .consts
-                        .get(const_name)
-                        .map(|constant| &**constant)
-                })
+        let result = self.class_ids.get(owner).and_then(|id| {
+            self.class_constant_results
+                .get(id)?
+                .get(const_name)
+                .map(|(_, c)| &**c)
+        });
+        result.or_else(|| {
+            self.classes
+                .get(owner)?
+                .consts
+                .get(const_name)
+                .map(|c| &**c)
         })
     }
 
@@ -1495,13 +1454,10 @@ impl Registry {
     /// from traits and held as Registry results.
     pub fn constant_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
         let declared = self.classes.get(class).map(|info| &info.consts);
-        let results = if self.raw_active {
-            None
-        } else {
-            self.class_ids
-                .get(class)
-                .and_then(|id| self.class_constant_results.get(id))
-        };
+        let results = self
+            .class_ids
+            .get(class)
+            .and_then(|id| self.class_constant_results.get(id));
         declared
             .into_iter()
             .flat_map(|constants| constants.keys())
@@ -1523,26 +1479,18 @@ impl Registry {
     ) -> Option<(Name, usize, &ConstantReflection)> {
         let owner = self.const_owners(class)?.get(const_name)?;
         let info = self.classes.get(owner)?;
-        let result = (!self.raw_active)
-            .then(|| {
-                let id = self.class_ids.get(owner)?;
-                self.class_constant_results.get(id)?.get(const_name)
-            })
-            .flatten();
+        let result = self
+            .class_ids
+            .get(owner)
+            .and_then(|id| self.class_constant_results.get(id))
+            .and_then(|constants| constants.get(const_name));
         let (slot, declared) = result
             .map(|(slot, constant)| (*slot, &**constant))
             .or_else(|| {
                 let slot = info.consts.get_index(const_name)?;
                 Some((slot, &**info.consts.get_index_value(slot)?))
             })?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_constant_by_class_id(*id, const_name))
-        } else {
-            None
-        };
-        let constant = from_file.unwrap_or(declared);
+        let constant = declared;
         Some((owner.clone(), slot, constant))
     }
 
@@ -1555,12 +1503,10 @@ impl Registry {
         const_name: &str,
     ) -> Option<(Name, &Type)> {
         let (owner, slot, constant) = self.lookup_const_with_owner_and_slot(class, const_name)?;
-        let resolved = (!self.raw_active)
-            .then(|| {
-                let id = self.class_ids.get(&owner)?;
-                self.class_const_types.get(&(*id, slot))
-            })
-            .flatten();
+        let resolved = self
+            .class_ids
+            .get(&owner)
+            .and_then(|id| self.class_const_types.get(&(*id, slot)));
         Some((owner, resolved.unwrap_or_else(|| constant.ty())))
     }
 
@@ -1582,31 +1528,19 @@ impl Registry {
         const_name: &str,
     ) -> Option<(Name, &ConstantReflection)> {
         let owner = self.const_owners(class)?.get(const_name)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_constant_by_class_id(*id, const_name))
-        } else {
-            None
-        };
-        let constant = from_file.or_else(|| {
-            (!self.raw_active)
-                .then(|| {
-                    let id = self.class_ids.get(owner)?;
-                    self.class_constant_results
-                        .get(id)?
-                        .get(const_name)
-                        .map(|(_, constant)| &**constant)
-                })
-                .flatten()
-                .or_else(|| {
-                    self.classes
-                        .get(owner)?
-                        .consts
-                        .get(const_name)
-                        .map(|constant| &**constant)
-                })
-        })?;
+        let constant = self
+            .class_ids
+            .get(owner)
+            .and_then(|id| self.class_constant_results.get(id))
+            .and_then(|constants| constants.get(const_name))
+            .map(|(_, constant)| &**constant)
+            .or_else(|| {
+                self.classes
+                    .get(owner)?
+                    .consts
+                    .get(const_name)
+                    .map(|c| &**c)
+            })?;
         Some((owner.clone(), constant))
     }
 

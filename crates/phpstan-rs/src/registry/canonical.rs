@@ -26,7 +26,7 @@ use crate::registry::name_table::NameTable;
 use crate::registry::{
     AssertInfo, AssertTarget, ChangedNames, ClassReflection, ConstantReflection,
     DoctrineEntityIndex, FunctionReflection, MethodEntry, ParameterReflection, PropertyReflection,
-    RawDeclarations, Registry,
+    Registry,
 };
 
 canonical_struct!(ClassReflection {
@@ -423,23 +423,6 @@ impl<T: CanonicalOver + ?Sized> CanonicalOver for Arc<T> {
     }
 }
 
-/// The declarations as built over the base's, when both keep them; whole
-/// otherwise.
-impl CanonicalOver for Option<Box<RawDeclarations>> {
-    fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
-        match (self, base) {
-            (Some(raw), Some(base)) => {
-                let RawDeclarations { classes } = &**raw;
-                p.node(
-                    "RawDeclarations",
-                    &[("classes", &Over(classes, &base.classes, compare))],
-                );
-            }
-            _ => self.canonical(p),
-        }
-    }
-}
-
 /// Every field, each table, map and set over the base's and the rest
 /// whole: a project's own state and settings, its effects and sites, which
 /// a base holds none of.
@@ -490,8 +473,7 @@ impl CanonicalOver for Registry {
             global_variables,
             phpstan_class_files,
             doctrine_entity_index,
-            raw,
-            raw_active,
+            resolved_declarations,
             changed,
             phpstan_stubs_loaded,
             scope,
@@ -549,8 +531,7 @@ impl CanonicalOver for Registry {
                     &Over(phpstan_class_files, &base.phpstan_class_files, compare),
                 ),
                 ("doctrine_entity_index", doctrine_entity_index),
-                ("raw", &Over(raw, &base.raw, compare)),
-                ("raw_active", raw_active),
+                ("resolved_declarations", resolved_declarations),
                 ("changed", changed),
                 ("phpstan_stubs_loaded", phpstan_stubs_loaded),
                 ("scope", scope),
@@ -685,8 +666,7 @@ canonical_struct!(Registry {
     global_variables,
     phpstan_class_files,
     doctrine_entity_index,
-    raw,
-    raw_active,
+    resolved_declarations,
     changed,
     phpstan_stubs_loaded,
     scope,
@@ -722,6 +702,8 @@ canonical_struct!(Registry {
     class_method_results_cache,
     class_property_results,
     class_property_results_cache,
+    class_reference_results,
+    class_reference_results_cache,
     member_owners_cache,
     effects,
     methods_by_name,
@@ -736,8 +718,6 @@ canonical_struct!(Registry {
     scoped_names,
 });
 
-canonical_struct!(RawDeclarations { classes });
-
 canonical_struct!(ChangedNames {
     classes,
     functions,
@@ -746,6 +726,7 @@ canonical_struct!(ChangedNames {
     function_ids_before,
     function_declarations_before,
     function_results_before,
+    class_declarations_before,
 });
 
 canonical_struct!(DoctrineEntityIndex {

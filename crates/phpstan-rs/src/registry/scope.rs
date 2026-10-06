@@ -262,16 +262,12 @@ impl Registry {
     /// one after another.
     pub(crate) fn warm(&self, scope: &Scope) {
         use rayon::prelude::*;
-        let raw = self.raw.as_deref();
         let classes: Vec<&String> = scope.class_keys().into_iter().flatten().collect();
         classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
                 self.classes.get_with_name(&FoldedKey(key));
-                if let Some(raw) = raw {
-                    raw.classes.get_with_name(&FoldedKey(key));
-                }
             });
         let functions: Vec<&String> = scope.function_keys().into_iter().flatten().collect();
         functions

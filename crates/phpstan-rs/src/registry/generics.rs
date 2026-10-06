@@ -90,6 +90,7 @@ impl Registry {
                 return None;
             }
             let info = self.classes.get(class)?;
+            let references = self.class_references_by_name(class)?;
             let own_bindings: FxHashMap<String, Type> = info
                 .templates
                 .iter()
@@ -101,7 +102,7 @@ impl Registry {
                 return Some(own_bindings);
             }
 
-            if let Some(parent) = info.extends.first() {
+            if let Some(parent) = references.extends.first() {
                 let parent_args: Vec<Type> = self
                     .effective_extends_args_by_name(class)
                     .iter()
@@ -117,7 +118,7 @@ impl Registry {
                 }
             }
             let implements_args = self.effective_implements_args_by_name(class);
-            for iface in &info.implements {
+            for iface in &references.implements {
                 let iface_args: Vec<Type> = implements_args
                     .get(iface)
                     .map(|args| {

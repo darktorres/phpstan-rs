@@ -239,6 +239,90 @@ fn imported_type_alias_results_survive_freeze_and_cache_round_trip() {
 }
 
 #[test]
+fn canonical_class_references_are_results_and_survive_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            namespace RefCase;
+            class ParentTarget {}
+            interface ContractTarget {}
+            trait TraitTarget { public function original(): void {} }
+            /** @phpstan-type Imported string */
+            class TypeSource {}
+            /** @phpstan-import-type Imported from typesource */
+            class Consumer extends parenttarget implements contracttarget {
+                use traittarget { traittarget::original as renamed; }
+            }
+            "#,
+    );
+    let id = registry
+        .class_ids
+        .get("RefCase\\Consumer")
+        .copied()
+        .unwrap();
+    let declared = registry.class_by_id(id).unwrap();
+    assert_eq!(declared.extends, vec![Name::from("RefCase\\parenttarget")]);
+    assert_eq!(
+        declared.implements,
+        vec![Name::from("RefCase\\contracttarget")]
+    );
+    assert_eq!(declared.uses, vec![Name::from("RefCase\\traittarget")]);
+    assert_eq!(
+        declared.type_imports[0].source_class_fqn,
+        Name::from("RefCase\\typesource")
+    );
+
+    let refs = registry.class_references(id).unwrap();
+    assert_eq!(refs.extends, &[Name::from("RefCase\\ParentTarget")]);
+    assert_eq!(refs.implements, &[Name::from("RefCase\\ContractTarget")]);
+    assert_eq!(refs.uses, &[Name::from("RefCase\\TraitTarget")]);
+    assert_eq!(
+        refs.trait_aliases[0].trait_name,
+        Some(Name::from("RefCase\\TraitTarget"))
+    );
+    assert_eq!(
+        refs.type_imports[0].source_class_fqn,
+        Name::from("RefCase\\TypeSource")
+    );
+    assert!(registry.is_subclass_of("RefCase\\Consumer", "RefCase\\ParentTarget"));
+    assert!(registry.is_subclass_of("RefCase\\Consumer", "RefCase\\ContractTarget"));
+    assert!(
+        registry
+            .all_ancestor_names("RefCase\\Consumer")
+            .contains("RefCase\\TraitTarget")
+    );
+    assert!(
+        registry
+            .lookup_own_method("RefCase\\Consumer", "renamed")
+            .is_some()
+    );
+
+    let back = round_trip(&registry);
+    let back_id = back.class_ids.get("RefCase\\Consumer").copied().unwrap();
+    let back_declared = back.class_by_id(back_id).unwrap();
+    assert_eq!(back_declared.extends, declared.extends);
+    assert_eq!(back_declared.implements, declared.implements);
+    assert_eq!(back_declared.uses, declared.uses);
+    assert_eq!(back_declared.trait_aliases, declared.trait_aliases);
+    assert_eq!(back_declared.type_imports, declared.type_imports);
+    let back_refs = back.class_references(back_id).unwrap();
+    assert_eq!(back_refs.extends, refs.extends);
+    assert_eq!(back_refs.implements, refs.implements);
+    assert_eq!(back_refs.uses, refs.uses);
+    assert_eq!(back_refs.trait_aliases, refs.trait_aliases);
+    assert_eq!(back_refs.type_imports, refs.type_imports);
+    assert!(back.is_subclass_of("RefCase\\Consumer", "RefCase\\ParentTarget"));
+    assert!(back.is_subclass_of("RefCase\\Consumer", "RefCase\\ContractTarget"));
+    assert!(
+        back.all_ancestor_names("RefCase\\Consumer")
+            .contains("RefCase\\TraitTarget")
+    );
+    assert!(
+        back.lookup_own_method("RefCase\\Consumer", "renamed")
+            .is_some()
+    );
+}
+
+#[test]
 fn class_deferred_generic_type_results_survive_cache_round_trip() {
     let registry = build_registry(
         r#"<?php
@@ -436,17 +520,13 @@ fn the_declarations_as_built_survive_a_round_trip() {
         "the stub registry keeps its declarations as built"
     );
     let back = read_back();
-    let (before, after) = (
-        registry.raw.as_ref().expect("kept"),
-        back.raw.as_ref().expect("stored with the registry"),
-    );
-    assert_eq!(after.classes.len(), before.classes.len());
-    assert_eq!(after.functions.len(), before.functions.len());
-    for (name, class) in before.classes.iter() {
-        assert_eq!(after.classes.get(name), Some(class), "class {name}");
+    assert_eq!(back.classes.len(), registry.classes.len());
+    assert_eq!(back.functions.len(), registry.functions.len());
+    for (name, class) in registry.classes.iter() {
+        assert_eq!(back.classes.get(name), Some(class), "class {name}");
     }
-    for (name, function) in before.functions.iter() {
-        assert_eq!(after.functions.get(name), Some(function), "function {name}");
+    for (name, function) in registry.functions.iter() {
+        assert_eq!(back.functions.get(name), Some(function), "function {name}");
     }
 }
 
@@ -489,7 +569,6 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
         let mut registry = registry.clone();
         registry.classes = Default::default();
         registry.functions = Default::default();
-        registry.raw = None;
         syntax::canonical::print(&registry)
     };
     // Built here, since `Project::new` may itself have read its base back.

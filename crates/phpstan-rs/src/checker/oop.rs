@@ -47,6 +47,9 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(registry_name) else {
             return;
         };
+        let Some(references) = self.registry.class_references_by_name(registry_name) else {
+            return;
+        };
         let kind = info.kind();
         let subject = DeclarationName {
             word: (!is_anonymous).then(|| class_kind_identifier(&kind)),
@@ -64,7 +67,7 @@ impl<'a> Checker<'a> {
         };
         let mut reports: Vec<(String, &'static str)> = Vec::new();
 
-        for parent in info.extends() {
+        for parent in &references.extends {
             let Some((parent_fqn, parent_info)) = self.registry.lookup_class(parent) else {
                 continue;
             };
@@ -122,7 +125,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        for iface in info.implements() {
+        for iface in &references.implements {
             let Some((iface_fqn, iface_kind)) = target_kind(iface) else {
                 continue;
             };
@@ -145,7 +148,7 @@ impl<'a> Checker<'a> {
             ));
         }
 
-        for used in info.uses() {
+        for used in &references.uses {
             let Some((used_fqn, used_kind)) = target_kind(used) else {
                 continue;
             };
@@ -192,7 +195,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        for parent in info.extends() {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
+        for parent in &references.extends {
             if !self.class_name_exists(parent) {
                 let verb = if info.kind() == ClassKind::Interface {
                     "extends unknown interface"
@@ -202,7 +208,7 @@ impl<'a> Checker<'a> {
                 self.report(format!("{fqn} {verb} {parent}"), span, 0, "class.notFound");
             }
         }
-        for iface in info.implements() {
+        for iface in &references.implements {
             if !self.class_name_exists(iface) {
                 self.report(
                     format!("{fqn} implements unknown interface {iface}"),
@@ -217,7 +223,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for used_trait in info.uses() {
+        for used_trait in &references.uses {
             if !self.class_name_exists(used_trait) {
                 self.report(
                     format!("{fqn} uses unknown trait {used_trait}"),
@@ -367,7 +373,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        for mixin in info.mixins() {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
+        for mixin in references.mixins {
             if !self.class_name_exists(mixin) {
                 self.report(
                     format!("PHPDoc tag @mixin references unknown class {mixin}."),
@@ -629,13 +638,16 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        if info.uses().len() < 2 {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
+        if references.uses.len() < 2 {
             return;
         }
 
         let mut seen_props: FxHashMap<&str, (&str, &PropertyReflection)> = FxHashMap::default();
         let mut seen_methods: FxHashMap<&str, (&str, &FunctionReflection)> = FxHashMap::default();
-        for trait_name in info.uses() {
+        for trait_name in &references.uses {
             for prop_name in self.registry.property_names(trait_name) {
                 let Some(sig) = self.registry.lookup_property(trait_name, prop_name) else {
                     continue;
@@ -984,11 +996,14 @@ impl<'a> Checker<'a> {
         );
         self.check_class_constant_modifiers(fqn, c.def.kind, &c.def.consts);
         let own = crate::registry::ClassReflection::from_decl(c, &self.name_ctx);
-        let registry_matches = self.registry.classes().get(fqn).is_some_and(|info| {
-            *info.extends() == *own.extends()
-                && *info.implements() == *own.implements()
-                && *info.uses() == *own.uses()
-        });
+        let registry_matches =
+            self.registry
+                .class_references_by_name(fqn)
+                .is_some_and(|references| {
+                    references.extends == own.extends().as_slice()
+                        && references.implements == own.implements().as_slice()
+                        && references.uses == own.uses().as_slice()
+                });
         if registry_matches {
             self.check_inheritance_target_kinds(fqn, false, c.def.span);
             self.check_magic_serialization_methods(fqn, fqn, c.name.span);
@@ -1008,8 +1023,11 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        let interfaces = info.implements().clone();
-        let parent = info.extends().first().cloned();
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
+        let interfaces = references.implements.to_vec();
+        let parent = references.extends.first().cloned();
         let is_interface = info.kind() == ClassKind::Interface;
         for cc in consts {
             let name = cc.name.as_ref();
@@ -1022,11 +1040,7 @@ impl<'a> Checker<'a> {
             // An interface's own `extends` list plays the immediate-
             // interface role.
             let immediate: Vec<_> = if is_interface {
-                self.registry
-                    .classes()
-                    .get(fqn)
-                    .map(|i| i.extends().clone())
-                    .unwrap_or_default()
+                references.extends.to_vec()
             } else {
                 interfaces.clone()
             };
@@ -1145,7 +1159,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        let immediate: Vec<Name> = info.uses().clone();
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
+        let immediate: Vec<Name> = references.uses.to_vec();
         if immediate.is_empty() {
             return;
         }
@@ -1155,8 +1172,8 @@ impl<'a> Checker<'a> {
             if all_traits.contains(&t) {
                 continue;
             }
-            if let Some(trait_info) = self.registry.classes().get(&t) {
-                stack.extend(trait_info.uses().iter().cloned());
+            if let Some(references) = self.registry.class_references_by_name(&t) {
+                stack.extend(references.uses.iter().cloned());
             }
             all_traits.push(t);
         }
@@ -1876,7 +1893,10 @@ impl<'a> Checker<'a> {
             return;
         }
         let kind = info.kind();
-        for parent_fqn in info.extends().iter().chain(info.implements().iter()) {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
+            return;
+        };
+        for parent_fqn in references.extends.iter().chain(references.implements) {
             let Some(parent_info) = self.registry.classes().get(parent_fqn) else {
                 continue;
             };
