@@ -163,6 +163,61 @@ fn inherited_class_property_results_survive_cache_round_trip() {
 }
 
 #[test]
+fn trait_method_results_survive_freeze_and_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            trait SourceMethods {
+                public const VALUES = ['hello'];
+                /** @return value-of<self::VALUES> */
+                public function greet(string $name): string { return $name; }
+            }
+            trait NestedMethods { use SourceMethods; }
+            class MethodHost {
+                use NestedMethods { greet as welcome; }
+                public const HOST_VALUES = ['host'];
+                /** @return value-of<self::HOST_VALUES> */
+                public function own(): string { return 'host'; }
+            }
+        "#,
+    );
+    let back = round_trip(&registry);
+
+    for method in ["greet", "welcome"] {
+        assert!(
+            registry
+                .classes
+                .get("MethodHost")
+                .unwrap()
+                .methods
+                .get(method)
+                .is_none()
+        );
+        assert!(registry.lookup_own_method("MethodHost", method).is_some());
+        let signature = back.lookup_own_method("MethodHost", method).unwrap();
+        assert_eq!(signature.params()[0].name().as_ref(), "name");
+        assert_eq!(
+            signature.return_type(),
+            &Type::string_literal("hello".into())
+        );
+    }
+    let raw_own = registry
+        .classes
+        .get("MethodHost")
+        .unwrap()
+        .methods
+        .get("own")
+        .unwrap();
+    assert!(raw_own.return_type().contains_deferred());
+    assert_eq!(
+        registry
+            .lookup_own_method("MethodHost", "own")
+            .unwrap()
+            .return_type(),
+        &Type::string_literal("host".into())
+    );
+}
+
+#[test]
 fn the_declarations_as_built_survive_a_round_trip() {
     let project = Project::new();
     let registry = project.registry();

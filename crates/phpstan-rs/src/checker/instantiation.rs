@@ -253,7 +253,7 @@ impl<'a> Checker<'a> {
             let Some(info) = registry.classes().get(&c) else {
                 break;
             };
-            if info.methods().contains_key("__construct") {
+            if registry.lookup_own_method(&c, "__construct").is_some() {
                 prototype_owner = c.clone();
             }
             current = info.extends().first().cloned();

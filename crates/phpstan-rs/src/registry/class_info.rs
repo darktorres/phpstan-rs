@@ -629,6 +629,9 @@ impl ClassReflection {
         &self.implements
     }
 
+    /// The methods stored on this declaration as built. Composed trait and
+    /// mixin methods, plus resolved method-pass outputs, are read through
+    /// `Registry::method_names` and `Registry::lookup_own_method`.
     pub fn methods(&self) -> &Members<FunctionReflection> {
         &self.methods
     }

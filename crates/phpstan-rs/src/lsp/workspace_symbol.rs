@@ -70,7 +70,10 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
                 .declaring_class()
                 .is_some_and(|c| c.eq_ignore_ascii_case(fqn))
         };
-        for (name, sig) in info.methods().iter() {
+        for name in registry.method_names(fqn) {
+            let Some(sig) = registry.lookup_own_method(fqn, name) else {
+                continue;
+            };
             if declared_here(sig.provenance()) {
                 push(
                     name,

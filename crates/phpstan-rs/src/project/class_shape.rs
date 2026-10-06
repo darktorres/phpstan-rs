@@ -127,7 +127,7 @@ impl Project {
     /// The classes extending `class` through their first parent,
     /// directly or transitively. Only the subtypes the registry indexes
     /// are read, not every class there is.
-    fn extending_classes(&self, class: &str) -> Vec<&crate::registry::ClassReflection> {
+    fn extending_classes(&self, class: &str) -> Vec<types::Name> {
         let mut seen: FxHashSet<String> = FxHashSet::default();
         seen.insert(class.to_ascii_lowercase());
         let mut found = Vec::new();
@@ -148,7 +148,7 @@ impl Project {
                     .first()
                     .is_some_and(|parent| parent.eq_ignore_ascii_case(&current));
                 if extends_current && seen.insert(child.to_ascii_lowercase()) {
-                    found.push(info);
+                    found.push(types::Name::from(child.as_str()));
                     stack.push(child.to_ascii_lowercase());
                 }
             }
@@ -174,9 +174,9 @@ impl Project {
 
     /// Whether a class below `lower` declares `method`.
     fn is_overridden(&self, lower: &str, method: &str) -> bool {
-        self.extending_classes(lower).iter().any(|info| {
-            info.methods()
-                .keys()
+        self.extending_classes(lower).iter().any(|class| {
+            self.registry
+                .method_names(class)
                 .any(|name| name.eq_ignore_ascii_case(method))
         })
     }

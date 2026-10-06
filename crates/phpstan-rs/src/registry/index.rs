@@ -553,8 +553,11 @@ impl Registry {
                 names.insert(Name::from(name.rsplit('\\').next().unwrap_or(name)));
             }
         }
-        for (_, info) in self.classes.own_iter() {
-            for (method, sig) in info.methods.iter() {
+        for class in self.classes.own_iter().map(|(class, _)| class) {
+            for method in self.method_names(class) {
+                let Some(sig) = self.lookup_own_method(class, method) else {
+                    continue;
+                };
                 if !sig.assert.is_empty() {
                     names.insert(method.clone());
                 }

@@ -15,7 +15,7 @@ const MAGIC: [u8; 8] = *b"PRSSTUBS";
 
 /// Bumped with any change to the layout, so a file of another layout is
 /// rebuilt instead of read.
-const VERSION: u32 = 12;
+const VERSION: u32 = 13;
 
 /// Magic, version, the body's length, the directory's length, the
 /// checksum.

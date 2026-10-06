@@ -119,7 +119,10 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         let Some(info) = checker.registry.classes().get(&ancestor) else {
             break;
         };
-        let found = info.methods().values().any(|sig| {
+        let found = checker.registry.method_names(&ancestor).any(|method| {
+            let Some(sig) = checker.registry.lookup_own_method(&ancestor, method) else {
+                return false;
+            };
             checker
                 .bodies
                 .summary(sig.provenance())

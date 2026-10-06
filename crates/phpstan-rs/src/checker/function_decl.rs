@@ -140,12 +140,7 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
     ) -> Option<&'a FunctionReflection> {
         match class_name {
-            Some(c) => self
-                .registry
-                .classes()
-                .get(c)?
-                .methods()
-                .get(f.name.as_ref()),
+            Some(c) => self.registry.lookup_own_method(c, f.name.as_ref()),
             None => self.registry.functions().get(f.fq_name()),
         }
     }

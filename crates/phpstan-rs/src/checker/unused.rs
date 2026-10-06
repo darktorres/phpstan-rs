@@ -91,9 +91,9 @@ impl<'a> Checker<'a> {
         self.registry.all_ancestor_names(class).iter().any(|name| {
             self.registry.classes().get(name).is_some_and(|ancestor| {
                 ancestor.kind() == ClassKind::Interface
-                    && ancestor
-                        .methods()
-                        .keys()
+                    && self
+                        .registry
+                        .method_names(name)
                         .any(|m| syntax::ast::is_constructor_name(m))
             })
         })

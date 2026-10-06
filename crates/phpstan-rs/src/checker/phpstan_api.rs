@@ -943,18 +943,18 @@ impl Walker<'_> {
         let Some(fqn) = self.resolve_if_phpstan(n) else {
             return;
         };
-        let Some(info) = self.registry.classes().get(fqn.as_str()) else {
+        if self.registry.classes().get(fqn.as_str()).is_none() {
             return;
-        };
+        }
         // Real PHPStan's own `ApiInstantiationRule` flags instantiation
         // unconditionally by default - a class-level `@api` does NOT
         // exempt it at all. The only exemption: the class's own,
         // non-inherited constructor (a direct `info.methods.get` lookup,
         // not `lookup_method`, since an inherited constructor doesn't
         // count) itself carries `@api`.
-        let has_own_api_constructor = info
-            .methods()
-            .get("__construct")
+        let has_own_api_constructor = self
+            .registry
+            .lookup_own_method(fqn.as_str(), "__construct")
             .is_some_and(|ctor| ctor.is_api());
         if !has_own_api_constructor {
             let action = format!("instantiating {fqn}");

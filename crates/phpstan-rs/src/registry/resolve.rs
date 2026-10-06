@@ -9,10 +9,12 @@ use syntax::name::{NameMap, NameSet, OrderedNameMap};
 type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 type DeferredClassConstantTypes = Vec<(usize, Type)>;
 type ClassPropertyResults = Vec<(Name, Arc<PropertyReflection>)>;
+type ClassMethodResults = Vec<(Name, FunctionReflection)>;
 type ClassConstantResults = OrderedNameMap<(usize, Arc<ConstantReflection>)>;
 type ResolvedClassUpdate = (
     ClassId,
     ClassReflection,
+    ClassMethodResults,
     DeferredClassConstantTypes,
     ClassPropertyResults,
 );
@@ -20,8 +22,8 @@ type VisibleClassConstTypes = OrderedNameMap<Type>;
 
 use crate::registry::Registry;
 use crate::registry::{
-    ClassId, ClassReflection, ConstantReflection, FnId, FunctionReflection, MethodEntry, MethodRef,
-    PropertyReflection, substitute_type_aliases,
+    ClassId, ClassReflection, ConstantReflection, FnId, FunctionReflection, Members, MethodEntry,
+    MethodRef, PropertyReflection, substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
 use types::{self, Type};
@@ -185,7 +187,7 @@ impl Registry {
                 // of its own is not copied out either: the apply loop only
                 // inserts into a vacant slot, so a member the class
                 // declares is left out here instead of cloned and dropped.
-                let own_method_names = &own.methods;
+                let own_method_names = &own.member_slots;
                 let mut methods = Vec::new();
                 let mut added_method_names = FoldedMap::default();
                 let mut next_method_slot = own.member_order.len();
@@ -200,7 +202,8 @@ impl Registry {
                     if let Some(trait_info) = registry.classes().get(trait_name) {
                         for entry in &trait_info.member_order {
                             let name = &entry.name;
-                            let Some(shared_sig) = trait_info.methods.shared_get(name) else {
+                            let Some(shared_sig) = registry.shared_own_method(trait_name, name)
+                            else {
                                 continue;
                             };
                             // PHP exposes an adapted alias immediately
@@ -211,7 +214,7 @@ impl Registry {
                                 let selected_trait = alias.trait_name.as_ref().or_else(|| {
                                     uses.iter().find(|candidate| {
                                         registry.classes().get(candidate).is_some_and(|info| {
-                                            info.methods.contains_key(&alias.method)
+                                            info.member_slots.contains_key(&alias.method)
                                         })
                                     })
                                 });
@@ -357,14 +360,14 @@ impl Registry {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (method_ref, entry, sig) in methods {
                     debug_assert_eq!(method_ref.class(), class_id);
-                    if info
-                        .methods
-                        .insert_shared_if_absent(entry.name.clone(), sig)
-                    {
+                    if !info.member_slots.contains_key(&entry.name) {
                         let name = entry.name.clone();
                         let inserted = info.register_member_entry(entry);
                         debug_assert!(inserted);
                         debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
+                        let methods = self.class_method_results.entry(class_id).or_default();
+                        let inserted = methods.insert_shared_if_absent(name, sig);
+                        debug_assert!(inserted);
                         changed = true;
                     }
                 }
@@ -411,23 +414,23 @@ impl Registry {
     /// backfill candidate) - no fixed-point loop needed, since a class's
     /// `method_tags` list is fixed the moment `from_decl` built it.
     ///
-    /// Fully self-contained per class (`info.method_tags` -> `info.
-    /// methods`, on that same `info` only) - no other class is ever read
-    /// or written, so this parallelizes with no read phase to separate
-    /// out first, unlike `flatten_traits`/`flatten_phpdoc_inheritance`
-    /// below (which do need one, since they read other classes).
+    /// Fully self-contained per class (`info.method_tags` and its member
+    /// slots); signatures are returned by class id into the method result
+    /// table after the parallel collection.
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
         let scope = &self.scope;
-        self.classes
+        let resolved: Vec<(ClassId, Vec<(Name, FunctionReflection)>)> = self
+            .classes
             .iter_mut_scoped_where(scope.class_keys(), |info| !info.method_tags.is_empty())
-            .map(|(_, info)| info)
             .collect::<Vec<_>>()
             .into_par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .for_each(|info| {
+            .filter_map(|(class_name, info)| {
+                let class_id = *self.class_ids.get(class_name)?;
+                let mut methods = Vec::new();
                 for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
-                    if info.methods.insert_if_absent(name.clone(), sig) {
+                    if !info.member_slots.contains_key(&name) {
                         info.register_member_entry(MethodEntry {
                             name: name.clone(),
                             is_abstract: false,
@@ -435,9 +438,18 @@ impl Registry {
                             is_static,
                             is_final_by_phpdoc: false,
                         });
+                        methods.push((name, sig));
                     }
                 }
-            });
+                Some((class_id, methods))
+            })
+            .collect();
+        for (class_id, methods) in resolved {
+            let results = self.class_method_results.entry(class_id).or_default();
+            for (name, signature) in methods {
+                results.insert(name, signature);
+            }
+        }
     }
 
     /// Mirrors real PHPStan's own backfill of a method's missing
@@ -649,12 +661,14 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
                 let id = *registry.class_ids.get(name)?;
-                registry
-                    .resolved_deferred_class(name)
-                    .map(|(info, constants, properties)| (id, info, constants, properties))
+                registry.resolved_deferred_class(name).map(
+                    |(info, methods, constants, properties)| {
+                        (id, info, methods, constants, properties)
+                    },
+                )
             })
             .collect();
-        for (id, info, constants, properties) in resolved {
+        for (id, info, methods, constants, properties) in resolved {
             if let Some(name) = self.class_name_by_id(id).cloned() {
                 for (slot, ty) in constants {
                     self.class_const_types.insert((id, slot), ty);
@@ -663,6 +677,10 @@ impl Registry {
                     .entry(id)
                     .or_default()
                     .extend(properties);
+                let method_results = self.class_method_results.entry(id).or_default();
+                for (name, method) in methods {
+                    method_results.insert(name, method);
+                }
                 self.classes.insert(name, info);
             }
         }
@@ -716,6 +734,7 @@ impl Registry {
         class_name: &Name,
     ) -> Option<(
         ClassReflection,
+        ClassMethodResults,
         DeferredClassConstantTypes,
         ClassPropertyResults,
     )> {
@@ -726,7 +745,7 @@ impl Registry {
         let own_consts =
             match self.classes.get(class_name) {
                 Some(info)
-                    if class_has_deferred_type(info)
+                    if class_has_deferred_type(info, self.class_method_results.get(&class_id))
                         || self.class_property_results.get(&class_id).is_some_and(
                             |properties| {
                                 properties
@@ -774,7 +793,7 @@ impl Registry {
                 );
             }
         };
-        for sig in info.methods.values_mut() {
+        let resolve_signature = |sig: &mut FunctionReflection| {
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
                 let native = param.ty_native.clone();
@@ -795,6 +814,24 @@ impl Registry {
             }
             if let Some(out) = &mut sig.self_out {
                 resolve(out, &Type::mixed(), &self.classes);
+            }
+        };
+        let mut method_results = Vec::new();
+        for name in info.methods.keys() {
+            let current = info.methods.get(name).expect("method key exists");
+            let mut resolved = current.clone();
+            resolve_signature(&mut resolved);
+            if resolved != *current {
+                method_results.push((name.clone(), resolved));
+            }
+        }
+        if let Some(results) = self.class_method_results.get(&class_id) {
+            for (name, current) in results.iter() {
+                let mut resolved = current.clone();
+                resolve_signature(&mut resolved);
+                if resolved != *current {
+                    method_results.push((name.clone(), resolved));
+                }
             }
         }
         let mut properties = Vec::new();
@@ -922,7 +959,7 @@ impl Registry {
                 );
             }
         }
-        Some((info, constants, properties))
+        Some((info, method_results, constants, properties))
     }
 
     /// Resolves every `ClassConstant` inside class constants'
@@ -1129,7 +1166,7 @@ impl Registry {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = substitute_type_aliases(taken, &aliases);
             };
-            for sig in info.methods.values_mut() {
+            let substitute_signature = |sig: &mut FunctionReflection| {
                 for param in &mut sig.params {
                     substitute(&mut param.ty);
                     if let Some(doc_ty) = &mut param.doc_ty {
@@ -1142,6 +1179,24 @@ impl Registry {
                 }
                 if let Some(out) = &mut sig.self_out {
                     substitute(out);
+                }
+            };
+            let mut resolved_methods = Vec::new();
+            for name in info.methods.keys() {
+                let current = info.methods.get(name).expect("method key exists");
+                let mut resolved = current.clone();
+                substitute_signature(&mut resolved);
+                if resolved != *current {
+                    resolved_methods.push((name.clone(), resolved));
+                }
+            }
+            if let Some(methods) = self.class_method_results.get(&class_id) {
+                for (name, current) in methods.iter() {
+                    let mut resolved = current.clone();
+                    substitute_signature(&mut resolved);
+                    if resolved != *current {
+                        resolved_methods.push((name.clone(), resolved));
+                    }
                 }
             }
             let existing_properties = self.class_property_results.get(&class_id);
@@ -1193,6 +1248,10 @@ impl Registry {
                 .entry(class_id)
                 .or_default()
                 .extend(resolved_properties);
+            let method_results = self.class_method_results.entry(class_id).or_default();
+            for (name, method) in resolved_methods {
+                method_results.insert(name, method);
+            }
             info.type_aliases.extend(aliases);
             info.type_imports.clear();
             self.classes.insert(class_name, info);
@@ -1238,13 +1297,13 @@ impl Registry {
                 };
                 for entry in &mixin_info.member_order {
                     let name = &entry.name;
-                    let Some(sig) = mixin_info.methods.get(name) else {
+                    let Some(sig) = self.lookup_own_method(mixin_fqn, name) else {
                         continue;
                     };
                     if sig.visibility == Visibility::Public
-                        && !info.methods.contains_key(name)
+                        && !info.member_slots.contains_key(name)
                         && !added_method_names.contains_key(name)
-                        && let Some(shared_sig) = mixin_info.methods.shared_get(name)
+                        && let Some(shared_sig) = self.shared_own_method(mixin_fqn, name)
                     {
                         let slot = u16::try_from(next_method_slot)
                             .expect("class method slot space exhausted");
@@ -1278,15 +1337,19 @@ impl Registry {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
+            let name = entry.name.clone();
+            let mut inserted = false;
             if let Some(info) = self.classes.get_mut(&class_name)
-                && info
-                    .methods
-                    .insert_shared_if_absent(entry.name.clone(), sig)
+                && !info.member_slots.contains_key(&name)
             {
-                let name = entry.name.clone();
-                let inserted = info.register_member_entry(entry);
-                debug_assert!(inserted);
+                let registered = info.register_member_entry(entry);
+                debug_assert!(registered);
                 debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
+                inserted = true;
+            }
+            if inserted {
+                let methods = self.class_method_results.entry(class_id).or_default();
+                debug_assert!(methods.insert_shared_if_absent(name, sig));
             }
         }
         for (class_id, name, sig) in property_additions {
@@ -1508,8 +1571,10 @@ impl Registry {
                 // its parents' methods to their owners, and the owners
                 // already found (a class's methods mostly share a few).
                 let mut parent_maps: Option<Vec<&FoldedMap<Name>>> = None;
-                let mut owner_classes: Vec<(&Name, &ClassReflection)> = Vec::new();
-                for (method_name, sig) in info.methods.iter() {
+                for method_name in registry.method_names(class_name) {
+                    let Some(sig) = registry.lookup_own_method(class_name, method_name) else {
+                        continue;
+                    };
                     let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
                     let needs_return = !sig.return_has_own_doc;
                     if !needs_param && !needs_return {
@@ -1527,19 +1592,7 @@ impl Registry {
                     else {
                         continue;
                     };
-                    let owner_class = match owner_classes.iter().find(|(name, _)| *name == owner) {
-                        Some((_, class)) => *class,
-                        None => {
-                            let Some(class) = registry.classes().get(owner) else {
-                                continue;
-                            };
-                            if owner_classes.len() < 8 {
-                                owner_classes.push((owner, class));
-                            }
-                            class
-                        }
-                    };
-                    let Some(ancestor_sig) = owner_class.methods.get(method_name) else {
+                    let Some(ancestor_sig) = registry.lookup_own_method(owner, method_name) else {
                         continue;
                     };
                     if ancestor_sig.visibility == Visibility::Private {
@@ -1720,7 +1773,13 @@ impl Registry {
                 else {
                     continue;
                 };
-                let Some(sig) = info.methods.get_mut(&method_name) else {
+                let Some(mut sig) = self
+                    .class_method_results
+                    .get(&class_id)
+                    .and_then(|methods| methods.get(&method_name))
+                    .or_else(|| info.methods.get(&method_name))
+                    .cloned()
+                else {
                     continue;
                 };
                 for (i, ty, explicit_mixed_hint) in param_fills {
@@ -1737,6 +1796,10 @@ impl Registry {
                     sig.return_explicit_mixed_hint = explicit_mixed_hint;
                     changed = true;
                 }
+                self.class_method_results
+                    .entry(class_id)
+                    .or_default()
+                    .insert(method_name, sig);
             }
         }
         changed
@@ -1877,8 +1940,12 @@ fn function_has_deferred_type(sig: &FunctionReflection) -> bool {
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `info`
 /// contains a deferred sentinel - lets that pass skip a class outright.
-fn class_has_deferred_type(info: &ClassReflection) -> bool {
+fn class_has_deferred_type(
+    info: &ClassReflection,
+    method_results: Option<&Members<FunctionReflection>>,
+) -> bool {
     info.methods.values().any(function_has_deferred_type)
+        || method_results.is_some_and(|methods| methods.values().any(function_has_deferred_type))
         || info
             .extends_args
             .iter()
@@ -2279,9 +2346,14 @@ impl Registry {
                     else {
                         continue;
                     };
-                    self.classes
-                        .get_mut(&class)
-                        .and_then(|info| info.methods.get_mut(&name))
+                    self.class_method_results
+                        .get_mut(&method.class())
+                        .and_then(|methods| methods.get_mut(&name))
+                        .or_else(|| {
+                            self.classes
+                                .get_mut(&class)
+                                .and_then(|info| info.methods.get_mut(&name))
+                        })
                 }
                 SigId::Function(function) => {
                     let Some(name) = self.function_name_by_id(function).cloned() else {

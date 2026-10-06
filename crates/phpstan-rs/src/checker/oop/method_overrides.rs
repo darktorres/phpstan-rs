@@ -56,9 +56,9 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|m| m.function.name.as_ref())
                 .collect();
-            let mut trait_method_names: Vec<Name> = info
-                .methods()
-                .keys()
+            let mut trait_method_names: Vec<Name> = self
+                .registry
+                .method_names(fqn)
                 .filter(|name| {
                     !syntax::ast::is_constructor_name(name)
                         && !own_method_names.contains(name.as_ref())
@@ -68,7 +68,11 @@ impl<'a> Checker<'a> {
                 .collect();
             trait_method_names.sort();
             for name in trait_method_names {
-                let Some(own_visibility) = info.methods().get(&name).map(|s| s.visibility()) else {
+                let Some(own_visibility) = self
+                    .registry
+                    .lookup_own_method(fqn, &name)
+                    .map(|s| s.visibility())
+                else {
                     continue;
                 };
                 self.check_one_method_override(fqn, &name, &own_visibility, c.def.span, None);
@@ -105,7 +109,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        let Some(own_sig) = info.methods().get(method_name) else {
+        let Some(own_sig) = self.registry.lookup_own_method(fqn, method_name) else {
             return;
         };
         let throwable = || Type::object("Throwable".into(), Vec::new());
@@ -130,7 +134,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes()
                 .get(parent)
-                .and_then(|p| p.methods().get(method_name))
+                .and_then(|_| self.registry.lookup_own_method(parent, method_name))
             && parent_sig.visibility() != Visibility::Private
         {
             ancestors.push((
@@ -150,7 +154,7 @@ impl<'a> Checker<'a> {
         for used in info.uses() {
             if let Some(trait_info) = self.registry.classes().get(used)
                 && trait_info.is_abstract_method(method_name)
-                && let Some(trait_sig) = trait_info.methods().get(method_name)
+                && let Some(trait_sig) = self.registry.lookup_own_method(used, method_name)
             {
                 ancestors.push((
                     used.to_string(),
@@ -234,7 +238,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        let Some(own_sig) = info.methods().get(method_name) else {
+        let Some(own_sig) = self.registry.lookup_own_method(fqn, method_name) else {
             return;
         };
         if let Some((ancestor_owner, ancestor_name)) = self

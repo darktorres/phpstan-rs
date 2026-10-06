@@ -53,8 +53,10 @@ fn a_trait_using_another_trait_is_flattened_transitively() {
             "#,
     );
     let foo = r.classes.get("Foo").unwrap();
-    assert!(foo.methods.contains_key("greet"));
-    assert!(foo.methods.contains_key("extra"));
+    assert!(!foo.methods.contains_key("greet"));
+    assert!(!foo.methods.contains_key("extra"));
+    assert!(r.lookup_own_method("Foo", "greet").is_some());
+    assert!(r.lookup_own_method("Foo", "extra").is_some());
 }
 
 #[test]
@@ -68,9 +70,12 @@ fn a_three_level_trait_chain_is_flattened_transitively() {
             "#,
     );
     let deep = r.classes.get("Deep").unwrap();
-    assert!(deep.methods.contains_key("m1"));
-    assert!(deep.methods.contains_key("m2"));
-    assert!(deep.methods.contains_key("m3"));
+    assert!(!deep.methods.contains_key("m1"));
+    assert!(!deep.methods.contains_key("m2"));
+    assert!(!deep.methods.contains_key("m3"));
+    for method in ["m1", "m2", "m3"] {
+        assert!(r.lookup_own_method("Deep", method).is_some());
+    }
 }
 
 #[test]
@@ -89,11 +94,11 @@ fn a_trait_as_alias_registers_the_method_under_its_new_name_too() {
             "#,
     );
     let c = r.classes.get("C").unwrap();
-    assert!(c.methods.contains_key("hello"));
-    assert!(c.methods.contains_key("helloA"));
-    assert!(c.methods.contains_key("helloB"));
-    let source = c.methods.shared_get("hello").unwrap();
-    let alias = c.methods.shared_get("helloA").unwrap();
+    assert!(!c.methods.contains_key("hello"));
+    assert!(!c.methods.contains_key("helloA"));
+    assert!(!c.methods.contains_key("helloB"));
+    let source = r.shared_own_method("C", "hello").unwrap();
+    let alias = r.shared_own_method("C", "helloA").unwrap();
     assert!(Arc::ptr_eq(&source, &alias));
 }
 
@@ -110,8 +115,10 @@ fn an_unqualified_trait_as_alias_resolves_against_the_used_trait() {
             "#,
     );
     let y = r.classes.get("Y").unwrap();
-    assert!(y.methods.contains_key("greet"));
-    assert!(y.methods.contains_key("greetAlias"));
+    assert!(!y.methods.contains_key("greet"));
+    assert!(!y.methods.contains_key("greetAlias"));
+    assert!(r.lookup_own_method("Y", "greet").is_some());
+    assert!(r.lookup_own_method("Y", "greetAlias").is_some());
 }
 
 #[test]

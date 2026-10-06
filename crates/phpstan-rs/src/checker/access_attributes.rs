@@ -199,10 +199,10 @@ impl<'a> Checker<'a> {
             if !checked {
                 continue;
             }
-            let Some(sig) = info.methods().get(m.function.name.as_ref()).or_else(|| {
-                info.methods()
-                    .get(m.function.name.to_ascii_lowercase().as_str())
-            }) else {
+            let Some(sig) = self
+                .registry
+                .lookup_own_method(fqn, m.function.name.as_ref())
+            else {
                 continue;
             };
             let findings: Vec<(Span, String, String, String)> = sig

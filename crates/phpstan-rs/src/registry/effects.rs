@@ -544,11 +544,14 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// declared in.
 fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry::ClassId>> {
     let mut by_name: FxHashMap<String, Vec<crate::registry::ClassId>> = FxHashMap::default();
-    for (class, info) in registry.classes().own_iter() {
+    for class in registry.classes().own_iter().map(|(class, _)| class) {
         let Some(class_id) = registry.class_ids.get(class).copied() else {
             continue;
         };
-        for (method, sig) in info.methods.iter() {
+        for method in registry.method_names(class) {
+            let Some(sig) = registry.lookup_own_method(class, method) else {
+                continue;
+            };
             if !sig.is_stub {
                 by_name
                     .entry(method.to_ascii_lowercase())
@@ -960,7 +963,7 @@ impl Registry {
                 let Some(info) = self.classes.get(class.as_str()) else {
                     return Effect::anything();
                 };
-                let Some(sig) = info.methods.get(key.member.as_str()) else {
+                let Some(sig) = self.lookup_own_method(class, key.member.as_str()) else {
                     return Effect::anything();
                 };
                 if sig.is_stub {
@@ -1253,13 +1256,13 @@ impl Registry {
     /// be an ancestor's, and from each class below `receiver` declaring it
     /// with a body.
     fn overrides_of_builtin(&self, receiver: &str, builtin: &str) -> Vec<DeclKey> {
-        let Some(info) = self.classes.get(builtin) else {
+        if !self.classes.contains_key(builtin) {
             return Vec::new();
-        };
+        }
         let below = self.subclasses(receiver);
         let below_lower: FxHashSet<&str> = below.iter().map(Name::lower).collect();
         let mut out = Vec::new();
-        for method in info.methods.keys() {
+        for method in self.method_names(builtin) {
             if let Some((owner, sig)) = self.lookup_method_with_owner(receiver, method)
                 && !sig.is_stub
             {
@@ -1271,9 +1274,8 @@ impl Registry {
                     below
                         .iter()
                         .filter(|class| {
-                            self.classes.get(class).is_some_and(|info| {
-                                info.methods.get(method).is_some_and(|sig| !sig.is_stub)
-                            })
+                            self.lookup_own_method(class, method)
+                                .is_some_and(|sig| !sig.is_stub)
                         })
                         .map(|class| method_key(class, method)),
                 );
@@ -1353,8 +1355,11 @@ impl Registry {
     /// whose effect is anything.
     pub(crate) fn own_builtin_methods_running_code(&self) -> FxHashSet<String> {
         let mut names = FxHashSet::default();
-        for (class, info) in self.classes.own_iter() {
-            for (method, sig) in info.methods.iter() {
+        for class in self.classes.own_iter().map(|(class, _)| class) {
+            for method in self.method_names(class) {
+                let Some(sig) = self.lookup_own_method(class, method) else {
+                    continue;
+                };
                 if !sig.is_stub {
                     continue;
                 }

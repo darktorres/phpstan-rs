@@ -704,7 +704,7 @@ impl Project {
                 continue;
             }
             let span = at_line(entry.line);
-            let Some((canonical, info)) = self.registry.lookup_class(class) else {
+            let Some((canonical, _)) = self.registry.lookup_class(class) else {
                 diagnostics.push(manifest_diagnostic(
                     format!(
                         "Composer script {script} calls {command}, but class {class} doesn't exist."
@@ -723,18 +723,14 @@ impl Project {
                         .lookup_method_with_owner(&canonical, &method.to_ascii_lowercase())
                 });
             let Some((owner, sig)) = found else {
-                if info
-                    .methods()
-                    .keys()
-                    .any(|m| m.eq_ignore_ascii_case("__callStatic"))
-                    || self
-                        .registry
-                        .lookup_method_with_owner(&canonical, "__callStatic")
-                        .or_else(|| {
-                            self.registry
-                                .lookup_method_with_owner(&canonical, "__callstatic")
-                        })
-                        .is_some()
+                if self
+                    .registry
+                    .lookup_method_with_owner(&canonical, "__callStatic")
+                    .or_else(|| {
+                        self.registry
+                            .lookup_method_with_owner(&canonical, "__callstatic")
+                    })
+                    .is_some()
                 {
                     continue;
                 }

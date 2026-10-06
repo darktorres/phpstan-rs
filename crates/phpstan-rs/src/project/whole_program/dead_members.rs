@@ -176,12 +176,10 @@ fn is_phpunit_test_method(registry: &Registry, fqn: &str, method_name: &str) -> 
 /// itself is never in its own `all_ancestor_names`, so this only ever
 /// matches a genuine override, never a method's own first declaration.
 fn overrides_an_ancestor_method(registry: &Registry, fqn: &str, method_name: &str) -> bool {
-    registry.all_ancestor_names(fqn).iter().any(|ancestor| {
-        registry
-            .classes()
-            .get(ancestor)
-            .is_some_and(|info| info.methods().contains_key(method_name))
-    })
+    registry
+        .all_ancestor_names(fqn)
+        .iter()
+        .any(|ancestor| registry.lookup_own_method(ancestor, method_name).is_some())
 }
 
 /// Every `(owner FQN, member name, kind)` of `classes`, by their
@@ -224,7 +222,10 @@ pub(crate) fn find_dead_members<'a>(
                 .is_empty()
         };
 
-        for (name, sig) in info.methods().iter() {
+        for name in registry.method_names(fqn) {
+            let Some(sig) = registry.lookup_own_method(fqn, name) else {
+                continue;
+            };
             if !is_visible(&sig.visibility())
                 || sig.is_magic()
                 || is_implicitly_invoked_method(name)

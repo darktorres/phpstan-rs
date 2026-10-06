@@ -514,11 +514,12 @@ impl<'a> Checker<'a> {
         let Some(class) = &self.current_class else {
             return Vec::new();
         };
-        let Some(info) = self.registry.classes().get(class.as_str()) else {
+        if self.registry.classes().get(class.as_str()).is_none() {
             return Vec::new();
-        };
-        info.methods()
-            .values()
+        }
+        self.registry
+            .method_names(class)
+            .filter_map(|name| self.registry.lookup_own_method(class, name))
             .flat_map(|sig| sig.attributes().iter().map(|a| a.name_arc().clone()))
             .collect()
     }

@@ -450,7 +450,7 @@ impl Registry {
             let Some(info) = self.classes.get(current) else {
                 continue;
             };
-            for name in info.methods.keys() {
+            for name in self.method_names(current) {
                 if !method_owner.contains_key(name) {
                     method_owner.insert(name.clone(), current.clone());
                 }
@@ -591,19 +591,65 @@ impl Registry {
     /// `method` as `owner` declares it (method names resolve
     /// case-insensitively; messages spell them as declared).
     pub(crate) fn declared_method_name(&self, owner: &str, method: &str) -> String {
-        self.classes
-            .get(owner)
-            .and_then(|info| {
-                info.methods
-                    .get_key_value(method)
-                    .or_else(|| {
-                        info.methods
-                            .iter()
-                            .find(|(k, _)| k.eq_ignore_ascii_case(method))
-                    })
-                    .map(|(k, _)| k.to_string())
-            })
+        self.method_names(owner)
+            .find(|name| name.eq_ignore_ascii_case(method))
+            .map(ToString::to_string)
             .unwrap_or_else(|| method.to_string())
+    }
+
+    /// Iterates the methods this class declares or composes, in its local
+    /// method order. The signatures for composed methods live in the
+    /// Registry result table.
+    pub fn method_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
+        self.classes
+            .get(class)
+            .into_iter()
+            .flat_map(|info| info.member_order.iter().map(|entry| &entry.name))
+    }
+
+    pub(crate) fn lookup_own_method(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<&FunctionReflection> {
+        if !self.raw_active
+            && let Some(result) = self
+                .class_ids
+                .get(class)
+                .and_then(|id| self.class_method_results.get(id))
+                .and_then(|methods| methods.get(method))
+        {
+            return Some(result);
+        }
+        self.classes.get(class)?.methods.get(method)
+    }
+
+    pub(crate) fn shared_own_method(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<std::sync::Arc<super::Lazy<FunctionReflection>>> {
+        if !self.raw_active
+            && let Some(result) = self
+                .class_ids
+                .get(class)
+                .and_then(|id| self.class_method_results.get(id))
+                .and_then(|methods| methods.shared_get(method))
+        {
+            return Some(result);
+        }
+        self.classes.get(class)?.methods.shared_get(method)
+    }
+
+    pub(crate) fn method_by_ref(&self, method: super::MethodRef) -> Option<&FunctionReflection> {
+        let class = self.class_name_by_id(method.class())?;
+        let name = self
+            .class_by_id(method.class())?
+            .member_order
+            .get(usize::from(method.slot()))?
+            .name
+            .as_ref();
+        self.lookup_own_method(class, name)
     }
 
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionReflection> {
@@ -611,11 +657,14 @@ impl Registry {
         // class and function names: the owners hold one entry for each
         // method, by the most derived declaration's spelling.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
-        let from_id = self
-            .class_ids
-            .get(owner)
-            .and_then(|id| self.file_method_by_class_id(*id, declared));
-        from_id.or_else(|| self.classes.get(owner)?.methods.get(declared))
+        if self.raw_active {
+            self.class_ids
+                .get(owner)
+                .and_then(|id| self.file_method_by_class_id(*id, declared))
+                .or_else(|| self.lookup_own_method(owner, declared))
+        } else {
+            self.lookup_own_method(owner, declared)
+        }
     }
 
     /// The real declared spelling `lookup_method`/`lookup_method_with_
@@ -682,11 +731,14 @@ impl Registry {
     ) -> Option<(Name, &FunctionReflection)> {
         // See `lookup_method`.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
-        let from_id = self
-            .class_ids
-            .get(owner)
-            .and_then(|id| self.file_method_by_class_id(*id, declared));
-        let sig = from_id.or_else(|| self.classes.get(owner)?.methods.get(declared))?;
+        let sig = if self.raw_active {
+            self.class_ids
+                .get(owner)
+                .and_then(|id| self.file_method_by_class_id(*id, declared))
+                .or_else(|| self.lookup_own_method(owner, declared))
+        } else {
+            self.lookup_own_method(owner, declared)
+        }?;
         Some((owner.clone(), sig))
     }
 
@@ -742,7 +794,7 @@ impl Registry {
         method: &str,
     ) -> Option<(Name, &FunctionReflection)> {
         let owner = self.ancestor_method_owner(self.classes.get(class)?, method)?;
-        let sig = self.classes.get(owner)?.methods.get(method)?;
+        let sig = self.lookup_own_method(owner, method)?;
         Some((owner.clone(), sig))
     }
 
@@ -801,7 +853,7 @@ impl Registry {
                 .classes
                 .get(used)
                 .is_some_and(|trait_info| trait_info.is_abstract_method(method))
-                && let Some(sig) = self.classes.get(used).and_then(|i| i.methods.get(method))
+                && let Some(sig) = self.lookup_own_method(used, method)
             {
                 return Some((used.clone(), sig, false));
             }
@@ -845,9 +897,8 @@ impl Registry {
         for _ in 0..self.classes.len().max(1) {
             let info = self.classes.get(&current)?;
             if info.is_consistent_constructor {
-                return info
-                    .methods
-                    .get("__construct")
+                return self
+                    .lookup_own_method(&current, "__construct")
                     .map(|sig| (current.clone(), sig));
             }
             current = info.extends.first()?.clone();
@@ -1058,7 +1109,7 @@ impl Registry {
                 let Some(iface_info) = self.classes.get(&iface) else {
                     continue;
                 };
-                if let Some(sig) = iface_info.methods.get(method) {
+                if let Some(sig) = self.lookup_own_method(&iface, method) {
                     result.push((iface.clone(), sig));
                 }
                 iface_queue.extend(iface_info.extends.iter().cloned());
@@ -1140,7 +1191,7 @@ impl Registry {
                 continue;
             };
             if info.kind != ClassKind::Interface
-                && info.methods.contains_key(method)
+                && self.lookup_own_method(&current, method).is_some()
                 && !info.is_abstract_method(method)
             {
                 return true;

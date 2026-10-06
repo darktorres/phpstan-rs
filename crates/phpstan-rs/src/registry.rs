@@ -460,6 +460,12 @@ pub struct Registry {
         FxHashMap<ClassId, OrderedNameMap<(usize, Arc<ConstantReflection>)>>,
     #[serde(skip)]
     class_constant_results_cache: NameTable<Vec<(Name, u32, Arc<ConstantReflection>)>>,
+    // Methods introduced by traits or mixins, keyed by the class that has
+    // the local MethodRef. ClassReflection.methods remains as-built.
+    #[serde(skip)]
+    pub(crate) class_method_results: FxHashMap<ClassId, Members<FunctionReflection>>,
+    #[serde(skip)]
+    class_method_results_cache: NameTable<Members<FunctionReflection>>,
     // Hook facts inherited by a redeclared property, keyed by the class
     // declaration that owns the completed property. The underlying
     // PropertyReflection remains the as-built declaration.
@@ -746,6 +752,7 @@ impl Registry {
                 .retain(|method, _| method.class() != id);
             self.class_const_types.retain(|(class, _), _| *class != id);
             self.class_constant_results.remove(&id);
+            self.class_method_results.remove(&id);
             self.class_property_results.remove(&id);
         }
     }
@@ -935,6 +942,7 @@ impl Registry {
         if scope.is_all() {
             self.class_const_types.clear();
             self.class_constant_results.clear();
+            self.class_method_results.clear();
             self.class_property_results.clear();
             self.classes = raw.classes.clone();
             self.functions = raw.functions.clone();
@@ -955,6 +963,8 @@ impl Registry {
         self.class_const_types
             .retain(|(id, _), _| !changed_class_ids.contains(id));
         self.class_constant_results
+            .retain(|id, _| !changed_class_ids.contains(id));
+        self.class_method_results
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_property_results
             .retain(|id, _| !changed_class_ids.contains(id));
@@ -1012,6 +1022,7 @@ impl Registry {
             .collect();
         let class_const_types = self.class_const_types_for_cache();
         let class_constant_results = self.class_constant_results_for_cache();
+        let class_method_results = self.class_method_results_for_cache();
         let class_property_results = self.class_property_results_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
@@ -1135,6 +1146,16 @@ impl Registry {
             })
             .collect();
         self.class_constant_results_cache = NameTable::default();
+        self.class_method_results = class_method_results
+            .iter()
+            .filter_map(|(name, methods)| {
+                self.class_ids
+                    .get(name)
+                    .copied()
+                    .map(|id| (id, methods.clone()))
+            })
+            .collect();
+        self.class_method_results_cache = NameTable::default();
         self.class_property_results = class_property_results
             .iter()
             .filter_map(|(name, properties)| {
@@ -1280,6 +1301,8 @@ impl Registry {
             .store(writer, "table:class_const_types")?;
         self.class_constant_results_for_cache()
             .store(writer, "table:class_constant_results")?;
+        self.class_method_results_for_cache()
+            .store(writer, "table:class_method_results")?;
         self.class_property_results_for_cache()
             .store(writer, "table:class_property_results")?;
         self.store_tables(writer)?;
@@ -1369,6 +1392,19 @@ impl Registry {
             .collect()
     }
 
+    fn class_method_results_for_cache(&self) -> NameTable<Members<FunctionReflection>> {
+        if !self.class_method_results_cache.is_empty() {
+            return self.class_method_results_cache.clone();
+        }
+        self.class_method_results
+            .iter()
+            .filter_map(|(id, methods)| {
+                self.class_name_by_id(*id)
+                    .map(|class| (class.clone(), methods.clone()))
+            })
+            .collect()
+    }
+
     fn class_property_results_for_cache(&self) -> NameTable<Vec<(Name, Arc<PropertyReflection>)>> {
         if !self.class_property_results_cache.is_empty() {
             return self.class_property_results_cache.clone();
@@ -1402,6 +1438,8 @@ impl Registry {
             .check_order("table:class_const_types")?;
         self.class_constant_results_for_cache()
             .check_order("table:class_constant_results")?;
+        self.class_method_results_for_cache()
+            .check_order("table:class_method_results")?;
         self.class_property_results_for_cache()
             .check_order("table:class_property_results")?;
         if let Some(raw) = &self.raw {
@@ -1436,6 +1474,8 @@ impl Registry {
         registry.class_const_types_cache = NameTable::load(reader, "table:class_const_types")?;
         registry.class_constant_results_cache =
             NameTable::load(reader, "table:class_constant_results")?;
+        registry.class_method_results_cache =
+            NameTable::load(reader, "table:class_method_results")?;
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
         if reader.has_section(RAW_CLASSES) {
@@ -1505,6 +1545,11 @@ impl Registry {
             .class_constant_results
             .drain()
             .map(|(id, constants)| (id.with_generation(generation), constants))
+            .collect();
+        base.class_method_results = base
+            .class_method_results
+            .drain()
+            .map(|(id, methods)| (id.with_generation(generation), methods))
             .collect();
         base.class_property_results = base
             .class_property_results

@@ -239,20 +239,25 @@ impl<'a> Checker<'a> {
     /// a trait, invalid there) is deliberately not built - no analog
     /// exists anywhere else in this project for any typehint location.
     pub(crate) fn check_method_tag_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.class_info(fqn) else {
+        if self.class_info(fqn).is_none() {
             return;
-        };
+        }
         // `Registry::resolve_method_tags` drains `ClassReflection::method_tags`
-        // into `info.methods` before this checker pass runs, so this
-        // class's `@method` tags are already merged and indistinguishable
-        // there from a real declared method by name alone.
+        // into the method result table before this checker pass runs, so
+        // these are read through the same effective-class API as traits.
         // `FunctionReflection::is_magic` is the one field `method_tag_sig` sets
         // that a real declared method's `FunctionReflection::from_decl` never
         // does, so it's the correct filter here. Also matches enum
         // `cases()`/`from()`/`tryFrom()` (the other `is_magic: true`
         // producer) harmlessly - their synthesized types never reference
         // an unresolvable class.
-        for (name, sig) in info.methods().iter().filter(|(_, sig)| sig.is_magic()) {
+        for name in self.registry.method_names(fqn) {
+            let Some(sig) = self.registry.lookup_own_method(fqn, name) else {
+                continue;
+            };
+            if !sig.is_magic() {
+                continue;
+            }
             for param in sig.params() {
                 self.check_type_class_names_exist(
                     param.ty(),
@@ -635,9 +640,6 @@ impl<'a> Checker<'a> {
         let mut seen_props: FxHashMap<&str, (&str, &PropertyReflection)> = FxHashMap::default();
         let mut seen_methods: FxHashMap<&str, (&str, &FunctionReflection)> = FxHashMap::default();
         for trait_name in info.uses() {
-            let Some(trait_info) = self.registry.classes().get(trait_name) else {
-                continue;
-            };
             for prop_name in self.registry.property_names(trait_name) {
                 let Some(sig) = self.registry.lookup_property(trait_name, prop_name) else {
                     continue;
@@ -657,7 +659,10 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            for (method_name, sig) in trait_info.methods().iter() {
+            for method_name in self.registry.method_names(trait_name) {
+                let Some(sig) = self.registry.lookup_own_method(trait_name, method_name) else {
+                    continue;
+                };
                 if info.resolved_trait_conflicts().contains(method_name) {
                     continue;
                 }

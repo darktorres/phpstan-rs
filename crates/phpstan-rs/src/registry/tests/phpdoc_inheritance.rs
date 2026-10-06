@@ -16,6 +16,12 @@ fn is_list_type(ty: &Type) -> bool {
     ty.is_list().yes()
 }
 
+fn method<'a>(registry: &'a Registry, class: &str, name: &str) -> &'a FunctionReflection {
+    registry
+        .lookup_own_method(class, name)
+        .expect("method exists")
+}
+
 #[test]
 fn a_return_type_is_inherited_from_an_interface_when_the_implementor_has_no_own_return_doc() {
     let r = build_registry(
@@ -29,7 +35,7 @@ fn a_return_type_is_inherited_from_an_interface_when_the_implementor_has_no_own_
             }
             "#,
     );
-    let sig = &r.classes["InstallView"].methods["pageAssets"];
+    let sig = method(&r, "InstallView", "pageAssets");
     assert_eq!(list_item_type(&sig.return_type), Type::string());
 }
 
@@ -46,7 +52,7 @@ fn a_param_type_is_inherited_from_an_interface_and_ty_native_is_left_alone() {
             }
             "#,
     );
-    let sig = &r.classes["RealConsumer"].methods["consume"];
+    let sig = method(&r, "RealConsumer", "consume");
     assert_eq!(list_item_type(&sig.params[0].ty), Type::int());
     // The native-only field must never be touched by this pass - it
     // feeds `check_one_method_override`'s Liskov check, which must keep
@@ -76,7 +82,7 @@ fn inheritance_applies_even_when_the_native_return_hint_is_already_non_mixed() {
             }
             "#,
     );
-    let sig = &r.classes["ConcreteView2"].methods["assets"];
+    let sig = method(&r, "ConcreteView2", "assets");
     assert!(is_list_type(&sig.return_type));
 }
 
@@ -97,7 +103,7 @@ fn a_parent_class_wins_over_an_implemented_interface_when_both_declare_the_metho
             }
             "#,
     );
-    let sig = &r.classes["Child3"].methods["make"];
+    let sig = method(&r, "Child3", "make");
     assert_eq!(sig.return_type, Type::int());
 }
 
@@ -118,7 +124,7 @@ fn the_first_declared_interface_wins_never_a_union_of_several() {
             }
             "#,
     );
-    let sig = &r.classes["Impl4"].methods["value"];
+    let sig = method(&r, "Impl4", "value");
     assert_eq!(sig.return_type, Type::int());
 }
 
@@ -141,7 +147,7 @@ fn a_three_level_chain_resolves_through_the_fixed_point_loop() {
             }
             "#,
     );
-    let sig = &r.classes["Concrete5"].methods["items"];
+    let sig = method(&r, "Concrete5", "items");
     assert!(is_list_type(&sig.return_type));
 }
 
@@ -159,7 +165,7 @@ fn a_childs_own_return_doc_is_never_overwritten() {
             }
             "#,
     );
-    let sig = &r.classes["Impl6"].methods["make"];
+    let sig = method(&r, "Impl6", "make");
     assert_eq!(list_item_type(&sig.return_type), Type::string());
 }
 
@@ -176,7 +182,7 @@ fn a_private_ancestor_method_is_never_inherited_from() {
             }
             "#,
     );
-    let sig = &r.classes["Sub7"].methods["make"];
+    let sig = method(&r, "Sub7", "make");
     assert!(
         !is_list_type(&sig.return_type),
         "a private ancestor method must never be inherited from, got {:?}",
@@ -207,7 +213,7 @@ fn a_constructor_matches_ancestor_params_by_name_not_position() {
             }
             "#,
     );
-    let sig = &r.classes["DoctrineCommand8"].methods["__construct"];
+    let sig = method(&r, "DoctrineCommand8", "__construct");
     // Position 0 ($dependencyFactory) must be untouched - still resolved
     // from its own native `?DependencyFactory8` hint, never `string|null`.
     assert!(
@@ -241,7 +247,7 @@ fn an_ancestors_mixed_tag_is_never_inherited() {
             }
             "#,
     );
-    let sig = &r.classes["StringVoType9"].methods["convertToPHPValue"];
+    let sig = method(&r, "StringVoType9", "convertToPHPValue");
     assert_ne!(
         sig.return_type,
         Type::mixed(),
@@ -266,7 +272,7 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
             }
             "#,
     );
-    let sig = &r.classes["ConcreteContainer10"].methods["get"];
+    let sig = method(&r, "ConcreteContainer10", "get");
     assert_eq!(
         sig.return_type,
         Type::mixed(),
@@ -303,7 +309,7 @@ fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding
             }
             "#,
     );
-    let sig = &r.classes["ConcreteContainer11"].methods["get"];
+    let sig = method(&r, "ConcreteContainer11", "get");
     assert_eq!(
         sig.return_type,
         Type::object("Widget11".into(), Vec::new()),
@@ -331,7 +337,7 @@ fn a_method_scoped_template_parameterized_type_is_inherited() {
             }
             "#,
     );
-    let sig = &r.classes["ConcreteRepo13"].methods["getReference"];
+    let sig = method(&r, "ConcreteRepo13", "getReference");
     assert_eq!(
         sig.params[0].ty.to_string(),
         "class-string<T>",
@@ -375,7 +381,7 @@ fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_nev
             }
             "#,
     );
-    let sig = &r.classes["Concrete11"].methods["getFactory"];
+    let sig = method(&r, "Concrete11", "getFactory");
     assert_eq!(
         sig.return_type,
         Type::object("SpecificFactory11".into(), Vec::new())
@@ -408,7 +414,7 @@ fn an_ancestors_doc_return_type_incompatible_with_the_native_return_type_is_reco
             }
             "#,
     );
-    let sig = &r.classes["ConstantStringType12"].methods["getValue"];
+    let sig = method(&r, "ConstantStringType12", "getValue");
     assert_eq!(
         sig.return_type,
         Type::string(),
@@ -438,7 +444,7 @@ fn an_ancestors_doc_param_type_incompatible_with_the_native_param_type_is_reconc
             }
             "#,
     );
-    let sig = &r.classes["StrC12"].methods["setValue"];
+    let sig = method(&r, "StrC12", "setValue");
     assert_eq!(
         sig.params[0].ty,
         Type::string(),
@@ -468,7 +474,7 @@ fn an_inherited_return_keeps_the_implementors_own_template_in_place_of_the_inter
             }
             "#,
     );
-    let sig = &r.classes["BaseFactory"].methods["all"];
+    let sig = method(&r, "BaseFactory", "all");
     let item = list_item_type(&sig.return_type);
     assert!(
         item.is_template(),
@@ -498,7 +504,7 @@ fn a_docblock_reaches_a_descendant_seven_levels_down_whatever_the_declaration_or
             "#,
     );
     for class in ["L1", "L2", "L3", "L4", "L5", "L6"] {
-        let sig = &r.classes[class].methods["items"];
+        let sig = method(&r, class, "items");
         assert_eq!(list_item_type(&sig.return_type), Type::string(), "{class}");
     }
 }
@@ -524,7 +530,7 @@ fn a_docblock_comes_down_an_interface_and_a_class_chain_that_meet() {
             "#,
     );
     for class in ["Base", "Middle", "Leaf"] {
-        let sig = &r.classes[class].methods["load"];
+        let sig = method(&r, class, "load");
         assert_eq!(list_item_type(&sig.params[0].ty), Type::int(), "{class}");
     }
 }
@@ -543,7 +549,7 @@ fn a_class_that_is_its_own_ancestor_does_not_stop_the_others_inheriting() {
             "#,
     );
     assert_eq!(
-        list_item_type(&r.classes["Child"].methods["f"].return_type),
+        list_item_type(&method(&r, "Child", "f").return_type),
         Type::int()
     );
     assert!(r.classes.contains_key("LoopA") && r.classes.contains_key("LoopB"));

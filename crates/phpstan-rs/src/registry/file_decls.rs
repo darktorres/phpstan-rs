@@ -1021,7 +1021,7 @@ mod tests {
                 .file_method_ref_by_class_id(class_id, name)
                 .unwrap();
             assert!(std::ptr::eq(
-                registry.file_method_by_ref(method_ref).unwrap(),
+                registry.method_by_ref(method_ref).unwrap(),
                 registry.lookup_method("Host", name).unwrap()
             ));
         }

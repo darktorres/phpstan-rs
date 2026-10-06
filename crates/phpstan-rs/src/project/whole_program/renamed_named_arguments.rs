@@ -88,9 +88,8 @@ fn class_overrides(
     };
     let own_method_names: FxHashSet<&str> =
         class.own_methods.iter().map(|name| name.as_ref()).collect();
-    let mut trait_method_names: Vec<Name> = info
-        .methods()
-        .keys()
+    let mut trait_method_names: Vec<Name> = registry
+        .method_names(fqn)
         .filter(|name| {
             !syntax::ast::is_constructor_name(name)
                 && !own_method_names.contains(name.as_ref())
@@ -110,10 +109,7 @@ fn method_overrides(
     method_name: &str,
     out: &mut RenamedParameterOverrideFacts,
 ) {
-    let Some(info) = registry.classes().get(fqn) else {
-        return;
-    };
-    let Some(own_sig) = info.methods().get(method_name) else {
+    let Some(own_sig) = registry.lookup_own_method(fqn, method_name) else {
         return;
     };
     let Some((ancestor_owner, ancestor_sig, _)) =

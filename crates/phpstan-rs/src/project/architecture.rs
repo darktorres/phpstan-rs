@@ -322,12 +322,15 @@ impl Project {
                 push(target.clone(), *span, constructed.contains(span), &mut deps);
             }
         }
-        if let Some((_, info)) = self.registry.lookup_class(fqn) {
+        {
             let mut names: Vec<String> = Vec::new();
             let mut add = |ty: &Type| {
                 names.extend(ty.referenced_class_names().iter().map(|n| n.to_string()));
             };
-            for sig in info.methods().values() {
+            for method in self.registry.method_names(fqn) {
+                let Some(sig) = self.registry.lookup_own_method(fqn, method) else {
+                    continue;
+                };
                 for p in sig.params() {
                     add(p.ty());
                 }

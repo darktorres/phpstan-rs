@@ -447,9 +447,8 @@ fn an_edited_analyzed_file_stays_analyzed() {
 fn class_has_method(project: &Project, class: &str, method: &str) -> bool {
     project
         .registry()
-        .classes()
-        .get(class)
-        .is_some_and(|c| c.methods().contains_key(method))
+        .lookup_own_method(class, method)
+        .is_some()
 }
 
 #[test]
@@ -907,17 +906,9 @@ fn removing_a_trait_file_drops_its_members_from_its_users() {
         .analysed("t.php", "<?php trait T { public function m(): void {} }")
         .analysed("c.php", "<?php class C { use T; }")
         .load();
-    assert!(
-        project.registry().classes()["C"]
-            .methods()
-            .contains_key("m")
-    );
+    assert!(project.registry().lookup_own_method("C", "m").is_some());
     project.remove_files(&[PathBuf::from("t.php")]);
-    assert!(
-        !project.registry().classes()["C"]
-            .methods()
-            .contains_key("m")
-    );
+    assert!(project.registry().lookup_own_method("C", "m").is_none());
 }
 
 #[test]

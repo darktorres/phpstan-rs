@@ -205,7 +205,10 @@ impl Registry {
                 let Some(class_id) = registry.class_ids.get(class_name).copied() else {
                     return per_class;
                 };
-                for (method_name, sig) in registry.classes()[class_name].methods.iter() {
+                for method_name in registry.method_names(class_name) {
+                    let Some(sig) = registry.lookup_own_method(class_name, method_name) else {
+                        continue;
+                    };
                     if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
                         continue;
                     }
@@ -261,7 +264,7 @@ impl Registry {
                     .function_by_id(candidates.functions[index])
                     .expect("a candidate function is declared"),
                 Some(i) => self
-                    .file_method_by_ref(candidates.methods[i])
+                    .method_by_ref(candidates.methods[i])
                     .expect("a candidate method is declared"),
             }
         };
@@ -290,7 +293,7 @@ impl Registry {
                 not_pure += 1;
                 let target = match dep {
                     PurityDependency::Function(id) => self.function_by_id(*id),
-                    PurityDependency::Method(method) => self.file_method_by_ref(*method),
+                    PurityDependency::Method(method) => self.method_by_ref(*method),
                 };
                 if let Some(&target) = target.and_then(|sig| index_of.get(&std::ptr::from_ref(sig)))
                 {
@@ -593,10 +596,10 @@ fn resolve_new(target_class: &str, registry: &Registry, deps: &mut Vec<PurityDep
     // case) or a literal name lifted verbatim from the AST (`new Foo()`),
     // whose case may not match the declaring key exactly. Same fix
     // rationale as `resolve_this_method_call`'s own doc comment.
-    let Some((owner, info)) = registry.lookup_class(target_class) else {
+    let Some((owner, _)) = registry.lookup_class(target_class) else {
         return true;
     };
-    if !info.methods.contains_key("__construct") {
+    if registry.lookup_own_method(owner, "__construct").is_none() {
         return true;
     }
     let Some(method_ref) = registry.method_ref(owner, "__construct") else {
@@ -838,9 +841,13 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
                     let resolved = match &callee.kind {
                         ExprKind::Name(name) => new_target_class(name, self.declaring_class)
                             .is_some_and(|class| {
-                                self.registry.lookup_class(&class).is_some_and(|(_, info)| {
-                                    info.methods.contains_key("__construct")
-                                })
+                                self.registry
+                                    .lookup_class(&class)
+                                    .is_some_and(|(owner, _)| {
+                                        self.registry
+                                            .lookup_own_method(owner, "__construct")
+                                            .is_some()
+                                    })
                             }),
                         _ => false,
                     };
