@@ -2,6 +2,7 @@
 //! their declaration kind, so member and parameter ranges cannot be confused.
 
 use la_arena::{Arena, Idx, IdxRange, RawIdx};
+use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use syntax::name::Name;
 
@@ -27,6 +28,18 @@ fn encode_range<T>(range: &IdxRange<T>) -> (u32, u32) {
 #[allow(dead_code)] // Used by the cached per-file arena representation in row 4.3.
 fn decode_range<T>(range: (u32, u32)) -> IdxRange<T> {
     IdxRange::new(decode_idx(range.0)..decode_idx(range.1))
+}
+
+#[allow(dead_code)] // Used by the cached per-file arena reader in row 4.3.
+fn idx_is_valid<T>(idx: Idx<T>, arena_len: usize) -> bool {
+    usize::try_from(encode_idx(idx)).is_ok_and(|index| index < arena_len)
+}
+
+#[allow(dead_code)] // Used by the cached per-file arena reader in row 4.3.
+fn range_is_valid<T>(range: &IdxRange<T>, arena_len: usize) -> bool {
+    let start = usize::try_from(encode_idx(range.start()));
+    let end = usize::try_from(encode_idx(range.end()));
+    matches!((start, end), (Ok(start), Ok(end)) if start <= end && end <= arena_len)
 }
 
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
@@ -153,6 +166,28 @@ impl FileDecls {
     pub(crate) fn parameters(&self, layout: Idx<FunctionLayout>) -> &[ParameterReflection] {
         &self.parameters[self.function_layouts[layout].parameters.clone()]
     }
+
+    #[allow(dead_code)] // Used by the cached per-file arena reader in row 4.3.
+    fn validate(&self) -> Result<(), &'static str> {
+        for (_, layout) in self.class_layouts.iter() {
+            if !idx_is_valid(layout.declaration, self.classes.len())
+                || !range_is_valid(&layout.members, self.members.len())
+                || !range_is_valid(&layout.properties, self.properties.len())
+                || !range_is_valid(&layout.constants, self.constants.len())
+                || !range_is_valid(&layout.names, self.names.len())
+            {
+                return Err("class layout refers outside its file declaration arenas");
+            }
+        }
+        for (_, layout) in self.function_layouts.iter() {
+            if !idx_is_valid(layout.declaration, self.functions.len())
+                || !range_is_valid(&layout.parameters, self.parameters.len())
+            {
+                return Err("function layout refers outside its file declaration arenas");
+            }
+        }
+        Ok(())
+    }
 }
 
 #[allow(dead_code)] // Used once ParsedFile stores its declaration arenas.
@@ -242,7 +277,7 @@ impl<'de> Deserialize<'de> for FileDecls {
         }
 
         let encoded = EncodedFileDecls::deserialize(deserializer)?;
-        Ok(FileDecls {
+        let declarations = FileDecls {
             classes: Arena::from_iter(encoded.classes),
             functions: Arena::from_iter(encoded.functions),
             class_layouts: Arena::from_iter(encoded.class_layouts.into_iter().map(|layout| {
@@ -265,7 +300,9 @@ impl<'de> Deserialize<'de> for FileDecls {
             properties: Arena::from_iter(encoded.properties),
             constants: Arena::from_iter(encoded.constants),
             names: Arena::from_iter(encoded.names),
-        })
+        };
+        declarations.validate().map_err(D::Error::custom)?;
+        Ok(declarations)
     }
 }
 
