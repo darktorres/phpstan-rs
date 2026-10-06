@@ -105,6 +105,9 @@ pub(crate) struct FileState {
     // checks read of it was taken when it was parsed, and `ast_of` parses
     // it again for a reader of the rest.
     kept_ast: Option<Vec<Stmt>>,
+    // Parsed bytes live beside a retained tree so source-backed payloads do
+    // not depend on the caller's read buffer.
+    kept_source: Option<Box<[u8]>>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
     // Where the file came in the order files were loaded, which a rebuild of
@@ -226,6 +229,10 @@ impl FileState {
         debug_assert!(
             self.kept_ast.is_some(),
             "a reader asked for the tree of a context file that dropped it"
+        );
+        debug_assert!(
+            self.kept_source.is_some(),
+            "a retained tree must own the bytes it was parsed from"
         );
         self.kept_ast.as_deref().unwrap_or(&[])
     }
@@ -1202,6 +1209,7 @@ impl Project {
             && let Ok(parsed) = parse_with_ignores(path, text, None)
         {
             file.kept_ast = Some(parsed.ast);
+            file.kept_source = Some(parsed.source);
             file.ignores = parsed.ignores;
         }
     }
@@ -1214,6 +1222,7 @@ impl Project {
             file.source = None;
             if !file.analyzed {
                 file.kept_ast = None;
+                file.kept_source = None;
                 file.ignores = Default::default();
             }
         }
@@ -1335,6 +1344,7 @@ impl Project {
         } = placed;
         let ParsedFile {
             ast,
+            source: parsed_source,
             lex_warnings: _,
             functions,
             classes,
@@ -1401,6 +1411,7 @@ impl Project {
             id,
             FileState {
                 kept_ast: ast.filter(|_| keeps_tree),
+                kept_source: parsed_source.filter(|_| keeps_tree),
                 source_len: len,
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, references.iter()),
@@ -3676,6 +3687,7 @@ fn file_references(
 /// A file parsed, with its inline ignore comments.
 struct Parsed {
     ast: Vec<Stmt>,
+    source: Box<[u8]>,
     // What the tree refers to, as the parse recorded it; none when a pass
     // changed the tree after.
     references: Option<syntax::references::FileReferences>,
@@ -3735,6 +3747,7 @@ fn parse_recording<'a>(
     }
     Ok(Parsed {
         ast,
+        source: parsed.source,
         references,
         ignores,
         warnings: parsed.warnings,
@@ -3755,6 +3768,8 @@ pub struct ParsedFile {
     // The tree; none for a file read back from the per-file cache, which
     // keeps what its tree gave and not the tree.
     ast: Option<Vec<Stmt>>,
+    // Present with a parsed tree; absent for a cache-only context entry.
+    source: Option<Box<[u8]>>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
     lex_warnings: Vec<LexWarning>,
     functions: Vec<Name>,
@@ -3893,6 +3908,7 @@ fn parse_file_recording_with_origin<'a>(
     let content_hash = source::ContentHash::of_source(source);
     let Parsed {
         ast,
+        source: parsed_source,
         references,
         ignores,
         warnings: lex_warnings,
@@ -3924,6 +3940,7 @@ fn parse_file_recording_with_origin<'a>(
     let pest_facts = PestFacts::of(path, &ast);
     Ok(ParsedFile {
         ast: Some(ast),
+        source: Some(parsed_source),
         lex_warnings,
         functions,
         classes,
@@ -3958,6 +3975,7 @@ impl ParsedFile {
     /// is kept has; a file read back from the per-file cache has neither.
     pub(crate) fn drop_tree(&mut self) {
         self.ast = None;
+        self.source = None;
         self.ignores = Default::default();
     }
 
@@ -3973,6 +3991,7 @@ impl syntax::canonical::Canonical for ParsedFile {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
         let ParsedFile {
             ast,
+            source: _,
             lex_warnings,
             functions,
             classes,

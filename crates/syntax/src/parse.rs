@@ -14,6 +14,9 @@ use crate::span::LineIndex;
 /// A parsed file.
 #[derive(Debug)]
 pub struct ParsedFile {
+    /// The bytes this tree was parsed from. AST payloads will become ranges
+    /// into this buffer as the tree moves to typed arenas.
+    pub source: Box<[u8]>,
     pub stmts: Vec<Stmt>,
     /// Every comment that holds `@phpstan-ignore`, doc comments included,
     /// in source order, with what the code next to it is.
@@ -98,7 +101,12 @@ pub fn parse_watching<'a>(
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
 ) -> Result<ParsedFile, ParseError> {
-    let lexer = Lexer::from_source(source.into());
+    let source = source.into();
+    let source_bytes: Box<[u8]> = match source {
+        Source::Text(text) => text.as_bytes().into(),
+        Source::Bytes(bytes) => bytes.into(),
+    };
+    let lexer = Lexer::from_source(source);
     let lexer = match watch {
         Some(watch) => lexer.watching(watch),
         None => lexer,
@@ -138,6 +146,7 @@ pub fn parse_watching<'a>(
     facts.unsets_property = unsets_property;
     facts.syntax.merge(&syntax_marks);
     Ok(ParsedFile {
+        source: source_bytes,
         stmts,
         ignore_marks,
         line_index,

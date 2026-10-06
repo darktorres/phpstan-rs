@@ -195,6 +195,7 @@ fn write_file(
     debug_assert!(state.file_decls.validate().is_ok());
     let FileState {
         kept_ast,
+        kept_source: _,
         source_len,
         load_order,
         functions,
