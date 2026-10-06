@@ -1410,10 +1410,15 @@ impl Expr {
     /// This expression inside any parentheses and `@`s: what it
     /// evaluates to, the wrappers being transparent.
     pub fn peeled(&self) -> &Expr {
-        crate::stack::guard(|| match &self.kind {
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner.peeled(),
-            _ => self,
-        })
+        let mut expression = self;
+        loop {
+            match &expression.kind {
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                    expression = inner;
+                }
+                _ => return expression,
+            }
+        }
     }
 
     /// The expression's kind, taken out of it.
