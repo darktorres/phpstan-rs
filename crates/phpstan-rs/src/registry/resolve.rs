@@ -9,6 +9,7 @@ use syntax::name::{NameMap, NameSet, OrderedNameMap};
 type AncestorBindings = NameMap<FxHashMap<String, Type>>;
 type DeferredClassConstantTypes = Vec<(usize, Type)>;
 type ResolvedClassUpdate = (ClassId, ClassReflection, DeferredClassConstantTypes);
+type VisibleClassConstTypes = OrderedNameMap<Type>;
 
 use crate::registry::Registry;
 use crate::registry::{
@@ -1725,8 +1726,8 @@ fn visible_class_consts(
     classes: &NameTable<ClassReflection>,
     class_ids: &NameTable<ClassId>,
     const_types: &FxHashMap<(ClassId, usize), Type>,
-) -> OrderedNameMap<ConstantReflection> {
-    let mut consts: OrderedNameMap<ConstantReflection> = OrderedNameMap::default();
+) -> VisibleClassConstTypes {
+    let mut consts = VisibleClassConstTypes::default();
     let mut seen: NameSet = NameSet::default();
     let mut queue: std::collections::VecDeque<Name> = std::collections::VecDeque::new();
     queue.push_back(Name::from(fqn));
@@ -1740,11 +1741,10 @@ fn visible_class_consts(
         let class_id = class_ids.get(&name).copied();
         for (slot, (const_name, sig)) in info.consts.iter().enumerate() {
             if !consts.contains_key(const_name) {
-                let mut constant = ConstantReflection::clone(sig);
-                if let Some(ty) = class_id.and_then(|id| const_types.get(&(id, slot))) {
-                    constant.ty = ty.clone();
-                }
-                consts.insert(const_name.clone(), constant);
+                let ty = class_id
+                    .and_then(|id| const_types.get(&(id, slot)))
+                    .unwrap_or(&sig.ty);
+                consts.insert(const_name.clone(), ty.clone());
             }
         }
         queue.extend(info.extends.iter().cloned());
@@ -1757,14 +1757,14 @@ fn visible_class_consts(
 /// see `resolve_class_const_type`.
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
-fn matching_class_const_type(consts: &OrderedNameMap<ConstantReflection>, pattern: &str) -> Type {
+fn matching_class_const_type(consts: &VisibleClassConstTypes, pattern: &str) -> Type {
     let names: Vec<&Name> = consts
         .keys()
         .filter(|name| glob_matches(pattern, name))
         .collect();
     let mut members: Vec<Type> = Vec::new();
     for name in names {
-        let ty = consts[name].ty.clone();
+        let ty = consts[name].clone();
         if !members.contains(&ty) {
             members.push(ty);
         }
@@ -1803,11 +1803,7 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
 /// rewritten out of the registry's class map while rewriting it, so
 /// `resolve_deferred_value_of_in_type` can't find a class's own constants
 /// there - this runs first, for the one class that's missing.
-fn bind_class_const_self(
-    ty: Type,
-    class: &str,
-    own_consts: &OrderedNameMap<ConstantReflection>,
-) -> Type {
+fn bind_class_const_self(ty: Type, class: &str, own_consts: &VisibleClassConstTypes) -> Type {
     bind_class_const_self_at(ty, class, own_consts, 0)
 }
 
@@ -1818,7 +1814,7 @@ fn bind_class_const_self(
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,
-    own_consts: &OrderedNameMap<ConstantReflection>,
+    own_consts: &VisibleClassConstTypes,
     depth: usize,
 ) -> Type {
     syntax::stack::guard(|| {
