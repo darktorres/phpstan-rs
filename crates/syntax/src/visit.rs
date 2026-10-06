@@ -21,7 +21,7 @@ pub trait Visitor<'ast> {
         walk_stmt(self, stmt);
     }
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         walk_expr(self, expr);
     }
 
@@ -239,7 +239,7 @@ pub fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) 
     }
 }
 
-pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
+pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast ExprNode) {
     crate::stack::guard(|| match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) => {}
         ExprKind::Name(name) => v.visit_name(name),
@@ -596,7 +596,7 @@ pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Swi
 /// closure's or arrow function's (its body runs later, in a scope of its
 /// own), and of an anonymous class only its constructor arguments (its body
 /// is its own scope).
-pub fn walk_expr_in_scope<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
+pub fn walk_expr_in_scope<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast ExprNode) {
     match &expr.kind {
         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {}
         ExprKind::NewAnonymousClass(class) => walk_args(v, &class.args),
@@ -623,7 +623,7 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
             }
             walk_stmt(self, stmt);
         }
-        fn visit_expr(&mut self, _: &'ast Expr) {}
+        fn visit_expr(&mut self, _: &'ast ExprNode) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_def(&mut self, _: &'ast ClassDef) {}
     }
@@ -637,18 +637,21 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
 /// and anonymous-class bodies and nested function and class declarations
 /// are not entered (though `pred` sees the expression that starts one, and
 /// an anonymous class's constructor arguments). Stops at the first match.
-pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) -> bool) -> bool {
+pub fn any_expr_in_body<'ast>(
+    stmts: &'ast [Stmt],
+    pred: impl FnMut(&'ast ExprNode) -> bool,
+) -> bool {
     struct Search<F> {
         pred: F,
         found: bool,
     }
-    impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Search<F> {
+    impl<'ast, F: FnMut(&'ast ExprNode) -> bool> Visitor<'ast> for Search<F> {
         fn visit_stmt(&mut self, stmt: &'ast Stmt) {
             if !self.found {
                 walk_stmt(self, stmt);
             }
         }
-        fn visit_expr(&mut self, expr: &'ast Expr) {
+        fn visit_expr(&mut self, expr: &'ast ExprNode) {
             if self.found {
                 return;
             }
@@ -670,13 +673,16 @@ pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) 
 /// the same scope: closure, arrow-function and anonymous-class bodies are
 /// not entered (though `pred` sees the expression that starts one, and an
 /// anonymous class's constructor arguments). Stops at the first match.
-pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) -> bool) -> bool {
+pub fn any_expr_in_scope<'ast>(
+    expr: &'ast ExprNode,
+    pred: impl FnMut(&'ast ExprNode) -> bool,
+) -> bool {
     struct Search<F> {
         pred: F,
         found: bool,
     }
-    impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Search<F> {
-        fn visit_expr(&mut self, expr: &'ast Expr) {
+    impl<'ast, F: FnMut(&'ast ExprNode) -> bool> Visitor<'ast> for Search<F> {
+        fn visit_expr(&mut self, expr: &'ast ExprNode) {
             if self.found {
                 return;
             }
@@ -695,13 +701,13 @@ pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) ->
 /// Calls `f` on each expression directly inside `expr` in its scope (its
 /// children, not their descendants; see `walk_expr_in_scope`), in order,
 /// until `f` returns true.
-pub fn any_child_expr<'ast>(expr: &'ast Expr, f: impl FnMut(&'ast Expr) -> bool) -> bool {
+pub fn any_child_expr<'ast>(expr: &'ast ExprNode, f: impl FnMut(&'ast ExprNode) -> bool) -> bool {
     struct Children<F> {
         f: F,
         found: bool,
     }
-    impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Children<F> {
-        fn visit_expr(&mut self, expr: &'ast Expr) {
+    impl<'ast, F: FnMut(&'ast ExprNode) -> bool> Visitor<'ast> for Children<F> {
+        fn visit_expr(&mut self, expr: &'ast ExprNode) {
             if !self.found && (self.f)(expr) {
                 self.found = true;
             }
@@ -727,7 +733,7 @@ pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool)
                 self.found = true;
             }
         }
-        fn visit_expr(&mut self, _: &'ast Expr) {}
+        fn visit_expr(&mut self, _: &'ast ExprNode) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_def(&mut self, _: &'ast ClassDef) {}
         fn visit_class_const(&mut self, _: &'ast ClassConst) {}
@@ -739,7 +745,7 @@ pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool)
 
 /// Calls `f` on each expression directly inside `expr` in its scope (its
 /// children, not their descendants; see `walk_expr_in_scope`), in order.
-pub fn for_each_child_expr<'ast>(expr: &'ast Expr, mut f: impl FnMut(&'ast Expr)) {
+pub fn for_each_child_expr<'ast>(expr: &'ast ExprNode, mut f: impl FnMut(&'ast ExprNode)) {
     any_child_expr(expr, |child| {
         f(child);
         false
@@ -773,7 +779,7 @@ pub trait VisitorMut {
         walk_stmt_mut(self, stmt);
     }
 
-    fn visit_expr(&mut self, expr: &mut Expr) {
+    fn visit_expr(&mut self, expr: &mut ExprNode) {
         walk_expr_mut(self, expr);
     }
 
@@ -983,7 +989,7 @@ fn walk_args_mut<V: VisitorMut + ?Sized>(v: &mut V, args: &mut [Arg]) {
     }
 }
 
-pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
+pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut ExprNode) {
     crate::stack::guard(|| match &mut expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
         ExprKind::Isset(operands) => {

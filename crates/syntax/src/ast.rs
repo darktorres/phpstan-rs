@@ -1405,7 +1405,7 @@ pub use ExprNode as Expr;
 impl ExprNode {
     /// This expression inside any parentheses and `@`s: what it
     /// evaluates to, the wrappers being transparent.
-    pub fn peeled(&self) -> &Expr {
+    pub fn peeled(&self) -> &ExprNode {
         let mut expression = self;
         loop {
             match &expression.kind {
@@ -1612,7 +1612,7 @@ pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
 /// Purely syntactic: a concatenation with a variable operand is never
 /// resolved here even if a caller's type tracking knows it's a literal
 /// value, since this function only sees the raw `Expr`.
-pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
+pub fn literal_string_value(e: &ExprNode) -> Option<std::borrow::Cow<'_, str>> {
     let e = e.peeled();
     crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),

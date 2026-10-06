@@ -26,9 +26,9 @@ impl Canonical for Stmt {
     }
 }
 
-impl Canonical for Expr {
+impl Canonical for ExprNode {
     fn canonical(&self, p: &mut Printer) {
-        let Expr { id: _, kind, span } = self;
+        let ExprNode { id: _, kind, span } = self;
         span.canonical(p);
         p.atom(" ");
         crate::stack::guard(|| kind.canonical(p));
