@@ -42,7 +42,7 @@ impl ParsedFile {
 
     /// Resolves a file-local name id to the shared interned name.
     pub fn name(&self, id: NameId) -> Option<&Name> {
-        self.names.get(id.index())
+        self.names.get(u32::from(id.into_raw()) as usize)
     }
 }
 

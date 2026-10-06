@@ -23,17 +23,11 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 use rustc_hash::FxHasher;
 
 /// An index into one parsed file's distinct-name table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NameId(u32);
+pub type NameId = la_arena::Idx<Name>;
 
-impl NameId {
-    pub(crate) fn new(index: usize) -> NameId {
-        NameId(u32::try_from(index).expect("a parsed file has too many names"))
-    }
-
-    pub fn index(self) -> usize {
-        self.0 as usize
-    }
+pub(crate) fn name_id(index: usize) -> NameId {
+    let index = u32::try_from(index).expect("a parsed file has too many names");
+    NameId::from_raw(la_arena::RawIdx::from_u32(index))
 }
 
 struct NameData {

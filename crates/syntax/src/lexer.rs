@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::name::{Interner, Name, NameCache};
+use crate::name::{Interner, Name, NameCache, NameId};
 use crate::span::{LineIndex, Span};
 use crate::token::{Keyword, Token};
 use std::sync::Arc;
@@ -73,7 +73,7 @@ pub struct Lexer<'a> {
     // repeats its identifiers and variables, and a repeat is found here
     // without the interner's lock. Held for as long as the lexer is, so
     // the names it returns are those the interner holds for the text.
-    names: hashbrown::HashTable<(u64, Name, u32)>,
+    names: hashbrown::HashTable<(u64, Name, u32, NameId)>,
     // The distinct names in stable first-use order, for the parsed file's
     // compact `NameId` table.
     file_names: Vec<Name>,
@@ -490,18 +490,18 @@ impl<'a> Lexer<'a> {
     /// are found when the spelling is first met in the file, which is far
     /// less often than a token.
     fn identifier_name(&mut self, text: &str) -> Name {
-        let (name, bits) = self.name_and_bits(text);
+        let (name, bits, _) = self.name_and_bits(text);
         self.facts.mentions |= bits;
         name
     }
 
-    fn name_and_bits(&mut self, text: &str) -> (Name, u32) {
+    fn name_and_bits(&mut self, text: &str) -> (Name, u32, NameId) {
         let hash = crate::name::text_hash(text);
-        if let Some((_, name, bits)) = self
+        if let Some((_, name, bits, id)) = self
             .names
-            .find(hash, |(h, name, _)| *h == hash && name.as_str() == text)
+            .find(hash, |(h, name, _, _)| *h == hash && name.as_str() == text)
         {
-            return (name.clone(), *bits);
+            return (name.clone(), *bits, *id);
         }
         let name = match self.shared_names.as_deref_mut() {
             Some(shared) => match shared.find(text, hash) {
@@ -515,10 +515,21 @@ impl<'a> Lexer<'a> {
             None => self.interner.name_hashed(text, hash),
         };
         let bits = self.watch.map_or(0, |watch| watch.bits(text));
+        let id = crate::name::name_id(self.file_names.len());
         self.names
-            .insert_unique(hash, (hash, name.clone(), bits), |(h, _, _)| *h);
+            .insert_unique(hash, (hash, name.clone(), bits, id), |(h, _, _, _)| *h);
         self.file_names.push(name.clone());
-        (name, bits)
+        (name, bits, id)
+    }
+
+    #[allow(dead_code)] // Used when parser name sites move to `NameId`.
+    pub(crate) fn name_id(&self, name: &Name) -> Option<NameId> {
+        let hash = crate::name::text_hash(name.as_str());
+        self.names
+            .find(hash, |(entry_hash, entry_name, _, _)| {
+                *entry_hash == hash && entry_name == name
+            })
+            .map(|(_, _, _, id)| *id)
     }
 
     /// Notes the spellings of `watch` in the facts of the file.
