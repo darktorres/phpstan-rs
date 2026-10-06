@@ -195,6 +195,16 @@ fn class_consts_are_registered_and_typed_from_their_literal_value() {
         r.lookup_const("Config", "MAX").map(|cs| &cs.ty),
         Some(&Type::int_literal(10))
     );
+    assert_eq!(
+        r.lookup_const_with_owner_and_slot("Config", "NAME")
+            .map(|(owner, slot, constant)| (owner.to_string(), slot, &constant.ty)),
+        Some(("Config".to_owned(), 0, &Type::string_literal("app".into())))
+    );
+    assert_eq!(
+        r.lookup_const_with_owner_and_slot("Config", "MAX")
+            .map(|(_, slot, _)| slot),
+        Some(1)
+    );
     assert!(r.lookup_const("Config", "MISSING").is_none());
 }
 
@@ -208,6 +218,11 @@ fn class_consts_are_inherited_through_extends() {
     assert_eq!(
         r.lookup_const("Derived", "KIND").map(|cs| &cs.ty),
         Some(&Type::string_literal("base".into()))
+    );
+    assert_eq!(
+        r.lookup_const_with_owner_and_slot("Derived", "KIND")
+            .map(|(owner, slot, _)| (owner.to_string(), slot)),
+        Some(("Base".to_owned(), 0))
     );
 }
 

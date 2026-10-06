@@ -1166,7 +1166,22 @@ impl Registry {
     /// Looks up a class constant, walking the ancestor graph if not
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstantReflection> {
+        self.lookup_const_with_owner_and_slot(class, const_name)
+            .map(|(_, _, constant)| constant)
+    }
+
+    /// Looks up a class constant and returns its stable slot in the
+    /// declaring class, walking the ancestor graph if needed. The slot is
+    /// suitable for ID-addressed pass results while the declaration stays
+    /// in insertion order.
+    pub fn lookup_const_with_owner_and_slot(
+        &self,
+        class: &str,
+        const_name: &str,
+    ) -> Option<(Name, usize, &ConstantReflection)> {
         let owner = self.const_owners(class)?.get(const_name)?;
+        let info = self.classes.get(owner)?;
+        let slot = info.consts.get_index(const_name)?;
         let from_file = if self.raw_active {
             self.class_ids
                 .get(owner)
@@ -1174,13 +1189,8 @@ impl Registry {
         } else {
             None
         };
-        from_file.or_else(|| {
-            self.classes
-                .get(owner)?
-                .consts
-                .get(const_name)
-                .map(|c| &**c)
-        })
+        let constant = from_file.or_else(|| info.consts.get(const_name).map(|c| &**c))?;
+        Some((owner.clone(), slot, constant))
     }
 
     /// Same as `lookup_const`, but also returns the declaring ancestor's
@@ -1194,22 +1204,8 @@ impl Registry {
         class: &str,
         const_name: &str,
     ) -> Option<(Name, &ConstantReflection)> {
-        let owner = self.const_owners(class)?.get(const_name)?;
-        let from_file = if self.raw_active {
-            self.class_ids
-                .get(owner)
-                .and_then(|id| self.file_constant_by_class_id(*id, const_name))
-        } else {
-            None
-        };
-        let sig = from_file.or_else(|| {
-            self.classes
-                .get(owner)?
-                .consts
-                .get(const_name)
-                .map(|c| &**c)
-        })?;
-        Some((owner.clone(), sig))
+        self.lookup_const_with_owner_and_slot(class, const_name)
+            .map(|(owner, _, constant)| (owner, constant))
     }
 
     /// A backed enum case's own literal backing value, if this
