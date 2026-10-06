@@ -533,6 +533,27 @@ impl Registry {
         Some(declaration.file.class(declaration.layout))
     }
 
+    pub(crate) fn file_method_by_class_id(
+        &self,
+        id: ClassId,
+        method: &str,
+    ) -> Option<&FunctionReflection> {
+        if id.source()? != IdSource::Project {
+            return None;
+        }
+        let declaration = self
+            .project_class_decls
+            .get(id.local() as usize)?
+            .as_ref()?;
+        Some(
+            declaration
+                .file
+                .member(declaration.layout, method)?
+                .declaration
+                .get(),
+        )
+    }
+
     /// The id and declaration selected for `name` by PHP's function-name rules.
     pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
         let (name, current) = self.functions.get_with_name(name)?;

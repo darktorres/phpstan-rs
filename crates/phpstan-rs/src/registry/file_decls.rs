@@ -661,6 +661,7 @@ mod tests {
             true,
             Some(&declarations),
         );
+        registry.precompute_member_owners();
         registry.end_declaration_changes(&crate::registry::scope::Scope::all(), None, true);
         registry.begin_declaration_changes();
 
@@ -673,6 +674,10 @@ mod tests {
         assert!(std::ptr::eq(
             registry.file_function_by_id(function_id).unwrap(),
             registry.function("helper").unwrap().2
+        ));
+        assert!(std::ptr::eq(
+            registry.lookup_method("Demo", "RUN").unwrap(),
+            registry.file_method_by_class_id(class_id, "run").unwrap()
         ));
         let mut merged = registry.clone();
         merged.merge_stub_classes(vec![(Name::from("Demo"), (*class).clone())]);
