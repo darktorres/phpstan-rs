@@ -485,12 +485,14 @@ impl Registry {
 
     /// The id and declaration selected for `name` by PHP's class-name rules.
     pub(crate) fn class(&self, name: &str) -> Option<(ClassId, &Name, &ClassReflection)> {
-        let (name, declaration) = self.classes.get_with_name(name)?;
-        Some((*self.class_ids.get(name)?, name, declaration))
+        let (name, current) = self.classes.get_with_name(name)?;
+        let id = *self.class_ids.get(name)?;
+        Some((id, name, self.class_by_id(id).unwrap_or(current)))
     }
 
-    /// A class declaration addressed by its source-range id.
-    #[allow(dead_code)] // Called by later registry-by-id rows as storage moves out of the name table.
+    /// A class declaration addressed by its source-range id. While the
+    /// registry exposes its as-built table for an edit, this reads an
+    /// unmerged project declaration from its file arena.
     pub(crate) fn class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
         match id.source()? {
             IdSource::Stub => {
@@ -503,9 +505,15 @@ impl Registry {
             IdSource::Context => None,
             IdSource::Project => {
                 let name = self.project_class_names.get(id.local() as usize)?;
-                (self.class_ids.get(name) == Some(&id))
-                    .then(|| self.classes.get(name))
-                    .flatten()
+                if self.class_ids.get(name) != Some(&id) {
+                    return None;
+                }
+                if self.raw_active
+                    && let Some(declaration) = self.file_class_by_id(id)
+                {
+                    return Some(declaration);
+                }
+                self.classes.get(name)
             }
         }
     }
@@ -514,7 +522,6 @@ impl Registry {
     /// still names one unmerged file declaration. Resolved or merged values
     /// remain available through `class_by_id` until the Registry finishes its
     /// id-store migration.
-    #[allow(dead_code)] // Consumed by the subsequent id-backed pass migration.
     pub(crate) fn file_class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
         if id.source()? != IdSource::Project {
             return None;
@@ -528,12 +535,14 @@ impl Registry {
 
     /// The id and declaration selected for `name` by PHP's function-name rules.
     pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
-        let (name, declaration) = self.functions.get_with_name(name)?;
-        Some((*self.function_ids.get(name)?, name, declaration))
+        let (name, current) = self.functions.get_with_name(name)?;
+        let id = *self.function_ids.get(name)?;
+        Some((id, name, self.function_by_id(id).unwrap_or(current)))
     }
 
-    /// A function declaration addressed by its source-range id.
-    #[allow(dead_code)] // Called by later registry-by-id rows as storage moves out of the name table.
+    /// A function declaration addressed by its source-range id. While the
+    /// registry exposes its as-built table for an edit, this reads an
+    /// unmerged project declaration from its file arena.
     pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
         match id.source()? {
             IdSource::Stub => {
@@ -546,16 +555,21 @@ impl Registry {
             IdSource::Context => None,
             IdSource::Project => {
                 let name = self.project_function_names.get(id.local() as usize)?;
-                (self.function_ids.get(name) == Some(&id))
-                    .then(|| self.functions.get(name))
-                    .flatten()
+                if self.function_ids.get(name) != Some(&id) {
+                    return None;
+                }
+                if self.raw_active
+                    && let Some(declaration) = self.file_function_by_id(id)
+                {
+                    return Some(declaration);
+                }
+                self.functions.get(name)
             }
         }
     }
 
     /// The immutable function declaration as built in its file, when this
     /// project id still names one unmerged file declaration.
-    #[allow(dead_code)] // Consumed by the subsequent id-backed pass migration.
     pub(crate) fn file_function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
         if id.source()? != IdSource::Project {
             return None;

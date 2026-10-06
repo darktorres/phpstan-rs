@@ -661,6 +661,8 @@ mod tests {
             true,
             Some(&declarations),
         );
+        registry.end_declaration_changes(&crate::registry::scope::Scope::all(), None, true);
+        registry.begin_declaration_changes();
 
         let class_id = registry.class("demo").unwrap().0;
         let function_id = registry.function("HELPER").unwrap().0;
