@@ -352,9 +352,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   library tests and all 1,199 crate tests, check, Clippy and formatting pass.
   `7a1558ed` keys inherited property-hook updates and deferred class-type
   resolution outputs by `ClassId` too; their values still apply into mutable
-  `ClassReflection`. ID-keyed inherited-doc values, remaining trait outputs,
-  constant resolution, other pass results and immutable declaration storage
-  remain. The 4.7 reference, include-graph,
+  `ClassReflection`. `15f73523` carries `ClassId` through the deferred
+  class-constant fixed-point queue and update records; constant slots and
+  writes to the reflection remain name-keyed. ID-keyed inherited-doc values,
+  remaining trait outputs, constant-resolution values, other pass results and
+  immutable declaration storage remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
