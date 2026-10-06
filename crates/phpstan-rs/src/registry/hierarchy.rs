@@ -65,7 +65,7 @@ impl Registry {
 
     /// Does `class` derive from or implement `of`, directly or
     /// transitively? A single `HashSet::contains` against
-    /// `self.ancestor_names` (see `precompute_ancestor_names`) - cheaper
+    /// `self.ancestors_by_id` (see `precompute_ancestor_names`) - cheaper
     /// than a fresh `extends`+`implements` DFS on every one of this
     /// function's dozens of read-only, post-load call sites.
     /// Whether `class` is `of` or extends or implements it, both compared
@@ -74,11 +74,18 @@ impl Registry {
         if class.eq_ignore_ascii_case(of) {
             return true;
         }
-        let class = self.lookup_class(class).map_or(class, |(k, _)| k);
         let of = self.lookup_class(of).map_or(of, |(k, _)| k);
-        self.ancestor_names
+        self.class_ids
             .get(class)
+            .and_then(|id| self.ancestors_by_id.get(id))
             .is_some_and(|ancestors| ancestors.contains(of))
+    }
+
+    /// The extends/implements closure for a declaration, addressed through
+    /// its stable class ID. Names stay in the values for existing callers.
+    pub(crate) fn ancestor_names_of(&self, class: &str) -> Option<&NameSet> {
+        let id = self.class_ids.get(class)?;
+        self.ancestors_by_id.get(id)
     }
 
     /// The exact `extends`+`implements`-only transitive closure
@@ -165,14 +172,11 @@ impl Registry {
             .is_some_and(|(id, ..)| self.phpstan_ancestry.contains(&id))
     }
 
-    /// Rebuilds `self.ancestor_names` (see `is_subclass_of`) from
+    /// Rebuilds `self.ancestors_by_id` (see `is_subclass_of`) from
     /// scratch over every registered class - call this any time the
     /// class graph could have changed, so `is_subclass_of` can always
-    /// trust this map is current. Read-only over `self.classes`, so it
-    /// parallelizes like `flatten_traits_one_pass`: reborrow as
-    /// `&Registry` for the DFS, then a plain sequential map assignment -
-    /// unlike that function, there's no per-class "apply" step, since no
-    /// class's result can invalidate another's.
+    /// trust this map is current. Read-only over `self.classes`; the
+    /// results are collected directly into the ID-keyed table.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
         let class_names = self.scoped_class_names();
@@ -180,47 +184,45 @@ impl Registry {
         let ancestor_names: Vec<_> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .map(|name| {
-                (
+            .filter_map(|name| {
+                Some((
+                    *registry.class_ids.get(name)?,
                     name.clone(),
                     registry.class_extends_implements_closure(name),
                     registry.class_reaches_phpstan_name(name),
-                )
+                ))
             })
             .collect();
-        let with_phpstan_ancestry = |registry: &Registry, entries: &[(Name, NameSet, bool)]| {
+        let with_phpstan_ancestry = |entries: &[(ClassId, Name, NameSet, bool)]| {
             entries
                 .iter()
-                .filter(|(_, _, reaches)| *reaches)
-                .filter_map(|(name, ..)| registry.class_ids.get(name).copied())
+                .filter(|(_, _, _, reaches)| *reaches)
+                .map(|(id, ..)| *id)
                 .collect::<FxHashSet<ClassId>>()
         };
         if self.scope.is_all() {
-            self.phpstan_ancestry = with_phpstan_ancestry(self, &ancestor_names);
-            let ancestor_names = ancestor_names
-                .into_iter()
-                .map(|(name, ancestors, _)| (name, ancestors));
-            self.ancestor_names = ancestor_names.collect();
+            self.phpstan_ancestry = with_phpstan_ancestry(&ancestor_names);
+            self.ancestors_by_id = ancestor_names
+                .par_iter()
+                .map(|(id, _, ancestors, _)| (*id, ancestors.clone()))
+                .collect();
             self.subtype_children = NameTable::default();
             self.trait_users = NameTable::default();
             self.recorded_parents = NameTable::default();
         } else {
             let active_ids: FxHashSet<ClassId> = self.class_ids.values().copied().collect();
             self.phpstan_ancestry.retain(|id| active_ids.contains(id));
+            self.ancestors_by_id.retain(|id, _| active_ids.contains(id));
             for name in self.scoped_removed_class_keys() {
-                self.ancestor_names.remove(&name);
                 self.unrecord_parents(&name);
             }
-            for (name, ancestors, reaches) in ancestor_names {
-                let Some(id) = self.class_ids.get(&name).copied() else {
-                    continue;
-                };
+            for (id, _name, ancestors, reaches) in ancestor_names {
                 if reaches {
                     self.phpstan_ancestry.insert(id);
                 } else {
                     self.phpstan_ancestry.remove(&id);
                 }
-                self.ancestor_names.insert(name, ancestors);
+                self.ancestors_by_id.insert(id, ancestors);
             }
         }
         for name in class_names.iter() {

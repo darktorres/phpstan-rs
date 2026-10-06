@@ -93,7 +93,6 @@ fn every_stored_table_reads_back_with_its_names_and_values() {
     }
     same_table!(
         built_in_stub_classes,
-        ancestor_names,
         subtype_children,
         trait_users,
         recorded_parents,
@@ -130,6 +129,13 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
             ancestry_names(&built),
             "the ID-addressed PHPStan-ancestry verdicts rebuild after a cache read"
         );
+        for (name, _) in built.classes().iter() {
+            assert_eq!(
+                back.ancestor_names_of(name),
+                built.ancestor_names_of(name),
+                "the ID-addressed ancestor closure for {name} survives a cache read"
+            );
+        }
         let (stored, back) = (printed(&built), printed(&back));
         if let Some(line) = stored
             .lines()

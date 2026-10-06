@@ -444,6 +444,8 @@ impl CanonicalOver for Option<Box<RawDeclarations>> {
 /// a base holds none of.
 impl CanonicalOver for Registry {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
+        let ancestor_names = self.ancestor_names_for_cache();
+        let base_ancestor_names = base.ancestor_names_for_cache();
         let Registry {
             id_generation: _,
             purity_results: _,
@@ -477,7 +479,8 @@ impl CanonicalOver for Registry {
             stub_provided_functions,
             names_with_assert_tags,
             base_assert_tagged,
-            ancestor_names,
+            ancestors_by_id: _,
+            ancestor_names_cache: _,
             phpstan_ancestry: _,
             subtype_children,
             trait_users,
@@ -562,7 +565,7 @@ impl CanonicalOver for Registry {
                 ),
                 (
                     "ancestor_names",
-                    &Over(ancestor_names, &base.ancestor_names, compare),
+                    &Over(&ancestor_names, &base_ancestor_names, compare),
                 ),
                 (
                     "subtype_children",
@@ -627,7 +630,6 @@ canonical_struct!(Registry {
     stub_provided_functions,
     names_with_assert_tags,
     base_assert_tagged,
-    ancestor_names,
     subtype_children,
     trait_users,
     recorded_parents,
@@ -642,6 +644,8 @@ canonical_struct!(Registry {
     id_generation,
     purity_results,
     phpstan_ancestry,
+    ancestors_by_id,
+    ancestor_names_cache,
     class_ids,
     project_class_names,
     project_class_decls,

@@ -967,6 +967,7 @@ mod tests {
         let mut registry = crate::registry::Registry::build(&program);
         let old_id = registry.class("Demo").unwrap().0;
         assert!(registry.class_has_phpstan_ancestry("Demo"));
+        assert!(registry.is_subclass_of("Demo", "PHPStan\\Rules\\Rule"));
         let mut replacement = crate::registry::Registry::build(&program);
         replacement.freeze();
 
@@ -976,6 +977,7 @@ mod tests {
         assert_ne!(current_id, old_id);
         assert_eq!(current_id.generation(), old_id.generation() + 1);
         assert!(registry.class_has_phpstan_ancestry("Demo"));
+        assert!(registry.is_subclass_of("Demo", "PHPStan\\Rules\\Rule"));
         let stale_read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             registry.class_by_id(old_id)
         }));

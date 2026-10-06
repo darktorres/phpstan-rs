@@ -414,12 +414,14 @@ pub struct Registry {
     // `names_with_assert_tags` of the base, as it was when frozen.
     #[serde(skip)]
     base_assert_tagged: Arc<NameSet>,
-    // Every class's precomputed `extends`+`implements` transitive
-    // closure - see `is_subclass_of`/`precompute_ancestor_names`
-    // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
-    // have changed.
+    // Every class's precomputed `extends`+`implements` transitive closure,
+    // keyed by declaration ID. See `is_subclass_of` and
+    // `precompute_ancestor_names` (`registry/hierarchy.rs`). Rebuilt whenever
+    // the class graph could have changed.
     #[serde(skip)]
-    pub(crate) ancestor_names: NameTable<syntax::name::NameSet>,
+    pub(crate) ancestors_by_id: FxHashMap<ClassId, syntax::name::NameSet>,
+    #[serde(skip)]
+    ancestor_names_cache: NameTable<syntax::name::NameSet>,
     // The classes, as declared, with a `PHPStan\` name anywhere among what
     // they extend, implement or use, transitively: one answer for each, made
     // with `ancestor_names` (`precompute_ancestor_names`).
@@ -927,6 +929,15 @@ impl Registry {
             .filter(|(_, id)| self.phpstan_ancestry.contains(id))
             .map(|(name, _)| name.clone())
             .collect();
+        let ancestor_names: FxHashMap<Name, syntax::name::NameSet> = self
+            .class_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.ancestors_by_id
+                    .get(id)
+                    .map(|ancestors| (name.clone(), ancestors.clone()))
+            })
+            .collect();
         self.classes.freeze();
         self.functions.freeze();
         self.class_ids = NameTable::default();
@@ -959,6 +970,31 @@ impl Registry {
             );
         }
         self.function_ids.freeze();
+        if ancestor_names.is_empty() {
+            // The cached form is persisted by name for stable cache reads;
+            // declaration IDs are assigned only after that table is read.
+            self.ancestors_by_id = self
+                .ancestor_names_cache
+                .iter()
+                .filter_map(|(name, ancestors)| {
+                    self.class_ids
+                        .get(name)
+                        .copied()
+                        .map(|id| (id, ancestors.clone()))
+                })
+                .collect();
+            self.ancestor_names_cache = NameTable::default();
+        } else {
+            self.ancestors_by_id = ancestor_names
+                .into_iter()
+                .filter_map(|(name, ancestors)| {
+                    self.class_ids.get(&name).copied().map(|id| (id, ancestors))
+                })
+                .collect();
+        }
+        if self.ancestors_by_id.is_empty() && !self.classes.is_empty() {
+            self.precompute_ancestor_names();
+        }
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -970,7 +1006,6 @@ impl Registry {
                 .collect();
         }
         self.built_in_stub_classes.freeze();
-        self.ancestor_names.freeze();
         self.subtype_children.freeze();
         self.trait_users.freeze();
         self.recorded_parents.freeze();
@@ -1087,12 +1122,30 @@ impl Registry {
             !self.raw_active,
             "the declarations as built are stored with the resolved ones"
         );
+        self.ancestor_names_for_cache()
+            .store(writer, "table:ancestor_names")?;
         self.store_tables(writer)?;
         if let Some(raw) = &self.raw {
             raw.classes.store(writer, RAW_CLASSES)?;
             raw.functions.store(writer, RAW_FUNCTIONS)?;
         }
         writer.section(REST, &stub_cache::encode(self)?)
+    }
+
+    /// The on-disk cache keeps names stable; runtime hierarchy lookups use
+    /// declaration IDs and reconstruct this view only while writing.
+    fn ancestor_names_for_cache(&self) -> NameTable<syntax::name::NameSet> {
+        if !self.ancestor_names_cache.is_empty() {
+            return self.ancestor_names_cache.clone();
+        }
+        self.class_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.ancestors_by_id
+                    .get(id)
+                    .map(|ancestors| (name.clone(), ancestors.clone()))
+            })
+            .collect()
     }
 
     /// Whether every stored table, map and set of a registry read back is
@@ -1102,6 +1155,8 @@ impl Registry {
     #[cfg(test)]
     pub(crate) fn check_stored(&self) -> Result<(), String> {
         self.check_tables()?;
+        self.ancestor_names_for_cache()
+            .check_order("table:ancestor_names")?;
         if let Some(raw) = &self.raw {
             raw.classes.check_order(RAW_CLASSES)?;
             raw.functions.check_order(RAW_FUNCTIONS)?;
@@ -1129,6 +1184,7 @@ impl Registry {
         let rest = reader.section(REST)?;
         let mut registry: Registry = stub_cache::decode(&reader.buffer()[rest])?;
         registry.load_tables(reader)?;
+        registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
                 classes: NameTable::load(reader, RAW_CLASSES)?,
@@ -1142,7 +1198,6 @@ impl Registry {
         classes,
         functions,
         built_in_stub_classes,
-        ancestor_names,
         subtype_children,
         trait_users,
         recorded_parents,
@@ -1169,6 +1224,7 @@ impl Registry {
             .id_generation
             .checked_add(1)
             .expect("registry id generation exhausted");
+        let generation = base.id_generation;
         base.purity_results = PurityResults::default();
         for (_, id) in base.class_ids.iter_mut() {
             id.set_generation(base.id_generation);
@@ -1176,7 +1232,12 @@ impl Registry {
         base.phpstan_ancestry = base
             .phpstan_ancestry
             .iter()
-            .map(|id| id.with_generation(base.id_generation))
+            .map(|id| id.with_generation(generation))
+            .collect();
+        base.ancestors_by_id = base
+            .ancestors_by_id
+            .drain()
+            .map(|(id, ancestors)| (id.with_generation(generation), ancestors))
             .collect();
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);

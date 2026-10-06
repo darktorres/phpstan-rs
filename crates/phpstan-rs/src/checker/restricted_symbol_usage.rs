@@ -629,8 +629,7 @@ impl<'a> Checker<'a> {
             glob_matches(&p, &class.to_lowercase())
                 || self
                     .registry
-                    .ancestor_names
-                    .get(class.as_str())
+                    .ancestor_names_of(class.as_str())
                     .is_some_and(|ancestors| {
                         ancestors
                             .iter()

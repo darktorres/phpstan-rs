@@ -412,8 +412,7 @@ impl Project {
         let parents = ctx.extends_chain(fqn);
         let interfaces: Vec<String> = self
             .registry
-            .ancestor_names
-            .get(fqn)
+            .ancestor_names_of(fqn)
             .map(|a| a.iter().map(|s| s.to_string()).collect::<Vec<String>>())
             .unwrap_or_default()
             .into_iter()
