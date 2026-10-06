@@ -285,6 +285,10 @@ pub(crate) enum EffectId {
 }
 
 impl EffectId {
+    fn is_closure(&self) -> bool {
+        matches!(self, EffectId::Named(key) if key.is_closure())
+    }
+
     pub(crate) fn with_generation(self, generation: u32) -> EffectId {
         match self {
             EffectId::Function(id) => EffectId::Function(id.with_generation(generation)),
@@ -605,6 +609,28 @@ struct Classification<'r> {
     runs: Vec<Condition>,
 }
 
+/// The same classification after resolving all declaration edges to IDs,
+/// ready for the fixed-point worklist.
+#[derive(Debug)]
+struct IdClassification<'r> {
+    own: Effect,
+    calls: Vec<(EffectId, Transfer, Option<u32>)>,
+    sites: Vec<IdSite<'r>>,
+    runs: Vec<Condition>,
+}
+
+#[derive(Debug)]
+struct IdSite<'r> {
+    call: &'r CallWrites,
+    passed: Vec<(&'r ArgAt, IdPassed)>,
+}
+
+#[derive(Debug)]
+struct IdPassed {
+    runs: Vec<(EffectId, Transfer)>,
+    params: Vec<Condition>,
+}
+
 impl Classification<'_> {
     fn anything() -> Self {
         Classification {
@@ -736,6 +762,57 @@ fn push_target(out: &mut Vec<(DeclKey, Transfer)>, key: DeclKey, transfer: Trans
     }
 }
 
+fn classifications_by_id<'r>(
+    registry: &Registry,
+    classified: FxHashMap<DeclKey, Classification<'r>>,
+) -> FxHashMap<EffectId, IdClassification<'r>> {
+    classified
+        .into_iter()
+        .map(|(key, classification)| {
+            let calls = classification
+                .calls
+                .into_iter()
+                .map(|(key, transfer, site)| (registry.effect_id_for(&key), transfer, site))
+                .collect();
+            let sites = classification
+                .sites
+                .into_iter()
+                .map(|site| IdSite {
+                    call: site.call,
+                    passed: site
+                        .passed
+                        .into_iter()
+                        .map(|(at, passed)| {
+                            (
+                                at,
+                                IdPassed {
+                                    runs: passed
+                                        .runs
+                                        .into_iter()
+                                        .map(|(key, transfer)| {
+                                            (registry.effect_id_for(&key), transfer)
+                                        })
+                                        .collect(),
+                                    params: passed.params,
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+                .collect();
+            (
+                registry.effect_id_for(&key),
+                IdClassification {
+                    own: classification.own,
+                    calls,
+                    sites,
+                    runs: classification.runs,
+                },
+            )
+        })
+        .collect()
+}
+
 impl Registry {
     pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
         match key.class.as_deref() {
@@ -858,8 +935,12 @@ impl Registry {
                     registry.classify_hook(bodies, class, property, declared, *set)
                 }),
         );
-        let mut effects = settle(registry, &classified, |key| {
-            Settled::of(registry.declaration_effect(key))
+        let classified = classifications_by_id(registry, classified);
+        let mut effects = settle(registry, &classified, |id| {
+            registry.effect_decl_key(id).map_or_else(
+                || Settled::of(Effect::anything()),
+                |key| Settled::of(registry.declaration_effect(&key)),
+            )
         });
         // A closure's effect is taken where it runs; no call names it. Keep
         // its result through settlement, then omit it from the registry.
@@ -1345,19 +1426,9 @@ impl Registry {
 /// what a call passes it, by what that may write.
 fn settle(
     registry: &Registry,
-    classified: &FxHashMap<DeclKey, Classification<'_>>,
-    outside: impl Fn(&DeclKey) -> Settled,
+    classified: &FxHashMap<EffectId, IdClassification<'_>>,
+    outside: impl Fn(&EffectId) -> Settled,
 ) -> FxHashMap<EffectId, Settled> {
-    let id_by_key: FxHashMap<DeclKey, EffectId> = classified
-        .keys()
-        .map(|key| (key.clone(), registry.effect_id_for(key)))
-        .collect();
-    debug_assert_eq!(id_by_key.len(), classified.len());
-    let key_by_id: FxHashMap<EffectId, &DeclKey> = id_by_key
-        .iter()
-        .map(|(key, id)| (id.clone(), key))
-        .collect();
-    debug_assert_eq!(key_by_id.len(), classified.len());
     let mut settled: FxHashMap<EffectId, Settled> = classified
         .iter()
         .map(|(key, classification)| {
@@ -1366,7 +1437,7 @@ fn settle(
                 effect: classification.own.clone(),
                 runs,
             };
-            (id_by_key[key].clone(), own)
+            (key.clone(), own)
         })
         .collect();
     // A declaration's effect only ever grows, and grows only when one it is
@@ -1374,9 +1445,9 @@ fn settle(
     // declaration it calls, or one an argument it passes runs, has grown.
     let mut callers: FxHashMap<&EffectId, Vec<&EffectId>> = FxHashMap::default();
     for (key, classification) in classified {
-        let caller = &id_by_key[key];
+        let caller = key;
         for (callee, _, _) in &classification.calls {
-            if let Some(callee) = id_by_key.get(callee) {
+            if classified.contains_key(callee) {
                 callers.entry(callee).or_default().push(caller);
             }
         }
@@ -1384,23 +1455,21 @@ fn settle(
     // The declarations an argument runs, which a declaration reads only once
     // a callee runs the argument.
     let mut passed_to: FxHashSet<(&EffectId, &EffectId)> = FxHashSet::default();
-    let mut queue: std::collections::VecDeque<&EffectId> = id_by_key.values().collect();
+    let mut queue: std::collections::VecDeque<&EffectId> = classified.keys().collect();
     let mut queued: FxHashSet<&EffectId> = queue.iter().copied().collect();
     while let Some(key) = queue.pop_front() {
         queued.remove(key);
-        let decl_key = key_by_id[key];
-        let classification = &classified[decl_key];
+        let classification = &classified[key];
         let before = &settled[key];
         if before.effect.is_anything() {
             continue;
         }
         let mut now = before.clone();
-        let mut read: Vec<DeclKey> = Vec::new();
-        let get =
-            |callee: &DeclKey| match id_by_key.get(callee).and_then(|callee| settled.get(callee)) {
-                Some(found) => found.clone(),
-                None => outside(callee),
-            };
+        let mut read: Vec<EffectId> = Vec::new();
+        let get = |callee: &EffectId| match settled.get(callee) {
+            Some(found) => found.clone(),
+            None => outside(callee),
+        };
         for (callee, transfer, site) in &classification.calls {
             let found = get(callee);
             now.effect.join(&found.effect.transferred(transfer));
@@ -1411,9 +1480,15 @@ fn settle(
                     now.runs.insert(condition.through(transfer));
                     continue;
                 }
-                let site = site.map(|site| &classification.sites[site as usize]);
                 run_passed(
-                    registry, site, callee, transfer, condition, &get, &mut now, &mut read,
+                    registry,
+                    site.map(|site| &classification.sites[site as usize]),
+                    callee,
+                    transfer,
+                    condition,
+                    &get,
+                    &mut now,
+                    &mut read,
                 );
                 if now.effect.is_anything() {
                     break;
@@ -1424,9 +1499,10 @@ fn settle(
             }
         }
         for found in read {
-            if let Some(found) = id_by_key.get(&found)
+            if let Some((found, _)) = classified.get_key_value(&found)
                 && passed_to.insert((found, key))
             {
+                // Keep caller edges borrowed from `classified`'s stable keys.
                 callers.entry(found).or_default().push(key);
             }
         }
@@ -1450,20 +1526,24 @@ fn settle(
 #[allow(clippy::too_many_arguments)]
 fn run_passed(
     registry: &Registry,
-    site: Option<&Site<'_>>,
-    callee: &DeclKey,
+    site: Option<&IdSite<'_>>,
+    callee: &EffectId,
     transfer: &Transfer,
     condition: &Condition,
-    get: &impl Fn(&DeclKey) -> Settled,
+    get: &impl Fn(&EffectId) -> Settled,
     into: &mut Settled,
-    read: &mut Vec<DeclKey>,
+    read: &mut Vec<EffectId>,
 ) {
     let Some(site) = site else {
         into.effect = Effect::anything();
         return;
     };
+    let Some(callee_key) = registry.effect_decl_key(callee) else {
+        into.effect = Effect::anything();
+        return;
+    };
     let default;
-    let (runs, params) = match registry.passing(site.call, callee, condition.at) {
+    let (runs, params) = match registry.passing(site.call, &callee_key, condition.at) {
         Passing::Argument(at) => match site.passed.iter().find(|(passed, _)| *passed == at) {
             Some((_, passed)) => (&passed.runs[..], &passed.params[..]),
             None => {
@@ -1472,7 +1552,10 @@ fn run_passed(
             }
         },
         Passing::Default(runs) => {
-            default = runs;
+            default = runs
+                .into_iter()
+                .map(|(key, transfer)| (registry.effect_id_for(&key), transfer))
+                .collect::<Vec<_>>();
             (&default[..], &[][..])
         }
         Passing::Unknown => {
@@ -2458,7 +2541,11 @@ impl Registry {
         };
         let classified: FxHashMap<DeclKey, Classification<'_>> =
             resolve.run(&holder, None).into_iter().collect();
-        let effects = settle(self, &classified, |key| self.settled(key));
+        let classified = classifications_by_id(self, classified);
+        let effects = settle(self, &classified, |id| {
+            self.effect_decl_key(id)
+                .map_or_else(|| Settled::of(Effect::anything()), |key| self.settled(&key))
+        });
         effects
             .get(&self.effect_id_for(&holder.closure(0)))
             .map_or_else(Effect::anything, Settled::unconditional)
