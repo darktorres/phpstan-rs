@@ -375,8 +375,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `ClassId` and ordered slot; trait property outputs still use names. The full
   suite, check, Clippy and formatting pass. `770b7370` assigns mixin methods
   and aliases host `MethodRef`s, with PHP-folded duplicate handling and slot
-  checks; the full suite, check, Clippy and formatting pass. The 4.7
-  reference, include-graph,
+  checks; the full suite, check, Clippy and formatting pass. `42c24a58`
+  moves abstract, native-final, static and PHPDoc-final facts onto each
+  class-local method entry, carries them through trait aliases and mixins, and
+  gives synthesized enum built-ins slots. All 1,142 crate tests, 275 syntax
+  tests, check, Clippy and formatting pass. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
