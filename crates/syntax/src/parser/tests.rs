@@ -4,6 +4,7 @@ mod doc_comments_and_robustness;
 mod expressions_and_operators;
 mod goto_labels;
 mod helpers;
+mod name_ids;
 mod namespaces_and_names;
 mod node_ids;
 mod spans;
