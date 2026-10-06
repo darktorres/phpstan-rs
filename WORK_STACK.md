@@ -283,7 +283,12 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   locators for unmerged project declarations; resolved and merged entries
   keep the legacy table value. Raw `lookup_method` and
   `lookup_method_with_owner` now use the file's folded member index too,
-  with fallback where declarations were merged.
+  with fallback where declarations were merged. Property and constant
+  ranges are now typed name slots which share the enclosing class's existing
+  reflection Arcs; the cache serializes only names and reconnects them to
+  the decoded class. Raw hierarchy lookups for properties and constants use
+  these exact-case per-file indexes when available. The focused locator test,
+  full library suite (1,137 tests), library check, and Clippy pass.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at

@@ -1109,7 +1109,14 @@ impl Registry {
     /// `precompute_member_owners`'s own doc comment.
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertyReflection> {
         let owner = self.property_owners(class)?.get(prop)?;
-        self.classes.get(owner)?.properties.get(prop).map(|p| &**p)
+        let from_file = if self.raw_active {
+            self.class_ids
+                .get(owner)
+                .and_then(|id| self.file_property_by_class_id(*id, prop))
+        } else {
+            None
+        };
+        from_file.or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))
     }
 
     /// Same as `lookup_property`, but also returns the declaring
@@ -1121,12 +1128,15 @@ impl Registry {
         prop: &str,
     ) -> Option<(Name, &PropertyReflection)> {
         let owner = self.property_owners(class)?.get(prop)?;
-        let sig = self
-            .classes
-            .get(owner)?
-            .properties
-            .get(prop)
-            .map(|p| &**p)?;
+        let from_file = if self.raw_active {
+            self.class_ids
+                .get(owner)
+                .and_then(|id| self.file_property_by_class_id(*id, prop))
+        } else {
+            None
+        };
+        let sig =
+            from_file.or_else(|| self.classes.get(owner)?.properties.get(prop).map(|p| &**p))?;
         Some((owner.clone(), sig))
     }
 
@@ -1134,11 +1144,20 @@ impl Registry {
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstantReflection> {
         let owner = self.const_owners(class)?.get(const_name)?;
-        self.classes
-            .get(owner)?
-            .consts
-            .get(const_name)
-            .map(|c| &**c)
+        let from_file = if self.raw_active {
+            self.class_ids
+                .get(owner)
+                .and_then(|id| self.file_constant_by_class_id(*id, const_name))
+        } else {
+            None
+        };
+        from_file.or_else(|| {
+            self.classes
+                .get(owner)?
+                .consts
+                .get(const_name)
+                .map(|c| &**c)
+        })
     }
 
     /// Same as `lookup_const`, but also returns the declaring ancestor's
@@ -1153,12 +1172,20 @@ impl Registry {
         const_name: &str,
     ) -> Option<(Name, &ConstantReflection)> {
         let owner = self.const_owners(class)?.get(const_name)?;
-        let sig = self
-            .classes
-            .get(owner)?
-            .consts
-            .get(const_name)
-            .map(|c| &**c)?;
+        let from_file = if self.raw_active {
+            self.class_ids
+                .get(owner)
+                .and_then(|id| self.file_constant_by_class_id(*id, const_name))
+        } else {
+            None
+        };
+        let sig = from_file.or_else(|| {
+            self.classes
+                .get(owner)?
+                .consts
+                .get(const_name)
+                .map(|c| &**c)
+        })?;
         Some((owner.clone(), sig))
     }
 

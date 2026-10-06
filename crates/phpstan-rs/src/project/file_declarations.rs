@@ -144,8 +144,12 @@ pub(super) fn collect(
                 found.file_decls.add_class(
                     std::sync::Arc::clone(info),
                     members,
-                    info.properties().values().map(std::sync::Arc::clone),
-                    info.consts().values().map(std::sync::Arc::clone),
+                    info.properties()
+                        .iter()
+                        .map(|(name, property)| (name.clone(), std::sync::Arc::clone(property))),
+                    info.consts()
+                        .iter()
+                        .map(|(name, constant)| (name.clone(), std::sync::Arc::clone(constant))),
                     info.extends()
                         .iter()
                         .chain(info.implements())

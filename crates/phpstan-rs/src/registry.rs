@@ -554,6 +554,36 @@ impl Registry {
         )
     }
 
+    pub(crate) fn file_property_by_class_id(
+        &self,
+        id: ClassId,
+        property: &str,
+    ) -> Option<&PropertyReflection> {
+        if id.source()? != IdSource::Project {
+            return None;
+        }
+        let declaration = self
+            .project_class_decls
+            .get(id.local() as usize)?
+            .as_ref()?;
+        declaration.file.property(declaration.layout, property)
+    }
+
+    pub(crate) fn file_constant_by_class_id(
+        &self,
+        id: ClassId,
+        constant: &str,
+    ) -> Option<&ConstantReflection> {
+        if id.source()? != IdSource::Project {
+            return None;
+        }
+        let declaration = self
+            .project_class_decls
+            .get(id.local() as usize)?
+            .as_ref()?;
+        declaration.file.constant(declaration.layout, constant)
+    }
+
     /// The id and declaration selected for `name` by PHP's function-name rules.
     pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
         let (name, current) = self.functions.get_with_name(name)?;
