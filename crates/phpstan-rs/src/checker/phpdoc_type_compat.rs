@@ -191,8 +191,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let class_info = class.and_then(|c| self.registry.classes().get(c));
-        let type_aliases = class_info
-            .map(|info| info.type_aliases().clone())
+        let type_aliases = class
+            .map(|class| self.registry.effective_type_aliases_by_name(class))
             .unwrap_or_default();
         let class_templates: Vec<String> = class_info
             .map(|info| info.templates().iter().map(|t| t.to_string()).collect())
@@ -323,12 +323,7 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.replace(fqn.to_string());
         let class_templates = self.current_class_template_params();
         self.current_class = previous_class;
-        let aliases = self
-            .registry
-            .classes()
-            .get(fqn)
-            .map(|info| info.type_aliases().clone())
-            .unwrap_or_default();
+        let aliases = self.registry.effective_type_aliases_by_name(fqn);
         let sig = FunctionReflection::from_decl(
             &decl,
             &self.name_ctx,

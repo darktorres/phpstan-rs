@@ -480,6 +480,13 @@ pub struct Registry {
     pub(crate) class_property_results: FxHashMap<ClassId, NameMap<Arc<PropertyReflection>>>,
     #[serde(skip)]
     class_property_results_cache: NameTable<Vec<(Name, Arc<PropertyReflection>)>>,
+    // Resolved `@phpstan-import-type` aliases, keyed by the importing
+    // declaration. `ClassReflection::type_aliases` contains local aliases
+    // only and remains the immutable declaration source.
+    #[serde(skip)]
+    pub(crate) imported_type_aliases: FxHashMap<ClassId, NameMap<Type>>,
+    #[serde(skip)]
+    imported_type_aliases_cache: NameTable<Vec<(Name, Type)>>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
@@ -571,6 +578,32 @@ impl Registry {
                 self.classes.get(name)
             }
         }
+    }
+
+    /// Local aliases declared on `id`, overlaid with aliases resolved from
+    /// `@phpstan-import-type` tags. Callers get an owned map so the source
+    /// declaration remains immutable.
+    pub(crate) fn effective_type_aliases(&self, id: ClassId) -> NameMap<Type> {
+        let mut aliases = self
+            .class_by_id(id)
+            .map(|class| class.type_aliases().clone())
+            .unwrap_or_default();
+        if !self.raw_active
+            && let Some(imported) = self.imported_type_aliases.get(&id)
+        {
+            aliases.extend(imported.clone());
+        }
+        aliases
+    }
+
+    /// Name-addressed convenience for checker paths which already carry a
+    /// class name rather than its declaration ID.
+    pub(crate) fn effective_type_aliases_by_name(&self, name: &str) -> NameMap<Type> {
+        self.class_ids
+            .get(name)
+            .copied()
+            .map(|id| self.effective_type_aliases(id))
+            .unwrap_or_default()
     }
 
     pub(crate) fn class_name_by_id(&self, id: ClassId) -> Option<&Name> {
@@ -764,6 +797,7 @@ impl Registry {
             self.class_constant_results.remove(&id);
             self.class_method_results.remove(&id);
             self.class_property_results.remove(&id);
+            self.imported_type_aliases.remove(&id);
         }
     }
 
@@ -971,6 +1005,7 @@ impl Registry {
             self.class_constant_results.clear();
             self.class_method_results.clear();
             self.class_property_results.clear();
+            self.imported_type_aliases.clear();
             self.classes = raw.classes.clone();
             self.functions = raw.functions.clone();
             return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
@@ -994,6 +1029,8 @@ impl Registry {
         self.class_method_results
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_property_results
+            .retain(|id, _| !changed_class_ids.contains(id));
+        self.imported_type_aliases
             .retain(|id, _| !changed_class_ids.contains(id));
         let functions = reset_scoped(
             &mut self.functions,
@@ -1060,6 +1097,7 @@ impl Registry {
         let class_constant_results = self.class_constant_results_for_cache();
         let class_method_results = self.class_method_results_for_cache();
         let class_property_results = self.class_property_results_for_cache();
+        let imported_type_aliases = self.imported_type_aliases_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
         self.functions.freeze();
@@ -1215,6 +1253,21 @@ impl Registry {
             })
             .collect();
         self.class_property_results_cache = NameTable::default();
+        self.imported_type_aliases = imported_type_aliases
+            .iter()
+            .filter_map(|(name, aliases)| {
+                self.class_ids.get(name).copied().map(|id| {
+                    (
+                        id,
+                        aliases
+                            .iter()
+                            .map(|(name, ty)| (name.clone(), ty.clone()))
+                            .collect(),
+                    )
+                })
+            })
+            .collect();
+        self.imported_type_aliases_cache = NameTable::default();
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -1366,6 +1419,8 @@ impl Registry {
             .store(writer, "table:class_method_results")?;
         self.class_property_results_for_cache()
             .store(writer, "table:class_property_results")?;
+        self.imported_type_aliases_for_cache()
+            .store(writer, "table:imported_type_aliases")?;
         self.store_tables(writer)?;
         if let Some(raw) = &self.raw {
             raw.classes.store(writer, RAW_CLASSES)?;
@@ -1499,6 +1554,24 @@ impl Registry {
             .collect()
     }
 
+    fn imported_type_aliases_for_cache(&self) -> NameTable<Vec<(Name, Type)>> {
+        if !self.imported_type_aliases_cache.is_empty() {
+            return self.imported_type_aliases_cache.clone();
+        }
+        self.imported_type_aliases
+            .iter()
+            .filter_map(|(id, aliases)| {
+                let mut aliases: Vec<_> = aliases
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.clone()))
+                    .collect();
+                aliases.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+                self.class_name_by_id(*id)
+                    .map(|name| (name.clone(), aliases))
+            })
+            .collect()
+    }
+
     /// Whether every stored table, map and set of a registry read back is
     /// in the order a lookup by bisection relies on. A load checks only
     /// that its records are inside the file, so the tests of what is stored
@@ -1520,6 +1593,8 @@ impl Registry {
             .check_order("table:class_method_results")?;
         self.class_property_results_for_cache()
             .check_order("table:class_property_results")?;
+        self.imported_type_aliases_for_cache()
+            .check_order("table:imported_type_aliases")?;
         if let Some(raw) = &self.raw {
             raw.classes.check_order(RAW_CLASSES)?;
             raw.functions.check_order(RAW_FUNCTIONS)?;
@@ -1557,6 +1632,8 @@ impl Registry {
             NameTable::load(reader, "table:class_method_results")?;
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
+        registry.imported_type_aliases_cache =
+            NameTable::load(reader, "table:imported_type_aliases")?;
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
                 classes: NameTable::load(reader, RAW_CLASSES)?,
@@ -1644,6 +1721,11 @@ impl Registry {
             .class_property_results
             .drain()
             .map(|(id, properties)| (id.with_generation(generation), properties))
+            .collect();
+        base.imported_type_aliases = base
+            .imported_type_aliases
+            .drain()
+            .map(|(id, aliases)| (id.with_generation(generation), aliases))
             .collect();
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);

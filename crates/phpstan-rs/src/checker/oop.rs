@@ -295,12 +295,7 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.replace(fqn.to_string());
         let class_templates = self.current_class_template_params();
         self.current_class = previous_class;
-        let type_aliases = self
-            .registry
-            .classes()
-            .get(fqn)
-            .map(|info| info.type_aliases().clone())
-            .unwrap_or_default();
+        let type_aliases = self.registry.effective_type_aliases_by_name(fqn);
         for tag in &block.method_tags {
             if tag.templates.is_empty() {
                 continue;
@@ -606,7 +601,8 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        for (name, ty) in info.type_aliases() {
+        let aliases = self.registry.effective_type_aliases_by_name(fqn);
+        for (name, ty) in &aliases {
             self.check_type_class_names_exist(
                 ty,
                 format!("PHPDoc tag @phpstan-type {name} for class {fqn}"),

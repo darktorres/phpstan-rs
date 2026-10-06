@@ -382,8 +382,7 @@ impl<'a> Checker<'a> {
                 .map(|(k, v)| (Name::from(k), resolve(v)))
                 .collect();
             let type_aliases = class_name
-                .and_then(|c| self.registry.classes().get(c))
-                .map(|info| info.type_aliases().clone())
+                .map(|c| self.registry.effective_type_aliases_by_name(c))
                 .unwrap_or_default();
             let display_name = match class_name {
                 Some(c) => format!("method {c}::{}()", f.name),

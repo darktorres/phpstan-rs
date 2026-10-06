@@ -510,12 +510,7 @@ impl<'a> Checker<'a> {
         tag: AncestorTag,
     ) -> Vec<(grammar::TypeNode, Type)> {
         let parsed = grammar::parse_shared(doc);
-        let aliases = self
-            .registry
-            .classes()
-            .get(fqn)
-            .map(|info| info.type_aliases().clone())
-            .unwrap_or_default();
+        let aliases = self.registry.effective_type_aliases_by_name(fqn);
         let mut out: Vec<(String, grammar::TypeNode, Type)> = Vec::new();
         for spelling in tag.spellings() {
             for t in &parsed.tags {

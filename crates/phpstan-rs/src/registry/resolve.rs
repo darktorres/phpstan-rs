@@ -1095,8 +1095,8 @@ impl Registry {
     /// indexed at all at that point. Mirrors `resolve_deferred_value_of`'s
     /// exact two-step shape (a read-only pass collecting every resolvable
     /// answer, then a second pass applying them) for the identical
-    /// reason - looking a different class's `type_aliases` up while
-    /// mutating this class's own would otherwise borrow `self.classes`
+    /// reason - looking a different class's aliases up while mutating
+    /// this class's own declaration would otherwise borrow `self.classes`
     /// two ways at once.
     ///
     /// A source class's alias is looked up under `{its own
@@ -1131,10 +1131,11 @@ impl Registry {
                     class_namespace(&imp.source_class_fqn),
                     &imp.source_alias_name,
                 );
-                if let Some(ty) = self
-                    .classes
-                    .get(&imp.source_class_fqn)
-                    .and_then(|src| src.type_aliases.get(source_key.as_str()))
+                let source_id = self.class_ids.get(&imp.source_class_fqn).copied();
+                let source_aliases = source_id.map(|id| self.effective_type_aliases(id));
+                if let Some(ty) = source_aliases
+                    .as_ref()
+                    .and_then(|aliases| aliases.get(source_key.as_str()))
                 {
                     resolved.push((class_id, imp.local_key.clone(), ty.clone()));
                 }
@@ -1151,14 +1152,11 @@ impl Registry {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
-            let Some(mut info) = self.classes.take(&class_name) else {
+            let Some(info) = self.classes.get(&class_name) else {
                 continue;
             };
-            // A class whose imports all failed to resolve (its source
-            // class isn't indexed at all) still needs `type_imports`
-            // cleared - the one-shot pass above already ran, so there's
-            // no second chance coming; an empty `aliases` map here makes
-            // every `substitute_type_aliases` call below a no-op.
+            // Keep even an empty result: it records that the class's import
+            // set was resolved and leaves the declaration's imports intact.
             let aliases = by_class.remove(&class_id).unwrap_or_default();
             let mut resolved_const_types = Vec::new();
             let mut resolved_properties = Vec::new();
@@ -1252,9 +1250,7 @@ impl Registry {
             for (name, method) in resolved_methods {
                 method_results.insert(name, method);
             }
-            info.type_aliases.extend(aliases);
-            info.type_imports.clear();
-            self.classes.insert(class_name, info);
+            self.imported_type_aliases.insert(class_id, aliases);
         }
     }
 

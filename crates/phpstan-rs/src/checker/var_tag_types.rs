@@ -317,12 +317,14 @@ impl<'a> Checker<'a> {
                 let name = name.clone();
                 let ty = self.resolve_type_node(node, "inline @var");
                 let ty = match &self.current_class {
-                    Some(class) => match self.registry.classes().get(class.as_str()) {
-                        Some(info) if !info.type_aliases().is_empty() => {
-                            registry::substitute_type_aliases(ty, info.type_aliases())
+                    Some(class) => {
+                        let aliases = self.registry.effective_type_aliases_by_name(class);
+                        if aliases.is_empty() {
+                            ty
+                        } else {
+                            registry::substitute_type_aliases(ty, &aliases)
                         }
-                        _ => ty,
-                    },
+                    }
                     None => ty,
                 };
                 let ty = match &self.current_class {

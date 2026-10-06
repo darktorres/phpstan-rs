@@ -543,12 +543,10 @@ pub struct ClassReflection {
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
-    // looked up in the source class's `type_aliases` - the source class
-    // may not be indexed yet at `from_decl` time. Resolved by
-    // `Registry::resolve_deferred_type_imports`, a later pass over the
-    // fully-indexed registry - merged into `type_aliases` above once
-    // resolved, so this field is empty again after that pass runs; never
-    // read afterward.
+    // looked up in the source class's aliases - the source class may not
+    // be indexed yet at `from_decl` time. `Registry::resolve_deferred_type_imports`
+    // stores successful resolutions in its ClassId-keyed result table;
+    // this declaration input stays intact after the pass.
     pub(in crate::registry) type_imports: Vec<ResolvedTypeImport>,
     // `@method` tags, already resolved into real `FunctionReflection`s but not
     // yet inserted into `methods` - insertion has to wait for

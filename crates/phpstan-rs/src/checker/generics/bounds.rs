@@ -228,7 +228,7 @@ impl<'a> Checker<'a> {
             let templates = info.templates().clone();
             let bounds = info.template_bounds().clone();
             let defaults = info.template_defaults().clone();
-            let type_aliases = info.type_aliases().clone();
+            let type_aliases = self.registry.effective_type_aliases_by_name(fqn);
             self.check_template_declaration_validity(
                 &templates,
                 &bounds,

@@ -185,6 +185,44 @@ fn inherited_class_property_results_survive_cache_round_trip() {
 }
 
 #[test]
+fn imported_type_alias_results_survive_freeze_and_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            /** @phpstan-type Imported string */
+            class AliasSource {}
+            /** @phpstan-import-type Imported from AliasSource */
+            class AliasTarget {
+                /** @var Imported */
+                public $value;
+            }
+            "#,
+    );
+    let target = registry.classes.get("AliasTarget").unwrap();
+    assert!(target.type_aliases().is_empty());
+    assert_eq!(target.type_imports().len(), 1);
+    assert_eq!(
+        registry
+            .effective_type_aliases_by_name("AliasTarget")
+            .get("Imported"),
+        Some(&Type::string())
+    );
+
+    let back = round_trip(&registry);
+    let target = back.classes.get("AliasTarget").unwrap();
+    assert!(target.type_aliases().is_empty());
+    assert_eq!(target.type_imports().len(), 1);
+    assert_eq!(
+        back.effective_type_aliases_by_name("AliasTarget")
+            .get("Imported"),
+        Some(&Type::string())
+    );
+    assert_eq!(
+        back.lookup_property("AliasTarget", "value").unwrap().ty(),
+        &Type::string()
+    );
+}
+
+#[test]
 fn trait_method_results_survive_freeze_and_cache_round_trip() {
     let registry = build_registry(
         r#"<?php

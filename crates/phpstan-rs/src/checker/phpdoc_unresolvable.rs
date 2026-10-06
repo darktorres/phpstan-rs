@@ -328,11 +328,11 @@ impl<'a> Checker<'a> {
             return ty;
         };
         // `@phpstan-type`/`@phpstan-import-type` aliases of the class.
-        let ty = match self.registry.classes().get(c) {
-            Some(info) if !info.type_aliases().is_empty() => {
-                crate::registry::substitute_type_aliases(ty, info.type_aliases())
-            }
-            _ => ty,
+        let aliases = self.registry.effective_type_aliases_by_name(c);
+        let ty = if aliases.is_empty() {
+            ty
+        } else {
+            crate::registry::substitute_type_aliases(ty, &aliases)
         };
         self.resolve_pseudo(&ty, c)
     }

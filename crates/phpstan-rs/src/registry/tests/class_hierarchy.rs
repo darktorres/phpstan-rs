@@ -365,6 +365,14 @@ fn imported_type_constant_results_leave_the_declaration_unchanged() {
         &Type::string(),
         "the property declaration keeps its imported-alias input"
     );
+    let target = r.classes.get("Target").unwrap();
+    assert!(target.type_aliases().is_empty());
+    assert_eq!(target.type_imports().len(), 1);
+    assert_eq!(
+        r.effective_type_aliases_by_name("Target").get("Imported"),
+        Some(&Type::string()),
+        "resolved imports live in the Registry result overlay"
+    );
 }
 
 #[test]
