@@ -893,11 +893,12 @@ impl Registry {
         let methods: Vec<(&Name, &Name, &FunctionReflection)> = registry
             .classes()
             .own_iter()
-            .flat_map(|(class, info)| {
-                info.methods
-                    .iter()
-                    .filter(move |(method, sig)| !never_runs(info, method, sig))
-                    .map(move |(method, sig)| (class, method, sig))
+            .flat_map(|(class, _)| {
+                registry.method_names(class).filter_map(move |method| {
+                    let info = registry.classes().get(class)?;
+                    let sig = registry.lookup_own_method(class, method)?;
+                    (!never_runs(info, method, sig)).then_some((class, method, sig))
+                })
             })
             .collect();
         let mut classified: FxHashMap<DeclKey, Classification<'_>> = functions

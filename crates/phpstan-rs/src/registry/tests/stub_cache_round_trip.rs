@@ -3,8 +3,9 @@
 
 use super::helpers::build_registry;
 use crate::project::Project;
-use crate::registry::Registry;
 use crate::registry::container::{Reader, Writer};
+use crate::registry::{Registry, Storage};
+use syntax::name::Name;
 use types::Type;
 
 /// `registry` stored and read back, and frozen, as a run loads it from the
@@ -274,6 +275,53 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
             .unwrap()
             .return_type(),
         &Type::string_literal("host".into())
+    );
+}
+
+#[test]
+fn trait_method_effects_use_host_method_results_and_survive_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            trait WritesOwnProperty {
+                public function writeValue() { $this->value = 1; }
+            }
+            class EffectHost { use WritesOwnProperty; }
+        "#,
+    );
+    let declaration = registry.classes["WritesOwnProperty"].methods["writeValue"].clone();
+    assert!(
+        registry.classes["EffectHost"]
+            .methods
+            .get("writeValue")
+            .is_none()
+    );
+    assert!(
+        registry
+            .lookup_own_method("EffectHost", "writeValue")
+            .is_some()
+    );
+    let expected = Storage::Own(Some(Name::from("value")));
+    let effect = registry.method_effect_by_name("writeValue");
+    assert!(
+        effect
+            .storages()
+            .is_some_and(|storages| storages.contains(&expected))
+    );
+    assert_eq!(
+        registry.classes["WritesOwnProperty"].methods["writeValue"], declaration,
+        "effect settlement leaves the trait declaration unchanged"
+    );
+
+    let back = round_trip(&registry);
+    let effect_after_cache = back.method_effect_by_name("writeValue");
+    assert!(
+        effect_after_cache
+            .storages()
+            .is_some_and(|storages| storages.contains(&expected))
+    );
+    assert_eq!(
+        back.classes["WritesOwnProperty"].methods["writeValue"],
+        declaration
     );
 }
 
