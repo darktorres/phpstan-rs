@@ -740,23 +740,35 @@ impl Registry {
         const MAX_ROUNDS: usize = 16;
         // The classes with a deferred constant type, found by the first
         // round: no later round gives another class one.
-        let mut with_deferred: Option<Vec<Name>> = None;
+        let mut with_deferred: Option<Vec<ClassId>> = None;
         for _ in 0..MAX_ROUNDS {
-            let mut updates: Vec<(Name, Name, Type)> = Vec::new();
+            let mut updates: Vec<(ClassId, Name, Type)> = Vec::new();
             match &with_deferred {
                 None => {
                     let mut found = Vec::new();
                     for (class_name, info) in self.scoped_classes() {
-                        if self.constant_reference_updates(class_name, info, &mut updates) {
-                            found.push(class_name.clone());
+                        let Some(class_id) = self.class_ids.get(class_name).copied() else {
+                            continue;
+                        };
+                        if self.constant_reference_updates(class_id, class_name, info, &mut updates)
+                        {
+                            found.push(class_id);
                         }
                     }
                     with_deferred = Some(found);
                 }
-                Some(names) => {
-                    for class_name in names {
-                        if let Some(info) = self.classes.get(class_name) {
-                            self.constant_reference_updates(class_name, info, &mut updates);
+                Some(ids) => {
+                    for class_id in ids {
+                        let Some(class_name) = self.class_name_by_id(*class_id).cloned() else {
+                            continue;
+                        };
+                        if let Some(info) = self.classes.get(&class_name) {
+                            self.constant_reference_updates(
+                                *class_id,
+                                &class_name,
+                                info,
+                                &mut updates,
+                            );
                         }
                     }
                 }
@@ -764,7 +776,10 @@ impl Registry {
             if updates.is_empty() {
                 break;
             }
-            for (class_name, const_name, ty) in updates {
+            for (class_id, const_name, ty) in updates {
+                let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                    continue;
+                };
                 if let Some(sig) = self
                     .classes
                     .get_mut(&class_name)
@@ -774,8 +789,11 @@ impl Registry {
                 }
             }
         }
-        for name in with_deferred.iter().flatten() {
-            let Some(info) = self.classes.get_mut(name) else {
+        for class_id in with_deferred.iter().flatten() {
+            let Some(class_name) = self.class_name_by_id(*class_id).cloned() else {
+                continue;
+            };
+            let Some(info) = self.classes.get_mut(&class_name) else {
                 continue;
             };
             for sig in info
@@ -795,9 +813,10 @@ impl Registry {
     /// class has a deferred constant type at all.
     fn constant_reference_updates(
         &self,
+        class_id: ClassId,
         class_name: &Name,
         info: &ClassReflection,
-        updates: &mut Vec<(Name, Name, Type)>,
+        updates: &mut Vec<(ClassId, Name, Type)>,
     ) -> bool {
         if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
             return false;
@@ -813,7 +832,7 @@ impl Registry {
                 None,
             );
             if step != sig.ty {
-                updates.push((class_name.clone(), const_name.clone(), step));
+                updates.push((class_id, const_name.clone(), step));
             }
         }
         true
