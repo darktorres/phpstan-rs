@@ -335,9 +335,12 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   from `cargo test -p phpstan-rs`, the library check and Clippy pass. `02ce0ec9`
   also keys the effect pass's `methods_by_name` values by `ClassId`; lookup and
   canonical output resolve IDs through the Registry. The full crate suite,
-  check and Clippy pass. Item 4.6 remains open; inherited
-  PHPDoc, trait composition, constant resolution, other pass results and
-  immutable declaration storage remain. The 4.7 reference, include-graph,
+  check and Clippy pass. `f6ddfc4f` reuses the trait's shared lazy method
+  signature for each composed source method and alias, avoiding reflection
+  clones while preserving host-local slots; the alias sharing check and all
+  1,141 library tests pass. Item 4.6 remains open; inherited PHPDoc, the
+  remaining trait composition outputs, constant resolution, other pass
+  results and immutable declaration storage remain. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
