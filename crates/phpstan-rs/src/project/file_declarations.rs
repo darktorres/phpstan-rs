@@ -127,8 +127,8 @@ pub(super) fn collect(
                 found.file_decls.add_class(
                     std::sync::Arc::clone(info),
                     members,
-                    info.properties().values().map(|item| item.as_ref().clone()),
-                    info.consts().values().map(|item| item.as_ref().clone()),
+                    info.properties().values().map(std::sync::Arc::clone),
+                    info.consts().values().map(std::sync::Arc::clone),
                     info.extends()
                         .iter()
                         .chain(info.implements())

@@ -55,8 +55,8 @@ pub(crate) struct FileMember {
 pub(crate) struct ClassLayout {
     pub(crate) declaration: Idx<Arc<ClassReflection>>,
     pub(crate) members: IdxRange<FileMember>,
-    pub(crate) properties: IdxRange<PropertyReflection>,
-    pub(crate) constants: IdxRange<ConstantReflection>,
+    pub(crate) properties: IdxRange<Arc<PropertyReflection>>,
+    pub(crate) constants: IdxRange<Arc<ConstantReflection>>,
     pub(crate) names: IdxRange<Name>,
 }
 
@@ -75,8 +75,8 @@ pub(crate) struct FileDecls {
     pub(crate) function_layouts: Arena<FunctionLayout>,
     pub(crate) members: Arena<FileMember>,
     pub(crate) parameters: Arena<ParameterReflection>,
-    pub(crate) properties: Arena<PropertyReflection>,
-    pub(crate) constants: Arena<ConstantReflection>,
+    pub(crate) properties: Arena<Arc<PropertyReflection>>,
+    pub(crate) constants: Arena<Arc<ConstantReflection>>,
     pub(crate) names: Arena<Name>,
 }
 
@@ -101,8 +101,8 @@ impl FileDecls {
         &mut self,
         declaration: Arc<ClassReflection>,
         members: impl IntoIterator<Item = FileMember>,
-        properties: impl IntoIterator<Item = PropertyReflection>,
-        constants: impl IntoIterator<Item = ConstantReflection>,
+        properties: impl IntoIterator<Item = Arc<PropertyReflection>>,
+        constants: impl IntoIterator<Item = Arc<ConstantReflection>>,
         names: impl IntoIterator<Item = Name>,
     ) -> Idx<ClassLayout> {
         let declaration = self.classes.alloc(declaration);
@@ -144,12 +144,12 @@ impl FileDecls {
     }
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
-    pub(crate) fn properties(&self, layout: Idx<ClassLayout>) -> &[PropertyReflection] {
+    pub(crate) fn properties(&self, layout: Idx<ClassLayout>) -> &[Arc<PropertyReflection>] {
         &self.properties[self.class_layouts[layout].properties.clone()]
     }
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
-    pub(crate) fn constants(&self, layout: Idx<ClassLayout>) -> &[ConstantReflection] {
+    pub(crate) fn constants(&self, layout: Idx<ClassLayout>) -> &[Arc<ConstantReflection>] {
         &self.constants[self.class_layouts[layout].constants.clone()]
     }
 
@@ -200,8 +200,8 @@ struct EncodedFileDecls<'a> {
     function_layouts: Vec<EncodedFunctionLayout>,
     members: Vec<&'a FileMember>,
     parameters: Vec<&'a ParameterReflection>,
-    properties: Vec<&'a PropertyReflection>,
-    constants: Vec<&'a ConstantReflection>,
+    properties: Vec<&'a Arc<PropertyReflection>>,
+    constants: Vec<&'a Arc<ConstantReflection>>,
     names: Vec<&'a Name>,
 }
 
@@ -272,8 +272,8 @@ impl<'de> Deserialize<'de> for FileDecls {
             function_layouts: Vec<EncodedFunctionLayout>,
             members: Vec<FileMember>,
             parameters: Vec<ParameterReflection>,
-            properties: Vec<PropertyReflection>,
-            constants: Vec<ConstantReflection>,
+            properties: Vec<Arc<PropertyReflection>>,
+            constants: Vec<Arc<ConstantReflection>>,
             names: Vec<Name>,
         }
 
@@ -335,12 +335,12 @@ mod tests {
         let properties = class
             .properties
             .iter()
-            .map(|(_, property)| (**property).clone())
+            .map(|(_, property)| Arc::clone(property))
             .collect::<Vec<_>>();
         let constants = class
             .consts
             .iter()
-            .map(|(_, constant)| (**constant).clone())
+            .map(|(_, constant)| Arc::clone(constant))
             .collect::<Vec<_>>();
         let names = class
             .extends

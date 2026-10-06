@@ -249,6 +249,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   retained `FileState`, and the disk cache carry the arena. Validation for
   this increment passed: the focused round-trip test, `cargo check -p
   phpstan-rs --lib --tests`, and `cargo clippy -p phpstan-rs --all-targets`.
+  Property and constant ranges share their existing `Arc` values rather than
+  deep-copying reflections into the arena.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
