@@ -320,8 +320,12 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `ClassId`-keyed table; reads in the checker and architecture pass use the
   Registry API, while the disk cache retains its stable name section and
   translates it to IDs when freezing. Closure queries are covered across
-  cache reads and base switches. The full 1,141-test library suite, check, and
-  Clippy pass. Other pass results and immutable declaration storage remain.
+  cache reads and base switches. `8e5026ae` moves member-owner tables to
+  `ClassId` keys, with the cache retaining its name sections and restoring the
+  ID map at freeze. The round-trip oracle checks all owner kinds for every
+  class; the generation-switch test checks inherited method ownership still
+  resolves. The full 1,141-test library suite, check, and Clippy pass. Other
+  pass results and immutable declaration storage remain.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
