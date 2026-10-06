@@ -41,8 +41,9 @@ impl Registry {
         &self,
         class: &K,
     ) -> Option<&FoldedMap<Name>> {
-        self.member_owners
-            .get(class)
+        class
+            .with_key(|key| self.class_ids.get(key))
+            .and_then(|id| self.member_owners.get(id))
             .map(|owners| owners.methods.get())
     }
 
@@ -51,15 +52,17 @@ impl Registry {
         &self,
         class: &K,
     ) -> Option<&NameMap<Name>> {
-        self.member_owners
-            .get(class)
+        class
+            .with_key(|key| self.class_ids.get(key))
+            .and_then(|id| self.member_owners.get(id))
             .map(|owners| owners.properties.get())
     }
 
     /// The owners of `class`'s constant names.
     pub(crate) fn const_owners<K: TableKey + ?Sized>(&self, class: &K) -> Option<&NameMap<Name>> {
-        self.member_owners
-            .get(class)
+        class
+            .with_key(|key| self.class_ids.get(key))
+            .and_then(|id| self.member_owners.get(id))
             .map(|owners| owners.consts.get())
     }
 
@@ -487,27 +490,41 @@ impl Registry {
         let own_by_class: Vec<_> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .map(|name| {
+            .filter_map(|name| {
+                let id = *registry.class_ids.get(name)?;
                 let (methods, properties, consts) = registry.own_owner_names(name);
-                (name.clone(), methods, properties, consts)
+                Some((id, methods, properties, consts))
             })
             .collect();
         if self.scope.is_all() {
-            self.member_owners = NameTable::default();
+            self.member_owners = own_by_class
+                .into_par_iter()
+                .map(|(id, methods, properties, consts)| {
+                    (
+                        id,
+                        ClassOwners {
+                            methods: Lazy::decoded(methods),
+                            properties: Lazy::decoded(properties),
+                            consts: Lazy::decoded(consts),
+                        },
+                    )
+                })
+                .collect();
         } else {
-            for name in self.scoped_removed_class_keys() {
-                self.member_owners.remove(&name);
-            }
-        }
-        for (name, methods, properties, consts) in own_by_class {
-            self.member_owners.insert(
-                name,
-                ClassOwners {
-                    methods: Lazy::decoded(methods),
-                    properties: Lazy::decoded(properties),
-                    consts: Lazy::decoded(consts),
+            let active_ids: FxHashSet<ClassId> = self.class_ids.values().copied().collect();
+            self.member_owners.retain(|id, _| active_ids.contains(id));
+            self.member_owners.extend(own_by_class.into_iter().map(
+                |(id, methods, properties, consts)| {
+                    (
+                        id,
+                        ClassOwners {
+                            methods: Lazy::decoded(methods),
+                            properties: Lazy::decoded(properties),
+                            consts: Lazy::decoded(consts),
+                        },
+                    )
                 },
-            );
+            ));
         }
     }
 

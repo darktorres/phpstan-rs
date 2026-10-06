@@ -446,6 +446,8 @@ impl CanonicalOver for Registry {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         let ancestor_names = self.ancestor_names_for_cache();
         let base_ancestor_names = base.ancestor_names_for_cache();
+        let member_owners = self.member_owners_for_cache();
+        let base_member_owners = base.member_owners_for_cache();
         let Registry {
             id_generation: _,
             purity_results: _,
@@ -485,7 +487,8 @@ impl CanonicalOver for Registry {
             subtype_children,
             trait_users,
             recorded_parents,
-            member_owners,
+            member_owners: _,
+            member_owners_cache: _,
             effects,
             builtin_methods_running_code,
             base_builtin_methods_running_code,
@@ -581,7 +584,7 @@ impl CanonicalOver for Registry {
                 ),
                 (
                     "member_owners",
-                    &Over(member_owners, &base.member_owners, compare),
+                    &Over(&member_owners, &base_member_owners, compare),
                 ),
                 ("effects", effects),
                 (
@@ -633,7 +636,6 @@ canonical_struct!(Registry {
     subtype_children,
     trait_users,
     recorded_parents,
-    member_owners,
     effects,
     builtin_methods_running_code,
     base_builtin_methods_running_code,
@@ -646,6 +648,8 @@ canonical_struct!(Registry {
     phpstan_ancestry,
     ancestors_by_id,
     ancestor_names_cache,
+    member_owners,
+    member_owners_cache,
     class_ids,
     project_class_names,
     project_class_decls,

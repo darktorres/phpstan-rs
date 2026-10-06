@@ -95,8 +95,7 @@ fn every_stored_table_reads_back_with_its_names_and_values() {
         built_in_stub_classes,
         subtype_children,
         trait_users,
-        recorded_parents,
-        member_owners
+        recorded_parents
     );
 }
 
@@ -134,6 +133,21 @@ fn a_built_stub_registry_reads_back_as_it_was_stored() {
                 back.ancestor_names_of(name),
                 built.ancestor_names_of(name),
                 "the ID-addressed ancestor closure for {name} survives a cache read"
+            );
+            assert_eq!(
+                back.method_owners(name),
+                built.method_owners(name),
+                "the ID-addressed method owners for {name} survive a cache read"
+            );
+            assert_eq!(
+                back.property_owners(name),
+                built.property_owners(name),
+                "the ID-addressed property owners for {name} survive a cache read"
+            );
+            assert_eq!(
+                back.const_owners(name),
+                built.const_owners(name),
+                "the ID-addressed constant owners for {name} survive a cache read"
             );
         }
         let (stored, back) = (printed(&built), printed(&back));

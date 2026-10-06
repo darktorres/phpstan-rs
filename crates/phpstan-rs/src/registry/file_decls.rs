@@ -961,13 +961,21 @@ mod tests {
 
     #[test]
     fn switching_registry_bases_invalidates_the_previous_id_generation() {
-        let tokens = Lexer::new("<?php class Demo implements \\PHPStan\\Rules\\Rule {}")
-            .tokenize_with_spans();
+        let tokens = Lexer::new(
+            "<?php class ParentDemo { public function work(): void {} } class Demo extends ParentDemo implements \\PHPStan\\Rules\\Rule {}",
+        )
+        .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
         let mut registry = crate::registry::Registry::build(&program);
         let old_id = registry.class("Demo").unwrap().0;
         assert!(registry.class_has_phpstan_ancestry("Demo"));
         assert!(registry.is_subclass_of("Demo", "PHPStan\\Rules\\Rule"));
+        assert_eq!(
+            registry
+                .lookup_method_with_owner("Demo", "work")
+                .map(|(owner, _)| owner),
+            Some(syntax::name::Name::from("ParentDemo"))
+        );
         let mut replacement = crate::registry::Registry::build(&program);
         replacement.freeze();
 
@@ -978,6 +986,12 @@ mod tests {
         assert_eq!(current_id.generation(), old_id.generation() + 1);
         assert!(registry.class_has_phpstan_ancestry("Demo"));
         assert!(registry.is_subclass_of("Demo", "PHPStan\\Rules\\Rule"));
+        assert_eq!(
+            registry
+                .lookup_method_with_owner("Demo", "work")
+                .map(|(owner, _)| owner),
+            Some(syntax::name::Name::from("ParentDemo"))
+        );
         let stale_read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             registry.class_by_id(old_id)
         }));

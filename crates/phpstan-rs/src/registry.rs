@@ -439,10 +439,12 @@ pub struct Registry {
     #[serde(skip)]
     recorded_parents: NameTable<(Vec<Name>, Vec<Name>)>,
     // Every registered class's precomputed member-name ->
-    // owning-ancestor-name map, one per member kind - see
+    // owning-ancestor-name map, keyed by class ID - see
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
     #[serde(skip)]
-    pub(crate) member_owners: NameTable<hierarchy::ClassOwners>,
+    pub(crate) member_owners: FxHashMap<ClassId, hierarchy::ClassOwners>,
+    #[serde(skip)]
+    member_owners_cache: NameTable<hierarchy::ClassOwners>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by lowercased (class, name).
     pub(crate) effects: FxHashMap<effects::DeclKey, effects::Settled>,
@@ -938,6 +940,15 @@ impl Registry {
                     .map(|ancestors| (name.clone(), ancestors.clone()))
             })
             .collect();
+        let member_owners: FxHashMap<Name, hierarchy::ClassOwners> = self
+            .class_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.member_owners
+                    .get(id)
+                    .map(|owners| (name.clone(), owners.clone()))
+            })
+            .collect();
         self.classes.freeze();
         self.functions.freeze();
         self.class_ids = NameTable::default();
@@ -995,6 +1006,25 @@ impl Registry {
         if self.ancestors_by_id.is_empty() && !self.classes.is_empty() {
             self.precompute_ancestor_names();
         }
+        self.member_owners = if member_owners.is_empty() {
+            self.member_owners_cache
+                .iter()
+                .filter_map(|(name, owners)| {
+                    self.class_ids
+                        .get(name)
+                        .copied()
+                        .map(|id| (id, owners.clone()))
+                })
+                .collect()
+        } else {
+            member_owners
+                .into_iter()
+                .filter_map(|(name, owners)| {
+                    self.class_ids.get(&name).copied().map(|id| (id, owners))
+                })
+                .collect()
+        };
+        self.member_owners_cache = NameTable::default();
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -1009,7 +1039,6 @@ impl Registry {
         self.subtype_children.freeze();
         self.trait_users.freeze();
         self.recorded_parents.freeze();
-        self.member_owners.freeze();
         if let Some(raw) = &mut self.raw {
             raw.classes.freeze();
             raw.functions.freeze();
@@ -1124,6 +1153,8 @@ impl Registry {
         );
         self.ancestor_names_for_cache()
             .store(writer, "table:ancestor_names")?;
+        self.member_owners_for_cache()
+            .store(writer, "table:member_owners")?;
         self.store_tables(writer)?;
         if let Some(raw) = &self.raw {
             raw.classes.store(writer, RAW_CLASSES)?;
@@ -1148,6 +1179,20 @@ impl Registry {
             .collect()
     }
 
+    fn member_owners_for_cache(&self) -> NameTable<hierarchy::ClassOwners> {
+        if !self.member_owners_cache.is_empty() {
+            return self.member_owners_cache.clone();
+        }
+        self.class_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.member_owners
+                    .get(id)
+                    .map(|owners| (name.clone(), owners.clone()))
+            })
+            .collect()
+    }
+
     /// Whether every stored table, map and set of a registry read back is
     /// in the order a lookup by bisection relies on. A load checks only
     /// that its records are inside the file, so the tests of what is stored
@@ -1157,6 +1202,8 @@ impl Registry {
         self.check_tables()?;
         self.ancestor_names_for_cache()
             .check_order("table:ancestor_names")?;
+        self.member_owners_for_cache()
+            .check_order("table:member_owners")?;
         if let Some(raw) = &self.raw {
             raw.classes.check_order(RAW_CLASSES)?;
             raw.functions.check_order(RAW_FUNCTIONS)?;
@@ -1185,6 +1232,7 @@ impl Registry {
         let mut registry: Registry = stub_cache::decode(&reader.buffer()[rest])?;
         registry.load_tables(reader)?;
         registry.ancestor_names_cache = NameTable::load(reader, "table:ancestor_names")?;
+        registry.member_owners_cache = NameTable::load(reader, "table:member_owners")?;
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
                 classes: NameTable::load(reader, RAW_CLASSES)?,
@@ -1201,7 +1249,6 @@ impl Registry {
         subtype_children,
         trait_users,
         recorded_parents,
-        member_owners,
         global_constants,
         unconditionally_declared_classes,
         unconditionally_declared_functions,
@@ -1238,6 +1285,11 @@ impl Registry {
             .ancestors_by_id
             .drain()
             .map(|(id, ancestors)| (id.with_generation(generation), ancestors))
+            .collect();
+        base.member_owners = base
+            .member_owners
+            .drain()
+            .map(|(id, owners)| (id.with_generation(generation), owners))
             .collect();
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);
