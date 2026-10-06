@@ -244,8 +244,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   them. They still retain their `Name` handle pending reader migration.
   `ParsedFile::ident_name` now resolves parser IDs through the file table
   (`8607a515`). Source/name lookup is exposed, and syntax depends on `la-arena` with typed
-  `ExprId`/`StmtId` aliases. Those IDs now target `ExprNode`/`StmtNode`
-  (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
+  `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are now named
+  (`6611157d`), but are not yet owned or populated by the parser. The IDs target
+  `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
   and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
   return those explicit node values (`36d608ba`), and AST child fields use the
   node names (`e9c7fb2b`). Those fields still hold recursive values. Row 9.3
