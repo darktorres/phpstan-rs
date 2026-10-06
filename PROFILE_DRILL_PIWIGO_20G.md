@@ -1795,7 +1795,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 3. **Nodes by index.**
    - `ExprId` and `StmtId` (`Idx<ExprNode>`, `Idx<StmtNode>`) are `Copy` and carry no lifetime. So no `'a` runs through the checker, through item 18's persistent scopes, or through the language server's caches.
    - An id is meaningful only with its file. A holder that crosses files keeps the `Arc<ParsedFile>` with the ids, as the re-parse cache and the debug build's bodies do (`project.rs:175-217`, `registry/bodies.rs:51`).
-   - An id is its node's identity. `NodeId` numbers expressions and statements together today (`ast.rs:7-11`), and its one keyed table, the inference cache (`infer_cache.rs:47-108`), takes `ExprId`.
+   - An id is its node's identity. The former shared `NodeId` has been split into typed `ExprId` and `StmtId` reservations as the migration starts; this step makes them indices into the file's expression and statement arenas. The inference cache (`infer_cache.rs`) is already keyed by `ExprId`.
    - A parse function returns its node once its children are built, and its caller commits it: alone, which gives its id, or with the rest of its list (step 7). `ParseError` is boxed, so a `Result` is the node's size and a word.
    - Matching changes from `match &e.kind { ExprKind::Call(..) }` to `match file.expr(id) { ExprNode::Call { .. } }`, compile-driven. `syntax::visit` takes the file and ids.
 4. **Payloads are byte ranges of the source.**
