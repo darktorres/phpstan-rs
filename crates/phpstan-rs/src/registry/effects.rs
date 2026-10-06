@@ -592,11 +592,14 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry
 /// Whether `class`'s `method` has no body of its own to run: a builtin's, an
 /// abstract or an interface method, or one a `@method` tag or an enum
 /// declares, whose calls run `__call` or PHP's own code.
-fn never_runs(class: &ClassReflection, method: &str, sig: &FunctionReflection) -> bool {
+fn never_runs(registry: &Registry, class: &str, method: &str, sig: &FunctionReflection) -> bool {
     sig.is_stub
         || sig.is_magic
-        || class.kind() == ClassKind::Interface
-        || class.is_abstract_method(method)
+        || registry
+            .classes()
+            .get(class)
+            .is_some_and(|info| info.kind() == ClassKind::Interface)
+        || registry.method_is_abstract(class, method)
 }
 
 /// One body's own writes and the calls it inherits writes from.
@@ -827,9 +830,8 @@ impl Registry {
             Some(_) if key.member.starts_with('$') => EffectId::Named(key.clone()),
             Some(class) => {
                 let method = self.class_ids.get(class).and_then(|id| {
-                    self.class_by_id(*id)
-                        .and_then(|info| info.member_slots.get(key.member.as_str()))
-                        .map(|slot| crate::registry::MethodRef::new(*id, *slot))
+                    self.member_slot(class, key.member.as_str())
+                        .map(|slot| crate::registry::MethodRef::new(*id, slot))
                 });
                 method.map_or_else(|| EffectId::Named(key.clone()), EffectId::Method)
             }
@@ -843,8 +845,7 @@ impl Registry {
                 .map(|name| function_key(name.as_str())),
             EffectId::Method(method) => {
                 let class = self.class_name_by_id(method.class())?;
-                let info = self.class_by_id(method.class())?;
-                let member = info.member_order.get(usize::from(method.slot()))?;
+                let member = self.member_entry_by_ref(*method)?;
                 Some(method_key(class.as_str(), member.name.as_str()))
             }
             EffectId::Named(key) => Some(key.clone()),
@@ -897,7 +898,7 @@ impl Registry {
                 registry.method_names(class).filter_map(move |method| {
                     let info = registry.classes().get(class)?;
                     let sig = registry.lookup_own_method(class, method)?;
-                    (!never_runs(info, method, sig)).then_some((class, method, sig))
+                    (!never_runs(registry, class, method, sig)).then_some((class, method, sig))
                 })
             })
             .collect();
@@ -2442,7 +2443,7 @@ impl Reach<'_> {
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
         let info = registry.classes().get(owner.as_str())?;
         let abstract_method =
-            info.kind() == ClassKind::Interface || info.is_abstract_method(method);
+            info.kind() == ClassKind::Interface || registry.method_is_abstract(&owner, method);
         (!sig.is_magic && !abstract_method).then(|| method_key(&owner, method))
     }
 
@@ -2507,10 +2508,7 @@ impl Reach<'_> {
             };
             match registry.lookup_method_with_owner(target, method) {
                 Some((owner, sig)) => {
-                    let is_static = registry
-                        .classes()
-                        .get(owner.as_str())
-                        .is_some_and(|info| info.is_static_method(method));
+                    let is_static = registry.method_is_static(&owner, method);
                     let transfer = if !is_static && forwards_from(target) {
                         Transfer::Same
                     } else {

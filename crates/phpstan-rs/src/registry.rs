@@ -189,6 +189,7 @@ pub(crate) struct ResolvedSnapshot {
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
     function_results: Vec<Option<FunctionReflection>>,
+    member_topology: FxHashMap<Name, hierarchy::MemberTopology>,
     effects: FxHashMap<effects::DeclKey, effects::Settled>,
     global_variables: syntax::name::NameMap<Type>,
 }
@@ -513,6 +514,13 @@ pub struct Registry {
     pub(crate) imported_type_aliases: FxHashMap<ClassId, NameMap<Type>>,
     #[serde(skip)]
     imported_type_aliases_cache: NameTable<Vec<(Name, Type)>>,
+    // Host-local method entries introduced by finishing passes. The
+    // declaration topology remains on `ClassReflection`; these extend it
+    // by ID and preserve the slot numbers consumed by MethodRef.
+    #[serde(skip)]
+    pub(crate) class_member_topology: FxHashMap<ClassId, hierarchy::MemberTopology>,
+    #[serde(skip)]
+    class_member_topology_cache: NameTable<Vec<MethodEntry>>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
@@ -886,6 +894,7 @@ impl Registry {
             self.class_const_types.retain(|(class, _), _| *class != id);
             self.class_constant_results.remove(&id);
             self.class_method_results.remove(&id);
+            self.class_member_topology.remove(&id);
             self.class_property_results.remove(&id);
             self.class_type_results.remove(&id);
             self.imported_type_aliases.remove(&id);
@@ -1088,6 +1097,15 @@ impl Registry {
                     .collect()
             })
             .unwrap_or_default();
+        let member_topology_before = self
+            .class_ids
+            .iter()
+            .filter_map(|(name, id)| {
+                self.class_member_topology
+                    .get(id)
+                    .map(|topology| (name.clone(), topology.clone()))
+            })
+            .collect();
         let snapshot = |classes, functions, registry: &Registry| ResolvedSnapshot {
             class_keys: body_scope.and_then(scope::Scope::shared_class_keys),
             classes,
@@ -1096,12 +1114,14 @@ impl Registry {
             function_results: function_results_before.clone(),
             effects: registry.effects_for_names(),
             global_variables: registry.global_variables().clone(),
+            member_topology: member_topology_before.clone(),
         };
         if scope.is_all() {
             self.class_const_types.clear();
             self.function_results.clear();
             self.class_constant_results.clear();
             self.class_method_results.clear();
+            self.class_member_topology.clear();
             self.class_property_results.clear();
             self.imported_type_aliases.clear();
             self.classes = raw.classes.clone();
@@ -1124,6 +1144,8 @@ impl Registry {
         self.class_constant_results
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_method_results
+            .retain(|id, _| !changed_class_ids.contains(id));
+        self.class_member_topology
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_property_results
             .retain(|id, _| !changed_class_ids.contains(id));
@@ -1205,6 +1227,7 @@ impl Registry {
         let function_results = self.function_results_for_cache();
         let class_constant_results = self.class_constant_results_for_cache();
         let class_method_results = self.class_method_results_for_cache();
+        let class_member_topology = self.class_member_topology_for_cache();
         let class_property_results = self.class_property_results_for_cache();
         let class_type_results = self.class_type_results_for_cache();
         let imported_type_aliases = self.imported_type_aliases_for_cache();
@@ -1353,6 +1376,19 @@ impl Registry {
             })
             .collect();
         self.class_method_results_cache = NameTable::default();
+        self.class_member_topology = class_member_topology
+            .iter()
+            .filter_map(|(name, entries)| {
+                let id = self.class_ids.get(name).copied()?;
+                let declaration_len = self.class_by_id(id)?.member_order.len();
+                let mut topology = hierarchy::MemberTopology::default();
+                for entry in entries {
+                    topology.add(declaration_len, entry.clone())?;
+                }
+                Some((id, topology))
+            })
+            .collect();
+        self.class_member_topology_cache = NameTable::default();
         self.class_property_results = class_property_results
             .iter()
             .filter_map(|(name, properties)| {
@@ -1459,6 +1495,22 @@ impl Registry {
                 keys.insert(RefKey::class_text(key));
             }
         }
+        for (name, old) in &before.member_topology {
+            let current = self
+                .class_ids
+                .get(name)
+                .and_then(|id| self.class_member_topology.get(id));
+            if current != Some(old) {
+                keys.insert(RefKey::class_text(name.as_str()));
+            }
+        }
+        for (name, id) in self.class_ids.iter() {
+            if self.class_member_topology.contains_key(id)
+                && !before.member_topology.contains_key(name)
+            {
+                keys.insert(RefKey::class_text(name.as_str()));
+            }
+        }
         let function_keys = before.function_keys.iter().flat_map(|keys| keys.iter());
         debug_assert_eq!(function_keys.clone().count(), before.functions.len());
         debug_assert_eq!(before.functions.len(), before.function_results.len());
@@ -1552,6 +1604,8 @@ impl Registry {
             .store(writer, "table:class_constant_results")?;
         self.class_method_results_for_cache()
             .store(writer, "table:class_method_results")?;
+        self.class_member_topology_for_cache()
+            .store(writer, "table:class_member_topology")?;
         self.class_property_results_for_cache()
             .store(writer, "table:class_property_results")?;
         self.class_type_results_for_cache()
@@ -1672,6 +1726,19 @@ impl Registry {
             .collect()
     }
 
+    fn class_member_topology_for_cache(&self) -> NameTable<Vec<MethodEntry>> {
+        if !self.class_member_topology_cache.is_empty() {
+            return self.class_member_topology_cache.clone();
+        }
+        self.class_member_topology
+            .iter()
+            .filter_map(|(id, topology)| {
+                self.class_name_by_id(*id)
+                    .map(|class| (class.clone(), topology.entries.clone()))
+            })
+            .collect()
+    }
+
     fn class_property_results_for_cache(&self) -> NameTable<Vec<(Name, Arc<PropertyReflection>)>> {
         if !self.class_property_results_cache.is_empty() {
             return self.class_property_results_cache.clone();
@@ -1747,6 +1814,8 @@ impl Registry {
             .check_order("table:class_constant_results")?;
         self.class_method_results_for_cache()
             .check_order("table:class_method_results")?;
+        self.class_member_topology_for_cache()
+            .check_order("table:class_member_topology")?;
         self.class_property_results_for_cache()
             .check_order("table:class_property_results")?;
         self.class_type_results_for_cache()
@@ -1787,6 +1856,8 @@ impl Registry {
             NameTable::load(reader, "table:class_constant_results")?;
         registry.class_method_results_cache =
             NameTable::load(reader, "table:class_method_results")?;
+        registry.class_member_topology_cache =
+            NameTable::load(reader, "table:class_member_topology")?;
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
         registry.class_type_results_cache = NameTable::load(reader, "table:class_type_results")?;
@@ -1873,6 +1944,11 @@ impl Registry {
             .class_method_results
             .drain()
             .map(|(id, methods)| (id.with_generation(generation), methods))
+            .collect();
+        base.class_member_topology = base
+            .class_member_topology
+            .drain()
+            .map(|(id, topology)| (id.with_generation(generation), topology))
             .collect();
         base.class_property_results = base
             .class_property_results

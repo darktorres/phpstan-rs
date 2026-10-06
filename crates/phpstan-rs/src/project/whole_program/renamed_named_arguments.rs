@@ -83,9 +83,9 @@ fn class_overrides(
     if !class.uses_traits {
         return;
     }
-    let Some(info) = registry.classes().get(fqn) else {
+    if registry.classes().get(fqn).is_none() {
         return;
-    };
+    }
     let own_method_names: FxHashSet<&str> =
         class.own_methods.iter().map(|name| name.as_ref()).collect();
     let mut trait_method_names: Vec<Name> = registry
@@ -93,7 +93,7 @@ fn class_overrides(
         .filter(|name| {
             !syntax::ast::is_constructor_name(name)
                 && !own_method_names.contains(name.as_ref())
-                && !info.is_abstract_method(name)
+                && !registry.method_is_abstract(fqn, name)
         })
         .cloned()
         .collect();

@@ -69,11 +69,7 @@ impl<'a> Checker<'a> {
             .registry
             .lookup_method_canonical_name(class, "equals")?;
         let (owner, sig) = self.lookup_method_with_owner(class, "equals")?;
-        let is_static = self
-            .registry
-            .classes()
-            .get(owner.as_ref())
-            .is_some_and(|o| o.is_static_method(name));
+        let is_static = self.registry.method_is_static(owner.as_ref(), name);
         let required = sig
             .params()
             .iter()

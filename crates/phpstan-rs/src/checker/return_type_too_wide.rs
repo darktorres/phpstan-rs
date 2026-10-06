@@ -33,7 +33,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(class_name) else {
             return true;
         };
-        if info.is_final() || info.is_final_method(method_name) {
+        if info.is_final() || self.registry.method_is_final(class_name, method_name) {
             return true;
         }
         if !self

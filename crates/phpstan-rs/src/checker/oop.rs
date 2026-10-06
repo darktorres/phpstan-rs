@@ -1677,12 +1677,7 @@ impl<'a> Checker<'a> {
         if ancestor_sig.visibility() == Visibility::Private {
             return;
         }
-        if self
-            .registry
-            .classes()
-            .get(&ancestor)
-            .is_some_and(|info| info.is_abstract_method("__construct"))
-        {
+        if self.registry.method_is_abstract(&ancestor, "__construct") {
             return;
         }
         if body_calls_parent_construct(ctor.function.body_stmts()) {

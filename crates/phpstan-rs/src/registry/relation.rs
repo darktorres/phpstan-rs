@@ -40,8 +40,7 @@ impl ClassHierarchy for Registry {
     fn is_static_method(&self, class: &str, method: &str) -> bool {
         let class = self.canonical_class_name(class);
         self.lookup_method_with_owner(class, method)
-            .and_then(|(owner, _)| self.classes.get(&owner))
-            .is_some_and(|info| info.is_static_method(method))
+            .is_some_and(|(owner, _)| self.method_is_static(&owner, method))
     }
 
     fn method_signature(&self, class: &str, method: &str) -> Option<CallableSig> {

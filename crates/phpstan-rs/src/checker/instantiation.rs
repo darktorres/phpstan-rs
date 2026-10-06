@@ -200,8 +200,7 @@ impl<'a> Checker<'a> {
         let in_static_method = self
             .registry
             .lookup_method_with_owner(&class, &method)
-            .and_then(|(owner, _)| self.registry.classes().get(&owner))
-            .is_some_and(|owner| owner.is_static_method(&method));
+            .is_some_and(|(owner, _)| self.registry.method_is_static(&owner, &method));
         if is_abstract && in_static_method {
             self.report_builder(
                 DiagnosticBuilder::new(format!(
@@ -239,9 +238,9 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        if registry.classes().get(&owner).is_some_and(|info| {
-            info.is_final_method("__construct") || info.is_final_method_by_phpdoc("__construct")
-        }) {
+        if registry.method_is_final(&owner, "__construct")
+            || registry.method_is_final_by_phpdoc(&owner, "__construct")
+        {
             return false;
         }
         let mut prototype_owner = owner.clone();
@@ -258,11 +257,7 @@ impl<'a> Checker<'a> {
             }
             current = info.extends().first().cloned();
         }
-        if registry
-            .classes()
-            .get(&prototype_owner)
-            .is_some_and(|info| info.is_abstract_method("__construct"))
-        {
+        if registry.method_is_abstract(&prototype_owner, "__construct") {
             return false;
         }
         let abstract_trait_methods_supported = registry
@@ -270,10 +265,7 @@ impl<'a> Checker<'a> {
             != Some(false);
         if abstract_trait_methods_supported
             && let Some(t) = &self.current_trait
-            && registry
-                .classes()
-                .get(t.as_str())
-                .is_some_and(|info| info.is_abstract_method("__construct"))
+            && registry.method_is_abstract(t.as_str(), "__construct")
         {
             return false;
         }

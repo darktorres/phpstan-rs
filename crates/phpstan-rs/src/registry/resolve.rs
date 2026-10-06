@@ -187,10 +187,9 @@ impl Registry {
                 // of its own is not copied out either: the apply loop only
                 // inserts into a vacant slot, so a member the class
                 // declares is left out here instead of cloned and dropped.
-                let own_method_names = &own.member_slots;
                 let mut methods = Vec::new();
                 let mut added_method_names = FoldedMap::default();
-                let mut next_method_slot = own.member_order.len();
+                let mut next_method_slot = registry.member_entries(class_name).count();
                 let mut properties = Vec::new();
                 let mut added_property_names = NameSet::default();
                 let mut consts = Vec::new();
@@ -200,7 +199,7 @@ impl Registry {
                     own.consts.len() + existing_const_results.map_or(0, |results| results.len());
                 for trait_name in uses {
                     if let Some(trait_info) = registry.classes().get(trait_name) {
-                        for entry in &trait_info.member_order {
+                        for entry in registry.member_entries(trait_name) {
                             let name = &entry.name;
                             let Some(shared_sig) = registry.shared_own_method(trait_name, name)
                             else {
@@ -214,12 +213,12 @@ impl Registry {
                                 let selected_trait = alias.trait_name.as_ref().or_else(|| {
                                     uses.iter().find(|candidate| {
                                         registry.classes().get(candidate).is_some_and(|info| {
-                                            info.member_slots.contains_key(&alias.method)
+                                            registry.member_slot(candidate, &alias.method).is_some()
                                         })
                                     })
                                 });
                                 if selected_trait == Some(trait_name)
-                                    && !own_method_names.contains_key(&alias.alias)
+                                    && registry.member_slot(class_name, &alias.alias).is_none()
                                     && !added_method_names.contains_key(&alias.alias)
                                 {
                                     let slot = u16::try_from(next_method_slot)
@@ -239,7 +238,7 @@ impl Registry {
                                     ));
                                 }
                             }
-                            if own_method_names.contains_key(name)
+                            if registry.member_slot(class_name, name).is_some()
                                 || added_method_names.contains_key(name)
                             {
                                 continue;
@@ -357,19 +356,16 @@ impl Registry {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
-            if let Some(info) = self.classes.get_mut(&class_name) {
-                for (method_ref, entry, sig) in methods {
-                    debug_assert_eq!(method_ref.class(), class_id);
-                    if !info.member_slots.contains_key(&entry.name) {
-                        let name = entry.name.clone();
-                        let inserted = info.register_member_entry(entry);
-                        debug_assert!(inserted);
-                        debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
-                        let methods = self.class_method_results.entry(class_id).or_default();
-                        let inserted = methods.insert_shared_if_absent(name, sig);
-                        debug_assert!(inserted);
-                        changed = true;
-                    }
+            for (method_ref, entry, sig) in methods {
+                debug_assert_eq!(method_ref.class(), class_id);
+                let name = entry.name.clone();
+                let inserted = self.add_member_entry(class_id, entry);
+                debug_assert_eq!(inserted, Some(method_ref));
+                if inserted.is_some() {
+                    let methods = self.class_method_results.entry(class_id).or_default();
+                    let inserted = methods.insert_shared_if_absent(name, sig);
+                    debug_assert!(inserted);
+                    changed = true;
                 }
             }
             let own_properties = self.class_property_results.entry(class_id).or_default();
@@ -420,34 +416,53 @@ impl Registry {
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
         let scope = &self.scope;
-        let resolved: Vec<(ClassId, Vec<(Name, FunctionReflection)>)> = self
+        let tagged_classes: Vec<(Name, Vec<(Name, FunctionReflection, bool)>)> = self
             .classes
             .iter_mut_scoped_where(scope.class_keys(), |info| !info.method_tags.is_empty())
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .filter_map(|(class_name, info)| {
-                let class_id = *self.class_ids.get(class_name)?;
-                let mut methods = Vec::new();
-                for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
-                    if !info.member_slots.contains_key(&name) {
-                        info.register_member_entry(MethodEntry {
-                            name: name.clone(),
-                            is_abstract: false,
-                            is_final: false,
-                            is_static,
-                            is_final_by_phpdoc: false,
-                        });
-                        methods.push((name, sig));
-                    }
-                }
-                Some((class_id, methods))
-            })
+            .map(|(class_name, info)| (class_name.clone(), std::mem::take(&mut info.method_tags)))
             .collect();
+        let registry: &Registry = self;
+        let resolved: Vec<(ClassId, Vec<(MethodRef, MethodEntry, FunctionReflection)>)> =
+            tagged_classes
+                .into_par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .filter_map(|(class_name, tags)| {
+                    let class_id = *registry.class_ids.get(&class_name)?;
+                    let mut methods = Vec::new();
+                    let mut next_slot = registry.member_entries(&class_name).count();
+                    let mut added_names = FoldedMap::default();
+                    for (name, sig, is_static) in tags {
+                        if registry.member_slot(&class_name, &name).is_none()
+                            && !added_names.contains_key(&name)
+                        {
+                            let slot = u16::try_from(next_slot)
+                                .expect("class method slot space exhausted");
+                            next_slot += 1;
+                            added_names.insert(name.clone(), ());
+                            methods.push((
+                                MethodRef::new(class_id, slot),
+                                MethodEntry {
+                                    name,
+                                    is_abstract: false,
+                                    is_final: false,
+                                    is_static,
+                                    is_final_by_phpdoc: false,
+                                },
+                                sig,
+                            ));
+                        }
+                    }
+                    Some((class_id, methods))
+                })
+                .collect();
         for (class_id, methods) in resolved {
-            let results = self.class_method_results.entry(class_id).or_default();
-            for (name, signature) in methods {
-                results.insert(name, signature);
+            for (method, entry, signature) in methods {
+                let name = entry.name.clone();
+                debug_assert_eq!(self.add_member_entry(class_id, entry), Some(method));
+                self.class_method_results
+                    .entry(class_id)
+                    .or_default()
+                    .insert(name, signature);
             }
         }
     }
@@ -1330,18 +1345,18 @@ impl Registry {
             };
             let mut added_method_names = FoldedMap::default();
             let own_property_names: NameSet = self.property_names(class_name).cloned().collect();
-            let mut next_method_slot = info.member_order.len();
+            let mut next_method_slot = self.member_entries(class_name).count();
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
                 };
-                for entry in &mixin_info.member_order {
+                for entry in self.member_entries(mixin_fqn) {
                     let name = &entry.name;
                     let Some(sig) = self.lookup_own_method(mixin_fqn, name) else {
                         continue;
                     };
                     if sig.visibility == Visibility::Public
-                        && !info.member_slots.contains_key(name)
+                        && self.member_slot(class_name, name).is_none()
                         && !added_method_names.contains_key(name)
                         && let Some(shared_sig) = self.shared_own_method(mixin_fqn, name)
                     {
@@ -1374,20 +1389,10 @@ impl Registry {
         }
         for (method_ref, entry, sig) in method_additions {
             let class_id = method_ref.class();
-            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
-                continue;
-            };
             let name = entry.name.clone();
-            let mut inserted = false;
-            if let Some(info) = self.classes.get_mut(&class_name)
-                && !info.member_slots.contains_key(&name)
-            {
-                let registered = info.register_member_entry(entry);
-                debug_assert!(registered);
-                debug_assert_eq!(info.member_slots.get(&name), Some(&method_ref.slot()));
-                inserted = true;
-            }
-            if inserted {
+            let inserted = self.add_member_entry(class_id, entry);
+            debug_assert_eq!(inserted, Some(method_ref));
+            if inserted.is_some() {
                 let methods = self.class_method_results.entry(class_id).or_default();
                 debug_assert!(methods.insert_shared_if_absent(name, sig));
             }
@@ -1788,7 +1793,7 @@ impl Registry {
                         )
                     });
                     if !param_fills.is_empty() || return_fill.is_some() {
-                        let slot = *info.member_slots.get(method_name)?;
+                        let slot = registry.member_slot(class_name, method_name)?;
                         per_class.push((MethodRef::new(class_id, slot), param_fills, return_fill));
                     }
                 }
@@ -1801,24 +1806,15 @@ impl Registry {
             let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                 continue;
             };
-            let Some(info) = self.classes.get_mut(&class_name) else {
-                continue;
-            };
             for (method_ref, param_fills, return_fill) in per_class {
                 debug_assert_eq!(method_ref.class(), class_id);
-                let Some(method_name) = info
-                    .member_order
-                    .get(usize::from(method_ref.slot()))
+                let Some(method_name) = self
+                    .member_entry_by_ref(method_ref)
                     .map(|entry| entry.name.clone())
                 else {
                     continue;
                 };
-                let Some(mut sig) = self
-                    .class_method_results
-                    .get(&class_id)
-                    .and_then(|methods| methods.get(&method_name))
-                    .or_else(|| info.methods.get(&method_name))
-                    .cloned()
+                let Some(mut sig) = self.lookup_own_method(&class_name, &method_name).cloned()
                 else {
                     continue;
                 };
@@ -2304,14 +2300,14 @@ impl Registry {
         let mut fixes: Vec<Fix> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .flat_map_iter(|(class, info)| {
+            .flat_map_iter(|(class, _info)| {
                 let Some(class_id) = registry.class_ids.get(*class).copied() else {
                     return Vec::new();
                 };
-                info.member_order
-                    .iter()
+                registry
+                    .member_entries(class)
                     .filter_map(|entry| {
-                        let slot = *info.member_slots.get(&entry.name)?;
+                        let slot = registry.member_slot(class, &entry.name)?;
                         let method = MethodRef::new(class_id, slot);
                         let sig = registry.method_by_ref(method)?;
                         Some(sig_fixes(SigId::Method(method), Some(class), sig))
@@ -2370,7 +2366,7 @@ impl Registry {
                 SigId::Method(method) => {
                     let Some(name) = self
                         .class_by_id(method.class())
-                        .and_then(|info| info.member_order.get(usize::from(method.slot())))
+                        .and_then(|_| self.member_entry_by_ref(method))
                         .map(|entry| entry.name.clone())
                     else {
                         continue;
@@ -2539,14 +2535,14 @@ impl Registry {
         let method_fixes: Vec<(MethodRef, FunctionReflection)> = classes
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
-            .flat_map_iter(|(class, info)| {
+            .flat_map_iter(|(class, _info)| {
                 let Some(class_id) = registry.class_ids.get(*class).copied() else {
                     return Vec::new();
                 };
-                info.member_order
-                    .iter()
+                registry
+                    .member_entries(class)
                     .filter_map(move |entry| {
-                        let slot = *info.member_slots.get(&entry.name)?;
+                        let slot = registry.member_slot(class, &entry.name)?;
                         let method = MethodRef::new(class_id, slot);
                         let sig = registry.method_by_ref(method)?;
                         let fixed = fixed_sig(registry, sig, &lookup)?;
@@ -2600,7 +2596,7 @@ impl Registry {
             let class_id = method.class();
             let Some(name) = self
                 .class_by_id(class_id)
-                .and_then(|info| info.member_order.get(usize::from(method.slot())))
+                .and_then(|_| self.member_entry_by_ref(method))
                 .map(|entry| entry.name.clone())
             else {
                 continue;

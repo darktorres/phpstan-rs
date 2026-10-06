@@ -706,8 +706,10 @@ impl<'a> Checker<'a> {
                 .lookup_method_canonical_name(class, method)
                 .unwrap_or(method)
                 .to_string();
-            let owner_info = self.registry.classes().get(owner.as_ref())?;
-            if !owner_info.is_static_method(name.as_str()) {
+            if !self
+                .registry
+                .method_is_static(owner.as_ref(), name.as_str())
+            {
                 return None;
             }
             // PHPStan's own test-case base classes expose their static

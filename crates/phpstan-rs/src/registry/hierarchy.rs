@@ -7,11 +7,33 @@ use rayon::prelude::*;
 
 use crate::registry::name_table::TableKey;
 use crate::registry::{
-    ClassId, ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
+    ClassId, ClassReflection, ConstantReflection, FunctionReflection, MethodEntry,
+    PropertyReflection,
 };
 use crate::registry::{Lazy, NameTable, Registry};
 use syntax::ast::ClassKind;
 use types::Type;
+
+/// Method entries added by finishing passes. Declaration entries remain on
+/// `ClassReflection`; these host-local entries extend its slot space.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct MemberTopology {
+    pub(crate) entries: Vec<MethodEntry>,
+    pub(crate) slots: FoldedMap<u16>,
+}
+
+impl MemberTopology {
+    pub(crate) fn add(&mut self, declaration_len: usize, entry: MethodEntry) -> Option<u16> {
+        if self.slots.contains_key(&entry.name) {
+            return None;
+        }
+        let slot = u16::try_from(declaration_len + self.entries.len())
+            .expect("class method slot space exhausted");
+        self.slots.insert(entry.name.clone(), slot);
+        self.entries.push(entry);
+        Some(slot)
+    }
+}
 
 /// The resolved extends/implements closure for one declaration. Registered
 /// ancestors use stable declaration IDs; unresolved direct names are retained
@@ -78,6 +100,116 @@ impl PartialEq for ClassOwners {
 }
 
 impl Registry {
+    /// All declared and pass-added member entries in host-local slot order.
+    pub(crate) fn member_entries(&self, class: &str) -> impl Iterator<Item = &MethodEntry> {
+        self.classes
+            .get(class)
+            .into_iter()
+            .flat_map(|info| info.member_order.iter())
+            .chain(
+                (!self.raw_active)
+                    .then(|| self.class_ids.get(class))
+                    .flatten()
+                    .and_then(|id| self.class_member_topology.get(id))
+                    .into_iter()
+                    .flat_map(|topology| topology.entries.iter()),
+            )
+    }
+
+    pub(crate) fn member_slot(&self, class: &str, method: &str) -> Option<u16> {
+        self.classes
+            .get(class)
+            .and_then(|info| info.member_slots.get(method).copied())
+            .or_else(|| {
+                (!self.raw_active).then_some(()).and_then(|_| {
+                    self.class_ids
+                        .get(class)
+                        .and_then(|id| self.class_member_topology.get(id))
+                        .and_then(|topology| topology.slots.get(method).copied())
+                })
+            })
+    }
+
+    pub(crate) fn member_entry_by_ref(&self, method: super::MethodRef) -> Option<&MethodEntry> {
+        let info = self.class_by_id(method.class())?;
+        let slot = usize::from(method.slot());
+        if let Some(entry) = info.member_order.get(slot) {
+            return Some(entry);
+        }
+        if self.raw_active {
+            return None;
+        }
+        self.class_member_topology
+            .get(&method.class())?
+            .entries
+            .get(slot.checked_sub(info.member_order.len())?)
+    }
+
+    pub(crate) fn add_member_entry(
+        &mut self,
+        class: ClassId,
+        entry: MethodEntry,
+    ) -> Option<super::MethodRef> {
+        let declaration_len = self.class_by_id(class)?.member_order.len();
+        if self
+            .class_by_id(class)?
+            .member_slots
+            .contains_key(&entry.name)
+        {
+            return None;
+        }
+        let slot = self
+            .class_member_topology
+            .entry(class)
+            .or_default()
+            .add(declaration_len, entry)?;
+        Some(super::MethodRef::new(class, slot))
+    }
+
+    pub(crate) fn method_is_abstract(&self, class: &str, method: &str) -> bool {
+        self.member_slot(class, method)
+            .and_then(|slot| {
+                self.class_ids
+                    .get(class)
+                    .copied()
+                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
+            })
+            .is_some_and(|entry| entry.is_abstract)
+    }
+
+    pub(crate) fn method_is_static(&self, class: &str, method: &str) -> bool {
+        self.member_slot(class, method)
+            .and_then(|slot| {
+                self.class_ids
+                    .get(class)
+                    .copied()
+                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
+            })
+            .is_some_and(|entry| entry.is_static)
+    }
+
+    pub(crate) fn method_is_final(&self, class: &str, method: &str) -> bool {
+        self.member_slot(class, method)
+            .and_then(|slot| {
+                self.class_ids
+                    .get(class)
+                    .copied()
+                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
+            })
+            .is_some_and(|entry| entry.is_final)
+    }
+
+    pub(crate) fn method_is_final_by_phpdoc(&self, class: &str, method: &str) -> bool {
+        self.member_slot(class, method)
+            .and_then(|slot| {
+                self.class_ids
+                    .get(class)
+                    .copied()
+                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
+            })
+            .is_some_and(|entry| entry.is_final_by_phpdoc)
+    }
+
     /// The owners of `class`'s method names, see `ClassOwners`.
     pub(crate) fn method_owners<K: TableKey + ?Sized>(
         &self,
@@ -652,13 +784,9 @@ impl Registry {
     }
 
     /// Iterates the methods this class declares or composes, in its local
-    /// method order. The signatures for composed methods live in the
-    /// Registry result table.
+    /// method order. Finishing-pass entries live in the topology result.
     pub fn method_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
-        self.classes
-            .get(class)
-            .into_iter()
-            .flat_map(|info| info.member_order.iter().map(|entry| &entry.name))
+        self.member_entries(class).map(|entry| &entry.name)
     }
 
     pub(crate) fn lookup_own_method(
@@ -697,12 +825,7 @@ impl Registry {
 
     pub(crate) fn method_by_ref(&self, method: super::MethodRef) -> Option<&FunctionReflection> {
         let class = self.class_name_by_id(method.class())?;
-        let name = self
-            .class_by_id(method.class())?
-            .member_order
-            .get(usize::from(method.slot()))?
-            .name
-            .as_ref();
+        let name = self.member_entry_by_ref(method)?.name.as_ref();
         self.lookup_own_method(class, name)
     }
 
@@ -906,7 +1029,7 @@ impl Registry {
             if self
                 .classes
                 .get(used)
-                .is_some_and(|trait_info| trait_info.is_abstract_method(method))
+                .is_some_and(|_| self.method_is_abstract(used, method))
                 && let Some(sig) = self.lookup_own_method(used, method)
             {
                 return Some((used.clone(), sig, false));
@@ -989,7 +1112,7 @@ impl Registry {
         info.uses.iter().any(|used_trait| {
             self.classes
                 .get(used_trait)
-                .is_some_and(|trait_info| trait_info.is_abstract_method(method))
+                .is_some_and(|_| self.method_is_abstract(used_trait, method))
         })
     }
 
@@ -1079,10 +1202,10 @@ impl Registry {
             let Some(current_info) = self.classes.get(&current) else {
                 continue;
             };
-            if current_info.is_final_method(method) {
+            if self.method_is_final(&current, method) {
                 return Some((current, false));
             }
-            if current_info.is_final_method_by_phpdoc(method) {
+            if self.method_is_final_by_phpdoc(&current, method) {
                 return Some((current, true));
             }
             stack.extend(current_info.extends.iter().cloned());
@@ -1201,16 +1324,14 @@ impl Registry {
                 // has no way to express "this interface method is
                 // optional," so an interface's real, textually-declared
                 // methods are still all unconditionally required.
-                required.extend(
-                    info.methods
-                        .iter()
-                        .filter(|(_, sig)| !sig.is_magic)
-                        .map(|(name, _)| name.clone()),
-                );
+                required.extend(self.member_entries(&current).filter_map(|entry| {
+                    self.lookup_own_method(&current, &entry.name)
+                        .filter(|sig| !sig.is_magic)
+                        .map(|_| entry.name.clone())
+                }));
             } else {
                 required.extend(
-                    info.member_order
-                        .iter()
+                    self.member_entries(&current)
                         .filter(|entry| entry.is_abstract)
                         .map(|entry| entry.name.clone()),
                 );
@@ -1246,7 +1367,7 @@ impl Registry {
             };
             if info.kind != ClassKind::Interface
                 && self.lookup_own_method(&current, method).is_some()
-                && !info.is_abstract_method(method)
+                && !self.method_is_abstract(&current, method)
             {
                 return true;
             }

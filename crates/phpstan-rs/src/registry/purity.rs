@@ -104,7 +104,7 @@ impl Registry {
 
     fn method_ref(&self, class: &str, method: &str) -> Option<MethodRef> {
         let id = *self.class_ids.get(class)?;
-        let slot = *self.class_by_id(id)?.member_slots.get(method)?;
+        let slot = self.member_slot(class, method)?;
         Some(MethodRef::new(id, slot))
     }
 
@@ -217,11 +217,7 @@ impl Registry {
                     else {
                         continue;
                     };
-                    let Some(slot) = registry.classes()[class_name]
-                        .member_slots
-                        .get(method_name)
-                        .copied()
-                    else {
+                    let Some(slot) = registry.member_slot(class_name, method_name) else {
                         continue;
                     };
                     per_class.push((MethodRef::new(class_id, slot), deps));
@@ -538,10 +534,11 @@ pub(crate) fn is_non_overridable(
     if sig.visibility == Visibility::Private {
         return true;
     }
-    if registry
-        .classes()
-        .get(owner)
-        .is_some_and(|info| info.is_final_method(method) || info.is_final)
+    if registry.method_is_final(owner, method)
+        || registry
+            .classes()
+            .get(owner)
+            .is_some_and(|info| info.is_final())
     {
         return true;
     }

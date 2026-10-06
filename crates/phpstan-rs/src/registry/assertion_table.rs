@@ -80,15 +80,11 @@ impl Registry {
                     if !self.scope.has_class(canonical) {
                         continue;
                     }
-                    let Some(info) = self.class_by_id(id) else {
+                    let Some(slot) = self.member_slot(canonical, method) else {
                         continue;
                     };
-                    let Some(slot) = info.member_slots.get(method).copied() else {
-                        continue;
-                    };
-                    let Some(name) = info
-                        .member_order
-                        .get(usize::from(slot))
+                    let Some(name) = self
+                        .member_entry_by_ref(crate::registry::MethodRef::new(id, slot))
                         .map(|member| member.name.clone())
                     else {
                         continue;

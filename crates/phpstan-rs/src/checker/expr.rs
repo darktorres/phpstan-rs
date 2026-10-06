@@ -2690,9 +2690,7 @@ impl<'a> Checker<'a> {
                         let declared = self.registry.declared_method_name(&owner, method);
                         let is_static = self
                             .registry
-                            .classes()
-                            .get(owner.as_str())
-                            .is_some_and(|info| info.is_static_method(declared.as_str()));
+                            .method_is_static(owner.as_str(), declared.as_str());
                         self.check_args(CheckArgsCall {
                             callee_label: CalleeLabel::Method { class, method },
                             callee: Callee::StaticMethod {

@@ -298,6 +298,7 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
     let back = round_trip(&registry);
 
     for method in ["greet", "welcome"] {
+        let original_slot = registry.member_slot("MethodHost", method).unwrap();
         assert!(
             registry
                 .classes
@@ -309,6 +310,15 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
         );
         assert!(registry.lookup_own_method("MethodHost", method).is_some());
         let signature = back.lookup_own_method("MethodHost", method).unwrap();
+        assert_eq!(back.member_slot("MethodHost", method), Some(original_slot));
+        assert_eq!(
+            back.member_entry_by_ref(crate::registry::MethodRef::new(
+                back.class_ids["MethodHost"],
+                original_slot,
+            ))
+            .map(|entry| entry.name.as_ref()),
+            Some(method)
+        );
         assert_eq!(signature.params()[0].name().as_ref(), "name");
         assert_eq!(
             signature.return_type(),
@@ -329,6 +339,44 @@ fn trait_method_results_survive_freeze_and_cache_round_trip() {
             .unwrap()
             .return_type(),
         &Type::string_literal("host".into())
+    );
+}
+
+#[test]
+fn mixin_and_phpdoc_method_topology_survives_freeze_and_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            class MixinSource { public function fromMixin(): string { return 'm'; } }
+            /**
+             * @mixin MixinSource
+             * @method bool fromTag()
+             */
+            class MethodHost {}
+        "#,
+    );
+    let back = round_trip(&registry);
+    let original_names: Vec<_> = registry
+        .member_entries("MethodHost")
+        .map(|entry| entry.name.to_string())
+        .collect();
+    assert_eq!(original_names, ["fromTag", "fromMixin"]);
+    assert!(registry.classes["MethodHost"].methods.is_empty());
+    assert!(back.classes["MethodHost"].methods.is_empty());
+    for name in &original_names {
+        assert_eq!(
+            registry.member_slot("MethodHost", name),
+            back.member_slot("MethodHost", name)
+        );
+        assert!(
+            back.lookup_own_method("MethodHost", name).is_some(),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        back.member_entries("MethodHost")
+            .map(|entry| entry.name.to_string())
+            .collect::<Vec<_>>(),
+        original_names
     );
 }
 

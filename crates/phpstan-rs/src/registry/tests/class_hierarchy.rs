@@ -196,22 +196,52 @@ fn trait_method_flags_are_preserved_on_composed_methods_and_aliases() {
             }
             "#,
     );
-    let c = r.classes.get("C").unwrap();
     for method in ["needs", "needsAlias"] {
-        assert!(c.is_abstract_method(method), "{method}");
-        assert!(!c.is_static_method(method), "{method}");
+        assert!(r.method_is_abstract("C", method), "{method}");
+        assert!(!r.method_is_static("C", method), "{method}");
     }
     for method in ["run", "runAlias"] {
-        assert!(!c.is_abstract_method(method), "{method}");
-        assert!(c.is_static_method(method), "{method}");
+        assert!(!r.method_is_abstract("C", method), "{method}");
+        assert!(r.method_is_static("C", method), "{method}");
     }
     for method in ["locked", "lockedAlias"] {
-        assert!(c.is_final_method(method), "{method}");
+        assert!(r.method_is_final("C", method), "{method}");
     }
     for method in ["documentedFinal", "documentedFinalAlias"] {
-        assert!(c.is_final_method_by_phpdoc(method), "{method}");
+        assert!(r.method_is_final_by_phpdoc("C", method), "{method}");
     }
-    assert!(c.is_static_method("RUNALIAS"));
+    assert!(r.method_is_static("C", "RUNALIAS"));
+}
+
+#[test]
+fn trait_mixin_and_phpdoc_members_live_in_host_topology() {
+    let r = build_registry(
+        r#"<?php
+            trait TraitMethods { public function fromTrait(): int { return 1; } }
+            class MixinMethods { public function fromMixin(): string { return 'm'; } }
+            /**
+             * @mixin MixinMethods
+             * @method bool fromTag()
+             */
+            class Host { use TraitMethods { fromTrait as traitAlias; } }
+            "#,
+    );
+    let host = r.classes.get("Host").unwrap();
+    let declaration_methods: Vec<_> = host.methods.keys().map(|name| name.to_string()).collect();
+    assert!(declaration_methods.is_empty(), "{declaration_methods:?}");
+
+    for name in ["fromTrait", "traitAlias", "fromMixin", "fromTag"] {
+        assert!(r.lookup_own_method("Host", name).is_some(), "{name}");
+        assert!(r.member_slot("Host", name).is_some(), "{name}");
+    }
+    let entries: Vec<_> = r
+        .member_entries("Host")
+        .map(|entry| entry.name.to_string())
+        .collect();
+    assert_eq!(entries, ["traitAlias", "fromTrait", "fromTag", "fromMixin"]);
+    for (slot, name) in entries.iter().enumerate() {
+        assert_eq!(r.member_slot("Host", name), Some(slot as u16));
+    }
 }
 
 #[test]

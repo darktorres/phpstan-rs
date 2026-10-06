@@ -63,7 +63,8 @@ impl<'a> Checker<'a> {
             .registry
             .classes()
             .get(owner.as_ref())
-            .is_some_and(|info| info.is_final() || info.is_final_method(method))
+            .is_some_and(|info| info.is_final())
+            || self.registry.method_is_final(owner.as_ref(), method)
         {
             return;
         }
