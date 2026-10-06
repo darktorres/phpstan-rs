@@ -240,9 +240,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `Registry` read accessors (`e06503ad`, preserving owned stub-table
   extraction). Row 4.2 added stub, context-base and project ID ranges
   (`1b8f79aa`); `cargo check -p phpstan-rs --lib --tests` and Clippy passed.
-  Row 4.3 is under way: the pinned `la-arena` dependency and the typed
-  per-file arena container are in place; declaration construction and
-  registry storage still need to migrate. The plan was committed at
+  Row 4.3 is under way: the pinned `la-arena` dependency, typed per-file
+  arenas, and class/member/property/constant/name and function/parameter
+  range layouts are in place (`b7651f06`); declaration construction and registry storage
+  still need to migrate. The layout layer passes `cargo check -p phpstan-rs
+  --lib --tests` and `cargo clippy -p phpstan-rs --all-targets`. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
