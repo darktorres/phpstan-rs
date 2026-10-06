@@ -49,6 +49,12 @@ impl ParsedFile {
         self.names.get(u32::from(id.into_raw()) as usize)
     }
 
+    /// Resolves a parser-created identifier through this file's compact
+    /// name table. Identifiers synthesized outside a parsed file have no id.
+    pub fn ident_name(&self, ident: &crate::ast::Ident) -> Option<&Name> {
+        self.name(ident.name_id?)
+    }
+
     /// The source span of an expression in this file.
     pub fn expr_span(&self, id: crate::ast::ExprId) -> Option<crate::span::Span> {
         self.expr_spans

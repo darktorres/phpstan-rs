@@ -26,10 +26,8 @@ fn parsed_file_resolves_identifier_ids_and_source_spans() {
     let ExprKind::PropertyAccess(_, member, _) = &expression.kind else {
         panic!("expected a property access");
     };
-    let id = member
-        .name_id
-        .expect("parsed identifier has a file-local id");
+    assert!(member.name_id.is_some());
 
-    assert_eq!(parsed.name(id).map(Name::as_str), Some("member"));
+    assert_eq!(parsed.ident_name(member).map(Name::as_str), Some("member"));
     assert_eq!(parsed.source_slice(member.span), Some(&b"member"[..]));
 }
