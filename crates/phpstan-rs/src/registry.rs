@@ -120,6 +120,12 @@ pub(crate) const PASS_CHUNK: usize = 32;
 pub(crate) struct ChangedNames {
     pub(crate) classes: FxHashSet<String>,
     pub(crate) functions: FxHashSet<String>,
+    // Prior function state for names changed since the last finish. Keep the
+    // values by declaration ID so removal or rebinding does not lose the
+    // old winner before `changed_since` compares it.
+    function_ids_before: FxHashMap<String, FnId>,
+    function_declarations_before: FxHashMap<FnId, Arc<FunctionReflection>>,
+    function_results_before: FxHashMap<FnId, FunctionReflection>,
     // With each constant's type before its first change.
     pub(crate) constants: FxHashMap<String, Option<Type>>,
 }
@@ -191,7 +197,6 @@ pub(crate) struct ResolvedSnapshot {
 /// built, and the rest.
 const REST: &str = "rest";
 const RAW_CLASSES: &str = "table:raw.classes";
-const RAW_FUNCTIONS: &str = "table:raw.functions";
 
 /// `Registry::store_tables` and `load_tables` for the tables named: each a
 /// section called `table:<field>`.
@@ -222,11 +227,6 @@ macro_rules! stored_tables {
 #[derive(Debug, Clone)]
 struct RawDeclarations {
     classes: NameTable<ClassReflection>,
-    // Function declarations are never rewritten by finishing passes; their
-    // results live in `function_results`. Keep this as the previous
-    // declaration view for incremental change detection, not as the table
-    // swapped into `functions` while editing.
-    functions: FunctionTable,
 }
 
 /// The winning project declaration's address inside its parsed file.
@@ -964,12 +964,12 @@ impl Registry {
         scope: &scope::Scope,
         body_scope: Option<&scope::Scope>,
         keep_raw: bool,
+        changed: Option<&ChangedNames>,
     ) -> Option<ResolvedSnapshot> {
         let Some(raw) = &mut self.raw else {
             if keep_raw {
                 self.raw = Some(Box::new(RawDeclarations {
                     classes: self.classes.clone(),
-                    functions: self.functions.clone(),
                 }));
             }
             return None;
@@ -986,10 +986,17 @@ impl Registry {
             .map(|keys| {
                 keys.iter()
                     .map(|name| {
-                        self.function_ids
-                            .get(name)
-                            .and_then(|id| self.function_results.get(id))
-                            .cloned()
+                        if changed.is_some_and(|changed| changed.functions.contains(name)) {
+                            changed
+                                .and_then(|changed| changed.function_ids_before.get(name))
+                                .and_then(|id| changed?.function_results_before.get(id))
+                                .cloned()
+                        } else {
+                            self.function_ids
+                                .get(name)
+                                .and_then(|id| self.function_results.get(id))
+                                .cloned()
+                        }
                     })
                     .collect()
             })
@@ -1011,7 +1018,6 @@ impl Registry {
             self.class_property_results.clear();
             self.imported_type_aliases.clear();
             self.classes = raw.classes.clone();
-            raw.functions = self.functions.clone();
             return body_scope.map(|_| snapshot(Vec::new(), Vec::new(), self));
         }
         let classes = reset_scoped(
@@ -1036,18 +1042,22 @@ impl Registry {
             .retain(|id, _| !changed_class_ids.contains(id));
         self.imported_type_aliases
             .retain(|id, _| !changed_class_ids.contains(id));
-        let function_scope = scope.function_keys();
         let functions = function_keys
             .as_ref()
             .into_iter()
             .flat_map(|keys| keys.iter())
             .map(|key| {
-                let source = if function_scope.is_some_and(|keys| keys.contains(key)) {
-                    &raw.functions
+                if changed.is_some_and(|changed| changed.functions.contains(key)) {
+                    changed
+                        .and_then(|changed| changed.function_ids_before.get(key))
+                        .and_then(|id| changed?.function_declarations_before.get(id))
+                        .cloned()
+                        .map(Detached::Own)
                 } else {
-                    &self.functions
-                };
-                source.get_shared(&FoldedKey(key)).map(Detached::Own)
+                    self.functions
+                        .get_shared(&FoldedKey(key))
+                        .map(Detached::Own)
+                }
             })
             .collect();
         let changed_function_ids: FxHashSet<FnId> = self
@@ -1058,7 +1068,6 @@ impl Registry {
             .collect();
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
-        raw.functions = self.functions.clone();
         body_scope.map(|_| snapshot(classes, functions, self))
     }
 
@@ -1297,7 +1306,6 @@ impl Registry {
         self.recorded_parents.freeze();
         if let Some(raw) = &mut self.raw {
             raw.classes.freeze();
-            raw.functions.freeze();
         }
     }
 
@@ -1309,7 +1317,23 @@ impl Registry {
 
     pub(crate) fn record_changed_function(&mut self, name: &str) {
         if self.raw.is_some() {
-            self.changed.functions.insert(name.to_ascii_lowercase());
+            let key = name.to_ascii_lowercase();
+            if !self.changed.functions.insert(key.clone()) {
+                return;
+            }
+            if let Some(id) = self.function_ids.get(name).copied() {
+                self.changed.function_ids_before.insert(key, id);
+                if let Some(declaration) = self.functions.get_shared(name) {
+                    self.changed
+                        .function_declarations_before
+                        .insert(id, declaration);
+                }
+                if let Some(result) = self.function_results.get(&id) {
+                    self.changed
+                        .function_results_before
+                        .insert(id, result.clone());
+                }
+            }
         }
     }
 
@@ -1437,7 +1461,6 @@ impl Registry {
         self.store_tables(writer)?;
         if let Some(raw) = &self.raw {
             raw.classes.store(writer, RAW_CLASSES)?;
-            raw.functions.store(writer, RAW_FUNCTIONS)?;
         }
         writer.section(REST, &stub_cache::encode(self)?)
     }
@@ -1610,7 +1633,6 @@ impl Registry {
             .check_order("table:imported_type_aliases")?;
         if let Some(raw) = &self.raw {
             raw.classes.check_order(RAW_CLASSES)?;
-            raw.functions.check_order(RAW_FUNCTIONS)?;
         }
         Ok(())
     }
@@ -1650,7 +1672,6 @@ impl Registry {
         if reader.has_section(RAW_CLASSES) {
             registry.raw = Some(Box::new(RawDeclarations {
                 classes: NameTable::load(reader, RAW_CLASSES)?,
-                functions: NameTable::load(reader, RAW_FUNCTIONS)?,
             }));
         }
         Ok(registry)

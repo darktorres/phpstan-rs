@@ -1629,6 +1629,7 @@ impl Project {
             &scope,
             changed.as_ref().map(|_| &body_scope),
             self.keeps_as_built,
+            changed.as_ref(),
         );
         if !body_scope.is_all() {
             self.registry.clear_purity(&body_scope.minus(&scope));

@@ -429,13 +429,10 @@ impl CanonicalOver for Option<Box<RawDeclarations>> {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         match (self, base) {
             (Some(raw), Some(base)) => {
-                let RawDeclarations { classes, functions } = &**raw;
+                let RawDeclarations { classes } = &**raw;
                 p.node(
                     "RawDeclarations",
-                    &[
-                        ("classes", &Over(classes, &base.classes, compare)),
-                        ("functions", &Over(functions, &base.functions, compare)),
-                    ],
+                    &[("classes", &Over(classes, &base.classes, compare))],
                 );
             }
             _ => self.canonical(p),
@@ -739,12 +736,16 @@ canonical_struct!(Registry {
     scoped_names,
 });
 
-canonical_struct!(RawDeclarations { classes, functions });
+canonical_struct!(RawDeclarations { classes });
 
 canonical_struct!(ChangedNames {
     classes,
     functions,
     constants,
+} skip {
+    function_ids_before,
+    function_declarations_before,
+    function_results_before,
 });
 
 canonical_struct!(DoctrineEntityIndex {

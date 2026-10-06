@@ -914,7 +914,7 @@ mod tests {
             Some(&declarations),
         );
         registry.precompute_member_owners();
-        registry.end_declaration_changes(&crate::registry::scope::Scope::all(), None, true);
+        registry.end_declaration_changes(&crate::registry::scope::Scope::all(), None, true, None);
         registry.begin_declaration_changes();
 
         let class_id = registry.class("demo").unwrap().0;
@@ -972,18 +972,26 @@ mod tests {
         let program = Parser::new(tokens).parse_program().unwrap();
         let mut registry = crate::registry::Registry::build(&program);
         let all = crate::registry::scope::Scope::all();
-        registry.end_declaration_changes(&all, None, true);
+        registry.end_declaration_changes(&all, None, true, None);
 
+        registry.begin_declaration_changes();
+        let function_id = *registry.function_ids.get("helper").unwrap();
+        let mut prior_result = registry.functions.get("helper").unwrap().clone();
+        prior_result.return_type = Type::bool();
+        registry
+            .function_results
+            .insert(function_id, prior_result.clone());
+        registry.record_changed_function("helper");
+        let changed = registry.take_changed();
         let mut edited = registry.functions.get("helper").unwrap().clone();
         edited.return_type = Type::string();
-        registry.begin_declaration_changes();
         registry
             .functions
             .insert(Name::from("helper"), edited.clone());
 
         let scope = crate::registry::scope::Scope::of(std::iter::empty::<&str>(), ["helper"]);
         let before = registry
-            .end_declaration_changes(&scope, Some(&scope), true)
+            .end_declaration_changes(&scope, Some(&scope), true, Some(&changed))
             .unwrap();
         assert_eq!(registry.functions.get("helper"), Some(&edited));
         assert_eq!(before.functions.len(), 1);
@@ -991,6 +999,8 @@ mod tests {
             before.functions[0].as_ref().unwrap().get().return_type,
             Type::int()
         );
+        assert_eq!(before.function_results.len(), 1);
+        assert_eq!(before.function_results[0].as_ref(), Some(&prior_result));
         assert!(
             !registry
                 .changed_since(&before, &crate::registry::ChangedNames::default())
@@ -999,7 +1009,7 @@ mod tests {
 
         registry.begin_declaration_changes();
         let unchanged = registry
-            .end_declaration_changes(&scope, Some(&scope), true)
+            .end_declaration_changes(&scope, Some(&scope), true, None)
             .unwrap();
         assert!(
             registry

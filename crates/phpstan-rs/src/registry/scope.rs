@@ -279,9 +279,6 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .for_each(|key| {
                 self.functions.get_with_name(&FoldedKey(key));
-                if let Some(raw) = raw {
-                    raw.functions.get_with_name(&FoldedKey(key));
-                }
             });
     }
 
