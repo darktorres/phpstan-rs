@@ -865,13 +865,16 @@ impl Registry {
     /// referencing each other.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_type_imports(&mut self) {
-        let mut classes_with_imports: Vec<Name> = Vec::new();
-        let mut resolved: Vec<(Name, Name, Type)> = Vec::new();
+        let mut classes_with_imports: Vec<ClassId> = Vec::new();
+        let mut resolved: Vec<(ClassId, Name, Type)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
             if info.type_imports.is_empty() {
                 continue;
             }
-            classes_with_imports.push(class_name.clone());
+            let Some(class_id) = self.class_ids.get(class_name).copied() else {
+                continue;
+            };
+            classes_with_imports.push(class_id);
             for imp in &info.type_imports {
                 let source_key = syntax::name_resolution::qualify(
                     class_namespace(&imp.source_class_fqn),
@@ -882,21 +885,21 @@ impl Registry {
                     .get(&imp.source_class_fqn)
                     .and_then(|src| src.type_aliases.get(source_key.as_str()))
                 {
-                    resolved.push((class_name.clone(), imp.local_key.clone(), ty.clone()));
+                    resolved.push((class_id, imp.local_key.clone(), ty.clone()));
                 }
             }
         }
         if classes_with_imports.is_empty() {
             return;
         }
-        let mut by_class: NameMap<NameMap<Type>> = NameMap::default();
-        for (class_name, local_key, ty) in resolved {
-            by_class
-                .entry(class_name)
-                .or_default()
-                .insert(local_key, ty);
+        let mut by_class: FxHashMap<ClassId, NameMap<Type>> = FxHashMap::default();
+        for (class_id, local_key, ty) in resolved {
+            by_class.entry(class_id).or_default().insert(local_key, ty);
         }
-        for class_name in classes_with_imports {
+        for class_id in classes_with_imports {
+            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             let Some(mut info) = self.classes.take(&class_name) else {
                 continue;
             };
@@ -905,7 +908,7 @@ impl Registry {
             // cleared - the one-shot pass above already ran, so there's
             // no second chance coming; an empty `aliases` map here makes
             // every `substitute_type_aliases` call below a no-op.
-            let aliases = by_class.remove(&class_name).unwrap_or_default();
+            let aliases = by_class.remove(&class_id).unwrap_or_default();
             let substitute = |ty: &mut Type| {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = substitute_type_aliases(taken, &aliases);
@@ -967,9 +970,13 @@ impl Registry {
     /// type_aliases`'s alias-of-alias handling accepts.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
-        let mut method_additions: Vec<(Name, Name, FunctionReflection)> = Vec::new();
-        let mut property_additions: Vec<(Name, Name, Arc<PropertyReflection>)> = Vec::new();
+        let mut method_additions: Vec<(ClassId, Name, Arc<super::Lazy<FunctionReflection>>)> =
+            Vec::new();
+        let mut property_additions: Vec<(ClassId, Name, Arc<PropertyReflection>)> = Vec::new();
         for (class_name, info) in self.scoped_classes() {
+            let Some(class_id) = self.class_ids.get(class_name).copied() else {
+                continue;
+            };
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
                     continue;
@@ -978,25 +985,34 @@ impl Registry {
                     let Some(sig) = mixin_info.methods.get(name) else {
                         continue;
                     };
-                    if sig.visibility == Visibility::Public && !info.methods.contains_key(name) {
-                        method_additions.push((class_name.clone(), name.clone(), sig.clone()));
+                    if sig.visibility == Visibility::Public
+                        && !info.methods.contains_key(name)
+                        && let Some(shared_sig) = mixin_info.methods.shared_get(name)
+                    {
+                        method_additions.push((class_id, name.clone(), shared_sig));
                     }
                 }
                 for (name, sig) in &mixin_info.properties {
                     if sig.visibility == Visibility::Public && !info.properties.contains_key(name) {
-                        property_additions.push((class_name.clone(), name.clone(), sig.clone()));
+                        property_additions.push((class_id, name.clone(), sig.clone()));
                     }
                 }
             }
         }
-        for (class_name, name, sig) in method_additions {
+        for (class_id, name, sig) in method_additions {
+            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             if let Some(info) = self.classes.get_mut(&class_name)
-                && info.methods.insert_if_absent(name.clone(), sig)
+                && info.methods.insert_shared_if_absent(name.clone(), sig)
             {
                 info.register_member_name(name);
             }
         }
-        for (class_name, name, sig) in property_additions {
+        for (class_id, name, sig) in property_additions {
+            let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
+                continue;
+            };
             if let Some(info) = self.classes.get_mut(&class_name) {
                 info.properties.entry(name).or_insert(sig);
             }
