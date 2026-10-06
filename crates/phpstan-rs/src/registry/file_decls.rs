@@ -950,4 +950,24 @@ mod tests {
         assert!(registry.file_class_by_id(class_id).is_none());
         assert!(registry.file_function_by_id(function_id).is_none());
     }
+
+    #[test]
+    fn switching_registry_bases_invalidates_the_previous_id_generation() {
+        let tokens = Lexer::new("<?php class Demo {}").tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut registry = crate::registry::Registry::build(&program);
+        let old_id = registry.class("Demo").unwrap().0;
+        let mut replacement = crate::registry::Registry::build(&program);
+        replacement.freeze();
+
+        registry.switch_base(replacement);
+
+        let current_id = registry.class("Demo").unwrap().0;
+        assert_ne!(current_id, old_id);
+        assert_eq!(current_id.generation(), old_id.generation() + 1);
+        let stale_read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            registry.class_by_id(old_id)
+        }));
+        assert!(stale_read.is_err());
+    }
 }

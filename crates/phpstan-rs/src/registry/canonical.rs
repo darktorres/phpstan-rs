@@ -450,6 +450,7 @@ impl CanonicalOver for Option<Box<RawDeclarations>> {
 impl CanonicalOver for Registry {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         let Registry {
+            id_generation: _,
             classes,
             class_ids: _,
             project_class_names: _,
@@ -647,6 +648,7 @@ canonical_struct!(Registry {
     unset_properties,
     global_sites,
 } skip {
+    id_generation,
     class_ids,
     project_class_names,
     project_class_decls,

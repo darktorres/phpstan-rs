@@ -255,6 +255,10 @@ impl std::fmt::Debug for FunctionDeclAt {
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
+    /// Changes whenever the declaration id space is replaced. IDs kept by
+    /// clients or pass tables from an older base cannot alias new entries.
+    #[serde(skip)]
+    id_generation: u32,
     #[serde(skip)]
     classes: NameTable<ClassReflection>,
     #[serde(skip)]
@@ -490,10 +494,21 @@ impl Registry {
         Some((id, name, self.class_by_id(id).unwrap_or(current)))
     }
 
+    fn debug_check_id_generation(&self, generation: u32) {
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            generation, self.id_generation,
+            "declaration id belongs to a stale Registry generation"
+        );
+        #[cfg(not(debug_assertions))]
+        let _ = generation;
+    }
+
     /// A class declaration addressed by its source-range id. While the
     /// registry exposes its as-built table for an edit, this reads an
     /// unmerged project declaration from its file arena.
     pub(crate) fn class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
+        self.debug_check_id_generation(id.generation());
         match id.source()? {
             IdSource::Stub => {
                 let name = self.classes.base_name(id.local() as usize)?;
@@ -523,6 +538,7 @@ impl Registry {
     /// remain available through `class_by_id` until the Registry finishes its
     /// id-store migration.
     pub(crate) fn file_class_by_id(&self, id: ClassId) -> Option<&ClassReflection> {
+        self.debug_check_id_generation(id.generation());
         if id.source()? != IdSource::Project {
             return None;
         }
@@ -538,6 +554,7 @@ impl Registry {
         id: ClassId,
         method: &str,
     ) -> Option<&FunctionReflection> {
+        self.debug_check_id_generation(id.generation());
         if id.source()? != IdSource::Project {
             return None;
         }
@@ -559,6 +576,7 @@ impl Registry {
         id: ClassId,
         property: &str,
     ) -> Option<&PropertyReflection> {
+        self.debug_check_id_generation(id.generation());
         if id.source()? != IdSource::Project {
             return None;
         }
@@ -574,6 +592,7 @@ impl Registry {
         id: ClassId,
         constant: &str,
     ) -> Option<&ConstantReflection> {
+        self.debug_check_id_generation(id.generation());
         if id.source()? != IdSource::Project {
             return None;
         }
@@ -595,6 +614,7 @@ impl Registry {
     /// registry exposes its as-built table for an edit, this reads an
     /// unmerged project declaration from its file arena.
     pub(crate) fn function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
+        self.debug_check_id_generation(id.generation());
         match id.source()? {
             IdSource::Stub => {
                 let name = self.functions.base_name(id.local() as usize)?;
@@ -622,6 +642,7 @@ impl Registry {
     /// The immutable function declaration as built in its file, when this
     /// project id still names one unmerged file declaration.
     pub(crate) fn file_function_by_id(&self, id: FnId) -> Option<&FunctionReflection> {
+        self.debug_check_id_generation(id.generation());
         if id.source()? != IdSource::Project {
             return None;
         }
@@ -638,7 +659,7 @@ impl Registry {
         }
         let local = u32::try_from(self.project_class_names.len())
             .expect("project class id range exhausted");
-        let id = ClassId::project(local);
+        let id = ClassId::project_in_generation(local, self.id_generation);
         self.class_ids.insert(name.clone(), id);
         self.project_class_names.push(name.clone());
         self.project_class_decls.push(None);
@@ -650,7 +671,7 @@ impl Registry {
         }
         let local = u32::try_from(self.project_function_names.len())
             .expect("project function id range exhausted");
-        let id = FnId::project(local);
+        let id = FnId::project_in_generation(local, self.id_generation);
         self.function_ids.insert(name.clone(), id);
         self.project_function_names.push(name.clone());
         self.project_function_decls.push(None);
@@ -898,7 +919,10 @@ impl Registry {
                 .classes
                 .base_name(index)
                 .expect("base index is in range");
-            self.class_ids.insert(name.clone(), ClassId::stub(local));
+            self.class_ids.insert(
+                name.clone(),
+                ClassId::stub(local).with_generation(self.id_generation),
+            );
         }
         self.class_ids.freeze();
         self.function_ids = NameTable::default();
@@ -910,7 +934,10 @@ impl Registry {
                 .functions
                 .base_name(index)
                 .expect("base index is in range");
-            self.function_ids.insert(name.clone(), FnId::stub(local));
+            self.function_ids.insert(
+                name.clone(),
+                FnId::stub(local).with_generation(self.id_generation),
+            );
         }
         self.function_ids.freeze();
         self.built_in_stub_classes.freeze();
@@ -1111,6 +1138,16 @@ impl Registry {
         base.configured_class_argument_returns =
             std::mem::take(&mut self.configured_class_argument_returns);
         base.changed = std::mem::take(&mut self.changed);
+        base.id_generation = self
+            .id_generation
+            .checked_add(1)
+            .expect("registry id generation exhausted");
+        for (_, id) in base.class_ids.iter_mut() {
+            id.set_generation(base.id_generation);
+        }
+        for (_, id) in base.function_ids.iter_mut() {
+            id.set_generation(base.id_generation);
+        }
         *self = base;
     }
 

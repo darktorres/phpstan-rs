@@ -14,34 +14,40 @@ pub(crate) enum IdSource {
 macro_rules! declaration_id {
     ($name:ident) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-        pub(crate) struct $name(u32);
+        pub(crate) struct $name {
+            raw: u32,
+            generation: u32,
+        }
 
         impl $name {
             pub(crate) fn stub(local: u32) -> Self {
-                Self::new(IdSource::Stub, local)
+                Self::new(IdSource::Stub, local, 0)
             }
 
             #[allow(dead_code)] // The context base is added in ledger row 17.5.
             pub(crate) fn context(local: u32) -> Self {
-                Self::new(IdSource::Context, local)
+                Self::new(IdSource::Context, local, 0)
             }
 
-            pub(crate) fn project(local: u32) -> Self {
-                Self::new(IdSource::Project, local)
+            pub(crate) fn project_in_generation(local: u32, generation: u32) -> Self {
+                Self::new(IdSource::Project, local, generation)
             }
 
-            fn new(source: IdSource, local: u32) -> Self {
+            fn new(source: IdSource, local: u32, generation: u32) -> Self {
                 assert!(local < LOCAL_LIMIT, "declaration id range exhausted");
                 let range = match source {
                     IdSource::Stub => 0,
                     IdSource::Context => 1,
                     IdSource::Project => 2,
                 };
-                Self((range << LOCAL_BITS) | local)
+                Self {
+                    raw: (range << LOCAL_BITS) | local,
+                    generation,
+                }
             }
 
             pub(crate) fn source(self) -> Option<IdSource> {
-                match self.0 >> LOCAL_BITS {
+                match self.raw >> LOCAL_BITS {
                     0 => Some(IdSource::Stub),
                     1 => Some(IdSource::Context),
                     2 => Some(IdSource::Project),
@@ -50,7 +56,20 @@ macro_rules! declaration_id {
             }
 
             pub(crate) fn local(self) -> u32 {
-                self.0 & LOCAL_MASK
+                self.raw & LOCAL_MASK
+            }
+
+            pub(crate) fn generation(self) -> u32 {
+                self.generation
+            }
+
+            pub(crate) fn set_generation(&mut self, generation: u32) {
+                self.generation = generation;
+            }
+
+            pub(crate) fn with_generation(mut self, generation: u32) -> Self {
+                self.set_generation(generation);
+                self
             }
         }
     };
@@ -68,7 +87,11 @@ mod tests {
         for (source, class, function) in [
             (IdSource::Stub, ClassId::stub(17), FnId::stub(23)),
             (IdSource::Context, ClassId::context(17), FnId::context(23)),
-            (IdSource::Project, ClassId::project(17), FnId::project(23)),
+            (
+                IdSource::Project,
+                ClassId::project_in_generation(17, 0),
+                FnId::project_in_generation(23, 0),
+            ),
         ] {
             assert_eq!(class.source(), Some(source));
             assert_eq!(class.local(), 17);
@@ -81,12 +104,24 @@ mod tests {
     fn each_source_range_ends_before_the_next_one_starts() {
         let stub = ClassId::stub(LOCAL_LIMIT - 1);
         let context = ClassId::context(0);
-        let project = ClassId::project(0);
+        let project = ClassId::project_in_generation(0, 0);
 
         assert_eq!(stub.source(), Some(IdSource::Stub));
         assert_eq!(context.source(), Some(IdSource::Context));
         assert_eq!(project.source(), Some(IdSource::Project));
-        assert!(stub.0 < context.0);
-        assert!(context.0 < project.0);
+        assert!(stub.raw < context.raw);
+        assert!(context.raw < project.raw);
+    }
+
+    #[test]
+    fn a_new_generation_makes_old_ids_distinct() {
+        assert_ne!(
+            ClassId::project_in_generation(7, 0),
+            ClassId::project_in_generation(7, 1)
+        );
+        assert_ne!(
+            FnId::project_in_generation(3, 0),
+            FnId::project_in_generation(3, 1)
+        );
     }
 }
