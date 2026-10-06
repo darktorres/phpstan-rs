@@ -4,6 +4,16 @@ use super::super::*;
 use super::helpers::*;
 use crate::visit::{Visitor, walk_expr, walk_stmt};
 
+#[test]
+fn parsed_file_and_node_ids_are_send_sync_and_copy() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    fn assert_copy<T: Copy>() {}
+
+    assert_send_sync::<crate::ParsedFile>();
+    assert_copy::<ExprId>();
+    assert_copy::<StmtId>();
+}
+
 /// Every statement's and expression's id.
 #[derive(Default)]
 struct Ids {
