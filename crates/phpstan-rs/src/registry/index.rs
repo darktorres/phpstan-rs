@@ -164,6 +164,20 @@ impl Registry {
     /// Applies one built declaration, updating the immutable ID-addressed
     /// winner only after conditional selection and merge policy finish.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+        self.insert_built_decl_with_ids(decl, analyzed, None, None);
+    }
+
+    /// As `insert_built_decl`, with the class/function id local reserved for
+    /// this declaration by the load's per-file prefix sum. A reservation is
+    /// used only when this declaration actually wins the name; collisions
+    /// and losing conditional declarations leave their reserved slot empty.
+    pub(crate) fn insert_built_decl_with_ids(
+        &mut self,
+        decl: BuiltDecl,
+        analyzed: bool,
+        class_local: Option<u32>,
+        function_local: Option<u32>,
+    ) {
         // A guard the configured PHP versions rule out is a declaration that
         // never runs: it changes nothing, and is not a change. One they
         // always satisfy declares as if it stood unguarded.
@@ -205,11 +219,11 @@ impl Registry {
         if !leaves_entry {
             match &decl {
                 BuiltDecl::Class { name, .. } => {
-                    self.ensure_class_id(name);
+                    self.ensure_class_id(name, class_local);
                     self.record_changed_class(name);
                 }
                 BuiltDecl::Function { name, .. } => {
-                    self.ensure_function_id(name);
+                    self.ensure_function_id(name, function_local);
                     self.record_changed_function(name);
                 }
                 BuiltDecl::GlobalConst { name, .. } => self.record_changed_constant(name),
@@ -647,7 +661,7 @@ impl Registry {
                 .insert(folded_key(&name));
             self.stub_provided_functions.insert(folded_key(&name));
             if self.function_by_name(&name).is_none() {
-                self.ensure_function_id(&name);
+                self.ensure_function_id(&name, None);
                 let id = *self
                     .function_ids
                     .get(&name)
@@ -684,7 +698,7 @@ impl Registry {
         for (name, info) in stubs {
             let name: Name = name.into();
             self.record_changed_class(&name);
-            self.ensure_class_id(&name);
+            self.ensure_class_id(&name, None);
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone(), ());
             let id = *self

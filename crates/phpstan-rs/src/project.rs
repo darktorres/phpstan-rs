@@ -1210,10 +1210,18 @@ impl Project {
         source: String,
         len: usize,
         analyzed: bool,
+        declaration_ids: Vec<(Option<u32>, Option<u32>)>,
     ) {
         self.begin_declaration_changes();
-        for decl in &parsed.built_decls {
-            self.registry.insert_built_decl(decl.clone(), analyzed);
+        debug_assert_eq!(parsed.built_decls.len(), declaration_ids.len());
+        for (decl, (class_local, function_local)) in parsed.built_decls.iter().zip(declaration_ids)
+        {
+            self.registry.insert_built_decl_with_ids(
+                decl.clone(),
+                analyzed,
+                class_local,
+                function_local,
+            );
         }
         // `record_phpstan_class_file` no-ops unless the name is
         // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
@@ -1444,13 +1452,36 @@ impl Project {
             })
             .collect();
         sources.sort_by_key(|source| (source.analyzed, source.load_order));
+        let mut next_class_local = 0u32;
+        let mut next_function_local = 0u32;
         for source in sources {
             for decl in source.declarations {
+                let (class_local, function_local) = match decl {
+                    BuiltDecl::Class { .. } => {
+                        let local = next_class_local;
+                        next_class_local = next_class_local
+                            .checked_add(1)
+                            .expect("project class id range exhausted");
+                        (Some(local), None)
+                    }
+                    BuiltDecl::Function { .. } => {
+                        let local = next_function_local;
+                        next_function_local = next_function_local
+                            .checked_add(1)
+                            .expect("project function id range exhausted");
+                        (None, Some(local))
+                    }
+                    BuiltDecl::GlobalConst { .. } => (None, None),
+                };
                 if let BuiltDecl::Class { name, .. } = decl {
                     self.registry.record_phpstan_class_file(name, source.path);
                 }
-                self.registry
-                    .insert_built_decl(decl.clone(), source.analyzed);
+                self.registry.insert_built_decl_with_ids(
+                    decl.clone(),
+                    source.analyzed,
+                    class_local,
+                    function_local,
+                );
             }
         }
     }

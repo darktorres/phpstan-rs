@@ -2004,8 +2004,47 @@ impl Session {
         });
         file_cache::trim();
         let numbers = project.number_files(numbering);
+        // Reserve declaration ids by file before the serial merge. Each
+        // file owns a contiguous class range and a contiguous function
+        // range, both in the established context-then-analysed load order.
+        // Slots for declarations that lose collision/conditional selection
+        // remain unused, preserving the merge policy while making every
+        // file's reservation independent of worker completion order.
+        let mut next_class_local = 0u32;
+        let mut next_function_local = 0u32;
+        let mut declaration_ids: Vec<Vec<(Option<u32>, Option<u32>)>> = combined_parsed
+            .iter()
+            .map(|read| {
+                let Read::Loaded(file) = read else {
+                    return Vec::new();
+                };
+                file.parsed
+                    .built_decls
+                    .iter()
+                    .map(|decl| match decl {
+                        crate::registry::BuiltDecl::Class { .. } => {
+                            let local = next_class_local;
+                            next_class_local = next_class_local
+                                .checked_add(1)
+                                .expect("project class id range exhausted");
+                            (Some(local), None)
+                        }
+                        crate::registry::BuiltDecl::Function { .. } => {
+                            let local = next_function_local;
+                            next_function_local = next_function_local
+                                .checked_add(1)
+                                .expect("project function id range exhausted");
+                            (None, Some(local))
+                        }
+                        crate::registry::BuiltDecl::GlobalConst { .. } => (None, None),
+                    })
+                    .collect()
+            })
+            .collect();
         let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
         let analyze_parsed = combined_parsed.split_off(context_files.len());
+        let analyze_declaration_ids = declaration_ids.split_off(context_files.len());
+        let context_declaration_ids = declaration_ids;
         let context_parsed = combined_parsed;
         project.expect_files(
             context_parsed
@@ -2033,10 +2072,11 @@ impl Session {
         };
         let mut skipped_context = 0usize;
         let mut context_failures = Vec::new();
-        for ((path, &id), parsed) in context_files
+        for (((path, &id), parsed), declaration_ids) in context_files
             .iter()
             .zip(context_numbers)
             .zip(context_parsed)
+            .zip(context_declaration_ids)
         {
             match parsed {
                 Read::Loaded(file) => {
@@ -2047,7 +2087,15 @@ impl Session {
                         cache_key: _,
                     } = *file;
                     note_lex_warnings(path, &parsed);
-                    project.insert_numbered_file(id, path, parsed, source, len, false)
+                    project.insert_numbered_file(
+                        id,
+                        path,
+                        parsed,
+                        source,
+                        len,
+                        false,
+                        declaration_ids,
+                    )
                 }
                 Read::Unparsed(failure) => {
                     skipped_context += 1;
@@ -2060,10 +2108,11 @@ impl Session {
         let mut analyze_sizes: Vec<usize> = vec![0; analyze_files.len()];
         let mut skipped_analyze = 0usize;
         let mut parse_failures = Vec::new();
-        for (index, ((path, &id), parsed)) in analyze_files
+        for (index, (((path, &id), parsed), declaration_ids)) in analyze_files
             .iter()
             .zip(analyze_numbers)
             .zip(analyze_parsed)
+            .zip(analyze_declaration_ids)
             .enumerate()
         {
             match parsed {
@@ -2076,7 +2125,15 @@ impl Session {
                     } = *file;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;
-                    project.insert_numbered_file(id, path, parsed, source, len, true)
+                    project.insert_numbered_file(
+                        id,
+                        path,
+                        parsed,
+                        source,
+                        len,
+                        true,
+                        declaration_ids,
+                    )
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;

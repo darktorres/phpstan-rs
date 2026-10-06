@@ -271,7 +271,7 @@ pub struct Registry {
     #[serde(skip)]
     class_ids: NameTable<ClassId>,
     #[serde(skip)]
-    project_class_names: Vec<Name>,
+    project_class_names: Vec<Option<Name>>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     #[serde(skip)]
@@ -285,7 +285,7 @@ pub struct Registry {
     #[serde(skip)]
     function_ids: NameTable<FnId>,
     #[serde(skip)]
-    project_function_names: Vec<Name>,
+    project_function_names: Vec<Option<Name>>,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -827,7 +827,10 @@ impl Registry {
         let name = match id.source()? {
             IdSource::Stub => self.classes.base_name(id.local() as usize)?,
             IdSource::Context => return None,
-            IdSource::Project => self.project_class_names.get(id.local() as usize)?,
+            IdSource::Project => self
+                .project_class_names
+                .get(id.local() as usize)?
+                .as_ref()?,
         };
         (self.class_ids.get(name) == Some(&id)).then_some(name)
     }
@@ -901,55 +904,81 @@ impl Registry {
         let name = match id.source()? {
             IdSource::Stub => self.functions.base_name(id.local() as usize)?,
             IdSource::Context => return None,
-            IdSource::Project => self.project_function_names.get(id.local() as usize)?,
+            IdSource::Project => self
+                .project_function_names
+                .get(id.local() as usize)?
+                .as_ref()?,
         };
         (self.function_ids.get(name) == Some(&id)).then_some(name)
     }
 
-    fn ensure_class_id(&mut self, name: &Name) {
+    fn ensure_class_id(&mut self, name: &Name, reserved: Option<u32>) {
         if let Some(existing_id) = self.class_ids.get(name).copied() {
             if existing_id.source() == Some(IdSource::Project) {
                 return;
             }
             let declaration = self.class_declarations.get(&existing_id).cloned();
-            let local = u32::try_from(self.project_class_names.len())
-                .expect("project class id range exhausted");
+            let local = reserved.unwrap_or_else(|| {
+                u32::try_from(self.project_class_names.len())
+                    .expect("project class id range exhausted")
+            });
             let id = ClassId::project_in_generation(local, self.id_generation);
             self.class_ids.insert(name.clone(), id);
-            self.project_class_names.push(name.clone());
+            if self.project_class_names.len() <= id.local() as usize {
+                self.project_class_names
+                    .resize_with(id.local() as usize + 1, || None);
+            }
+            self.project_class_names[id.local() as usize] = Some(name.clone());
             if let Some(declaration) = declaration {
                 self.class_declarations.insert(id, declaration);
             }
             return;
         }
-        let local = u32::try_from(self.project_class_names.len())
-            .expect("project class id range exhausted");
+        let local = reserved.unwrap_or_else(|| {
+            u32::try_from(self.project_class_names.len()).expect("project class id range exhausted")
+        });
         let id = ClassId::project_in_generation(local, self.id_generation);
         self.class_ids.insert(name.clone(), id);
-        self.project_class_names.push(name.clone());
+        if self.project_class_names.len() <= id.local() as usize {
+            self.project_class_names
+                .resize_with(id.local() as usize + 1, || None);
+        }
+        self.project_class_names[id.local() as usize] = Some(name.clone());
     }
 
-    fn ensure_function_id(&mut self, name: &Name) {
+    fn ensure_function_id(&mut self, name: &Name, reserved: Option<u32>) {
         if let Some(existing_id) = self.function_ids.get(name).copied() {
             if existing_id.source() == Some(IdSource::Project) {
                 return;
             }
             let declaration = self.function_declarations.get(&existing_id).cloned();
-            let local = u32::try_from(self.project_function_names.len())
-                .expect("project function id range exhausted");
+            let local = reserved.unwrap_or_else(|| {
+                u32::try_from(self.project_function_names.len())
+                    .expect("project function id range exhausted")
+            });
             let id = FnId::project_in_generation(local, self.id_generation);
             self.function_ids.insert(name.clone(), id);
-            self.project_function_names.push(name.clone());
+            if self.project_function_names.len() <= id.local() as usize {
+                self.project_function_names
+                    .resize_with(id.local() as usize + 1, || None);
+            }
+            self.project_function_names[id.local() as usize] = Some(name.clone());
             if let Some(declaration) = declaration {
                 self.function_declarations.insert(id, declaration);
             }
             return;
         }
-        let local = u32::try_from(self.project_function_names.len())
-            .expect("project function id range exhausted");
+        let local = reserved.unwrap_or_else(|| {
+            u32::try_from(self.project_function_names.len())
+                .expect("project function id range exhausted")
+        });
         let id = FnId::project_in_generation(local, self.id_generation);
         self.function_ids.insert(name.clone(), id);
-        self.project_function_names.push(name.clone());
+        if self.project_function_names.len() <= id.local() as usize {
+            self.project_function_names
+                .resize_with(id.local() as usize + 1, || None);
+        }
+        self.project_function_names[id.local() as usize] = Some(name.clone());
     }
 
     fn remove_project_class_id(&mut self, name: &Name) {
