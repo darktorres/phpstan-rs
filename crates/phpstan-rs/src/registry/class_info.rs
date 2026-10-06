@@ -438,6 +438,8 @@ pub struct ClassReflection {
     // class, independent of whether this class is itself generic (e.g.
     // `class IntCollection extends Collection<int> {}`, which isn't
     // generic itself but permanently binds `Collection`'s `T` to `int`).
+    // These remain the arguments as built; deferred class-constant types
+    // resolved later live in Registry's ClassId-keyed class type results.
     // An argument can itself reference this class's own `@template` name
     // (`class Box<T> extends Collection<T> {}`) - such an argument is
     // a template `name`, substituted using whatever this
@@ -459,10 +461,11 @@ pub struct ClassReflection {
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `TraitUse::doc_comment`.
     pub(in crate::registry) uses_args: NameMap<Vec<Type>>,
-    // `@template T of Bound` - the resolved bound for whichever of
+    // `@template T of Bound` - the as-built bound for whichever of
     // `templates` above declared one. Checked by
     // `checker::check_generic_bounds` wherever this class is referenced
-    // with concrete type arguments (`Collection<Foo>`).
+    // with concrete type arguments (`Collection<Foo>`); deferred
+    // class-constant values are read from Registry's result overlay.
     pub(in crate::registry) template_bounds: NameMap<Type>,
     // `@template T = Default` - the resolved default for whichever of
     // `templates` above declared one, mirroring `template_bounds`'s

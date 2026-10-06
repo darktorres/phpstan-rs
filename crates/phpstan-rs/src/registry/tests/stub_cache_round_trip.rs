@@ -239,6 +239,45 @@ fn imported_type_alias_results_survive_freeze_and_cache_round_trip() {
 }
 
 #[test]
+fn class_deferred_generic_type_results_survive_cache_round_trip() {
+    let registry = build_registry(
+        r#"<?php
+            class Config { public const VALUES = ['first', 'second']; }
+            /** @template T of value-of<Config::VALUES> */
+            class Bounded {}
+            /** @template T */
+            class ParentGeneric {}
+            /** @extends ParentGeneric<value-of<Config::VALUES>> */
+            class ChildGeneric extends ParentGeneric {}
+            /** @template T */
+            interface GenericContract {}
+            /** @implements GenericContract<value-of<Config::VALUES>> */
+            class ContractUser implements GenericContract {}
+            "#,
+    );
+    let expected =
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()));
+    let back = round_trip(&registry);
+
+    assert!(back.classes["Bounded"].template_bounds["T"].contains_deferred());
+    assert_eq!(
+        back.effective_template_bounds_by_name("Bounded").get("T"),
+        Some(&expected)
+    );
+    assert!(back.classes["ChildGeneric"].extends_args[0].contains_deferred());
+    assert_eq!(
+        back.effective_extends_args_by_name("ChildGeneric"),
+        vec![expected.clone()]
+    );
+    assert!(back.classes["ContractUser"].implements_args["GenericContract"][0].contains_deferred());
+    assert_eq!(
+        back.effective_implements_args_by_name("ContractUser")
+            .get("GenericContract"),
+        Some(&vec![expected])
+    );
+}
+
+#[test]
 fn trait_method_results_survive_freeze_and_cache_round_trip() {
     let registry = build_registry(
         r#"<?php

@@ -67,9 +67,10 @@ impl<'a> Checker<'a> {
         }
         match ty.as_object() {
             Some((class, args)) => {
+                let bounds = self.registry.effective_template_bounds_by_name(class);
                 if !args.is_empty()
                     && let Some(info) = self.registry.classes().get(class.as_str())
-                    && !info.template_bounds().is_empty()
+                    && !bounds.is_empty()
                 {
                     // Bound-checking cares about the real referenced
                     // type, not a call-site variance marker wrapping it
@@ -92,7 +93,7 @@ impl<'a> Checker<'a> {
                         }))
                         .collect();
                     for (name, arg) in info.templates().iter().zip(args.iter()) {
-                        let Some(bound) = info.template_bounds().get(name) else {
+                        let Some(bound) = bounds.get(name) else {
                             continue;
                         };
                         let bound = bound.substitute_templates(&bindings, &self.relation());
@@ -226,7 +227,7 @@ impl<'a> Checker<'a> {
         if !info.templates().is_empty() {
             let display_name = format!("{} {fqn}", class_kind_identifier(&c.def.kind));
             let templates = info.templates().clone();
-            let bounds = info.template_bounds().clone();
+            let bounds = self.registry.effective_template_bounds_by_name(fqn);
             let defaults = info.template_defaults().clone();
             let type_aliases = self.registry.effective_type_aliases_by_name(fqn);
             self.check_template_declaration_validity(

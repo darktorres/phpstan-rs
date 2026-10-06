@@ -13,17 +13,17 @@ type ClassMethodResults = Vec<(Name, FunctionReflection)>;
 type ClassConstantResults = OrderedNameMap<(usize, Arc<ConstantReflection>)>;
 type ResolvedClassUpdate = (
     ClassId,
-    ClassReflection,
     ClassMethodResults,
     DeferredClassConstantTypes,
     ClassPropertyResults,
+    ClassTypeResults,
 );
 type VisibleClassConstTypes = OrderedNameMap<Type>;
 
 use crate::registry::Registry;
 use crate::registry::{
-    ClassId, ClassReflection, ConstantReflection, FnId, FunctionReflection, Members, MethodEntry,
-    MethodRef, PropertyReflection, substitute_type_aliases,
+    ClassId, ClassReflection, ClassTypeResults, ConstantReflection, FnId, FunctionReflection,
+    Members, MethodEntry, MethodRef, PropertyReflection, substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
 use types::{self, Type};
@@ -655,6 +655,12 @@ impl Registry {
     pub(crate) fn resolve_deferred_value_of(&mut self) {
         self.resolve_class_constant_references();
         let class_names = self.scoped_class_names();
+        let scoped_class_ids: FxHashSet<ClassId> = class_names
+            .iter()
+            .filter_map(|name| self.class_ids.get(name).copied())
+            .collect();
+        self.class_type_results
+            .retain(|id, _| !scoped_class_ids.contains(id));
         let registry: &Registry = self;
         let resolved: Vec<ResolvedClassUpdate> = class_names
             .par_iter()
@@ -662,26 +668,26 @@ impl Registry {
             .filter_map(|name| {
                 let id = *registry.class_ids.get(name)?;
                 registry.resolved_deferred_class(name).map(
-                    |(info, methods, constants, properties)| {
-                        (id, info, methods, constants, properties)
+                    |(methods, constants, properties, type_results)| {
+                        (id, methods, constants, properties, type_results)
                     },
                 )
             })
             .collect();
-        for (id, info, methods, constants, properties) in resolved {
-            if let Some(name) = self.class_name_by_id(id).cloned() {
-                for (slot, ty) in constants {
-                    self.class_const_types.insert((id, slot), ty);
-                }
-                self.class_property_results
-                    .entry(id)
-                    .or_default()
-                    .extend(properties);
-                let method_results = self.class_method_results.entry(id).or_default();
-                for (name, method) in methods {
-                    method_results.insert(name, method);
-                }
-                self.classes.insert(name, info);
+        for (id, methods, constants, properties, type_results) in resolved {
+            for (slot, ty) in constants {
+                self.class_const_types.insert((id, slot), ty);
+            }
+            self.class_property_results
+                .entry(id)
+                .or_default()
+                .extend(properties);
+            let method_results = self.class_method_results.entry(id).or_default();
+            for (name, method) in methods {
+                method_results.insert(name, method);
+            }
+            if !type_results.is_empty() {
+                self.class_type_results.insert(id, type_results);
             }
         }
         let class_ids = &self.class_ids;
@@ -746,10 +752,10 @@ impl Registry {
         &self,
         class_name: &Name,
     ) -> Option<(
-        ClassReflection,
         ClassMethodResults,
         DeferredClassConstantTypes,
         ClassPropertyResults,
+        ClassTypeResults,
     )> {
         // Only a class with a deferred sentinel somewhere needs its
         // inherited-constant view (the overwhelming majority, stubs
@@ -784,7 +790,7 @@ impl Registry {
                 }
                 _ => return None,
             };
-        let mut info = self.classes.get(class_name)?.clone();
+        let info = self.classes.get(class_name)?;
         let class_ids = &self.class_ids;
         let const_types = &self.class_const_types;
         let constant_results = &self.class_constant_results;
@@ -933,14 +939,11 @@ impl Registry {
                 Some((slot, ty))
             })
             .collect();
-        for bound in info.template_bounds.values_mut() {
+        let mut type_results = ClassTypeResults::default();
+        for (name, bound) in info.template_bounds.iter() {
             if bound.contains_deferred() {
-                let ty = bind_class_const_self(
-                    std::mem::replace(bound, Type::mixed()),
-                    class_name,
-                    &own_consts,
-                );
-                *bound = resolve_deferred_value_of_in_type(
+                let ty = bind_class_const_self(bound.clone(), class_name, &own_consts);
+                let resolved = resolve_deferred_value_of_in_type(
                     ty,
                     &self.classes,
                     &self.class_ids,
@@ -948,14 +951,14 @@ impl Registry {
                     &self.class_constant_results,
                     Some(class_name),
                 );
+                if resolved != *bound {
+                    type_results.template_bounds.push((name.clone(), resolved));
+                }
             }
         }
         // `@extends Lexer<self::T_*>`: what inherited PHPDoc binds to.
-        let ancestor_args = info
-            .extends_args
-            .iter_mut()
-            .chain(info.implements_args.values_mut().flatten());
-        for arg in ancestor_args {
+        let mut extends_args = info.extends_args.clone();
+        for arg in &mut extends_args {
             if arg.contains_deferred() {
                 let ty = bind_class_const_self(
                     std::mem::replace(arg, Type::mixed()),
@@ -972,7 +975,35 @@ impl Registry {
                 );
             }
         }
-        Some((info, method_results, constants, properties))
+        if extends_args != info.extends_args {
+            type_results.extends_args = Some(extends_args);
+        }
+        for (interface, args) in info.implements_args.iter() {
+            let mut resolved_args = args.clone();
+            for arg in &mut resolved_args {
+                if arg.contains_deferred() {
+                    let ty = bind_class_const_self(
+                        std::mem::replace(arg, Type::mixed()),
+                        class_name,
+                        &own_consts,
+                    );
+                    *arg = resolve_deferred_value_of_in_type(
+                        ty,
+                        &self.classes,
+                        &self.class_ids,
+                        &self.class_const_types,
+                        &self.class_constant_results,
+                        Some(class_name),
+                    );
+                }
+            }
+            if resolved_args != *args {
+                type_results
+                    .implements_args
+                    .push((interface.clone(), resolved_args));
+            }
+        }
+        Some((method_results, constants, properties, type_results))
     }
 
     /// Resolves every `ClassConstant` inside class constants'
@@ -1443,7 +1474,7 @@ impl Registry {
     /// `list<T>` becomes `list<CMTemplate>` for a `@template-implements
     /// Factory<CMTemplate>` class rather than losing `T` to `Mixed`.
     fn ancestor_bindings(&self, class_name: &str, info: &ClassReflection) -> AncestorBindings {
-        let own_args = info.own_template_args(class_name);
+        let own_args = self.own_template_args(class_name);
         self.all_ancestor_names(class_name)
             .into_iter()
             .filter(|a| self.classes.get(a).is_some_and(|c| !c.templates.is_empty()))
@@ -2206,39 +2237,35 @@ fn resolve_deferred_value_of_with_native_fallback(
     }
 }
 
-impl ClassReflection {
+impl Registry {
     /// This class's own templates as `TemplateParam` arguments scoped to
     /// `class_name` - the identity binding, which `class_template_bindings`
     /// maps through to an ancestor without erasing them.
     pub(crate) fn own_template_args(&self, class_name: &str) -> Vec<Type> {
-        self.templates
+        let Some(info) = self.classes.get(class_name) else {
+            return Vec::new();
+        };
+        let bounds = self.effective_template_bounds_by_name(class_name);
+        info.templates
             .iter()
             .map(|name| {
-                let variance = if self.covariant_templates.contains(name) {
+                let variance = if info.covariant_templates.contains(name) {
                     types::Variance::Covariant
-                } else if self.contravariant_templates.contains(name) {
+                } else if info.contravariant_templates.contains(name) {
                     types::Variance::Contravariant
                 } else {
                     types::Variance::Invariant
                 };
                 Type::template_param(types::TemplateParam {
                     name: name.to_string(),
-                    bound: Box::new(
-                        self.template_bounds
-                            .get(name)
-                            .cloned()
-                            .unwrap_or(Type::mixed()),
-                    ),
+                    bound: Box::new(bounds.get(name).cloned().unwrap_or(Type::mixed())),
                     variance,
                     scope: Some(class_name.to_string()),
-                    default: self.template_defaults.get(name).cloned().map(Box::new),
+                    default: info.template_defaults.get(name).cloned().map(Box::new),
                 })
             })
             .collect()
     }
-}
-
-impl Registry {
     /// `reconcile_with_native` runs before the class hierarchy exists, so
     /// it keeps every class-named PHPDoc member. Once every class is
     /// indexed, a member the native hint provably excludes (`Schema` on a

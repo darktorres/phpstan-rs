@@ -132,6 +132,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes().get(class.as_str()) else {
             return rustc_hash::FxHashMap::default();
         };
+        let bounds = self.registry.effective_template_bounds_by_name(class);
         info.templates()
             .iter()
             .map(|name| {
@@ -147,7 +148,7 @@ impl<'a> Checker<'a> {
                     types::TemplateParam {
                         name: name.to_string(),
                         bound: Box::new(
-                            info.template_bounds()
+                            bounds
                                 .get(name)
                                 .cloned()
                                 // No `of`/`as` clause at all - explicit

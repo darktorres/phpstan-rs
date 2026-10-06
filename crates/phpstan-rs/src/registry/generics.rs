@@ -102,8 +102,8 @@ impl Registry {
             }
 
             if let Some(parent) = info.extends.first() {
-                let parent_args: Vec<Type> = info
-                    .extends_args
+                let parent_args: Vec<Type> = self
+                    .effective_extends_args_by_name(class)
                     .iter()
                     .map(|t| t.substitute_templates(&own_bindings, &self.relation()))
                     .collect();
@@ -116,9 +116,9 @@ impl Registry {
                     return Some(found);
                 }
             }
+            let implements_args = self.effective_implements_args_by_name(class);
             for iface in &info.implements {
-                let iface_args: Vec<Type> = info
-                    .implements_args
+                let iface_args: Vec<Type> = implements_args
                     .get(iface)
                     .map(|args| {
                         args.iter()

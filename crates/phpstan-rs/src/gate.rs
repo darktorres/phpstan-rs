@@ -57,7 +57,7 @@ pub fn template_scope_at(registry: &Registry, stmts: &[Stmt], at: u32) -> Templa
         for (name, arg) in info
             .templates()
             .iter()
-            .zip(info.own_template_args(class.fq_name()))
+            .zip(registry.own_template_args(class.fq_name()))
         {
             templates.insert(name.to_string(), arg);
         }

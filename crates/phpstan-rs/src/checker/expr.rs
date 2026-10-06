@@ -75,17 +75,14 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// an `array-key` bound widening any scalar.
 fn generalize_inferred_class_template(
     info: &crate::registry::ClassReflection,
+    bounds: &crate::registry::NameMap<Type>,
     template: &Name,
     ty: &Type,
 ) -> Type {
     if info.covariant_templates().contains(template) {
         return ty.clone();
     }
-    let bound = info
-        .template_bounds()
-        .get(template)
-        .cloned()
-        .unwrap_or_else(Type::mixed);
+    let bound = bounds.get(template).cloned().unwrap_or_else(Type::mixed);
     let array_key_bound =
         bound == Type::unknown_array_key() || bound == Type::benevolent_array_key();
     let widens = if ty.is_scalar().yes() && array_key_bound {
@@ -4757,12 +4754,15 @@ impl<'a> Checker<'a> {
                                 .map(|i| i + 1)
                                 .unwrap_or(0);
                             let info = self.registry.classes().get(canonical.as_str());
+                            let bounds = self
+                                .registry
+                                .effective_template_bounds_by_name(canonical.as_str());
                             let bound_args = templates[..last_bound]
                                 .iter()
                                 .map(|t| match bindings.get(t.as_ref()) {
                                     Some(ty) => match info {
                                         Some(info) => {
-                                            generalize_inferred_class_template(info, t, ty)
+                                            generalize_inferred_class_template(info, &bounds, t, ty)
                                         }
                                         None => ty.clone(),
                                     },
@@ -5696,7 +5696,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .classes()
                     .get(current.as_str())
-                    .map(|info| info.own_template_args(current))
+                    .map(|_| self.registry.own_template_args(current))
                     .unwrap_or_default();
                 self.substitute_class_templates(sig, current, &own, &owner)
             }

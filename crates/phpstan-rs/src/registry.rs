@@ -193,6 +193,23 @@ pub(crate) struct ResolvedSnapshot {
     global_variables: syntax::name::NameMap<Type>,
 }
 
+/// Class-level generic types completed after class constants are available.
+/// Names and values stay separate from the as-built ClassReflection.
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ClassTypeResults {
+    pub(crate) template_bounds: Vec<(Name, Type)>,
+    pub(crate) extends_args: Option<Vec<Type>>,
+    pub(crate) implements_args: Vec<(Name, Vec<Type>)>,
+}
+
+impl ClassTypeResults {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.template_bounds.is_empty()
+            && self.extends_args.is_none()
+            && self.implements_args.is_empty()
+    }
+}
+
 /// The sections a stored registry is in: one per table, the declarations as
 /// built, and the rest.
 const REST: &str = "rest";
@@ -484,6 +501,11 @@ pub struct Registry {
     pub(crate) class_property_results: FxHashMap<ClassId, NameMap<Arc<PropertyReflection>>>,
     #[serde(skip)]
     class_property_results_cache: NameTable<Vec<(Name, Arc<PropertyReflection>)>>,
+    // Resolved class-level generic types, keyed by declaration ID.
+    #[serde(skip)]
+    pub(crate) class_type_results: FxHashMap<ClassId, ClassTypeResults>,
+    #[serde(skip)]
+    class_type_results_cache: NameTable<ClassTypeResults>,
     // Resolved `@phpstan-import-type` aliases, keyed by the importing
     // declaration. `ClassReflection::type_aliases` contains local aliases
     // only and remains the immutable declaration source.
@@ -607,6 +629,70 @@ impl Registry {
             .get(name)
             .copied()
             .map(|id| self.effective_type_aliases(id))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn effective_template_bounds(&self, id: ClassId) -> NameMap<Type> {
+        let mut bounds = self
+            .class_by_id(id)
+            .map(|class| class.template_bounds().clone())
+            .unwrap_or_default();
+        if !self.raw_active
+            && let Some(results) = self.class_type_results.get(&id)
+        {
+            bounds.extend(results.template_bounds.clone());
+        }
+        bounds
+    }
+
+    pub(crate) fn effective_template_bounds_by_name(&self, name: &str) -> NameMap<Type> {
+        self.class_ids
+            .get(name)
+            .copied()
+            .map(|id| self.effective_template_bounds(id))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn effective_extends_args(&self, id: ClassId) -> Vec<Type> {
+        if !self.raw_active
+            && let Some(args) = self
+                .class_type_results
+                .get(&id)
+                .and_then(|results| results.extends_args.as_ref())
+        {
+            return args.clone();
+        }
+        self.class_by_id(id)
+            .map(|class| class.extends_args().clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn effective_extends_args_by_name(&self, name: &str) -> Vec<Type> {
+        self.class_ids
+            .get(name)
+            .copied()
+            .map(|id| self.effective_extends_args(id))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn effective_implements_args(&self, id: ClassId) -> NameMap<Vec<Type>> {
+        let mut args = self
+            .class_by_id(id)
+            .map(|class| class.implements_args().clone())
+            .unwrap_or_default();
+        if !self.raw_active
+            && let Some(results) = self.class_type_results.get(&id)
+        {
+            args.extend(results.implements_args.clone());
+        }
+        args
+    }
+
+    pub(crate) fn effective_implements_args_by_name(&self, name: &str) -> NameMap<Vec<Type>> {
+        self.class_ids
+            .get(name)
+            .copied()
+            .map(|id| self.effective_implements_args(id))
             .unwrap_or_default()
     }
 
@@ -801,6 +887,7 @@ impl Registry {
             self.class_constant_results.remove(&id);
             self.class_method_results.remove(&id);
             self.class_property_results.remove(&id);
+            self.class_type_results.remove(&id);
             self.imported_type_aliases.remove(&id);
         }
     }
@@ -1119,6 +1206,7 @@ impl Registry {
         let class_constant_results = self.class_constant_results_for_cache();
         let class_method_results = self.class_method_results_for_cache();
         let class_property_results = self.class_property_results_for_cache();
+        let class_type_results = self.class_type_results_for_cache();
         let imported_type_aliases = self.imported_type_aliases_for_cache();
         let effects = self.effects_for_names();
         self.classes.freeze();
@@ -1275,6 +1363,16 @@ impl Registry {
             })
             .collect();
         self.class_property_results_cache = NameTable::default();
+        self.class_type_results = class_type_results
+            .iter()
+            .filter_map(|(name, results)| {
+                self.class_ids
+                    .get(name)
+                    .copied()
+                    .map(|id| (id, results.clone()))
+            })
+            .collect();
+        self.class_type_results_cache = NameTable::default();
         self.imported_type_aliases = imported_type_aliases
             .iter()
             .filter_map(|(name, aliases)| {
@@ -1456,6 +1554,8 @@ impl Registry {
             .store(writer, "table:class_method_results")?;
         self.class_property_results_for_cache()
             .store(writer, "table:class_property_results")?;
+        self.class_type_results_for_cache()
+            .store(writer, "table:class_type_results")?;
         self.imported_type_aliases_for_cache()
             .store(writer, "table:imported_type_aliases")?;
         self.store_tables(writer)?;
@@ -1608,6 +1708,26 @@ impl Registry {
             .collect()
     }
 
+    fn class_type_results_for_cache(&self) -> NameTable<ClassTypeResults> {
+        if !self.class_type_results_cache.is_empty() {
+            return self.class_type_results_cache.clone();
+        }
+        self.class_type_results
+            .iter()
+            .filter_map(|(id, results)| {
+                let mut results = results.clone();
+                results
+                    .template_bounds
+                    .sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+                results
+                    .implements_args
+                    .sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+                self.class_name_by_id(*id)
+                    .map(|name| (name.clone(), results))
+            })
+            .collect()
+    }
+
     /// Whether every stored table, map and set of a registry read back is
     /// in the order a lookup by bisection relies on. A load checks only
     /// that its records are inside the file, so the tests of what is stored
@@ -1629,6 +1749,8 @@ impl Registry {
             .check_order("table:class_method_results")?;
         self.class_property_results_for_cache()
             .check_order("table:class_property_results")?;
+        self.class_type_results_for_cache()
+            .check_order("table:class_type_results")?;
         self.imported_type_aliases_for_cache()
             .check_order("table:imported_type_aliases")?;
         if let Some(raw) = &self.raw {
@@ -1667,6 +1789,7 @@ impl Registry {
             NameTable::load(reader, "table:class_method_results")?;
         registry.class_property_results_cache =
             NameTable::load(reader, "table:class_property_results")?;
+        registry.class_type_results_cache = NameTable::load(reader, "table:class_type_results")?;
         registry.imported_type_aliases_cache =
             NameTable::load(reader, "table:imported_type_aliases")?;
         if reader.has_section(RAW_CLASSES) {
@@ -1755,6 +1878,11 @@ impl Registry {
             .class_property_results
             .drain()
             .map(|(id, properties)| (id.with_generation(generation), properties))
+            .collect();
+        base.class_type_results = base
+            .class_type_results
+            .drain()
+            .map(|(id, results)| (id.with_generation(generation), results))
             .collect();
         base.imported_type_aliases = base
             .imported_type_aliases

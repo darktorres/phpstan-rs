@@ -623,7 +623,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes()
                 .get(c)
-                .map(|info| info.own_template_args(c))
+                .map(|_| self.registry.own_template_args(c))
                 .unwrap_or_default();
             locals.insert_var("this", Type::object(c.into(), own));
         }

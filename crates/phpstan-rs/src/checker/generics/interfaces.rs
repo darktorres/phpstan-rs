@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
         // `Base`, silently agreeing when they're actually two unrelated,
         // independently-instantiable templates). An identity entry makes
         // `Type::substitute_templates` leave it alone instead.
-        let own_bindings = identity_template_bindings(root_info, fqn);
+        let own_bindings = identity_template_bindings(self.registry, root_info, fqn);
 
         let mut found: FxHashMap<String, Vec<Type>> = FxHashMap::default();
         let mut diagnostics: Vec<(String, usize, Type, Type)> = Vec::new();
@@ -126,12 +126,9 @@ impl<'a> Checker<'a> {
         let mut visited = visited.clone();
         visited.insert(class.to_string());
 
+        let implements_args = self.registry.effective_implements_args_by_name(class);
         for iface in info.implements() {
-            let raw_args = info
-                .implements_args()
-                .get(iface)
-                .cloned()
-                .unwrap_or_default();
+            let raw_args = implements_args.get(iface).cloned().unwrap_or_default();
             let concrete_args: Vec<Type> = raw_args
                 .iter()
                 .map(|t| t.substitute_templates(own_bindings, &self.relation()))
@@ -157,10 +154,10 @@ impl<'a> Checker<'a> {
         // interface `extends`-ing more than one parent at once conflates
         // their argument lists into one flat, un-keyed list, unsafe to
         // attribute to either.
-        if info.extends().len() == 1 && !info.extends_args().is_empty() {
+        let extends_args = self.registry.effective_extends_args_by_name(class);
+        if info.extends().len() == 1 && !extends_args.is_empty() {
             let parent = &info.extends()[0];
-            let concrete_args: Vec<Type> = info
-                .extends_args()
+            let concrete_args: Vec<Type> = extends_args
                 .iter()
                 .map(|t| t.substitute_templates(own_bindings, &self.relation()))
                 .collect();
@@ -220,10 +217,14 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn identity_template_bindings(info: &ClassReflection, class: &str) -> FxHashMap<String, Type> {
+fn identity_template_bindings(
+    registry: &crate::registry::Registry,
+    info: &ClassReflection,
+    class: &str,
+) -> FxHashMap<String, Type> {
     info.templates()
         .iter()
         .map(|name| name.to_string())
-        .zip(info.own_template_args(class))
+        .zip(registry.own_template_args(class))
         .collect()
 }

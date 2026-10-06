@@ -376,6 +376,51 @@ fn imported_type_constant_results_leave_the_declaration_unchanged() {
 }
 
 #[test]
+fn class_deferred_generic_types_are_results_not_declaration_writes() {
+    let registry = build_registry(
+        r#"<?php
+            class Config { public const VALUES = ['first', 'second']; }
+            /** @template T of value-of<Config::VALUES> */
+            class Bounded {}
+            /** @template T */
+            class ParentGeneric {}
+            /** @extends ParentGeneric<value-of<Config::VALUES>> */
+            class ChildGeneric extends ParentGeneric {}
+            /** @template T */
+            interface GenericContract {}
+            /** @implements GenericContract<value-of<Config::VALUES>> */
+            class ContractUser implements GenericContract {}
+            "#,
+    );
+    let expected =
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()));
+
+    assert!(registry.classes["Bounded"].template_bounds["T"].contains_deferred());
+    assert_eq!(
+        registry
+            .effective_template_bounds_by_name("Bounded")
+            .get("T"),
+        Some(&expected)
+    );
+
+    assert!(registry.classes["ChildGeneric"].extends_args[0].contains_deferred());
+    assert_eq!(
+        registry.effective_extends_args_by_name("ChildGeneric"),
+        vec![expected.clone()]
+    );
+
+    assert!(
+        registry.classes["ContractUser"].implements_args["GenericContract"][0].contains_deferred()
+    );
+    assert_eq!(
+        registry
+            .effective_implements_args_by_name("ContractUser")
+            .get("GenericContract"),
+        Some(&vec![expected])
+    );
+}
+
+#[test]
 fn deferred_value_of_property_results_leave_the_declaration_unchanged() {
     let r = build_registry(
         r#"<?php
