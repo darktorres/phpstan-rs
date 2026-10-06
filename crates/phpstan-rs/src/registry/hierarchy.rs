@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 use syntax::name::NameSet;
 use syntax::name::{FoldedMap, Name, NameMap};
@@ -184,49 +184,51 @@ impl Registry {
     pub fn precompute_ancestor_names(&mut self) {
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
-        let ancestor_names: Vec<_> = class_names
+        let ancestor_names: FxHashMap<_, _> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
                 Some((
                     *registry.class_ids.get(name)?,
-                    name.clone(),
-                    registry.class_extends_implements_closure(name),
-                    registry.class_reaches_phpstan_name(name),
+                    (
+                        registry.class_extends_implements_closure(name),
+                        registry.class_reaches_phpstan_name(name),
+                    ),
                 ))
             })
             .collect();
-        let with_phpstan_ancestry = |entries: &[(ClassId, Name, NameSet, bool)]| {
-            entries
-                .iter()
-                .filter(|(_, _, _, reaches)| *reaches)
-                .map(|(id, ..)| *id)
-                .collect::<FxHashSet<ClassId>>()
-        };
         if self.scope.is_all() {
-            self.phpstan_ancestry = with_phpstan_ancestry(&ancestor_names);
-            self.ancestors_by_id = ancestor_names
+            self.phpstan_ancestry = ancestor_names
                 .par_iter()
-                .map(|(id, _, ancestors, _)| (*id, ancestors.clone()))
+                .filter_map(|(id, (_, reaches))| reaches.then_some(*id))
+                .collect();
+            self.ancestors_by_id = ancestor_names
+                .into_par_iter()
+                .map(|(id, (ancestors, _))| (id, ancestors))
                 .collect();
             self.subtype_children = NameTable::default();
             self.trait_users = NameTable::default();
             self.recorded_parents = NameTable::default();
         } else {
             let active_ids: FxHashSet<ClassId> = self.class_ids.values().copied().collect();
-            self.phpstan_ancestry.retain(|id| active_ids.contains(id));
+            self.phpstan_ancestry.retain(|id| {
+                active_ids.contains(id)
+                    && !ancestor_names.get(id).is_some_and(|(_, reaches)| !reaches)
+            });
             self.ancestors_by_id.retain(|id, _| active_ids.contains(id));
             for name in self.scoped_removed_class_keys() {
                 self.unrecord_parents(&name);
             }
-            for (id, _name, ancestors, reaches) in ancestor_names {
-                if reaches {
-                    self.phpstan_ancestry.insert(id);
-                } else {
-                    self.phpstan_ancestry.remove(&id);
-                }
-                self.ancestors_by_id.insert(id, ancestors);
-            }
+            self.phpstan_ancestry.par_extend(
+                ancestor_names
+                    .par_iter()
+                    .filter_map(|(id, (_, reaches))| reaches.then_some(*id)),
+            );
+            self.ancestors_by_id.par_extend(
+                ancestor_names
+                    .into_par_iter()
+                    .map(|(id, (ancestors, _))| (id, ancestors)),
+            );
         }
         for name in class_names.iter() {
             let Some(info) = self.classes.get(name) else {
@@ -487,44 +489,28 @@ impl Registry {
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
 
-        let own_by_class: Vec<_> = class_names
+        let own_by_class: FxHashMap<_, _> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
                 let id = *registry.class_ids.get(name)?;
                 let (methods, properties, consts) = registry.own_owner_names(name);
-                Some((id, methods, properties, consts))
+                Some((
+                    id,
+                    ClassOwners {
+                        methods: Lazy::decoded(methods),
+                        properties: Lazy::decoded(properties),
+                        consts: Lazy::decoded(consts),
+                    },
+                ))
             })
             .collect();
         if self.scope.is_all() {
-            self.member_owners = own_by_class
-                .into_par_iter()
-                .map(|(id, methods, properties, consts)| {
-                    (
-                        id,
-                        ClassOwners {
-                            methods: Lazy::decoded(methods),
-                            properties: Lazy::decoded(properties),
-                            consts: Lazy::decoded(consts),
-                        },
-                    )
-                })
-                .collect();
+            self.member_owners = own_by_class;
         } else {
             let active_ids: FxHashSet<ClassId> = self.class_ids.values().copied().collect();
             self.member_owners.retain(|id, _| active_ids.contains(id));
-            self.member_owners.extend(own_by_class.into_iter().map(
-                |(id, methods, properties, consts)| {
-                    (
-                        id,
-                        ClassOwners {
-                            methods: Lazy::decoded(methods),
-                            properties: Lazy::decoded(properties),
-                            consts: Lazy::decoded(consts),
-                        },
-                    )
-                },
-            ));
+            self.member_owners.par_extend(own_by_class);
         }
     }
 
