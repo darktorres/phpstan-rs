@@ -325,7 +325,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   ID map at freeze. The round-trip oracle checks all owner kinds for every
   class; the generation-switch test checks inherited method ownership still
   resolves. The full 1,141-test library suite, check, and Clippy pass. Other
-  pass results and immutable declaration storage remain.
+  pass results and immutable declaration storage remain. `d3c4d0d9` changes
+  the ancestor-closure and member-owner builds to collect directly into
+  ID-keyed maps and parallel-merges scoped updates. This advances 4.7; its
+  reference, include-graph, purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
