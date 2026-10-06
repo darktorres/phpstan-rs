@@ -162,7 +162,7 @@ fn instanceof_target_name_span_points_at_the_class_name() {
 fn member_names_and_static_targets_have_their_own_spans() {
     let src = "<?php self::LIMIT; Foo::bar(); Foo::$count; $o->run(Bar::X); $o->prop;";
     let program = parse(src);
-    let exprs: Vec<&Expr> = program
+    let exprs: Vec<&ExprNode> = program
         .iter()
         .map(|s| match &s.kind {
             StmtKind::Expression(e) => e,
@@ -219,7 +219,7 @@ fn spans_inside_an_interpolated_expression_are_real_even_in_a_closure() {
     let program = parse(src);
     struct Find(Option<Span>);
     impl<'ast> crate::visit::Visitor<'ast> for Find {
-        fn visit_expr(&mut self, e: &'ast Expr) {
+        fn visit_expr(&mut self, e: &'ast ExprNode) {
             if matches!(&e.kind, ExprKind::Variable(v) if &**v == "inner") {
                 self.0 = Some(e.span);
             }

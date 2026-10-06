@@ -48,35 +48,35 @@ enum Infix {
 impl Parser<'_> {
     // ---- expressions (binding power, by PHP's precedence table) ----
 
-    pub fn parse_expression(&mut self) -> Result<Expr, ParseError> {
+    pub fn parse_expression(&mut self) -> Result<ExprNode, ParseError> {
         self.parse_expr_bp(bp::LOWEST)
     }
 
     /// An expression without the low-precedence `and`/`or`/`xor`: what an
     /// assignment's right side, a `print` operand and a ternary's branches
     /// are.
-    pub(crate) fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_assignment(&mut self) -> Result<ExprNode, ParseError> {
         self.parse_expr_bp(bp::TERNARY)
     }
 
-    pub(crate) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_ternary(&mut self) -> Result<ExprNode, ParseError> {
         self.parse_expr_bp(bp::TERNARY)
     }
 
     /// A prefix operator's operand and what binds tighter: `clone`'s
     /// operand, an `instanceof` target.
-    pub(crate) fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_unary(&mut self) -> Result<ExprNode, ParseError> {
         self.parse_expr_bp(bp::UNARY)
     }
 
     /// The operators of binding power `min` or tighter around one operand,
     /// by `bp`'s levels. One stack guard for each expression nested in
     /// another, where each operand used to pass three.
-    pub(crate) fn parse_expr_bp(&mut self, min: u8) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_expr_bp(&mut self, min: u8) -> Result<ExprNode, ParseError> {
         crate::stack::guard(|| self.parse_expr_bp_inner(min))
     }
 
-    fn parse_expr_bp_inner(&mut self, min: u8) -> Result<Expr, ParseError> {
+    fn parse_expr_bp_inner(&mut self, min: u8) -> Result<ExprNode, ParseError> {
         let start = self.current_pos();
         let mut lhs = self.parse_prefix(start)?;
         // The level of the non-associative operator just applied: another
@@ -127,7 +127,7 @@ impl Parser<'_> {
     /// the `?`. A ternary is left-associative, and PHP refuses to compile
     /// one that is the condition of another unless both are short
     /// (`$a ?: $b ?: $c`).
-    fn parse_ternary_rest(&mut self, cond: Expr, start: u32) -> Result<Expr, ParseError> {
+    fn parse_ternary_rest(&mut self, cond: ExprNode, start: u32) -> Result<ExprNode, ParseError> {
         let short = matches!(self.peek_at(1), Token::Colon);
         if let ExprKind::Ternary(_, then, _) = &cond.kind
             && !(then.is_none() && short)
@@ -284,7 +284,7 @@ impl Parser<'_> {
     /// `!($x instanceof Y)`: `apply_narrowing`'s `Unary(Not, Instanceof)`
     /// pattern depends on it), and the other prefix operators take their
     /// operand with `**` (`-$a ** 2` is `-($a ** 2)`).
-    fn parse_prefix(&mut self, start: u32) -> Result<Expr, ParseError> {
+    fn parse_prefix(&mut self, start: u32) -> Result<ExprNode, ParseError> {
         if let Some(spelling) = self.try_parse_cast() {
             let operand = self.parse_expr_bp(bp::UNARY)?;
             return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
@@ -326,9 +326,9 @@ impl Parser<'_> {
     /// once, to every operand (`parse_pow`).
     pub(crate) fn parse_assignment_tail(
         &mut self,
-        lhs: Expr,
+        lhs: ExprNode,
         start: u32,
-    ) -> Result<Expr, ParseError> {
+    ) -> Result<ExprNode, ParseError> {
         let op = match self.peek() {
             Token::Equals => None,
             Token::PlusEquals => Some(BinOp::Add),
@@ -398,7 +398,11 @@ impl Parser<'_> {
     /// taken as the destructuring pattern it is there. `top` is whether
     /// `target` is the whole target rather than an item of an enclosing
     /// pattern.
-    pub(crate) fn as_pattern(&mut self, mut target: Expr, top: bool) -> Result<Expr, ParseError> {
+    pub(crate) fn as_pattern(
+        &mut self,
+        mut target: ExprNode,
+        top: bool,
+    ) -> Result<ExprNode, ParseError> {
         match &mut target.kind {
             ExprKind::ArrayLiteral(items) => {
                 let items = std::mem::take(items);
@@ -417,7 +421,7 @@ impl Parser<'_> {
                     ));
                 }
                 let items = self.destructure_items(items, DestructureSyntax::Short, target.span)?;
-                Ok(Expr {
+                Ok(ExprNode {
                     id: target.id,
                     kind: ExprKind::Destructure(items, DestructureSyntax::Short),
                     span: target.span,

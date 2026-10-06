@@ -8,7 +8,7 @@ fn word_operators_bind_looser_than_assignment() {
     // The classic PHP gotcha: `$a = $b or $c;` is `($a = $b) or $c;`,
     // not `$a = ($b or $c);` - unlike &&/||.
     let program = parse("<?php $x = 5 or die();");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Binary(BinOp::LogicalOr, lhs, _),
         ..
     }) = &program[0].kind
@@ -359,7 +359,7 @@ fn a_spread_element_inside_an_array_literal_sets_its_own_spread_flag() {
 #[test]
 fn first_class_callable_parses_distinctly_from_a_real_call() {
     let program = parse("<?php $f = strlen(...);");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -395,7 +395,7 @@ fn bitwise_compound_assignment_operators_parse() {
     for stmt in f.body_stmts().iter() {
         assert!(matches!(
             &stmt.kind,
-            StmtKind::Expression(Expr {
+            StmtKind::Expression(ExprNode {
                 kind: ExprKind::CompoundAssign(..),
                 ..
             })
@@ -420,14 +420,14 @@ fn yield_forms_all_parse() {
     };
     assert_eq!(f.body_stmts().len(), 4);
 
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Yield(None, Some(_)),
         ..
     }) = &f.body_stmts()[0].kind
     else {
         panic!("expected bare-value yield");
     };
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Yield(Some(_), Some(_)),
         ..
     }) = f.body_stmts()[1].kind
@@ -436,14 +436,14 @@ fn yield_forms_all_parse() {
     };
     assert!(matches!(
         f.body_stmts()[2].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::YieldFrom(_),
             ..
         })
     ));
     assert!(matches!(
         f.body_stmts()[3].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::Yield(None, None),
             ..
         })
@@ -459,7 +459,7 @@ fn binary_and_explicit_octal_literals_parse() {
             $c = 0x1F;
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -467,7 +467,7 @@ fn binary_and_explicit_octal_literals_parse() {
         panic!("expected assignment");
     };
     assert!(matches!(&rhs.kind, ExprKind::Literal(Literal::Int(5))));
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[1].kind
@@ -475,7 +475,7 @@ fn binary_and_explicit_octal_literals_parse() {
         panic!("expected assignment");
     };
     assert!(matches!(&rhs.kind, ExprKind::Literal(Literal::Int(509))));
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[2].kind
@@ -493,7 +493,7 @@ fn instanceof_with_dynamic_class_name_parses() {
             $ok = $x instanceof Foo;
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Call(_, args),
         ..
     }) = &program[0].kind
@@ -505,7 +505,7 @@ fn instanceof_with_dynamic_class_name_parses() {
     };
     assert!(matches!(target, InstanceofTarget::Expr(_)));
 
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[1].kind
@@ -527,7 +527,7 @@ fn not_binds_looser_than_instanceof() {
     // produced `(!$x) instanceof Y` instead, which never matches the
     // `Unary(Not, Instanceof(..))` shape narrowing looks for.
     let program = parse("<?php $ok = ! $x instanceof Foo;");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -551,14 +551,14 @@ fn reference_assignment_parses_as_assign_ref_not_plain_assign() {
     );
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::AssignRef(_, _),
             ..
         })
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::AssignRef(_, _),
             ..
         })
@@ -567,7 +567,7 @@ fn reference_assignment_parses_as_assign_ref_not_plain_assign() {
     // `Assign`, not `AssignRef`.
     assert!(matches!(
         &program[2].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::Assign(_, _),
             ..
         })
@@ -582,7 +582,7 @@ fn destructuring_with_skipped_slot_parses() {
             [$a, , $c] = $t;
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(lhs, _),
         ..
     }) = &program[0].kind
@@ -599,7 +599,7 @@ fn destructuring_with_skipped_slot_parses() {
         ExprKind::Variable(_)
     ));
 
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(lhs, _),
         ..
     }) = &program[1].kind
@@ -632,7 +632,7 @@ fn a_foreach_value_array_is_a_destructuring_target() {
 #[test]
 fn an_array_that_is_not_assigned_to_stays_a_value() {
     let program = parse("<?php $x = [$a, [$b]][0] = 1;");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -653,7 +653,7 @@ fn pipe_operator_parses_left_associative_and_at_the_right_precedence() {
     // Precedence checked empirically against a real PHP 8.5 build:
     // tighter than relational, looser than additive/concat.
     let program = parse(r#"<?php $r = 1 |> 'inc' |> 'dbl' < 3;"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -680,7 +680,7 @@ fn dynamic_property_and_method_access_parse() {
             Foo::{$name}();
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -694,13 +694,13 @@ fn dynamic_property_and_method_access_parse() {
 
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::DynamicMethodCall(_, _, _, _),
             ..
         })
     ));
 
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::DynamicStaticCall(class, name, _),
         ..
     }) = &program[2].kind
@@ -722,15 +722,15 @@ fn dollar_brace_variable_variable_forms_parse() {
     );
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicVariable(_))
+        StmtKind::Expression(ExprNode { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicVariable(_))
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicPropertyAccess(_, _, _))
+        StmtKind::Expression(ExprNode { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicPropertyAccess(_, _, _))
     ));
     assert!(matches!(
         &program[2].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if **c == "C")
+        StmtKind::Expression(ExprNode { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if **c == "C")
     ));
 }
 
@@ -743,7 +743,7 @@ fn clone_with_overrides_and_classic_forms_both_parse() {
             $z = clone($a)->b;
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -754,7 +754,7 @@ fn clone_with_overrides_and_classic_forms_both_parse() {
 
     // `clone $a->b` clones the result of `$a->b`, not `$a` itself -
     // postfix binds inside clone's operand.
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[1].kind
@@ -768,7 +768,7 @@ fn clone_with_overrides_and_classic_forms_both_parse() {
 
     // Same rule applies even with explicit parens and no comma:
     // `clone($a)->b` clones `$a->b`, not `$a`.
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[2].kind
@@ -786,12 +786,12 @@ fn void_and_binary_casts_parse() {
     let program = parse(r#"<?php (void) foo(); $x = (binary) 42;"#);
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::Cast(CastSpelling::Void, _),
             ..
         })
     ));
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[1].kind
@@ -818,7 +818,7 @@ fn cast_spellings_are_recorded_as_written_with_their_kind() {
     let spellings: Vec<CastSpelling> = program
         .iter()
         .map(|s| {
-            let StmtKind::Expression(Expr {
+            let StmtKind::Expression(ExprNode {
                 kind: ExprKind::Cast(spelling, _),
                 ..
             }) = &s.kind
@@ -872,7 +872,7 @@ fn yield_followed_by_pure_binary_operator_is_bare() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Call(_, args),
         ..
     }) = &f.body_stmts()[0].kind
@@ -902,7 +902,7 @@ fn clone_call_form_variants_parse() {
 #[test]
 fn clone_as_first_class_callable_parses() {
     let program = parse(r#"<?php $f = clone(...);"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -915,7 +915,7 @@ fn clone_as_first_class_callable_parses() {
 #[test]
 fn by_reference_arrow_function_still_parses_as_arrow_fn() {
     let program = parse(r#"<?php $id = fn&(&$x) => $x;"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -931,7 +931,7 @@ fn by_reference_arrow_function_still_parses_as_arrow_fn() {
 #[test]
 fn an_attributed_closure_expression_carries_its_own_attrs() {
     let program = parse(r#"<?php $f = #[Pure] function () { return 1; };"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -948,7 +948,7 @@ fn an_attributed_closure_expression_carries_its_own_attrs() {
 #[test]
 fn an_attributed_static_arrow_function_carries_its_own_attrs() {
     let program = parse(r#"<?php $f = #[Pure] static fn($x) => $x;"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -966,7 +966,7 @@ fn an_attributed_static_arrow_function_carries_its_own_attrs() {
 #[test]
 fn a_plain_closure_with_no_attributes_has_an_empty_attrs_list() {
     let program = parse(r#"<?php $f = function () { return 1; };"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -982,7 +982,7 @@ fn a_plain_closure_with_no_attributes_has_an_empty_attrs_list() {
 #[test]
 fn trailing_dot_float_literal_parses() {
     let program = parse(r#"<?php $x = [5., 6.];"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -1005,7 +1005,7 @@ fn dynamic_class_expr_after_new_and_instanceof_parses() {
             var_dump($obj instanceof ('std'.$class));
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Call(_, args),
         ..
     }) = &program[1].kind
@@ -1017,7 +1017,7 @@ fn dynamic_class_expr_after_new_and_instanceof_parses() {
     };
     assert!(matches!(&class_expr.kind, ExprKind::Grouping(_)));
 
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Call(_, args),
         ..
     }) = &program[2].kind
@@ -1038,7 +1038,7 @@ fn brace_less_double_dollar_variable_variable_parses() {
     };
     assert_eq!(vars[0].name().map(|n| n.as_str()), Some("a"));
     assert!(
-        matches!(&vars[1], GlobalVar::Dynamic(Expr { kind: ExprKind::Variable(b), .. }) if &**b == "b")
+        matches!(&vars[1], GlobalVar::Dynamic(ExprNode { kind: ExprKind::Variable(b), .. }) if &**b == "b")
     );
 }
 
@@ -1053,18 +1053,18 @@ fn double_dollar_variable_variable_in_member_position_parses() {
     );
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::DynamicPropertyAccess(_, _, _),
             ..
         })
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _), .. }) if **c == "Foo"
+        StmtKind::Expression(ExprNode { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _), .. }) if **c == "Foo"
     ));
     assert!(matches!(
         &program[2].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::DynamicMethodCall(_, _, _, _),
             ..
         })
@@ -1088,14 +1088,14 @@ fn bare_variable_in_member_position_parses_as_dynamic() {
     );
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::DynamicPropertyAccess(_, _, _),
             ..
         })
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::DynamicMethodCall(_, _, _, _),
             ..
         })
@@ -1105,7 +1105,7 @@ fn bare_variable_in_member_position_parses_as_dynamic() {
 #[test]
 fn array_cast_parses() {
     let program = parse(r#"<?php $tmp = (array)$var;"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -1125,7 +1125,7 @@ fn a_variable_variable_member_name_keeps_both_levels_of_indirection() {
         "#,
     );
     let name_of = |i: usize| match &program[i].kind {
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::DynamicPropertyAccess(_, name, _),
             ..
         }) => &name.kind,

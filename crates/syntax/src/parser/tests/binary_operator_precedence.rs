@@ -3,7 +3,7 @@ use super::helpers::{parse, text_at};
 
 /// `expr` as nested parentheses over its binary operators, variables as
 /// their names.
-fn grouped(expr: &Expr) -> String {
+fn grouped(expr: &ExprNode) -> String {
     match &expr.kind {
         ExprKind::Binary(op, left, right) => {
             format!("({} {op:?} {})", grouped(left), grouped(right))
@@ -13,7 +13,7 @@ fn grouped(expr: &Expr) -> String {
     }
 }
 
-fn statement_expr(src: &str) -> (Vec<Stmt>, usize) {
+fn statement_expr(src: &str) -> (Vec<StmtNode>, usize) {
     (parse(src), 0)
 }
 

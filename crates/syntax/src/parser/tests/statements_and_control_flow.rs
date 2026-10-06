@@ -148,7 +148,7 @@ fn if_alt_syntax_with_elseif_and_else_is_one_chain() {
     };
     assert!(matches!(&elseif.body.kind, StmtKind::Block(s) if s.len() == 1));
     assert!(
-        matches!(if_stmt.else_branch.as_deref(), Some(Stmt { kind: StmtKind::Block(s), .. }) if s.len() == 1)
+        matches!(if_stmt.else_branch.as_deref(), Some(StmtNode { kind: StmtKind::Block(s), .. }) if s.len() == 1)
     );
 }
 
@@ -161,7 +161,7 @@ fn elseif_is_part_of_the_chain_and_else_if_is_a_nested_if() {
     assert_eq!(if_stmt.elseifs.len(), 1);
     assert!(matches!(
         if_stmt.else_branch.as_deref(),
-        Some(Stmt { kind: StmtKind::If(nested), .. }) if nested.elseifs.is_empty()
+        Some(StmtNode { kind: StmtKind::If(nested), .. }) if nested.elseifs.is_empty()
     ));
 }
 
@@ -225,7 +225,7 @@ fn foreach_alt_syntax_parses_its_body_via_parse_alt_block() {
 #[test]
 fn isset_empty_and_unset_are_their_own_nodes() {
     let program = parse("<?php\n$a = isset($x, $y['k']) || empty($z);\nunset($x, $y['k']);\n");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -243,7 +243,7 @@ fn isset_empty_and_unset_are_their_own_nodes() {
 #[test]
 fn list_is_apart_from_an_array_literal() {
     let program = parse("<?php\nlist($a, list($b)) = [1, [2]];\n");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(lhs, rhs),
         ..
     }) = &program[0].kind
@@ -263,7 +263,7 @@ fn list_is_apart_from_an_array_literal() {
 #[test]
 fn error_suppression_is_kept_as_a_node() {
     let program = parse("<?php\n$f = @fopen('x', 'r');\n");
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -281,7 +281,7 @@ fn error_suppression_is_kept_as_a_node() {
 fn match_arms_are_spanned_with_the_default_in_its_place() {
     let src = "<?php $r = match ($x) { default => 0, 1, 2 => 1 };";
     let program = parse(src);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind

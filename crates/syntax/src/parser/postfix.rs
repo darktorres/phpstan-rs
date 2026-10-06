@@ -6,12 +6,12 @@ use crate::span::Span;
 use crate::token::Token;
 
 impl Parser<'_> {
-    pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<ExprNode, ParseError> {
         let primary = self.parse_primary()?;
         self.parse_postfix(primary)
     }
 
-    pub(crate) fn parse_postfix(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_postfix(&mut self, mut expr: ExprNode) -> Result<ExprNode, ParseError> {
         let start = expr.span.start;
         loop {
             match self.peek() {
@@ -297,5 +297,5 @@ enum StaticMember {
     Name(Ident),
     /// `$name`, and where it is.
     Variable(Name, Span),
-    Dynamic(Expr),
+    Dynamic(ExprNode),
 }

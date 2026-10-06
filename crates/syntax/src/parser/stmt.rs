@@ -7,11 +7,11 @@ use crate::token::{Keyword, Token};
 impl Parser<'_> {
     // ---- statements ----
 
-    pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_statement(&mut self) -> Result<StmtNode, ParseError> {
         crate::stack::guard(|| self.parse_statement_unguarded())
     }
 
-    fn parse_statement_unguarded(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_statement_unguarded(&mut self) -> Result<StmtNode, ParseError> {
         // Captured before any leading `#[Attr]` group(s) are consumed, so
         // a declaration's own span includes them - matches how `start`
         // already includes a class's own `abstract`/`final` modifiers.
@@ -335,7 +335,7 @@ impl Parser<'_> {
                 self.skip();
                 let (args, _) = self.parse_args()?;
                 self.expect_semicolon()?;
-                let targets: Vec<Expr> = args.into_iter().map(|a| a.value).collect();
+                let targets: Vec<ExprNode> = args.into_iter().map(|a| a.value).collect();
                 self.saw_property_unset |= targets.iter().any(|target| {
                     matches!(
                         target.peeled().kind,
@@ -483,7 +483,7 @@ impl Parser<'_> {
 
 /// `parse_optional_level`'s own constant-folder - see that function's
 /// doc comment for why only these three shapes matter.
-fn const_fold_level(e: &Expr) -> Option<i64> {
+fn const_fold_level(e: &ExprNode) -> Option<i64> {
     let e = e.peeled();
     crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),

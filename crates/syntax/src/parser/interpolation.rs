@@ -16,7 +16,7 @@ impl Parser<'_> {
         &mut self,
         parts: Vec<StringPart>,
         base: u32,
-    ) -> Result<Expr, ParseError> {
+    ) -> Result<ExprNode, ParseError> {
         let mut exprs = Vec::new();
         for part in parts {
             match part {
@@ -166,7 +166,7 @@ impl Parser<'_> {
 /// Whether `e` is what PHP's `variable` production allows: a variable
 /// with property fetches, method or static calls, and offsets chained on
 /// it (`$a->b[0]->c()`, `$f()`, `$c::$p`).
-fn is_variable_chain(e: &Expr) -> bool {
+fn is_variable_chain(e: &ExprNode) -> bool {
     match &e.kind {
         ExprKind::Variable(_) | ExprKind::DynamicVariable(_) => true,
         ExprKind::PropertyAccess(base, ..)

@@ -8,7 +8,7 @@ use crate::token::StringPart;
 #[test]
 fn shell_exec_backtick_string_parses() {
     let program = parse(r#"<?php $x = `echo -n ""`;"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -57,7 +57,7 @@ fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
 #[test]
 fn bareword_index_interpolation_parses_as_an_index_with_a_string_literal_key() {
     let program = parse(r#"<?php $x = "$arr[key]";"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -81,7 +81,7 @@ fn bareword_index_interpolation_parses_as_an_index_with_a_string_literal_key() {
 #[test]
 fn variable_index_interpolation_parses_as_an_index_with_a_variable_key() {
     let program = parse(r#"<?php $x = "$arr[$idx]";"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -110,7 +110,7 @@ fn int_index_interpolation_including_negative_parses_as_an_index_with_an_int_lit
         (r#"<?php $x = "$arr[-1]";"#, -1),
     ] {
         let program = parse(src);
-        let StmtKind::Expression(Expr {
+        let StmtKind::Expression(ExprNode {
             kind: ExprKind::Assign(_, rhs),
             ..
         }) = &program[0].kind
@@ -138,7 +138,7 @@ fn a_non_canonical_number_index_in_interpolation_is_a_string_key() {
     for key in ["01", "-0", "0x1A", "1_000", "9223372036854775808"] {
         let src = format!(r#"<?php $x = "$arr[{key}]";"#);
         let program = parse(&src);
-        let StmtKind::Expression(Expr {
+        let StmtKind::Expression(ExprNode {
             kind: ExprKind::Assign(_, rhs),
             ..
         }) = &program[0].kind
@@ -213,7 +213,7 @@ fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
 #[test]
 fn braced_property_access_interpolation_parses_as_a_property_access() {
     let program = parse(r#"<?php $x = "{$obj->prop}";"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -234,7 +234,7 @@ fn braced_property_access_interpolation_parses_as_a_property_access() {
 #[test]
 fn braced_index_interpolation_parses_as_an_index() {
     let program = parse(r#"<?php $x = "{$arr[key]}";"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -261,7 +261,7 @@ fn braced_index_interpolation_parses_as_an_index() {
 #[test]
 fn a_braced_method_call_is_not_mistaken_for_a_simple_property_access() {
     let program = parse(r#"<?php $x = "{$obj->method()}";"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -284,7 +284,7 @@ fn a_braced_method_call_is_not_mistaken_for_a_simple_property_access() {
 #[test]
 fn a_malformed_index_key_falls_back_to_complex_expr_re_lexing() {
     let program = parse(r#"<?php $x = "$arr[1a]";"#);
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -313,7 +313,7 @@ fn quote_inside_complex_interpolation_does_not_end_the_string() {
     let program = parse(r#"<?php $x = "before {$data["key"]} after";"#);
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr {
+        StmtKind::Expression(ExprNode {
             kind: ExprKind::Assign(_, _),
             ..
         })
@@ -342,7 +342,7 @@ fn a_complex_interpolation_fragment_with_an_extreme_base_position_does_not_panic
 /// backtick one; elsewhere, a heredoc included, each stays two bytes.
 #[test]
 fn quote_escapes_decode_only_for_their_own_delimiter() {
-    fn literal_bytes(e: &Expr) -> Vec<u8> {
+    fn literal_bytes(e: &ExprNode) -> Vec<u8> {
         match &e.kind {
             ExprKind::Literal(Literal::String(s)) => s.as_bytes().to_vec(),
             ExprKind::ShellExec(inner) => literal_bytes(inner),
@@ -355,7 +355,7 @@ fn quote_escapes_decode_only_for_their_own_delimiter() {
         ("<?php $x = <<<EOT\na\\\"b\\`c\nEOT;\n", &b"a\\\"b\\`c"[..]),
     ] {
         let program = parse(src);
-        let StmtKind::Expression(Expr {
+        let StmtKind::Expression(ExprNode {
             kind: ExprKind::Assign(_, rhs),
             ..
         }) = &program[0].kind

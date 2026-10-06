@@ -2,7 +2,7 @@ use super::super::*;
 use crate::lexer::Lexer;
 use crate::span::Span;
 
-pub(super) fn parse(src: &str) -> Vec<Stmt> {
+pub(super) fn parse(src: &str) -> Vec<StmtNode> {
     Parser::new(Lexer::new(src).tokenize_with_spans())
         .parse_program()
         .unwrap()

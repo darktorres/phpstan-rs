@@ -4,7 +4,7 @@ use crate::span::Span;
 use crate::token::{Keyword, Token};
 
 impl Parser<'_> {
-    pub(crate) fn parse_closure_like(&mut self, is_static: bool) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_closure_like(&mut self, is_static: bool) -> Result<ExprNode, ParseError> {
         if self.check(&Token::Keyword(Keyword::Fn)) {
             self.parse_arrow_fn(is_static)
         } else {
@@ -12,7 +12,7 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn parse_closure(&mut self, is_static: bool) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_closure(&mut self, is_static: bool) -> Result<ExprNode, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Function))?;
         let by_ref = self.eat(&Token::Amp);
@@ -79,7 +79,7 @@ impl Parser<'_> {
         ))
     }
 
-    pub(crate) fn parse_arrow_fn(&mut self, is_static: bool) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_arrow_fn(&mut self, is_static: bool) -> Result<ExprNode, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Fn))?;
         let by_ref = self.eat(&Token::Amp);
@@ -109,7 +109,7 @@ impl Parser<'_> {
         ))
     }
 
-    pub(crate) fn parse_match_expr(&mut self) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_match_expr(&mut self) -> Result<ExprNode, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Match))?;
         self.expect(&Token::LParen)?;

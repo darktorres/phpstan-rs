@@ -80,7 +80,7 @@ impl Parser<'_> {
     /// `new_variable`), never a call, so `new $this->model($v)`
     /// instantiates the class `$this->model` names and `($v)` is the
     /// constructor's arguments.
-    fn parse_new_class_reference(&mut self) -> Result<Expr, ParseError> {
+    fn parse_new_class_reference(&mut self) -> Result<ExprNode, ParseError> {
         let start = self.current_pos();
         let mut expr = match self.peek() {
             Token::Variable(_) | Token::Dollar | Token::DollarBrace => self.parse_primary()?,
@@ -187,7 +187,7 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_primary(&mut self) -> Result<ExprNode, ParseError> {
         let start = self.current_pos();
         // Matches on `self.peek()` by reference rather than `self.peek()
         // .clone()` - most arms below need no payload at all (delegating

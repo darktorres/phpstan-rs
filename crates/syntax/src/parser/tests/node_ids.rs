@@ -12,11 +12,11 @@ struct Ids {
 }
 
 impl<'ast> Visitor<'ast> for Ids {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         self.statements.push((stmt.id, stmt.span));
         walk_stmt(self, stmt);
     }
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         self.expressions.push((e.id, e.span));
         walk_expr(self, e);
     }

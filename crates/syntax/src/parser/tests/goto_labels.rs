@@ -8,7 +8,7 @@ use crate::visit::{Visitor, any_stmt_in_body, walk_expr, walk_function_decl, wal
 
 /// What a walk of `stmts` in source order says: every label a `goto` names,
 /// and whether some `goto` after the label names it.
-fn expected(stmts: &[Stmt]) -> Vec<(String, bool)> {
+fn expected(stmts: &[StmtNode]) -> Vec<(String, bool)> {
     let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut targets: Vec<(String, bool)> = Vec::new();
     for stmt in stmts {
@@ -51,7 +51,7 @@ struct Check {
 }
 
 impl Check {
-    fn compare(&mut self, what: &str, stmts: &[Stmt], labels: &[GotoLabel]) {
+    fn compare(&mut self, what: &str, stmts: &[StmtNode], labels: &[GotoLabel]) {
         self.bodies += 1;
         let (want, got) = (expected(stmts), recorded(labels));
         if !want.is_empty() {
@@ -65,7 +65,7 @@ impl Check {
 }
 
 impl<'ast> Visitor<'ast> for Check {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         walk_stmt(self, stmt);
     }
 
@@ -76,7 +76,7 @@ impl<'ast> Visitor<'ast> for Check {
         walk_function_decl(self, function);
     }
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         if let ExprKind::Closure(closure) = &expr.kind {
             self.compare("closure", &closure.body, &closure.goto_labels);
         }

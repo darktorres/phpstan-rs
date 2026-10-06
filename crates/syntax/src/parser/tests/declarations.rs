@@ -88,7 +88,7 @@ fn backed_enum_with_interface_and_method_parses() {
     );
     assert!(matches!(
         &e.def.enum_cases[0].value,
-        Some(Expr {
+        Some(ExprNode {
             kind: ExprKind::Literal(_),
             ..
         })
@@ -420,7 +420,7 @@ fn anonymous_class_parses_with_interface_and_constructor_args() {
             };
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind
@@ -455,7 +455,7 @@ fn anonymous_class_with_a_leading_attribute_group_parses() {
             };
         "#,
     );
-    let StmtKind::Expression(Expr {
+    let StmtKind::Expression(ExprNode {
         kind: ExprKind::Assign(_, rhs),
         ..
     }) = &program[0].kind

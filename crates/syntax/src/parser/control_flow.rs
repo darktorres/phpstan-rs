@@ -4,13 +4,13 @@ use crate::span::Span;
 use crate::token::{Keyword, Token};
 
 impl Parser<'_> {
-    pub(crate) fn parse_block(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_block(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         let stmts = self.parse_stmt_list_block()?;
         Ok(self.stmt(StmtKind::Block(stmts), start))
     }
 
-    pub(crate) fn parse_braced_or_single(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_braced_or_single(&mut self) -> Result<StmtNode, ParseError> {
         if self.check(&Token::LBrace) {
             self.parse_block()
         } else {
@@ -21,7 +21,7 @@ impl Parser<'_> {
     /// A loop/if body, accepting either `{ ... }` / a bare statement, or
     /// PHP's alternative colon syntax (`: ... endwhile;` etc, common in
     /// templates that interleave HTML and PHP).
-    pub(crate) fn parse_body(&mut self, alt_end: Keyword) -> Result<Box<Stmt>, ParseError> {
+    pub(crate) fn parse_body(&mut self, alt_end: Keyword) -> Result<Box<StmtNode>, ParseError> {
         let start = self.current_pos();
         if self.check(&Token::Colon) {
             let stmts = self.parse_alt_block(alt_end)?;
@@ -31,7 +31,7 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn parse_alt_block(&mut self, end_kw: Keyword) -> Result<Vec<Stmt>, ParseError> {
+    pub(crate) fn parse_alt_block(&mut self, end_kw: Keyword) -> Result<Vec<StmtNode>, ParseError> {
         self.expect(&Token::Colon)?;
         let mut stmts = Vec::new();
         while !self.check(&Token::Keyword(end_kw.clone())) && !self.at_eof() {
@@ -42,7 +42,7 @@ impl Parser<'_> {
         Ok(stmts)
     }
 
-    pub(crate) fn parse_if(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_if(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip(); // if
         let cond = self.parse_paren_condition()?;
@@ -82,7 +82,7 @@ impl Parser<'_> {
     }
 
     /// `( expr )`.
-    fn parse_paren_condition(&mut self) -> Result<Expr, ParseError> {
+    fn parse_paren_condition(&mut self) -> Result<ExprNode, ParseError> {
         self.expect(&Token::LParen)?;
         let cond = self.parse_expression()?;
         self.expect(&Token::RParen)?;
@@ -91,7 +91,11 @@ impl Parser<'_> {
 
     /// `if (c1): … elseif (c2): … else: … endif;`, the `if` keyword and its
     /// condition already read.
-    pub(crate) fn parse_if_alt(&mut self, cond: Expr, start: u32) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_if_alt(
+        &mut self,
+        cond: ExprNode,
+        start: u32,
+    ) -> Result<StmtNode, ParseError> {
         let then_branch = Box::new(self.parse_alt_branch()?);
         let mut elseifs = Vec::new();
         while self.check(&Token::Keyword(Keyword::ElseIf)) {
@@ -128,7 +132,7 @@ impl Parser<'_> {
 
     /// One branch of the alternative `if` syntax: `:` and the statements up
     /// to the next `elseif`, `else` or `endif`, as a block.
-    fn parse_alt_branch(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_alt_branch(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Colon)?;
         let mut stmts = Vec::new();
@@ -144,7 +148,7 @@ impl Parser<'_> {
         Ok(self.stmt(StmtKind::Block(stmts), start))
     }
 
-    pub(crate) fn parse_while(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_while(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip();
         self.expect(&Token::LParen)?;
@@ -154,7 +158,7 @@ impl Parser<'_> {
         Ok(self.stmt(StmtKind::While { cond, body }, start))
     }
 
-    pub(crate) fn parse_do_while(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_do_while(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip();
         let body = Box::new(self.parse_braced_or_single()?);
@@ -166,7 +170,7 @@ impl Parser<'_> {
         Ok(self.stmt(StmtKind::DoWhile { body, cond }, start))
     }
 
-    pub(crate) fn parse_for(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_for(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip();
         self.expect(&Token::LParen)?;
@@ -188,7 +192,10 @@ impl Parser<'_> {
         ))
     }
 
-    pub(crate) fn parse_expr_list_until(&mut self, stop: &Token) -> Result<Vec<Expr>, ParseError> {
+    pub(crate) fn parse_expr_list_until(
+        &mut self,
+        stop: &Token,
+    ) -> Result<Vec<ExprNode>, ParseError> {
         let mut exprs = Vec::new();
         if self.check(stop) {
             return Ok(exprs);
@@ -200,7 +207,7 @@ impl Parser<'_> {
         Ok(exprs)
     }
 
-    pub(crate) fn parse_foreach(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_foreach(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip();
         self.expect(&Token::LParen)?;
@@ -260,7 +267,7 @@ impl Parser<'_> {
         ))
     }
 
-    pub(crate) fn parse_try(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_try(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip(); // try
         let body = self.parse_stmt_list_block()?;
@@ -316,7 +323,7 @@ impl Parser<'_> {
     }
 
     /// A `{ ... }` block's statements.
-    pub(crate) fn parse_stmt_list_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub(crate) fn parse_stmt_list_block(&mut self) -> Result<Vec<StmtNode>, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut stmts = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
@@ -326,7 +333,7 @@ impl Parser<'_> {
         Ok(stmts)
     }
 
-    pub(crate) fn parse_switch(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn parse_switch(&mut self) -> Result<StmtNode, ParseError> {
         let start = self.current_pos();
         self.skip(); // switch
         self.expect(&Token::LParen)?;

@@ -390,7 +390,7 @@ impl Parser<'_> {
         self.ahead.front().map_or(self.last_span, |tok| tok.span)
     }
 
-    /// The position a `Stmt`/`Expr` about to be parsed starts at - call
+    /// The position a `StmtNode`/`ExprNode` about to be parsed starts at - call
     /// before consuming its first token. Falls back to the last known
     /// span: `self.pos` can run one past the last real token
     /// (`__halt_compiler()` jumps there), as `peek()` and `skip()` also
@@ -478,7 +478,7 @@ impl Parser<'_> {
     }
 
     /// The end of the last token actually consumed - call right before
-    /// returning a `Stmt`/`Expr` to close out its span. Same defensive
+    /// returning a `StmtNode`/`ExprNode` to close out its span. Same defensive
     /// fallback as `current_pos` for the same reason.
     pub(crate) fn previous_end(&self) -> u32 {
         self.last_end
@@ -615,10 +615,10 @@ impl Parser<'_> {
         StmtId::from_raw(la_arena::RawIdx::from_u32(id))
     }
 
-    /// Builds a `Stmt` spanning from `start` (the position captured before
+    /// Builds a `StmtNode` spanning from `start` (the position captured before
     /// this statement's first token was consumed) to whatever token was
     /// last consumed.
-    pub(crate) fn stmt(&self, mut kind: StmtKind, start: u32) -> Stmt {
+    pub(crate) fn stmt(&self, mut kind: StmtKind, start: u32) -> StmtNode {
         // What a statement changes in the names that follow it, and the
         // names a declaration gets, are settled as it is made: PHP reads a
         // file in this order.
@@ -667,7 +667,7 @@ impl Parser<'_> {
         let span_index = self.stmt_span_base + self.stmt_spans.borrow().len() as u32;
         debug_assert_eq!(u32::from(id.into_raw()), span_index);
         self.stmt_spans.borrow_mut().push(span);
-        Stmt {
+        StmtNode {
             id,
             kind,
             span,
@@ -677,7 +677,7 @@ impl Parser<'_> {
     }
 
     /// Same as `stmt`, for expressions.
-    pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> Expr {
+    pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> ExprNode {
         self.expr_at(
             kind,
             Span {
@@ -688,12 +688,12 @@ impl Parser<'_> {
     }
 
     /// Builds an expression whose span came directly from a lexer fragment.
-    pub(crate) fn expr_at(&self, kind: ExprKind, span: Span) -> Expr {
+    pub(crate) fn expr_at(&self, kind: ExprKind, span: Span) -> ExprNode {
         let id = self.expr_id();
         let span_index = self.expr_span_base + self.expr_spans.borrow().len() as u32;
         debug_assert_eq!(u32::from(id.into_raw()), span_index);
         self.expr_spans.borrow_mut().push(span);
-        Expr { id, kind, span }
+        ExprNode { id, kind, span }
     }
 
     /// Takes the span side tables built by this parser. A fragment parser's
@@ -718,7 +718,7 @@ impl Parser<'_> {
     }
 
     #[hotpath::measure]
-    pub fn parse_program(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub fn parse_program(&mut self) -> Result<Vec<StmtNode>, ParseError> {
         let mut stmts = Vec::new();
         while !self.at_eof() {
             // See parse_statement's own Namespace arm for why the
@@ -741,11 +741,11 @@ impl Parser<'_> {
     /// the common `namespace Foo\Bar;` statement form (still handled
     /// generically in parse_statement). Only legal at the top level of a
     /// file, so this is special-cased in parse_program rather than making
-    /// every parse_statement caller handle getting more than one Stmt
+    /// every parse_statement caller handle getting more than one StmtNode
     /// back. The block's body is spliced into the surrounding statement
-    /// list after a `Stmt::Namespace` marker, the same shape the statement
+    /// list after a `StmtNode::Namespace` marker, the same shape the statement
     /// form gives.
-    pub(crate) fn parse_namespace_stmt(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub(crate) fn parse_namespace_stmt(&mut self) -> Result<Vec<StmtNode>, ParseError> {
         let start = self.current_pos();
         self.skip(); // `namespace`
         let name = self.parse_qualified_name();

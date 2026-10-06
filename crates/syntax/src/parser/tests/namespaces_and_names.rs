@@ -103,7 +103,7 @@ fn namespace_relative_name_parses_as_expression_and_as_type() {
     };
     assert!(matches!(
         &f.params[0].default,
-        Some(Expr { kind: ExprKind::Name(n), .. }) if n == "namespace\\unknown"
+        Some(ExprNode { kind: ExprKind::Name(n), .. }) if n == "namespace\\unknown"
     ));
 
     let StmtKind::FunctionDecl(g) = &program[1].kind else {
@@ -176,7 +176,7 @@ fn readonly_abstract_final_usable_as_plain_names() {
     for stmt in &program[1..] {
         assert!(matches!(
             &stmt.kind,
-            StmtKind::Expression(Expr {
+            StmtKind::Expression(ExprNode {
                 kind: ExprKind::Call(_, _),
                 ..
             })
@@ -204,7 +204,7 @@ fn enum_usable_as_plain_function_and_constant_name() {
 fn fn_usable_as_namespace_segment_when_not_a_signature() {
     let program = parse(r#"<?php fn\test();"#);
     assert!(
-        matches!(&program[0].kind, StmtKind::Expression(Expr { kind: ExprKind::Call(callee, _), .. })
+        matches!(&program[0].kind, StmtKind::Expression(ExprNode { kind: ExprKind::Call(callee, _), .. })
             if matches!(&callee.kind, ExprKind::Name(n) if n == "fn\\test"))
     );
 }
@@ -214,7 +214,7 @@ fn namespace_relative_call_statement_is_not_a_declaration() {
     let program = parse(r#"<?php namespace\foo();"#);
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Call(callee, _), .. })
+        StmtKind::Expression(ExprNode { kind: ExprKind::Call(callee, _), .. })
             if matches!(&callee.kind, ExprKind::Name(n) if n == "namespace\\foo")
     ));
 }

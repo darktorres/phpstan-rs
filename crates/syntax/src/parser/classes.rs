@@ -46,7 +46,7 @@ impl Parser<'_> {
     /// handling already establishes for every other declaration. Reuses
     /// parse_class_body for the `{ ... }` part, the same as a named
     /// class/interface/trait declaration.
-    pub(crate) fn parse_anonymous_class_new(&mut self, start: u32) -> Result<Expr, ParseError> {
+    pub(crate) fn parse_anonymous_class_new(&mut self, start: u32) -> Result<ExprNode, ParseError> {
         let decl_start = self.current_pos();
         let attrs = self.parse_attributes()?;
         let mut class_is_readonly = false;
