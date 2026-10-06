@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(restored.file_decls.classes.len(), 1);
         assert_eq!(restored.file_decls.functions.len(), 1);
         assert_eq!(restored.file_decls.members.len(), 1);
-        assert_eq!(restored.file_decls.parameters.len(), 1);
+        assert_eq!(restored.file_decls.parameters.len(), 2);
         assert_eq!(restored.file_decls.properties.len(), 1);
         assert_eq!(restored.file_decls.constants.len(), 1);
         let BuiltDecl::Class { info, .. } = &restored.built_decls[0] else {

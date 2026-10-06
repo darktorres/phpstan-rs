@@ -120,10 +120,10 @@ pub(super) fn collect(
     for decl in &found.built_decls {
         match decl {
             BuiltDecl::Class { info, .. } => {
-                let members = info.methods().iter().map(|(name, declaration)| FileMember {
-                    name: name.clone(),
-                    declaration: declaration.clone(),
-                });
+                let members = info
+                    .methods()
+                    .iter()
+                    .map(|(name, declaration)| FileMember::new(name.clone(), declaration.clone()));
                 found.file_decls.add_class(
                     std::sync::Arc::clone(info),
                     members,

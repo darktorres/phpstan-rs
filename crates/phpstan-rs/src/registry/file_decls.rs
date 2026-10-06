@@ -44,10 +44,21 @@ fn range_is_valid<T>(range: &IdxRange<T>, arena_len: usize) -> bool {
 }
 
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FileMember {
     pub(crate) name: Name,
     pub(crate) declaration: FunctionReflection,
+    parameters: IdxRange<ParameterReflection>,
+}
+
+impl FileMember {
+    pub(crate) fn new(name: Name, declaration: FunctionReflection) -> Self {
+        Self {
+            name,
+            declaration,
+            parameters: decode_range((0, 0)),
+        }
+    }
 }
 
 #[allow(dead_code)] // Consumed as row 4.3 moves readers to typed ranges.
@@ -106,7 +117,14 @@ impl FileDecls {
         names: impl IntoIterator<Item = Name>,
     ) -> Idx<ClassLayout> {
         let declaration = self.classes.alloc(declaration);
-        let members = self.members.alloc_many(members);
+        let mut stored_members = Vec::new();
+        for mut member in members {
+            member.parameters = self
+                .parameters
+                .alloc_many(member.declaration.params().iter().cloned());
+            stored_members.push(member);
+        }
+        let members = self.members.alloc_many(stored_members);
         let properties = self.properties.alloc_many(properties);
         let constants = self.constants.alloc_many(constants);
         let names = self.names.alloc_many(names);
@@ -141,6 +159,11 @@ impl FileDecls {
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
     pub(crate) fn members(&self, layout: Idx<ClassLayout>) -> &[FileMember] {
         &self.members[self.class_layouts[layout].members.clone()]
+    }
+
+    #[allow(dead_code)] // Used by registry accessors as method parameters move to FileDecls.
+    pub(crate) fn member_parameters(&self, member: &FileMember) -> &[ParameterReflection] {
+        &self.parameters[member.parameters.clone()]
     }
 
     #[allow(dead_code)] // Used by registry accessors as declarations move to FileDecls.
@@ -180,6 +203,11 @@ impl FileDecls {
                 return Err("class layout refers outside its file declaration arenas");
             }
         }
+        for (_, member) in self.members.iter() {
+            if !range_is_valid(&member.parameters, self.parameters.len()) {
+                return Err("class member refers outside its parameter arena");
+            }
+        }
         for (_, layout) in self.function_layouts.iter() {
             if !idx_is_valid(layout.declaration, self.functions.len())
                 || !range_is_valid(&layout.parameters, self.parameters.len())
@@ -198,11 +226,25 @@ struct EncodedFileDecls<'a> {
     functions: Vec<&'a Arc<FunctionReflection>>,
     class_layouts: Vec<EncodedClassLayout>,
     function_layouts: Vec<EncodedFunctionLayout>,
-    members: Vec<&'a FileMember>,
+    members: Vec<EncodedFileMember<'a>>,
     parameters: Vec<&'a ParameterReflection>,
     properties: Vec<&'a Arc<PropertyReflection>>,
     constants: Vec<&'a Arc<ConstantReflection>>,
     names: Vec<&'a Name>,
+}
+
+#[derive(Serialize)]
+struct EncodedFileMember<'a> {
+    name: &'a Name,
+    declaration: &'a FunctionReflection,
+    parameters: (u32, u32),
+}
+
+#[derive(Deserialize)]
+struct DecodedFileMember {
+    name: Name,
+    declaration: FunctionReflection,
+    parameters: (u32, u32),
 }
 
 #[allow(dead_code)] // Used once ParsedFile stores its declaration arenas.
@@ -249,7 +291,15 @@ impl Serialize for FileDecls {
                     parameters: encode_range(&layout.parameters),
                 })
                 .collect(),
-            members: self.members.iter().map(|(_, value)| value).collect(),
+            members: self
+                .members
+                .iter()
+                .map(|(_, member)| EncodedFileMember {
+                    name: &member.name,
+                    declaration: &member.declaration,
+                    parameters: encode_range(&member.parameters),
+                })
+                .collect(),
             parameters: self.parameters.iter().map(|(_, value)| value).collect(),
             properties: self.properties.iter().map(|(_, value)| value).collect(),
             constants: self.constants.iter().map(|(_, value)| value).collect(),
@@ -270,7 +320,7 @@ impl<'de> Deserialize<'de> for FileDecls {
             functions: Vec<Arc<FunctionReflection>>,
             class_layouts: Vec<EncodedClassLayout>,
             function_layouts: Vec<EncodedFunctionLayout>,
-            members: Vec<FileMember>,
+            members: Vec<DecodedFileMember>,
             parameters: Vec<ParameterReflection>,
             properties: Vec<Arc<PropertyReflection>>,
             constants: Vec<Arc<ConstantReflection>>,
@@ -296,7 +346,11 @@ impl<'de> Deserialize<'de> for FileDecls {
                     parameters: decode_range(layout.parameters),
                 },
             )),
-            members: Arena::from_iter(encoded.members),
+            members: Arena::from_iter(encoded.members.into_iter().map(|member| FileMember {
+                name: member.name,
+                declaration: member.declaration,
+                parameters: decode_range(member.parameters),
+            })),
             parameters: Arena::from_iter(encoded.parameters),
             properties: Arena::from_iter(encoded.properties),
             constants: Arena::from_iter(encoded.constants),
@@ -327,10 +381,7 @@ mod tests {
         let members = class
             .methods
             .iter()
-            .map(|(name, declaration)| FileMember {
-                name: name.clone(),
-                declaration: declaration.clone(),
-            })
+            .map(|(name, declaration)| FileMember::new(name.clone(), declaration.clone()))
             .collect::<Vec<_>>();
         let properties = class
             .properties
@@ -364,7 +415,14 @@ mod tests {
         let decoded: FileDecls = postcard::from_bytes(&encoded).unwrap();
 
         assert_eq!(decoded.class(class_layout), &class);
-        assert_eq!(decoded.members(class_layout), members);
+        let decoded_members = decoded.members(class_layout);
+        assert_eq!(decoded_members.len(), members.len());
+        assert_eq!(decoded_members[0].name, members[0].name);
+        assert_eq!(decoded_members[0].declaration, members[0].declaration);
+        assert_eq!(
+            decoded.member_parameters(&decoded_members[0]),
+            members[0].declaration.params()
+        );
         assert_eq!(decoded.properties(class_layout), properties);
         assert_eq!(decoded.constants(class_layout), constants);
         assert_eq!(decoded.names(class_layout), names);
