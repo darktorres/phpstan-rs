@@ -4410,7 +4410,7 @@ impl<'a> Checker<'a> {
         ) {
             return self.infer_expr(e, locals);
         }
-        self.cached(e, locals, InferQuestion::ChainLink, || {
+        self.cached(e.id, locals, InferQuestion::ChainLink, || {
             self.chain_link_type_uncached(e, locals)
         })
     }
@@ -4470,7 +4470,7 @@ impl<'a> Checker<'a> {
         // finds of the operands for as long as it runs, as one inside does,
         // and not each level of a nested expression infers them again.
         let outermost = self.open_infer_scope();
-        let ty = self.cached(e, locals, InferQuestion::Type, || {
+        let ty = self.cached(e.id, locals, InferQuestion::Type, || {
             self.infer_expr_unguarded(e, locals)
         });
         if outermost {
@@ -4498,11 +4498,11 @@ impl<'a> Checker<'a> {
         *self.infer_spare.borrow_mut() = cache;
     }
 
-    /// `answer`'s answer to `question` about `e`, from `infer_cache` while
+    /// `answer`'s answer to `question` about `id`, from `infer_cache` while
     /// an expression check runs.
     fn cached(
         &self,
-        e: &Expr,
+        id: ExprId,
         locals: &Locals,
         question: InferQuestion,
         answer: impl FnOnce() -> Type,
@@ -4511,7 +4511,7 @@ impl<'a> Checker<'a> {
         // token slice into a cloned scope from the loaded file. Those two
         // trees have independent file-local ids; the short-lived probe
         // bypasses this one-file cache rather than mixing their slots.
-        if e.id == syntax::ast::SYNTHETIC_EXPR_ID
+        if id == syntax::ast::SYNTHETIC_EXPR_ID
             || self.probe_span.get().is_some()
             || self.infer_cache.borrow().is_none()
         {
@@ -4522,13 +4522,13 @@ impl<'a> Checker<'a> {
             .infer_cache
             .borrow()
             .as_ref()
-            .and_then(|c| c.get(e.id, version, question))
+            .and_then(|c| c.get(id, version, question))
         {
             return ty.clone();
         }
         let ty = syntax::stack::guard(answer);
         if let Some(cache) = self.infer_cache.borrow_mut().as_mut() {
-            cache.insert(e.id, version, question, ty.clone());
+            cache.insert(id, version, question, ty.clone());
         }
         ty
     }
