@@ -397,8 +397,12 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   and remains correct across scoped edits and base switches. Stub-container
   layout version is 9. The imported-alias regression and cache round-trip pass;
   all 1,145 crate tests and 275 syntax tests, check, Clippy, formatting and diff
-  checks pass. Item 4.6 is still active: trait-composed property results and
-  other pass outputs still mutate declaration reflections. The 4.7 reference,
+  checks pass. `f5d8a1a8` changes the deferred visible-constant scratch view
+  from cloned reflections to ordered name-to-type pairs, keeping breadth-first
+  shadowing and union order; all 1,145 crate tests, 275 syntax tests, check,
+  Clippy, formatting and diff checks pass. Item 4.6 is still active: trait-
+  composed property results and other pass outputs still mutate declaration
+  reflections. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
