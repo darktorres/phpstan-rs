@@ -431,7 +431,17 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   readers use Registry lookups. The result survives freeze/cache round trips
   (container format 13). The full crate suite (1,149 library, 3 binary and 44
   CLI tests), 275 syntax tests, check, Clippy, formatting and diff checks pass.
-  Item 4.6 remains open for other result fields and immutable declaration storage. The 4.7 reference,
+  `22518763` adds `FnId`-keyed function-signature result overlays for the late
+  native-type and constant-named type fixes, routes declaration checking and
+  effects through effective signatures, and moves assertion-table results to
+  function/method overlays without mutating their declarations. The cache
+  format advances to 14; freeze, base retagging, cache round trips and scoped
+  invalidation preserve the results. Incremental snapshots compare old
+  function overlays, and the assertion fast-gate indexes effective signatures.
+  The focused cache, incremental and fast-gate tests and all 1,153 library
+  tests pass; check, formatting and diff checks pass. Item 4.6 remains open:
+  declarations still live in mutable name-keyed tables with `raw/reset_scoped`,
+  and other finishing outputs remain to migrate. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
