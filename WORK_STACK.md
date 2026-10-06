@@ -295,8 +295,13 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   rows 4.6-4.8). Declaration IDs carry a generation, base switches
   increment the registry generation and retag the replacement's IDs, and
   debug reads reject stale IDs (`ac7ff5f9`). The focused stale-ID test and all 1,139
-  library tests pass; the library check and Clippy pass. Row 4.3 remains open
-  at the broader item validation row 4.V, which follows 4.8.
+  library tests pass; the library check and Clippy pass. Item validation row
+  4.V follows 4.8.
+  Item 4.5 has started: raw direct-method lookups now resolve a typed
+  `MethodRef` `(ClassId, slot)` over the declaration-ordered file member
+  range (`9ae10e46`). The focused locator test, all 1,139 library tests,
+  library check, and Clippy pass. Trait-composed methods and aliases still
+  need their resolved per-class member lists.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
