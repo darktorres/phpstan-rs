@@ -400,9 +400,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   checks pass. `f5d8a1a8` changes the deferred visible-constant scratch view
   from cloned reflections to ordered name-to-type pairs, keeping breadth-first
   shadowing and union order; all 1,145 crate tests, 275 syntax tests, check,
-  Clippy, formatting and diff checks pass. Item 4.6 is still active: trait-
-  composed property results and other pass outputs still mutate declaration
-  reflections. The 4.7 reference,
+  Clippy, formatting and diff checks pass. `dce105fb` moves inherited
+  property-hook outputs into a `(ClassId, property name)` result table used by
+  Registry property lookup. Cache round trips preserve it, and scoped edits
+  clear affected IDs; the container format advances to version 10. The focused
+  declaration-immutability and cache tests, all 1,147 crate tests and 275 syntax
+  tests, check, Clippy, formatting and diff checks pass. Item 4.6 is active:
+  trait-composed property results and other pass outputs still mutate
+  declarations. The 4.7 reference,
   include-graph, purity, and property-write relations remain open. Registry name
   tables and resolution still read legacy declaration values; their migration
   remains open. The plan was committed at
