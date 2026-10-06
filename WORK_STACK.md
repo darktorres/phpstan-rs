@@ -244,8 +244,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   them. They still retain their `Name` handle pending reader migration.
   Source/name lookup is exposed, and syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. Row 9.3 is in progress: the shared `NodeId` is
-  removed; the parser reserves distinct typed expression/statement indices,
-  and the inference cache is keyed by `ExprId`. Nodes still use recursive
+  removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
+  indices, and the inference cache is keyed by `ExprId`. A test for per-file
+  name-ID reuse was added in `eee0c503` but has not run. Nodes still use recursive
   storage, arena commits are not implemented, and no item gate or full
   validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
