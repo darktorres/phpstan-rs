@@ -879,7 +879,7 @@ pub struct Checker<'a> {
     // each distinct resolution. `None` unless kept.
     doc_resolutions: RefCell<Option<std::collections::BTreeSet<String>>>,
     // The types `infer_expr` found while one outermost `check_expr` runs,
-    // by expression (its address and id) and scope version, in a slot for
+    // by the file-local expression id and scope version, in a slot for
     // each node (`infer_cache.rs`): checking a
     // nested expression infers each operand again at every level above
     // it, which without this is quadratic in the nesting depth. `None`

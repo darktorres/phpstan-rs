@@ -2,11 +2,12 @@
 //! outermost expression check runs, by node, so a lookup is an index and a
 //! short walk, not a hash of a 32-byte key.
 //!
-//! An answer is for one question about one expression (its address, since
-//! trees of other files share node ids) in one scope version. The nodes of
-//! a file have dense ids, so each id has a slot holding the head of a chain
-//! through `entries`; a slot of an earlier generation is empty, so ending a
-//! check is clearing `entries`, not the slots.
+//! An answer is for one question about one expression in one scope version.
+//! A checker runs this cache against one file's tree at a time; synthetic
+//! expressions bypass it. The nodes of a file have dense ids, so each id
+//! has a slot holding the head of a chain through `entries`; a slot of an
+//! earlier generation is empty, so ending a check clears `entries`, not the
+//! slots.
 
 use types::Type;
 
@@ -31,7 +32,6 @@ const EMPTY: Slot = Slot {
 };
 
 struct Entry {
-    addr: usize,
     version: u64,
     question: InferQuestion,
     next: u32,
@@ -45,7 +45,7 @@ pub(crate) struct InferCache {
     // The map this replaces, kept beside it in a test build, which asserts
     // that each lookup answers as the map does.
     #[cfg(test)]
-    shadow: rustc_hash::FxHashMap<(usize, ExprId, u64, InferQuestion), Type>,
+    shadow: rustc_hash::FxHashMap<(ExprId, u64, InferQuestion), Type>,
 }
 
 impl Default for InferCache {
@@ -61,32 +61,20 @@ impl Default for InferCache {
 }
 
 impl InferCache {
-    /// The answer to `question` about the expression at `addr`, node `id`,
-    /// in scope `version`, if it was found since the last `clear`.
-    pub(crate) fn get(
-        &self,
-        addr: usize,
-        id: ExprId,
-        version: u64,
-        question: InferQuestion,
-    ) -> Option<&Type> {
-        let found = self.find(addr, id, version, question);
+    /// The answer to `question` about node `id` in scope `version`, if it
+    /// was found since the last `clear`.
+    pub(crate) fn get(&self, id: ExprId, version: u64, question: InferQuestion) -> Option<&Type> {
+        let found = self.find(id, version, question);
         #[cfg(test)]
         assert_eq!(
             found,
-            self.shadow.get(&(addr, id, version, question)),
+            self.shadow.get(&(id, version, question)),
             "the infer cache answers as the map does"
         );
         found
     }
 
-    fn find(
-        &self,
-        addr: usize,
-        id: ExprId,
-        version: u64,
-        question: InferQuestion,
-    ) -> Option<&Type> {
+    fn find(&self, id: ExprId, version: u64, question: InferQuestion) -> Option<&Type> {
         let slot = self.slots.get(u32::from(id.into_raw()) as usize)?;
         if slot.generation != self.generation {
             return None;
@@ -94,7 +82,7 @@ impl InferCache {
         let mut at = slot.head;
         while at != NO_ENTRY {
             let entry = &self.entries[at as usize];
-            if entry.addr == addr && entry.version == version && entry.question == question {
+            if entry.version == version && entry.question == question {
                 return Some(&entry.ty);
             }
             at = entry.next;
@@ -103,14 +91,7 @@ impl InferCache {
     }
 
     /// Remembers `ty` as the answer; none is held for these yet.
-    pub(crate) fn insert(
-        &mut self,
-        addr: usize,
-        id: ExprId,
-        version: u64,
-        question: InferQuestion,
-        ty: Type,
-    ) {
+    pub(crate) fn insert(&mut self, id: ExprId, version: u64, question: InferQuestion, ty: Type) {
         let index = u32::from(id.into_raw()) as usize;
         if index >= self.slots.len() {
             self.slots.resize(index + 1 + index / 4, EMPTY);
@@ -123,11 +104,9 @@ impl InferCache {
             };
         }
         #[cfg(test)]
-        self.shadow
-            .insert((addr, id, version, question), ty.clone());
+        self.shadow.insert((id, version, question), ty.clone());
         let at = self.entries.len() as u32;
         self.entries.push(Entry {
-            addr,
             version,
             question,
             next: slot.head,
@@ -152,5 +131,29 @@ impl InferCache {
                 1
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use la_arena::RawIdx;
+
+    #[test]
+    fn entries_are_keyed_by_expression_id_question_and_scope() {
+        let mut cache = InferCache::default();
+        let id = ExprId::from_raw(RawIdx::from_u32(4));
+        let inferred = Type::int();
+        let chain = Type::string();
+
+        cache.insert(id, 7, InferQuestion::Type, inferred.clone());
+        cache.insert(id, 7, InferQuestion::ChainLink, chain.clone());
+
+        assert_eq!(cache.get(id, 7, InferQuestion::Type), Some(&inferred));
+        assert_eq!(cache.get(id, 7, InferQuestion::ChainLink), Some(&chain));
+        assert!(cache.get(id, 8, InferQuestion::Type).is_none());
+
+        cache.clear();
+        assert!(cache.get(id, 7, InferQuestion::Type).is_none());
     }
 }

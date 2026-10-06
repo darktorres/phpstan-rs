@@ -4510,19 +4510,18 @@ impl<'a> Checker<'a> {
         if e.id == syntax::ast::SYNTHETIC_EXPR_ID || self.infer_cache.borrow().is_none() {
             return syntax::stack::guard(answer);
         }
-        let addr = std::ptr::from_ref(e) as usize;
         let version = locals.version();
         if let Some(ty) = self
             .infer_cache
             .borrow()
             .as_ref()
-            .and_then(|c| c.get(addr, e.id, version, question))
+            .and_then(|c| c.get(e.id, version, question))
         {
             return ty.clone();
         }
         let ty = syntax::stack::guard(answer);
         if let Some(cache) = self.infer_cache.borrow_mut().as_mut() {
-            cache.insert(addr, e.id, version, question, ty.clone());
+            cache.insert(e.id, version, question, ty.clone());
         }
         ty
     }
