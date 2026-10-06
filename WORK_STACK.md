@@ -311,9 +311,13 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   tables. The focused transitive/clear test and all 1,141 library tests pass;
   library check and Clippy pass. `106045fd` keys the PHPStan-ancestry verdict
   set by `ClassId`, applies scoped changes through IDs, and rebuilds it on
-  all-scope passes; the derived ID set no longer goes through the name-keyed
-  cache serializer. The full 1,141-test library suite, check, and Clippy pass.
-  Other pass results and immutable declaration storage still remain to migrate.
+  all-scope passes (`106045fd`). `131bb4ef` preserves the verdicts when
+  freezing a fresh base by translating IDs, and rebuilds them from declarations
+  when a cache read has no runtime IDs. `fb72f92b` retags the set across base
+  generation changes; the base-switch test checks the verdict still resolves.
+  The cache round-trip oracle checks class names reached through IDs for both
+  stub bases. The full 1,141-test library suite, check, and Clippy pass. Other
+  pass results and immutable declaration storage still remain to migrate.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
   `d520c9fd`. A separate reviewer goes through it adversarially, one item at
