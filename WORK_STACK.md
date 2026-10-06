@@ -358,8 +358,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   remaining trait outputs, constant-resolution values, other pass results and
   immutable declaration storage remain. `9ccaef59` carries class IDs through
   deferred type-import and mixin result batches; mixin method outputs share the
-  source's lazy signature handles. All 1,199 crate tests, check, Clippy and
-  formatting pass. The 4.7 reference, include-graph,
+  source's lazy signature handles. `1f0411bf` keys two more deferred type-fix
+  batches by `MethodRef`, `FnId` and `ClassId`; apply resolves the IDs only
+  when mutating the current reflection store. The full crate suite (1,199
+  tests), check, Clippy and formatting pass. The 4.7 reference, include-graph,
   purity, and property-write relations remain open.
   Registry name tables and resolution still read legacy declaration values;
   their migration remains open. The plan was committed at
