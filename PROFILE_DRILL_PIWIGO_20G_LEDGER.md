@@ -174,7 +174,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 8.4 | `from_decl`, `reconcile_with_native` | Parameters passed on; a lone member refined and returned with no `Vec` | — | perf | DONE (451f0fa6; `from_decl` classifies assertion targets directly against AST params; singleton native reconciliation avoids intermediate member/result vectors unless native-union alternatives must be added) |
 | 8.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 8.4 | val | DONE (451f0fa6; `cargo test --workspace --lib --bins --tests -- --quiet`: 2,113 passed, 0 failed; formatting and diff checks pass. Full §11 validation remains deferred until item 19.) |
 | **9** | **item 9** | **Trees in typed vectors, nodes by index** | | | |
-| 9.1 | step 1 | `Expr::peeled` becomes a loop, with no guard, alone | — | perf | OPEN |
+| 9.1 | step 1 | `Expr::peeled` becomes a loop, with no guard, alone | — | perf | DONE (3f9ad5b8) |
 | 9.2 | step 2 | `ParsedFile` of typed arenas (`la-arena`): source bytes, `names`, `exprs`/`stmts` with spans, large variants and list elements in their own arenas; per-worker scratch store | 4.3 | perf | OPEN |
 | 3.4 | scratch store | A tree that is not kept is parsed into the worker's scratch store | 9.2 | perf | OPEN |
 | 9.3 | step 3 | Nodes by index (`ExprId`, `StmtId`): parse functions return nodes committed by their callers; `ParseError` boxed; matching and `syntax::visit` over ids; the inference cache by `ExprId` | 9.2 | perf | OPEN |
