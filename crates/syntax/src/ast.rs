@@ -23,7 +23,7 @@ pub struct Attribute {
 /// actual variant data (renamed from the old bare `Stmt` enum so the two
 /// concerns - "what kind of statement" and "where it is" - stay separate).
 #[derive(Debug, Clone)]
-pub struct Stmt {
+pub struct StmtNode {
     pub id: StmtId,
     pub kind: StmtKind,
     pub span: Span,
@@ -46,11 +46,13 @@ pub struct Stmt {
     pub doc_line: Option<u32>,
 }
 
+pub use StmtNode as Stmt;
+
 /// A typed index into a parsed file's expression arena.
-pub type ExprId = la_arena::Idx<Expr>;
+pub type ExprId = la_arena::Idx<ExprNode>;
 
 /// A typed index into a parsed file's statement arena.
-pub type StmtId = la_arena::Idx<Stmt>;
+pub type StmtId = la_arena::Idx<StmtNode>;
 
 /// The identity used for an expression synthesized outside a parsed file.
 pub const SYNTHETIC_EXPR_ID: ExprId = ExprId::from_raw(la_arena::RawIdx::from_u32(u32::MAX));
@@ -1392,13 +1394,15 @@ pub struct ArrowFnExpr {
 /// An expression, plus the real source span it occupies - see `Stmt`'s
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
-pub struct Expr {
+pub struct ExprNode {
     pub id: ExprId,
     pub kind: ExprKind,
     pub span: Span,
 }
 
-impl Expr {
+pub use ExprNode as Expr;
+
+impl ExprNode {
     /// This expression inside any parentheses and `@`s: what it
     /// evaluates to, the wrappers being transparent.
     pub fn peeled(&self) -> &Expr {
@@ -1419,7 +1423,7 @@ impl Expr {
     }
 }
 
-impl Stmt {
+impl StmtNode {
     /// The statement's kind, taken out of it.
     pub fn into_kind(mut self) -> StmtKind {
         std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()))
@@ -1428,14 +1432,14 @@ impl Stmt {
 
 /// Dropping a tree goes one level at a time on a guarded stack, so a deep
 /// tree (a long `.` chain is one) drops without overflowing it.
-impl Drop for Expr {
+impl Drop for ExprNode {
     fn drop(&mut self) {
         let kind = std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null));
         crate::stack::guard(|| drop(kind));
     }
 }
 
-impl Drop for Stmt {
+impl Drop for StmtNode {
     fn drop(&mut self) {
         let kind = std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()));
         crate::stack::guard(|| drop(kind));
