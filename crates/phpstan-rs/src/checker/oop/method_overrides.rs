@@ -8,7 +8,7 @@ use types::Type;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
-        let Some(info) = self.class_info(fqn) else {
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
         // Redeclaring a native enum method is itself the error.
@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
         // class's effective implementation, not something to compare the
         // class against).
         let mut ancestors: Vec<(String, Type)> = Vec::new();
-        if let Some(parent) = info.extends().first()
+        if let Some(parent) = references.extends.first()
             && let Some(parent_sig) = self
                 .registry
                 .classes()
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
                 sig.throws().clone().unwrap_or_else(throwable),
             ));
         }
-        for used in info.uses() {
+        for used in references.uses {
             if self.registry.method_is_abstract(used, method_name)
                 && let Some(trait_sig) = self.registry.lookup_own_method(used, method_name)
             {

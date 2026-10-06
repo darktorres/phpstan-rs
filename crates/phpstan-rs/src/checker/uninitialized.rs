@@ -108,17 +108,16 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
     }
     let mut current = checker
         .registry
-        .classes()
-        .get(fqn)
-        .and_then(|info| info.extends().first().cloned());
+        .class_references_by_name(fqn)
+        .and_then(|references| references.extends.first().cloned());
     let mut seen = FxHashSet::default();
     while let Some(ancestor) = current {
         if !seen.insert(ancestor.clone()) {
             break; // cycle guard for a malformed/circular hierarchy
         }
-        let Some(info) = checker.registry.classes().get(&ancestor) else {
+        if checker.registry.classes().get(&ancestor).is_none() {
             break;
-        };
+        }
         let found = checker.registry.method_names(&ancestor).any(|method| {
             let Some(sig) = checker.registry.lookup_own_method(&ancestor, method) else {
                 return false;
@@ -136,7 +135,10 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         if found {
             return true;
         }
-        current = info.extends().first().cloned();
+        current = checker
+            .registry
+            .class_references_by_name(&ancestor)
+            .and_then(|references| references.extends.first().cloned());
     }
     false
 }

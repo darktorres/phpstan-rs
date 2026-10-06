@@ -2460,8 +2460,8 @@ impl Project {
         let mut scopes: NameSet = NameSet::default();
         let mut stack: Vec<Name> = writers.iter().cloned().collect();
         while let Some(class) = stack.pop() {
-            if let Some(info) = self.registry.classes().get(class.as_ref()) {
-                stack.extend(info.uses().iter().cloned());
+            if let Some(references) = self.registry.class_references_by_name(class.as_ref()) {
+                stack.extend(references.uses.iter().cloned());
             }
             scopes.insert(class);
         }

@@ -1161,7 +1161,11 @@ impl Registry {
             if !hooked || seen.iter().any(|class| class.eq_ignore_case(&owner)) {
                 return None;
             }
-            let parent = self.classes.get(owner.as_str())?.extends().first()?.clone();
+            let parent = self
+                .class_references_by_name(owner.as_str())?
+                .extends
+                .first()?
+                .clone();
             seen.push(owner);
             (owner, declared) = self.lookup_property_with_owner(&parent, property)?;
             if declared.visibility() == Visibility::Private {
@@ -1697,9 +1701,8 @@ pub(crate) fn holder_of(ty: &Type) -> Holder {
 fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &str) -> Holder {
     let mut ty = ty.bind_static(class).bind_self(owner);
     if let Some(parent) = registry
-        .classes()
-        .get(owner)
-        .and_then(|info| info.extends().first())
+        .class_references_by_name(owner)
+        .and_then(|references| references.extends.first())
     {
         ty = ty.bind_parent(parent);
     }
@@ -1766,7 +1769,13 @@ fn named_classes(
     Some(if class.is_keyword("self") {
         vec![Name::from(own?)]
     } else if class.is_keyword("parent") {
-        vec![registry.classes().get(own?)?.extends().first()?.clone()]
+        vec![
+            registry
+                .class_references_by_name(own?)?
+                .extends
+                .first()?
+                .clone(),
+        ]
     } else if class.is_keyword("static") {
         let own = own?;
         std::iter::once(Name::from(own))
@@ -2175,9 +2184,8 @@ impl Reach<'_> {
             }
             Callee::ParentHook { property, set } => {
                 let parent = registry
-                    .classes()
-                    .get(self.ctx.class()?)?
-                    .extends()
+                    .class_references_by_name(self.ctx.class()?)?
+                    .extends
                     .first()?;
                 registry
                     .hook_owner(parent, property, *set)
@@ -3453,8 +3461,8 @@ impl<'r> Level<'r> {
             } => {
                 let Some(parent) = self
                     .class
-                    .and_then(|class| registry.classes().get(class))
-                    .and_then(|info| info.extends().first())
+                    .and_then(|class| registry.class_references_by_name(class))
+                    .and_then(|references| references.extends.first())
                 else {
                     return Holder::Unknown;
                 };

@@ -83,7 +83,12 @@ impl<'p> Context<'p> {
             if info.kind() != ClassKind::Class {
                 break;
             }
-            let Some(parent) = info.extends().first() else {
+            let Some(parent) = self
+                .project
+                .registry
+                .class_references_by_name(&current)
+                .and_then(|references| references.extends.first())
+            else {
                 break;
             };
             let parent = self.canonical(parent);
@@ -413,7 +418,6 @@ impl Project {
                 "architecture.missingDependency",
             );
         }
-        let info = self.registry.lookup_class(fqn).map(|(_, i)| i.clone());
         let parents = ctx.extends_chain(fqn);
         let interfaces: Vec<String> = self
             .registry
@@ -427,9 +431,10 @@ impl Project {
                     .is_some_and(|(_, i)| i.kind() == ClassKind::Interface)
             })
             .collect();
-        let traits: Vec<String> = info
-            .as_ref()
-            .map(|i| i.uses().iter().map(|u| u.to_string()).collect())
+        let traits: Vec<String> = self
+            .registry
+            .class_references_by_name(fqn)
+            .map(|references| references.uses.iter().map(ToString::to_string).collect())
             .unwrap_or_default();
         let relation_checks: [RelationCheck; 6] = [
             (

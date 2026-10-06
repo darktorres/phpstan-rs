@@ -123,11 +123,14 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(class) else {
             return;
         };
+        let Some(references) = self.registry.class_references_by_name(class) else {
+            return;
+        };
         let mut visited = visited.clone();
         visited.insert(class.to_string());
 
         let implements_args = self.registry.effective_implements_args_by_name(class);
-        for iface in info.implements() {
+        for iface in references.implements {
             let raw_args = implements_args.get(iface).cloned().unwrap_or_default();
             let concrete_args: Vec<Type> = raw_args
                 .iter()
@@ -155,8 +158,8 @@ impl<'a> Checker<'a> {
         // their argument lists into one flat, un-keyed list, unsafe to
         // attribute to either.
         let extends_args = self.registry.effective_extends_args_by_name(class);
-        if info.extends().len() == 1 && !extends_args.is_empty() {
-            let parent = &info.extends()[0];
+        if references.extends.len() == 1 && !extends_args.is_empty() {
+            let parent = &references.extends[0];
             let concrete_args: Vec<Type> = extends_args
                 .iter()
                 .map(|t| t.substitute_templates(own_bindings, &self.relation()))

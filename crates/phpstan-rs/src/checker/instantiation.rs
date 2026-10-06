@@ -47,9 +47,8 @@ impl<'a> Checker<'a> {
         }
         let has_parent = self
             .registry
-            .classes()
-            .get(class.as_str())
-            .is_none_or(|info| !info.extends().is_empty());
+            .class_references_by_name(&class)
+            .is_none_or(|references| !references.extends.is_empty());
         if has_parent {
             return;
         }
@@ -227,7 +226,9 @@ impl<'a> Checker<'a> {
             if info.is_consistent_constructor() {
                 return false;
             }
-            current = info.extends().first().map(|p| p.to_string());
+            current = registry
+                .class_references_by_name(&c)
+                .and_then(|references| references.extends.first().map(ToString::to_string));
         }
         let Some((owner, _)) = registry.lookup_method_with_owner(class, "__construct") else {
             return true;
@@ -245,17 +246,18 @@ impl<'a> Checker<'a> {
         }
         let mut prototype_owner = owner.clone();
         let mut current = registry
-            .classes()
-            .get(&owner)
-            .and_then(|info| info.extends().first().cloned());
+            .class_references_by_name(&owner)
+            .and_then(|references| references.extends.first().cloned());
         while let Some(c) = current {
-            let Some(info) = registry.classes().get(&c) else {
+            if registry.classes().get(&c).is_none() {
                 break;
-            };
+            }
             if registry.lookup_own_method(&c, "__construct").is_some() {
                 prototype_owner = c.clone();
             }
-            current = info.extends().first().cloned();
+            current = registry
+                .class_references_by_name(&c)
+                .and_then(|references| references.extends.first().cloned());
         }
         if registry.method_is_abstract(&prototype_owner, "__construct") {
             return false;

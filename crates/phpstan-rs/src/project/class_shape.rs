@@ -140,13 +140,18 @@ impl Project {
                 .into_iter()
                 .flatten()
             {
-                let Some(info) = self.registry.classes().get(child) else {
+                if self.registry.classes().get(child).is_none() {
                     continue;
-                };
-                let extends_current = info
-                    .extends()
-                    .first()
-                    .is_some_and(|parent| parent.eq_ignore_ascii_case(&current));
+                }
+                let extends_current =
+                    self.registry
+                        .class_references_by_name(child)
+                        .is_some_and(|references| {
+                            references
+                                .extends
+                                .first()
+                                .is_some_and(|parent| parent.eq_ignore_ascii_case(&current))
+                        });
                 if extends_current && seen.insert(child.to_ascii_lowercase()) {
                     found.push(types::Name::from(child.as_str()));
                     stack.push(child.to_ascii_lowercase());
@@ -164,11 +169,14 @@ impl Project {
             .into_iter()
             .flatten()
             .any(|child| {
-                self.registry.classes().get(child).is_some_and(|info| {
-                    info.extends()
-                        .first()
-                        .is_some_and(|parent| parent.eq_ignore_ascii_case(lower))
-                })
+                self.registry
+                    .class_references_by_name(child)
+                    .is_some_and(|references| {
+                        references
+                            .extends
+                            .first()
+                            .is_some_and(|parent| parent.eq_ignore_ascii_case(lower))
+                    })
             })
     }
 
@@ -192,6 +200,9 @@ impl Project {
             return;
         }
         let Some(info) = self.registry.classes().get(fqn) else {
+            return;
+        };
+        let Some(references) = self.registry.class_references_by_name(fqn) else {
             return;
         };
         let attribute_names: Vec<String> = c
@@ -218,14 +229,14 @@ impl Project {
         }
         if info.is_final() {
             let inherited = |member: &str, of_method: bool| {
-                info.extends().first().is_some_and(|parent| {
+                references.extends.first().is_some_and(|parent| {
                     if of_method {
                         self.registry.lookup_method(parent, member).is_some()
                     } else {
                         self.registry.lookup_property(parent, member).is_some()
                     }
-                }) || info
-                    .implements()
+                }) || references
+                    .implements
                     .iter()
                     .any(|i| of_method && self.registry.lookup_method(i, member).is_some())
             };
@@ -262,8 +273,8 @@ impl Project {
                 }
             }
             for k in &c.def.consts {
-                let from_parent = info
-                    .extends()
+                let from_parent = references
+                    .extends
                     .first()
                     .is_some_and(|parent| self.registry.lookup_const(parent, &k.name).is_some());
                 if k.visibility == Visibility::Protected && !from_parent {
