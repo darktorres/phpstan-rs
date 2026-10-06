@@ -245,7 +245,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   Source/name lookup is exposed, and syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. Row 9.3 is in progress: the shared `NodeId` is
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
-  indices, and the inference cache is keyed by `ExprId`. Expression and
+  indices, and the inference cache is keyed by `ExprId` alone during a
+  file's active expression check. Commit `36ad3c08` removes the address key
+  and adds cache coverage for ID, question, and scope. Expression and
   statement spans now travel in typed-ID-indexed tables through retained
   project trees (`a42f63ab`); parser tests cover name-ID reuse and span
   alignment (`eee0c503`, `a42f63ab`) but have not run. Nodes still use recursive
