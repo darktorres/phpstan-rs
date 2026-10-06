@@ -157,12 +157,14 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            if sig.native_ty().is_some() || sig.ty().has_unknown_part() {
+            let ty = self
+                .registry
+                .lookup_const_type(fqn, &constant.name.name)
+                .unwrap_or_else(|| sig.ty());
+            if sig.native_ty().is_some() || ty.has_unknown_part() {
                 continue;
             }
-            let Some(suggested) = sig
-                .ty()
-                .native_declaration(false, self.registry.php_version_min())
+            let Some(suggested) = ty.native_declaration(false, self.registry.php_version_min())
             else {
                 continue;
             };

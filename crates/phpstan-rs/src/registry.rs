@@ -446,6 +446,11 @@ pub struct Registry {
     pub(crate) member_owners: FxHashMap<ClassId, hierarchy::ClassOwners>,
     #[serde(skip)]
     member_owners_cache: NameTable<hierarchy::ClassOwners>,
+    // Resolved class-constant values keyed by immutable declaration
+    // identity. The reflection still carries a compatibility copy while
+    // consumers move to this result table.
+    #[serde(skip)]
+    pub(crate) class_const_types: FxHashMap<(ClassId, usize), Type>,
     // What a call to each function and method with a body may write
     // (`registry::effects`), keyed by declaration ID where one exists.
     #[serde(skip)]
@@ -723,6 +728,7 @@ impl Registry {
             self.purity_results
                 .method_dependencies
                 .retain(|method, _| method.class() != id);
+            self.class_const_types.retain(|(class, _), _| *class != id);
         }
     }
 
@@ -846,6 +852,7 @@ impl Registry {
     /// them; a no-op before then, while they still are the declarations as
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
+        self.class_const_types.clear();
         if let Some(raw) = &mut self.raw
             && !self.raw_active
         {
@@ -919,6 +926,7 @@ impl Registry {
             scope.class_keys(),
             body_scope.and_then(scope::Scope::class_keys),
         );
+        self.class_const_types.clear();
         let functions = reset_scoped(
             &mut self.functions,
             &raw.functions,
@@ -1049,6 +1057,10 @@ impl Registry {
                 .collect()
         };
         self.member_owners_cache = NameTable::default();
+        // The reflection compatibility copy survives cache/freeze today;
+        // declaration IDs are about to be rebuilt, so discard these runtime
+        // keys rather than retain results under stale IDs.
+        self.class_const_types.clear();
         if phpstan_ancestry_names.is_empty() {
             // Cached registries omit runtime ids and this derived set; walk
             // the hierarchy only for that path.
@@ -1315,6 +1327,11 @@ impl Registry {
             .member_owners
             .drain()
             .map(|(id, owners)| (id.with_generation(generation), owners))
+            .collect();
+        base.class_const_types = base
+            .class_const_types
+            .drain()
+            .map(|((id, slot), ty)| ((id.with_generation(generation), slot), ty))
             .collect();
         for (_, id) in base.function_ids.iter_mut() {
             id.set_generation(base.id_generation);

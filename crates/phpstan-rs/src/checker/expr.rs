@@ -4922,12 +4922,13 @@ impl<'a> Checker<'a> {
                     self.record_member_ref(e.span, &owner, member);
                 }
                 self.registry
-                    .lookup_const_with_owner(&class, member)
-                    .map(|(owner, cs)| {
-                        let ty =
-                            self.settings
-                                .constants
-                                .class_constant_type(&owner, member, cs.ty());
+                    .lookup_const_type_with_owner(&class, member)
+                    .map(|(owner, constant_type)| {
+                        let ty = self.settings.constants.class_constant_type(
+                            &owner,
+                            member,
+                            constant_type,
+                        );
                         self.resolve_pseudo(&ty, &class)
                     })
                     .unwrap_or(Type::mixed())
@@ -6276,11 +6277,14 @@ impl<'a> Checker<'a> {
                 .unwrap_or(Type::mixed())
         } else {
             let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
-            let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
-                self.settings
-                    .constants
-                    .class_constant_type(owner, member, cs.ty())
-            });
+            let const_type_with_owner = self.registry.lookup_const_type_with_owner(&class, member);
+            let const_ty = const_type_with_owner
+                .as_ref()
+                .map(|(owner, constant_type)| {
+                    self.settings
+                        .constants
+                        .class_constant_type(owner, member, constant_type)
+                });
             if const_ty.is_none() {
                 self.report(
                     format!("access to undefined constant {class}::{member}"),
@@ -6573,8 +6577,12 @@ impl<'a> Checker<'a> {
             };
             let cases: Vec<Type> = info
                 .consts()
-                .values()
-                .filter_map(|c| c.ty().as_enum_case())
+                .iter()
+                .filter_map(|(name, _)| {
+                    self.registry
+                        .lookup_const_type(class_name, name)
+                        .and_then(Type::as_enum_case)
+                })
                 .filter(|(cls, _)| *cls == class_name)
                 .map(|(cls, case)| Type::enum_case_ref(cls, case))
                 .collect();

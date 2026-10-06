@@ -575,6 +575,10 @@ impl Registry {
             .collect();
         for (id, info) in resolved {
             if let Some(name) = self.class_name_by_id(id).cloned() {
+                for (slot, constant) in info.consts.values().enumerate() {
+                    self.class_const_types
+                        .insert((id, slot), constant.ty().clone());
+                }
                 self.classes.insert(name, info);
             }
         }
@@ -790,6 +794,8 @@ impl Registry {
                 break;
             }
             for (class_id, const_slot, ty) in updates {
+                self.class_const_types
+                    .insert((class_id, const_slot), ty.clone());
                 let Some(class_name) = self.class_name_by_id(class_id).cloned() else {
                     continue;
                 };
@@ -809,14 +815,17 @@ impl Registry {
             let Some(info) = self.classes.get_mut(&class_name) else {
                 continue;
             };
-            for sig in info
+            for (slot, sig) in info
                 .consts
                 .values_mut()
-                .filter(|sig| sig.ty.contains_deferred())
+                .enumerate()
+                .filter_map(|(slot, sig)| sig.ty.contains_deferred().then_some((slot, sig)))
             {
                 let sig = Arc::make_mut(sig);
-                sig.ty =
+                let ty =
                     unresolved_class_const_to_mixed(std::mem::replace(&mut sig.ty, Type::mixed()));
+                self.class_const_types.insert((*class_id, slot), ty.clone());
+                sig.ty = ty;
             }
         }
     }

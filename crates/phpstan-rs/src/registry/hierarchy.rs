@@ -1206,6 +1206,30 @@ impl Registry {
         Some((owner.clone(), slot, constant))
     }
 
+    /// Looks up a constant's effective value type and its declaring class.
+    /// A resolved ID-and-slot result wins when available; the reflection's
+    /// type remains the fallback for raw declarations and older cache data.
+    pub fn lookup_const_type_with_owner(
+        &self,
+        class: &str,
+        const_name: &str,
+    ) -> Option<(Name, &Type)> {
+        let (owner, slot, constant) = self.lookup_const_with_owner_and_slot(class, const_name)?;
+        let resolved = (!self.raw_active)
+            .then(|| {
+                let id = self.class_ids.get(&owner)?;
+                self.class_const_types.get(&(*id, slot))
+            })
+            .flatten();
+        Some((owner, resolved.unwrap_or_else(|| constant.ty())))
+    }
+
+    /// Looks up a constant's effective value type.
+    pub fn lookup_const_type(&self, class: &str, const_name: &str) -> Option<&Type> {
+        self.lookup_const_type_with_owner(class, const_name)
+            .map(|(_, ty)| ty)
+    }
+
     /// Same as `lookup_const`, but also returns the declaring ancestor's
     /// name - the `@internal`-usage check needs it to know *which*
     /// class's own `@internal` tag (if any) actually governs a

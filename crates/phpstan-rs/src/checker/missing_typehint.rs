@@ -341,13 +341,7 @@ impl<'a> Checker<'a> {
             if doc_var_type.is_none() {
                 continue;
             }
-            let Some(ty) = self
-                .registry
-                .classes()
-                .get(fqn)
-                .and_then(|info| info.consts().get(&c.name.name))
-                .map(|cs| cs.ty().clone())
-            else {
+            let Some(ty) = self.registry.lookup_const_type(fqn, &c.name.name).cloned() else {
                 continue;
             };
             let name = c.name.clone();

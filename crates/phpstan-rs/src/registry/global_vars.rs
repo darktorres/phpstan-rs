@@ -795,8 +795,8 @@ fn resolve_value(value: &StaticValue, registry: &Registry) -> Type {
             .unwrap_or(Type::mixed()),
         StaticValue::ClassConst(class, name) => class
             .as_ref()
-            .and_then(|class| registry.lookup_const(class, name))
-            .map(|c| c.ty.clone())
+            .and_then(|class| registry.lookup_const_type(class, name))
+            .cloned()
             .unwrap_or(Type::mixed()),
         StaticValue::MethodCall(recv, method) => resolve_value(recv, registry)
             .as_object()

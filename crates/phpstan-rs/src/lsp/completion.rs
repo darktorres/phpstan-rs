@@ -449,10 +449,13 @@ pub(super) fn enumerate_members(
                 let Some((owner, sig)) = registry.lookup_const_with_owner(class, name) else {
                     continue;
                 };
+                let constant_type = registry
+                    .lookup_const_type(class, name)
+                    .unwrap_or_else(|| sig.ty());
                 if !is_visible(registry, &owner, &sig.visibility(), current_class) {
                     continue;
                 }
-                let kind = if sig.ty().is_enum_case() {
+                let kind = if constant_type.is_enum_case() {
                     CompletionItemKind::ENUM_MEMBER
                 } else {
                     CompletionItemKind::CONSTANT

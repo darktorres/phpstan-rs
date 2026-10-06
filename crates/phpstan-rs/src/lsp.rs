@@ -1185,8 +1185,8 @@ impl Workspace {
         if let Some((_, sig)) = registry.lookup_property_with_owner(owner, name) {
             return Some(format!("{owner}::${name}: {}", sig.ty()));
         }
-        if let Some((_, sig)) = registry.lookup_const_with_owner(owner, name) {
-            return Some(format!("{owner}::{name}: {}", sig.ty()));
+        if let Some(constant_type) = registry.lookup_const_type(owner, name) {
+            return Some(format!("{owner}::{name}: {constant_type}"));
         }
         None
     }

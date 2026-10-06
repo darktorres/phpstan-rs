@@ -185,6 +185,7 @@ fn class_consts_are_registered_and_typed_from_their_literal_value() {
             class Config {
                 const NAME = "app";
                 const MAX = 10;
+                const COPY = self::NAME;
             }"#,
     );
     assert_eq!(
@@ -204,6 +205,20 @@ fn class_consts_are_registered_and_typed_from_their_literal_value() {
         r.lookup_const_with_owner_and_slot("Config", "MAX")
             .map(|(_, slot, _)| slot),
         Some(1)
+    );
+    assert_eq!(
+        r.lookup_const_type("Config", "COPY"),
+        Some(&Type::string_literal("app".into()))
+    );
+    assert_eq!(
+        r.lookup_const_with_owner_and_slot("Config", "COPY")
+            .map(|(_, slot, _)| slot),
+        Some(2)
+    );
+    let id = *r.class_ids.get("Config").unwrap();
+    assert_eq!(
+        r.class_const_types.get(&(id, 2)),
+        Some(&Type::string_literal("app".into()))
     );
     assert!(r.lookup_const("Config", "MISSING").is_none());
 }

@@ -861,11 +861,13 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
         for c in consts {
-            let phpdoc_ty = self
+            let has_phpdoc_type = self
                 .registry
                 .lookup_const_with_owner(fqn, &c.name)
-                .filter(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type())
-                .map(|(_, sig)| sig.ty().clone());
+                .is_some_and(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type());
+            let phpdoc_ty = has_phpdoc_type
+                .then(|| self.registry.lookup_const_type(fqn, &c.name).cloned())
+                .flatten();
             if phpdoc_ty.is_none() && c.type_hint.is_none() {
                 let value_ty = self.infer_expr(&c.value, &self.new_locals());
                 self.check_configured_constant_value(
@@ -1105,13 +1107,21 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            let proto_ty = self
+                .registry
+                .lookup_const_type(&proto_owner, name)
+                .unwrap_or_else(|| proto.ty());
+            let own_ty = self
+                .registry
+                .lookup_const_type(fqn, name)
+                .unwrap_or_else(|| own.ty());
             if proto.has_phpdoc_type()
                 && own.has_phpdoc_type()
-                && !self.accepts(proto.ty(), own.ty()).yes()
+                && !self.accepts(proto_ty, own_ty).yes()
             {
                 self.report(format!(
                         "Type {} of constant {fqn}::{name} is not covariant with type {} of constant {proto_owner}::{name}.",
-                        own.ty(), proto.ty()
+                        own_ty, proto_ty
                     ),
                     span,
                     3,
