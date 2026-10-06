@@ -142,7 +142,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(class) else {
             return true;
         };
-        if info.is_final() || info.final_properties().contains(property) {
+        if info.is_final() || info.is_final_property(property) {
             return true;
         }
         self.settings

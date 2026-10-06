@@ -970,8 +970,7 @@ impl Registry {
     /// `find_final_ancestor_method`'s property-side
     /// mirror - PHP 8.4's own `final` property modifier. Walks only
     /// `extends`, same reasoning as the method version (properties have
-    /// no `implements`/interface side at all, and traits do not have
-    /// corresponding final-property entries to propagate. See that function's own doc comment
+    /// no `implements`/interface side at all. See that function's own doc comment
     /// for the `@final`/keyword priority the returned `bool` encodes.
     pub fn find_final_ancestor_property(
         &self,
@@ -988,10 +987,10 @@ impl Registry {
             let Some(current_info) = self.classes.get(&current) else {
                 continue;
             };
-            if current_info.final_properties.contains(property) {
+            if current_info.is_final_property(property) {
                 return Some((current, false));
             }
-            if current_info.final_properties_by_phpdoc.contains(property) {
+            if current_info.is_final_property_by_phpdoc(property) {
                 return Some((current, true));
             }
             stack.extend(current_info.extends.iter().cloned());

@@ -154,6 +154,31 @@ fn trait_method_flags_are_preserved_on_composed_methods_and_aliases() {
 }
 
 #[test]
+fn a_final_trait_property_keeps_its_flag_on_the_using_class() {
+    let r = build_registry(
+        r#"<?php
+            trait T { final public int $id; }
+            class Host { use T; }
+            class Child extends Host { public int $id; }
+            "#,
+    );
+    assert!(
+        r.classes
+            .get("Host")
+            .unwrap()
+            .properties
+            .get("id")
+            .unwrap()
+            .is_final()
+    );
+    assert_eq!(
+        r.find_final_ancestor_property("Child", "id")
+            .map(|(name, by_phpdoc)| (name.to_string(), by_phpdoc)),
+        Some(("Host".to_owned(), false))
+    );
+}
+
+#[test]
 fn class_consts_are_registered_and_typed_from_their_literal_value() {
     let r = build_registry(
         r#"<?php

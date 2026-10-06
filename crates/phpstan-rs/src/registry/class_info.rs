@@ -129,6 +129,8 @@ pub struct PropertyReflection {
     // (the safe, permissive default) for every synthetic property with
     // no real declaration to read a default from.
     pub(in crate::registry) has_default: bool,
+    pub(in crate::registry) is_final: bool,
+    pub(in crate::registry) is_final_by_phpdoc: bool,
     // PHP 8.4 `abstract` property modifier (only legal on a hooked
     // property inside an abstract class, but tracked here unconditionally
     // like `is_readonly` above - the parser/engine enforce the legality
@@ -204,6 +206,14 @@ impl PropertyReflection {
 
     pub fn is_readonly(&self) -> bool {
         self.is_readonly
+    }
+
+    pub fn is_final(&self) -> bool {
+        self.is_final
+    }
+
+    pub fn is_final_by_phpdoc(&self) -> bool {
+        self.is_final_by_phpdoc
     }
 
     pub fn allows_private_mutation(&self) -> bool {
@@ -407,13 +417,6 @@ pub struct ClassReflection {
     // PHPStan.
     pub(in crate::registry) consts: Shared<OrderedNameMap<Arc<ConstantReflection>>>,
     pub(in crate::registry) uses: Vec<Name>,
-    // Property names declared `final` in this class's own body (PHP 8.4) -
-    // same "not walked up the hierarchy" shape as method-entry flags;
-    // `Registry::find_final_ancestor_property` does that walk. Real PHP
-    // fatals overriding a `final` property in a subclass exactly like a
-    // `final` method.
-    pub(in crate::registry) final_properties: NameSet,
-    pub(in crate::registry) final_properties_by_phpdoc: NameSet,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -674,12 +677,16 @@ impl ClassReflection {
             .is_some_and(|entry| entry.is_final_by_phpdoc)
     }
 
-    pub fn final_properties(&self) -> &NameSet {
-        &self.final_properties
+    pub fn is_final_property(&self, name: &str) -> bool {
+        self.properties
+            .get(name)
+            .is_some_and(|property| property.is_final)
     }
 
-    pub fn final_properties_by_phpdoc(&self) -> &NameSet {
-        &self.final_properties_by_phpdoc
+    pub fn is_final_property_by_phpdoc(&self, name: &str) -> bool {
+        self.properties
+            .get(name)
+            .is_some_and(|property| property.is_final_by_phpdoc)
     }
 
     pub fn trait_aliases(&self) -> &Vec<TraitAlias> {
@@ -1224,6 +1231,8 @@ impl ClassReflection {
                         is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
                         has_default: p.default.is_some(),
+                        is_final: false,
+                        is_final_by_phpdoc: false,
                         is_abstract: p.is_abstract,
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
@@ -1341,6 +1350,8 @@ impl ClassReflection {
                         is_internal: false,
                         deprecated: None,
                         has_default: p.default.is_some(),
+                        is_final: false,
+                        is_final_by_phpdoc: false,
                         is_abstract: false,
                         // Unlike `is_abstract` above (impossible on a
                         // promoted property - an abstract constructor
@@ -1407,6 +1418,8 @@ impl ClassReflection {
                         // so `false` (the safe, never-wrongly-exempting
                         // choice) rather than a guess.
                         has_default: false,
+                        is_final: false,
+                        is_final_by_phpdoc: false,
                         is_abstract: false,
                         has_get_hook: false,
                         has_set_hook: false,
@@ -1417,6 +1430,11 @@ impl ClassReflection {
                     }
                 });
             }
+        }
+
+        for (name, property) in properties.iter_mut() {
+            property.is_final = final_properties.contains(name);
+            property.is_final_by_phpdoc = final_properties_by_phpdoc.contains(name);
         }
 
         // `@method` - a virtual method with no real declaration at all.
@@ -1695,8 +1713,6 @@ impl ClassReflection {
                 .map(|(name, constant)| (name, Arc::new(constant)))
                 .collect(),
             uses: c.used_traits().map(class_ref).collect(),
-            final_properties,
-            final_properties_by_phpdoc,
             trait_aliases,
             resolved_trait_conflicts: c.resolved_trait_conflicts().map(Name::from).collect(),
             templates,
@@ -1990,6 +2006,8 @@ impl ClassReflection {
                 // `false`, so `isset($case->name)` can still be correctly
                 // recognized as redundant.
                 has_default: true,
+                is_final: false,
+                is_final_by_phpdoc: false,
                 is_abstract: false,
                 has_get_hook: false,
                 has_set_hook: false,
@@ -2056,6 +2074,8 @@ impl ClassReflection {
                     // Same reasoning as `->name` above - a backed enum
                     // case's `->value` is language-guaranteed too.
                     has_default: true,
+                    is_final: false,
+                    is_final_by_phpdoc: false,
                     is_abstract: false,
                     has_get_hook: false,
                     has_set_hook: false,
@@ -2144,15 +2164,19 @@ impl ClassReflection {
             }
         }
         self.redeclared_methods.extend(other.redeclared_methods);
-        self.properties.extend(other.properties);
+        for (name, mut property) in other.properties {
+            if let Some(existing) = self.properties.get(&name) {
+                let merged = Arc::make_mut(&mut property);
+                merged.is_final |= existing.is_final;
+                merged.is_final_by_phpdoc |= existing.is_final_by_phpdoc;
+            }
+            self.properties.insert(name, property);
+        }
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);
         self.type_aliases.extend(other.type_aliases);
         self.type_alias_case_refs.extend(other.type_alias_case_refs);
         self.type_imports.extend(other.type_imports);
-        self.final_properties.extend(other.final_properties);
-        self.final_properties_by_phpdoc
-            .extend(other.final_properties_by_phpdoc);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);
         self.covariant_templates.extend(other.covariant_templates);
