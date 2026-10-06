@@ -370,7 +370,10 @@ pub(super) fn store(key: &Key, cached: &CachedFile) {
     // What is stored reads back as what was.
     #[cfg(debug_assertions)]
     {
-        let reader = CacheReader::new(container.clone()).expect("what is stored is whole");
+        let mut reader = CacheReader::new(container.clone()).expect("what is stored is whole");
+        if let Some(file_id) = cached.origin_file_id {
+            reader.set_cache_context(file_id.index() as u64);
+        }
         let decode = || decode_cached_file(&reader).expect("what is stored decodes");
         let decoded = match cached.origin_file_id {
             Some(file_id) => crate::registry::provenance::with_origin_file_id(file_id, decode),

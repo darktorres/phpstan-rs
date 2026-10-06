@@ -11,6 +11,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::container::{Reader, Unreadable, Writer};
 
@@ -100,7 +101,13 @@ pub(crate) fn store_container(name: &str, writer: Writer) {
     if fs::create_dir_all(dir).is_err() {
         return;
     }
-    let temporary = dir.join(format!("{name}-{}.{}.tmp", cache_key(), std::process::id()));
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let temporary = dir.join(format!(
+        "{name}-{}.{}.{}.tmp",
+        cache_key(),
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
     let written = fs::write(&temporary, writer.finish()).is_ok();
     if !written || fs::rename(&temporary, &target).is_err() {
         let _ = fs::remove_file(&temporary);

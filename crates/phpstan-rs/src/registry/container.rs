@@ -393,8 +393,7 @@ impl Reader {
         let directory = source
             .read(body_end, directory_len)
             .map_err(|_| Unreadable::Damaged)?;
-        let spans = parse_directory(&directory, body_end, file_len)
-            .ok_or_else(|| Unreadable::Inconsistent("its directory is cut short".to_string()))?;
+        let spans = parse_directory(&directory, body_end, file_len).ok_or(Unreadable::Damaged)?;
         if !spans.contains_key(NAMES) {
             return Err(Unreadable::Inconsistent("it has no name table".to_string()));
         }

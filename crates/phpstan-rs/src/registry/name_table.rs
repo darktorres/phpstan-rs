@@ -1272,8 +1272,12 @@ fn decode_entry<V: serde::de::DeserializeOwned>(
     bytes: &[u8],
     names: Option<&syntax::name::CacheNameTable>,
 ) -> V {
-    try_decode_entry(bytes, names)
-        .unwrap_or_else(|error| panic!("a stored registry entry no longer decodes: {error}"))
+    try_decode_entry(bytes, names).unwrap_or_else(|error| {
+        panic!(
+            "a stored registry entry of {} no longer decodes: {error}",
+            std::any::type_name::<V>()
+        )
+    })
 }
 
 fn try_decode_entry<V: serde::de::DeserializeOwned>(
