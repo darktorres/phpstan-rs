@@ -234,19 +234,19 @@ impl<'a> Checker<'a> {
     /// shape (`infer_expr`/`find_method_owner`/`resolve_static_class_name`),
     /// since real type inference is available here, unlike
     /// `registry::purity`'s own registry-build-time classification pass;
-    /// this reads `is_transitively_pure` straight off whatever
-    /// `FunctionReflection` the call actually, concretely resolves to, with no
-    /// need to reconstruct a `PurityDependency` key at all.
+    /// this reads the registry's ID-keyed verdict for whatever declaration
+    /// the call actually, concretely resolves to, without rebuilding a
+    /// `PurityDependency` key from the call body.
     pub(crate) fn check_pure_call_without_effect(&mut self, e: &Expr, locals: &Locals) {
         let (message, identifier) = match &e.kind {
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {
                     return;
                 };
-                let Some((resolved, sig)) = self.registry.resolve_function(name) else {
+                let Some((resolved, _sig)) = self.registry.resolve_function(name) else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self.registry.function_is_pure(resolved) {
                     return;
                 }
                 let declared = self
@@ -277,14 +277,14 @@ impl<'a> Checker<'a> {
                 }) else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self.registry.method_is_pure(&owner, method) {
                     return;
                 }
                 // Real PHPStan's own `PossiblyPureMethodCallCollector`
                 // re-applies the identical overridability gate
                 // `registry::purity`'s own classification pass already
-                // used to decide `sig.is_transitively_pure` in the first
-                // place - a *different* question (does *this* call site
+                // used to decide the registry's purity verdict in the
+                // first place - a *different* question (does *this* call site
                 // definitely reach `sig` itself, not some subclass's own
                 // override of it). Only handled for a plain `Object`
                 // receiver, matching this whole feature's own disclosed
@@ -326,13 +326,13 @@ impl<'a> Checker<'a> {
                 let Some(resolved_class) = self.infer_static_target_class(target, locals) else {
                     return;
                 };
-                let Some((owner, sig)) = self
+                let Some((owner, _sig)) = self
                     .registry
                     .lookup_method_with_owner(&resolved_class, method)
                 else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self.registry.method_is_pure(&owner, method) {
                     return;
                 }
                 (
@@ -345,10 +345,10 @@ impl<'a> Checker<'a> {
                 let Some((class, _)) = new_ty.as_object() else {
                     return;
                 };
-                let Some(sig) = self.registry.lookup_method(class, "__construct") else {
+                let Some(_sig) = self.registry.lookup_method(class, "__construct") else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self.registry.method_is_pure(class, "__construct") {
                     return;
                 }
                 (
@@ -364,7 +364,7 @@ impl<'a> Checker<'a> {
     /// `@phpstan-pure`/`@phpstan-impure` tag validation - real PHPStan's
     /// own `FunctionPurityCheck`, scoped to the one direction this
     /// project's own binary purity classification
-    /// (`FunctionReflection::is_transitively_pure` - deliberately not the
+    /// (the registry's ID-keyed purity verdict - deliberately not the
     /// richer per-point `certain`/`maybe` taxonomy real PHPStan's own
     /// version needs) can support without a real risk of false
     /// positives: a declaration tagged `@phpstan-impure` that this
@@ -386,13 +386,18 @@ impl<'a> Checker<'a> {
         &mut self,
         f: &FunctionDecl,
         sig: Option<&FunctionReflection>,
-        is_method: bool,
+        class_name: Option<&str>,
         label: &str,
     ) {
-        let Some(sig) = sig else {
+        if sig.is_none() {
             return;
+        }
+        let is_pure = if let Some(class_name) = class_name {
+            self.registry.method_is_pure(class_name, f.name.as_ref())
+        } else {
+            self.registry.function_is_pure(f.name.as_ref())
         };
-        if !sig.is_transitively_pure() {
+        if !is_pure {
             return;
         }
         let Some(doc) = f.doc_comment.as_deref() else {
@@ -405,7 +410,7 @@ impl<'a> Checker<'a> {
         if !block.impure {
             return;
         }
-        let (description, identifier) = if is_method {
+        let (description, identifier) = if class_name.is_some() {
             ("Method", "impureMethod.pure")
         } else {
             ("Function", "impureFunction.pure")
@@ -428,7 +433,7 @@ impl<'a> Checker<'a> {
     /// doc comment has the full identifier/certain-vs-maybe mapping).
     ///
     /// Gated on an explicit `@phpstan-pure`/`@pure` tag only, not
-    /// `sig.is_transitively_pure` alone: real PHPStan's own reflection
+    /// the purity verdict alone: real PHPStan's own reflection
     /// layer can infer purity without any tag at all, but doing the same
     /// here would make every one of these four diagnostics fire on any
     /// ordinary, untagged void function/method the classifier happens to

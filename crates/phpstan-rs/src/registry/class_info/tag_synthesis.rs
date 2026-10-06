@@ -123,7 +123,6 @@ pub(crate) fn method_tag_sig(
         assert_if_false: Vec::new(),
         assert: Vec::new(),
         purity_dependencies: None,
-        is_transitively_pure: false,
         declared_pure: false,
         is_stub: false,
         is_magic: true,

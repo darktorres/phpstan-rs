@@ -297,7 +297,7 @@ impl<'a> Checker<'a> {
         if self.settings.sidz.check_magic_numbers {
             self.check_magic_numbers_in_params(&f.params);
         }
-        self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
+        self.check_declared_purity_tag(f, sig, class_name, &label);
         self.check_declared_param_callable_tags(f);
         self.check_internal_param_and_return_types(f, class_name, &label);
         self.check_restricted_param_and_return_types(f, class_name);

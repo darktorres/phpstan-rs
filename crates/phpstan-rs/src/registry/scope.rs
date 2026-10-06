@@ -289,6 +289,7 @@ impl Registry {
     /// the purity passes to settle again; their declarations are as
     /// resolved otherwise.
     pub(crate) fn clear_purity(&mut self, scope: &Scope) {
+        self.clear_purity_results(scope);
         for key in scope.function_keys().into_iter().flatten() {
             let Some((name, sig)) = self.functions.get_with_name(&FoldedKey(key)) else {
                 continue;

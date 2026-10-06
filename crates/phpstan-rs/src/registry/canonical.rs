@@ -195,7 +195,6 @@ canonical_struct!(FunctionReflection {
     assert_if_false,
     assert,
     purity_dependencies,
-    is_transitively_pure,
     declared_pure,
     is_stub,
     is_magic,
@@ -453,6 +452,7 @@ impl CanonicalOver for Registry {
     fn canonical_over(&self, base: &Self, compare: CompareAt, p: &mut Printer) {
         let Registry {
             id_generation: _,
+            purity_results: _,
             classes,
             class_ids: _,
             project_class_names: _,
@@ -651,6 +651,7 @@ canonical_struct!(Registry {
     global_sites,
 } skip {
     id_generation,
+    purity_results,
     class_ids,
     project_class_names,
     project_class_decls,

@@ -37,11 +37,11 @@
 
 use crate::registry::bodies::BodySource;
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::Name;
 
 use crate::registry::summaries::PurityCall;
-use crate::registry::{FunctionReflection, Registry};
+use crate::registry::{ClassId, FnId, FunctionReflection, MethodRef, Registry};
 use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
@@ -71,6 +71,12 @@ struct PurityCandidates {
     methods: Vec<(Name, Name)>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub(crate) struct PurityResults {
+    pub(crate) pure_functions: FxHashSet<FnId>,
+    pub(crate) pure_methods: FxHashSet<MethodRef>,
+}
+
 impl Registry {
     /// Wired into `Registry::build` immediately after
     /// `resolve_deferred_value_of` (and into `Project`'s own incremental
@@ -84,6 +90,58 @@ impl Registry {
         let candidates = self.classify_purity(bodies);
         self.run_purity_fixed_point(&candidates);
         self.resolve_effects(bodies);
+    }
+
+    pub(crate) fn function_is_pure(&self, name: &str) -> bool {
+        let Some(id) = self.function_ids.get(name) else {
+            return false;
+        };
+        self.debug_check_id_generation(id.generation());
+        self.purity_results.pure_functions.contains(id)
+    }
+
+    pub(crate) fn method_is_pure(&self, class: &str, method: &str) -> bool {
+        self.method_ref(class, method)
+            .is_some_and(|method| self.purity_results.pure_methods.contains(&method))
+    }
+
+    fn method_ref(&self, class: &str, method: &str) -> Option<MethodRef> {
+        let id = *self.class_ids.get(class)?;
+        let slot = *self.class_by_id(id)?.member_slots.get(method)?;
+        Some(MethodRef::new(id, slot))
+    }
+
+    pub(crate) fn clear_purity_results(&mut self, scope: &super::scope::Scope) {
+        if scope.is_all() {
+            self.purity_results = PurityResults::default();
+            return;
+        }
+        let function_ids: FxHashSet<FnId> = scope
+            .function_keys()
+            .into_iter()
+            .flatten()
+            .filter_map(|key| {
+                self.function_ids
+                    .get(&super::name_table::FoldedKey(key))
+                    .copied()
+            })
+            .collect();
+        let class_ids: FxHashSet<ClassId> = scope
+            .class_keys()
+            .into_iter()
+            .flatten()
+            .filter_map(|key| {
+                self.class_ids
+                    .get(&super::name_table::FoldedKey(key))
+                    .copied()
+            })
+            .collect();
+        self.purity_results
+            .pure_functions
+            .retain(|id| !function_ids.contains(id));
+        self.purity_results
+            .pure_methods
+            .retain(|method| !class_ids.contains(&method.class()));
     }
 
     /// Populates `purity_dependencies` on every function/method this
@@ -212,9 +270,6 @@ impl Registry {
         let mut ready: Vec<usize> = Vec::new();
         for (index, wait) in waiting.iter_mut().enumerate() {
             let sig = signature(index);
-            if sig.is_transitively_pure {
-                continue;
-            }
             let Some(deps) = &sig.purity_dependencies else {
                 continue;
             };
@@ -254,20 +309,15 @@ impl Registry {
         for index in pure {
             match index.checked_sub(candidates.functions.len()) {
                 None => {
-                    self.functions
-                        .get_mut(&candidates.functions[index])
-                        .unwrap()
-                        .is_transitively_pure = true;
+                    if let Some(id) = self.function_ids.get(&candidates.functions[index]) {
+                        self.purity_results.pure_functions.insert(*id);
+                    }
                 }
                 Some(i) => {
                     let (class, method) = &candidates.methods[i];
-                    self.classes
-                        .get_mut(class)
-                        .unwrap()
-                        .methods
-                        .get_mut(method)
-                        .unwrap()
-                        .is_transitively_pure = true;
+                    if let Some(method_ref) = self.method_ref(class, method) {
+                        self.purity_results.pure_methods.insert(method_ref);
+                    }
                 }
             }
         }
@@ -275,15 +325,8 @@ impl Registry {
 
     fn dependency_is_pure(&self, dep: &PurityDependency) -> bool {
         match dep {
-            PurityDependency::Function(name) => self
-                .functions
-                .get(name)
-                .is_some_and(|sig| sig.is_transitively_pure),
-            PurityDependency::Method(class, method) => self
-                .classes
-                .get(class)
-                .and_then(|info| info.methods.get(method))
-                .is_some_and(|sig| sig.is_transitively_pure),
+            PurityDependency::Function(name) => self.function_is_pure(name),
+            PurityDependency::Method(class, method) => self.method_is_pure(class, method),
         }
     }
 }
@@ -795,5 +838,34 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
             }
             walk_expr(self, e);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::scope::Scope;
+    use syntax::lexer::Lexer;
+    use syntax::parser::Parser;
+
+    #[test]
+    fn purity_verdicts_live_in_registry_tables_by_declaration_id() {
+        let tokens = Lexer::new(
+            "<?php function leaf(int $n): int { return $n + 1; } function caller(int $n): int { return leaf($n); } final class Demo { public function leaf(int $n): int { return $n + 1; } public function caller(int $n): int { return $this->leaf($n); } }",
+        )
+        .tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut registry = Registry::build(&program);
+
+        assert!(registry.function_is_pure("leaf"));
+        assert!(registry.function_is_pure("caller"));
+        assert!(registry.method_is_pure("Demo", "leaf"));
+        assert!(registry.method_is_pure("Demo", "CALLER"));
+
+        registry.clear_purity(&Scope::all());
+        assert!(!registry.function_is_pure("leaf"));
+        assert!(!registry.function_is_pure("caller"));
+        assert!(!registry.method_is_pure("Demo", "leaf"));
+        assert!(!registry.method_is_pure("Demo", "caller"));
     }
 }

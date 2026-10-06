@@ -79,7 +79,7 @@ pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_typ
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
-pub(crate) use purity::{collect_impure_points, is_non_overridable};
+pub(crate) use purity::{PurityResults, collect_impure_points, is_non_overridable};
 pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
 pub(crate) use type_node::{mentions_mixed, parse_type_node};
 
@@ -259,6 +259,8 @@ pub struct Registry {
     /// clients or pass tables from an older base cannot alias new entries.
     #[serde(skip)]
     id_generation: u32,
+    #[serde(skip)]
+    purity_results: PurityResults,
     #[serde(skip)]
     classes: NameTable<ClassReflection>,
     #[serde(skip)]
@@ -690,6 +692,9 @@ impl Registry {
         {
             self.class_ids.remove(name);
             self.project_class_decls[id.local() as usize] = None;
+            self.purity_results
+                .pure_methods
+                .retain(|method| method.class() != id);
         }
     }
 
@@ -702,6 +707,7 @@ impl Registry {
         {
             self.function_ids.remove(name);
             self.project_function_decls[id.local() as usize] = None;
+            self.purity_results.pure_functions.remove(&id);
         }
     }
 
@@ -1146,6 +1152,7 @@ impl Registry {
             .id_generation
             .checked_add(1)
             .expect("registry id generation exhausted");
+        base.purity_results = PurityResults::default();
         for (_, id) in base.class_ids.iter_mut() {
             id.set_generation(base.id_generation);
         }
