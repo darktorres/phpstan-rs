@@ -234,17 +234,15 @@ struct DeclarationSource<'a> {
 
 /// A file's tree: the one it kept, or one parsed again.
 pub(crate) enum AstRef<'a> {
-    Kept(&'a [StmtNode]),
+    Kept(&'a SyntaxTree),
     Parsed(Arc<Vec<StmtNode>>),
 }
 
-impl std::ops::Deref for AstRef<'_> {
-    type Target = [StmtNode];
-
-    fn deref(&self) -> &[StmtNode] {
+impl AstRef<'_> {
+    pub(crate) fn statements(&self) -> &[StmtNode] {
         match self {
-            AstRef::Kept(ast) => ast,
-            AstRef::Parsed(ast) => ast,
+            AstRef::Kept(tree) => tree.statements(),
+            AstRef::Parsed(ast) => ast.as_slice(),
         }
     }
 }
@@ -287,8 +285,8 @@ impl FileState {
     }
 
     /// The file's tree, when it is kept.
-    fn tree(&self) -> Option<&[StmtNode]> {
-        self.kept_tree.as_ref().map(SyntaxTree::statements)
+    fn tree(&self) -> Option<&SyntaxTree> {
+        self.kept_tree.as_ref()
     }
 }
 
@@ -3047,7 +3045,7 @@ impl Project {
             .with_settings(&self.settings)
             .with_bodies(&self.files)
             .with_line_index(&file.line_index);
-        if let Some(tree) = file.kept_tree.as_ref() {
+        if let AstRef::Kept(tree) = &ast {
             checker = checker.with_syntax_tree(tree);
         }
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
@@ -3079,7 +3077,7 @@ impl Project {
         let Some((mut checker, ast)) = self.checker_for(path) else {
             return Vec::new();
         };
-        checker.check_program(&ast);
+        checker.check_program(ast.statements());
         checker.take_semantic_tokens()
     }
 
@@ -3094,9 +3092,9 @@ impl Project {
         checker.set_defer_property_type_checks(true);
         checker.set_collect_member_refs(collect_member_refs);
         checker.set_records(records);
-        checker.check_program(&ast);
+        checker.check_program(ast.statements());
         if collect_member_refs {
-            checker.collect_default_and_const_value_member_refs(&ast);
+            checker.collect_default_and_const_value_member_refs(ast.statements());
         }
         FileCheck {
             member_refs: checker.take_member_ref_sites(),
