@@ -263,7 +263,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   returns it inside `ParsedFile`; `into_node_arenas` recovers it after use.
   Load workers now pass their `NodeArenas` bundle across files whose trees are
   dropped, reclaiming the arenas from each parsed file. The capacity and
-  span-alignment test is added but unrun. Row 3.4 is implemented with item 9.2;
+  span-alignment test and project tree-to-scratch handoff test are added but
+  unrun. Row 3.4 is implemented with item 9.2;
   item 9.V remains the pending tests-only gate. The node payload arenas remain
   empty. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
