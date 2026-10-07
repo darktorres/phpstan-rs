@@ -185,6 +185,16 @@ impl SyntaxTree {
         &self.stmts
     }
 
+    #[allow(dead_code)] // Used as checker readers move to file-local IDs in row 9.3.
+    pub(crate) fn expr(&self, id: syntax::ast::ExprId) -> Option<&syntax::ast::ExprNode> {
+        self.arenas.expr(id)
+    }
+
+    #[allow(dead_code)] // Used as checker readers move to file-local IDs in row 9.3.
+    pub(crate) fn stmt(&self, id: syntax::ast::StmtId) -> Option<&syntax::ast::StmtNode> {
+        self.arenas.stmt(id)
+    }
+
     #[allow(dead_code)] // Used as payloads become source ranges in row 9.4.
     pub(crate) fn source_slice(&self, span: Span) -> Option<&[u8]> {
         self.source.get(span.start as usize..span.end as usize)
