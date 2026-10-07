@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
 
     fn nullable_operand(
         &mut self,
-        operand: &Expr,
+        operand: &ExprNode,
         locals: &Locals,
         context: &str,
         id: &'static str,
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
 
     /// `isset`/`empty` of a variable or property holding an object, which a
     /// null check or `instanceof` says more precisely.
-    fn check_object_probes(&mut self, which: &str, operands: &[Expr], locals: &Locals) {
+    fn check_object_probes(&mut self, which: &str, operands: &[ExprNode], locals: &Locals) {
         for operand in operands {
             // An offset or static probe asks whether the key or member
             // exists, not what the value is.
@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The expression-level checks, before `e` itself is checked.
-    pub(crate) fn check_strict_expression_idioms(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_strict_expression_idioms(&mut self, e: &ExprNode, locals: &Locals) {
         if self.settings.shipmonk.check_null_coercion {
             match &e.kind {
                 ExprKind::Isset(operands) => self.check_object_probes("isset", operands, locals),
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The statement-level checks, before `stmt` itself is checked.
-    pub(crate) fn check_strict_statement_idioms(&mut self, stmt: &Stmt, locals: &Locals) {
+    pub(crate) fn check_strict_statement_idioms(&mut self, stmt: &StmtNode, locals: &Locals) {
         if !self.settings.shipmonk.check_enum_exhaustiveness {
             return;
         }
@@ -261,7 +261,7 @@ impl<'a> Checker<'a> {
                 let mut compared: Vec<(String, String)> = Vec::new();
                 let mut chain_ifs: Vec<syntax::span::Span> = Vec::new();
                 let mut current = Some(stmt);
-                'chain: while let Some(Stmt {
+                'chain: while let Some(StmtNode {
                     kind: StmtKind::If(if_stmt),
                     span,
                     ..

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
-use syntax::ast::{ClassDecl, FunctionDecl, Stmt, StmtKind};
+use syntax::ast::{ClassDecl, FunctionDecl, StmtKind, StmtNode};
 use syntax::span::LineCol;
 use syntax::visit::{self, Visitor};
 use types::Type;
@@ -43,7 +43,7 @@ impl TemplateScope {
 
 /// The templates in scope at the byte offset `at` of a file whose
 /// statements are `stmts`, with class templates from `registry`.
-pub fn template_scope_at(registry: &Registry, stmts: &[Stmt], at: u32) -> TemplateScope {
+pub fn template_scope_at(registry: &Registry, stmts: &[StmtNode], at: u32) -> TemplateScope {
     let mut finder = Enclosing {
         at,
         class: None,
@@ -93,7 +93,7 @@ impl Enclosing<'_> {
 }
 
 impl<'ast> Visitor<'ast> for Enclosing<'ast> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         if !self.contains(stmt.span.start, stmt.span.end) {
             return;
         }
@@ -307,7 +307,7 @@ pub fn type_drift_of_fixtures(
 }
 
 /// A file's statements and lines.
-type ParsedScopeFile = (Vec<Stmt>, Arc<syntax::span::LineIndex>);
+type ParsedScopeFile = (Vec<StmtNode>, Arc<syntax::span::LineIndex>);
 
 /// `template_scope_at` over files read and parsed once each.
 pub struct TemplateScopes<'r> {

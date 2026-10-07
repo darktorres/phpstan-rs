@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn check_current_time_expression(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_current_time_expression(&mut self, e: &ExprNode, locals: &Locals) {
         match &e.kind {
             ExprKind::New(class, args) => {
                 let ExprKind::Name(name) = &class.kind else {

@@ -15,7 +15,7 @@ use types::Type;
 /// there's nothing recorded for it, the common case for every function
 /// this mechanism doesn't apply to. Each branch's type stays its own:
 /// a union would merge `list<A>|list<B>` into `list<A|B>`.
-fn reconstructed_discriminant_return_types(e: &Expr, locals: &Locals) -> Vec<Type> {
+fn reconstructed_discriminant_return_types(e: &ExprNode, locals: &Locals) -> Vec<Type> {
     let ExprKind::Variable(name) = &e.kind else {
         return Vec::new();
     };
@@ -58,7 +58,7 @@ fn level_of(level: Option<i64>) -> u32 {
 impl<'a> Checker<'a> {
     pub(crate) fn check_block(
         &mut self,
-        stmts: &[Stmt],
+        stmts: &[StmtNode],
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
     /// goes in `state`.
     fn check_stmt_range(
         &mut self,
-        stmts: &[Stmt],
+        stmts: &[StmtNode],
         range: std::ops::Range<usize>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
@@ -177,12 +177,12 @@ impl<'a> Checker<'a> {
     /// it, where both are in this list and not in one statement of it (the
     /// list inside that statement has the stretch then). Overlapping
     /// stretches are one.
-    fn goto_regions(&self, stmts: &[Stmt]) -> Vec<GotoRegion> {
+    fn goto_regions(&self, stmts: &[StmtNode]) -> Vec<GotoRegion> {
         let labels = &self.current_function_goto_targets.labels;
         if !labels.iter().any(|l| l.backward) {
             return Vec::new();
         }
-        let holds = |stmt: &Stmt, is_label: bool, name: &syntax::name::Name| {
+        let holds = |stmt: &StmtNode, is_label: bool, name: &syntax::name::Name| {
             syntax::visit::any_stmt_in_body(stmt, |s| match &s.kind {
                 StmtKind::Label(n) => is_label && n.name == *name,
                 StmtKind::Goto(n) => !is_label && n.name == *name,
@@ -226,7 +226,7 @@ impl<'a> Checker<'a> {
     /// back, and only the last pass's findings stay.
     fn check_goto_region(
         &mut self,
-        stmts: &[Stmt],
+        stmts: &[StmtNode],
         region: &GotoRegion,
         locals: &mut Locals,
         declared_return: Option<&Type>,
@@ -279,7 +279,7 @@ impl<'a> Checker<'a> {
     /// reasoning.
     pub(crate) fn check_stmt(
         &mut self,
-        stmt: &Stmt,
+        stmt: &StmtNode,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -316,7 +316,7 @@ impl<'a> Checker<'a> {
     /// statement's docblock except an expression statement that isn't an
     /// assignment; a function/class/enum declaration's own docblock is
     /// skipped here, since the declaration-level half already covers it.
-    fn check_statement_doc_tag_values(&mut self, stmt: &Stmt) {
+    fn check_statement_doc_tag_values(&mut self, stmt: &StmtNode) {
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return;
         };
@@ -341,7 +341,12 @@ impl<'a> Checker<'a> {
     /// list) or, elsewhere, a variable already defined; an unnamed tag
     /// needs exactly one candidate. `locals` is the scope before `stmt`.
     /// Whether every tag's variable name checked out.
-    fn check_statement_var_tag_names(&mut self, stmt: &Stmt, locals: &Locals, label: &str) -> bool {
+    fn check_statement_var_tag_names(
+        &mut self,
+        stmt: &StmtNode,
+        locals: &Locals,
+        label: &str,
+    ) -> bool {
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return true;
         };
@@ -551,7 +556,7 @@ impl<'a> Checker<'a> {
     /// `InvalidPhpDocVarTagTypeRule`'s unresolvable half: every `@var` on
     /// a statement (not a declaration, whose own rules check its tags),
     /// reported on the comment's own line.
-    fn check_statement_var_tags_resolvable(&mut self, stmt: &Stmt) {
+    fn check_statement_var_tags_resolvable(&mut self, stmt: &StmtNode) {
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return;
         };
@@ -585,7 +590,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn dispatch_stmt_rules(&mut self, stmt: &Stmt, locals: &Locals) {
+    fn dispatch_stmt_rules(&mut self, stmt: &StmtNode, locals: &Locals) {
         let rules = self.external_rules;
         let mut found = Vec::new();
         for rule in rules {
@@ -599,7 +604,7 @@ impl<'a> Checker<'a> {
 
     fn check_stmt_impl(
         &mut self,
-        stmt: &Stmt,
+        stmt: &StmtNode,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -962,7 +967,7 @@ impl<'a> Checker<'a> {
                     .completion
             }
             StmtKind::If(if_stmt) => {
-                let branches: Vec<(&Expr, &Stmt)> =
+                let branches: Vec<(&ExprNode, &StmtNode)> =
                     std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
                         .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
                         .collect();
@@ -1261,7 +1266,7 @@ impl<'a> Checker<'a> {
     /// inference or hierarchy walk - safe because the set is a superset
     /// of "names that could possibly match" (see that field's doc
     /// comment for why it never under-approximates).
-    fn apply_bare_statement_assert_narrowing(&mut self, e: &Expr, locals: &mut Locals) {
+    fn apply_bare_statement_assert_narrowing(&mut self, e: &ExprNode, locals: &mut Locals) {
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 if !self.registry.names_with_assert_tags.contains(&method.name) {
@@ -1316,8 +1321,8 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     fn check_if(
         &mut self,
-        branches: &[(&Expr, &Stmt)],
-        else_branch: Option<&Stmt>,
+        branches: &[(&ExprNode, &StmtNode)],
+        else_branch: Option<&StmtNode>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -1491,7 +1496,7 @@ impl<'a> Checker<'a> {
 
     /// A statement's resolved `@var` tags; none on a declaration, whose
     /// own rules read its tags.
-    fn statement_var_tags_of(&self, stmt: &Stmt) -> Vec<(Option<String>, Type)> {
+    fn statement_var_tags_of(&self, stmt: &StmtNode) -> Vec<(Option<String>, Type)> {
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return Vec::new();
         };
@@ -1510,7 +1515,7 @@ impl<'a> Checker<'a> {
     /// checks one declared at a file's top level; otherwise it would be
     /// indexed into the registry, so calls to it resolve, but exempt from
     /// every diagnostic.
-    pub(crate) fn check_nested_declaration(&mut self, stmt: &Stmt) {
+    pub(crate) fn check_nested_declaration(&mut self, stmt: &StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(c) => {
@@ -1589,7 +1594,7 @@ impl<'a> Checker<'a> {
     /// Checks the declarations `stmt` holds in its blocks
     /// (`check_nested_declaration`); not those in its expressions, which
     /// belong to a closure or an anonymous class and are checked with it.
-    pub(crate) fn check_nested_declarations(&mut self, stmt: &Stmt) {
+    pub(crate) fn check_nested_declarations(&mut self, stmt: &StmtNode) {
         NestedDeclarations { checker: self }.visit_stmt(stmt);
     }
 }
@@ -1600,7 +1605,7 @@ struct NestedDeclarations<'c, 'a> {
 }
 
 impl<'ast> Visitor<'ast> for NestedDeclarations<'_, '_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {
                 self.checker.check_nested_declaration(stmt);
@@ -1609,13 +1614,16 @@ impl<'ast> Visitor<'ast> for NestedDeclarations<'_, '_> {
         }
     }
 
-    fn visit_expr(&mut self, _: &'ast Expr) {}
+    fn visit_expr(&mut self, _: &'ast ExprNode) {}
 }
 
 /// The `(name, type)` assertions a statement's `@var` tags make: each
 /// named tag, and a single unnamed one for the one variable the
 /// statement defines (see `statement_defined_variable_names`).
-fn inline_var_annotations(stmt: &Stmt, tags: Vec<(Option<String>, Type)>) -> Vec<(String, Type)> {
+fn inline_var_annotations(
+    stmt: &StmtNode,
+    tags: Vec<(Option<String>, Type)>,
+) -> Vec<(String, Type)> {
     let unnamed_target = match statement_defined_variable_names(&stmt.kind).as_slice() {
         [single] => Some(single.clone()),
         _ => None,
@@ -1660,8 +1668,8 @@ fn inline_var_annotations(stmt: &Stmt, tags: Vec<(Option<String>, Type)>) -> Vec
 /// walked past the leftmost position, even for a real, common `assert(
 /// $a) && assert($b);` double-assertion, a real, disclosed scope trim
 /// rather than a wrong answer.
-fn bare_assert_condition(e: &Expr) -> Option<&Expr> {
-    fn as_bare_assert_call(e: &Expr) -> Option<&Expr> {
+fn bare_assert_condition(e: &ExprNode) -> Option<&ExprNode> {
+    fn as_bare_assert_call(e: &ExprNode) -> Option<&ExprNode> {
         let ExprKind::Call(callee, args) = &e.kind else {
             return None;
         };
@@ -1711,7 +1719,7 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
 /// Every variable an assignment statement (`$x = ...`, `[$a, [$b]] =
 /// ...`, `$x = &...`) binds.
 fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
-    fn collect(target: &Expr, out: &mut Vec<String>) {
+    fn collect(target: &ExprNode, out: &mut Vec<String>) {
         match &target.kind {
             ExprKind::Variable(name) => out.push(name.to_string()),
             ExprKind::Destructure(items, _) => {
@@ -1745,7 +1753,7 @@ fn static_variable_type(initializer: &Type) -> Type {
 
 /// The plain variables an assignment target writes: `$x`, or each of a
 /// `[$a, $b]`/`list($a, $b)` destructuring's.
-pub(super) fn assigned_variable_names(target: &Expr) -> Vec<String> {
+pub(super) fn assigned_variable_names(target: &ExprNode) -> Vec<String> {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
         ExprKind::Destructure(items, _) => items

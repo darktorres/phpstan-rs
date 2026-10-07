@@ -29,8 +29,8 @@ enum PromotionSite {
 /// Where a function-like's `return` values come from, for
 /// `ReturnNullsafeByRefRule`.
 enum ReturnSource<'s> {
-    Body(&'s [Stmt]),
-    Arrow(&'s Expr),
+    Body(&'s [StmtNode]),
+    Arrow(&'s ExprNode),
 }
 
 const SUPERGLOBALS: [&str; 9] = [
@@ -39,7 +39,7 @@ const SUPERGLOBALS: [&str; 9] = [
 
 /// Every `return <expr>` directly in `body`, not inside a nested
 /// function-like or class declaration.
-fn collect_return_exprs<'s>(body: &'s [Stmt], out: &mut Vec<&'s Expr>) {
+fn collect_return_exprs<'s>(body: &'s [StmtNode], out: &mut Vec<&'s ExprNode>) {
     for stmt in body {
         any_stmt_in_body(stmt, |s| {
             if let StmtKind::Return(Some(e)) = &s.kind {
@@ -58,7 +58,7 @@ struct Promotions<'c, 'a> {
 }
 
 impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
                 self.checker.check_function_like_declaration(
@@ -87,7 +87,7 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr {
@@ -153,15 +153,15 @@ fn is_promoted(p: &Param) -> bool {
 impl<'a> Checker<'a> {
     /// Entry point for one top-level statement of `check_program`'s own
     /// loop, so class names resolve against the positional `name_ctx`.
-    pub(crate) fn check_function_like_declarations_in_stmt(&mut self, stmt: &Stmt) {
+    pub(crate) fn check_function_like_declarations_in_stmt(&mut self, stmt: &StmtNode) {
         Promotions { checker: self }.visit_stmt(stmt);
     }
 
-    fn walk_promoted_in_body(&mut self, body: &[Stmt]) {
+    fn walk_promoted_in_body(&mut self, body: &[StmtNode]) {
         walk_stmts(&mut Promotions { checker: self }, body);
     }
 
-    fn walk_promoted_in_expr(&mut self, e: &Expr) {
+    fn walk_promoted_in_expr(&mut self, e: &ExprNode) {
         Promotions { checker: self }.visit_expr(e);
     }
 

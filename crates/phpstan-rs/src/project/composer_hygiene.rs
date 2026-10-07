@@ -172,7 +172,7 @@ struct FileFacts {
     probed_symbols: FxHashSet<String>,
 }
 
-fn collect_facts_in_stmts(stmts: &[Stmt], facts: &mut FileFacts) {
+fn collect_facts_in_stmts(stmts: &[StmtNode], facts: &mut FileFacts) {
     walk_stmts(&mut Facts(facts), stmts);
 }
 
@@ -181,14 +181,14 @@ fn collect_facts_in_stmts(stmts: &[Stmt], facts: &mut FileFacts) {
 struct Facts<'f>(&'f mut FileFacts);
 
 impl<'ast> Visitor<'ast> for Facts<'_> {
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         collect_facts_in_expr(e, self.0);
         walk_expr(self, e);
     }
 }
 
 /// `e`'s own facts, not its operands'.
-fn collect_facts_in_expr(e: &Expr, facts: &mut FileFacts) {
+fn collect_facts_in_expr(e: &ExprNode, facts: &mut FileFacts) {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => facts.strings.push(s.to_string()),
         ExprKind::Call(callee, args) => {
@@ -777,7 +777,7 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
 
 /// Every class-like `stmts` declares unconditionally, with its name's
 /// span.
-fn collect_declared_classes(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
+fn collect_declared_classes(stmts: &[StmtNode], out: &mut Vec<(String, Span)>) {
     syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
         if let Declared::Class(c) = declaration.declared
             && !declaration.conditional

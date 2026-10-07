@@ -122,7 +122,7 @@ pub(crate) enum Resolved {
 #[derive(Debug, Clone)]
 pub(crate) enum ProbeScope {
     Function(Box<FunctionDecl>),
-    TopLevel(Vec<Stmt>),
+    TopLevel(Vec<StmtNode>),
 }
 
 /// What a candidate `Span` is checked against - a single cursor position
@@ -237,7 +237,7 @@ struct Walker<'a> {
     // (`current_function` is `None`), cloned only then (one clone per
     // request, the same cost `ProbeScope::Function` already accepts for
     // an ordinary function-scoped probe).
-    top_level_stmts: &'a [Stmt],
+    top_level_stmts: &'a [StmtNode],
     // An owned clone (not a borrow - see `ProbeScope`'s own doc comment
     // for why) of whichever *named*
     // `FunctionDecl`/`MethodDecl` currently encloses the statement being
@@ -403,7 +403,7 @@ impl<'a> Walker<'a> {
     /// (`foreach ($rows as [$a, $b])`). Anything else (rare: a property/
     /// index write target as a foreach binding isn't valid PHP at all)
     /// falls back to an ordinary read-walk.
-    fn bind_var(&mut self, e: &Expr) {
+    fn bind_var(&mut self, e: &ExprNode) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => self.record_var_self(e.span, name),
             ExprKind::Destructure(items, _) => {
@@ -422,7 +422,7 @@ impl<'a> Walker<'a> {
 }
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Foreach {
                 subject,
@@ -562,7 +562,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         walk_enum_case(self, case);
     }
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::NewAnonymousClass(class) => {
@@ -727,7 +727,7 @@ impl Walker<'_> {
 
     /// Records `member` of `recv`: directly for `$this`, else as a probe
     /// of the receiver's type.
-    fn record_receiver_member(&mut self, recv: &Expr, member: &Ident) {
+    fn record_receiver_member(&mut self, recv: &ExprNode, member: &Ident) {
         let value = match &self.current_class {
             Some(owner) if matches!(&recv.kind, ExprKind::Variable(v) if *v == "this") => {
                 Resolved::Member(owner.clone(), member.to_string())

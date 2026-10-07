@@ -365,7 +365,7 @@ fn resolve_class_ref(name: &QualifiedName) -> Option<String> {
 /// `navigation.rs` does via `registry.classes()`, harmless to add later but
 /// unneeded for Tier 1's own class/function scope; the member half is
 /// Tier 2's job entirely, via a real Checker-resolved declaring owner).
-pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, RefTarget)> {
+pub(crate) fn index_class_fn_refs(stmts: &[StmtNode], source: &str) -> Vec<(Span, RefTarget)> {
     let mut w = ClassFnRefWalker {
         source: Some(source),
         out: Vec::new(),
@@ -383,7 +383,7 @@ pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, Re
 /// characters. A caller that reads only whether a name is referenced never
 /// reads a span; the index `textDocument/references`/`rename` read is built
 /// with `index_class_fn_refs`.
-pub(crate) fn index_class_fn_refs_without_source(stmts: &[Stmt]) -> Vec<(Span, RefTarget)> {
+pub(crate) fn index_class_fn_refs_without_source(stmts: &[StmtNode]) -> Vec<(Span, RefTarget)> {
     let mut w = ClassFnRefWalker {
         source: None,
         out: Vec::new(),
@@ -454,7 +454,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
         walk_args(self, &attribute.args);
     }
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 // The callee's name is recorded here, as a function or a

@@ -7,7 +7,7 @@
 
 use syntax::name::Name;
 
-use syntax::ast::{Attribute, Expr, ExprKind, Literal, StaticTarget};
+use syntax::ast::{Attribute, ExprKind, ExprNode, Literal, StaticTarget};
 
 /// `NamespaceVisibility`: callers must be in `namespace` (or, unless
 /// `exclude_sub_namespaces`, below it).
@@ -49,7 +49,7 @@ fn library_attribute(resolved: &str) -> Option<&str> {
         .then(|| resolved.rsplit('\\').next().unwrap_or(resolved))
 }
 
-fn class_names(args: &[Expr], out: &mut Vec<Name>) {
+fn class_names(args: &[ExprNode], out: &mut Vec<Name>) {
     syntax::stack::guard(|| {
         for arg in args {
             match &arg.kind {
@@ -60,7 +60,7 @@ fn class_names(args: &[Expr], out: &mut Vec<Name>) {
                     out.push(Name::from(s.to_str_lossy().trim_start_matches('\\')));
                 }
                 ExprKind::ArrayLiteral(items) => {
-                    let values: Vec<Expr> = items.iter().map(|i| i.value.clone()).collect();
+                    let values: Vec<ExprNode> = items.iter().map(|i| i.value.clone()).collect();
                     class_names(&values, out);
                 }
                 _ => {}
@@ -76,7 +76,7 @@ pub(crate) fn access_attributes(attrs: &[Attribute], namespace: &str) -> AccessA
         let Some(short) = attribute.name.resolved_class().and_then(library_attribute) else {
             continue;
         };
-        let values: Vec<Expr> = attribute.args.iter().map(|a| a.value.clone()).collect();
+        let values: Vec<ExprNode> = attribute.args.iter().map(|a| a.value.clone()).collect();
         match short {
             "Friend" => class_names(&values, &mut out.friends),
             "RestrictTraitTo" => class_names(&values, &mut out.restrict_trait_to),

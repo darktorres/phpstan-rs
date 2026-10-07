@@ -153,12 +153,12 @@ impl Locals {
 
     /// The key of the expression `e` narrows, made when it has not been
     /// (`KeyTable::key_of`).
-    pub(crate) fn key_of(&self, e: &Expr) -> Option<LocalKey> {
+    pub(crate) fn key_of(&self, e: &ExprNode) -> Option<LocalKey> {
         self.keys.borrow_mut().key_of(e, self.class.as_ref())
     }
 
     /// `key_of`, when the key has been made: a read never makes one.
-    pub(crate) fn find_key(&self, e: &Expr) -> Option<LocalKey> {
+    pub(crate) fn find_key(&self, e: &ExprNode) -> Option<LocalKey> {
         self.keys.borrow().find_key(e, self.class.as_ref())
     }
 
@@ -370,7 +370,7 @@ impl Locals {
         &mut self,
         name: LocalKey,
         target_keys: Vec<LocalKey>,
-        condition: std::rc::Rc<Expr>,
+        condition: std::rc::Rc<ExprNode>,
     ) {
         self.touch();
         self.condition_aliases
@@ -379,7 +379,7 @@ impl Locals {
 
     /// The store half of `QueryBuilderAliasMap`'s own mechanism - see its
     /// doc comment.
-    pub(crate) fn set_query_builder_alias(&mut self, name: LocalKey, rhs: std::rc::Rc<Expr>) {
+    pub(crate) fn set_query_builder_alias(&mut self, name: LocalKey, rhs: std::rc::Rc<ExprNode>) {
         self.touch();
         self.query_builder_aliases.insert(name, rhs);
     }

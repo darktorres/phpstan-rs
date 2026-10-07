@@ -30,7 +30,7 @@
 //! `ExprKind::Variable` probe hook (`checker/expr.rs`'s `self.probe_hit_
 //! at(e.span, &ty)` inside that arm) - no new Checker API, and uniform
 //! for `->`/`::` alike (`ExprKind::ClassConstFetch`/`StaticCall`'s class
-//! side is a bare `String`, not an `Expr`, so there is no AST-node shape
+//! side is a bare `String`, not an `ExprNode`, so there is no AST-node shape
 //! a `::` receiver could otherwise be spliced into).
 //!
 //! Truncating (not "inserting before the next statement") means a stale,
@@ -48,8 +48,8 @@ use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 use crate::project::{self, Project};
 use crate::registry::Registry;
 use syntax::ast::{
-    ClassKind, Expr, ExprKind, FunctionBody, FunctionDecl, SYNTHETIC_EXPR_ID, SYNTHETIC_STMT_ID,
-    Stmt, StmtKind, Visibility,
+    ClassKind, ExprKind, ExprNode, FunctionBody, FunctionDecl, SYNTHETIC_EXPR_ID,
+    SYNTHETIC_STMT_ID, StmtKind, StmtNode, Visibility,
 };
 use syntax::span::{LineIndex, Span, Unit};
 use syntax::token::{Keyword, Token};
@@ -167,7 +167,7 @@ fn receiver_start_idx(tokens: &[(Token, Span)], anchor_idx: usize) -> usize {
 /// receiver's internal ones, and any diagnostics this throwaway checker
 /// pass produces are discarded the same way the existing hover probe
 /// already discards its own).
-fn parse_standalone_expr(text: &str) -> Option<Expr> {
+fn parse_standalone_expr(text: &str) -> Option<ExprNode> {
     let tokens = syntax::lexer::Lexer::new_in_php(text).tokenize_with_spans();
     let mut parser = syntax::parser::Parser::new(tokens);
     let expr = parser.parse_expression().ok()?;
@@ -262,7 +262,7 @@ fn find_enclosing_names(
 }
 
 fn find_function_by_name<'a>(
-    stmts: &'a [Stmt],
+    stmts: &'a [StmtNode],
     class_name: Option<&str>,
     function_name: &str,
 ) -> Option<(&'a FunctionDecl, bool)> {
@@ -304,17 +304,17 @@ fn sentinel_span(at: u32) -> Span {
 /// variable's type from the receiver) and `ExprKind::Variable` read
 /// (`checker/expr.rs`'s own `self.probe_hit_at(e.span, &ty)`) rather
 /// than any new Checker-side mechanism.
-fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
+fn probe_statements(receiver: ExprNode) -> (StmtNode, StmtNode, Span) {
     let assign_span = sentinel_span(u32::MAX - 3);
     let read_span = sentinel_span(u32::MAX - 1);
-    let probe_var = |span: Span| Expr {
+    let probe_var = |span: Span| ExprNode {
         id: SYNTHETIC_EXPR_ID,
         kind: ExprKind::Variable(PROBE_VAR.into()),
         span,
     };
-    let assign_stmt = Stmt {
+    let assign_stmt = StmtNode {
         id: SYNTHETIC_STMT_ID,
-        kind: StmtKind::Expression(Expr {
+        kind: StmtKind::Expression(ExprNode {
             id: SYNTHETIC_EXPR_ID,
             kind: ExprKind::Assign(Box::new(probe_var(assign_span)), Box::new(receiver)),
             span: assign_span,
@@ -323,7 +323,7 @@ fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
         doc_comment: None,
         doc_line: None,
     };
-    let read_stmt = Stmt {
+    let read_stmt = StmtNode {
         id: SYNTHETIC_STMT_ID,
         kind: StmtKind::Expression(probe_var(read_span)),
         span: read_span,
@@ -346,12 +346,12 @@ fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
 /// appended - see this module's own doc comment for why truncating
 /// (never "insert before") is the sound choice.
 fn build_probe_scope(
-    stmts: &[Stmt],
+    stmts: &[StmtNode],
     class_name: Option<&str>,
     function_name: Option<&str>,
     cut_line: u32,
     index: &LineIndex,
-    receiver: Expr,
+    receiver: ExprNode,
 ) -> (ProbeScope, bool, Option<String>, Span) {
     let (assign_stmt, read_stmt, probe_span) = probe_statements(receiver);
     let found = function_name.and_then(|f| find_function_by_name(stmts, class_name, f));
@@ -376,7 +376,7 @@ fn build_probe_scope(
             )
         }
         None => {
-            let mut top: Vec<Stmt> = stmts
+            let mut top: Vec<StmtNode> = stmts
                 .iter()
                 .filter(|s| index.line(s.span.end) < cut_line)
                 .cloned()
@@ -525,7 +525,7 @@ fn short_name(fqn: &str) -> &str {
 /// (neither exists) degrades to a fully-qualified insert with no edit at
 /// all (see `resolve_import`) rather than guessing a top-of-file
 /// insertion point.
-fn find_use_insertion_point(stmts: &[Stmt]) -> Option<u32> {
+fn find_use_insertion_point(stmts: &[StmtNode]) -> Option<u32> {
     stmts
         .iter()
         .rfind(|s| matches!(&s.kind, StmtKind::Use(_) | StmtKind::Namespace(_)))
@@ -541,7 +541,7 @@ fn find_use_insertion_point(stmts: &[Stmt]) -> Option<u32> {
 /// fully-qualified `\Some\Fqn` with no edit at all, rather than silently
 /// importing over an unrelated existing name.
 fn resolve_import(
-    stmts: &[Stmt],
+    stmts: &[StmtNode],
     index: Positions<'_>,
     ctx: &NameContext,
     fqn: &str,
@@ -587,7 +587,7 @@ fn resolve_import(
 pub(super) fn enumerate_bare(
     project: &Project,
     path: &Path,
-    current_stmts: &[Stmt],
+    current_stmts: &[StmtNode],
     cursor: u32,
     unit: Unit,
 ) -> Vec<CompletionItem> {
@@ -689,7 +689,7 @@ pub(super) fn build_member_probe(
     text: &str,
     tokens: &[(Token, Span)],
     cursor: Cursor,
-    stmts: &[Stmt],
+    stmts: &[StmtNode],
     registry: &Registry,
 ) -> Option<MemberProbe> {
     let Trigger::Member {

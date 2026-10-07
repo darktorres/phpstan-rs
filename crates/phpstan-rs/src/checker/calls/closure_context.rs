@@ -31,7 +31,7 @@ impl<'a> Checker<'a> {
     /// its own original declaration site anyway.
     pub(crate) fn check_closure_literal_with_this_and_scope(
         &mut self,
-        closure_expr: &Expr,
+        closure_expr: &ExprNode,
         locals: &mut Locals,
         label: &str,
         this_ty: Type,
@@ -83,7 +83,7 @@ impl<'a> Checker<'a> {
     /// variadic or by-ref.
     pub(crate) fn check_closure_literal_with_param_overrides(
         &mut self,
-        closure_expr: &Expr,
+        closure_expr: &ExprNode,
         param_overrides: &[Type],
         locals: &mut Locals,
         label: &str,

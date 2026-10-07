@@ -18,11 +18,11 @@ enum Check<'e> {
         exact: bool,
     },
     /// `===` this expression.
-    Identical(&'e Expr),
+    Identical(&'e ExprNode),
     /// Equal as `sebastian/comparator` compares; `exact` without a delta,
     /// canonicalizing or ignoring case.
     Equal {
-        expected: &'e Expr,
+        expected: &'e ExprNode,
         exact: bool,
     },
     /// Empty: `empty()`, or a `Countable` counting 0.
@@ -30,9 +30,9 @@ enum Check<'e> {
     /// Counts exactly a value of this type.
     Count(Type),
     /// Has this key, as `array_key_exists` or `offsetExists`.
-    HasKey(&'e Expr),
+    HasKey(&'e ExprNode),
     /// `value op other` holds.
-    Ordering(OrderingOp, &'e Expr),
+    Ordering(OrderingOp, &'e ExprNode),
     /// A string, non-empty when `non_empty`; through a `string` parameter
     /// (`coerced`), a scalar or `Stringable` passes too.
     Str {
@@ -41,17 +41,17 @@ enum Check<'e> {
     },
     /// A string matching this pattern.
     Matches {
-        pattern: &'e Expr,
+        pattern: &'e ExprNode,
         coerced: bool,
     },
     /// A haystack holding this needle, compared with `===` (`strict`) or
     /// `==`.
     Contains {
-        needle: &'e Expr,
+        needle: &'e ExprNode,
         strict: bool,
     },
     /// An object with this property.
-    HasProperty(&'e Expr),
+    HasProperty(&'e ExprNode),
     Not(Box<Check<'e>>),
     And(Vec<Check<'e>>),
     Or(Vec<Check<'e>>),
@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
     /// `PHPUnit\Framework\Assert` (`$this->assertX()`, `self::assertX()`,
     /// `Assert::assertX()`) or one of its global `assertX()` functions.
     /// Past the statement the assertion held, since a failing one throws.
-    pub(crate) fn apply_phpunit_assertion_narrowing(&self, e: &Expr, locals: &mut Locals) {
+    pub(crate) fn apply_phpunit_assertion_narrowing(&self, e: &ExprNode, locals: &mut Locals) {
         let Some((name, sig, args)) = self.phpunit_method(e, locals) else {
             return;
         };
@@ -85,7 +85,7 @@ impl<'a> Checker<'a> {
     /// and arguments.
     fn phpunit_method<'e>(
         &self,
-        e: &'e Expr,
+        e: &'e ExprNode,
         locals: &Locals,
     ) -> Option<(String, &'a FunctionReflection, &'e [Arg])> {
         match &e.peeled().kind {
@@ -121,9 +121,9 @@ impl<'a> Checker<'a> {
         &self,
         name: &str,
         sig: &FunctionReflection,
-        arg: &dyn Fn(usize) -> Option<&'e Expr>,
+        arg: &dyn Fn(usize) -> Option<&'e ExprNode>,
         locals: &Locals,
-    ) -> Option<(&'e Expr, Check<'e>, bool)> {
+    ) -> Option<(&'e ExprNode, Check<'e>, bool)> {
         if let Some(kind) = name.strip_prefix("assertisnot") {
             return Some((arg(0)?, Check::Type(is_kind_type(kind)?), false));
         }
@@ -137,7 +137,7 @@ impl<'a> Checker<'a> {
             coerced: true,
         };
         let non_empty_needle =
-            |e: Option<&Expr>| e.is_some_and(|e| self.is_non_empty_string(e, locals));
+            |e: Option<&ExprNode>| e.is_some_and(|e| self.is_non_empty_string(e, locals));
         let equal = |exact| Check::Equal {
             expected: arg(0).expect("checked by the caller"),
             exact,
@@ -261,7 +261,7 @@ impl<'a> Checker<'a> {
 
     /// An `assertThat` constraint built directly by one of `Assert`'s
     /// factories; `None` for any other expression.
-    fn constraint<'e>(&self, e: &'e Expr, locals: &Locals) -> Option<Check<'e>> {
+    fn constraint<'e>(&self, e: &'e ExprNode, locals: &Locals) -> Option<Check<'e>> {
         let (name, sig, args) = self.phpunit_method(e, locals)?;
         let resolved = resolve_call_args(args, sig.params());
         let arg = |i: usize| resolved.get(i).copied().flatten();
@@ -334,7 +334,7 @@ impl<'a> Checker<'a> {
 
     /// The type an `assertInstanceOf` class argument names, and whether
     /// it names exactly one class (`Foo::class`, `'Foo'`).
-    fn instance_target(&self, e: &Expr, locals: &Locals) -> Option<(Type, bool)> {
+    fn instance_target(&self, e: &ExprNode, locals: &Locals) -> Option<(Type, bool)> {
         if let ExprKind::ClassNameFetch(target) = &e.kind
             && let Some(name) = target.as_name()
         {
@@ -364,20 +364,20 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether `e` is surely a non-empty string.
-    fn is_non_empty_string(&self, e: &Expr, locals: &Locals) -> bool {
+    fn is_non_empty_string(&self, e: &ExprNode, locals: &Locals) -> bool {
         self.infer_expr(e, locals)
             .is_refined_string(AccessoryKind::NonEmptyString)
             .yes()
     }
 
     /// The count type of `e`: its count range, when it's an array.
-    fn count_type(&self, e: &Expr, locals: &Locals) -> Option<Type> {
+    fn count_type(&self, e: &ExprNode, locals: &Locals) -> Option<Type> {
         let (lo, hi) = self.infer_expr(e, locals).count_range()?;
         Some(Type::int_range(Some(lo), hi))
     }
 
     /// Narrows `value` by `check` having held (`holds`) or failed.
-    fn apply_check(&self, value: &Expr, check: &Check<'_>, holds: bool, locals: &mut Locals) {
+    fn apply_check(&self, value: &ExprNode, check: &Check<'_>, holds: bool, locals: &mut Locals) {
         let key = locals.key_of(value);
         let narrow_value = |locals: &mut Locals, f: &dyn Fn(&Type) -> Option<Type>| {
             if let Some(key) = key {

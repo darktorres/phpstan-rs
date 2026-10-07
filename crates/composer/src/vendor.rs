@@ -26,7 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
+use syntax::ast::{BinOp, ClassDecl, ExprKind, ExprNode, Literal, StmtKind, StmtNode};
 
 use crate::dir_table::{DirTable, EntryKind, Listing};
 
@@ -158,7 +158,7 @@ fn parse_separate_files(
     ctx
 }
 
-fn parse_top_level_array(path: &Path) -> Option<Expr> {
+fn parse_top_level_array(path: &Path) -> Option<ExprNode> {
     let stmts = parse_generated_file(path)?;
     stmts.into_iter().find_map(|s| match s.into_kind() {
         StmtKind::Return(Some(e)) if matches!(e.kind, ExprKind::ArrayLiteral(_)) => Some(e),
@@ -166,7 +166,7 @@ fn parse_top_level_array(path: &Path) -> Option<Expr> {
     })
 }
 
-fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
+fn find_class_decl(stmts: &[StmtNode]) -> Option<&ClassDecl> {
     stmts.iter().find_map(|s| match &s.kind {
         StmtKind::ClassDecl(c) => Some(&**c),
         _ => None,
@@ -178,7 +178,7 @@ fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
 /// syntax generated file must degrade to "no context from this file",
 /// never crash `check-project` - `parse_program`'s own `Result` already
 /// gives that for free, no `catch_unwind` needed.
-fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
+fn parse_generated_file(path: &Path) -> Option<Vec<StmtNode>> {
     let bytes = std::fs::read(path).ok()?;
     syntax::parse(&bytes).ok().map(|parsed| parsed.stmts)
 }
@@ -222,7 +222,7 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_files(&mut self, array: &Expr, out: &mut Vec<PathBuf>) {
+    fn collect_files(&mut self, array: &ExprNode, out: &mut Vec<PathBuf>) {
         let ExprKind::ArrayLiteral(items) = &array.kind else {
             return;
         };
@@ -233,7 +233,7 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<PathBuf>) {
+    fn collect_dirs(&mut self, array: &ExprNode, out: &mut Vec<PathBuf>) {
         let ExprKind::ArrayLiteral(items) = &array.kind else {
             return;
         };
@@ -254,7 +254,7 @@ impl<'p> Resolver<'p> {
     /// load-bearing case) resolves outside `vendor_dir` entirely - a
     /// `$baseDir`/`__DIR__`-with-extra-`/..`-rooted, first-party location,
     /// which must never be silently treated as vendor context.
-    fn path(&mut self, expr: &Expr) -> Option<PathBuf> {
+    fn path(&mut self, expr: &ExprNode) -> Option<PathBuf> {
         let raw = eval_concat(expr, self.vendor_dir, self.base_dir, self.generated_dir)?;
         let raw = path_of(&raw);
         // Containment is decided on the path as written, not its canonical
@@ -444,7 +444,7 @@ fn lexically_normalized(path: &Path) -> PathBuf {
 /// generated code chains multiple concatenations (`__DIR__ . '/..' .
 /// '/pkg/path'`), not a flat two-operand shape.
 fn eval_concat(
-    expr: &Expr,
+    expr: &ExprNode,
     vendor_dir: &Path,
     base_dir: &Path,
     generated_dir: &Path,
@@ -457,7 +457,7 @@ fn eval_concat(
 /// Appends to `out` what `expr` evaluates to; where it does not evaluate
 /// to a literal string, `out` holds what came before and is not used.
 fn append_concat(
-    expr: &Expr,
+    expr: &ExprNode,
     vendor_dir: &Path,
     base_dir: &Path,
     generated_dir: &Path,

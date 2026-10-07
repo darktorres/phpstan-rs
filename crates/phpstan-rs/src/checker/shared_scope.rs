@@ -51,7 +51,7 @@ impl SharedScope {
     /// The shared scope of the statements `body`, a function's, a closure's
     /// (whose `use` list is `uses`) or a file's top level.
     pub(crate) fn of(
-        body: &[Stmt],
+        body: &[StmtNode],
         uses: &[ClosureUse],
         function: Option<(Option<Name>, Name)>,
         top_level: bool,
@@ -70,7 +70,7 @@ impl SharedScope {
     }
 
     /// The shared scope of an arrow function's body, which binds nothing.
-    pub(crate) fn of_arrow_function(body: &Expr) -> SharedScope {
+    pub(crate) fn of_arrow_function(body: &ExprNode) -> SharedScope {
         let mut scan = Scan::default();
         scan.visit_expr(body);
         scan.finish(None, false)
@@ -162,14 +162,14 @@ impl Scan {
 
     /// A use of `e` that does not let the object it is leave the scope:
     /// the base of a property access, an identity or type test.
-    fn kept(&mut self, e: &Expr) {
+    fn kept(&mut self, e: &ExprNode) {
         if !matches!(&e.peeled().kind, ExprKind::Variable(_)) {
             self.visit_expr(e);
         }
     }
 
     /// An assignment to `target` of what `held` says.
-    fn assign(&mut self, target: &Expr, held: Held) {
+    fn assign(&mut self, target: &ExprNode, held: Held) {
         match &target.peeled().kind {
             ExprKind::Variable(name) => self.note(name, held),
             ExprKind::Destructure(items, _) => {
@@ -193,7 +193,7 @@ impl Scan {
 }
 
 /// What the scope made or wrote that `e` evaluates to.
-fn held_by(e: &Expr) -> Held {
+fn held_by(e: &ExprNode) -> Held {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::New(..) | ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Held::Made,
@@ -211,7 +211,7 @@ impl<'ast> Visitor<'ast> for Scan {
 
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Global(vars) => {
                 for var in vars {
@@ -268,7 +268,7 @@ impl<'ast> Visitor<'ast> for Scan {
         })
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => {
                 self.escaped.insert(name.clone());

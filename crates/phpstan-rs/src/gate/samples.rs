@@ -576,7 +576,7 @@ struct Declared<'ast> {
 }
 
 impl<'ast> syntax::visit::Visitor<'ast> for Declared<'ast> {
-    fn visit_stmt(&mut self, stmt: &'ast syntax::ast::Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast syntax::ast::StmtNode) {
         match &stmt.kind {
             syntax::ast::StmtKind::FunctionDecl(function) => self.functions.push(function),
             syntax::ast::StmtKind::ClassDecl(class) => {
@@ -594,7 +594,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Declared<'ast> {
         }
     }
 
-    fn visit_expr(&mut self, _: &'ast syntax::ast::Expr) {}
+    fn visit_expr(&mut self, _: &'ast syntax::ast::ExprNode) {}
 }
 
 #[cfg(test)]

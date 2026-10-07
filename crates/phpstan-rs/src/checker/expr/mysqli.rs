@@ -55,7 +55,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `mysqli::query($sql)`/`mysqli_query($link, $sql)`.
-    pub(crate) fn mysqli_query_type(&self, sql_arg: Option<&Expr>, locals: &Locals) -> Type {
+    pub(crate) fn mysqli_query_type(&self, sql_arg: Option<&ExprNode>, locals: &Locals) -> Type {
         let sql = sql_arg.and_then(|e| self.foldable_sql_string(e, locals));
         let success = match &sql {
             Some(sql) if !returns_result_set(sql) => Type::bool_literal(true),
@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
         &self,
         method: &str,
         row: Option<&Type>,
-        arg: Option<&Expr>,
+        arg: Option<&ExprNode>,
     ) -> Option<Type> {
         let shape = row?.as_array_shape()?;
         let fields = shape.fields();

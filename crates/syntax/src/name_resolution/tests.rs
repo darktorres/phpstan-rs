@@ -3,7 +3,7 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::visit::{Visitor, walk_expr, walk_stmts};
 
-fn parse(src: &str) -> Vec<Stmt> {
+fn parse(src: &str) -> Vec<StmtNode> {
     Parser::new(Lexer::new(src).tokenize_with_spans())
         .parse_program()
         .expect("parses")
@@ -19,7 +19,7 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
         }
     }
     impl<'ast> Visitor<'ast> for Collect {
-        fn visit_expr(&mut self, e: &'ast Expr) {
+        fn visit_expr(&mut self, e: &'ast ExprNode) {
             match &e.kind {
                 ExprKind::Name(n) => self.push(n),
                 ExprKind::ClassConstFetch(StaticTarget::Name(n), _)

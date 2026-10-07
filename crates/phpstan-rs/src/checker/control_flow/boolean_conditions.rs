@@ -11,7 +11,11 @@ impl<'a> Checker<'a> {
     /// `should_skip_constant_condition`
     /// excludes every shape that has - or, for a `Call`-shaped condition,
     /// deliberately doesn't yet have - its own separate, dedicated check.
-    pub(crate) fn inferred_constant_condition(&self, e: &Expr, locals: &Locals) -> Option<bool> {
+    pub(crate) fn inferred_constant_condition(
+        &self,
+        e: &ExprNode,
+        locals: &Locals,
+    ) -> Option<bool> {
         if should_skip_constant_condition(e) {
             return None;
         }
@@ -31,7 +35,7 @@ impl<'a> Checker<'a> {
     /// PHPStan's `!isInFirstLevelStatement()` guard: skipped exactly when
     /// this `&&`/`||` *is* the direct condition of an `if`/`while`/
     /// ternary, since that's already covered by that construct's own
-    /// check). `whole` is the same `&Expr` `check_expr`'s own `ExprKind::
+    /// check). `whole` is the same `&ExprNode` `check_expr`'s own `ExprKind::
     /// Binary` arm already has in hand - never reconstructed. Its own
     /// diagnostic deliberately calls `infer_expr` directly rather than
     /// going through `inferred_constant_condition` (unlike left/right,
@@ -69,9 +73,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_boolean_and_or(
         &mut self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
-        whole: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
+        whole: &ExprNode,
         locals: &Locals,
         is_first_level: bool,
     ) {
@@ -141,7 +145,7 @@ impl<'a> Checker<'a> {
     /// `||`) - `xor` doesn't short-circuit, so there's no "already
     /// covered by the enclosing if/while's own check" overlap to avoid,
     /// and no real rule for it exists to model that overlap regardless.
-    pub(crate) fn check_logical_xor(&mut self, l: &Expr, r: &Expr, locals: &Locals) {
+    pub(crate) fn check_logical_xor(&mut self, l: &ExprNode, r: &ExprNode, locals: &Locals) {
         if let Some(value) = self.inferred_constant_condition(l, locals) {
             self.report(
                 format!(
@@ -179,7 +183,7 @@ impl<'a> Checker<'a> {
 /// attempting anything symbolic beyond a bare literal - a variable or
 /// expression that merely *evaluates* to a truthy constant isn't
 /// something this checker tracks precisely enough to trust here.
-pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
+pub(crate) fn is_truthy_literal(e: &ExprNode) -> bool {
     match &e.kind {
         ExprKind::Literal(Literal::Bool(true)) => true,
         ExprKind::Literal(Literal::Int(n)) => *n != 0,
@@ -198,7 +202,7 @@ pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
 /// type-check rule reports it (`function.alreadyNarrowedType`/
 /// `function.impossibleType`). Any other call condition is answered like
 /// any other shape.
-fn should_skip_constant_condition(e: &Expr) -> bool {
+fn should_skip_constant_condition(e: &ExprNode) -> bool {
     // Parentheses don't change what reports the condition.
     let e = e.peeled();
     // A type-check call (`is_int($x)`) reports itself

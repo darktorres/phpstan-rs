@@ -9,7 +9,7 @@ impl Checker<'_> {
     /// call itself, by its truthiness.
     pub(super) fn apply_preg_result_narrowing(
         &self,
-        cond: &Expr,
+        cond: &ExprNode,
         locals: &mut Locals,
         branch_true: bool,
     ) {
@@ -31,8 +31,8 @@ impl Checker<'_> {
     pub(super) fn apply_preg_comparison(
         &self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         locals: &mut Locals,
         holds: bool,
     ) {

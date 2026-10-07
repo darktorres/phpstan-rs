@@ -7,7 +7,7 @@
 use crate::ast::*;
 use crate::php_string::PhpString;
 
-pub fn print_expr(e: &Expr) -> String {
+pub fn print_expr(e: &ExprNode) -> String {
     let mut out = String::new();
     write_expr(&mut out, e);
     out
@@ -15,7 +15,7 @@ pub fn print_expr(e: &Expr) -> String {
 
 /// `print_expr`, cut to its first line with a trailing `…` when the
 /// rendering spans several.
-pub fn print_expr_first_line(e: &Expr) -> String {
+pub fn print_expr_first_line(e: &ExprNode) -> String {
     let printed = print_expr(e);
     match printed.split_once('\n') {
         Some((first, _)) => format!("{first}…"),
@@ -171,7 +171,7 @@ fn write_return_type(out: &mut String, return_type: Option<&TypeHint>) {
 
 /// A member name after `->`/`?->`: bare when it's a plain name, `$x` for
 /// a variable, braced otherwise.
-fn write_member_name(out: &mut String, name: &Expr) {
+fn write_member_name(out: &mut String, name: &ExprNode) {
     match &name.kind {
         ExprKind::Variable(_) => write_expr(out, name),
         _ => {
@@ -182,7 +182,7 @@ fn write_member_name(out: &mut String, name: &Expr) {
     }
 }
 
-fn write_interpolated_parts(out: &mut String, parts: &[Expr], delimiter: u8) {
+fn write_interpolated_parts(out: &mut String, parts: &[ExprNode], delimiter: u8) {
     for part in parts {
         match &part.kind {
             ExprKind::Literal(Literal::String(s)) => {
@@ -204,11 +204,11 @@ fn write_static_target(out: &mut String, target: &StaticTarget) {
     }
 }
 
-fn write_expr(out: &mut String, e: &Expr) {
+fn write_expr(out: &mut String, e: &ExprNode) {
     crate::stack::guard(|| write_expr_unguarded(out, e));
 }
 
-fn write_expr_unguarded(out: &mut String, e: &Expr) {
+fn write_expr_unguarded(out: &mut String, e: &ExprNode) {
     match &e.kind {
         ExprKind::Literal(lit) => match lit {
             Literal::Int(n) => out.push_str(&n.to_string()),

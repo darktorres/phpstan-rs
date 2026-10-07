@@ -7,7 +7,7 @@
 
 use super::*;
 
-fn resolve_import_at_end(stmts: &[Stmt], fqn: &str) -> (String, Option<TextEdit>) {
+fn resolve_import_at_end(stmts: &[StmtNode], fqn: &str) -> (String, Option<TextEdit>) {
     resolve_import(
         stmts,
         Positions::utf16(&LineIndex::default()),
@@ -21,7 +21,7 @@ fn pos_after(text: &str, needle: &str) -> u32 {
     (text.find(needle).unwrap() + needle.len()) as u32
 }
 
-fn parse(text: &str) -> Vec<Stmt> {
+fn parse(text: &str) -> Vec<StmtNode> {
     let tokens = syntax::lexer::Lexer::new(text).tokenize_with_spans();
     syntax::parser::Parser::new(tokens).parse_program().unwrap()
 }

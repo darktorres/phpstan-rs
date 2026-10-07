@@ -5,7 +5,7 @@ use types::Type;
 impl<'a> Checker<'a> {
     pub(crate) fn check_switch(
         &mut self,
-        subject: &Expr,
+        subject: &ExprNode,
         cases: &[SwitchCase],
         span: syntax::span::Span,
         locals: &mut Locals,

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::registry::function_sig::declared_type;
-use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks};
+use syntax::ast::{ExprKind, ExprNode, PropertyHookBody, PropertyHooks};
 use syntax::name_resolution::NameContext;
 use syntax::visit::{any_expr_in_body, any_expr_in_scope};
 use types::{TemplateParam, Type};
@@ -67,7 +67,7 @@ pub(crate) fn hook_body_calls_parent_hook(body: &PropertyHookBody, prop_name: &s
 }
 
 /// Whether `pred` holds for an expression in the hook's own body.
-fn any_hook_expr(body: &PropertyHookBody, pred: impl FnMut(&Expr) -> bool) -> bool {
+fn any_hook_expr(body: &PropertyHookBody, pred: impl FnMut(&ExprNode) -> bool) -> bool {
     match body {
         PropertyHookBody::Arrow(e) => any_expr_in_scope(e, pred),
         PropertyHookBody::Block(stmts) => any_expr_in_body(stmts, pred),

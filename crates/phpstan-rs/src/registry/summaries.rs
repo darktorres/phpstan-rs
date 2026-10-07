@@ -93,7 +93,7 @@ impl Place {
 
     /// The place `e` names, when it names one: a variable, a property, an
     /// element, a static property or a global, through any nesting.
-    pub(crate) fn of(e: &Expr) -> Option<Place> {
+    pub(crate) fn of(e: &ExprNode) -> Option<Place> {
         syntax::stack::guard(|| {
             Some(match &e.peeled().kind {
                 ExprKind::Variable(v) if **v == *"this" => Place::root(Root::This),
@@ -312,7 +312,7 @@ impl Origin {
 
 /// Where the value `e` evaluates to comes from; `None` when that is not
 /// known.
-fn origins_of(e: &Expr) -> Option<Vec<Origin>> {
+fn origins_of(e: &ExprNode) -> Option<Vec<Origin>> {
     let e = e.peeled();
     syntax::stack::guard(|| {
         Some(match &e.kind {
@@ -453,7 +453,7 @@ fn element_origins(origins: Vec<Origin>) -> Option<Vec<Origin>> {
 
 /// Whether the value `e` evaluates to may be a string, as an operand of a
 /// loose comparison.
-fn may_be_string(e: &Expr) -> bool {
+fn may_be_string(e: &ExprNode) -> bool {
     !matches!(
         &e.peeled().kind,
         ExprKind::Literal(Literal::Int(_) | Literal::Float(_) | Literal::Bool(_) | Literal::Null)
@@ -541,7 +541,7 @@ pub(crate) enum PairTarget {
 
 impl Summarizer {
     /// The callable `e` names, when the body wrote one.
-    fn callable(&mut self, e: &Expr) -> Option<Callable> {
+    fn callable(&mut self, e: &ExprNode) -> Option<Callable> {
         let e = e.peeled();
         match &e.kind {
             ExprKind::Literal(Literal::String(text)) => {
@@ -735,20 +735,20 @@ pub struct BodySummary {
 impl BodySummary {
     /// The summary of code that only writes `e`, a closure, an arrow
     /// function or a first-class callable: the first closure it lists.
-    pub(crate) fn of_closure(e: &Expr) -> BodySummary {
+    pub(crate) fn of_closure(e: &ExprNode) -> BodySummary {
         let mut walk = Summarizer::default();
         walk.visit_expr(e.peeled());
         walk.finish()
     }
 
     /// The summary of the statements of one body.
-    pub fn of(body: &[Stmt]) -> BodySummary {
+    pub fn of(body: &[StmtNode]) -> BodySummary {
         BodySummary::of_function(&[], body)
     }
 
     /// The summary of the body of a function with the parameters `params`:
     /// a constructor's assigns each property it promotes, first.
-    pub fn of_function(params: &[Param], body: &[Stmt]) -> BodySummary {
+    pub fn of_function(params: &[Param], body: &[StmtNode]) -> BodySummary {
         let mut walk = Summarizer::default();
         for param in params.iter().filter(|param| param.promotion.is_some()) {
             walk.implicit_on(
@@ -807,7 +807,7 @@ struct AssignedBuilder {
 
 impl AssignedBuilder {
     /// The expression of a statement of the body, outside its closures.
-    fn statement(&mut self, e: &Expr) {
+    fn statement(&mut self, e: &ExprNode) {
         match &e.kind {
             ExprKind::Assign(lhs, rhs) => {
                 if let ExprKind::Variable(v) = &lhs.kind
@@ -861,7 +861,7 @@ impl AssignedProperties {
 
 /// The class a `new` names, at the end of a chain of assignments
 /// (`$a = $b->p = new C`).
-fn new_instance_class(e: &Expr) -> Option<Name> {
+fn new_instance_class(e: &ExprNode) -> Option<Name> {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::New(callee, _) => {
             let ExprKind::Name(name) = &callee.kind else {
@@ -882,7 +882,7 @@ fn is_self_instance_class(class: &str, class_name: &str) -> bool {
 }
 
 fn record_property_assigned(
-    lhs: &Expr,
+    lhs: &ExprNode,
     on_this: &mut Vec<Name>,
     on_variables: &mut Vec<(Name, Name)>,
 ) {
@@ -1006,7 +1006,7 @@ impl Summarizer {
 
     /// The index of the closure, arrow function or first-class callable
     /// `e`, given it when it is first met.
-    fn closure_id(&mut self, e: &Expr) -> u32 {
+    fn closure_id(&mut self, e: &ExprNode) -> u32 {
         let next = self.written.len() as u32;
         let id = *self
             .ids
@@ -1031,7 +1031,7 @@ impl Summarizer {
     /// scope of its own, which takes `captures` from the one the walk is in.
     fn closure(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         params: &[Param],
         captures: Option<Box<[(Name, bool)]>>,
         walk: impl FnOnce(&mut Summarizer),
@@ -1089,7 +1089,7 @@ impl Summarizer {
     }
 
     /// An assignment to `target`: each variable it names is reassigned.
-    fn reassign(&mut self, target: &Expr) {
+    fn reassign(&mut self, target: &ExprNode) {
         let mut names = FxHashSet::default();
         collect_assigned(target, &mut names);
         for name in names {
@@ -1103,7 +1103,7 @@ impl Summarizer {
     /// `None`: to each target of a destructuring, of an element of it, to
     /// the place `target` names otherwise. A variable written holds what
     /// the body made when `made` says what.
-    fn write(&mut self, target: &Expr, made: Option<Made>, origins: Option<Vec<Origin>>) {
+    fn write(&mut self, target: &ExprNode, made: Option<Made>, origins: Option<Vec<Origin>>) {
         if let ExprKind::Destructure(items, _) = &target.peeled().kind {
             let element = origins.and_then(element_origins);
             for item in items {
@@ -1197,7 +1197,7 @@ impl Summarizer {
 
     /// That the expression `target` does what `access` says with what it
     /// accesses.
-    fn mark(&mut self, target: &Expr, access: u8) {
+    fn mark(&mut self, target: &ExprNode, access: u8) {
         *self
             .accesses
             .entry(std::ptr::from_ref(target.peeled()) as usize)
@@ -1212,7 +1212,7 @@ impl Summarizer {
     }
 
     /// An operation PHP may run code of the value `operand` for.
-    fn implicit(&mut self, operand: &Expr, operation: Operation) {
+    fn implicit(&mut self, operand: &ExprNode, operation: Operation) {
         self.implicit_on(origins_of(operand), operation);
     }
 
@@ -1248,7 +1248,7 @@ impl Summarizer {
     /// An access to a property, `name` (`None` for a computed one), or an
     /// element, when `element`, of `base`, doing what `access` says; `base`
     /// is read on the way, tested too when the access tests.
-    fn member_access(&mut self, base: &Expr, name: Option<&Name>, access: u8, element: bool) {
+    fn member_access(&mut self, base: &ExprNode, name: Option<&Name>, access: u8, element: bool) {
         let on = origins_of(base);
         for (bit, kind) in [
             (READ, Access::Read),
@@ -1322,7 +1322,7 @@ impl Summarizer {
     }
 
     /// What the body made that `e` evaluates to, when it is that.
-    fn made_by(&mut self, e: &Expr) -> Option<Made> {
+    fn made_by(&mut self, e: &ExprNode) -> Option<Made> {
         let e = e.peeled();
         match &e.kind {
             ExprKind::New(callee, _) => Some(Made::Object(match &callee.kind {
@@ -1341,7 +1341,7 @@ impl Summarizer {
 
 impl Summarizer {
     /// Records `e` when it is a call.
-    fn record_call(&mut self, e: &Expr) {
+    fn record_call(&mut self, e: &ExprNode) {
         match &e.kind {
             ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) => {
@@ -1419,7 +1419,7 @@ impl Summarizer {
 /// Whether `e` is a call writing variables whose names it computes:
 /// `extract()`, and `parse_str()` and `mb_parse_str()` with no array to
 /// write.
-fn writes_computed_variables(e: &Expr) -> bool {
+fn writes_computed_variables(e: &ExprNode) -> bool {
     let ExprKind::Call(callee, args) = &e.kind else {
         return false;
     };
@@ -1448,7 +1448,7 @@ fn destructures_by_ref(items: &[DestructureItem]) -> bool {
 }
 
 /// The call `e` is, as a body's summary records it.
-pub(crate) fn call_of(e: &Expr) -> Option<CallWrites> {
+pub(crate) fn call_of(e: &ExprNode) -> Option<CallWrites> {
     let mut walk = Summarizer::default();
     walk.record_call(e);
     walk.scope.calls.pop()
@@ -1456,7 +1456,7 @@ pub(crate) fn call_of(e: &Expr) -> Option<CallWrites> {
 
 /// `$obj->prop = ...`/`unset($obj->prop)`: a write to a property of any
 /// object, through any depth of array-index nesting.
-fn property_write_target(e: &Expr) -> bool {
+fn property_write_target(e: &ExprNode) -> bool {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::Index(base, _) => property_write_target(base),
@@ -1484,7 +1484,7 @@ fn static_callee(target: &StaticTarget, method: &Ident) -> Callee {
 }
 
 /// The object `recv` is, as far as the body shows it.
-fn receiver(recv: &Expr) -> Receiver {
+fn receiver(recv: &ExprNode) -> Receiver {
     match &recv.peeled().kind {
         ExprKind::Variable(v) if **v == *"this" => Receiver::This,
         ExprKind::Variable(v) => Receiver::Variable(v.clone()),
@@ -1534,7 +1534,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
         walk_catch_clause(self, clause);
     }
 
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         syntax::stack::guard(|| {
             let impure = match &stmt.kind {
                 StmtKind::Echo(_)
@@ -1644,7 +1644,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
         })
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| {
             let impure = match &e.kind {
                 // Any static property access at all, even a read of shared
@@ -1851,7 +1851,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
 struct Reassigned<'a>(&'a mut FxHashSet<Name>);
 
 impl<'ast> Visitor<'ast> for Reassigned<'_> {
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         if let ExprKind::Assign(lhs, _)
         | ExprKind::AssignRef(lhs, _)
         | ExprKind::CompoundAssign(_, lhs, _) = &e.kind
@@ -1861,7 +1861,7 @@ impl<'ast> Visitor<'ast> for Reassigned<'_> {
         walk_expr(self, e);
     }
 
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         if let StmtKind::Foreach { key, value, .. } = &stmt.kind {
             for target in key.iter().map(|k| &**k).chain([&**value]) {
                 collect_assigned(target, self.0);
@@ -1871,7 +1871,7 @@ impl<'ast> Visitor<'ast> for Reassigned<'_> {
     }
 }
 
-fn collect_assigned(target: &Expr, out: &mut FxHashSet<Name>) {
+fn collect_assigned(target: &ExprNode, out: &mut FxHashSet<Name>) {
     match &target.kind {
         ExprKind::Variable(name) => {
             out.insert(name.clone());

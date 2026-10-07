@@ -22,7 +22,7 @@ use crate::registry::Registry;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
-fn parse(src: &str) -> Vec<Stmt> {
+fn parse(src: &str) -> Vec<StmtNode> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     Parser::new(tokens).parse_program().unwrap()
 }

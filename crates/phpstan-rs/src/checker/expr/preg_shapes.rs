@@ -399,8 +399,8 @@ pub(super) struct PregFlags {
 /// (and, when `allow_order` is set, `PREG_PATTERN_ORDER`/
 /// `PREG_SET_ORDER`). `None` if any leaf name isn't one of these, or if
 /// both `PATTERN_ORDER` and `SET_ORDER` appear together - never guessed.
-pub(super) fn parse_preg_flags(e: &Expr, allow_order: bool) -> Option<PregFlags> {
-    fn collect<'a>(e: &'a Expr, out: &mut Vec<&'a str>) -> bool {
+pub(super) fn parse_preg_flags(e: &ExprNode, allow_order: bool) -> Option<PregFlags> {
+    fn collect<'a>(e: &'a ExprNode, out: &mut Vec<&'a str>) -> bool {
         let e = e.peeled();
         match &e.kind {
             ExprKind::Name(name) => {
@@ -439,11 +439,11 @@ pub(super) fn parse_preg_flags(e: &Expr, allow_order: bool) -> Option<PregFlags>
 /// parameter name.
 pub(crate) struct PregCall<'e> {
     pub(crate) all: bool,
-    pub(crate) pattern: &'e Expr,
-    pub(crate) subject: Option<&'e Expr>,
-    pub(crate) matches: Option<&'e Expr>,
-    pub(crate) flags: Option<&'e Expr>,
-    pub(crate) offset: Option<&'e Expr>,
+    pub(crate) pattern: &'e ExprNode,
+    pub(crate) subject: Option<&'e ExprNode>,
+    pub(crate) matches: Option<&'e ExprNode>,
+    pub(crate) flags: Option<&'e ExprNode>,
+    pub(crate) offset: Option<&'e ExprNode>,
 }
 
 /// What a preg call's result, as narrowed, says happened: the match
@@ -465,7 +465,7 @@ impl PregOutcome {
 /// `e` as a `preg_match` / `preg_match_all` call. The parameters are
 /// PHP's own (`pattern`, `subject`, `matches`, `flags`, `offset`), so
 /// named arguments resolve without the registry; a spread gives `None`.
-pub(crate) fn preg_call(e: &Expr) -> Option<PregCall<'_>> {
+pub(crate) fn preg_call(e: &ExprNode) -> Option<PregCall<'_>> {
     const PARAMS: [&str; 5] = ["pattern", "subject", "matches", "flags", "offset"];
     let ExprKind::Call(callee, args) = &e.peeled().kind else {
         return None;
@@ -481,7 +481,7 @@ pub(crate) fn preg_call(e: &Expr) -> Option<PregCall<'_>> {
     } else {
         return None;
     };
-    let mut resolved: [Option<&Expr>; 5] = [None; 5];
+    let mut resolved: [Option<&ExprNode>; 5] = [None; 5];
     let mut position = 0;
     for arg in args {
         if arg.spread {

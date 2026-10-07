@@ -33,7 +33,7 @@
 //! not a good trade for a rule whose whole point is confidence.
 
 use crate::checker::Checker;
-use syntax::ast::{BinOp, Expr, ExprKind, UnaryOp};
+use syntax::ast::{BinOp, ExprKind, ExprNode, UnaryOp};
 use syntax::span::Span;
 use types::UnionAll as _;
 use types::{ArithmeticOp, OrderingOp, Type};
@@ -254,7 +254,7 @@ impl<'a> Checker<'a> {
     /// know, may be bool" rather than a confirmed non-bool.
     pub(crate) fn check_non_boolean_condition(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         ty: &Type,
         context: &str,
         identifier: &'static str,
@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
     /// condition".
     pub(crate) fn check_non_boolean_and_or_operand(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         ty: &Type,
         sigil: &str,
         side: &str,
@@ -305,7 +305,7 @@ impl<'a> Checker<'a> {
     /// on whether the result is always true/false/zero (a float `NAN`
     /// makes `$x === $x` false) - just that comparing/subtracting an
     /// expression from itself is almost always a copy-paste mistake.
-    pub(crate) fn check_duplicate_operands(&mut self, op: &BinOp, l: &Expr, r: &Expr) {
+    pub(crate) fn check_duplicate_operands(&mut self, op: &BinOp, l: &ExprNode, r: &ExprNode) {
         if !matches!(
             op,
             BinOp::Identical
@@ -336,7 +336,7 @@ impl<'a> Checker<'a> {
     /// identity helper. A compound-assign self-target (`$x += $x`) is a
     /// real, meaningful operation (doubling), not a no-op, so it's
     /// deliberately not covered here.
-    pub(crate) fn check_self_assignment(&mut self, lhs: &Expr, rhs: &Expr) {
+    pub(crate) fn check_self_assignment(&mut self, lhs: &ExprNode, rhs: &ExprNode) {
         if !is_duplicate_side_effect_free_operand(lhs, rhs) {
             return;
         }
@@ -530,7 +530,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_incdec_validity(
         &mut self,
         op: &UnaryOp,
-        target: &syntax::ast::Expr,
+        target: &syntax::ast::ExprNode,
         inner_ty: &Type,
         span: Span,
     ) {
@@ -792,7 +792,7 @@ pub(crate) fn binop_sigil(op: &BinOp) -> &'static str {
 /// fresh, non-identical value each time, so "looks the same" wouldn't
 /// mean "IS the same" there. Never a literal either - `1 === 1` isn't
 /// a copy-paste mistake the way `$x === $x` is.
-fn is_duplicate_side_effect_free_operand(l: &Expr, r: &Expr) -> bool {
+fn is_duplicate_side_effect_free_operand(l: &ExprNode, r: &ExprNode) -> bool {
     syntax::stack::guard(|| match (&l.peeled().kind, &r.peeled().kind) {
         (ExprKind::Variable(a), ExprKind::Variable(b)) => a == b,
         (ExprKind::PropertyAccess(la, lp, ln), ExprKind::PropertyAccess(ra, rp, rn)) => {

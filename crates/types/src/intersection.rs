@@ -17,7 +17,7 @@ pub(crate) fn intersect_types(members: Vec<Type>) -> Type {
 impl Relation<'_> {
     /// The intersection of `members`, as PHPStan's `TypeCombinator::
     /// intersect` reduces it: a member another member is within is
-    /// dropped (`Expr&Dim` is `Dim`), two arrays or shapes fold into one,
+    /// dropped (`ExprNode&Dim` is `Dim`), two arrays or shapes fold into one,
     /// an offset or accessory a shape can hold is applied to it, and
     /// members sharing no value make `never`.
     pub fn intersect(&self, members: Vec<Type>) -> Type {

@@ -4,7 +4,7 @@
 //! for a dynamic class-name operand that can't be a string or an object.
 
 use crate::checker::{Checker, Locals};
-use syntax::ast::{ClassKind, Expr, InstanceofTarget};
+use syntax::ast::{ClassKind, ExprNode, InstanceofTarget};
 use syntax::span::Span;
 use types::Type;
 
@@ -14,7 +14,7 @@ impl<'a> Checker<'a> {
     /// and isn't reported.
     pub(crate) fn check_impossible_instanceof(
         &mut self,
-        inner: &Expr,
+        inner: &ExprNode,
         target: &InstanceofTarget,
         span: Span,
         locals: &Locals,

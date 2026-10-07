@@ -29,7 +29,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::literal_string_value;
-use syntax::ast::{Arg, Expr, ExprKind, StaticTarget};
+use syntax::ast::{Arg, ExprKind, ExprNode, StaticTarget};
 use types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -264,7 +264,7 @@ fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
     Some(out)
 }
 
-fn looks_like_dbal_query_builder_chain(e: &Expr) -> bool {
+fn looks_like_dbal_query_builder_chain(e: &ExprNode) -> bool {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
@@ -279,14 +279,14 @@ struct ChainCall {
 }
 
 enum Cursor<'a> {
-    Borrowed(&'a Expr),
-    Owned(std::rc::Rc<Expr>),
+    Borrowed(&'a ExprNode),
+    Owned(std::rc::Rc<ExprNode>),
 }
 
 impl std::ops::Deref for Cursor<'_> {
-    type Target = Expr;
+    type Target = ExprNode;
 
-    fn deref(&self) -> &Expr {
+    fn deref(&self) -> &ExprNode {
         match self {
             Cursor::Borrowed(e) => e,
             Cursor::Owned(e) => e,
@@ -303,7 +303,7 @@ impl<'a> Checker<'a> {
     /// entirely).
     pub(crate) fn resolve_dbal_query_builder_sql(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         locals: &Locals,
     ) -> Option<String> {
         self.resolve_dbal_query_builder_chain(recv, locals)?
@@ -319,7 +319,7 @@ impl<'a> Checker<'a> {
     /// cross-reference against them).
     pub(crate) fn resolve_dbal_query_builder_chain(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         locals: &Locals,
     ) -> Option<DbalQueryBuilderChain> {
         if !looks_like_dbal_query_builder_chain(recv) {
@@ -359,7 +359,7 @@ impl<'a> Checker<'a> {
     /// the "already a plain string" shortcut, matching the DQL side's own
     /// 168g precedent for `createQuery($dql)`: a literal or constant-
     /// foldable string needs no chain-walking at all.
-    pub(crate) fn foldable_sql_string(&self, expr: &Expr, locals: &Locals) -> Option<String> {
+    pub(crate) fn foldable_sql_string(&self, expr: &ExprNode, locals: &Locals) -> Option<String> {
         fold_string_expr(self, expr, locals)
     }
 
@@ -606,7 +606,7 @@ impl<'a> Checker<'a> {
         self.foldable_arg_string_expr(&arg.value, locals)
     }
 
-    fn foldable_arg_string_expr(&self, expr: &Expr, locals: &Locals) -> Option<String> {
+    fn foldable_arg_string_expr(&self, expr: &ExprNode, locals: &Locals) -> Option<String> {
         fold_string_expr(self, expr, locals)
     }
 
@@ -621,7 +621,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<String> {
+fn fold_string_expr(checker: &Checker, expr: &ExprNode, locals: &Locals) -> Option<String> {
     syntax::stack::guard(|| {
         if let Some(s) = literal_string_value(expr) {
             return Some(s.into_owned());
@@ -731,7 +731,7 @@ fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option
 /// since every case means the same thing for this check's own purposes
 /// ("this placeholder expects an array, expand it into an `IN (...)`
 /// list").
-pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
+pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &ExprNode) -> bool {
     match &expr.kind {
         ExprKind::ClassConstFetch(StaticTarget::Name(class_name), _member) => checker
             .resolve_class_name(class_name)
@@ -751,7 +751,7 @@ pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
 /// same thing for that check, but `ParameterType`/`Types` have several
 /// other cases (`STRING`/`BOOLEAN`/...) this project deliberately
 /// doesn't treat as integer.
-pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool {
+pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &ExprNode) -> bool {
     match &expr.kind {
         ExprKind::ClassConstFetch(StaticTarget::Name(class_name), member) => {
             let resolved = checker.resolve_class_name(class_name);
@@ -794,7 +794,7 @@ fn param_key_from_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<P
 /// "don't guess" leniency every other chain call already has.
 pub(crate) fn param_key_from_expr(
     checker: &Checker,
-    expr: &Expr,
+    expr: &ExprNode,
     locals: &Locals,
 ) -> Option<ParamKey> {
     if let Some(s) = fold_string_expr(checker, expr, locals) {

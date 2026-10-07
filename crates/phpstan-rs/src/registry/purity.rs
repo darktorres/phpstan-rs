@@ -470,7 +470,7 @@ fn new_target_class(name: &QualifiedName, declaring_class: Option<&str>) -> Opti
 /// being mutated, through the exact same reference, whether the
 /// assignment target is written as a bare `PropertyAccess` or an
 /// `Index` chain ending in one.
-fn property_write_target(e: &Expr) -> bool {
+fn property_write_target(e: &ExprNode) -> bool {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::Index(base, _) => property_write_target(base),
@@ -686,7 +686,7 @@ pub(crate) struct ImpurePointOccurrence {
 /// `implicit_calls` are the offsets in `body` the checker found calling an
 /// `ArrayAccess` method, which the walk can't tell from an array's.
 pub(crate) fn collect_impure_points(
-    body: &[Stmt],
+    body: &[StmtNode],
     declaring_class: Option<&str>,
     registry: &Registry,
     implicit_calls: &[Span],
@@ -749,7 +749,7 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
 
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         syntax::stack::guard(|| {
             match &stmt.kind {
                 StmtKind::Echo(_) => self.push(stmt.span, "echo", "echo", true),
@@ -772,7 +772,7 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
         })
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| {
             match &e.kind {
                 // Only a static property read is mutable shared state; a

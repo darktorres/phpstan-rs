@@ -1358,7 +1358,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // Preserves `original`'s leading `\`: a bare, unqualified
         // `Closure` is genuinely ambiguous (real shape: `rector/rector`
         // consumers of `nikic/php-parser` routinely
-        // `use PhpParser\Node\Expr\Closure;`, then type-hint bare
+        // `use PhpParser\Node\ExprNode\Closure;`, then type-hint bare
         // `Closure` meaning *that* one) - only `\Closure`, root-anchored,
         // unambiguously means the real global class. Losing the
         // backslash here would make every native `\Closure $fn` hint in

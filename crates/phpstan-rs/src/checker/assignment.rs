@@ -11,7 +11,7 @@ use types::{Shape, ShapeKey, Type};
 /// (`$a?->{$expr}`) - that shape doesn't carry its own nullsafe flag at
 /// all (see `ExprKind::DynamicPropertyAccess`'s own doc comment), a
 /// real, disclosed gap matching how rare it is in practice.
-pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
+pub(crate) fn contains_nullsafe(expr: &ExprNode) -> bool {
     syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => {
             nullsafe.is_nullsafe() || contains_nullsafe(base)
@@ -43,7 +43,7 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
 /// needs its own explicit "assignable" arm to match that same semantics,
 /// while `DynamicMethodCall`/`MethodCall` deliberately don't get one,
 /// since neither is ever a valid assignment target in real PHP either.
-pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
+pub(crate) fn is_non_assignable_target(expr: &ExprNode) -> bool {
     syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::Variable(_)
         | ExprKind::PropertyAccess(..)
@@ -70,7 +70,7 @@ impl<'a> Checker<'a> {
     /// `check_nullsafe_byref_target` (nullsafe on an assign-by-ref's own
     /// RHS) and `check_assignable_target` (a non-assignable LHS),
     /// both just below.
-    pub(crate) fn check_nullsafe_assignment_target(&mut self, target: &Expr) {
+    pub(crate) fn check_nullsafe_assignment_target(&mut self, target: &ExprNode) {
         if !contains_nullsafe(target) {
             return;
         }
@@ -92,7 +92,7 @@ impl<'a> Checker<'a> {
     /// `check_nullsafe_assignment_target` just above. Only ever called
     /// for `ExprKind::AssignRef`'s own RHS - a plain `Assign`'s RHS is an
     /// ordinary read, never checked this way.
-    pub(crate) fn check_nullsafe_byref_target(&mut self, target: &Expr) {
+    pub(crate) fn check_nullsafe_byref_target(&mut self, target: &ExprNode) {
         if !contains_nullsafe(target) {
             return;
         }
@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
     /// (needed for the guard-clause idiom documented on `parse_
     /// assignment_tail` itself), so `foo() = 1;`/`1 = 2;` genuinely
     /// reach here rather than already being a parse error.
-    pub(crate) fn check_assignable_target(&mut self, target: &Expr) {
+    pub(crate) fn check_assignable_target(&mut self, target: &ExprNode) {
         if !is_non_assignable_target(target) {
             return;
         }
@@ -145,7 +145,7 @@ impl<'a> Checker<'a> {
     /// wrongly check `$a`/`$b` as reads of not-yet-defined variables.
     pub(crate) fn check_assignment_target(
         &mut self,
-        target: &Expr,
+        target: &ExprNode,
         locals: &mut Locals,
         label: &str,
     ) {
@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
     /// per-position/per-key element-type resolution exactly, so a
     /// destructured array shape source still checks each element
     /// against its own real per-slot type, not a blanket `Mixed`.
-    pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type) {
+    pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &ExprNode, ty: &Type) {
         syntax::stack::guard(|| {
             let ExprKind::Destructure(items, _) = &lhs.kind else {
                 return;
@@ -263,7 +263,7 @@ impl<'a> Checker<'a> {
     /// the declared type, as PHP either coerces the value into it or
     /// rejects the write with a `TypeError`. A write that isn't to a known
     /// property is returned as is.
-    fn property_value_after_write(&self, lhs: &Expr, value: &Type, locals: &Locals) -> Type {
+    fn property_value_after_write(&self, lhs: &ExprNode, value: &Type, locals: &Locals) -> Type {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             return value.clone();
         };
@@ -291,7 +291,7 @@ impl<'a> Checker<'a> {
     /// into a destructuring target (`[$a, $b] = $arr;`, `list($a, $b) =
     /// $arr;`, nested `[[$a, $b], $c] = $nested;`): each element target
     /// gets the value at its key.
-    pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
+    pub(crate) fn bind_assignment_target(&self, lhs: &ExprNode, ty: Type, locals: &mut Locals) {
         syntax::stack::guard(|| {
             // Keep any existing `key_of` entry for this exact
             // property-chain/literal-index-chain expression in sync with a
@@ -326,7 +326,7 @@ impl<'a> Checker<'a> {
                 // destructuring target (`[$a, $b] = ...`) - `lhs.span` is
                 // already exactly the right span either way, since this
                 // recursion re-enters with `item.value` (each destructuring
-                // leaf's own real `Expr`, own real span) for the latter
+                // leaf's own real `ExprNode`, own real span) for the latter
                 // case.
                 ExprKind::Variable(name) => {
                     // See `Checker::probe_hit_at`'s doc comment.
@@ -591,7 +591,12 @@ impl<'a> Checker<'a> {
     /// array, and a property's narrowed value is forgotten. The target is
     /// read as quietly as `isset()` reads it - unsetting what doesn't
     /// exist is no error.
-    pub(crate) fn check_unset_target(&mut self, target: &Expr, locals: &mut Locals, label: &str) {
+    pub(crate) fn check_unset_target(
+        &mut self,
+        target: &ExprNode,
+        locals: &mut Locals,
+        label: &str,
+    ) {
         self.check_expr_quiet_root(target, locals, label);
         // `unset($o[$k])` calls `offsetUnset`; a statement has no
         // expression of its own to throw from, so its throw goes to the
@@ -648,7 +653,7 @@ impl<'a> Checker<'a> {
     /// (`$x['a']` in `$x['a']['b'] = 1`), at any depth: where the offset
     /// may be absent or holds `null`, PHP creates a fresh array, so the
     /// container includes `array{}` there.
-    fn nested_write_container_type(&self, e: &Expr, locals: &Locals) -> Type {
+    fn nested_write_container_type(&self, e: &ExprNode, locals: &Locals) -> Type {
         syntax::stack::guard(|| {
             let ExprKind::Index(inner, idx) = &e.kind else {
                 return self.infer_expr(e, locals);
@@ -671,7 +676,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    pub(crate) fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut Locals) {
+    pub(crate) fn bind_simple_target(&self, target: &ExprNode, ty: Type, locals: &mut Locals) {
         if let ExprKind::Variable(name) = &target.kind {
             purge_stale_narrowing_for_var(locals, name);
             // Real rebind - `target` is a `foreach` key's bare `$var`
@@ -694,9 +699,9 @@ impl<'a> Checker<'a> {
     /// narrowed to a type without `null` is there.
     pub(crate) fn check_offset_existence(
         &mut self,
-        read: &Expr,
-        base: &Expr,
-        idx: &Expr,
+        read: &ExprNode,
+        base: &ExprNode,
+        idx: &ExprNode,
         locals: &Locals,
     ) {
         if locals.may_have_member_narrowing()
@@ -830,7 +835,7 @@ impl<'a> Checker<'a> {
     /// exclusion: `$x = null; $x['a'] = 1;` legally auto-vivifies `$x`
     /// into an array on write, so this is only ever wired into a read
     /// site, never `check_assignment_target`'s.
-    pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &Expr) {
+    pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &ExprNode) {
         // Reading an offset of `null` gives `null` with a warning (PHP
         // 7.4+), and is a bug on every version.
         if let Some(level) = self.failing_level(base_ty, 3, |m| {
@@ -880,7 +885,7 @@ pub(crate) fn unassigned_variable_type(name: &str) -> Type {
 /// and a literal-key write (`$r['qs'] = ...`) may land on whatever a
 /// variable-subscript entry (`$r[$k]`) currently reads. Drops every
 /// such entry at each level of `lhs`'s index chain.
-fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
+fn purge_aliased_index_entries(lhs: &ExprNode, locals: &mut Locals) {
     syntax::stack::guard(|| {
         let ExprKind::Index(base, Some(idx)) = &lhs.kind else {
             if let ExprKind::Index(base, None) = &lhs.kind {
@@ -926,7 +931,7 @@ fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
 
 /// The array key a literal subscript names, by its bytes: `'5'` is the
 /// int key 5, `"\xff"` its own string key.
-pub(crate) fn literal_shape_key(e: &Expr) -> Option<ShapeKey> {
+pub(crate) fn literal_shape_key(e: &ExprNode) -> Option<ShapeKey> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(ShapeKey::from_bytes(s.as_bytes())),
         ExprKind::Literal(Literal::Int(n)) => Some(ShapeKey::Int(*n)),
@@ -934,7 +939,7 @@ pub(crate) fn literal_shape_key(e: &Expr) -> Option<ShapeKey> {
     }
 }
 
-pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
+pub(crate) fn literal_string_key(e: &ExprNode) -> Option<String> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),

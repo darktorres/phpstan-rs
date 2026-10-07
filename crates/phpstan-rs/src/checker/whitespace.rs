@@ -15,7 +15,7 @@ fn is_whitespace_run(html: &str) -> bool {
 
 /// The last statement of the file, of each namespace, and of each
 /// `declare(...) { }` block.
-fn section_ends(program: &[Stmt]) -> Vec<&Stmt> {
+fn section_ends(program: &[StmtNode]) -> Vec<&StmtNode> {
     let mut ends = Vec::new();
     for (i, stmt) in program.iter().enumerate() {
         if let StmtKind::Declare {
@@ -33,7 +33,7 @@ fn section_ends(program: &[Stmt]) -> Vec<&Stmt> {
 }
 
 impl<'a> Checker<'a> {
-    pub(crate) fn check_file_whitespace(&mut self, program: &[Stmt]) {
+    pub(crate) fn check_file_whitespace(&mut self, program: &[StmtNode]) {
         if let Some(first) = program.first()
             && let StmtKind::InlineHtml(html) = &first.kind
         {

@@ -57,11 +57,11 @@ impl Scope {
 /// Walks one function-like body: expressions and nested declarations are
 /// not entered.
 impl<'ast> Visitor<'ast> for Scope {
-    fn visit_expr(&mut self, _: &'ast Expr) {}
+    fn visit_expr(&mut self, _: &'ast ExprNode) {}
     fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::While { body, .. }
@@ -149,7 +149,7 @@ fn is_prefix(prefix: &[usize], of: &[usize]) -> bool {
 
 impl<'a> Checker<'a> {
     /// One function-like body, or the file's top-level statements.
-    pub(crate) fn check_statement_keywords(&mut self, body: &[Stmt]) {
+    pub(crate) fn check_statement_keywords(&mut self, body: &[StmtNode]) {
         let mut scope = Scope::default();
         walk_stmts(&mut scope, body);
         for (kind, span, message) in std::mem::take(&mut scope.jumps) {
@@ -222,7 +222,7 @@ impl<'a> Checker<'a> {
     /// must be `0`/`1`, the file's first statement, and never block
     /// mode; `ticks` needs an int and `encoding` a string; any other
     /// directive is unsupported.
-    pub(crate) fn check_declare_directives(&mut self, program: &[Stmt]) {
+    pub(crate) fn check_declare_directives(&mut self, program: &[StmtNode]) {
         for (stmt, is_first) in collect_declares(program) {
             let StmtKind::Declare { directives, body } = &stmt.kind else {
                 continue;
@@ -294,16 +294,16 @@ impl<'a> Checker<'a> {
 
 /// Every `declare` statement, with whether it's the file's first
 /// statement.
-fn collect_declares(program: &[Stmt]) -> Vec<(&Stmt, bool)> {
+fn collect_declares(program: &[StmtNode]) -> Vec<(&StmtNode, bool)> {
     struct Declares<'s> {
-        out: Vec<(&'s Stmt, bool)>,
+        out: Vec<(&'s StmtNode, bool)>,
         // The next statement visited is the file's first, looking through
         // leading blocks.
         next_is_first: bool,
     }
     impl<'s> Visitor<'s> for Declares<'s> {
-        fn visit_expr(&mut self, _: &'s Expr) {}
-        fn visit_stmt(&mut self, stmt: &'s Stmt) {
+        fn visit_expr(&mut self, _: &'s ExprNode) {}
+        fn visit_stmt(&mut self, stmt: &'s StmtNode) {
             let is_first = std::mem::replace(&mut self.next_is_first, false);
             match &stmt.kind {
                 StmtKind::Declare { body, .. } => {
@@ -334,7 +334,7 @@ fn collect_declares(program: &[Stmt]) -> Vec<(&Stmt, bool)> {
     declares.out
 }
 
-fn describe_literal(value: &Expr) -> String {
+fn describe_literal(value: &ExprNode) -> String {
     match &value.kind {
         ExprKind::Literal(Literal::Int(n)) => n.to_string(),
         ExprKind::Literal(Literal::String(s)) => format!("'{s}'"),

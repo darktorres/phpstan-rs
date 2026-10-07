@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use syntax::ast::{
-    ExprKind, FunctionDecl, MethodDecl, Param, PropertyDecl, PropertyHooks, Stmt, StmtKind,
+    ExprKind, FunctionDecl, MethodDecl, Param, PropertyDecl, PropertyHooks, StmtKind, StmtNode,
 };
 use syntax::name::Name;
 use syntax::span::Span;
@@ -69,10 +69,10 @@ pub struct UnsetProperties {
 impl UnsetProperties {
     /// The properties the statements `stmts` unset, those of the closures,
     /// the functions and the classes they declare included.
-    fn of(stmts: &[Stmt]) -> UnsetProperties {
+    fn of(stmts: &[StmtNode]) -> UnsetProperties {
         struct Unsets(UnsetProperties);
         impl<'ast> Visitor<'ast> for Unsets {
-            fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
                 if let StmtKind::Unset(targets) = &stmt.kind {
                     for target in targets {
                         match &target.peeled().kind {
@@ -152,7 +152,7 @@ pub struct FileBodies {
 }
 
 impl FileBodies {
-    pub fn of(stmts: &[Stmt]) -> FileBodies {
+    pub fn of(stmts: &[StmtNode]) -> FileBodies {
         FileBodies::collect(stmts, true, true)
     }
 
@@ -160,7 +160,7 @@ impl FileBodies {
     /// walked only when a body can be in one, in an anonymous class or a
     /// closure, and the whole file for what it unsets only when it unsets
     /// a property.
-    pub fn of_file(stmts: &[Stmt], facts: &syntax::FileFacts) -> FileBodies {
+    pub fn of_file(stmts: &[StmtNode], facts: &syntax::FileFacts) -> FileBodies {
         FileBodies::collect(
             stmts,
             facts.has_anonymous_class || facts.has_nested_declaration,
@@ -168,7 +168,7 @@ impl FileBodies {
         )
     }
 
-    fn collect(stmts: &[Stmt], in_expressions: bool, unsets: bool) -> FileBodies {
+    fn collect(stmts: &[StmtNode], in_expressions: bool, unsets: bool) -> FileBodies {
         struct Collect {
             bodies: FxHashMap<Span, Body>,
             hooks: FxHashMap<Span, Hooks>,
@@ -197,7 +197,7 @@ impl FileBodies {
             }
         }
         impl<'ast> Visitor<'ast> for Collect {
-            fn visit_expr(&mut self, expr: &'ast syntax::ast::Expr) {
+            fn visit_expr(&mut self, expr: &'ast syntax::ast::ExprNode) {
                 if self.in_expressions {
                     visit::walk_expr(self, expr);
                 }

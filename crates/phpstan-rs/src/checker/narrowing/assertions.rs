@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
     /// chain" `infer_expr` fallback, that this avoids cloning for.
     pub(crate) fn current_narrowed_type<'l>(
         &self,
-        expr: &Expr,
+        expr: &ExprNode,
         key: LocalKey,
         locals: &'l Locals,
     ) -> std::borrow::Cow<'l, Type> {
@@ -76,7 +76,7 @@ impl<'a> Checker<'a> {
     /// branch to its element type.
     pub(crate) fn in_array_narrowing(
         &self,
-        haystack: &Expr,
+        haystack: &ExprNode,
         locals: &Locals,
     ) -> Option<(Type, Option<Type>)> {
         if let ExprKind::ArrayLiteral(items) = &haystack.peeled().kind
@@ -140,8 +140,8 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn apply_equality_narrowing(
         &self,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         locals: &mut Locals,
         matches_when_true: bool,
     ) {
@@ -267,8 +267,8 @@ impl<'a> Checker<'a> {
     /// against the other side's type, as PHP's loose comparison allows.
     pub(crate) fn apply_loose_equality_narrowing(
         &self,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         locals: &mut Locals,
         equal: bool,
     ) {
@@ -296,8 +296,8 @@ impl<'a> Checker<'a> {
     /// model.
     pub(crate) fn apply_ordering_narrowing(
         &self,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         op: types::OrderingOp,
         holds: bool,
         locals: &mut Locals,
@@ -395,7 +395,7 @@ impl<'a> Checker<'a> {
         &self,
         infos: &[crate::registry::AssertInfo],
         sig: &crate::registry::FunctionReflection,
-        recv: Option<&Expr>,
+        recv: Option<&ExprNode>,
         args: &[Arg],
         locals: &mut Locals,
     ) {
@@ -429,7 +429,7 @@ impl<'a> Checker<'a> {
     /// pass an argument for, e.g. an omitted optional parameter).
     /// `Param`/`ThisSelf` both name a *real* argument/receiver
     /// expression already in hand, so `current_narrowed_type` (which
-    /// needs a real `Expr` for its own `infer_expr` fallback) applies
+    /// needs a real `ExprNode` for its own `infer_expr` fallback) applies
     /// directly; `ThisProp` has no such expression to offer (`$this->
     /// prop` is synthesized from docblock text, never a real parsed
     /// node) - its own "not already narrowed" fallback instead looks the
@@ -439,8 +439,8 @@ impl<'a> Checker<'a> {
         &self,
         target: &crate::registry::AssertTarget,
         sig: &crate::registry::FunctionReflection,
-        recv: Option<&Expr>,
-        resolved: &[Option<&Expr>],
+        recv: Option<&ExprNode>,
+        resolved: &[Option<&ExprNode>],
         locals: &'l Locals,
     ) -> Option<(LocalKey, std::borrow::Cow<'l, Type>)> {
         use crate::registry::AssertTarget;

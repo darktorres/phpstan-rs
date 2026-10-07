@@ -14,7 +14,7 @@ impl Rule for FlagsVariableNamed {
         matches!(kind, ExprKind::Variable(name) if name.as_ref() == self.0)
     }
 
-    fn check_expr(&self, _scope: &Scope, expr: &Expr, ty: &Type) -> Vec<Diagnostic> {
+    fn check_expr(&self, _scope: &Scope, expr: &ExprNode, ty: &Type) -> Vec<Diagnostic> {
         vec![
             DiagnosticBuilder::new(
                 format!("flagged ${} (inferred {ty})", self.0),
@@ -36,7 +36,7 @@ impl Rule for FlagsEchoStatements {
         matches!(kind, StmtKind::Echo(_))
     }
 
-    fn check_stmt(&self, _scope: &Scope, stmt: &Stmt) -> Vec<Diagnostic> {
+    fn check_stmt(&self, _scope: &Scope, stmt: &StmtNode) -> Vec<Diagnostic> {
         vec![
             DiagnosticBuilder::new(
                 "flagged an echo".to_string(),
@@ -122,7 +122,7 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
             matches!(kind, ExprKind::Variable(name) if name.as_ref() == "x")
         }
 
-        fn check_expr(&self, scope: &Scope, expr: &Expr, _ty: &Type) -> Vec<Diagnostic> {
+        fn check_expr(&self, scope: &Scope, expr: &ExprNode, _ty: &Type) -> Vec<Diagnostic> {
             vec![
                 DiagnosticBuilder::new(
                     format!(
@@ -169,7 +169,7 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
                 if matches!(&callee.kind, ExprKind::Name(n) if n == "maybe_missing"))
         }
 
-        fn check_expr(&self, scope: &Scope, expr: &Expr, _ty: &Type) -> Vec<Diagnostic> {
+        fn check_expr(&self, scope: &Scope, expr: &ExprNode, _ty: &Type) -> Vec<Diagnostic> {
             vec![
                 DiagnosticBuilder::new(
                     format!("guarded={}", scope.is_function_guarded("maybe_missing")),

@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::{Name, OrderedNameMap};
 
-use syntax::ast::Stmt;
+use syntax::ast::StmtNode;
 use types::Type;
 
 pub mod access_attributes;
@@ -1109,7 +1109,7 @@ impl Registry {
         }
     }
 
-    pub fn build(program: &[Stmt]) -> Registry {
+    pub fn build(program: &[StmtNode]) -> Registry {
         let mut registry = Registry::index_and_flatten(program, &Origin::Unknown);
         registry.resolve_transitive_purity(&FileBodies::of(program));
         registry
@@ -1122,7 +1122,7 @@ impl Registry {
     /// would wrongly mark every PHP built-in (`header()`, `exit()`, ...)
     /// as provably pure, baked permanently into the `LazyLock`-cached
     /// stub signatures every real project's registry later merges in.
-    pub(crate) fn index_and_flatten(program: &[Stmt], origin: &Origin) -> Registry {
+    pub(crate) fn index_and_flatten(program: &[StmtNode], origin: &Origin) -> Registry {
         let mut registry = Registry::default();
         registry.index(program, origin, false);
         registry.canonicalize_class_name_case();

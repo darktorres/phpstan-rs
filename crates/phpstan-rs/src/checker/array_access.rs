@@ -10,7 +10,7 @@
 use crate::checker::call_effects::is_this;
 use crate::checker::{Checker, Locals};
 use crate::registry::summaries::{Access, Operation};
-use syntax::ast::{DestructureItem, Expr, ExprKind};
+use syntax::ast::{DestructureItem, ExprKind, ExprNode};
 use syntax::span::Span;
 use types::Type;
 
@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
     /// property name becomes a string.
     fn implicit_member_access(
         &mut self,
-        operand: &Expr,
+        operand: &ExprNode,
         accesses: &[Access],
         span: Span,
         locals: &mut Locals,
@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
     /// reported (`offsetAssign.indirectModification`).
     pub(crate) fn implicit_array_access_write(
         &mut self,
-        lhs: &Expr,
+        lhs: &ExprNode,
         span: Span,
         locals: &mut Locals,
     ) {
@@ -182,7 +182,12 @@ impl<'a> Checker<'a> {
     /// the expression at `span`: the property or the element is read
     /// (`__get`, `offsetGet`), and so is each container on the way, as for
     /// a write.
-    pub(crate) fn implicit_reference(&mut self, target: &Expr, span: Span, locals: &mut Locals) {
+    pub(crate) fn implicit_reference(
+        &mut self,
+        target: &ExprNode,
+        span: Span,
+        locals: &mut Locals,
+    ) {
         self.implicit_member_fetch(target, Access::Read, span, locals);
     }
 
@@ -190,7 +195,7 @@ impl<'a> Checker<'a> {
     /// each element on the way to it (`implicit_array_access_write`).
     fn implicit_member_fetch(
         &mut self,
-        lhs: &Expr,
+        lhs: &ExprNode,
         access: Access,
         span: Span,
         locals: &mut Locals,
@@ -199,7 +204,7 @@ impl<'a> Checker<'a> {
         let ExprKind::Index(base, _) = &lhs.kind else {
             return;
         };
-        let mut link: &Expr = base;
+        let mut link: &ExprNode = base;
         while let ExprKind::Index(inner, _) = &link.kind {
             let inner_ty = self.infer_expr(inner, locals);
             self.implicit_array_access_call(&inner_ty, is_this(inner), Access::Read, span, locals);
@@ -261,7 +266,7 @@ impl<'a> Checker<'a> {
     /// test and then a read, or only a read for an unset.
     pub(crate) fn implicit_array_access_probe(
         &mut self,
-        operand: &Expr,
+        operand: &ExprNode,
         root: &[Access],
         span: Span,
         locals: &mut Locals,
@@ -272,7 +277,7 @@ impl<'a> Checker<'a> {
             &[Access::Isset, Access::Read]
         };
         self.implicit_member_access(operand, root, span, locals);
-        let mut link: &Expr = operand;
+        let mut link: &ExprNode = operand;
         while let ExprKind::Index(inner, _)
         | ExprKind::PropertyAccess(inner, _, _)
         | ExprKind::DynamicPropertyAccess(inner, _, _) = &link.kind

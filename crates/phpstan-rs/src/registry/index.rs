@@ -10,7 +10,7 @@ use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
     ClassId, ClassReflection, FnId, FunctionReflection, folded_key, function_key, infer_const_type,
 };
-use syntax::ast::{Expr, Stmt, Visibility};
+use syntax::ast::{ExprNode, StmtNode, Visibility};
 use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
 use syntax::name_resolution::NameContext;
 use syntax::php_string::PhpString;
@@ -121,7 +121,7 @@ impl Registry {
     /// this way - rather than writing a second, independent tree-walker
     /// for the parallel path - matters here specifically.
     #[hotpath::measure]
-    pub(crate) fn index(&mut self, stmts: &[Stmt], origin: &Origin, analyzed: bool) {
+    pub(crate) fn index(&mut self, stmts: &[StmtNode], origin: &Origin, analyzed: bool) {
         for decl in build_declarations(stmts, origin) {
             self.insert_built_decl(decl, analyzed);
         }
@@ -1180,7 +1180,7 @@ impl Registry {
 /// Each declaration's PHPDoc resolves in the name context in effect where
 /// it sits (`for_each_declaration`).
 #[hotpath::measure]
-pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
+pub(crate) fn build_declarations(stmts: &[StmtNode], origin: &Origin) -> Vec<BuiltDecl> {
     let mut out = Vec::new();
     for_each_declaration(stmts, |declaration, ctx, guards| {
         built_declaration(declaration, ctx, guards, origin, &mut out);
@@ -1272,7 +1272,7 @@ pub(crate) fn built_declaration(
 /// `\null` reference for every file in the corpus - every `!== \false`-
 /// style narrowing idiom would silently stop narrowing away `false` at
 /// all once such a stub was indexed.
-fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Name, Type)> {
+fn define_constant(const_name: &PhpString, value: &ExprNode) -> Option<(Name, Type)> {
     let const_name = const_name.as_str()?;
     if ["true", "false", "null"]
         .iter()
@@ -1291,7 +1291,7 @@ fn define_constant(const_name: &PhpString, value: &Expr) -> Option<(Name, Type)>
     // stub's placeholder value (an empty string, or `0` for `__LINE__`)
     // exists purely so the declaration type-checks, and was never meant
     // to be read literally. This project has no dedicated magic-constant
-    // `Expr` kind (a bare `__DIR__`/`__LINE__`/... reference parses as
+    // `ExprNode` kind (a bare `__DIR__`/`__LINE__`/... reference parses as
     // an ordinary `ExprKind::Name`, already `mixed` via
     // `bare_name_literal_type`'s default arm) - excluding them here
     // protects that existing, already-correct "don't know" behavior

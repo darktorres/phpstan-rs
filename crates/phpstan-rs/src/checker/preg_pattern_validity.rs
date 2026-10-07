@@ -11,7 +11,7 @@
 
 use crate::checker::Checker;
 use crate::pcre_validate::validate_pattern;
-use syntax::ast::{Arg, Expr, ExprKind, Literal};
+use syntax::ast::{Arg, ExprKind, ExprNode, Literal};
 use syntax::span::Span;
 
 /// Which of the 8 real PCRE-pattern-taking builtins `name` is, and how
@@ -48,7 +48,7 @@ fn pattern_arg_shape(name: &str) -> Option<PatternArgShape> {
     }
 }
 
-fn as_string_literal(e: &Expr) -> Option<&str> {
+fn as_string_literal(e: &ExprNode) -> Option<&str> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => s.as_str(),
         _ => None,

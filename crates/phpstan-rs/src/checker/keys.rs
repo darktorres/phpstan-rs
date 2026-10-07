@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use rustc_hash::FxHasher;
-use syntax::ast::{BinOp, Expr, ExprKind, Literal, StaticTarget};
+use syntax::ast::{BinOp, ExprKind, ExprNode, Literal, StaticTarget};
 use syntax::name::{Name, text_hash};
 
 /// What a scope's facts are filed under; see the module documentation.
@@ -306,16 +306,16 @@ impl KeyTable {
     /// a variable, a property chain rooted in one, an array-index chain by
     /// literals or variables, a static property; looking through
     /// parentheses, an assignment (the key of its target) and `?? null`.
-    pub(crate) fn key_of(&mut self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
+    pub(crate) fn key_of(&mut self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
         self.resolve(e, class)
     }
 
     /// `key_of`, when the key has been made: a read never makes one.
-    pub(crate) fn find_key(&self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
+    pub(crate) fn find_key(&self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
         self.find_expr(e, class)
     }
 
-    fn resolve(&mut self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
+    fn resolve(&mut self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
         syntax::stack::guard(|| {
             let e = e.peeled();
             match &e.kind {
@@ -362,7 +362,7 @@ impl KeyTable {
         })
     }
 
-    fn find_expr(&self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
+    fn find_expr(&self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
         syntax::stack::guard(|| {
             let e = e.peeled();
             match &e.kind {
@@ -432,7 +432,7 @@ mod tests {
 
     /// The keys as they were formatted before they were made by structure:
     /// what `KeyTable::render` of `key_of` has to equal.
-    fn formatted(e: &Expr) -> Option<String> {
+    fn formatted(e: &ExprNode) -> Option<String> {
         let e = e.peeled();
         match &e.kind {
             ExprKind::Variable(name) => Some(name.to_string()),

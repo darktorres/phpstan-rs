@@ -16,7 +16,7 @@ use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     /// `pipe.byRef` - see this module's own doc comment for scope.
-    pub(crate) fn check_pipe_byref(&mut self, rhs: &Expr, locals: &Locals) {
+    pub(crate) fn check_pipe_byref(&mut self, rhs: &ExprNode, locals: &Locals) {
         let Some(true) = self.pipe_target_first_param_is_by_ref(rhs, locals) else {
             return;
         };
@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
     /// zero parameters is `Some(false)` - never flagged, matching real
     /// PHPStan's own `foreach` over zero parameters never entering its
     /// loop body at all.
-    fn pipe_target_first_param_is_by_ref(&self, expr: &Expr, locals: &Locals) -> Option<bool> {
+    fn pipe_target_first_param_is_by_ref(&self, expr: &ExprNode, locals: &Locals) -> Option<bool> {
         let ty = self.infer_expr(expr, locals);
         if let Some(sig) = ty.callable_sig() {
             return Some(sig.params.first().is_some_and(|p| p.by_ref));

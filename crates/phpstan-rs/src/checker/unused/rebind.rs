@@ -29,7 +29,7 @@ pub(crate) const WATCH: &[(&str, u32)] = &[
 /// resolve without real type inference. A rebind is `Closure::bind()`,
 /// `->bindTo()`, or `->call()` on a closure (a literal, or a variable
 /// assigned one), whose scope is its object's class.
-pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (NameSet, bool) {
+pub(crate) fn scan_program_for_rebind_targets(program: &[StmtNode]) -> (NameSet, bool) {
     let mut closures = ClosureVariables::default();
     walk_stmts(&mut closures, program);
     let mut rebinds = Rebinds {
@@ -46,7 +46,7 @@ pub(crate) fn scan_program_for_rebind_targets(program: &[Stmt]) -> (NameSet, boo
 struct ClosureVariables(NameSet);
 
 impl<'ast> Visitor<'ast> for ClosureVariables {
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         if let ExprKind::Assign(target, value) = &expr.kind
             && let ExprKind::Variable(name) = &target.kind
             && is_closure_expr(value)
@@ -58,7 +58,7 @@ impl<'ast> Visitor<'ast> for ClosureVariables {
 }
 
 /// A closure or arrow function literal, or a first-class callable.
-fn is_closure_expr(e: &Expr) -> bool {
+fn is_closure_expr(e: &ExprNode) -> bool {
     matches!(
         &e.peeled().kind,
         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::FirstClassCallable(_)
@@ -72,7 +72,7 @@ struct Rebinds {
 }
 
 impl<'ast> Visitor<'ast> for Rebinds {
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         match &expr.kind {
             // `Closure::bind($closure, $newThis, $scope)`.
             ExprKind::StaticCall(StaticTarget::Name(class), method, args)

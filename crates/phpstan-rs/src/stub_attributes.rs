@@ -56,7 +56,7 @@ fn ends_superseded(attrs: &[Attribute]) -> bool {
     })
 }
 
-fn string_literal(e: &Expr) -> Option<&str> {
+fn string_literal(e: &ExprNode) -> Option<&str> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => s.as_str(),
         _ => None,
@@ -173,7 +173,7 @@ pub(crate) const WATCH: &[(&str, u32)] = &[
 
 /// Applies and removes the version attributes in a parsed file, then
 /// resolves the names of any type it added. Whether the tree changed.
-pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) -> bool {
+pub(crate) fn apply_stub_attributes(stmts: &mut Vec<StmtNode>) -> bool {
     if !mentions_stub_attributes(stmts) {
         return false;
     }
@@ -187,7 +187,7 @@ pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) -> bool {
 }
 
 /// Whether any attribute in the file is one of the two.
-fn mentions_stub_attributes(stmts: &[Stmt]) -> bool {
+fn mentions_stub_attributes(stmts: &[StmtNode]) -> bool {
     struct Find {
         found: bool,
     }
@@ -220,7 +220,7 @@ impl Pass {
     }
 
     /// Drops the function declarations a closed range supersedes.
-    fn retain_stmts(&self, stmts: &mut Vec<Stmt>) {
+    fn retain_stmts(&self, stmts: &mut Vec<StmtNode>) {
         stmts
             .retain(|s| !matches!(&s.kind, StmtKind::FunctionDecl(f) if ends_superseded(&f.attrs)));
     }
@@ -303,7 +303,7 @@ impl Pass {
 }
 
 impl VisitorMut for Pass {
-    fn visit_stmt(&mut self, stmt: &mut Stmt) {
+    fn visit_stmt(&mut self, stmt: &mut StmtNode) {
         match &mut stmt.kind {
             StmtKind::Block(stmts)
             | StmtKind::Declare {
@@ -349,7 +349,7 @@ impl VisitorMut for Pass {
         walk_class_def_mut(self, c);
     }
 
-    fn visit_expr(&mut self, expr: &mut Expr) {
+    fn visit_expr(&mut self, expr: &mut ExprNode) {
         match &mut expr.kind {
             ExprKind::Closure(closure) => {
                 self.strip(&mut closure.attrs);

@@ -21,7 +21,7 @@ use types::Type;
 /// *real* left-hand type - inferring from the real target directly is
 /// what lets `is_int($x['k'] ?? null)` see `$x['k']`'s own true type
 /// (`int|null`), not the coalesce result's already-narrower one.
-pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
+pub(crate) fn narrowing_infer_target(e: &ExprNode) -> &ExprNode {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
@@ -174,9 +174,9 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
 impl<'a> Checker<'a> {
     pub(crate) fn or_chain_narrowing_target<'e>(
         &self,
-        cond: &'e Expr,
+        cond: &'e ExprNode,
         locals: &Locals,
-    ) -> Option<(LocalKey, Type, &'e Expr)> {
+    ) -> Option<(LocalKey, Type, &'e ExprNode)> {
         syntax::stack::guard(|| {
             let cond = cond.peeled();
             match &cond.kind {
@@ -243,9 +243,9 @@ impl<'a> Checker<'a> {
 impl<'a> Checker<'a> {
     pub(crate) fn and_chain_narrowing_target<'e>(
         &self,
-        cond: &'e Expr,
+        cond: &'e ExprNode,
         locals: &Locals,
-    ) -> Option<(LocalKey, Type, &'e Expr)> {
+    ) -> Option<(LocalKey, Type, &'e ExprNode)> {
         let cond = cond.peeled();
         syntax::stack::guard(|| match &cond.kind {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {

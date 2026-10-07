@@ -13,7 +13,7 @@ use crate::restricted_symbols::{
 };
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
-use syntax::ast::{Arg, ClassKind, Expr, FunctionDecl, Param};
+use syntax::ast::{Arg, ClassKind, ExprNode, FunctionDecl, Param};
 use syntax::span::Span;
 use types::Name;
 use types::Type;
@@ -80,7 +80,11 @@ fn is_allowed_by_position(entry: &RestrictedSymbolEntry, location: ClassUsageLoc
 /// positional resolution stops (returns `None`) once one is seen -
 /// this project's own conservative posture, matching how every other
 /// spread-aware check here already treats an unpack as "can't know."
-fn resolve_arg<'a>(args: &'a [Arg], position: Option<u32>, name: Option<&str>) -> Option<&'a Expr> {
+fn resolve_arg<'a>(
+    args: &'a [Arg],
+    position: Option<u32>,
+    name: Option<&str>,
+) -> Option<&'a ExprNode> {
     if let Some(name) = name
         && let Some(found) = args
             .iter()

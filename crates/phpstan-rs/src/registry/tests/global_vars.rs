@@ -5,12 +5,12 @@
 use std::path::Path;
 
 use super::super::*;
-use syntax::ast::Stmt;
+use syntax::ast::StmtNode;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 use types::Type;
 
-fn parse(src: &str) -> Vec<Stmt> {
+fn parse(src: &str) -> Vec<StmtNode> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     Parser::new(tokens).parse_program().unwrap()
 }
@@ -21,11 +21,11 @@ fn parse(src: &str) -> Vec<Stmt> {
 /// genuinely separate files - real per-file `NameContext` isolation and
 /// include-graph resolution, not one concatenated blob.
 fn build_with_files(sources: &[(&str, &str)]) -> Registry {
-    let parsed: Vec<(String, Vec<Stmt>)> = sources
+    let parsed: Vec<(String, Vec<StmtNode>)> = sources
         .iter()
         .map(|(path, src)| (path.to_string(), parse(src)))
         .collect();
-    let combined: Vec<Stmt> = parsed.iter().flat_map(|(_, p)| p.clone()).collect();
+    let combined: Vec<StmtNode> = parsed.iter().flat_map(|(_, p)| p.clone()).collect();
     let mut registry = Registry::build(&combined);
     let facts: Vec<GlobalFacts> = parsed.iter().map(|(_, p)| GlobalFacts::of(p)).collect();
     let files: Vec<(crate::file_id::FileId, &Path, &GlobalFacts)> = parsed

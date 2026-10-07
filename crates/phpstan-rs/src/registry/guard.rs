@@ -6,7 +6,7 @@
 //! the declaration, so a change of the configured versions evaluates it again
 //! without a parse.
 
-use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
+use syntax::ast::{BinOp, ExprKind, ExprNode, Literal, UnaryOp};
 use syntax::declarations::GuardTerm;
 use types::PhpVersions;
 
@@ -122,7 +122,7 @@ impl GuardExpr {
     }
 
     /// What `expr`, an `if` condition, says about the versions.
-    fn of_condition(expr: &Expr) -> GuardExpr {
+    fn of_condition(expr: &ExprNode) -> GuardExpr {
         match &expr.kind {
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 GuardExpr::Not(Box::new(GuardExpr::of_condition(inner)))
@@ -204,7 +204,7 @@ impl GuardExpr {
 }
 
 /// Whether `expr` is the global constant `name`.
-fn is_constant(expr: &Expr, name: &str) -> bool {
+fn is_constant(expr: &ExprNode, name: &str) -> bool {
     let ExprKind::Name(written) = &expr.kind else {
         return false;
     };
@@ -212,7 +212,7 @@ fn is_constant(expr: &Expr, name: &str) -> bool {
     fallback.unwrap_or(primary) == name
 }
 
-fn int(expr: &Expr) -> Option<i64> {
+fn int(expr: &ExprNode) -> Option<i64> {
     match &expr.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
         _ => None,
@@ -222,7 +222,7 @@ fn int(expr: &Expr) -> Option<i64> {
 /// `version_compare(PHP_VERSION, 'x.y.z', '<op>')`, as the comparison of
 /// `PHP_VERSION_ID` with the version's id. A call that has no operator
 /// returns a number, not a condition.
-fn version_compare(callee: &Expr, args: &[syntax::ast::Arg]) -> GuardExpr {
+fn version_compare(callee: &ExprNode, args: &[syntax::ast::Arg]) -> GuardExpr {
     let ExprKind::Name(name) = &callee.kind else {
         return GuardExpr::Opaque;
     };
@@ -247,7 +247,7 @@ fn version_compare(callee: &Expr, args: &[syntax::ast::Arg]) -> GuardExpr {
     }
 }
 
-fn text(expr: &Expr) -> Option<&[u8]> {
+fn text(expr: &ExprNode) -> Option<&[u8]> {
     match &expr.kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.as_bytes()),
         _ => None,

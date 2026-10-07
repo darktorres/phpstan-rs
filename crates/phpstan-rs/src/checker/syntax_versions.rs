@@ -74,7 +74,7 @@ const MARKS: &[(SyntaxMark, PhpFeature, &str, &str)] = &[
 impl<'a> Checker<'a> {
     /// Reports the syntax of `program` and of `marks` that a PHP version
     /// the project runs on lacks.
-    pub(crate) fn check_syntax_versions(&mut self, program: &[Stmt], marks: &SyntaxMarks) {
+    pub(crate) fn check_syntax_versions(&mut self, program: &[StmtNode], marks: &SyntaxMarks) {
         // Every version the project runs on has every syntax gated here.
         if self
             .registry
@@ -130,7 +130,7 @@ impl Gates<'_, '_> {
     }
 
     /// `new` in an initializer, which PHP takes only from 8.1.
-    fn initializer(&mut self, value: &Expr) {
+    fn initializer(&mut self, value: &ExprNode) {
         if let Some(span) = new_in(value) {
             self.report(
                 PhpFeature::NewInInitializers,
@@ -142,7 +142,7 @@ impl Gates<'_, '_> {
     }
 
     /// Member access on `new` without its parentheses (`new A()->f()`).
-    fn receiver(&mut self, receiver: &Expr) {
+    fn receiver(&mut self, receiver: &ExprNode) {
         if matches!(
             receiver.kind,
             ExprKind::New(..) | ExprKind::NewAnonymousClass(_)
@@ -158,7 +158,7 @@ impl Gates<'_, '_> {
 }
 
 impl<'ast> Visitor<'ast> for Gates<'_, '_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::StaticVar(vars) => {
                 for value in vars.iter().filter_map(|(_, value)| value.as_ref()) {
@@ -233,7 +233,7 @@ impl<'ast> Visitor<'ast> for Gates<'_, '_> {
         walk_catch_clause(self, clause);
     }
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         let span = expr.span;
         match &expr.kind {
             ExprKind::Destructure(items, syntax) => {
@@ -354,10 +354,10 @@ impl<'ast> Visitor<'ast> for Gates<'_, '_> {
 }
 
 /// Where `value` makes an object with `new`, outside the closures in it.
-fn new_in(value: &Expr) -> Option<Span> {
+fn new_in(value: &ExprNode) -> Option<Span> {
     struct Find(Option<Span>);
     impl<'ast> Visitor<'ast> for Find {
-        fn visit_expr(&mut self, expr: &'ast Expr) {
+        fn visit_expr(&mut self, expr: &'ast ExprNode) {
             if self.0.is_some() {
                 return;
             }

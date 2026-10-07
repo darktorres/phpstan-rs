@@ -143,7 +143,11 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
     false
 }
 
-fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &FxHashSet<String>) -> bool {
+fn body_ever_assigns_property(
+    stmts: &[StmtNode],
+    prop: &str,
+    self_vars: &FxHashSet<String>,
+) -> bool {
     stmts
         .iter()
         .any(|s| stmt_ever_assigns_property(s, prop, self_vars))
@@ -156,14 +160,14 @@ fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &FxHashSet<
 /// conditional - deliberately permissive, unlike a real dataflow
 /// guarantee. Doesn't descend into a closure/arrow-fn's own body; a
 /// property assigned only inside one is an accepted gap.
-fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &FxHashSet<String>) -> bool {
+fn stmt_ever_assigns_property(stmt: &StmtNode, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     any_stmt_in_body(
         stmt,
         |s| matches!(&s.kind, StmtKind::Expression(e) if initializes_property(e, prop, self_vars)),
     )
 }
 
-fn initializes_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> bool {
+fn initializes_property(e: &ExprNode, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     match &e.kind {
         ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => {
             is_tracked_property(lhs, prop, self_vars)
@@ -180,7 +184,7 @@ fn initializes_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> 
     }
 }
 
-fn is_tracked_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> bool {
+fn is_tracked_property(e: &ExprNode, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     let ExprKind::PropertyAccess(base, name, _) = &e.kind else {
         return false;
     };
@@ -197,13 +201,17 @@ fn is_tracked_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> b
 /// static(...)`/a bare `new <ThisClass>(...)` anywhere in `stmts` -
 /// scoped to the single, common `$var = new ...;` expression-statement
 /// shape, not e.g. a ternary-wrapped `new`.
-fn collect_self_instance_vars(stmts: &[Stmt], class_name: &str) -> FxHashSet<String> {
+fn collect_self_instance_vars(stmts: &[StmtNode], class_name: &str) -> FxHashSet<String> {
     let mut vars = FxHashSet::default();
     collect_self_instance_vars_into(stmts, class_name, &mut vars);
     vars
 }
 
-fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut FxHashSet<String>) {
+fn collect_self_instance_vars_into(
+    stmts: &[StmtNode],
+    class_name: &str,
+    vars: &mut FxHashSet<String>,
+) {
     for stmt in stmts {
         any_stmt_in_body(stmt, |s| {
             if let StmtKind::Expression(e) = &s.kind
@@ -218,7 +226,7 @@ fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut 
     }
 }
 
-fn is_new_self_instance(e: &Expr, class_name: &str) -> bool {
+fn is_new_self_instance(e: &ExprNode, class_name: &str) -> bool {
     syntax::stack::guard(|| {
         match &e.kind {
             ExprKind::New(callee, _) => {

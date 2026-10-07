@@ -123,7 +123,7 @@ fn upper_first(text: &str) -> String {
 /// One argument as the check sees it: a written argument, or one
 /// element of a constant array unpacked into the call.
 struct Argument<'e> {
-    value: &'e Expr,
+    value: &'e ExprNode,
     /// Known up front for an unpacked element; inferred otherwise.
     ty: Option<Type>,
     unpack: bool,

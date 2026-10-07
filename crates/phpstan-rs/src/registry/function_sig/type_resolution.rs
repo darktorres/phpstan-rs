@@ -5,7 +5,7 @@ use super::generics::mark_template_params;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
-use syntax::ast::{Expr, ExprKind, Literal, NativeType, TypeHint, TypeHintKind};
+use syntax::ast::{ExprKind, ExprNode, Literal, NativeType, TypeHint, TypeHintKind};
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
@@ -23,7 +23,7 @@ use types::{self, TemplateParam, Type};
 /// behavior itself is unchanged.
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
-pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) -> Type {
+pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&ExprNode>) -> Type {
     let is_bare_null_default = matches!(
         default.map(|e| &e.kind),
         Some(ExprKind::Literal(Literal::Null))

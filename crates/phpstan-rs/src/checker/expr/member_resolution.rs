@@ -534,7 +534,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn method_call_return_type(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         recv_ty: &Type,
         method: &str,
         args: &[Arg],
@@ -557,7 +557,7 @@ impl<'a> Checker<'a> {
     /// `method_call_return_type` once the method may exist.
     fn declared_method_return_type(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         recv_ty: &Type,
         method: &str,
         args: &[Arg],
@@ -643,7 +643,7 @@ impl<'a> Checker<'a> {
     /// the library-aware returns first, then the declared one.
     fn object_method_call_return_type(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         class: &types::Name,
         type_args: &[Type],
         method: &str,
@@ -958,7 +958,7 @@ impl<'a> Checker<'a> {
     /// a guess.
     fn resolve_dbal_sql_from_call(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         class: &str,
         args: &[Arg],
         locals: &Locals,
@@ -1124,7 +1124,7 @@ impl<'a> Checker<'a> {
     /// `->delete()`/`->update()` chain has no select items to parse.
     fn doctrine_query_builder_source(
         &self,
-        qb: &Expr,
+        qb: &ExprNode,
         locals: &Locals,
     ) -> Option<DoctrineQuerySource> {
         let chain = self.resolve_query_builder_chain(qb, locals)?;
@@ -1136,7 +1136,7 @@ impl<'a> Checker<'a> {
     }
 
     /// A literal `createQuery($dql)` string's query, when resolvable.
-    fn doctrine_dql_source(&self, dql: &Expr, locals: &Locals) -> Option<DoctrineQuerySource> {
+    fn doctrine_dql_source(&self, dql: &ExprNode, locals: &Locals) -> Option<DoctrineQuerySource> {
         let dql = match literal_string_value(dql) {
             Some(s) => s.into_owned(),
             None => self
@@ -1151,7 +1151,7 @@ impl<'a> Checker<'a> {
     /// a direct `->getQuery()`/`createQuery(...)` call.
     fn doctrine_query_source_of(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         locals: &Locals,
     ) -> Option<DoctrineQuerySource> {
         match &recv.peeled().kind {
@@ -1199,7 +1199,7 @@ impl<'a> Checker<'a> {
     /// affected-row count from every method but `toIterable()`.
     fn doctrine_query_result(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         method: &str,
         args: &[Arg],
         type_args: &[Type],

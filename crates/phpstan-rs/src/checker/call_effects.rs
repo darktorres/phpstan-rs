@@ -30,8 +30,8 @@ struct TypedCall<'c, 'a> {
     checker: &'c Checker<'a>,
     locals: &'c Locals,
     /// What a function call calls, when not a name.
-    callee: Option<&'c Expr>,
-    receiver: Option<&'c Expr>,
+    callee: Option<&'c ExprNode>,
+    receiver: Option<&'c ExprNode>,
     args: &'c [Arg],
     /// What the closures the scope wrote that the call runs may write.
     written: RefCell<Effect>,
@@ -44,7 +44,7 @@ struct TypedCall<'c, 'a> {
 
 impl TypedCall<'_, '_> {
     /// The argument passed `at`.
-    fn arg(&self, at: &ArgAt) -> Option<&Expr> {
+    fn arg(&self, at: &ArgAt) -> Option<&ExprNode> {
         match at {
             ArgAt::Position(at) => self.args.get(*at as usize).map(|arg| &arg.value),
             ArgAt::Named(name) => self
@@ -60,13 +60,13 @@ impl TypedCall<'_, '_> {
         }
     }
 
-    fn inferred(&self, e: &Expr) -> Holder {
+    fn inferred(&self, e: &ExprNode) -> Holder {
         holder_of(&self.checker.infer_expr(e, self.locals))
     }
 
     /// What running `e` may write, when it is a closure, an arrow function
     /// or a first-class callable, there or assigned there.
-    fn closure_effect(&self, e: &Expr) -> Option<Effect> {
+    fn closure_effect(&self, e: &ExprNode) -> Option<Effect> {
         let mut e = e.peeled();
         while let ExprKind::Assign(_, rhs) = &e.kind {
             e = rhs.peeled();
@@ -187,7 +187,7 @@ impl CallContext for TypedCall<'_, '_> {
 }
 
 /// Whether `e` is the scope's own `$this`.
-pub(crate) fn is_this(e: &Expr) -> bool {
+pub(crate) fn is_this(e: &ExprNode) -> bool {
     matches!(&e.peeled().kind, ExprKind::Variable(name) if **name == *"this")
 }
 
@@ -207,7 +207,7 @@ impl Checker<'_> {
     /// After a call, what it may have written is stale: see the module's
     /// doc comment. So is what iterating an argument spread into it may
     /// have written.
-    pub(crate) fn forget_what_a_call_may_change(&mut self, e: &Expr, locals: &mut Locals) {
+    pub(crate) fn forget_what_a_call_may_change(&mut self, e: &ExprNode, locals: &mut Locals) {
         let (callee, receiver, args) = match &e.kind {
             ExprKind::MethodCall(recv, _, args, _)
             | ExprKind::DynamicMethodCall(recv, _, args, _) => (None, Some(&**recv), &args[..]),
@@ -317,8 +317,8 @@ impl Checker<'_> {
     pub(crate) fn binary_string_conversions(
         &self,
         op: &BinOp,
-        l: (&Expr, &Type),
-        r: (&Expr, &Type),
+        l: (&ExprNode, &Type),
+        r: (&ExprNode, &Type),
         locals: &mut Locals,
     ) {
         let converted = match op {
@@ -348,7 +348,7 @@ impl Checker<'_> {
     /// `operand`, evaluated.
     pub(crate) fn forget_what_an_operation_on_may_change(
         &self,
-        operand: &Expr,
+        operand: &ExprNode,
         operation: Operation,
         locals: &mut Locals,
     ) {

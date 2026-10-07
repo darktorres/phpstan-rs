@@ -7,7 +7,7 @@
 //! is `offsetAccess.invalidOffset`'s concern, on writes as on reads.
 
 use crate::checker::{Checker, Locals};
-use syntax::ast::{Expr, ExprKind};
+use syntax::ast::{ExprKind, ExprNode};
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -17,7 +17,7 @@ impl<'a> Checker<'a> {
     /// error, reported elsewhere).
     pub(crate) fn check_offset_assignment(
         &mut self,
-        lhs: &Expr,
+        lhs: &ExprNode,
         value: &Type,
         is_assign_op: bool,
         locals: &Locals,
@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
     /// every version the project runs on or on some.
     fn check_string_offset_write(
         &mut self,
-        lhs: &Expr,
+        lhs: &ExprNode,
         container: &Type,
         dim: Option<&Type>,
         value: &Type,

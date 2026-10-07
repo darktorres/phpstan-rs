@@ -24,7 +24,7 @@ use syntax::span::Span;
 
 impl<'a> Checker<'a> {
     /// The value of `e` when it's a magic number.
-    fn magic_number(&self, e: &Expr) -> Option<f64> {
+    fn magic_number(&self, e: &ExprNode) -> Option<f64> {
         let value = self.numeric_literal_value(e)?;
         let exempt = match &self.settings.sidz.magic_number_exemptions {
             Some(numbers) => numbers.iter().any(|n| n.value() == value),
@@ -33,7 +33,7 @@ impl<'a> Checker<'a> {
         (!exempt).then_some(value)
     }
 
-    fn numeric_literal_value(&self, e: &Expr) -> Option<f64> {
+    fn numeric_literal_value(&self, e: &ExprNode) -> Option<f64> {
         let e = e.peeled();
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Literal(Literal::Int(i)) => Some(*i as f64),
@@ -61,7 +61,14 @@ impl<'a> Checker<'a> {
         );
     }
 
-    fn check_magic_operand_pair(&mut self, l: &Expr, r: &Expr, span: Span, id: &str, place: &str) {
+    fn check_magic_operand_pair(
+        &mut self,
+        l: &ExprNode,
+        r: &ExprNode,
+        span: Span,
+        id: &str,
+        place: &str,
+    ) {
         if self.magic_number(l).is_some() || self.magic_number(r).is_some() {
             self.report_magic_number(span, id, place);
         }
@@ -91,7 +98,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn check_magic_numbers_expression(&mut self, e: &Expr) {
+    pub(crate) fn check_magic_numbers_expression(&mut self, e: &ExprNode) {
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 let is_define = matches!(&callee.kind, ExprKind::Name(name)
@@ -182,7 +189,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn check_magic_numbers_statement(&mut self, stmt: &Stmt) {
+    pub(crate) fn check_magic_numbers_statement(&mut self, stmt: &StmtNode) {
         match &stmt.kind {
             StmtKind::Return(Some(value)) if self.magic_number(value).is_some() => {
                 self.report(

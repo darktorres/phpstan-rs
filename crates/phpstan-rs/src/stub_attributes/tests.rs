@@ -5,7 +5,7 @@ use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
-fn parse(src: &str) -> Vec<Stmt> {
+fn parse(src: &str) -> Vec<StmtNode> {
     let mut stmts = Parser::new(Lexer::new(src).tokenize_with_spans())
         .parse_program()
         .expect("parses");
@@ -55,7 +55,7 @@ fn shape(src: &str) -> Vec<String> {
             f.doc_comment,
         ));
     }
-    fn stmts(list: &[Stmt], out: &mut Vec<String>) {
+    fn stmts(list: &[StmtNode], out: &mut Vec<String>) {
         for s in list {
             match &s.kind {
                 StmtKind::FunctionDecl(f) => function(f, out),

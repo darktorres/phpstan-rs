@@ -1,4 +1,4 @@
-use syntax::ast::{Attribute, BinOp, Expr, ExprKind, Literal};
+use syntax::ast::{Attribute, BinOp, ExprKind, ExprNode, Literal};
 
 /// PHP's own `Attribute::TARGET_*`/`IS_REPEATABLE` class constant values.
 fn attribute_target_constant_value(name: &str) -> Option<u32> {
@@ -26,7 +26,7 @@ fn attribute_target_constant_value(name: &str) -> Option<u32> {
 /// project doesn't recognize) falls back to `Attribute::TARGET_ALL` -
 /// "don't know, don't guess wrong," so an unusual-but-legal flags
 /// expression can never manufacture a false `attribute.target` finding.
-fn eval_attribute_flags_expr(e: &Expr) -> u32 {
+fn eval_attribute_flags_expr(e: &ExprNode) -> u32 {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::ClassConstFetch(_, member) => {
             attribute_target_constant_value(member).unwrap_or(ATTRIBUTE_TARGET_ALL)

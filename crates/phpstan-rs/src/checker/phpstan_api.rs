@@ -80,7 +80,7 @@ use syntax::visit::{Visitor, walk_args, walk_class_def, walk_expr, walk_stmt};
 /// fires without a file, the same "no signal, stay quiet" leniency every
 /// other unresolvable case in this module already gets.
 pub(crate) fn check_phpstan_api_usage(
-    program: &[Stmt],
+    program: &[StmtNode],
     line_index: &LineIndex,
     registry: &Registry,
     file_package: Option<Option<&str>>,
@@ -856,7 +856,7 @@ impl<'a> Walker<'a> {
 }
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         syntax::stack::guard(|| {
             if let StmtKind::Namespace(ns) = &stmt.kind {
                 self.check_namespace_declaration(ns, stmt.span);
@@ -871,7 +871,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
 
     /// Each name-bearing reference kind is checked directly against
     /// `self.registry`'s `@api`/`@api-do-not-implement` state.
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| {
             match &e.kind {
                 ExprKind::NewAnonymousClass(class) => {

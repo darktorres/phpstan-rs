@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::ast::{GotoLabel, Stmt};
+use crate::ast::{GotoLabel, StmtNode};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
 use crate::name::{Name, NameCache, NameId};
@@ -19,7 +19,7 @@ pub struct ParsedFile {
     pub source: Box<[u8]>,
     /// The distinct names encountered in the file, in first-use order.
     pub names: Box<[Name]>,
-    pub stmts: Vec<Stmt>,
+    pub stmts: Vec<StmtNode>,
     /// Expression spans indexed by their file-local `ExprId`s.
     pub expr_spans: Box<[crate::span::Span]>,
     /// Statement spans indexed by their file-local `StmtId`s.

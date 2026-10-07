@@ -3,7 +3,7 @@
 //! `check_file` are `pub`, `Registry::classes`/`.functions` are `pub`
 //! `FxHashMap`s of fully-`pub`-fielded `ClassReflection`/`FunctionReflection`,
 //! `Diagnostic` is a `pub struct` with every field `pub`, and
-//! `ast::{Stmt, Expr, ...}` is fully public - this trait gives an
+//! `ast::{StmtNode, ExprNode, ...}` is fully public - this trait gives an
 //! external crate a named entry point for exactly this kind of check,
 //! rather than writing it by hand against `project.registry().classes()`.
 //!

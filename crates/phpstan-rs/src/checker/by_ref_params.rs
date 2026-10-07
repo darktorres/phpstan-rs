@@ -12,7 +12,7 @@
 //! identical `getOutType() ?? getType()` fallback).
 
 use crate::checker::Checker;
-use syntax::ast::{Expr, ExprKind, Visibility};
+use syntax::ast::{ExprKind, ExprNode, Visibility};
 use types::UnionAll as _;
 use types::{Name, Type};
 
@@ -60,7 +60,7 @@ impl<'a> Checker<'a> {
     /// variable (destructuring/`foreach`-rebind targets are handled at
     /// their own separate call sites - see this module's sibling
     /// functions below).
-    pub(crate) fn check_param_out_assignment(&mut self, lhs: &Expr, actual: &Type) {
+    pub(crate) fn check_param_out_assignment(&mut self, lhs: &ExprNode, actual: &Type) {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };

@@ -1952,7 +1952,7 @@ impl<'a> Checker<'a> {
 /// statement anywhere in the body, nested blocks (`if`/`else`/`try`/
 /// `switch`/loops) included - real PHP call resolution is
 /// case-insensitive, so the class/method names are compared that way too.
-fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
+fn body_calls_parent_construct(stmts: &[StmtNode]) -> bool {
     stmts.iter().any(|stmt| {
         any_stmt_in_body(stmt, |s| {
             matches!(&s.kind, StmtKind::Expression(e)

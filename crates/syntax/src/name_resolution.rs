@@ -169,11 +169,14 @@ pub struct NameContext {
 /// are visited in its place, so a braced namespace body sees its `namespace` and `use`
 /// statements; a `namespace` or `use` statement is passed after it takes
 /// effect.
-pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &NameContext)) {
+pub fn for_each_in_context<'a>(
+    stmts: &'a [StmtNode],
+    mut f: impl FnMut(&'a StmtNode, &NameContext),
+) {
     fn walk<'a>(
-        stmts: &'a [Stmt],
+        stmts: &'a [StmtNode],
         ctx: &mut NameContext,
-        f: &mut impl FnMut(&'a Stmt, &NameContext),
+        f: &mut impl FnMut(&'a StmtNode, &NameContext),
     ) {
         for stmt in stmts {
             match &stmt.kind {
@@ -196,7 +199,7 @@ pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &N
 
 /// The context in effect at the byte offset `pos`: every `namespace` and
 /// `use` statement that starts before it has taken effect.
-pub fn context_at(stmts: &[Stmt], pos: u32) -> NameContext {
+pub fn context_at(stmts: &[StmtNode], pos: u32) -> NameContext {
     let mut at = NameContext::default();
     for_each_in_context(stmts, |stmt, ctx| {
         if matches!(stmt.kind, StmtKind::Namespace(_) | StmtKind::Use(_)) && stmt.span.start < pos {
@@ -435,7 +438,7 @@ pub fn qualify(namespace: &str, name: &str) -> String {
 /// shares the context of its `namespace` statement. Declarations get their
 /// namespaced name. The parser resolves each name as it makes it, so this
 /// is for a tree changed after: the stub attributes' types.
-pub fn resolve_names(stmts: &mut [Stmt]) {
+pub fn resolve_names(stmts: &mut [StmtNode]) {
     let mut resolver = Resolver {
         ctx: NameContext::default(),
     };
@@ -477,7 +480,7 @@ impl Resolver {
     }
 
     #[inline(never)]
-    fn resolve_expr(&mut self, expr: &mut Expr) {
+    fn resolve_expr(&mut self, expr: &mut ExprNode) {
         match &mut expr.kind {
             ExprKind::Name(name) => self.constant(name),
 
@@ -597,7 +600,7 @@ fn is_class_keyword(name: &str) -> bool {
 }
 
 impl VisitorMut for Resolver {
-    fn visit_stmt(&mut self, stmt: &mut Stmt) {
+    fn visit_stmt(&mut self, stmt: &mut StmtNode) {
         match &mut stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
@@ -621,7 +624,7 @@ impl VisitorMut for Resolver {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut Expr) {
+    fn visit_expr(&mut self, expr: &mut ExprNode) {
         // Only name-bearing expressions need more than the plain walk;
         // keeping the rest out of `resolve_expr` keeps the frames of this
         // recursion small.

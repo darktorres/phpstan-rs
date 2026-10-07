@@ -14,7 +14,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::literal_string_value;
-use syntax::ast::{Arg, Expr, ExprKind};
+use syntax::ast::{Arg, ExprKind, ExprNode};
 
 /// A cheap syntactic pre-check mirroring `resolve_query_builder_chain`'s
 /// own `MethodCall`/`Grouping` walk - "does this expression's own chain
@@ -22,9 +22,9 @@ use syntax::ast::{Arg, Expr, ExprKind};
 /// resolving anything semantically (no `Checker`/`Locals` needed).
 /// Storing every assignment's RHS unconditionally would also be correct
 /// (nothing ever reads an entry whose name is never tested via a later
-/// `->getQuery()`), but costs a real `Expr` clone per assignment,
+/// `->getQuery()`), but costs a real `ExprNode` clone per assignment,
 /// project-wide; this keeps that cost to the rare, actually-relevant one.
-fn looks_like_query_builder_chain(e: &Expr) -> bool {
+fn looks_like_query_builder_chain(e: &ExprNode) -> bool {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
@@ -88,7 +88,7 @@ pub(crate) struct QueryBuilderChain {
 /// executes root-to-outer chronologically. Owns its own data (not
 /// borrowed from the walked expression) since the walk's own `cursor`
 /// may switch from borrowing the original expression tree to an owned
-/// `Rc<Expr>` read back from `QueryBuilderAliasMap` partway through
+/// `Rc<ExprNode>` read back from `QueryBuilderAliasMap` partway through
 /// (`Cursor`'s own doc comment) - a borrow tied to one generation of
 /// `cursor` can't outlive its own replacement.
 struct ChainCall {
@@ -98,20 +98,20 @@ struct ChainCall {
 
 /// `resolve_query_builder_chain`'s own walk cursor - starts borrowing the
 /// real receiver expression tree (the common case, no clone needed), but
-/// switches to owning a cloned `Rc<Expr>` the moment the walk reads
+/// switches to owning a cloned `Rc<ExprNode>` the moment the walk reads
 /// through a `$qb = <chain>;` variable alias (`QueryBuilderAliasMap`'s
 /// own doc comment) - the stored expression's lifetime is independent of
 /// the original receiver's, so continuing to borrow from it isn't an
 /// option once that happens.
 enum Cursor<'a> {
-    Borrowed(&'a Expr),
-    Owned(std::rc::Rc<Expr>),
+    Borrowed(&'a ExprNode),
+    Owned(std::rc::Rc<ExprNode>),
 }
 
 impl std::ops::Deref for Cursor<'_> {
-    type Target = Expr;
+    type Target = ExprNode;
 
-    fn deref(&self) -> &Expr {
+    fn deref(&self) -> &ExprNode {
         match self {
             Cursor::Borrowed(e) => e,
             Cursor::Owned(e) => e,
@@ -125,7 +125,12 @@ impl<'a> Checker<'a> {
     /// `lhs`, mirroring `record_condition_alias`'s own call site and
     /// cheap-fast-path shape (a plain syntactic check with no clone,
     /// paid only by the rare RHS that actually qualifies).
-    pub(crate) fn record_query_builder_alias(&self, lhs: &Expr, rhs: &Expr, locals: &mut Locals) {
+    pub(crate) fn record_query_builder_alias(
+        &self,
+        lhs: &ExprNode,
+        rhs: &ExprNode,
+        locals: &mut Locals,
+    ) {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };
@@ -142,7 +147,7 @@ impl<'a> Checker<'a> {
     /// takes at the same point (`return null`).
     pub(crate) fn resolve_query_builder_chain(
         &self,
-        recv: &Expr,
+        recv: &ExprNode,
         locals: &crate::checker::Locals,
     ) -> Option<QueryBuilderChain> {
         let mut calls: Vec<ChainCall> = Vec::new();
@@ -198,7 +203,7 @@ impl<'a> Checker<'a> {
     /// else is undecidable.
     fn resolve_chain_root(
         &self,
-        root: &Expr,
+        root: &ExprNode,
         locals: &crate::checker::Locals,
     ) -> Option<QueryBuilderChain> {
         let ExprKind::MethodCall(target, method, args, _) = &root.kind else {

@@ -2026,9 +2026,9 @@ impl<'a> Checker<'a> {
     /// the callback's last return otherwise, both when either may be.
     fn reduced_array_type(
         &self,
-        array: &Expr,
-        callback: &Expr,
-        initial: Option<&Expr>,
+        array: &ExprNode,
+        callback: &ExprNode,
+        initial: Option<&ExprNode>,
         locals: &Locals,
     ) -> Type {
         let array_ty = self.infer_expr(array, locals);
@@ -2052,7 +2052,7 @@ impl<'a> Checker<'a> {
     /// that never settles is inferred with any `$carry`.
     fn reduce_callback_return(
         &self,
-        callback: &Expr,
+        callback: &ExprNode,
         initial: &Type,
         item: &Type,
         locals: &Locals,
@@ -2090,7 +2090,7 @@ impl<'a> Checker<'a> {
     /// closure's, a first-class callable's or a callable shape's, or that
     /// of the function or method a string or an array names; `mixed` when
     /// none is known.
-    fn callable_return_type(&self, callback: &Expr, locals: &Locals) -> Type {
+    fn callable_return_type(&self, callback: &ExprNode, locals: &Locals) -> Type {
         let ty = self.infer_expr(callback, locals);
         if let Some(sig) = ty.callable_sig() {
             return (*sig.return_type).clone();
@@ -2193,7 +2193,7 @@ impl<'a> Checker<'a> {
     /// that isn't known.
     fn infer_case_function_call(
         &self,
-        arg: &Expr,
+        arg: &ExprNode,
         locals: &Locals,
         ops: &[CaseOp],
         multibyte: bool,
@@ -2460,7 +2460,7 @@ fn title_case(
     Some(PhpString::from(out))
 }
 
-fn is_var_named(e: &Expr, name: &str) -> bool {
+fn is_var_named(e: &ExprNode, name: &str) -> bool {
     matches!(&e.kind, ExprKind::Variable(n) if **n == *name)
 }
 
@@ -2472,7 +2472,7 @@ fn is_var_named(e: &Expr, name: &str) -> bool {
 /// array, ...) - the caller can't partially trust the rest of the list
 /// either, since real `compact()` combines every argument into one flat
 /// result.
-fn compact_argument_names(e: &Expr) -> Option<Vec<String>> {
+fn compact_argument_names(e: &ExprNode) -> Option<Vec<String>> {
     syntax::stack::guard(|| {
         if let Some(name) = literal_string_value(e) {
             return Some(vec![name.into_owned()]);
@@ -2513,7 +2513,7 @@ fn unseal_with(shape: &mut Shape, key: &Type, value: &Type) {
     }));
 }
 
-fn is_null_literal(e: &Expr) -> bool {
+fn is_null_literal(e: &ExprNode) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Null))
 }
 
@@ -2522,8 +2522,8 @@ fn is_null_literal(e: &Expr) -> bool {
 /// (or `null !== $v`), as an arrow function or a closure whose only
 /// statement is the equivalent `return`. Deliberately narrow, not a
 /// general boolean-expression evaluator.
-fn is_null_filter_callback(e: &Expr) -> bool {
-    fn is_not_null_check(body: &Expr, param: &str) -> bool {
+fn is_null_filter_callback(e: &ExprNode) -> bool {
+    fn is_not_null_check(body: &ExprNode, param: &str) -> bool {
         matches!(&body.kind, ExprKind::Binary(BinOp::NotIdentical, l, r)
             if (is_var_named(l, param) && is_null_literal(r))
                 || (is_var_named(r, param) && is_null_literal(l)))
@@ -2554,8 +2554,8 @@ fn strip_null_from_array_element(ty: Type) -> Type {
 /// `fn ($v): bool => $v instanceof Target` (or the equivalent
 /// single-statement closure) - returns `Target`'s raw name string, for
 /// the caller to resolve.
-fn is_instanceof_filter_callback(e: &Expr) -> Option<&QualifiedName> {
-    fn as_instanceof_class<'a>(body: &'a Expr, param: &str) -> Option<&'a QualifiedName> {
+fn is_instanceof_filter_callback(e: &ExprNode) -> Option<&QualifiedName> {
+    fn as_instanceof_class<'a>(body: &'a ExprNode, param: &str) -> Option<&'a QualifiedName> {
         match &body.kind {
             ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name))
                 if is_var_named(inner, param) =>
@@ -2593,7 +2593,7 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&QualifiedName> {
 /// variant, not attempted here). Recognizes the first-class-callable form
 /// (`is_string(...)`) alongside the same arrow-fn/closure wrapping shapes
 /// `is_instanceof_filter_callback` handles, for consistency.
-fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
+fn is_type_check_filter_callback(e: &ExprNode) -> Option<Type> {
     fn type_for_predicate(name: &str) -> Option<Type> {
         let name = name.trim_start_matches('\\').to_ascii_lowercase();
         match name.as_str() {
@@ -2602,7 +2602,7 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
             _ => narrowing_type_for_predicate(&name),
         }
     }
-    fn as_predicate_call<'a>(body: &'a Expr, param: &str) -> Option<&'a str> {
+    fn as_predicate_call<'a>(body: &'a ExprNode, param: &str) -> Option<&'a str> {
         match &body.kind {
             ExprKind::Call(callee, args) => match (&callee.kind, args.as_slice()) {
                 (ExprKind::Name(name), [single_arg]) if is_var_named(&single_arg.value, param) => {
@@ -2663,7 +2663,7 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
 /// instead of unioning it in.
 fn filter_validate_result(
     filter_name: &str,
-    flags_expr: Option<&Expr>,
+    flags_expr: Option<&ExprNode>,
     flags_ty: Option<&Type>,
 ) -> Option<(Type, Type, bool)> {
     let base_ty = filter_validate_type_for_constant(filter_name)?;
@@ -2761,7 +2761,7 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
 /// requirement: an unrecognized flag alongside `target` doesn't change
 /// what this is used for, so it just answers "is `target` definitely one
 /// of them" for whatever it does recognize.
-pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
+pub(crate) fn contains_flag_name(e: &ExprNode, target: &str) -> bool {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,
@@ -2778,7 +2778,7 @@ pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
 /// fixture uses for `FILTER_THROW_ON_FAILURE`. Not folded into
 /// `contains_flag_name` itself, which stays a narrow bitwise-or-chain
 /// scan for its unrelated call sites.
-fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
+fn contains_flag_name_with_options(e: &ExprNode, target: &str) -> bool {
     syntax::stack::guard(|| {
         if contains_flag_name(e, target) {
             return true;
@@ -2817,7 +2817,7 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
 /// a bare `JSON_THROW_ON_ERROR` or a multi-flag chain
 /// (`JSON_HEX_TAG | JSON_HEX_AMP | ... | JSON_THROW_ON_ERROR`). Tolerates
 /// a leading-backslash global name (`\JSON_THROW_ON_ERROR`) too.
-fn contains_json_throw_on_error(e: &Expr) -> bool {
+fn contains_json_throw_on_error(e: &ExprNode) -> bool {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
@@ -3623,7 +3623,7 @@ fn shape_end_key(arr_ty: &Type, from_start: bool) -> Option<Type> {
 
 /// Whether `e` names a hash algorithm whose hex digest is longer than any
 /// decimal int.
-fn long_hex_algorithm(e: &Expr) -> bool {
+fn long_hex_algorithm(e: &ExprNode) -> bool {
     const LONG: [&str; 47] = [
         "md2",
         "md4",

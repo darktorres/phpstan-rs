@@ -32,7 +32,7 @@ pub fn global_variable_key(name: &str) -> String {
 /// over-collecting: an unqualified function or constant name in a
 /// namespace yields both the namespaced and the global name, and the
 /// names in PHPDoc tags are taken from the tag text without parsing it.
-pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<RefKey> {
+pub fn referenced_names(stmts: &[StmtNode]) -> FxHashSet<RefKey> {
     let mut collector = Collector::new(false);
     walk_stmts(&mut collector, stmts);
     collector.names
@@ -129,7 +129,7 @@ pub(crate) fn doc_site_references(
 }
 
 /// `referenced_names` and `declaration_referenced_names`, in one walk.
-pub fn both_referenced_names(stmts: &[Stmt]) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
+pub fn both_referenced_names(stmts: &[StmtNode]) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
     let mut collector = Collector::new(true);
     walk_stmts(&mut collector, stmts);
     (collector.names, collector.outside)
@@ -244,7 +244,7 @@ impl Collector {
 }
 
 impl<'ast> Visitor<'ast> for Collector {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => {
@@ -340,7 +340,7 @@ impl<'ast> Visitor<'ast> for Collector {
     /// The names in an expression: a constant, the callee of a call, and
     /// every other name - the class of a `new`, a static access, an
     /// `instanceof` - as what each is.
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         match &expr.kind {
             ExprKind::Name(name) => self.add_name(name, NameKind::Constant),
             ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {

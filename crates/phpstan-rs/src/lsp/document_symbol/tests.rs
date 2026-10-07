@@ -4,7 +4,7 @@ use lsp_types::SymbolKind;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
-fn parse(src: &str) -> Vec<syntax::ast::Stmt> {
+fn parse(src: &str) -> Vec<syntax::ast::StmtNode> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     Parser::new(tokens).parse_program().unwrap()
 }

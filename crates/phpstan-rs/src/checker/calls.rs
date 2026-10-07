@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
         call_name: Option<&str>,
         sig: Option<&FunctionReflection>,
         args: &[Arg],
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &mut Locals,
     ) {
         {
@@ -542,7 +542,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         defining_class: Option<&str>,
     ) {
-        let mut positional: Vec<(usize, &Expr)> = Vec::new();
+        let mut positional: Vec<(usize, &ExprNode)> = Vec::new();
         let mut positional_index = 0usize;
         for arg in args {
             if arg.spread || arg.name.is_some() {
@@ -695,7 +695,7 @@ impl<'a> Checker<'a> {
     /// `None` rather than guessing.
     fn resolve_call_user_func_callable(
         &self,
-        callable_expr: &Expr,
+        callable_expr: &ExprNode,
         locals: &Locals,
     ) -> Option<&FunctionReflection> {
         let callable_expr = callable_expr.peeled();
@@ -798,7 +798,7 @@ impl<'a> Checker<'a> {
 
 /// Resolves a call's argument list against the declared parameter list
 /// it's being checked against, producing one slot per declared parameter:
-/// `Some(&Expr)` when some argument (positional or named) actually
+/// `Some(&ExprNode)` when some argument (positional or named) actually
 /// fills that parameter, `None` when it doesn't (an omitted optional
 /// parameter, or a parameter a spread/unpack argument might fill, whose
 /// real contents can't be resolved statically). This lets a named or
@@ -831,8 +831,8 @@ impl<'a> Checker<'a> {
 pub(crate) fn resolve_call_args<'a>(
     args: &'a [Arg],
     params: &[ParameterReflection],
-) -> Vec<Option<&'a Expr>> {
-    let mut resolved: Vec<Option<&Expr>> = vec![None; params.len()];
+) -> Vec<Option<&'a ExprNode>> {
+    let mut resolved: Vec<Option<&ExprNode>> = vec![None; params.len()];
     let mut positional_index = 0usize;
     let mut spread_seen = false;
     for arg in args {
@@ -907,7 +907,7 @@ pub(crate) fn call_arg_param_name_hints(
 /// evaluation order (`'/' . $x . '/'` starts with the leftmost `'/'`
 /// literal). `None` when the leaf isn't a literal at all (a variable, a
 /// function call) - don't guess.
-fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
+fn concat_leftmost_delimiter(e: &ExprNode) -> Option<char> {
     syntax::stack::guard(|| {
         let e = e.peeled();
         if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
@@ -921,7 +921,7 @@ fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
 /// `.right` at every node, unlike `concat_leftmost_delimiter`'s own
 /// left-only descent) collecting each `preg_quote(...)` call's own
 /// argument list found anywhere in it.
-fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
+fn find_preg_quote_calls<'a>(e: &'a ExprNode, out: &mut Vec<&'a [Arg]>) {
     syntax::stack::guard(|| {
         let e = e.peeled();
         match &e.kind {
@@ -952,7 +952,7 @@ fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
 /// deep, can be relied on to name a genuine, always-evaluated storage
 /// location, which is exactly what passing an argument by reference
 /// needs.
-pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
+pub(crate) fn contains_nullsafe_access(expr: &ExprNode) -> bool {
     syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => {
             nullsafe.is_nullsafe() || contains_nullsafe_access(base)
@@ -984,7 +984,7 @@ pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
 /// function/method that itself returns by reference, so every remaining
 /// shape (a call result, a literal, an operator expression, ...) is
 /// conservatively treated as illegal.
-pub(crate) fn is_valid_byref_argument_expr(expr: &Expr) -> bool {
+pub(crate) fn is_valid_byref_argument_expr(expr: &ExprNode) -> bool {
     matches!(
         expr.peeled().kind,
         ExprKind::Variable(_)

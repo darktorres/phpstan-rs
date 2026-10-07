@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 
 use crate::registry::Registry;
 use syntax::ast::literal_string_value;
-use syntax::ast::{Arg, Expr, ExprKind, StaticTarget, Stmt, StmtKind};
+use syntax::ast::{Arg, ExprKind, ExprNode, StaticTarget, StmtKind, StmtNode};
 use types::Type;
 
 /// The seven Pest functions whose closure argument gets `$this` rebound.
@@ -83,7 +83,7 @@ fn this_type_from_class_names(names: Vec<String>) -> Option<Type> {
 /// A bare `uses(X::class);` written directly inside the file being
 /// checked (no chained `->in(...)`) - real Pest's own file-local binding,
 /// checked first, ahead of any directory-scoped `Pest.php` config.
-pub(crate) fn file_local_this_type(program: &[Stmt]) -> Option<Type> {
+pub(crate) fn file_local_this_type(program: &[StmtNode]) -> Option<Type> {
     program.iter().find_map(|stmt| {
         let StmtKind::Expression(e) = &stmt.kind else {
             return None;
@@ -126,7 +126,7 @@ pub(crate) fn file_local_this_type(program: &[Stmt]) -> Option<Type> {
 /// as undefined, matching this project's own established "safe default"
 /// pattern for a definition whose real type isn't worth modeling
 /// precisely (see `predefine_byref_or_unknown_args`).
-pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> FxHashSet<String> {
+pub(crate) fn file_local_hook_properties(program: &[StmtNode]) -> FxHashSet<String> {
     let mut props = FxHashSet::default();
     for stmt in program {
         let StmtKind::Expression(e) = &stmt.kind else {
@@ -154,7 +154,7 @@ pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> FxHashSet<String> 
 /// literal `$this` expression only (unlike the real reader, which
 /// resolves by the property base's *type* via PHPStan's own `Scope` -
 /// an aliased `$self = $this; $self->prop` isn't covered here).
-fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
+fn collect_hook_closure_properties(expr: &ExprNode, props: &mut FxHashSet<String>) {
     let ExprKind::Closure(closure) = &expr.kind else {
         return;
     };
@@ -183,7 +183,10 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
 /// call's own receiver is - returns the base `uses(...)` call's own
 /// arguments, or `None` if the chain doesn't bottom out in a real
 /// `uses(...)` call.
-fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut FxHashSet<String>) -> Option<&'e [Arg]> {
+fn walk_uses_chain<'e>(
+    expr: &'e ExprNode,
+    hook_props: &mut FxHashSet<String>,
+) -> Option<&'e [Arg]> {
     syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::Call(callee, args) => {
             let ExprKind::Name(name) = &callee.kind else {
@@ -226,7 +229,7 @@ pub struct PestFacts {
 impl PestFacts {
     /// The bindings of the file `path` with the tree `ast`; `None` for a
     /// file not named `Pest.php`.
-    pub fn of(path: &Path, ast: &[Stmt]) -> Option<PestFacts> {
+    pub fn of(path: &Path, ast: &[StmtNode]) -> Option<PestFacts> {
         if path.file_name().and_then(|n| n.to_str()) != Some("Pest.php") {
             return None;
         }

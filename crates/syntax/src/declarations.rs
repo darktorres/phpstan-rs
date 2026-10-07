@@ -19,7 +19,7 @@ pub enum Declared<'a> {
     /// string holds it, fully qualified.
     Define {
         name: &'a PhpString,
-        value: &'a Expr,
+        value: &'a ExprNode,
     },
 }
 
@@ -57,7 +57,7 @@ pub enum GuardTerm<'a> {
     /// An `if` or `elseif` condition, taken as it stands or - for a later
     /// branch of the chain, an `else`, or the code after an
     /// `if (c) { return; }` - negated.
-    Condition { expr: &'a Expr, negated: bool },
+    Condition { expr: &'a ExprNode, negated: bool },
     /// A loop, `switch`, `try`, function, class or expression the
     /// declaration is nested in: running code that decides nothing a reader
     /// of the terms could know.
@@ -74,7 +74,7 @@ pub enum GuardTerm<'a> {
 /// declaration at the top level: PHP declares those before running
 /// anything, so they exist whatever the return decides.
 pub fn for_each_declaration<'a>(
-    stmts: &'a [Stmt],
+    stmts: &'a [StmtNode],
     f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
 ) {
     for_each_declaration_in(stmts, true, f);
@@ -86,7 +86,7 @@ pub fn for_each_declaration<'a>(
 /// neither (`FileFacts`) has no declaration there to find, and its
 /// expressions need not be walked.
 pub fn for_each_declaration_in<'a>(
-    stmts: &'a [Stmt],
+    stmts: &'a [StmtNode],
     in_expressions: bool,
     mut f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
 ) {
@@ -114,7 +114,7 @@ pub fn for_each_declaration_in<'a>(
 }
 
 /// Whether `stmt` is a `return`, or a block whose last statement is one.
-fn ends_in_return(stmt: &Stmt) -> bool {
+fn ends_in_return(stmt: &StmtNode) -> bool {
     match &stmt.kind {
         StmtKind::Return(_) => true,
         StmtKind::Block(stmts) => stmts.last().is_some_and(ends_in_return),
@@ -169,7 +169,8 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Declarations
     fn if_chain(&mut self, if_stmt: &'a IfStmt) {
         let was = std::mem::replace(&mut self.conditional, true);
         let mark = self.guards.len();
-        let mut branches: Vec<(&'a Expr, &'a Stmt)> = vec![(&if_stmt.cond, &if_stmt.then_branch)];
+        let mut branches: Vec<(&'a ExprNode, &'a StmtNode)> =
+            vec![(&if_stmt.cond, &if_stmt.then_branch)];
         branches.extend(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)));
         for (expr, body) in branches {
             self.visit_expr(expr);
@@ -196,7 +197,7 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Declarations
 impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
     for Declarations<'a, '_, F>
 {
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+    fn visit_stmt(&mut self, stmt: &'a StmtNode) {
         crate::stack::guard(|| match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
@@ -225,7 +226,7 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
         })
     }
 
-    fn visit_expr(&mut self, e: &'a Expr) {
+    fn visit_expr(&mut self, e: &'a ExprNode) {
         if !self.in_expressions {
             return;
         }
@@ -238,7 +239,7 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
 
 /// `define('NAME', value)`'s name and value: a call to the global
 /// `define` with a literal name and no spread or named argument.
-fn define_call(e: &Expr) -> Option<(&PhpString, &Expr)> {
+fn define_call(e: &ExprNode) -> Option<(&PhpString, &ExprNode)> {
     let ExprKind::Call(callee, args) = &e.kind else {
         return None;
     };

@@ -128,7 +128,11 @@ impl<'a> Checker<'a> {
     /// An array literal item's key: the one PHP stores it under when the
     /// key expression's type pins it down (`-1`, `'5'` as `5`, `true` as
     /// `1`, a constant), otherwise the key type it may be.
-    pub(crate) fn array_literal_key(&self, key: &Expr, locals: &Locals) -> Result<ShapeKey, Type> {
+    pub(crate) fn array_literal_key(
+        &self,
+        key: &ExprNode,
+        locals: &Locals,
+    ) -> Result<ShapeKey, Type> {
         let key_ty = self.infer_expr(key, locals).to_array_key();
         ShapeKey::from_type(&key_ty).ok_or(key_ty)
     }
@@ -456,7 +460,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn infer_call_return_type(
         &self,
         sig: &FunctionReflection,
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &Locals,
     ) -> Type {
         // A `value-of<Enum>` the call's bindings made concrete needs the
@@ -469,7 +473,7 @@ impl<'a> Checker<'a> {
     fn bound_call_return_type(
         &self,
         sig: &FunctionReflection,
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &Locals,
     ) -> Type {
         // Without a template reference, a late reference or a conditional,
@@ -518,7 +522,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn call_template_bindings(
         &self,
         sig: &FunctionReflection,
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &Locals,
     ) -> TemplateBindings {
         self.call_bindings(sig, resolved, locals, false).0
@@ -530,7 +534,7 @@ impl<'a> Checker<'a> {
     fn call_bindings(
         &self,
         sig: &FunctionReflection,
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &Locals,
         with_arguments: bool,
     ) -> (TemplateBindings, Vec<Option<Type>>) {
@@ -618,7 +622,7 @@ impl<'a> Checker<'a> {
     /// "don't guess" leniency this project applies everywhere else, so a
     /// `Mixed`/unresolved/partially-legal key is silently allowed rather
     /// than flagged.
-    pub(crate) fn check_array_item_key_type(&mut self, key_expr: &Expr, locals: &Locals) {
+    pub(crate) fn check_array_item_key_type(&mut self, key_expr: &ExprNode, locals: &Locals) {
         let key_ty = self.infer_expr(key_expr, locals);
         if let Some(desc) = invalid_array_key_description(&key_ty, self.registry.php_version_max())
         {
@@ -677,7 +681,12 @@ impl<'a> Checker<'a> {
     /// this project's usual leniency rather than real PHPStan's own
     /// tri-state `isSuperTypeOf` grading (`reportMaybes`, off by
     /// default).
-    pub(crate) fn check_dim_fetch_key_type(&mut self, base: &Expr, idx: &Expr, locals: &Locals) {
+    pub(crate) fn check_dim_fetch_key_type(
+        &mut self,
+        base: &ExprNode,
+        idx: &ExprNode,
+        locals: &Locals,
+    ) {
         let base_ty = self.infer_expr(base, locals);
         if !base_ty.is_array().yes() {
             return;

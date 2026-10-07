@@ -22,7 +22,7 @@ enum ValueShape {
     Other,
 }
 
-fn value_shape(e: &Expr) -> ValueShape {
+fn value_shape(e: &ExprNode) -> ValueShape {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Literal(_) | ExprKind::Interpolated(_) | ExprKind::Name(_) => ValueShape::Literal,
@@ -63,7 +63,7 @@ fn native_iterable_key(ty: &Type) -> Type {
 impl<'a> Checker<'a> {
     /// `e`'s value when it is a known string: literal syntax, or a
     /// constant (`self::PATTERN`) whose inferred type is one string.
-    pub(crate) fn constant_string_value(&self, e: &Expr, locals: &Locals) -> Option<String> {
+    pub(crate) fn constant_string_value(&self, e: &ExprNode, locals: &Locals) -> Option<String> {
         if let Some(s) = literal_string_value(e) {
             return Some(s.into_owned());
         }
@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
     /// The native type of `e` - what PHP itself guarantees, ignoring
     /// PHPDoc - or `mixed` when it isn't known. Never narrower than the
     /// real native type, so a check against it can only miss.
-    pub(crate) fn native_expr_type(&self, e: &Expr, locals: &Locals) -> Type {
+    pub(crate) fn native_expr_type(&self, e: &ExprNode, locals: &Locals) -> Type {
         syntax::stack::guard(|| {
             match &e.kind {
                 ExprKind::Literal(_) => self.infer_expr(e, locals),
@@ -340,7 +340,7 @@ impl<'a> Checker<'a> {
     /// `@var` tags: `class.notFound` and `varTag.trait`.
     pub(crate) fn check_statement_var_tag_classes(
         &mut self,
-        stmt: &Stmt,
+        stmt: &StmtNode,
         tags: &[(Option<String>, Type)],
     ) {
         for (name, ty) in tags {
@@ -384,7 +384,7 @@ impl<'a> Checker<'a> {
     /// variable names matched an assignment (checked only then).
     pub(crate) fn check_statement_var_tag_types(
         &mut self,
-        stmt: &Stmt,
+        stmt: &StmtNode,
         tags: &[(Option<String>, Type)],
         names_ok: bool,
         locals: &Locals,
@@ -537,7 +537,7 @@ impl<'a> Checker<'a> {
             if current == tag {
                 continue;
             }
-            let variable = Expr {
+            let variable = ExprNode {
                 id: syntax::ast::SYNTHETIC_EXPR_ID,
                 kind: ExprKind::Variable(name.as_str().into()),
                 span: stmt.span,
@@ -561,7 +561,7 @@ impl<'a> Checker<'a> {
     /// descends into each item's offset.
     fn collect_target_checks<'t>(
         &self,
-        target: &Expr,
+        target: &ExprNode,
         described: Described,
         tag_for: &dyn Fn(&str, usize) -> Option<&'t Type>,
         candidates: usize,

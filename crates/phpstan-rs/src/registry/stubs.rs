@@ -1428,7 +1428,7 @@ pub(crate) fn embedded_stub_files() -> Vec<(String, &'static str, Origin)> {
 /// with the stub attributes applied.
 pub(crate) fn stub_program(
     source: &str,
-) -> Result<Vec<syntax::ast::Stmt>, syntax::parser::ParseError> {
+) -> Result<Vec<syntax::ast::StmtNode>, syntax::parser::ParseError> {
     let mut program = syntax::parse(source.as_bytes())?.stmts;
     crate::stub_attributes::apply_stub_attributes(&mut program);
     Ok(program)
@@ -1443,7 +1443,7 @@ fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
 /// What the stub build takes of an embedded stub file's tree, `program`,
 /// from `origin`.
 pub(crate) fn index_stub_program(
-    program: &[syntax::ast::Stmt],
+    program: &[syntax::ast::StmtNode],
     origin: &Origin,
 ) -> StubFileDeclarations {
     let registry = Registry::index_and_flatten(program, origin);

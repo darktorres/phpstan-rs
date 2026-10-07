@@ -18,7 +18,7 @@ use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionReflection, collect_impure_points};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
-use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
+use syntax::ast::{BinOp, CastKind, ExprKind, ExprNode, FunctionDecl, UnaryOp};
 use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope};
 use types::Type;
 
@@ -32,7 +32,7 @@ enum Effects {
     Some,
 }
 
-fn is_local_assign_target(target: &Expr) -> bool {
+fn is_local_assign_target(target: &ExprNode) -> bool {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
         ExprKind::Destructure(items, _) => items.iter().all(|item| {
@@ -48,10 +48,10 @@ fn is_local_assign_target(target: &Expr) -> bool {
 /// The strongest effect anywhere in `e`'s subtree. A nested closure or
 /// anonymous class's body doesn't run by being constructed, so it
 /// doesn't count.
-fn expr_side_effects(e: &Expr) -> Effects {
+fn expr_side_effects(e: &ExprNode) -> Effects {
     struct Strongest(Effects);
     impl<'ast> Visitor<'ast> for Strongest {
-        fn visit_expr(&mut self, e: &'ast Expr) {
+        fn visit_expr(&mut self, e: &'ast ExprNode) {
             if self.0 == Effects::Some {
                 return;
             }
@@ -65,7 +65,7 @@ fn expr_side_effects(e: &Expr) -> Effects {
 }
 
 /// `e`'s own effects, not its operands'.
-fn own_side_effects(e: &Expr) -> Effects {
+fn own_side_effects(e: &ExprNode) -> Effects {
     match &e.kind {
         ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
             if is_local_assign_target(target) =>
@@ -111,12 +111,12 @@ impl<'a> Checker<'a> {
     /// Effects that depend on the operands' types: `__get`/`get` hooks on
     /// a property read, `offsetGet` on an object offset read, and
     /// `__toString` on a stringified object.
-    fn expr_has_hidden_effects(&self, e: &Expr, locals: &Locals) -> bool {
+    fn expr_has_hidden_effects(&self, e: &ExprNode, locals: &Locals) -> bool {
         any_expr_in_scope(e, |e| self.own_hidden_effects(e, locals))
     }
 
     /// `expr_has_hidden_effects` for `e` itself, not its operands.
-    fn own_hidden_effects(&self, e: &Expr, locals: &Locals) -> bool {
+    fn own_hidden_effects(&self, e: &ExprNode, locals: &Locals) -> bool {
         match &e.kind {
             ExprKind::PropertyAccess(object, name, _) => {
                 !self.property_read_is_plain(&self.infer_expr(object, locals), name)
@@ -169,7 +169,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Called from `StmtKind::Expression` after `e` itself was checked.
-    pub(crate) fn check_noop_statement(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_noop_statement(&mut self, e: &ExprNode, locals: &Locals) {
         let e = e.peeled();
         let effects = expr_side_effects(e);
         if effects == Effects::Some || self.expr_has_hidden_effects(e, locals) {
@@ -237,7 +237,7 @@ impl<'a> Checker<'a> {
     /// this reads the registry's ID-keyed verdict for whatever declaration
     /// the call actually, concretely resolves to, without rebuilding a
     /// `PurityDependency` key from the call body.
-    pub(crate) fn check_pure_call_without_effect(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_pure_call_without_effect(&mut self, e: &ExprNode, locals: &Locals) {
         let (message, identifier) = match &e.kind {
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {

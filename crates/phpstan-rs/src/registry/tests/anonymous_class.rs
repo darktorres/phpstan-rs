@@ -5,12 +5,12 @@
 //! of the end-to-end `project::tests::anonymous_class_naming` suite.
 
 use crate::registry::{Origin, anonymous_class_decls, name_anonymous_classes};
-use syntax::ast::{Expr, ExprKind, Stmt};
+use syntax::ast::{ExprKind, ExprNode, StmtNode};
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 use syntax::visit::{Visitor, walk_expr};
 
-fn parse(src: &str) -> Vec<Stmt> {
+fn parse(src: &str) -> Vec<StmtNode> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let mut program = Parser::new(tokens).parse_program().unwrap();
     name_anonymous_classes(
@@ -22,10 +22,10 @@ fn parse(src: &str) -> Vec<Stmt> {
 }
 
 /// Every anonymous class's name, in source order.
-fn names(program: &[Stmt]) -> Vec<Option<String>> {
+fn names(program: &[StmtNode]) -> Vec<Option<String>> {
     struct Names(Vec<Option<String>>);
     impl<'a> Visitor<'a> for Names {
-        fn visit_expr(&mut self, expr: &'a Expr) {
+        fn visit_expr(&mut self, expr: &'a ExprNode) {
             if let ExprKind::NewAnonymousClass(class) = &expr.kind {
                 self.0
                     .push(class.name.as_ref().map(|name| name.to_string()));

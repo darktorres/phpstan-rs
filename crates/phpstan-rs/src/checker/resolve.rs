@@ -291,7 +291,7 @@ impl<'a> Checker<'a> {
     /// `StaticCall`'s own full `StaticTarget` resolution, for a
     /// `check_expr`-side call site (full diagnostics): `Name` resolves
     /// exactly like `resolve_static_class_name` always has; a
-    /// genuinely dynamic `Expr` receiver (`$obj::method()`) is checked
+    /// genuinely dynamic `ExprNode` receiver (`$obj::method()`) is checked
     /// in full first - so an undefined variable, an unresolvable
     /// property access, etc. inside it is still caught, the same as any
     /// other checked sub-expression - then resolved via its own real

@@ -21,7 +21,10 @@ pub(crate) use predicates::{
 /// `key_of` (a bare `count(...)` call isn't itself a narrowable
 /// key). Returns the call's own argument and whether `count(...)` was
 /// written on the left (`count($x) > 0`) or the right (`0 < count($x)`).
-pub(crate) fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, bool)> {
+pub(crate) fn count_call_operand<'e>(
+    l: &'e ExprNode,
+    r: &'e ExprNode,
+) -> Option<(&'e ExprNode, bool)> {
     count_call(l)
         .map(|(a, _)| (a, true))
         .or_else(|| count_call(r).map(|(a, _)| (a, false)))
@@ -29,7 +32,7 @@ pub(crate) fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Ex
 
 /// `count($x)` or `sizeof($x)`, with its mode argument if written: `$x`
 /// and the mode.
-fn count_call(e: &Expr) -> Option<(&Expr, Option<&Expr>)> {
+fn count_call(e: &ExprNode) -> Option<(&ExprNode, Option<&ExprNode>)> {
     let ExprKind::Call(callee, args) = &e.peeled().kind else {
         return None;
     };
@@ -69,7 +72,7 @@ pub(super) fn mirror_comparison(op: &BinOp) -> BinOp {
 /// semantics. A *non*-nullsafe chain returns `None`: `$a->b()` proven
 /// non-null says nothing new about `$a` (it was already known non-null,
 /// or this expression could never have been reached at all).
-pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
+pub(super) fn nullsafe_receiver(e: &ExprNode) -> Option<&ExprNode> {
     match &e.kind {
         ExprKind::PropertyAccess(base, _, ObjectOperator::NullsafeArrow)
         | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => Some(base),
@@ -87,7 +90,7 @@ pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
 /// `$y = $x;`) - not attempted: compound `&&`/`||`, `isset()`/array-dim
 /// correlation, `match`-arm correlation (the genuinely large part of
 /// real PHPStan's own mechanism this project declines to build).
-fn condition_alias_shape(rhs: &Expr) -> bool {
+fn condition_alias_shape(rhs: &ExprNode) -> bool {
     syntax::stack::guard(|| {
         match &rhs.kind {
             ExprKind::Instanceof(..)
@@ -161,7 +164,7 @@ fn condition_alias_shape(rhs: &Expr) -> bool {
 /// "is this name referenced anywhere in it," not narrow/instanceof-specific
 /// shape recognition the way `key_of`/`truthiness_discriminant_subject`
 /// do elsewhere in this module.
-fn cond_references_variable(e: &Expr, name: &str) -> bool {
+fn cond_references_variable(e: &ExprNode, name: &str) -> bool {
     syntax::visit::any_expr_in_scope(
         e,
         |e| matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name),
@@ -177,7 +180,7 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
 /// same atom" under a naive `key_of`-only comparison, since
 /// `key_of` only ever identifies the *subject*, not the value
 /// compared against.
-fn disjunctive_syllogism_atom_key(e: &Expr, locals: &Locals) -> Option<LocalKey> {
+fn disjunctive_syllogism_atom_key(e: &ExprNode, locals: &Locals) -> Option<LocalKey> {
     let e = e.peeled();
     let inner = match &e.kind {
         ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => inner,
@@ -200,7 +203,7 @@ fn disjunctive_syllogism_atom_key(e: &Expr, locals: &Locals) -> Option<LocalKey>
 /// two corpus-confirmed ones - matching this project's "don't guess"
 /// precedent throughout `narrowing.rs` rather than a general condition
 /// canonicalizer.
-fn truthiness_discriminant_subject(cond: &Expr, locals: &Locals) -> Option<LocalKey> {
+fn truthiness_discriminant_subject(cond: &ExprNode, locals: &Locals) -> Option<LocalKey> {
     match &cond.kind {
         // Apart from `$x === true`'s key: a truthy `$x` is that only for
         // a bool.
@@ -218,7 +221,7 @@ fn truthiness_discriminant_subject(cond: &Expr, locals: &Locals) -> Option<Local
 impl<'a> Checker<'a> {
     /// A true `isset($a['x'][$k])` also proves every container along the
     /// chain held an offset - see `Type::to_isset_container`.
-    fn narrow_isset_containers(&self, arg: &Expr, locals: &mut Locals) {
+    fn narrow_isset_containers(&self, arg: &ExprNode, locals: &mut Locals) {
         let mut e = arg.peeled();
         loop {
             let (base, lit_key) = match &e.kind {
@@ -279,7 +282,7 @@ impl<'a> Checker<'a> {
     /// `apply_narrowing` recursion any other proven-true condition
     /// already uses - a real, sound inference, not a new narrowing rule
     /// of its own.
-    pub(crate) fn apply_disjunctive_syllogism(&self, cond: &Expr, locals: &mut Locals) {
+    pub(crate) fn apply_disjunctive_syllogism(&self, cond: &ExprNode, locals: &mut Locals) {
         let Some(cond_key) = disjunctive_syllogism_atom_key(cond, locals) else {
             return;
         };
@@ -383,7 +386,7 @@ impl<'a> Checker<'a> {
     /// branch, as `(subject, value)`, when it has one facts are keyed by.
     pub(crate) fn primary_discriminant(
         &self,
-        cond: &Expr,
+        cond: &ExprNode,
         before: &Locals,
         branch_true: bool,
     ) -> Option<(LocalKey, Type)> {
@@ -416,7 +419,7 @@ impl<'a> Checker<'a> {
     /// branch are recorded at, if any.
     pub(crate) fn primary_discriminant_key(
         &self,
-        cond: &Expr,
+        cond: &ExprNode,
         before: &Locals,
         branch_true: bool,
     ) -> Option<Discriminant> {
@@ -426,7 +429,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn record_branch_implied_facts(
         &self,
-        cond: &Expr,
+        cond: &ExprNode,
         before: &Locals,
         after: &mut Locals,
         branch_true: bool,
@@ -586,7 +589,7 @@ fn record_implied_facts(
 /// as an alias, matching this project's "don't guess, don't false-
 /// positive" precedent throughout `narrowing.rs`, not a false
 /// conclusion.
-fn condition_alias_targets(rhs: &Expr, locals: &Locals) -> Option<Vec<LocalKey>> {
+fn condition_alias_targets(rhs: &ExprNode, locals: &Locals) -> Option<Vec<LocalKey>> {
     syntax::stack::guard(|| {
         match &rhs.kind {
             ExprKind::Instanceof(inner, _) => Some(vec![locals.key_of(inner)?]),
@@ -659,11 +662,11 @@ impl<'a> Checker<'a> {
     /// common, safe patterns - equality against a known-type value
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
-    pub(crate) fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
+    pub(crate) fn apply_narrowing(&self, cond: &ExprNode, locals: &mut Locals, branch_true: bool) {
         syntax::stack::guard(|| self.apply_narrowing_unguarded(cond, locals, branch_true))
     }
 
-    fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
+    fn apply_narrowing_unguarded(&self, cond: &ExprNode, locals: &mut Locals, branch_true: bool) {
         // A preg call's truthiness narrows its `$matches` and subject.
         self.apply_preg_result_narrowing(cond, locals, branch_true);
         // `function_exists('foo')`'s own true branch proves `foo` is
@@ -1281,9 +1284,14 @@ impl<'a> Checker<'a> {
     /// never qualify (`$x = 5;`, `$x = $obj->method();` with no
     /// recognized shape) cost one match check and nothing else. Only the
     /// narrow subset that passes it pays for `rhs.clone()` (an owned
-    /// `Expr` deep-clone, once), which then lives behind an `Rc` so every
+    /// `ExprNode` deep-clone, once), which then lives behind an `Rc` so every
     /// later branch-fork of `Locals` stays O(1).
-    pub(crate) fn record_condition_alias(&self, lhs: &Expr, rhs: &Expr, locals: &mut Locals) {
+    pub(crate) fn record_condition_alias(
+        &self,
+        lhs: &ExprNode,
+        rhs: &ExprNode,
+        locals: &mut Locals,
+    ) {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };
@@ -1359,8 +1367,8 @@ impl<'a> Checker<'a> {
     /// so it's left alone rather than risking a wrong alias.
     pub(crate) fn record_if_body_flag_alias(
         &self,
-        cond: &Expr,
-        then_branch: &Stmt,
+        cond: &ExprNode,
+        then_branch: &StmtNode,
         then_locals: &mut Locals,
         else_locals: &mut Locals,
     ) {
@@ -1543,7 +1551,7 @@ impl<'a> Checker<'a> {
 }
 
 /// Whether `e` is a plain variable this scope has defined.
-fn is_defined_variable(e: &Expr, locals: &Locals) -> bool {
+fn is_defined_variable(e: &ExprNode, locals: &Locals) -> bool {
     matches!(&e.kind, ExprKind::Variable(name) if locals.contains_var(name))
 }
 
@@ -1552,9 +1560,9 @@ fn is_defined_variable(e: &Expr, locals: &Locals) -> bool {
 /// when `cond` isn't one.
 fn spaceship_comparison<'e>(
     op: &BinOp,
-    l: &'e Expr,
-    r: &'e Expr,
-) -> Option<(Option<types::OrderingOp>, &'e Expr, &'e Expr)> {
+    l: &'e ExprNode,
+    r: &'e ExprNode,
+) -> Option<(Option<types::OrderingOp>, &'e ExprNode, &'e ExprNode)> {
     let (spaceship, constant, op) = match (&l.peeled().kind, &r.peeled().kind) {
         (ExprKind::Binary(BinOp::Spaceship, ..), _) => (l.peeled(), r, *op),
         (_, ExprKind::Binary(BinOp::Spaceship, ..)) => (r.peeled(), l, mirror_comparison(op)),
@@ -1587,9 +1595,9 @@ fn spaceship_comparison<'e>(
 /// whether it's on the left.
 fn comparison_count_operand<'e>(
     op: &BinOp,
-    l: &'e Expr,
-    r: &'e Expr,
-) -> Option<(&'e Expr, Option<&'e Expr>, bool)> {
+    l: &'e ExprNode,
+    r: &'e ExprNode,
+) -> Option<(&'e ExprNode, Option<&'e ExprNode>, bool)> {
     if !matches!(
         op,
         BinOp::Lt
@@ -1615,8 +1623,8 @@ impl Checker<'_> {
     fn apply_count_narrowing(
         &self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         holds: bool,
         locals: &mut Locals,
     ) {
@@ -1669,7 +1677,7 @@ impl Checker<'_> {
     /// so the empty side narrows only one `known_defined`.
     pub(crate) fn narrow_emptiness(
         &self,
-        operand: &Expr,
+        operand: &ExprNode,
         empty: bool,
         known_defined: bool,
         locals: &mut Locals,
@@ -1691,8 +1699,8 @@ impl Checker<'_> {
     /// is a literal, an int one stringified as shape keys are.
     pub(crate) fn narrow_key_presence(
         &self,
-        key: &Expr,
-        arr: &Expr,
+        key: &ExprNode,
+        arr: &ExprNode,
         present: bool,
         locals: &mut Locals,
     ) {
@@ -1720,8 +1728,8 @@ impl Checker<'_> {
     /// none of them.
     pub(crate) fn narrow_strict_membership(
         &self,
-        needle: &Expr,
-        haystack: &Expr,
+        needle: &ExprNode,
+        haystack: &ExprNode,
         contained: bool,
         locals: &mut Locals,
     ) {
@@ -1750,7 +1758,7 @@ impl Checker<'_> {
     /// isn't empty.
     pub(crate) fn narrow_counted(
         &self,
-        counted: &Expr,
+        counted: &ExprNode,
         recursive: bool,
         op: BinOp,
         other_ty: &Type,
@@ -1816,8 +1824,8 @@ impl Checker<'_> {
     /// constants, surely equals none of them.
     pub(crate) fn narrow_loose_membership(
         &self,
-        needle: &Expr,
-        haystack: &Expr,
+        needle: &ExprNode,
+        haystack: &ExprNode,
         contained: bool,
         locals: &mut Locals,
     ) {
@@ -1850,7 +1858,7 @@ impl Checker<'_> {
 
 /// A comparison operand as the value it compares: an assignment's target
 /// and its assigned value, or the operand itself and no value.
-fn condition_operand(e: &Expr) -> (&Expr, Option<&Expr>) {
+fn condition_operand(e: &ExprNode) -> (&ExprNode, Option<&ExprNode>) {
     match &e.peeled().kind {
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => (lhs, Some(rhs)),
         _ => (e, None),
@@ -1859,7 +1867,7 @@ fn condition_operand(e: &Expr) -> (&Expr, Option<&Expr>) {
 
 /// Whether `value` reads a variable `target` names, whose old value it
 /// meant; after the assignment, the name holds the new one.
-fn reads_assigned_variable(target: &Expr, value: &Expr) -> bool {
+fn reads_assigned_variable(target: &ExprNode, value: &ExprNode) -> bool {
     syntax::visit::any_expr_in_scope(
         target,
         |t| matches!(&t.kind, ExprKind::Variable(v) if cond_references_variable(value, v)),
@@ -1874,8 +1882,8 @@ impl Checker<'_> {
     fn apply_comparison_narrowing(
         &self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         locals: &mut Locals,
         holds: bool,
     ) {
@@ -1894,7 +1902,14 @@ impl Checker<'_> {
 
     /// `l op r` was `holds`: a preg call's result, a spaceship, a count, or
     /// the sides themselves, as each narrows.
-    fn compare_operands(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &mut Locals, holds: bool) {
+    fn compare_operands(
+        &self,
+        op: &BinOp,
+        l: &ExprNode,
+        r: &ExprNode,
+        locals: &mut Locals,
+        holds: bool,
+    ) {
         self.apply_preg_comparison(op, l, r, locals, holds);
         if let Some((spaceship_op, a, b)) = spaceship_comparison(op, l, r) {
             // `($a <=> $b) < 0` is `$a < $b`; `=== 0` or `== 0` is

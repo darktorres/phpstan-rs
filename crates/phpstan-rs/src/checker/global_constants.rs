@@ -35,7 +35,7 @@ pub(crate) struct ConstantFacts {
     pub(crate) magic_in_closure: FxHashSet<Span>,
 }
 
-pub(crate) fn constant_facts(program: &[Stmt]) -> ConstantFacts {
+pub(crate) fn constant_facts(program: &[StmtNode]) -> ConstantFacts {
     let mut collector = Collector {
         out: ConstantFacts::default(),
         in_closure: false,
@@ -53,7 +53,7 @@ struct Collector {
 }
 
 impl Collector {
-    fn body(&mut self, body: &[Stmt], in_closure: bool) {
+    fn body(&mut self, body: &[StmtNode], in_closure: bool) {
         let outer = std::mem::replace(&mut self.in_closure, in_closure);
         walk_stmts(self, body);
         self.in_closure = outer;
@@ -61,7 +61,7 @@ impl Collector {
 }
 
 impl<'ast> Visitor<'ast> for Collector {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.body(f.body_stmts(), false),
             StmtKind::ClassDecl(c) => {
@@ -73,7 +73,7 @@ impl<'ast> Visitor<'ast> for Collector {
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Name(name)
                 if self.in_closure

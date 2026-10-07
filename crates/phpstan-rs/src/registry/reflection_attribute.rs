@@ -5,7 +5,7 @@
 use syntax::name::Name;
 
 use crate::registry::name_context::class_ref;
-use syntax::ast::{Arg, Attribute, BinOp, Expr, ExprKind, Literal, StaticTarget, UnaryOp};
+use syntax::ast::{Arg, Attribute, BinOp, ExprKind, ExprNode, Literal, StaticTarget, UnaryOp};
 
 /// One attribute on a declaration.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -107,7 +107,7 @@ fn argument(arg: &Arg) -> AttributeArgument {
     }
 }
 
-fn value(expr: &Expr) -> AttributeValue {
+fn value(expr: &ExprNode) -> AttributeValue {
     let expr = expr.peeled();
     syntax::stack::guard(|| match &expr.kind {
         ExprKind::Literal(Literal::Null) => AttributeValue::Null,

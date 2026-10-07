@@ -24,7 +24,7 @@ use syntax::name::Name;
 use syntax::name::NameMap;
 
 use syntax::ast::{
-    ArrayItem, Attribute, ClassDef, Expr, ExprKind, Literal, QualifiedName, StaticTarget,
+    ArrayItem, Attribute, ClassDef, ExprKind, ExprNode, Literal, QualifiedName, StaticTarget,
 };
 use types::Type;
 
@@ -138,7 +138,7 @@ fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
     })
 }
 
-fn class_name_of_class_const(e: &Expr) -> Option<&QualifiedName> {
+fn class_name_of_class_const(e: &ExprNode) -> Option<&QualifiedName> {
     match &e.kind {
         ExprKind::ClassNameFetch(StaticTarget::Name(class_name)) => Some(class_name),
         _ => None,

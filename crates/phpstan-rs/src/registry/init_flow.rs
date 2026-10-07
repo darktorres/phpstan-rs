@@ -119,14 +119,14 @@ pub struct InitFlow {
 
 impl InitFlow {
     /// The flow of the statements of one body, whose `goto`s name `labels`.
-    pub fn of(body: &[Stmt], labels: &[GotoLabel]) -> InitFlow {
+    pub fn of(body: &[StmtNode], labels: &[GotoLabel]) -> InitFlow {
         InitFlow {
             nodes: flow_of_stmts(body, labels).into_boxed_slice(),
         }
     }
 }
 
-fn is_this(e: &Expr) -> bool {
+fn is_this(e: &ExprNode) -> bool {
     matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
 }
 
@@ -134,7 +134,7 @@ fn is_this(e: &Expr) -> bool {
 /// checker applies, with what can be told without inferring a type - a
 /// literal condition, `return`, `throw`, `exit`, `break`, `continue`.
 /// `labels` are the labels the `goto`s of the body land on.
-fn completion_of(stmt: &Stmt, labels: &[GotoLabel]) -> Completion {
+fn completion_of(stmt: &StmtNode, labels: &[GotoLabel]) -> Completion {
     syntax::stack::guard(|| match &stmt.kind {
         StmtKind::Return(_) | StmtKind::Throw(_) => Completion::EXITS,
         StmtKind::Break(level) => Completion::break_(level.unwrap_or(1)),
@@ -155,7 +155,7 @@ fn completion_of(stmt: &Stmt, labels: &[GotoLabel]) -> Completion {
                 .else_branch
                 .as_deref()
                 .map_or(Completion::FALLS_THROUGH, |e| completion_of(e, labels));
-            let branches: Vec<(&Expr, &Stmt)> =
+            let branches: Vec<(&ExprNode, &StmtNode)> =
                 std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
                     .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
                     .collect();
@@ -202,7 +202,7 @@ fn completion_of(stmt: &Stmt, labels: &[GotoLabel]) -> Completion {
 
 /// The completion of a statement list: what follows a statement that
 /// terminates is unreachable until a label a `goto` lands on.
-fn block_completion(stmts: &[Stmt], labels: &[GotoLabel]) -> Completion {
+fn block_completion(stmts: &[StmtNode], labels: &[GotoLabel]) -> Completion {
     let mut reach = Reach::default();
     for stmt in stmts {
         if matches!(&stmt.kind, StmtKind::Label(name) if labels.iter().any(|l| l.name == name.name))
@@ -216,7 +216,7 @@ fn block_completion(stmts: &[Stmt], labels: &[GotoLabel]) -> Completion {
 
 /// A condition that is a literal: always true, always false, or neither
 /// known.
-fn known_condition(cond: &Expr) -> Option<bool> {
+fn known_condition(cond: &ExprNode) -> Option<bool> {
     match &cond.kind {
         _ if is_truthy_literal(cond) => Some(true),
         ExprKind::Literal(Literal::Bool(false)) | ExprKind::Literal(Literal::Int(0)) => Some(false),
@@ -226,7 +226,7 @@ fn known_condition(cond: &Expr) -> Option<bool> {
 
 /// The flow of a statement list: a nested block is part of it, and what has
 /// no event in it is not.
-fn flow_of_stmts(stmts: &[Stmt], labels: &[GotoLabel]) -> Vec<Flow> {
+fn flow_of_stmts(stmts: &[StmtNode], labels: &[GotoLabel]) -> Vec<Flow> {
     let mut out = Vec::new();
     for stmt in stmts {
         flow_of_stmt(stmt, labels, &mut out);
@@ -234,7 +234,7 @@ fn flow_of_stmts(stmts: &[Stmt], labels: &[GotoLabel]) -> Vec<Flow> {
     out
 }
 
-fn events_of_each<'a>(exprs: impl IntoIterator<Item = &'a Expr>) -> Vec<Event> {
+fn events_of_each<'a>(exprs: impl IntoIterator<Item = &'a ExprNode>) -> Vec<Event> {
     let mut events = Vec::new();
     for e in exprs {
         events_of(e, &mut events);
@@ -249,7 +249,7 @@ fn push_events(out: &mut Vec<Flow>, events: Vec<Event>) {
     }
 }
 
-fn flow_of_stmt(stmt: &Stmt, labels: &[GotoLabel], out: &mut Vec<Flow>) {
+fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
     syntax::stack::guard(|| match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => push_events(out, events_of_each([e])),
         StmtKind::Return(Some(e)) => push_events(out, events_of_each([e])),
@@ -409,7 +409,7 @@ fn flow_of_stmt(stmt: &Stmt, labels: &[GotoLabel], out: &mut Vec<Flow>) {
 }
 
 /// The events of evaluating `e`, in order.
-fn events_of(e: &Expr, out: &mut Vec<Event>) {
+fn events_of(e: &ExprNode, out: &mut Vec<Event>) {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, name, _) => {
             events_of(base, out);
@@ -490,7 +490,7 @@ fn events_of(e: &Expr, out: &mut Vec<Event>) {
 /// The names of the calls between `$this` and the end of `recv`, when `recv`
 /// is `$this` or a chain of calls on it: each must return the object for the
 /// chain to still be it.
-fn this_chain(recv: &Expr) -> Option<Vec<Name>> {
+fn this_chain(recv: &ExprNode) -> Option<Vec<Name>> {
     syntax::stack::guard(|| match &recv.kind {
         ExprKind::Variable(v) if **v == *"this" => Some(Vec::new()),
         ExprKind::MethodCall(inner, name, _, _) => {
@@ -505,7 +505,7 @@ fn this_chain(recv: &Expr) -> Option<Vec<Name>> {
 /// An assignment target: `$this->prop` becomes initialized and is no read;
 /// a list assigns each of its targets, and its keys are read; anything else
 /// is read as an expression.
-fn assignment_events(lhs: &Expr, out: &mut Vec<Event>) {
+fn assignment_events(lhs: &ExprNode, out: &mut Vec<Event>) {
     syntax::stack::guard(|| {
         if let ExprKind::PropertyAccess(base, name, _) = &lhs.kind
             && is_this(base)
@@ -532,7 +532,7 @@ fn assignment_events(lhs: &Expr, out: &mut Vec<Event>) {
 /// the "must not be accessed before initialization" error for a property
 /// found anywhere in the chain being *tested*, however deep. An index or
 /// name expression embedded in the chain is read as any expression is.
-fn quiet_probe_events(e: &Expr, out: &mut Vec<Event>) {
+fn quiet_probe_events(e: &ExprNode, out: &mut Vec<Event>) {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, _, _) => quiet_probe_events(base, out),
         ExprKind::DynamicPropertyAccess(base, name_expr, _) => {

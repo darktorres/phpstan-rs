@@ -51,7 +51,7 @@
 
 use crate::checker::{Checker, Locals};
 use diagnostics::Diagnostic;
-use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
+use syntax::ast::{ExprKind, ExprNode, StmtKind, StmtNode};
 use types::Type;
 
 /// One flow-sensitive, per-node-kind rule - see this module's own doc
@@ -77,7 +77,7 @@ pub trait Rule: Send + Sync {
     /// `Type` - the same value `Checker::check_expr` itself just
     /// computed, handed over so a rule never needs its own duplicate
     /// inference pass.
-    fn check_expr(&self, scope: &Scope, expr: &Expr, ty: &Type) -> Vec<Diagnostic> {
+    fn check_expr(&self, scope: &Scope, expr: &ExprNode, ty: &Type) -> Vec<Diagnostic> {
         let _ = (scope, expr, ty);
         Vec::new()
     }
@@ -90,7 +90,7 @@ pub trait Rule: Send + Sync {
 
     /// See `check_expr`'s own doc comment - the statement-level sibling.
     /// No `ty` parameter: a statement has no type of its own.
-    fn check_stmt(&self, scope: &Scope, stmt: &Stmt) -> Vec<Diagnostic> {
+    fn check_stmt(&self, scope: &Scope, stmt: &StmtNode) -> Vec<Diagnostic> {
         let _ = (scope, stmt);
         Vec::new()
     }

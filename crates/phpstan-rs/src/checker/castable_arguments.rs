@@ -6,7 +6,7 @@
 
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
-use syntax::ast::{Arg, Expr};
+use syntax::ast::{Arg, ExprNode};
 use types::Type;
 
 const SORT_REGULAR: i64 = 0;
@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
         function: &str,
         sig: &FunctionReflection,
         args: &[Arg],
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &Locals,
     ) {
         let function = function.trim_start_matches('\\').to_ascii_lowercase();
@@ -166,7 +166,7 @@ impl<'a> Checker<'a> {
         &mut self,
         function: &str,
         param_name: &str,
-        value: &Expr,
+        value: &ExprNode,
         cast: Cast,
         locals: &Locals,
     ) {

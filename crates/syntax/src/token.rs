@@ -277,7 +277,7 @@ impl Keyword {
 // two "simple syntax" shapes (`$var->prop`, `$var[key]`) directly instead -
 // the lexer already has the variable/property/key text as separate pieces
 // at the point it would otherwise throw them away into a synthesized
-// `format!("${name}->{prop}")`-style source string, so building the `Expr`
+// `format!("${name}->{prop}")`-style source string, so building the `ExprNode`
 // straight from those pieces (`parser::build_interpolated`) skips a full
 // second `Lexer`/`Parser` round-trip per occurrence. `$var->prop`'s own
 // property name is always a well-formed identifier by construction (the

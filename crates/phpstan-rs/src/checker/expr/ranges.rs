@@ -21,7 +21,7 @@ use types::{self, Type};
 /// `Binary`/`Unary`/`Grouping`/`Index`) - missing a rarer shape only
 /// means this guard occasionally under-protects, never over-flags,
 /// matching this project's own "favor false negatives" precedent.
-pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
+pub(crate) fn expr_reads_a_property(e: &ExprNode) -> bool {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..)

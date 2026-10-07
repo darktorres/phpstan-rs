@@ -5,12 +5,12 @@
 
 use lsp_types::{DocumentSymbol, SymbolKind};
 
-use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, Stmt, StmtKind};
+use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, StmtKind, StmtNode};
 use syntax::span::Span;
 
 use super::protocol::Positions;
 
-pub(super) fn document_symbols(stmts: &[Stmt], index: Positions<'_>) -> Vec<DocumentSymbol> {
+pub(super) fn document_symbols(stmts: &[StmtNode], index: Positions<'_>) -> Vec<DocumentSymbol> {
     syntax::stack::guard(|| {
         let mut symbols = Vec::new();
         for stmt in stmts {

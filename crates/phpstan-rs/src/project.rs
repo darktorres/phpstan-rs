@@ -23,7 +23,7 @@ use composer::dir_table::{DirTable, EntryKind};
 use declared_classes::DeclaredClass;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
-use syntax::ast::{Stmt, StmtKind};
+use syntax::ast::{StmtKind, StmtNode};
 use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
 use syntax::parser::ParseError;
@@ -104,7 +104,7 @@ pub(crate) struct FileState {
     // an editor has open; a context file's is not: what the passes and the
     // checks read of it was taken when it was parsed, and `ast_of` parses
     // it again for a reader of the rest.
-    kept_ast: Option<Vec<Stmt>>,
+    kept_ast: Option<Vec<StmtNode>>,
     // Parsed bytes live beside a retained tree so source-backed payloads do
     // not depend on the caller's read buffer.
     kept_source: Option<Box<[u8]>>,
@@ -186,14 +186,14 @@ struct DeclarationSource<'a> {
 
 /// A file's tree: the one it kept, or one parsed again.
 pub(crate) enum AstRef<'a> {
-    Kept(&'a [Stmt]),
-    Parsed(Arc<Vec<Stmt>>),
+    Kept(&'a [StmtNode]),
+    Parsed(Arc<Vec<StmtNode>>),
 }
 
 impl std::ops::Deref for AstRef<'_> {
-    type Target = [Stmt];
+    type Target = [StmtNode];
 
-    fn deref(&self) -> &[Stmt] {
+    fn deref(&self) -> &[StmtNode] {
         match self {
             AstRef::Kept(ast) => ast,
             AstRef::Parsed(ast) => ast,
@@ -205,12 +205,12 @@ impl std::ops::Deref for AstRef<'_> {
 /// that reads a few of them (the files that declare a class writing a
 /// private property) asks for more than once.
 #[derive(Default)]
-struct AstCache(std::collections::VecDeque<(PathBuf, Arc<Vec<Stmt>>)>);
+struct AstCache(std::collections::VecDeque<(PathBuf, Arc<Vec<StmtNode>>)>);
 
 impl AstCache {
     const CAPACITY: usize = 32;
 
-    fn get(&mut self, path: &Path) -> Option<Arc<Vec<Stmt>>> {
+    fn get(&mut self, path: &Path) -> Option<Arc<Vec<StmtNode>>> {
         let at = self.0.iter().position(|(cached, _)| cached == path)?;
         let entry = self.0.remove(at)?;
         let ast = Arc::clone(&entry.1);
@@ -218,7 +218,7 @@ impl AstCache {
         Some(ast)
     }
 
-    fn insert(&mut self, path: PathBuf, ast: Arc<Vec<Stmt>>) {
+    fn insert(&mut self, path: PathBuf, ast: Arc<Vec<StmtNode>>) {
         if self.0.len() == Self::CAPACITY {
             self.0.pop_front();
         }
@@ -230,7 +230,7 @@ impl FileState {
     /// The file's tree, for a reader of a file whose tree is kept: an
     /// analysed file's. A test build asserts that no reader asks for the
     /// tree of a file that has none.
-    fn ast(&self) -> &[Stmt] {
+    fn ast(&self) -> &[StmtNode] {
         debug_assert!(
             self.kept_ast.is_some(),
             "a reader asked for the tree of a context file that dropped it"
@@ -251,7 +251,7 @@ impl FileState {
     }
 
     /// The file's tree, when it is kept.
-    fn tree(&self) -> Option<&[Stmt]> {
+    fn tree(&self) -> Option<&[StmtNode]> {
         self.kept_ast.as_deref()
     }
 }
@@ -1653,7 +1653,11 @@ impl Project {
     /// The class and function use sites of a file being loaded, from its
     /// `source`: each at the span of the identifier itself
     /// (`use_sites::index_class_fn_refs`).
-    fn class_fn_refs_of(&self, ast: &[Stmt], source: &str) -> Vec<(Span, use_sites::RefTarget)> {
+    fn class_fn_refs_of(
+        &self,
+        ast: &[StmtNode],
+        source: &str,
+    ) -> Vec<(Span, use_sites::RefTarget)> {
         if self.indexes_use_sites() {
             use_sites::index_class_fn_refs(ast, source)
         } else {
@@ -3661,7 +3665,7 @@ fn line_start_range(line: u32) -> syntax::span::Range {
 }
 
 /// First and last line of every trait declared in `ast`.
-fn trait_line_ranges(ast: &[Stmt], line_index: &LineIndex) -> Vec<(u32, u32)> {
+fn trait_line_ranges(ast: &[StmtNode], line_index: &LineIndex) -> Vec<(u32, u32)> {
     let mut ranges = Vec::new();
     for stmt in ast {
         syntax::visit::any_stmt_in_body(stmt, |s| {
@@ -3700,7 +3704,7 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
 /// What the tree `ast` refers to, and what its declarations do: from what
 /// the parse recorded, or by walking the tree when a pass changed it after.
 fn file_references(
-    ast: &[Stmt],
+    ast: &[StmtNode],
     recorded: Option<syntax::references::FileReferences>,
 ) -> (FxHashSet<deps::RefKey>, FxHashSet<deps::RefKey>) {
     let Some(recorded) = recorded else {
@@ -3711,7 +3715,7 @@ fn file_references(
 
 /// A file parsed, with its inline ignore comments.
 struct Parsed {
-    ast: Vec<Stmt>,
+    ast: Vec<StmtNode>,
     source: Box<[u8]>,
     names: Box<[Name]>,
     expr_spans: Box<[Span]>,
@@ -3798,7 +3802,7 @@ fn parse_recording<'a>(
 pub struct ParsedFile {
     // The tree; none for a file read back from the per-file cache, which
     // keeps what its tree gave and not the tree.
-    ast: Option<Vec<Stmt>>,
+    ast: Option<Vec<StmtNode>>,
     // Present with a parsed tree; absent for a cache-only context entry.
     source: Option<Box<[u8]>>,
     // The per-file distinct-name table, retained with the tree.
@@ -4350,7 +4354,7 @@ struct DeclaredNames {
 /// Walks the declarations `registry::build_declarations` builds entries
 /// from, so an incremental update's removal step finds every key the
 /// registry holds.
-pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<Name>, Vec<Name>) {
+pub(crate) fn declared_names(stmts: &[StmtNode]) -> (Vec<Name>, Vec<Name>) {
     let mut functions = Vec::new();
     let mut classes = Vec::new();
     syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {

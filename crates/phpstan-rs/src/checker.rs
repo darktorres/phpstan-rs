@@ -63,12 +63,12 @@ type GuardedMemberSet = imbl::GenericHashSet<
 type ReinitializedPropertySet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
-// `name -> (target_key, Rc<Expr>)` for a variable whose last assignment's
+// `name -> (target_key, Rc<ExprNode>)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
 // `condition_alias_shape`/`condition_alias_targets` in `checker/
 // narrowing.rs`), replayed through `apply_narrowing` when `name` is later
 // checked bare (`if ($name)`) - correlates a *second* variable's narrowing
-// to `name`'s own truthiness without any new type math: the stored `Expr`
+// to `name`'s own truthiness without any new type math: the stored `ExprNode`
 // is the original AST node, re-run through the exact dispatch a direct
 // `if (<rhsExpr>)` would use. `target_keys` (computed once at store time,
 // mirroring `key_of`'s own string form - one entry per distinct
@@ -77,12 +77,12 @@ type ReinitializedPropertySet =
 // is what `Locals::declare` scans for to invalidate a stale alias whose
 // *any* target was rebound, not just the alias variable itself. `Rc`, not
 // a deep clone, so every branch fork of `Locals` stays O(1); a given
-// alias's `Expr` never changes after it's first stored, only wholesale-
+// alias's `ExprNode` never changes after it's first stored, only wholesale-
 // replaced or purged, so `Rc::ptr_eq` is a correct, cheap "did both
 // branches inherit this unchanged" merge test (see `merge_scopes`).
 type ConditionAliasMap = imbl::GenericHashMap<
     LocalKey,
-    (Vec<LocalKey>, std::rc::Rc<Expr>),
+    (Vec<LocalKey>, std::rc::Rc<ExprNode>),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -94,7 +94,7 @@ type ConditionAliasMap = imbl::GenericHashMap<
 // replays into `locals` alongside that condition's own ordinary
 // narrowing (see `checker/narrowing.rs`'s `record_branch_implied_facts`/
 // `apply_equality_narrowing`'s own replay hook). `Rc`-wrapped `Vec`,
-// mirroring `ConditionAliasMap`'s own `Rc<Expr>` value, so cloning
+// mirroring `ConditionAliasMap`'s own `Rc<ExprNode>` value, so cloning
 // `Locals` (extremely frequent - one clone per branch fork) stays O(1)
 // even though a fact list itself isn't `Copy`. A recorded fact is a
 // structural fact about the code at this exact discriminant, not
@@ -144,7 +144,7 @@ type BranchImpliedFactsMap = imbl::GenericHashMap<
 // for the same reason - just the expression, no accompanying target list.
 type QueryBuilderAliasMap = imbl::GenericHashMap<
     LocalKey,
-    std::rc::Rc<Expr>,
+    std::rc::Rc<ExprNode>,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -611,7 +611,7 @@ pub struct Checker<'a> {
     // `Project::working_dir`); `None` is the process's working directory.
     pub(crate) working_dir: Option<std::path::PathBuf>,
     // `includes::file_constant_initializers` for the file being checked.
-    pub(crate) include_constant_initializers: FxHashMap<String, Expr>,
+    pub(crate) include_constant_initializers: FxHashMap<String, ExprNode>,
     // The places an `include` or `require` looked for a file, in the order
     // looked at: what the file's report reads of the filesystem.
     pub(crate) include_probes: Vec<std::path::PathBuf>,
@@ -768,7 +768,7 @@ pub struct Checker<'a> {
     pub(crate) syntax_marks: syntax::SyntaxMarks,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
-    // `probe_span` is the exact `Span` of the receiver `Expr` the caller
+    // `probe_span` is the exact `Span` of the receiver `ExprNode` the caller
     // wants typed; `check_expr`'s `MethodCall`/`PropertyAccess` arms
     // already compute the receiver's real `Type` as part of ordinary
     // checking (`recv_ty`) - this just also stashes it in `probe_hit` when
@@ -864,7 +864,7 @@ pub struct Checker<'a> {
     // see `checker/narrowing.rs`'s `disjunctive_syllogism_atom_key` for
     // exactly which "is this the same atom" comparison is sound enough
     // to act on.
-    pub(crate) pending_or_disjunctions: Vec<(Expr, Expr)>,
+    pub(crate) pending_or_disjunctions: Vec<(ExprNode, ExprNode)>,
     // `--dump-types`: every tracked variable's type (and native type) after
     // each statement, keyed by the statement's start and the class it was
     // checked in, so a later loop pass or trait host overwrites an earlier
@@ -1437,7 +1437,7 @@ impl<'a> Checker<'a> {
 
     /// Records every tracked variable's type after `stmt` - see
     /// `type_dump`.
-    pub(crate) fn record_type_dump(&mut self, stmt: &Stmt, locals: &Locals) {
+    pub(crate) fn record_type_dump(&mut self, stmt: &StmtNode, locals: &Locals) {
         let Some(dump) = self.type_dump.as_mut() else {
             return;
         };
@@ -1787,7 +1787,7 @@ impl<'a> Checker<'a> {
     }
 
     #[hotpath::measure]
-    pub fn check_program(&mut self, program: &[Stmt]) {
+    pub fn check_program(&mut self, program: &[StmtNode]) {
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
                 strict_rules::assigned_variables(program)

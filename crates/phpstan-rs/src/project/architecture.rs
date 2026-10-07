@@ -26,10 +26,10 @@ fn contains(outer: Span, inner: Span) -> bool {
 
 /// Spans of the class operand of every `new` in `stmts`, wherever it is:
 /// parameter defaults, property hooks and constants included.
-fn new_class_spans(stmts: &[Stmt], out: &mut FxHashSet<Span>) {
+fn new_class_spans(stmts: &[StmtNode], out: &mut FxHashSet<Span>) {
     struct News<'o>(&'o mut FxHashSet<Span>);
     impl<'ast> Visitor<'ast> for News<'_> {
-        fn visit_expr(&mut self, e: &'ast Expr) {
+        fn visit_expr(&mut self, e: &'ast ExprNode) {
             if let ExprKind::New(class, _) = &e.kind {
                 self.0.insert(class.span);
             }

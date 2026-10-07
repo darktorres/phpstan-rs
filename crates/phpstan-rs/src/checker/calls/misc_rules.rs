@@ -27,7 +27,7 @@ impl<'a> Checker<'a> {
     /// other cast target yet; a `(void)`-cast `NoDiscard` call is simply
     /// not flagged at all, the safe (false-negative, never false-
     /// positive) direction to skip in.
-    pub(crate) fn check_no_discard_statement(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_no_discard_statement(&mut self, e: &ExprNode, locals: &Locals) {
         // The callee's description is formatted only for a call that is
         // reported: the attribute is tested first, on the call statements
         // that mostly have none.

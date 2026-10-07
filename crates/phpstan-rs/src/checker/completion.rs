@@ -2,7 +2,7 @@
 //! statements inside it complete: whether control can pass out of its end
 //! to the statement after it, and whether it leaves the function or loop.
 
-use syntax::ast::Stmt;
+use syntax::ast::StmtNode;
 
 use super::{Checker, Locals};
 
@@ -391,7 +391,7 @@ impl Checker<'_> {
     /// completion: the last pass's is the one that stays.
     pub(crate) fn check_loop_body(
         &mut self,
-        body: &Stmt,
+        body: &StmtNode,
         locals: &mut Locals,
         declared_return: Option<&types::Type>,
         label: &str,

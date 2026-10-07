@@ -334,7 +334,7 @@ fn div_sign(v: f64) -> f64 {
 
 /// Real PHPStan's own `integerRangeMath`'s `Div` arm, transcribed
 /// directly (`InitializerExprTypeResolver::integerRangeMath`,
-/// `Expr\BinaryOp\Div` branch, plus the shared tail every arm in that
+/// `ExprNode\BinaryOp\Div` branch, plus the shared tail every arm in that
 /// function runs through afterward). Real division between two ints
 /// isn't guaranteed to itself produce an int (`7 / 2` is `3.5`), so the
 /// result is always a union of a refined int-range possibility and a

@@ -7,8 +7,8 @@ use types::php_version::PhpFeature;
 impl<'a> Checker<'a> {
     pub(crate) fn check_property_assignment(
         &mut self,
-        lhs: &Expr,
-        rhs: &Expr,
+        lhs: &ExprNode,
+        rhs: &ExprNode,
         locals: &mut Locals,
     ) {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
@@ -275,7 +275,7 @@ impl<'a> Checker<'a> {
     /// property the current scope can't write (`property.assignByRef`,
     /// PHP 8.4+ asymmetric visibility), or to a readonly one
     /// (`property.readOnlyAssignByRef`/`property.readOnlyByPhpDocAssignByRef`).
-    pub(crate) fn check_property_assign_by_ref(&mut self, rhs: &Expr, locals: &Locals) {
+    pub(crate) fn check_property_assign_by_ref(&mut self, rhs: &ExprNode, locals: &Locals) {
         let (owner, prop, sig, is_static_fetch) = match &rhs.kind {
             ExprKind::PropertyAccess(base, prop, _) => {
                 let base_ty = self.infer_expr(base, locals);

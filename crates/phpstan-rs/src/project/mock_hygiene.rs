@@ -45,7 +45,7 @@ const MOCK_FACTORIES: [&str; 5] = [
 
 /// Whether `e` is `$this->name(...)`, `self::name(...)` or
 /// `static::name(...)`.
-fn is_test_helper_call<'e>(e: &'e Expr, name: &str) -> Option<&'e [Arg]> {
+fn is_test_helper_call<'e>(e: &'e ExprNode, name: &str) -> Option<&'e [Arg]> {
     match &e.kind {
         ExprKind::MethodCall(recv, method, args, _)
             if method.eq_ignore_ascii_case(name)
@@ -66,7 +66,7 @@ fn is_test_helper_call<'e>(e: &'e Expr, name: &str) -> Option<&'e [Arg]> {
 }
 
 /// The method names of the call chain ending at `e`, innermost first.
-fn chain(e: &Expr) -> Vec<(&str, &[Arg], Span)> {
+fn chain(e: &ExprNode) -> Vec<(&str, &[Arg], Span)> {
     let mut out = Vec::new();
     let mut current = e;
     while let ExprKind::MethodCall(recv, method, args, _) = &current.kind {
@@ -88,7 +88,7 @@ struct Walker<'a> {
 }
 
 /// Whether `e` creates a mock (`Some(true)`) or a stub (`Some(false)`).
-fn mock_origin(e: &Expr) -> Option<bool> {
+fn mock_origin(e: &ExprNode) -> Option<bool> {
     if is_test_helper_call(e, "createStub").is_some() {
         return Some(false);
     }
@@ -112,7 +112,7 @@ fn mock_origin(e: &Expr) -> Option<bool> {
 }
 
 /// The origin key of an assignment target or chain base.
-fn origin_key(e: &Expr) -> Option<String> {
+fn origin_key(e: &ExprNode) -> Option<String> {
     match &e.kind {
         ExprKind::Variable(name) => Some(format!("${name}")),
         ExprKind::PropertyAccess(object, prop, _) if matches!(&object.kind, ExprKind::Variable(v) if v.as_ref() == "this") => {
@@ -122,12 +122,12 @@ fn origin_key(e: &Expr) -> Option<String> {
     }
 }
 
-fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
+fn collect_origins(stmts: &[StmtNode], out: &mut FxHashMap<String, bool>) {
     struct Origins<'o> {
         out: &'o mut FxHashMap<String, bool>,
     }
     impl<'ast> Visitor<'ast> for Origins<'_> {
-        fn visit_expr(&mut self, e: &'ast Expr) {
+        fn visit_expr(&mut self, e: &'ast ExprNode) {
             if let ExprKind::Assign(target, value) = &e.kind
                 && let (Some(key), Some(is_mock)) = (origin_key(target), mock_origin(value))
             {
@@ -235,7 +235,7 @@ impl<'a> Walker<'a> {
     }
 
     /// Rules over one statement's mock-configuration chain.
-    fn configuration_chain(&mut self, e: &Expr) {
+    fn configuration_chain(&mut self, e: &ExprNode) {
         let e = match &e.kind {
             ExprKind::Assign(_, value) => value.as_ref(),
             _ => e,
@@ -281,7 +281,7 @@ impl<'a> Walker<'a> {
 }
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
@@ -305,7 +305,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         if let ExprKind::MethodCall(_, method, args, _) = &e.kind
             && method.eq_ignore_ascii_case("expects")
             && let Some(arg) = args.first()

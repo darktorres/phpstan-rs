@@ -999,7 +999,7 @@ impl<'a> Checker<'a> {
         // the body unconditionally terminating is equally sound proof
         // the function never falls off the end, the same reasoning
         // `Completion::terminates`'s `Block` arm uses for a nested `{ ... }` -
-        // `f.body` just isn't itself one `Stmt`, so it needs the same
+        // `f.body` just isn't itself one `StmtNode`, so it needs the same
         // check spelled out here directly. A generator stays exempt from
         // this whole check unless its declared `Generator<TKey, TValue,
         // TSend, TReturn>` carries a real, non-Mixed/Void TReturn - in
@@ -1423,7 +1423,7 @@ impl<'a> Checker<'a> {
             }
             let is_default_null = matches!(
                 &p.default,
-                Some(Expr {
+                Some(ExprNode {
                     kind: ExprKind::Literal(Literal::Null),
                     ..
                 })

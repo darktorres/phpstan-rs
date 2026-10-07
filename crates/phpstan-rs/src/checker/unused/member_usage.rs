@@ -67,7 +67,7 @@ pub(crate) fn method_key(name: &str) -> Name {
     Name::from(name.to_ascii_lowercase())
 }
 
-fn is_this(e: &Expr) -> bool {
+fn is_this(e: &ExprNode) -> bool {
     matches!(&e.kind, ExprKind::Variable(name) if **name == *"this")
 }
 
@@ -76,7 +76,7 @@ fn is_this(e: &Expr) -> bool {
 /// `$sub = new self(); ...; $sub->privateMethod();`, or
 /// `if ($x instanceof self) { ...; $x->privateProp; }`. See
 /// `MemberUsage::aliases`'s own doc comment for how that set is built.
-fn is_this_or_aliased(e: &Expr, usage: &MemberUsage) -> bool {
+fn is_this_or_aliased(e: &ExprNode, usage: &MemberUsage) -> bool {
     is_this(e)
         || matches!(&e.kind, ExprKind::Variable(name) if usage.aliases.contains(name.as_ref()))
 }
@@ -84,7 +84,7 @@ fn is_this_or_aliased(e: &Expr, usage: &MemberUsage) -> bool {
 /// `new self(...)`/`new static(...)`/`new <SameClass>(...)` - the
 /// declaration-based half of `MemberUsage::aliases`'s detection, paired
 /// with the `Assign` arm below.
-fn is_new_self_instance(e: &Expr, fqn: &str) -> bool {
+fn is_new_self_instance(e: &ExprNode, fqn: &str) -> bool {
     matches!(&e.kind, ExprKind::New(callee, _)
         if matches!(&callee.kind, ExprKind::Name(class_ref) if class_ref_is_self(class_ref, fqn)))
 }
@@ -98,7 +98,7 @@ fn is_new_self_instance(e: &Expr, fqn: &str) -> bool {
 /// only ever mutated in place might go unreported as "never written", but
 /// this can never *cause* a false "unused"/"only written" report, since
 /// falling back to a plain read only ever adds usage, never removes it.
-fn mark_write_target(l: &Expr, fqn: &str, usage: &mut MemberUsage, also_read: bool) -> bool {
+fn mark_write_target(l: &ExprNode, fqn: &str, usage: &mut MemberUsage, also_read: bool) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
             usage.writes.insert(Name::from(&name.name));
@@ -135,7 +135,7 @@ impl<'ast> Visitor<'ast> for Members<'_> {
 
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         syntax::stack::guard(|| {
             let (fqn, usage) = (self.fqn, &mut *self.usage);
             match &expr.kind {
@@ -243,7 +243,7 @@ impl<'ast> Visitor<'ast> for Members<'_> {
     }
 }
 
-pub(crate) fn walk_expr_for_members(expr: &Expr, fqn: &str, usage: &mut MemberUsage) {
+pub(crate) fn walk_expr_for_members(expr: &ExprNode, fqn: &str, usage: &mut MemberUsage) {
     Members { fqn, usage }.visit_expr(expr);
 }
 
@@ -271,7 +271,7 @@ pub(crate) fn hook_read_write_shape(hooks: Option<&PropertyHooks>) -> (bool, boo
     }
 }
 
-pub(crate) fn walk_stmt_body_for_members(body: &[Stmt], fqn: &str, usage: &mut MemberUsage) {
+pub(crate) fn walk_stmt_body_for_members(body: &[StmtNode], fqn: &str, usage: &mut MemberUsage) {
     walk_stmts(&mut Members { fqn, usage }, body);
 }
 

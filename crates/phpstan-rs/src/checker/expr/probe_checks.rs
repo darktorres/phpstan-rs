@@ -40,7 +40,7 @@ impl<'a> Checker<'a> {
     /// normally, since `isset()`/`??` don't evaluate quietly past one.
     pub(crate) fn check_expr_quiet_root(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         locals: &mut Locals,
         label: &str,
     ) -> Type {
@@ -116,7 +116,7 @@ impl<'a> Checker<'a> {
     /// risk a false positive from an unmodeled "might not exist" case.
     pub(crate) fn check_pointless_null_probe(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         locals: &Locals,
         identifier_prefix: &str,
         operator_description: &str,
@@ -179,7 +179,7 @@ impl<'a> Checker<'a> {
     /// would be.
     fn resolve_always_exists(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         locals: &Locals,
         identifier_prefix: &str,
         operator_description: &str,
@@ -266,7 +266,7 @@ impl<'a> Checker<'a> {
     /// just double-report.
     pub(crate) fn check_pointless_offset_or_property_probe(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         locals: &Locals,
         identifier_prefix: &str,
         operator_description: &str,
@@ -346,8 +346,8 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_constant_loose_comparison(
         &mut self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         l_ty: &Type,
         r_ty: &Type,
         span: Span,
@@ -422,8 +422,8 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_strict_comparison_of_different_types(
         &mut self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         l_ty: &Type,
         r_ty: &Type,
         span: Span,
@@ -500,8 +500,8 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_constant_numeric_comparison(
         &mut self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         l_ty: &Type,
         r_ty: &Type,
         span: Span,
@@ -574,7 +574,7 @@ impl<'a> Checker<'a> {
     /// decided.
     pub(crate) fn check_impossible_type_check_call(
         &mut self,
-        callee: &Expr,
+        callee: &ExprNode,
         args: &[Arg],
         locals: &Locals,
         is_exempt_last_condition: bool,
@@ -665,7 +665,7 @@ impl<'a> Checker<'a> {
 /// exists for (`$status === Status::A`) from ever firing at all -
 /// caught by this check's own manual verification pass, not a test
 /// written in advance of knowing this gap existed.
-fn expr_reads_a_mutable_property(e: &Expr) -> bool {
+fn expr_reads_a_mutable_property(e: &ExprNode) -> bool {
     let e = e.peeled();
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,

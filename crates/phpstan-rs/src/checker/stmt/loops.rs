@@ -24,7 +24,7 @@ use types::Type;
 /// confirmed via `dumpType()` against real PHPStan that list-ness
 /// genuinely isn't preserved for that shape, only for a fresh `count()`
 /// re-evaluated in the condition itself.
-fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
+fn in_range_index_write_loop_vars(cond: &ExprNode) -> Option<(String, String)> {
     let ExprKind::Binary(op, l, r) = &cond.peeled().kind else {
         return None;
     };
@@ -54,8 +54,8 @@ fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
 impl<'a> Checker<'a> {
     pub(crate) fn check_while(
         &mut self,
-        cond: &Expr,
-        body: &Stmt,
+        cond: &ExprNode,
+        body: &StmtNode,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -226,8 +226,8 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_do_while(
         &mut self,
-        body: &Stmt,
-        cond: &Expr,
+        body: &StmtNode,
+        cond: &ExprNode,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -343,10 +343,10 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_for(
         &mut self,
-        init: &[Expr],
-        cond: &[Expr],
-        step: &[Expr],
-        body: &Stmt,
+        init: &[ExprNode],
+        cond: &[ExprNode],
+        step: &[ExprNode],
+        body: &StmtNode,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -551,11 +551,11 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_foreach(
         &mut self,
-        subject: &Expr,
-        key: Option<&Expr>,
-        value: &Expr,
+        subject: &ExprNode,
+        key: Option<&ExprNode>,
+        value: &ExprNode,
         by_ref: bool,
-        body: &Stmt,
+        body: &StmtNode,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -661,7 +661,7 @@ impl<'a> Checker<'a> {
         // every convergence pass below binds the loop variable to it,
         // not just whatever `check_stmt`'s own generic preamble happened
         // to insert before this function's own rebinding overwrote it.
-        let annotated = |target: &Expr| match &target.kind {
+        let annotated = |target: &ExprNode| match &target.kind {
             ExprKind::Variable(name) => inline_var
                 .iter()
                 .find(|(n, _)| n.as_str() == name.as_ref())
@@ -733,7 +733,7 @@ impl<'a> Checker<'a> {
             LoopZeroIterations::Possible {
                 subject_exempt,
                 subject_key: match key {
-                    Some(Expr {
+                    Some(ExprNode {
                         kind: ExprKind::Variable(name),
                         ..
                     }) if !by_ref => Some(name.as_ref()),
@@ -836,7 +836,7 @@ impl<'a> Checker<'a> {
                     propagate_container_field_facts(pass_locals, value_key, subject_key);
                 }
                 this.check_loop_body(body, pass_locals, declared_return, label);
-                if let Some(Expr {
+                if let Some(ExprNode {
                     kind: ExprKind::Variable(key_name),
                     ..
                 }) = key

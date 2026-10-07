@@ -40,7 +40,7 @@ impl VarUsage {
     }
 }
 
-pub(crate) fn collect_var_usage(stmts: &[Stmt]) -> VarUsage {
+pub(crate) fn collect_var_usage(stmts: &[StmtNode]) -> VarUsage {
     let mut vars = Vars {
         names: NameSet::default(),
         escaped: false,
@@ -55,7 +55,7 @@ pub(crate) fn collect_var_usage(stmts: &[Stmt]) -> VarUsage {
 
 /// Whether `callee` names the global function `target`, as an unqualified
 /// call in a namespace falls back to.
-fn is_call_to(callee: &Expr, target: &str) -> bool {
+fn is_call_to(callee: &ExprNode, target: &str) -> bool {
     matches!(&callee.kind, ExprKind::Name(n) if {
         let (primary, fallback) = n.candidates();
         fallback.unwrap_or(primary).eq_ignore_ascii_case(target)
@@ -75,7 +75,7 @@ impl<'ast> Visitor<'ast> for Vars {
 
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::Variable(name) => {
@@ -131,7 +131,7 @@ impl<'ast> Visitor<'ast> for Vars {
 /// spread, ...) has no static name to resolve here, so it escalates to the
 /// same blanket "everything is used" fallback as `func_get_args()`/
 /// `get_defined_vars()` rather than risk a false "unused" report.
-fn collect_compact_names(e: &Expr, names: &mut NameSet, escaped: &mut bool) {
+fn collect_compact_names(e: &ExprNode, names: &mut NameSet, escaped: &mut bool) {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
             names.insert(Name::from(&*s.to_str_lossy()));

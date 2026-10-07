@@ -6,7 +6,7 @@
 //! `staticMethod.private`/`staticMethod.protected`.
 
 use crate::checker::{Checker, MemberLabel};
-use syntax::ast::{Expr, ExprKind, Literal, Visibility};
+use syntax::ast::{ExprKind, ExprNode, Literal, Visibility};
 use syntax::span::Span;
 
 /// `check_member_visibility`'s own call bundle - 7 positional
@@ -242,7 +242,7 @@ impl<'a> Checker<'a> {
     /// implicit default does, which this project has no way to recover
     /// once already checking the closure literal outside its original
     /// declaration site).
-    pub(crate) fn literal_class_name_from_expr(&self, e: &Expr) -> Option<String> {
+    pub(crate) fn literal_class_name_from_expr(&self, e: &ExprNode) -> Option<String> {
         match &e.kind {
             ExprKind::ClassNameFetch(target) => target
                 .as_name()

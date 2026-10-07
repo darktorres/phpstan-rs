@@ -19,7 +19,7 @@
 use crate::checker::{Checker, PropertyAssignFacts};
 use crate::registry::{ClassId, PropertyRef};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::ast::{ClassDef, Expr, ExprKind, Literal, Visibility};
+use syntax::ast::{ClassDef, ExprKind, ExprNode, Literal, Visibility};
 use syntax::span::{LineIndex, Span};
 use types::UnionAll as _;
 use types::{Name, Relation, Type};
@@ -58,10 +58,10 @@ struct SiteProperty {
 /// instance starts there until a real write happens), but only an
 /// `ExprKind::Assign` node inside a method body ever records a fact, so a
 /// declaration-site default is otherwise invisible to this check.
-fn is_null_default(default: &Option<Expr>) -> bool {
+fn is_null_default(default: &Option<ExprNode>) -> bool {
     matches!(
         default,
-        Some(Expr {
+        Some(ExprNode {
             kind: ExprKind::Literal(Literal::Null),
             ..
         })

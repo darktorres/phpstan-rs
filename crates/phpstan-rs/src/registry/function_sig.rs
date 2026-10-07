@@ -440,7 +440,7 @@ impl FunctionReflection {
 /// (an array, a concatenation, another constant) falls back to `Mixed` -
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
-pub(crate) fn infer_const_type(value: &syntax::ast::Expr) -> Type {
+pub(crate) fn infer_const_type(value: &syntax::ast::ExprNode) -> Type {
     infer_const_type_with(value, &|_, _| None)
 }
 
@@ -451,7 +451,7 @@ pub(crate) fn infer_const_type(value: &syntax::ast::Expr) -> Type {
 /// `Registry::resolve_deferred_value_of`'s constant pre-pass. Only class
 /// constants go through that pass, so only they get this; a global
 /// constant keeps plain `infer_const_type`.
-pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
+pub(crate) fn infer_class_const_type(value: &syntax::ast::ExprNode) -> Type {
     infer_const_type_with(value, &|class, name| {
         Some(Type::class_constant(
             types::parse_type_string(&class_ref(class)),
@@ -466,7 +466,7 @@ pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
 fn infer_const_type_with(
-    value: &syntax::ast::Expr,
+    value: &syntax::ast::ExprNode,
     class_const_ref: &dyn Fn(&syntax::ast::QualifiedName, &str) -> Option<Type>,
 ) -> Type {
     syntax::stack::guard(|| {

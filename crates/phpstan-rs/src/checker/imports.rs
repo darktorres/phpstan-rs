@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
     /// check_function_name_case`, mirroring real PHPStan's own
     /// `checkFunctionNameCase`-gated half of the same rule, default
     /// `false` at every level).
-    pub(crate) fn check_use_function_imports(&mut self, program: &[Stmt]) {
+    pub(crate) fn check_use_function_imports(&mut self, program: &[StmtNode]) {
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;
@@ -111,7 +111,7 @@ impl<'a> Checker<'a> {
     /// inside a function/method body is invisible to it, so a `use
     /// const` importing one stays unflagged either way rather than
     /// risking a false positive on a shape this project can't see.
-    pub(crate) fn check_use_const_imports(&mut self, program: &[Stmt]) {
+    pub(crate) fn check_use_const_imports(&mut self, program: &[StmtNode]) {
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;
@@ -157,7 +157,7 @@ impl<'a> Checker<'a> {
     /// `class.nameCase` itself is already built and wired at other
     /// class-reference sites project-wide (`checker/resolve.rs`'s
     /// `check_type_class_names_exist` pipeline).
-    pub(crate) fn check_use_class_imports(&mut self, program: &[Stmt]) {
+    pub(crate) fn check_use_class_imports(&mut self, program: &[StmtNode]) {
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;
@@ -205,7 +205,7 @@ impl<'a> Checker<'a> {
     /// active at each point, matching real PHPStan's own per-namespace
     /// scoping (and real PHP's: two same-named classes in two different
     /// namespaces never collide).
-    pub(crate) fn check_used_names(&mut self, program: &[Stmt]) {
+    pub(crate) fn check_used_names(&mut self, program: &[StmtNode]) {
         // Original-case (for display in a message) and lowercased (the
         // real map key, since PHP namespace/name comparison here is
         // case-insensitive) kept side by side.

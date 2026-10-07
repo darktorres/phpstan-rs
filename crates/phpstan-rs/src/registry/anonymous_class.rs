@@ -43,7 +43,7 @@ pub(crate) fn synthetic_name(
 /// file across one analysis run, not to match real PHPStan's own path
 /// convention exactly, since nothing compares the two.
 pub(crate) fn name_anonymous_classes(
-    stmts: &mut [Stmt],
+    stmts: &mut [StmtNode],
     relative_file: &str,
     line_index: &LineIndex,
 ) {
@@ -71,7 +71,7 @@ pub(crate) fn name_anonymous_classes(
 
 /// The registry entry of every named anonymous class in `stmts`, each
 /// recorded as declared at its `new class` expression in `origin`.
-pub(crate) fn anonymous_class_decls(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
+pub(crate) fn anonymous_class_decls(stmts: &[StmtNode], origin: &Origin) -> Vec<BuiltDecl> {
     let mut decls = Vec::new();
     let mut in_stmt = Found(Vec::new());
     for_each_in_context(stmts, |stmt, ctx: &NameContext| {
@@ -99,7 +99,7 @@ pub(crate) fn anonymous_class_decls(stmts: &[Stmt], origin: &Origin) -> Vec<Buil
 struct Lines<'i>(Vec<u32>, &'i LineIndex);
 
 impl<'a> Visitor<'a> for Lines<'_> {
-    fn visit_expr(&mut self, expr: &'a Expr) {
+    fn visit_expr(&mut self, expr: &'a ExprNode) {
         if let ExprKind::NewAnonymousClass(_) = &expr.kind {
             self.0.push(self.1.line(expr.span.start));
         }
@@ -116,7 +116,7 @@ struct Namer<'a> {
 }
 
 impl VisitorMut for Namer<'_> {
-    fn visit_expr(&mut self, expr: &mut Expr) {
+    fn visit_expr(&mut self, expr: &mut ExprNode) {
         if let ExprKind::NewAnonymousClass(class) = &mut expr.kind {
             let line = self.line_index.line(expr.span.start);
             let line_index = if self.per_line.get(&line).is_some_and(|n| *n > 1) {
@@ -137,10 +137,10 @@ impl VisitorMut for Namer<'_> {
 }
 
 /// Every anonymous class, in source order, wherever it is.
-struct Found<'a>(Vec<(&'a Expr, &'a AnonymousClass)>);
+struct Found<'a>(Vec<(&'a ExprNode, &'a AnonymousClass)>);
 
 impl<'a> Visitor<'a> for Found<'a> {
-    fn visit_expr(&mut self, expr: &'a Expr) {
+    fn visit_expr(&mut self, expr: &'a ExprNode) {
         if let ExprKind::NewAnonymousClass(class) = &expr.kind {
             self.0.push((expr, class));
         }

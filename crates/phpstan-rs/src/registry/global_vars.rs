@@ -28,7 +28,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::registry::infer_const_type;
 use syntax::ast::{
-    BinOp, Expr, ExprKind, GlobalVar, Literal, QualifiedName, StaticTarget, Stmt, StmtKind,
+    BinOp, ExprKind, ExprNode, GlobalVar, Literal, QualifiedName, StaticTarget, StmtKind, StmtNode,
 };
 use syntax::visit::{Visitor, any_stmt_in_body, walk_expr_in_scope, walk_stmt};
 
@@ -223,7 +223,7 @@ pub struct GlobalFacts {
 
 impl GlobalFacts {
     /// The facts of the statements of one file.
-    pub fn of(stmts: &[Stmt]) -> GlobalFacts {
+    pub fn of(stmts: &[StmtNode]) -> GlobalFacts {
         let mut facts = GlobalFacts::default();
         walk_top_level(stmts, &mut facts);
         facts
@@ -465,7 +465,7 @@ fn text_ends_with_suffix(path: &str, suffix: &str) -> bool {
 /// string and doesn't invalidate resolution - only the trailing literal
 /// suffix needs to match a real file's path, never the constant's actual
 /// value.
-fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
+fn resolve_include_target_suffix(expr: &ExprNode) -> Option<String> {
     syntax::stack::guard(|| match &expr.peeled().kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Name(_) => Some(String::new()),
@@ -482,7 +482,7 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
 /// is staged as a top-level site (gated by the include-graph result
 /// applied later), regardless of any `global $x;` (file top level is
 /// already, potentially, the real global scope).
-fn walk_top_level(stmts: &[Stmt], out: &mut GlobalFacts) {
+fn walk_top_level(stmts: &[StmtNode], out: &mut GlobalFacts) {
     let empty = NameSet::default();
     walk_scope(stmts, true, &empty, out);
 }
@@ -495,14 +495,14 @@ fn walk_top_level(stmts: &[Stmt], out: &mut GlobalFacts) {
 /// the walk with per-branch cloning). Every site found here is
 /// unconditional - a function body's own scope isn't subject to the
 /// include-graph check the way file top level is.
-fn walk_function_body(stmts: &[Stmt], out: &mut GlobalFacts) {
+fn walk_function_body(stmts: &[StmtNode], out: &mut GlobalFacts) {
     let global_names = collect_global_names(stmts);
     walk_scope(stmts, false, &global_names, out);
 }
 
 /// Every name a `global` statement in this body imports. A nested
 /// function, class or closure needs its own `global`, so none is entered.
-fn collect_global_names(stmts: &[Stmt]) -> NameSet {
+fn collect_global_names(stmts: &[StmtNode]) -> NameSet {
     let mut out = NameSet::default();
     for stmt in stmts {
         any_stmt_in_body(stmt, |s| {
@@ -517,7 +517,7 @@ fn collect_global_names(stmts: &[Stmt]) -> NameSet {
     out
 }
 
-fn walk_scope(stmts: &[Stmt], top_level: bool, global_names: &NameSet, out: &mut GlobalFacts) {
+fn walk_scope(stmts: &[StmtNode], top_level: bool, global_names: &NameSet, out: &mut GlobalFacts) {
     let mut scope = Scope {
         top_level,
         global_names,
@@ -537,7 +537,7 @@ struct Scope<'r> {
 }
 
 impl<'a> Visitor<'a> for Scope<'_> {
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+    fn visit_stmt(&mut self, stmt: &'a StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
                 walk_function_body(f.body_stmts(), self.out);
@@ -557,7 +557,7 @@ impl<'a> Visitor<'a> for Scope<'_> {
         walk_stmt(self, stmt);
     }
 
-    fn visit_expr(&mut self, expr: &'a Expr) {
+    fn visit_expr(&mut self, expr: &'a ExprNode) {
         match &expr.kind {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr { body, .. } = &**closure;
@@ -587,7 +587,7 @@ impl<'a> Visitor<'a> for Scope<'_> {
 /// site of that global, gated on the file being included when at top
 /// level. A compound assignment only widens the variable.
 fn handle_top_expr_statement(
-    e: &Expr,
+    e: &ExprNode,
     top_level: bool,
     global_names: &NameSet,
     out: &mut GlobalFacts,
@@ -609,8 +609,8 @@ fn handle_top_expr_statement(
 }
 
 fn handle_assignment_target(
-    lhs: &Expr,
-    rhs: &Expr,
+    lhs: &ExprNode,
+    rhs: &ExprNode,
     is_site: &dyn Fn(&str) -> bool,
     top_level: bool,
     out: &mut GlobalFacts,
@@ -686,7 +686,7 @@ fn handle_assignment_target(
 /// isn't a literal (including a bare append directly on the variable
 /// itself, `$name[] = ...` - nothing to report there, not a special
 /// case, `key.as_ref()` on `None` already falls through to `None`).
-fn root_variable_and_first_key(expr: &Expr) -> Option<(&Name, String)> {
+fn root_variable_and_first_key(expr: &ExprNode) -> Option<(&Name, String)> {
     syntax::stack::guard(|| {
         let ExprKind::Index(base, key) = &expr.peeled().kind else {
             return None;
@@ -707,7 +707,7 @@ fn root_variable_and_first_key(expr: &Expr) -> Option<(&Name, String)> {
 /// merge its fields in rather than discarding them. `None` for anything
 /// else (not this exact self-referencing shape) - the caller falls back to
 /// its own ordinary whole-value handling in that case.
-fn array_merge_self(name: &Name, rhs: &Expr) -> Option<ContributionFact> {
+fn array_merge_self(name: &Name, rhs: &ExprNode) -> Option<ContributionFact> {
     let ExprKind::Call(callee, args) = &rhs.peeled().kind else {
         return None;
     };
@@ -730,7 +730,7 @@ fn array_merge_self(name: &Name, rhs: &Expr) -> Option<ContributionFact> {
     })
 }
 
-fn literal_string_key(expr: &Expr) -> Option<String> {
+fn literal_string_key(expr: &ExprNode) -> Option<String> {
     match &expr.peeled().kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
@@ -741,7 +741,7 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
 /// An assigned expression as far as its type can be said without the
 /// registry: the types of calls, class constants and methods are looked up
 /// when the facts are resolved.
-fn static_value(expr: &Expr) -> StaticValue {
+fn static_value(expr: &ExprNode) -> StaticValue {
     syntax::stack::guard(|| {
         let expr = expr.peeled();
         match &expr.kind {

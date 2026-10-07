@@ -57,7 +57,7 @@ use types::{AccessoryKind, Type};
 
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
-    pub(crate) fn check_strict_rules_expression(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_strict_rules_expression(&mut self, e: &ExprNode, locals: &Locals) {
         if self.settings.strict_rules.check_dynamic_static_calls {
             let call = match &e.kind {
                 ExprKind::FirstClassCallable(inner) => inner,
@@ -163,7 +163,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_arithmetic_operands(&mut self, e: &Expr, locals: &Locals) {
+    fn check_arithmetic_operands(&mut self, e: &ExprNode, locals: &Locals) {
         let (op, left, right) = match &e.kind {
             ExprKind::Binary(op, l, r) | ExprKind::CompoundAssign(op, l, r) => (op, l, r),
             ExprKind::Unary(op, operand) => {
@@ -275,8 +275,8 @@ impl<'a> Checker<'a> {
     fn check_comparable_types(
         &mut self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         span: syntax::span::Span,
         locals: &Locals,
     ) {
@@ -394,8 +394,8 @@ impl<'a> Checker<'a> {
     fn check_mixed_type_operands(
         &mut self,
         op: &BinOp,
-        l: &Expr,
-        r: &Expr,
+        l: &ExprNode,
+        r: &ExprNode,
         compound: bool,
         span: syntax::span::Span,
         locals: &Locals,
@@ -558,7 +558,7 @@ impl<'a> Checker<'a> {
 
     /// Replaces the current function's assignment sites with `body`'s,
     /// returning the previous ones to restore.
-    pub(crate) fn enter_assigned_variables(&mut self, body: &[Stmt]) -> Vec<AssignedVariable> {
+    pub(crate) fn enter_assigned_variables(&mut self, body: &[StmtNode]) -> Vec<AssignedVariable> {
         let entered = if self.settings.strict_rules.check_implicit_array_creation {
             assigned_variables(body)
         } else {
@@ -624,7 +624,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The statement-level ports, before `stmt` itself is checked.
-    pub(crate) fn check_strict_rules_statement(&mut self, stmt: &Stmt, locals: &Locals) {
+    pub(crate) fn check_strict_rules_statement(&mut self, stmt: &StmtNode, locals: &Locals) {
         if self.settings.strict_rules.check_loop_variable_overwrite {
             let mut overwritten: Vec<(syntax::span::Span, &str, String)> = Vec::new();
             match &stmt.kind {
@@ -692,7 +692,7 @@ impl<'a> Checker<'a> {
     /// `receiver` can be declares it static.
     fn static_method_through_instance(
         &self,
-        receiver: &Expr,
+        receiver: &ExprNode,
         method: &str,
         locals: &Locals,
     ) -> Option<(String, String)> {
@@ -815,7 +815,7 @@ impl<'a> Checker<'a> {
 
 /// The plain variables `target` binds (recursing into `[...]`/`list()`
 /// destructuring) that `locals` already defines.
-fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::span::Span)> {
+fn defined_targets(target: &ExprNode, locals: &Locals) -> Vec<(String, syntax::span::Span)> {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) if locals.contains_var(name) => {
             vec![(name.to_string(), target.span)]
@@ -870,7 +870,7 @@ pub(crate) struct AssignedVariable {
 
 /// Every site in `body` that binds a variable, outside nested functions,
 /// closures and classes.
-pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
+pub(crate) fn assigned_variables(body: &[StmtNode]) -> Vec<AssignedVariable> {
     let mut assigned = Assigned {
         loops: Vec::new(),
         out: Vec::new(),
@@ -885,7 +885,7 @@ struct Assigned {
 }
 
 impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         let loops = &mut self.loops;
         let out = &mut self.out;
         match &stmt.kind {
@@ -933,7 +933,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         match &e.kind {
             ExprKind::Closure { .. }
             | ExprKind::ArrowFn { .. }
@@ -951,7 +951,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
 
 /// The variables an assignment target binds: a plain variable, the root
 /// of an offset chain, or each element of a destructuring.
-fn bind_targets(target: &Expr, loops: &[syntax::span::Span], out: &mut Vec<AssignedVariable>) {
+fn bind_targets(target: &ExprNode, loops: &[syntax::span::Span], out: &mut Vec<AssignedVariable>) {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => out.push(AssignedVariable {
             name: name.clone(),

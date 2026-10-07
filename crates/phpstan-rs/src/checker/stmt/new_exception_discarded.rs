@@ -9,7 +9,7 @@ impl<'a> Checker<'a> {
     /// `new Foo();` for a class with a constructor side effect, which
     /// this deliberately never touches - only a genuine `Throwable`
     /// qualifies).
-    pub(crate) fn check_new_exception_discarded(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_new_exception_discarded(&mut self, e: &ExprNode, locals: &Locals) {
         if !self.settings.extras.check_new_exception_discarded {
             return;
         }

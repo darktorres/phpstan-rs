@@ -5,7 +5,7 @@ use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 
-fn parse(src: &str) -> Vec<Stmt> {
+fn parse(src: &str) -> Vec<StmtNode> {
     Parser::new(Lexer::new(src).tokenize_with_spans())
         .parse_program()
         .expect("parses")
@@ -15,7 +15,7 @@ fn parse(src: &str) -> Vec<Stmt> {
 struct Variables(Vec<String>);
 
 impl<'ast> Visitor<'ast> for Variables {
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         if let ExprKind::Variable(name) = &expr.kind {
             self.0.push(name.to_string());
         }
@@ -75,7 +75,7 @@ fn the_walk_reaches_every_nested_scope_and_initializer() {
 struct Rename;
 
 impl VisitorMut for Rename {
-    fn visit_expr(&mut self, expr: &mut Expr) {
+    fn visit_expr(&mut self, expr: &mut ExprNode) {
         if let ExprKind::Variable(name) = &mut expr.kind {
             *name = format!("{name}_").into();
         }

@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_unused_closure_uses(
         &mut self,
         uses: &[ClosureUse],
-        body: &[Stmt],
+        body: &[StmtNode],
         span: Span,
     ) {
         if uses.is_empty() {

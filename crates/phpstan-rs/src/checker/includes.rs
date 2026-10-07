@@ -60,7 +60,7 @@ fn class_constant_key(class: &str, constant: &str) -> String {
 /// with a literal name, and class/enum constants - keyed by short name
 /// (`Class::NAME` lowercased on the class). A name declared twice is
 /// dropped.
-pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, Expr> {
+pub(crate) fn file_constant_initializers(program: &[StmtNode]) -> FxHashMap<String, ExprNode> {
     let mut initializers = Initializers(FxHashMap::default());
     walk_stmts(&mut initializers, program);
     initializers
@@ -73,10 +73,10 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
 /// Each constant's initializer, `None` once a name is declared twice.
 /// Function bodies are not entered, and a `define()` counts only as a
 /// statement's own expression.
-struct Initializers(FxHashMap<String, Option<Expr>>);
+struct Initializers(FxHashMap<String, Option<ExprNode>>);
 
 impl Initializers {
-    fn add(&mut self, key: String, value: &Expr) {
+    fn add(&mut self, key: String, value: &ExprNode) {
         self.0
             .entry(key)
             .and_modify(|v| *v = None)
@@ -85,7 +85,7 @@ impl Initializers {
 }
 
 impl<'ast> Visitor<'ast> for Initializers {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
@@ -102,7 +102,7 @@ impl<'ast> Visitor<'ast> for Initializers {
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         if let ExprKind::Call(callee, args) = &e.kind
             && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
             && let [name, value, ..] = args.as_slice()
@@ -126,7 +126,7 @@ pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static st
 
 /// The function a call's callee names, as an unqualified name in a
 /// namespace falls back to the global one.
-fn callee_name(e: &Expr) -> Option<&str> {
+fn callee_name(e: &ExprNode) -> Option<&str> {
     match &e.kind {
         ExprKind::Name(n) => {
             let (primary, fallback) = n.candidates();
@@ -170,11 +170,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Every string `e` can evaluate to, when all of them are known.
-    fn resolve_include_paths(&self, e: &Expr, locals: &Locals) -> Option<Vec<String>> {
+    fn resolve_include_paths(&self, e: &ExprNode, locals: &Locals) -> Option<Vec<String>> {
         self.resolve_paths_at(e, locals, 0)
     }
 
-    fn file_constant_initializer(&self, e: &Expr) -> Option<&Expr> {
+    fn file_constant_initializer(&self, e: &ExprNode) -> Option<&ExprNode> {
         let key = match &e.kind {
             ExprKind::Name(n) if !(n.starts_with("__") && n.ends_with("__")) => {
                 short_name(n).to_string()
@@ -196,7 +196,7 @@ impl<'a> Checker<'a> {
         self.include_constant_initializers.get(&key)
     }
 
-    fn resolve_paths_at(&self, e: &Expr, locals: &Locals, depth: usize) -> Option<Vec<String>> {
+    fn resolve_paths_at(&self, e: &ExprNode, locals: &Locals, depth: usize) -> Option<Vec<String>> {
         syntax::stack::guard(|| {
             if let Some(init) = self.file_constant_initializer(e) {
                 return (depth < MAX_CONSTANT_DEPTH)
@@ -324,7 +324,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_include_path(
         &mut self,
         (construct, identifier_prefix): (&'static str, &'static str),
-        path_expr: &Expr,
+        path_expr: &ExprNode,
         locals: &Locals,
         span: Span,
     ) {
@@ -355,7 +355,7 @@ impl<'a> Checker<'a> {
     /// file sets it to.
     pub(crate) fn collect_include_guards(
         &self,
-        program: &[Stmt],
+        program: &[StmtNode],
     ) -> (FxHashSet<String>, Vec<String>) {
         let locals = self.new_locals();
         let mut guarded = FxHashSet::default();
@@ -394,8 +394,8 @@ pub(crate) fn default_include_dirs() -> Vec<String> {
 }
 
 enum IncludeCall<'e> {
-    Guard(&'e Expr),
-    SetIncludePath(&'e Expr),
+    Guard(&'e ExprNode),
+    SetIncludePath(&'e ExprNode),
 }
 
 /// Hands every `GUARD_FUNCTIONS`, `set_include_path()` and
@@ -404,7 +404,7 @@ enum IncludeCall<'e> {
 struct GuardArgs<'o>(&'o mut dyn FnMut(IncludeCall));
 
 impl<'ast> Visitor<'ast> for GuardArgs<'_> {
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         syntax::stack::guard(|| {
             if let ExprKind::Call(callee, args) = &e.kind
                 && let Some(name) = callee_name(callee)

@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
             if p.type_hint.is_none()
                 && matches!(
                     default,
-                    Expr {
+                    ExprNode {
                         kind: ExprKind::Literal(Literal::Null),
                         ..
                     }

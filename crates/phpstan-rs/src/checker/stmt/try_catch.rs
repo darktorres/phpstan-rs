@@ -44,9 +44,9 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_try(
         &mut self,
-        body: &[Stmt],
+        body: &[StmtNode],
         catches: &[CatchClause],
-        finally: &Option<Vec<Stmt>>,
+        finally: &Option<Vec<StmtNode>>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -344,7 +344,7 @@ impl<'a> Checker<'a> {
         )
     }
 
-    pub(crate) fn check_throw(&mut self, e: &Expr, locals: &mut Locals, label: &str) {
+    pub(crate) fn check_throw(&mut self, e: &ExprNode, locals: &mut Locals, label: &str) {
         // `throw` only accepts a real Throwable - a real,
         // unconditional PHP fatal error otherwise, independent of
         // anything about the thrown value at runtime.
@@ -395,7 +395,7 @@ impl<'a> Checker<'a> {
 /// Every `throw` in `stmts` with whether it's a direct statement of
 /// `stmts` itself, not reaching into nested functions, classes, or
 /// nested `catch` clauses (checked on their own).
-fn collect_throws(stmts: &[Stmt]) -> Vec<(&Expr, Span, bool)> {
+fn collect_throws(stmts: &[StmtNode]) -> Vec<(&ExprNode, Span, bool)> {
     let mut throws = Throws {
         out: Vec::new(),
         top: true,
@@ -405,13 +405,13 @@ fn collect_throws(stmts: &[Stmt]) -> Vec<(&Expr, Span, bool)> {
 }
 
 struct Throws<'s> {
-    out: Vec<(&'s Expr, Span, bool)>,
+    out: Vec<(&'s ExprNode, Span, bool)>,
     // Whether the statement being visited is directly in the list.
     top: bool,
 }
 
 impl<'s> Visitor<'s> for Throws<'s> {
-    fn visit_stmt(&mut self, stmt: &'s Stmt) {
+    fn visit_stmt(&mut self, stmt: &'s StmtNode) {
         let top = std::mem::replace(&mut self.top, false);
         match &stmt.kind {
             StmtKind::Throw(e) => {
@@ -430,7 +430,7 @@ impl<'s> Visitor<'s> for Throws<'s> {
         self.top = top;
     }
 
-    fn visit_expr(&mut self, e: &'s Expr) {
+    fn visit_expr(&mut self, e: &'s ExprNode) {
         if let ExprKind::Throw(inner) = &e.kind {
             self.out.push((inner, e.span, false));
         }
@@ -438,7 +438,7 @@ impl<'s> Visitor<'s> for Throws<'s> {
     }
 }
 
-fn mentions_variable(e: &Expr, name: &str) -> bool {
+fn mentions_variable(e: &ExprNode, name: &str) -> bool {
     any_expr_in_scope(
         e,
         |e| matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name),

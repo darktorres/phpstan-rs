@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use syntax::FileFacts;
-use syntax::ast::Stmt;
+use syntax::ast::StmtNode;
 use syntax::declarations::{Declared, for_each_declaration_in};
 use syntax::name::Name;
 
@@ -62,7 +62,7 @@ pub(crate) fn declares_in_expressions(facts: &FileFacts) -> bool {
 /// (`anonymous_class_decls`) can find, and whether its declarations can be
 /// inside expressions.
 pub(super) fn collect(
-    ast: &[Stmt],
+    ast: &[StmtNode],
     path: &Path,
     is_stub: bool,
     origin: &Origin,

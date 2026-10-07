@@ -104,7 +104,7 @@ impl<'a> Checker<'a> {
         !ty.is_mixed() && self.registry.is_super_type_of(&logger, ty) == types::TrinaryLogic::Yes
     }
 
-    pub(crate) fn check_psr3_call(&mut self, e: &Expr, locals: &Locals) {
+    pub(crate) fn check_psr3_call(&mut self, e: &ExprNode, locals: &Locals) {
         let (method, args) = match &e.kind {
             ExprKind::MethodCall(receiver, method, args, _) => {
                 let receiver_ty = self.infer_expr(receiver, locals);
@@ -201,8 +201,8 @@ impl<'a> Checker<'a> {
     fn check_psr3_message(
         &mut self,
         method: &str,
-        message: &Expr,
-        context: Option<&Expr>,
+        message: &ExprNode,
+        context: Option<&ExprNode>,
         context_ty: Option<&Type>,
         locals: &Locals,
     ) {
@@ -340,7 +340,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_risky_log_expr(&self, e: &Expr, locals: &Locals) -> bool {
+    fn is_risky_log_expr(&self, e: &ExprNode, locals: &Locals) -> bool {
         let e = e.peeled();
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
@@ -354,7 +354,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn is_risky_value(&self, e: &Expr, locals: &Locals) -> bool {
+    fn is_risky_value(&self, e: &ExprNode, locals: &Locals) -> bool {
         if matches!(e.kind, ExprKind::Literal(_)) {
             return false;
         }

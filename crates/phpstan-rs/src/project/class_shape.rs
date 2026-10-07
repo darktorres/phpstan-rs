@@ -29,7 +29,7 @@ const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 /// declared inside an expression, a function, a loop or a branch is, so
 /// these statements are all there is to look through - not every
 /// expression of every body, as `for_each_declaration` does.
-pub(super) fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>) {
+pub(super) fn collect_classes<'a>(stmts: &'a [StmtNode], out: &mut Vec<(String, &'a ClassDecl)>) {
     for stmt in stmts {
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::ClassDecl(c) if c.def.kind != ClassKind::Enum => {
@@ -58,7 +58,7 @@ fn is_doctrine_mapped(c: &ClassDef, ctx_names: &[String]) -> bool {
 }
 
 /// Whether `e` is `parent::method(...)`.
-fn is_parent_call(e: &Expr, method: &str) -> bool {
+fn is_parent_call(e: &ExprNode, method: &str) -> bool {
     matches!(
         &e.kind,
         ExprKind::StaticCall(StaticTarget::Name(target), called, _)
@@ -67,7 +67,7 @@ fn is_parent_call(e: &Expr, method: &str) -> bool {
 }
 
 /// Whether statement `stmt` is (or returns) `parent::method(...)`.
-fn stmt_is_parent_call(stmt: &Stmt, method: &str) -> bool {
+fn stmt_is_parent_call(stmt: &StmtNode, method: &str) -> bool {
     match &stmt.kind {
         StmtKind::Expression(e) => is_parent_call(e, method),
         StmtKind::Return(Some(e)) => is_parent_call(e, method),
@@ -75,7 +75,7 @@ fn stmt_is_parent_call(stmt: &Stmt, method: &str) -> bool {
     }
 }
 
-fn contains_parent_call(stmts: &[Stmt], method: &str) -> bool {
+fn contains_parent_call(stmts: &[StmtNode], method: &str) -> bool {
     any_expr_in_body(stmts, |e| is_parent_call(e, method))
 }
 

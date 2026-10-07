@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
     /// here to just the two real test-body functions (`describe`/
     /// `beforeEach`/etc. are structural grouping/hooks, never a test
     /// body of their own).
-    pub(crate) fn check_pest_risky_test(&mut self, name: &str, closure: &Expr, span: Span) {
+    pub(crate) fn check_pest_risky_test(&mut self, name: &str, closure: &ExprNode, span: Span) {
         if name != "it" && name != "test" {
             return;
         }
@@ -90,7 +90,7 @@ fn is_assertion_method_name(name: &str) -> bool {
 }
 
 /// Whether `e` is itself an assertion call.
-fn is_assertion(e: &Expr) -> bool {
+fn is_assertion(e: &ExprNode) -> bool {
     match &e.kind {
         ExprKind::MethodCall(_, method, _, _) => is_assertion_method_name(method),
         ExprKind::StaticCall(_, method, _) => is_assertion_method_name(method),
@@ -121,7 +121,7 @@ impl<'ast> Visitor<'ast> for Assertions {
 
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         if self.found || is_assertion(e) {
             self.found = true;
             return;
@@ -130,13 +130,13 @@ impl<'ast> Visitor<'ast> for Assertions {
     }
 }
 
-fn expr_has_assertion(e: &Expr) -> bool {
+fn expr_has_assertion(e: &ExprNode) -> bool {
     let mut search = Assertions::default();
     search.visit_expr(e);
     search.found
 }
 
-fn body_has_assertion(stmts: &[Stmt]) -> bool {
+fn body_has_assertion(stmts: &[StmtNode]) -> bool {
     let mut search = Assertions::default();
     walk_stmts(&mut search, stmts);
     search.found

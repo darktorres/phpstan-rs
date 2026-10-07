@@ -425,7 +425,7 @@ pub(crate) fn merge_scopes(
     // A condition alias only survives a merge point when both incoming
     // branches still
     // agree on the exact same stored condition - `Rc::ptr_eq` (not a
-    // deep `Expr` comparison) is a correct, cheap test for this: it's
+    // deep `ExprNode` comparison) is a correct, cheap test for this: it's
     // exactly true whenever both branches inherited the alias unchanged
     // from before the split (the overwhelmingly common case - the
     // assignment happened before an unrelated `if`/`else`, both forks
@@ -435,7 +435,7 @@ pub(crate) fn merge_scopes(
     // it on that side, so the key is simply absent there and this filter
     // drops it too) - no case needs comparing two independently-
     // constructed-but-textually-identical conditions from different
-    // branches, so no `Expr: PartialEq` bound is needed anywhere.
+    // branches, so no `ExprNode: PartialEq` bound is needed anywhere.
     *merged.condition_aliases_mut() = then_locals
         .condition_aliases()
         .iter()
@@ -467,7 +467,7 @@ pub(crate) fn merge_scopes(
     }
     // Same "both branches inherited the identical, unchanged alias"
     // dedup as `condition_aliases` above - a `QueryBuilder` alias has no
-    // separate target to intersect against, just the one stored `Rc<Expr>`.
+    // separate target to intersect against, just the one stored `Rc<ExprNode>`.
     *merged.query_builder_aliases_mut() = then_locals
         .query_builder_aliases()
         .iter()

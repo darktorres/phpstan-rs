@@ -1,6 +1,6 @@
 //! `textDocument/signatureHelp` - an active-parameter tooltip while
 //! typing inside a call's parens. A `Visitor` over the file: at each
-//! call-shaped `Expr` it asks whether the cursor is inside this call's own
+//! call-shaped `ExprNode` it asks whether the cursor is inside this call's own
 //! argument list, and if so, which argument.
 //!
 //! **Claim-and-clear, not overwrite-only-on-match.** Every call-shaped
@@ -35,7 +35,7 @@ use std::path::Path;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use syntax::ast::{Arg, ClassDecl, Expr, ExprKind, FunctionDecl, MethodDecl, Stmt};
+use syntax::ast::{Arg, ClassDecl, ExprKind, ExprNode, FunctionDecl, MethodDecl, StmtNode};
 use syntax::span::Span;
 use syntax::visit::{
     Visitor, walk_args, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl,
@@ -103,7 +103,7 @@ fn active_parameter(args: &[Arg], pos: u32) -> usize {
 struct Walker<'a> {
     registry: &'a Registry,
     pos: u32,
-    top_level_stmts: &'a [Stmt],
+    top_level_stmts: &'a [StmtNode],
     current_function: Option<FunctionDecl>,
     current_is_static: bool,
     /// The class whose body the walk is in; an anonymous class's
@@ -165,7 +165,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         self.current_function = previous;
     }
 
-    fn visit_expr(&mut self, expr: &'ast Expr) {
+    fn visit_expr(&mut self, expr: &'ast ExprNode) {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {

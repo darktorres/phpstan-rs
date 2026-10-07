@@ -4,7 +4,7 @@
 use super::super::*;
 use super::helpers::*;
 
-fn child_expr_count(e: &Expr) -> usize {
+fn child_expr_count(e: &ExprNode) -> usize {
     let mut count = 0;
     any_child_expr(e, |_| {
         count += 1;
@@ -13,7 +13,7 @@ fn child_expr_count(e: &Expr) -> usize {
     count
 }
 
-fn child_stmt_count(s: &Stmt) -> usize {
+fn child_stmt_count(s: &StmtNode) -> usize {
     let mut count = 0;
     any_child_stmt(s, |_| {
         count += 1;

@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
     /// from this point on, so the branch the probe guards can read it.
     fn check_existence_probe(
         &mut self,
-        operand: &Expr,
+        operand: &ExprNode,
         locals: &mut Locals,
         label: &str,
         (identifier_prefix, operator_description, verdict_fn): (&str, &str, NullProbeVerdictFn),
@@ -208,7 +208,7 @@ impl<'a> Checker<'a> {
     /// `check_expr_impl`'s own many internal `self.check_expr(...)`
     /// recursive calls needing to know about rule dispatch at all (see
     /// `rule`'s own module doc comment).
-    pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
+    pub(crate) fn check_expr(&mut self, e: &ExprNode, locals: &mut Locals, label: &str) -> Type {
         let outermost = self.open_infer_scope();
         let ty = self.check_expr_cached(e, locals, label);
         if outermost {
@@ -217,7 +217,7 @@ impl<'a> Checker<'a> {
         ty
     }
 
-    fn check_expr_cached(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
+    fn check_expr_cached(&mut self, e: &ExprNode, locals: &mut Locals, label: &str) -> Type {
         syntax::stack::guard(|| {
             let native = self
                 .records_expr_types()
@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
     /// `ArithmeticError`; a `clone`, a `yield` (the generator may be
     /// thrown into) or a pipe's call anything. A `match` records its own
     /// throw point, before its arms.
-    fn thrown_by(&mut self, e: &Expr, locals: &Locals) -> Option<Type> {
+    fn thrown_by(&mut self, e: &ExprNode, locals: &Locals) -> Option<Type> {
         let anything = || Type::object("Throwable".into(), Vec::new());
         // An offset of an `ArrayAccess` object calls one of its methods
         // (`array_access`).
@@ -284,7 +284,7 @@ impl<'a> Checker<'a> {
     /// `thrown_by` for what `e` does itself, beside an implicit call.
     fn thrown_by_itself(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         locals: &Locals,
         anything: impl Fn() -> Type,
     ) -> Option<Type> {
@@ -313,7 +313,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn dispatch_expr_rules(&mut self, e: &Expr, locals: &Locals, ty: &Type) {
+    fn dispatch_expr_rules(&mut self, e: &ExprNode, locals: &Locals, ty: &Type) {
         let rules = self.external_rules;
         let mut found = Vec::new();
         for rule in rules {
@@ -325,7 +325,7 @@ impl<'a> Checker<'a> {
         self.diagnostics.extend(found);
     }
 
-    fn check_expr_impl(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
+    fn check_expr_impl(&mut self, e: &ExprNode, locals: &mut Locals, label: &str) -> Type {
         // See `Checker::in_bare_statement_position`'s doc comment - taken,
         // not just read, so it reads `true` only for the exact top-level
         // expression `StmtKind::Expression` set it for, never for
@@ -2542,7 +2542,7 @@ impl<'a> Checker<'a> {
                 // Only special-cased when the first argument is literally
                 // a closure expression right here (not some arbitrary
                 // `Closure`-typed value) - the closure
-                // body needs to still be reachable as an `Expr` to
+                // body needs to still be reachable as an `ExprNode` to
                 // re-check with the rebound `$this`.
                 if resolved_class.as_deref() == Some("Closure")
                     && method == "bind"
@@ -4400,7 +4400,7 @@ impl<'a> Checker<'a> {
     /// its chain sees it: a nullsafe access earlier in the chain that met
     /// `null` skipped the rest of it, so that `null` isn't this link's.
     /// Anything else's type is its inferred one.
-    pub(crate) fn chain_link_type(&self, e: &Expr, locals: &Locals) -> Type {
+    pub(crate) fn chain_link_type(&self, e: &ExprNode, locals: &Locals) -> Type {
         if !matches!(
             e.kind,
             ExprKind::MethodCall(..)
@@ -4415,7 +4415,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn chain_link_type_uncached(&self, e: &Expr, locals: &Locals) -> Type {
+    fn chain_link_type_uncached(&self, e: &ExprNode, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 // What the method is looked up on is the receiver's object
@@ -4464,7 +4464,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
+    pub(crate) fn infer_expr(&self, e: &ExprNode, locals: &Locals) -> Type {
         // Inferring is `&self`, so nothing moves under one call: an
         // inference asked for outside an expression check remembers what it
         // finds of the operands for as long as it runs, as one inside does,
@@ -4533,7 +4533,7 @@ impl<'a> Checker<'a> {
         ty
     }
 
-    fn infer_expr_unguarded(&self, e: &Expr, locals: &Locals) -> Type {
+    fn infer_expr_unguarded(&self, e: &ExprNode, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
@@ -5048,7 +5048,7 @@ impl<'a> Checker<'a> {
     /// than the diagnostic-producing one.
     pub(crate) fn infer_closure_return_with_param_overrides(
         &self,
-        callback: &Expr,
+        callback: &ExprNode,
         param_overrides: &[Type],
         locals: &Locals,
     ) -> Option<Type> {
@@ -5111,7 +5111,7 @@ impl<'a> Checker<'a> {
                 // body at all.
                 match body.as_slice() {
                     [
-                        Stmt {
+                        StmtNode {
                             kind: StmtKind::Return(Some(e)),
                             ..
                         },
@@ -5204,7 +5204,7 @@ impl<'a> Checker<'a> {
     /// top-level/method-parameter gap this method's own trace found,
     /// disclosed rather than silently dropped (see this item's own
     /// PROGRESS notes).
-    pub(crate) fn collect_default_and_const_value_member_refs(&mut self, program: &[Stmt]) {
+    pub(crate) fn collect_default_and_const_value_member_refs(&mut self, program: &[StmtNode]) {
         for stmt in program {
             self.collect_member_ref_defaults_stmt(stmt);
         }
@@ -5226,14 +5226,14 @@ impl<'a> Checker<'a> {
     }
 
     /// Every declaration in `stmt`'s body, nested ones included.
-    fn collect_member_ref_defaults_stmt(&mut self, stmt: &Stmt) {
+    fn collect_member_ref_defaults_stmt(&mut self, stmt: &StmtNode) {
         syntax::visit::any_stmt_in_body(stmt, |s| {
             self.collect_member_ref_defaults_decl(s);
             false
         });
     }
 
-    fn collect_member_ref_defaults_decl(&mut self, stmt: &Stmt) {
+    fn collect_member_ref_defaults_decl(&mut self, stmt: &StmtNode) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
             StmtKind::ClassDecl(c) => {
@@ -5267,7 +5267,7 @@ impl<'a> Checker<'a> {
     /// holds arbitrary keys at runtime, which would otherwise collapse to
     /// the literal empty `[]` shape from the fallback alone, making every
     /// later `$details['key']` read look like a typo.
-    fn widen_coalesce_result(&self, l: &Expr, r_ty: Type, locals: &Locals) -> Type {
+    fn widen_coalesce_result(&self, l: &ExprNode, r_ty: Type, locals: &Locals) -> Type {
         // `$x ?? null` is a real, if unusual, no-op: if `$x` is null the
         // result is null either way, and otherwise the result is exactly
         // `$x` itself - so its type is exactly `$x`'s own type,
@@ -5335,7 +5335,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
+    pub(crate) fn infer_binary(
+        &self,
+        op: &BinOp,
+        l: &ExprNode,
+        r: &ExprNode,
+        locals: &Locals,
+    ) -> Type {
         match op {
             // `resolve_concat_type` is a full port of real PHPStan's
             // `InitializerExprTypeResolver::resolveConcatType`: real
@@ -5621,7 +5627,7 @@ impl<'a> Checker<'a> {
     /// shape's declared return type instead of `Mixed` - the same fix
     /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
     /// side.
-    fn call_fallback_return_type(&self, callee: &Expr, args: &[Arg], locals: &Locals) -> Type {
+    fn call_fallback_return_type(&self, callee: &ExprNode, args: &[Arg], locals: &Locals) -> Type {
         self.infer_expr(callee, locals)
             .callable_sig()
             .map_or(Type::mixed(), |sig| {
@@ -5641,9 +5647,9 @@ impl<'a> Checker<'a> {
     /// the receiver, the method's from the arguments).
     fn apply_self_out(
         &mut self,
-        recv: &Expr,
+        recv: &ExprNode,
         sig: &FunctionReflection,
-        resolved: &[Option<&Expr>],
+        resolved: &[Option<&ExprNode>],
         locals: &mut Locals,
         class: &str,
     ) {
@@ -5764,7 +5770,7 @@ impl<'a> Checker<'a> {
     /// A first-class callable's `Closure(...)` type: the named function's
     /// or method's signature, its own templates the closure's; a plain
     /// `Closure` when what it names isn't known.
-    fn first_class_callable_type(&self, inner: &Expr, locals: &Locals) -> Type {
+    fn first_class_callable_type(&self, inner: &ExprNode, locals: &Locals) -> Type {
         let Some(target) = self.first_class_callable_target(&inner.kind, locals) else {
             return Type::object("Closure".into(), Vec::new());
         };
@@ -5886,12 +5892,12 @@ impl<'a> Checker<'a> {
             scope.insert_var(&p.name, ty);
         }
         // Every `return` in the body, last first.
-        struct Returns<'ast>(Vec<&'ast Stmt>);
+        struct Returns<'ast>(Vec<&'ast StmtNode>);
         impl<'ast> syntax::visit::Visitor<'ast> for Returns<'ast> {
-            fn visit_expr(&mut self, _: &'ast Expr) {}
+            fn visit_expr(&mut self, _: &'ast ExprNode) {}
             fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
             fn visit_class_def(&mut self, _: &'ast ClassDef) {}
-            fn visit_stmt(&mut self, s: &'ast Stmt) {
+            fn visit_stmt(&mut self, s: &'ast StmtNode) {
                 syntax::visit::walk_stmt(self, s);
                 if matches!(s.kind, StmtKind::Return(_)) {
                     self.0.push(s);
@@ -5926,7 +5932,7 @@ impl<'a> Checker<'a> {
     fn arrow_fn_inferred_return(
         &self,
         params: &[Param],
-        body: &Expr,
+        body: &ExprNode,
         is_generator: bool,
         locals: &Locals,
         overrides: Option<&[Type]>,
@@ -5969,7 +5975,7 @@ impl<'a> Checker<'a> {
     /// the caller's ordinary `infer_expr` applies then.
     pub(crate) fn infer_closure_literal_in_context(
         &self,
-        arg: &Expr,
+        arg: &ExprNode,
         expected: &Type,
         locals: &Locals,
     ) -> Option<Type> {
@@ -6023,7 +6029,7 @@ impl<'a> Checker<'a> {
 /// Whether `e` is the literal `false` - used to scope
 /// `array_slice`/`array_reverse`'s `$preserve_keys` argument to exactly
 /// the default-matching case (omitted, or explicitly `false`).
-fn is_false_literal(e: &Expr) -> bool {
+fn is_false_literal(e: &ExprNode) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(false)))
 }
 
@@ -6031,7 +6037,7 @@ fn is_false_literal(e: &Expr) -> bool {
 /// `var_export()`'s dynamic-return-type narrowing to recognize its
 /// `$return` argument's default-matching-but-inverted case (explicitly
 /// `true`, unlike `$preserve_keys`'s "omitted or `false`" default).
-fn is_true_literal(e: &Expr) -> bool {
+fn is_true_literal(e: &ExprNode) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
 }
 
@@ -6050,8 +6056,8 @@ fn forwards_static_binding(target: &StaticTarget) -> bool {
     )
 }
 
-fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> Expr {
-    Expr {
+fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> ExprNode {
+    ExprNode {
         id: syntax::ast::SYNTHETIC_EXPR_ID,
         kind: ExprKind::StaticCall(
             target.clone(),
@@ -6068,7 +6074,7 @@ fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) 
 
 /// A synthetic `target::NAME` fetch, for a computed constant name whose
 /// possible values are known.
-fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
+fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> ExprNode {
     let kind = if name == "class" {
         ExprKind::ClassNameFetch(target.clone())
     } else {
@@ -6081,7 +6087,7 @@ fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
             },
         )
     };
-    Expr {
+    ExprNode {
         id: syntax::ast::SYNTHETIC_EXPR_ID,
         kind,
         span,
@@ -6133,7 +6139,7 @@ impl<'a> Checker<'a> {
     /// deprecation and internal-use problems.
     fn check_static_member_fetch(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         target: &StaticTarget,
         member: &str,
         is_property: bool,
@@ -6175,7 +6181,7 @@ impl<'a> Checker<'a> {
     /// the class name as written, absent for a receiver expression.
     fn static_member_of_class(
         &mut self,
-        e: &Expr,
+        e: &ExprNode,
         class: &str,
         written: Option<&QualifiedName>,
         member: &str,
@@ -6352,12 +6358,12 @@ impl<'a> Checker<'a> {
     /// locals, applied here across one arm's multiple conditions.
     fn narrow_match_arm_conditions(
         &self,
-        subject: &Expr,
-        conds: &[Expr],
+        subject: &ExprNode,
+        conds: &[ExprNode],
         base: &Locals,
         match_true: bool,
     ) -> Locals {
-        let narrow_one = |cond: &Expr| {
+        let narrow_one = |cond: &ExprNode| {
             let mut locals = base.clone();
             if match_true {
                 self.apply_narrowing(cond, &mut locals, true);
@@ -6422,7 +6428,7 @@ impl<'a> Checker<'a> {
     /// `inferred_constant_condition`) isn't attempted here yet, each
     /// with its own separate dedicated-check family this could equally
     /// reach into later.
-    fn condition_is_provably_true(&self, e: &Expr, locals: &Locals) -> bool {
+    fn condition_is_provably_true(&self, e: &ExprNode, locals: &Locals) -> bool {
         if self.inferred_constant_condition(e, locals) == Some(true) {
             return true;
         }
@@ -6608,7 +6614,7 @@ impl<'a> Checker<'a> {
 /// (e.g. a plain `$nullableVar->prop`) - that's a real mistake elsewhere,
 /// and re-widening its result to include `Null` here would risk masking
 /// further bugs rather than fixing anything.
-pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
+pub(crate) fn postfix_chain_has_nullsafe(base: &ExprNode) -> bool {
     let base = base.peeled();
     syntax::stack::guard(|| match &base.kind {
         ExprKind::PropertyAccess(inner, _, operator)

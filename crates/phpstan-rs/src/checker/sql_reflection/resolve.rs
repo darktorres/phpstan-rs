@@ -36,7 +36,8 @@
 use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{
-    Expr, ObjectNamePart, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator, Value,
+    Expr, ObjectNamePart, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator,
+    Value,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;

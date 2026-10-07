@@ -265,7 +265,7 @@ impl Relation<'_> {
                 // A template is accepted as its bound is, before the union
                 // arms below take the bound apart (`TNodeType of
                 // PreInc|PreDec` where a `Node` is expected, each member
-                // extending `Node` through `Expr`).
+                // extending `Node` through `ExprNode`).
                 (Repr::TemplateParam(tp), _) => self.accepts_type(&tp.bound, sup),
                 // An unresolved conditional, on either side, is its two
                 // branches' union. Before the arms that take `sub` apart: a

@@ -394,12 +394,12 @@ canonical_struct!(ClosureUse { name, by_ref });
 
 canonical_enum!(InstanceofTarget {
     Name(name),
-    Expr(expr),
+    ExprNode(expr),
 });
 
 canonical_enum!(StaticTarget {
     Name(name),
-    Expr(expr),
+    ExprNode(expr),
 });
 
 canonical_struct!(TypeHint { kind, span });

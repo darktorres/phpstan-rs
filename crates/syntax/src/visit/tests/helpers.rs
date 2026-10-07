@@ -2,7 +2,7 @@ use super::super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 
-pub(super) fn parse_expr(src: &str) -> Expr {
+pub(super) fn parse_expr(src: &str) -> ExprNode {
     let tokens = Lexer::new(&format!("<?php {src};")).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     match program.into_iter().next().unwrap().into_kind() {
@@ -11,7 +11,7 @@ pub(super) fn parse_expr(src: &str) -> Expr {
     }
 }
 
-pub(super) fn parse_stmt(src: &str) -> Stmt {
+pub(super) fn parse_stmt(src: &str) -> StmtNode {
     let tokens = Lexer::new(&format!("<?php {src}")).tokenize_with_spans();
     Parser::new(tokens)
         .parse_program()

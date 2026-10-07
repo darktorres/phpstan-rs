@@ -153,7 +153,7 @@ impl<'a> Checker<'a> {
         let mut premature_reads: Vec<(String, Span)> = Vec::new();
         let mut walk = |checker: &Checker,
                         method: &str,
-                        body: &[Stmt],
+                        body: &[StmtNode],
                         labels: &[GotoLabel],
                         entry: PropertyInitState| {
             let mut ctx = PropertyInitCtx {
@@ -228,10 +228,10 @@ fn trackable(c: &ClassDef, p: &PropertyDecl) -> bool {
 }
 
 /// Whether `body` contains `unset($this->prop)` anywhere.
-fn unsets_this_property(body: &[Stmt]) -> bool {
+fn unsets_this_property(body: &[StmtNode]) -> bool {
     struct Finder(bool);
     impl<'ast> Visitor<'ast> for Finder {
-        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
             if let StmtKind::Unset(targets) = &stmt.kind
                 && targets.iter().any(
                     |t| matches!(&t.kind, ExprKind::PropertyAccess(base, _, _) if is_this(base)),
@@ -251,7 +251,7 @@ fn unsets_this_property(body: &[Stmt]) -> bool {
     finder.0
 }
 
-fn is_this(e: &Expr) -> bool {
+fn is_this(e: &ExprNode) -> bool {
     matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
 }
 

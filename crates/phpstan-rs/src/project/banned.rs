@@ -148,7 +148,7 @@ impl<'a> Walker<'a> {
     }
 
     /// The constructs `e` itself is; its children are walked after.
-    fn expr_itself(&mut self, e: &Expr) {
+    fn expr_itself(&mut self, e: &ExprNode) {
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 if let ExprKind::Name(name) = &callee.kind {
@@ -325,7 +325,7 @@ fn hint_mentions(hint: &TypeHint, name: &str) -> bool {
 }
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         match &stmt.kind {
             StmtKind::Switch { .. } => {
                 self.ban(BannedConstruct::Switch, stmt.span, "switch".to_string())
@@ -372,7 +372,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         walk_stmt(self, stmt);
     }
 
-    fn visit_expr(&mut self, e: &'ast Expr) {
+    fn visit_expr(&mut self, e: &'ast ExprNode) {
         self.expr_itself(e);
         if let ExprKind::NewAnonymousClass(class) = &e.kind {
             self.classes

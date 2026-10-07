@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use diagnostics::Diagnostic;
 use syntax::ParsedFile;
-use syntax::ast::{ClassDef, FunctionDecl, Param, Stmt, StmtKind};
+use syntax::ast::{ClassDef, FunctionDecl, Param, StmtKind, StmtNode};
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_class_def, walk_function_decl, walk_stmt};
 
@@ -777,13 +777,13 @@ fn declaring(class: &str) -> String {
 }
 
 /// The span of the name of the class `fqn` declares in `stmts`.
-fn class_name_span(stmts: &[Stmt], fqn: &str) -> Option<Span> {
+fn class_name_span(stmts: &[StmtNode], fqn: &str) -> Option<Span> {
     struct Named<'a> {
         fqn: &'a str,
         found: Option<Span>,
     }
     impl<'ast> Visitor<'ast> for Named<'_> {
-        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
             if let StmtKind::ClassDecl(decl) = &stmt.kind
                 && self.found.is_none()
                 && decl.fq_name().eq_ignore_ascii_case(self.fqn)
@@ -884,7 +884,7 @@ impl<'a> Finder<'a> {
 }
 
 impl<'ast> Visitor<'ast> for Finder<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
         if let StmtKind::ClassDecl(decl) = &stmt.kind
             && self.class.is_none()
         {

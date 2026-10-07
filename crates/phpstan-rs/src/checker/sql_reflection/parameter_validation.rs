@@ -46,7 +46,7 @@ use crate::checker::sql_reflection::query_builder::{
     param_key_from_expr, value_is_confidently_not_an_integer,
 };
 use crate::checker::{Checker, Locals};
-use syntax::ast::{Arg, Expr, ExprKind};
+use syntax::ast::{Arg, ExprKind, ExprNode};
 use syntax::span::Span;
 use types::Type;
 
@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
         &mut self,
         class: &str,
         method: &str,
-        recv: &Expr,
+        recv: &ExprNode,
         args: &[Arg],
         locals: &Locals,
         span: Span,
