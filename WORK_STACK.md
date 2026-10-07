@@ -250,8 +250,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   retains an `Arc<SyntaxTree>` instead of only a statement vector, keeping the
   file-local source/name/span owner available for IDs after a context reparse
   (`90acb6ac`, unvalidated). Syntax depends on `la-arena` with typed
-  `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are now named
-  (`6611157d`), but are not yet owned or populated by the parser. The IDs target
+  `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are named
+  (`6611157d`), and typed aliases now also name the function/method/class/
+  closure payload arenas and the argument/array-item/parameter/match-arm/
+  attribute list arenas (`6e5a6382`). None are yet owned or populated by the
+  parser. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
   and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
   return those explicit node values (`36d608ba`), and AST child fields use the
