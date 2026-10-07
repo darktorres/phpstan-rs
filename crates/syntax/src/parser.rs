@@ -72,11 +72,10 @@ pub struct Parser<'a> {
     // doc comments are on.
     pub(crate) line_index: Arc<LineIndex>,
     tracks_name_ids: bool,
-    // The next indices to allocate when each node is committed to its arena.
-    pub(crate) next_expr_id: std::cell::Cell<u32>,
-    pub(crate) next_stmt_id: std::cell::Cell<u32>,
     // Spans are parallel to node indices. Interpolation fragments have a
-    // non-zero base and append their newly parsed spans to their parent.
+    // non-zero base and append their newly parsed spans to their parent. The
+    // span vector length is the local arena length and therefore the source
+    // of the next dense ID; no separate counters can drift out of alignment.
     pub(crate) expr_span_base: u32,
     pub(crate) stmt_span_base: u32,
     node_arenas: std::cell::RefCell<NodeArenas>,
@@ -255,8 +254,6 @@ impl<'a> Parser<'a> {
             last_span: Span::default(),
             line_index,
             tracks_name_ids,
-            next_expr_id: std::cell::Cell::new(0),
-            next_stmt_id: std::cell::Cell::new(0),
             expr_span_base: 0,
             stmt_span_base: 0,
             node_arenas: std::cell::RefCell::new(node_arenas),
@@ -622,19 +619,23 @@ impl Parser<'_> {
         }
     }
 
-    /// Reserves the index the next expression will have in its typed arena.
+    /// Returns the index the next expression will have in its typed arena.
     pub(crate) fn expr_id(&self) -> ExprId {
-        let id = self.next_expr_id.get();
-        self.next_expr_id
-            .set(id.checked_add(1).expect("expression arena exhausted"));
+        let local_len = self.node_arenas.borrow().expr_spans.len();
+        let id = self
+            .expr_span_base
+            .checked_add(u32::try_from(local_len).expect("expression arena exhausted"))
+            .expect("expression arena exhausted");
         ExprId::from_raw(la_arena::RawIdx::from_u32(id))
     }
 
-    /// Reserves the index the next statement will have in its typed arena.
+    /// Returns the index the next statement will have in its typed arena.
     pub(crate) fn stmt_id(&self) -> StmtId {
-        let id = self.next_stmt_id.get();
-        self.next_stmt_id
-            .set(id.checked_add(1).expect("statement arena exhausted"));
+        let local_len = self.node_arenas.borrow().stmt_spans.len();
+        let id = self
+            .stmt_span_base
+            .checked_add(u32::try_from(local_len).expect("statement arena exhausted"))
+            .expect("statement arena exhausted");
         StmtId::from_raw(la_arena::RawIdx::from_u32(id))
     }
 
