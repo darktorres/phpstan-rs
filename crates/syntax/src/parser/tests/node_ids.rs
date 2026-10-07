@@ -60,3 +60,33 @@ fn statements_and_expressions_have_dense_typed_ids() {
         assert_eq!(parsed.expr_span(*id), Some(*span));
     }
 }
+
+#[test]
+fn reused_arenas_restart_ids_and_keep_every_node_span_aligned() {
+    let first = crate::parse("<?php $old = 1; if ($old) { echo $old; }").unwrap();
+    let mut scratch = first.into_node_arenas();
+    let parsed = crate::parse_watching_with_scratch(
+        "<?php $new = 2; if ($new) { echo $new; }",
+        None,
+        None,
+        &mut scratch,
+    )
+    .unwrap();
+
+    let mut ids = Ids::default();
+    crate::visit::walk_stmts(&mut ids, &parsed.stmts);
+    ids.statements
+        .sort_by_key(|(id, _)| u32::from(id.into_raw()));
+    ids.expressions
+        .sort_by_key(|(id, _)| u32::from(id.into_raw()));
+    assert_eq!(parsed.stmt_count(), ids.statements.len());
+    assert_eq!(parsed.expr_count(), ids.expressions.len());
+    for (expected, (id, span)) in ids.statements.iter().enumerate() {
+        assert_eq!(u32::from(id.into_raw()) as usize, expected);
+        assert_eq!(parsed.stmt_span(*id), Some(*span));
+    }
+    for (expected, (id, span)) in ids.expressions.iter().enumerate() {
+        assert_eq!(u32::from(id.into_raw()) as usize, expected);
+        assert_eq!(parsed.expr_span(*id), Some(*span));
+    }
+}
