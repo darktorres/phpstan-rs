@@ -73,10 +73,11 @@ pub struct Lexer<'a> {
     // repeats its identifiers and variables, and a repeat is found here
     // without the interner's lock. Held for as long as the lexer is, so
     // the names it returns are those the interner holds for the text.
-    names: hashbrown::HashTable<(u64, Name, u32, NameId)>,
+    names: hashbrown::HashTable<(u64, Name, u32, Option<NameId>)>,
     // The distinct names in stable first-use order, for the parsed file's
     // compact `NameId` table.
     file_names: Vec<Name>,
+    track_file_names: bool,
     // The spellings whose mention the file's facts hold.
     watch: Option<&'static WatchList>,
 }
@@ -458,6 +459,7 @@ impl<'a> Lexer<'a> {
             interner: Interner::global(),
             names: hashbrown::HashTable::new(),
             file_names: Vec::new(),
+            track_file_names: true,
             watch: None,
         }
     }
@@ -495,7 +497,7 @@ impl<'a> Lexer<'a> {
         name
     }
 
-    fn name_and_bits(&mut self, text: &str) -> (Name, u32, NameId) {
+    fn name_and_bits(&mut self, text: &str) -> (Name, u32, Option<NameId>) {
         let hash = crate::name::text_hash(text);
         if let Some((_, name, bits, id)) = self
             .names
@@ -515,10 +517,14 @@ impl<'a> Lexer<'a> {
             None => self.interner.name_hashed(text, hash),
         };
         let bits = self.watch.map_or(0, |watch| watch.bits(text));
-        let id = crate::name::name_id(self.file_names.len());
+        let id = self
+            .track_file_names
+            .then(|| crate::name::name_id(self.file_names.len()));
         self.names
             .insert_unique(hash, (hash, name.clone(), bits, id), |(h, _, _, _)| *h);
-        self.file_names.push(name.clone());
+        if self.track_file_names {
+            self.file_names.push(name.clone());
+        }
         (name, bits, id)
     }
 
@@ -528,7 +534,16 @@ impl<'a> Lexer<'a> {
             .find(hash, |(entry_hash, entry_name, _, _)| {
                 *entry_hash == hash && entry_name == name
             })
-            .map(|(_, _, _, id)| *id)
+            .and_then(|(_, _, _, id)| *id)
+    }
+
+    pub(crate) fn without_file_names(mut self) -> Self {
+        self.track_file_names = false;
+        self
+    }
+
+    pub(crate) fn tracks_file_names(&self) -> bool {
+        self.track_file_names
     }
 
     /// Notes the spellings of `watch` in the facts of the file.

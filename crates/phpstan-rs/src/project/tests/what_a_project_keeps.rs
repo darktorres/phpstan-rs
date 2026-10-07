@@ -65,6 +65,7 @@ fn a_dropped_project_tree_returns_arenas_for_the_next_parse() {
     .unwrap();
 
     assert!(reparsed.source.is_empty());
+    assert!(reparsed.names.is_empty());
     assert!(reparsed.arenas.expr_spans.capacity() >= expr_capacity);
     assert!(reparsed.arenas.stmt_spans.capacity() >= stmt_capacity);
 }

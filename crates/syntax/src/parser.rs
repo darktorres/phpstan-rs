@@ -71,6 +71,7 @@ pub struct Parser<'a> {
     // The file's lines, which the parser asks about the lines tokens and
     // doc comments are on.
     pub(crate) line_index: Arc<LineIndex>,
+    tracks_name_ids: bool,
     // The next indices to allocate when each node is committed to its arena.
     pub(crate) next_expr_id: std::cell::Cell<u32>,
     pub(crate) next_stmt_id: std::cell::Cell<u32>,
@@ -223,18 +224,25 @@ impl<'a> Parser<'a> {
         mut node_arenas: NodeArenas,
     ) -> Parser<'a> {
         let line_index = lexer.line_index();
+        let tracks_name_ids = lexer.tracks_file_names();
         node_arenas.clear();
-        Parser::with_supply_and_node_arenas(Supply::Lexer(Box::new(lexer)), line_index, node_arenas)
+        Parser::with_supply_and_node_arenas(
+            Supply::Lexer(Box::new(lexer)),
+            line_index,
+            node_arenas,
+            tracks_name_ids,
+        )
     }
 
     fn with_supply(supply: Supply<'a>, line_index: Arc<LineIndex>) -> Parser<'a> {
-        Self::with_supply_and_node_arenas(supply, line_index, NodeArenas::default())
+        Self::with_supply_and_node_arenas(supply, line_index, NodeArenas::default(), true)
     }
 
     fn with_supply_and_node_arenas(
         supply: Supply<'a>,
         line_index: Arc<LineIndex>,
         node_arenas: NodeArenas,
+        tracks_name_ids: bool,
     ) -> Parser<'a> {
         let mut parser = Parser {
             supply: std::cell::RefCell::new(supply),
@@ -246,6 +254,7 @@ impl<'a> Parser<'a> {
             last_end: 0,
             last_span: Span::default(),
             line_index,
+            tracks_name_ids,
             next_expr_id: std::cell::Cell::new(0),
             next_stmt_id: std::cell::Cell::new(0),
             expr_span_base: 0,

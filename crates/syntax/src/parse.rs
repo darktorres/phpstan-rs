@@ -19,6 +19,7 @@ pub struct ParsedFile {
     /// as the tree moves to typed arenas.
     pub source: Box<[u8]>,
     /// The distinct names encountered in the file, in first-use order.
+    /// Empty when the transient-scratch entry point is used.
     pub names: Box<[Name]>,
     pub stmts: Vec<StmtNode>,
     /// The file's typed node storage and their parallel span tables.
@@ -56,6 +57,7 @@ impl ParsedFile {
     }
 
     /// Resolves a file-local name id to the shared interned name.
+    /// Returns `None` when the transient-scratch entry point omitted the table.
     pub fn name(&self, id: NameId) -> Option<&Name> {
         self.names.get(u32::from(id.into_raw()) as usize)
     }
@@ -187,9 +189,9 @@ pub fn parse_watching_with_scratch<'a>(
 
 /// Parses a file whose tree is used only while its products are collected.
 /// It reuses `scratch`, returns its arenas with the parsed file on success,
-/// and restores them to `scratch` on a parse error. The source bytes are
-/// not copied into `ParsedFile::source`; the caller must not retain the tree
-/// or use its source-slice accessors.
+/// and restores them to `scratch` on a parse error. It does not copy the
+/// source bytes or retain the file's `NameId` table; the caller must not
+/// retain the tree or use its source/name accessors.
 pub fn parse_watching_transient_with_scratch<'a>(
     source: impl Into<Source<'a>>,
     names: Option<&mut NameCache>,
@@ -206,11 +208,11 @@ fn parse_watching_in_arenas<'a>(
     watch: Option<&'static WatchList>,
     arenas: NodeArenas,
     compact_arenas: bool,
-    retain_source: bool,
+    retain_file_data: bool,
     mut scratch: Option<&mut NodeArenas>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
-    let source_bytes: Box<[u8]> = if retain_source {
+    let source_bytes: Box<[u8]> = if retain_file_data {
         match source {
             Source::Text(text) => text.as_bytes().into(),
             Source::Bytes(bytes) => bytes.into(),
@@ -226,6 +228,11 @@ fn parse_watching_in_arenas<'a>(
     let lexer = match names {
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
+    };
+    let lexer = if retain_file_data {
+        lexer
+    } else {
+        lexer.without_file_names()
     };
     let mut parser = Parser::from_lexer_with_node_arenas(lexer, arenas);
     let parsed = parser.parse_program();
@@ -431,11 +438,15 @@ mod tests {
     }
 
     #[test]
-    fn transient_scratch_parse_does_not_copy_source_bytes() {
+    fn transient_scratch_parse_omits_source_and_file_name_table() {
         let mut scratch = NodeArenas::default();
-        let parsed =
-            parse_watching_transient_with_scratch(b"<?php $value = 1;", None, None, &mut scratch)
-                .unwrap();
+        let parsed = parse_watching_transient_with_scratch(
+            b"<?php $object->member; $text = \"{$object->nested}\";",
+            None,
+            None,
+            &mut scratch,
+        )
+        .unwrap();
 
         assert!(parsed.source.is_empty());
         assert!(
@@ -443,8 +454,25 @@ mod tests {
                 .source_slice(crate::span::Span { start: 0, end: 5 })
                 .is_none()
         );
-        assert!(!parsed.names.is_empty());
+        assert!(parsed.names.is_empty());
         assert!(parsed.expr_count() > 0);
         assert!(parsed.stmt_count() > 0);
+
+        struct NoNameIds;
+        impl<'ast> crate::visit::Visitor<'ast> for NoNameIds {
+            fn visit_expr(&mut self, expr: &'ast crate::ast::ExprNode) {
+                match &expr.kind {
+                    crate::ast::ExprKind::PropertyAccess(_, ident, _) => {
+                        assert!(ident.name_id.is_none());
+                    }
+                    crate::ast::ExprKind::MethodCall(_, ident, _, _) => {
+                        assert!(ident.name_id.is_none());
+                    }
+                    _ => {}
+                }
+                crate::visit::walk_expr(self, expr);
+            }
+        }
+        crate::visit::walk_stmts(&mut NoNameIds, &parsed.stmts);
     }
 }

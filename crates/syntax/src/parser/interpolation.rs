@@ -30,6 +30,11 @@ impl Parser<'_> {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
                     let lexer = Lexer::fragment(&src, frag_base);
+                    let lexer = if self.tracks_name_ids {
+                        lexer
+                    } else {
+                        lexer.without_file_names()
+                    };
                     let mut sub = Parser::from_lexer(lexer);
                     sub.line_index = Arc::clone(&self.line_index);
                     // The fragment's names are read in the namespace and
