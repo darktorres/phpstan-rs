@@ -225,7 +225,7 @@ impl Parser<'_> {
                     // follows), leaving `name` with a trailing separator
                     // already - trimming it avoids doubling up below.
                     let group_prefix = name.trim_end_matches('\\');
-                    let mut imports = Vec::new();
+                    let imports_start = self.use_import_scratch.len();
                     while !self.check(&Token::RBrace) {
                         // Real PHP only allows a per-member `function`/
                         // `const` marker when the outer `use` itself was
@@ -247,7 +247,7 @@ impl Parser<'_> {
                         } else {
                             None
                         };
-                        imports.push(UseImport {
+                        self.use_import_scratch.push(UseImport {
                             path: self.use_path(&format!("{group_prefix}\\{member}")),
                             written: self.ident(member, member_span),
                             alias,
@@ -262,7 +262,10 @@ impl Parser<'_> {
                     }
                     self.expect(&Token::RBrace)?;
                     self.expect_semicolon()?;
-                    let imports = self.node_arenas.borrow_mut().alloc_use_imports(imports);
+                    let imports = self
+                        .node_arenas
+                        .borrow_mut()
+                        .alloc_use_imports(self.use_import_scratch.drain(imports_start..));
                     return Ok(self.stmt(StmtKind::Use(imports), start));
                 }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
@@ -270,12 +273,13 @@ impl Parser<'_> {
                 } else {
                     None
                 };
-                let mut imports = vec![UseImport {
+                let imports_start = self.use_import_scratch.len();
+                self.use_import_scratch.push(UseImport {
                     path: self.use_path(&name),
                     written: self.ident(name, name_span),
                     alias,
                     kind: default_kind,
-                }];
+                });
                 // `use foo\bar\baz, foo\bar\qux;` - a plain
                 // comma-separated list, distinct from the `use Foo\{...}`
                 // group form above (each member here is a full path of its
@@ -287,7 +291,7 @@ impl Parser<'_> {
                     } else {
                         None
                     };
-                    imports.push(UseImport {
+                    self.use_import_scratch.push(UseImport {
                         path: self.use_path(&path),
                         written: self.ident(path, path_span),
                         alias,
@@ -295,7 +299,10 @@ impl Parser<'_> {
                     });
                 }
                 self.expect_semicolon()?;
-                let imports = self.node_arenas.borrow_mut().alloc_use_imports(imports);
+                let imports = self
+                    .node_arenas
+                    .borrow_mut()
+                    .alloc_use_imports(self.use_import_scratch.drain(imports_start..));
                 self.stmt(StmtKind::Use(imports), start)
             }
             Token::Keyword(Keyword::Const) => {

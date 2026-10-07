@@ -56,13 +56,19 @@ impl Parser<'_> {
             None
         };
 
-        let mut implements = Vec::new();
+        let implements_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            implements.push(self.parse_name_reference());
+            self.qualified_name_scratch
+                .push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                implements.push(self.parse_name_reference());
+                self.qualified_name_scratch
+                    .push(self.parse_name_reference());
             }
         }
+        let implements = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_qualified_names(self.qualified_name_scratch.drain(implements_start..));
 
         let crate::parser::classes::ClassBody {
             properties,
@@ -71,13 +77,7 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = self.parse_class_body(false)?;
-        let (extends, implements) = {
-            let mut arenas = self.node_arenas.borrow_mut();
-            (
-                arenas.alloc_qualified_names([]),
-                arenas.alloc_qualified_names(implements),
-            )
-        };
+        let extends = self.node_arenas.borrow_mut().alloc_qualified_names([]);
 
         let def = ClassDef {
             kind: ClassKind::Enum,

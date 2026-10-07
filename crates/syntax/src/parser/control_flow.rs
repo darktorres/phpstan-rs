@@ -4,58 +4,69 @@ use crate::span::Span;
 use crate::token::{Keyword, Token};
 
 impl Parser<'_> {
-    pub(crate) fn parse_block(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_block(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
-        let stmts = self.parse_stmt_list_block()?;
+        let stmts = self.parse_stmt_list_block_range()?;
         Ok(self.stmt(StmtKind::Block(stmts), start))
     }
 
-    pub(crate) fn parse_braced_or_single(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_braced_or_single(&mut self) -> Result<StmtId, ParseError> {
         if self.check(&Token::LBrace) {
             self.parse_block()
         } else {
-            self.parse_statement()
+            Ok(self
+                .parse_statement(false)?
+                .expect("a single statement is not omitted by the stub rules"))
         }
     }
 
     /// A loop/if body, accepting either `{ ... }` / a bare statement, or
     /// PHP's alternative colon syntax (`: ... endwhile;` etc, common in
     /// templates that interleave HTML and PHP).
-    pub(crate) fn parse_body(&mut self, alt_end: Keyword) -> Result<Box<StmtNode>, ParseError> {
+    pub(crate) fn parse_body(&mut self, alt_end: Keyword) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         if self.check(&Token::Colon) {
             let stmts = self.parse_alt_block(alt_end)?;
-            Ok(Box::new(self.stmt(StmtKind::Block(stmts), start)))
+            Ok(self.stmt(StmtKind::Block(stmts), start))
         } else {
-            Ok(Box::new(self.parse_braced_or_single()?))
+            self.parse_braced_or_single()
         }
     }
 
-    pub(crate) fn parse_alt_block(&mut self, end_kw: Keyword) -> Result<Vec<StmtNode>, ParseError> {
+    pub(crate) fn parse_alt_block(&mut self, end_kw: Keyword) -> Result<StmtIdRange, ParseError> {
         self.expect(&Token::Colon)?;
-        let mut stmts = Vec::new();
-        while !self.check(&Token::Keyword(end_kw.clone())) && !self.at_eof() {
-            stmts.push(self.parse_statement()?);
+        let list_start = self.begin_stmt_list();
+        let parsed = (|| {
+            while !self.check(&Token::Keyword(end_kw.clone())) && !self.at_eof() {
+                if let Some(stmt) = self.parse_statement(true)? {
+                    self.push_stmt_list_item(stmt);
+                }
+            }
+            self.expect(&Token::Keyword(end_kw))?;
+            self.expect_semicolon()?;
+            Ok::<(), ParseError>(())
+        })();
+        if let Err(error) = parsed {
+            self.discard_stmt_list(list_start);
+            return Err(error);
         }
-        self.expect(&Token::Keyword(end_kw))?;
-        self.expect_semicolon()?;
-        Ok(stmts)
+        Ok(self.finish_stmt_list(list_start))
     }
 
-    pub(crate) fn parse_if(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_if(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip(); // if
         let cond = self.parse_paren_condition()?;
         if self.check(&Token::Colon) {
             return self.parse_if_alt(cond, start);
         }
-        let then_branch = Box::new(self.parse_braced_or_single()?);
+        let then_branch = self.parse_braced_or_single()?;
         let mut elseifs = Vec::new();
         while self.check(&Token::Keyword(Keyword::ElseIf)) {
             let elseif_start = self.current_pos();
             self.skip();
             let cond = self.parse_paren_condition()?;
-            let body = Box::new(self.parse_braced_or_single()?);
+            let body = self.parse_braced_or_single()?;
             elseifs.push(ElseIf {
                 cond,
                 body,
@@ -66,7 +77,7 @@ impl Parser<'_> {
             });
         }
         let else_branch = if self.eat(&Token::Keyword(Keyword::Else)) {
-            Some(Box::new(self.parse_braced_or_single()?))
+            Some(self.parse_braced_or_single()?)
         } else {
             None
         };
@@ -82,7 +93,7 @@ impl Parser<'_> {
     }
 
     /// `( expr )`.
-    fn parse_paren_condition(&mut self) -> Result<ExprNode, ParseError> {
+    fn parse_paren_condition(&mut self) -> Result<ExprId, ParseError> {
         self.expect(&Token::LParen)?;
         let cond = self.parse_expression()?;
         self.expect(&Token::RParen)?;
@@ -91,18 +102,14 @@ impl Parser<'_> {
 
     /// `if (c1): … elseif (c2): … else: … endif;`, the `if` keyword and its
     /// condition already read.
-    pub(crate) fn parse_if_alt(
-        &mut self,
-        cond: ExprNode,
-        start: u32,
-    ) -> Result<StmtNode, ParseError> {
-        let then_branch = Box::new(self.parse_alt_branch()?);
+    pub(crate) fn parse_if_alt(&mut self, cond: ExprId, start: u32) -> Result<StmtId, ParseError> {
+        let then_branch = self.parse_alt_branch()?;
         let mut elseifs = Vec::new();
         while self.check(&Token::Keyword(Keyword::ElseIf)) {
             let elseif_start = self.current_pos();
             self.skip();
             let cond = self.parse_paren_condition()?;
-            let body = Box::new(self.parse_alt_branch()?);
+            let body = self.parse_alt_branch()?;
             elseifs.push(ElseIf {
                 cond,
                 body,
@@ -113,7 +120,7 @@ impl Parser<'_> {
             });
         }
         let else_branch = if self.eat(&Token::Keyword(Keyword::Else)) {
-            Some(Box::new(self.parse_alt_branch()?))
+            Some(self.parse_alt_branch()?)
         } else {
             None
         };
@@ -132,10 +139,10 @@ impl Parser<'_> {
 
     /// One branch of the alternative `if` syntax: `:` and the statements up
     /// to the next `elseif`, `else` or `endif`, as a block.
-    fn parse_alt_branch(&mut self) -> Result<StmtNode, ParseError> {
+    fn parse_alt_branch(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Colon)?;
-        let mut stmts = Vec::new();
+        let list_start = self.begin_stmt_list();
         while !matches!(
             self.peek(),
             Token::Keyword(Keyword::ElseIf)
@@ -143,12 +150,20 @@ impl Parser<'_> {
                 | Token::Keyword(Keyword::EndIf)
         ) && !self.at_eof()
         {
-            stmts.push(self.parse_statement()?);
+            match self.parse_statement(true) {
+                Ok(Some(stmt)) => self.push_stmt_list_item(stmt),
+                Ok(None) => {}
+                Err(error) => {
+                    self.discard_stmt_list(list_start);
+                    return Err(error);
+                }
+            }
         }
+        let stmts = self.finish_stmt_list(list_start);
         Ok(self.stmt(StmtKind::Block(stmts), start))
     }
 
-    pub(crate) fn parse_while(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_while(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip();
         self.expect(&Token::LParen)?;
@@ -158,10 +173,10 @@ impl Parser<'_> {
         Ok(self.stmt(StmtKind::While { cond, body }, start))
     }
 
-    pub(crate) fn parse_do_while(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_do_while(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip();
-        let body = Box::new(self.parse_braced_or_single()?);
+        let body = self.parse_braced_or_single()?;
         self.expect(&Token::Keyword(Keyword::While))?;
         self.expect(&Token::LParen)?;
         let cond = self.parse_expression()?;
@@ -170,7 +185,7 @@ impl Parser<'_> {
         Ok(self.stmt(StmtKind::DoWhile { body, cond }, start))
     }
 
-    pub(crate) fn parse_for(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_for(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip();
         self.expect(&Token::LParen)?;
@@ -195,19 +210,21 @@ impl Parser<'_> {
     pub(crate) fn parse_expr_list_until(
         &mut self,
         stop: &Token,
-    ) -> Result<Vec<ExprNode>, ParseError> {
-        let mut exprs = Vec::new();
+    ) -> Result<ExprIdRange, ParseError> {
+        let exprs_start = self.begin_expr_id_list();
         if self.check(stop) {
-            return Ok(exprs);
+            return Ok(self.finish_expr_id_list(exprs_start));
         }
-        exprs.push(self.parse_expression()?);
+        let first = self.parse_expression()?;
+        self.push_expr_id_list_item(first);
         while self.eat(&Token::Comma) {
-            exprs.push(self.parse_expression()?);
+            let expr = self.parse_expression()?;
+            self.push_expr_id_list_item(expr);
         }
-        Ok(exprs)
+        Ok(self.finish_expr_id_list(exprs_start))
     }
 
-    pub(crate) fn parse_foreach(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_foreach(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip();
         self.expect(&Token::LParen)?;
@@ -225,12 +242,12 @@ impl Parser<'_> {
                 ));
             }
             if matches!(
-                first.kind,
+                &self.expr_node(first).kind,
                 ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
             ) {
                 return Err(ParseError::new(
                     "Cannot use list as key element".to_string(),
-                    first.span,
+                    self.expr_node(first).span,
                 ));
             }
             self.skip();
@@ -242,7 +259,7 @@ impl Parser<'_> {
             (None, by_ref_first, first_amp, first)
         };
         let is_pattern = matches!(
-            value.kind,
+            &self.expr_node(value).kind,
             ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
         );
         if by_ref && is_pattern {
@@ -257,9 +274,9 @@ impl Parser<'_> {
         let body = self.parse_body(Keyword::EndForeach)?;
         Ok(self.stmt(
             StmtKind::Foreach {
-                subject: Box::new(subject),
-                key: key.map(Box::new),
-                value: Box::new(value),
+                subject,
+                key,
+                value,
                 by_ref,
                 body,
             },
@@ -267,18 +284,21 @@ impl Parser<'_> {
         ))
     }
 
-    pub(crate) fn parse_try(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_try(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip(); // try
-        let body = self.parse_stmt_list_block()?;
+        let body = self.parse_stmt_list_block_range()?;
 
         let mut catches = Vec::new();
         while self.eat(&Token::Keyword(Keyword::Catch)) {
             let catch_start = self.previous_end();
             self.expect(&Token::LParen)?;
-            let mut types = vec![self.parse_name_reference()];
+            let types_start = self.qualified_name_scratch.len();
+            self.qualified_name_scratch
+                .push(self.parse_name_reference());
             while self.eat(&Token::Pipe) {
-                types.push(self.parse_name_reference());
+                self.qualified_name_scratch
+                    .push(self.parse_name_reference());
             }
             let var = if matches!(self.peek(), Token::Variable(_)) {
                 let var_start = self.current_pos();
@@ -294,7 +314,11 @@ impl Parser<'_> {
                 None
             };
             self.expect(&Token::RParen)?;
-            let body = self.parse_stmt_list_block()?;
+            let body = self.parse_stmt_list_block_range()?;
+            let types = self
+                .node_arenas
+                .borrow_mut()
+                .alloc_qualified_names(self.qualified_name_scratch.drain(types_start..));
             catches.push(CatchClause {
                 types,
                 var,
@@ -307,7 +331,7 @@ impl Parser<'_> {
         }
 
         let finally = if self.eat(&Token::Keyword(Keyword::Finally)) {
-            Some(self.parse_stmt_list_block()?)
+            Some(self.parse_stmt_list_block_range()?)
         } else {
             None
         };
@@ -322,18 +346,28 @@ impl Parser<'_> {
         ))
     }
 
-    /// A `{ ... }` block's statements.
-    pub(crate) fn parse_stmt_list_block(&mut self) -> Result<Vec<StmtNode>, ParseError> {
+    /// A `{ ... }` block's statements, built in parser scratch and committed
+    /// as one contiguous range in the owning statement arena.
+    pub(crate) fn parse_stmt_list_block_range(&mut self) -> Result<StmtIdRange, ParseError> {
         self.expect(&Token::LBrace)?;
-        let mut stmts = Vec::new();
-        while !self.check(&Token::RBrace) && !self.at_eof() {
-            stmts.push(self.parse_statement()?);
+        let list_start = self.begin_stmt_list();
+        let parsed = (|| {
+            while !self.check(&Token::RBrace) && !self.at_eof() {
+                if let Some(stmt) = self.parse_statement(true)? {
+                    self.push_stmt_list_item(stmt);
+                }
+            }
+            self.expect(&Token::RBrace)?;
+            Ok::<(), ParseError>(())
+        })();
+        if let Err(error) = parsed {
+            self.discard_stmt_list(list_start);
+            return Err(error);
         }
-        self.expect(&Token::RBrace)?;
-        Ok(stmts)
+        Ok(self.finish_stmt_list(list_start))
     }
 
-    pub(crate) fn parse_switch(&mut self) -> Result<StmtNode, ParseError> {
+    pub(crate) fn parse_switch(&mut self) -> Result<StmtId, ParseError> {
         let start = self.current_pos();
         self.skip(); // switch
         self.expect(&Token::LParen)?;
@@ -348,44 +382,57 @@ impl Parser<'_> {
         }
 
         let mut cases: Vec<SwitchCase> = Vec::new();
+        let mut case_list_start = None;
         let closer = Token::Keyword(Keyword::EndSwitch);
         while !self.at_eof() && !self.check(if alt { &closer } else { &Token::RBrace }) {
             if self.eat(&Token::Keyword(Keyword::Case)) {
+                if let Some(list_start) = case_list_start.take() {
+                    cases.last_mut().unwrap().body = self.finish_stmt_list(list_start);
+                }
                 let case_start = self.previous_end();
                 let test = self.parse_expression()?;
                 if !self.eat(&Token::Colon) {
                     self.eat(&Token::Semicolon);
                 }
+                case_list_start = Some(self.begin_stmt_list());
                 cases.push(SwitchCase {
                     test: Some(test),
-                    body: Vec::new(),
+                    body: self.node_arenas.borrow_mut().alloc_stmt_ids([]),
                     span: Span {
                         start: case_start,
                         end: self.previous_end(),
                     },
                 });
             } else if self.eat(&Token::Keyword(Keyword::Default)) {
+                if let Some(list_start) = case_list_start.take() {
+                    cases.last_mut().unwrap().body = self.finish_stmt_list(list_start);
+                }
                 let case_start = self.previous_end();
                 if !self.eat(&Token::Colon) {
                     self.eat(&Token::Semicolon);
                 }
+                case_list_start = Some(self.begin_stmt_list());
                 cases.push(SwitchCase {
                     test: None,
-                    body: Vec::new(),
+                    body: self.node_arenas.borrow_mut().alloc_stmt_ids([]),
                     span: Span {
                         start: case_start,
                         end: self.previous_end(),
                     },
                 });
             } else {
-                let stmt = self.parse_statement()?;
+                let stmt = self.parse_statement(true)?;
                 // A statement before any `case`/`default` label is malformed
                 // PHP; dropping it here just keeps the parser in sync.
-                if let Some(case) = cases.last_mut() {
+                if let (Some(case), Some(stmt)) = (cases.last_mut(), stmt) {
                     case.span.end = self.previous_end();
-                    case.body.push(stmt);
+                    self.push_stmt_list_item(stmt);
                 }
             }
+        }
+
+        if let Some(list_start) = case_list_start {
+            cases.last_mut().unwrap().body = self.finish_stmt_list(list_start);
         }
 
         if alt {

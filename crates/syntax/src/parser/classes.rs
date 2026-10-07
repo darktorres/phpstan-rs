@@ -79,18 +79,29 @@ impl Parser<'_> {
             self.node_arenas.borrow_mut().alloc_args([])
         };
 
-        let mut extends = Vec::new();
+        let extends_start = self.qualified_name_scratch.len();
         // A class extends one class.
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            extends.push(self.parse_name_reference());
+            self.qualified_name_scratch
+                .push(self.parse_name_reference());
         }
-        let mut implements = Vec::new();
+        let extends = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_qualified_names(self.qualified_name_scratch.drain(extends_start..));
+        let implements_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            implements.push(self.parse_name_reference());
+            self.qualified_name_scratch
+                .push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                implements.push(self.parse_name_reference());
+                self.qualified_name_scratch
+                    .push(self.parse_name_reference());
             }
         }
+        let implements = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_qualified_names(self.qualified_name_scratch.drain(implements_start..));
 
         self.nested_depth.set(self.nested_depth.get() + 1);
         let body = self.parse_class_body(class_is_readonly);
@@ -102,14 +113,6 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = body?;
-        let (extends, implements) = {
-            let mut arenas = self.node_arenas.borrow_mut();
-            (
-                arenas.alloc_qualified_names(extends),
-                arenas.alloc_qualified_names(implements),
-            )
-        };
-
         let def = ClassDef {
             kind: ClassKind::Class,
             backing_type: None,
@@ -188,10 +191,17 @@ impl Parser<'_> {
             }
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
-                let mut traits = vec![self.parse_name_reference()];
+                let traits_start = self.qualified_name_scratch.len();
+                self.qualified_name_scratch
+                    .push(self.parse_name_reference());
                 while self.eat(&Token::Comma) {
-                    traits.push(self.parse_name_reference());
+                    self.qualified_name_scratch
+                        .push(self.parse_name_reference());
                 }
+                let traits = self
+                    .node_arenas
+                    .borrow_mut()
+                    .alloc_qualified_names(self.qualified_name_scratch.drain(traits_start..));
                 let adaptations = if self.check(&Token::LBrace) {
                     self.parse_trait_adaptations()?
                 } else {
@@ -204,7 +214,7 @@ impl Parser<'_> {
                 };
                 self.note_doc(&doc, member_start);
                 self.trait_use_scratch.push(TraitUse {
-                    traits: self.node_arenas.borrow_mut().alloc_qualified_names(traits),
+                    traits,
                     doc_comment: doc,
                     adaptations,
                     span: self.span_from(member_start),
@@ -486,8 +496,8 @@ impl Parser<'_> {
     /// Other, ...;` and `[Trait::]method as [visibility] [alias];`. A bare
     /// `method as ...` names no trait; flattening finds the one that has it.
     pub(crate) fn parse_trait_adaptations(&mut self) -> Result<TraitAdaptations, ParseError> {
-        let mut aliases = Vec::new();
-        let mut precedences = Vec::new();
+        let aliases_start = self.trait_alias_scratch.len();
+        let precedences_start = self.trait_precedence_scratch.len();
         self.expect(&Token::LBrace)?;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             // A bare name here is a method's, and no reference.
@@ -501,23 +511,28 @@ impl Parser<'_> {
                 };
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
-                let mut instead_of = vec![self.parse_unrecorded_name_reference()];
+                let instead_of_start = self.qualified_name_scratch.len();
+                self.qualified_name_scratch
+                    .push(self.parse_unrecorded_name_reference());
                 while self.eat(&Token::Comma) {
-                    instead_of.push(self.parse_unrecorded_name_reference());
+                    self.qualified_name_scratch
+                        .push(self.parse_unrecorded_name_reference());
                 }
                 // The names stand only with a trait to take the method from.
                 if let Some(trait_name) = trait_name {
-                    for name in &instead_of {
+                    for name in &self.qualified_name_scratch[instead_of_start..] {
                         self.record_name(name, NameKind::Class);
                     }
-                    precedences.push(TraitPrecedence {
+                    let instead_of = self.node_arenas.borrow_mut().alloc_qualified_names(
+                        self.qualified_name_scratch.drain(instead_of_start..),
+                    );
+                    self.trait_precedence_scratch.push(TraitPrecedence {
                         trait_name,
                         method,
-                        instead_of: self
-                            .node_arenas
-                            .borrow_mut()
-                            .alloc_qualified_names(instead_of),
+                        instead_of,
                     });
+                } else {
+                    self.qualified_name_scratch.truncate(instead_of_start);
                 }
             } else if self.eat(&Token::Keyword(Keyword::As)) {
                 let visibility = match self.peek() {
@@ -534,7 +549,7 @@ impl Parser<'_> {
                 } else {
                     Some(self.expect_ident()?)
                 };
-                aliases.push(TraitAlias {
+                self.trait_alias_scratch.push(TraitAlias {
                     trait_name,
                     method,
                     visibility,
@@ -546,8 +561,9 @@ impl Parser<'_> {
         self.expect(&Token::RBrace)?;
         let mut arenas = self.node_arenas.borrow_mut();
         Ok(TraitAdaptations {
-            aliases: arenas.alloc_trait_aliases(aliases),
-            precedences: arenas.alloc_trait_precedences(precedences),
+            aliases: arenas.alloc_trait_aliases(self.trait_alias_scratch.drain(aliases_start..)),
+            precedences: arenas
+                .alloc_trait_precedences(self.trait_precedence_scratch.drain(precedences_start..)),
         })
     }
 
@@ -608,21 +624,33 @@ impl Parser<'_> {
         // several other interfaces (`interface C extends A, B {}`) - both
         // are accepted here since the parser doesn't distinguish the two
         // declaration kinds structurally.
-        let mut extends = Vec::new();
+        let extends_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            extends.push(self.parse_name_reference());
+            self.qualified_name_scratch
+                .push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                extends.push(self.parse_name_reference());
+                self.qualified_name_scratch
+                    .push(self.parse_name_reference());
             }
         }
+        let extends = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_qualified_names(self.qualified_name_scratch.drain(extends_start..));
 
-        let mut implements = Vec::new();
+        let implements_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            implements.push(self.parse_name_reference());
+            self.qualified_name_scratch
+                .push(self.parse_name_reference());
             while self.eat(&Token::Comma) {
-                implements.push(self.parse_name_reference());
+                self.qualified_name_scratch
+                    .push(self.parse_name_reference());
             }
         }
+        let implements = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_qualified_names(self.qualified_name_scratch.drain(implements_start..));
 
         let ClassBody {
             properties,
@@ -631,14 +659,6 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
-        let (extends, implements) = {
-            let mut arenas = self.node_arenas.borrow_mut();
-            (
-                arenas.alloc_qualified_names(extends),
-                arenas.alloc_qualified_names(implements),
-            )
-        };
-
         let def = ClassDef {
             kind,
             backing_type: None,
