@@ -68,6 +68,16 @@ impl ParsedFile {
         self.name(ident.name_id?)
     }
 
+    /// Looks up an expression by its file-local arena id.
+    pub fn expr(&self, id: crate::ast::ExprId) -> Option<&crate::ast::ExprNode> {
+        self.arenas.expr(id)
+    }
+
+    /// Looks up a statement by its file-local arena id.
+    pub fn stmt(&self, id: crate::ast::StmtId) -> Option<&crate::ast::StmtNode> {
+        self.arenas.stmt(id)
+    }
+
     /// The source span of an expression in this file.
     pub fn expr_span(&self, id: crate::ast::ExprId) -> Option<crate::span::Span> {
         self.arenas

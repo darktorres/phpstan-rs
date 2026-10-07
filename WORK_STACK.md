@@ -290,7 +290,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   unvalidated). `AstRef`
   carries the owner explicitly and no longer dereferences to a statement slice
   (`abf88e87`); callers now request statements explicitly (`c568d7b6`). Expression
-  and statement readers still use recursive values. Commit `36ad3c08` removes the address key
+  and statement readers still use recursive values. `NodeArenas::expr/stmt`
+  and `ParsedFile::expr/stmt` now provide typed, file-local lookup for the
+  planned ID-based readers; parsed node payload arenas are still empty.
+  Commit `36ad3c08` removes the address key
   and adds cache coverage for ID, question, and scope; completion's mixed-tree
   probe bypasses it (`a6960c97`). Parser errors are boxed and their canonical
   print is preserved (`2e33f369`); an unrun regression test asserts their

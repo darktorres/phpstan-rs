@@ -95,6 +95,16 @@ pub struct NodeArenas {
 }
 
 impl NodeArenas {
+    /// Looks up an expression in this file's expression arena.
+    pub fn expr(&self, id: ExprId) -> Option<&ExprNode> {
+        self.exprs.get(id)
+    }
+
+    /// Looks up a statement in this file's statement arena.
+    pub fn stmt(&self, id: StmtId) -> Option<&StmtNode> {
+        self.stmts.get(id)
+    }
+
     /// Drops the current file's nodes but keeps the worker's allocations.
     pub fn clear(&mut self) {
         self.exprs.clear();
