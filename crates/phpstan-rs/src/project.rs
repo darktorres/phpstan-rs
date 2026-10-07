@@ -210,7 +210,6 @@ impl SyntaxTree {
             .copied()
     }
 
-    #[allow(dead_code)] // Used by file-scoped statement readers in row 9.3.
     pub(crate) fn stmt_span(&self, id: syntax::ast::StmtId) -> Option<Span> {
         self.stmt_spans
             .get(u32::from(id.into_raw()) as usize)

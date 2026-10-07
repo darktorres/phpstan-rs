@@ -1801,6 +1801,11 @@ impl<'a> Checker<'a> {
         if let Some(tree) = self.syntax_tree {
             debug_assert_eq!(program.as_ptr(), tree.statements().as_ptr());
             debug_assert_eq!(program.len(), tree.statements().len());
+            debug_assert!(
+                program
+                    .iter()
+                    .all(|stmt| tree.stmt_span(stmt.id) == Some(stmt.span))
+            );
         }
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
