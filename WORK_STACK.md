@@ -885,10 +885,15 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   dependency and parser-test readers migrated (9.7.b.d.a/c, unvalidated). Name
   lists for class inheritance, catch types, trait names and precedence clauses,
   plus grouped imports and trait adaptations, now build in reusable scratch
-  before arena commit. Union and intersection type-hint lists remain.
+  before arena commit. Union and intersection type hints now build in scratch,
+  commit as `TypeHintRange`s, and resolve through owner arenas across type,
+  checker, registry, project, LSP, printer and parser-test readers; this part of
+  9.7 is unvalidated. Property hooks need no list migration: `get` and `set`
+  are fixed optional fields, attributes already use ranges, and block bodies
+  already use statement ranges.
   Closure captures now use an owner-backed range resolved by syntax, checker
   and printer readers (9.7.a.d.c.b/9.7.b.e.a, unvalidated). Remaining scratch
-  builders, property-hook list review, list-element recorder IDs,
+  builders and list-element recorder IDs,
   exact-size kept arenas and item 9.8 remain. Items 10-19 have
   complete child-task and tests-only gate rows. A follow-up granularity pass
   added the PHPDoc cache migration (14.9.d), the deferred document-encoding
