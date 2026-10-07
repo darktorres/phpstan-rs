@@ -1225,7 +1225,7 @@ impl Project {
             Err(error) => parse_with_ignores(path, &error.into_bytes(), None),
         }
         .ok()?;
-        let ast = Arc::new(parsed.ast);
+        let ast = Arc::new(parsed.tree.stmts);
         self.ast_cache
             .lock()
             .ok()?
@@ -1258,13 +1258,7 @@ impl Project {
         if file.kept_tree.is_none()
             && let Ok(parsed) = parse_with_ignores(path, text, None)
         {
-            file.kept_tree = Some(SyntaxTree {
-                stmts: parsed.ast,
-                source: parsed.source,
-                names: parsed.names,
-                expr_spans: parsed.expr_spans,
-                stmt_spans: parsed.stmt_spans,
-            });
+            file.kept_tree = Some(parsed.tree);
             file.ignores = parsed.ignores;
         }
     }
@@ -3743,11 +3737,7 @@ fn file_references(
 
 /// A file parsed, with its inline ignore comments.
 struct Parsed {
-    ast: Vec<StmtNode>,
-    source: Box<[u8]>,
-    names: Box<[Name]>,
-    expr_spans: Box<[Span]>,
-    stmt_spans: Box<[Span]>,
+    tree: SyntaxTree,
     // What the tree refers to, as the parse recorded it; none when a pass
     // changed the tree after.
     references: Option<syntax::references::FileReferences>,
@@ -3806,11 +3796,13 @@ fn parse_recording<'a>(
         };
     }
     Ok(Parsed {
-        ast,
-        source: parsed.source,
-        names: parsed.names,
-        expr_spans: parsed.expr_spans,
-        stmt_spans: parsed.stmt_spans,
+        tree: SyntaxTree {
+            stmts: ast,
+            source: parsed.source,
+            names: parsed.names,
+            expr_spans: parsed.expr_spans,
+            stmt_spans: parsed.stmt_spans,
+        },
         references,
         ignores,
         warnings: parsed.warnings,
@@ -3968,17 +3960,14 @@ fn parse_file_recording_with_origin<'a>(
     let source = source.into();
     let content_hash = source::ContentHash::of_source(source);
     let Parsed {
-        ast,
-        source: parsed_source,
-        names: parsed_names,
-        expr_spans,
-        stmt_spans,
+        tree,
         references,
         ignores,
         warnings: lex_warnings,
         facts,
         line_index,
     } = parse_recording(path, source, names, record)?;
+    let ast = tree.statements();
     let file_declarations::FileDeclarations {
         functions,
         classes,
@@ -3988,8 +3977,8 @@ fn parse_file_recording_with_origin<'a>(
         duplicate_fn_sites,
         duplicate_class_sites,
         declared_classes,
-    } = file_declarations::collect(&ast, path, is_stub, &origin, &facts);
-    let (references, declaration_references) = file_references(&ast, references);
+    } = file_declarations::collect(ast, path, is_stub, &origin, &facts);
+    let (references, declaration_references) = file_references(ast, references);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls
@@ -3999,17 +3988,11 @@ fn parse_file_recording_with_origin<'a>(
             _ => None,
         })
         .collect();
-    let bodies = FileBodies::of_file(&ast, &facts);
-    let global_facts = Arc::new(GlobalFacts::of(&ast));
-    let pest_facts = PestFacts::of(path, &ast);
+    let bodies = FileBodies::of_file(ast, &facts);
+    let global_facts = Arc::new(GlobalFacts::of(ast));
+    let pest_facts = PestFacts::of(path, ast);
     Ok(ParsedFile {
-        tree: Some(SyntaxTree {
-            stmts: ast,
-            source: parsed_source,
-            names: parsed_names,
-            expr_spans,
-            stmt_spans,
-        }),
+        tree: Some(tree),
         lex_warnings,
         functions,
         classes,
