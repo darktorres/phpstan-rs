@@ -1327,6 +1327,7 @@ impl Session {
                 context && !held && !keeps_tree,
                 index_use_sites,
                 file_id,
+                !keeps_tree,
             );
             if let Read::Loaded(file) = &mut read {
                 shared.index_use_sites(&mut file.parsed, &file.source);
@@ -1362,6 +1363,7 @@ impl Session {
         cacheable: bool,
         index_use_sites: bool,
         file_id: FileId,
+        reuse_scratch: bool,
     ) -> Read {
         let LoadState { names, buf, .. } = state;
         if self.read_into(path, absolute, buf).is_err() {
@@ -1396,24 +1398,42 @@ impl Session {
             Ok(text) => text.len(),
             Err(_) => String::from_utf8_lossy(bytes).len(),
         };
-        let scratch = std::mem::take(&mut state.scratch);
+        let scratch = reuse_scratch.then(|| std::mem::take(&mut state.scratch));
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
-            Ok(text) => super::parse_file_with_names_and_file_id_and_scratch(
-                path,
-                text,
-                is_stub,
-                Some(names),
-                file_id,
-                scratch,
-            ),
-            Err(_) => super::parse_file_with_names_and_file_id_and_scratch(
-                path,
-                bytes,
-                is_stub,
-                Some(names),
-                file_id,
-                scratch,
-            ),
+            Ok(text) => match scratch {
+                Some(scratch) => super::parse_file_with_names_and_file_id_and_scratch(
+                    path,
+                    text,
+                    is_stub,
+                    Some(names),
+                    file_id,
+                    scratch,
+                ),
+                None => super::parse_file_with_names_and_file_id(
+                    path,
+                    text,
+                    is_stub,
+                    Some(names),
+                    file_id,
+                ),
+            },
+            Err(_) => match scratch {
+                Some(scratch) => super::parse_file_with_names_and_file_id_and_scratch(
+                    path,
+                    bytes,
+                    is_stub,
+                    Some(names),
+                    file_id,
+                    scratch,
+                ),
+                None => super::parse_file_with_names_and_file_id(
+                    path,
+                    bytes,
+                    is_stub,
+                    Some(names),
+                    file_id,
+                ),
+            },
         })) else {
             return Read::Unread;
         };
