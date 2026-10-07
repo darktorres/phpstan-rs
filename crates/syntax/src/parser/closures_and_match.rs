@@ -19,14 +19,14 @@ impl Parser<'_> {
         let mut no_doc = None;
         let params = self.parse_params(&mut no_doc, true)?;
 
-        let mut uses = Vec::new();
+        let uses_start = self.closure_use_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Use)) {
             self.expect(&Token::LParen)?;
             while !self.check(&Token::RParen) {
                 let use_by_ref = self.eat(&Token::Amp);
                 let name_start = self.current_pos();
                 let name = self.expect_variable()?;
-                uses.push(ClosureUse {
+                self.closure_use_scratch.push(ClosureUse {
                     name: self.ident(
                         name,
                         Span {
@@ -60,6 +60,10 @@ impl Parser<'_> {
         let body = body?;
 
         let attrs = self.node_arenas.borrow_mut().alloc_attributes([]);
+        let uses = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_closure_uses(self.closure_use_scratch.drain(uses_start..));
         let closure = self
             .node_arenas
             .borrow_mut()

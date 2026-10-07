@@ -10,7 +10,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
-use syntax::visit::{Visitor, walk_expr, walk_stmt};
+use syntax::visit::arena::{self, Visitor};
 
 use crate::registry::summaries::{BodySummary, Place, Step};
 
@@ -51,7 +51,8 @@ impl SharedScope {
     /// The shared scope of the statements `body`, a function's, a closure's
     /// (whose `use` list is `uses`) or a file's top level.
     pub(crate) fn of(
-        body: &[StmtNode],
+        arenas: &NodeArenas,
+        body: &[StmtId],
         uses: &[ClosureUse],
         function: Option<(Option<Name>, Name)>,
         top_level: bool,
@@ -63,16 +64,14 @@ impl SharedScope {
                 scan.held.insert(u.name.name.clone(), Held::Other);
             }
         }
-        for stmt in body {
-            scan.visit_stmt(stmt);
-        }
+        arena::walk_stmts(&mut scan, arenas, body);
         scan.finish(function, top_level)
     }
 
     /// The shared scope of an arrow function's body, which binds nothing.
-    pub(crate) fn of_arrow_function(body: &ExprNode) -> SharedScope {
+    pub(crate) fn of_arrow_function(arenas: &NodeArenas, body: ExprId) -> SharedScope {
         let mut scan = Scan::default();
-        scan.visit_expr(body);
+        scan.visit_expr(arenas, body);
         scan.finish(None, false)
     }
 
@@ -162,56 +161,69 @@ impl Scan {
 
     /// A use of `e` that does not let the object it is leave the scope:
     /// the base of a property access, an identity or type test.
-    fn kept(&mut self, e: &ExprNode) {
-        if !matches!(&e.peeled().kind, ExprKind::Variable(_)) {
-            self.visit_expr(e);
+    fn kept(&mut self, arenas: &NodeArenas, id: ExprId) {
+        if !arenas
+            .peeled(id)
+            .and_then(|id| arenas.expr(id))
+            .is_some_and(|e| matches!(&e.kind, ExprKind::Variable(_)))
+        {
+            self.visit_expr(arenas, id);
         }
     }
 
     /// An assignment to `target` of what `held` says.
-    fn assign(&mut self, target: &ExprNode, held: Held) {
-        match &target.peeled().kind {
+    fn assign(&mut self, arenas: &NodeArenas, id: ExprId, held: Held) {
+        let Some(target) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+            return;
+        };
+        match &target.kind {
             ExprKind::Variable(name) => self.note(name, held),
             ExprKind::Destructure(items, _) => {
-                for item in items {
+                for item in arenas.destructure_items(items) {
                     if let Some(key) = &item.key {
-                        self.visit_expr(key);
+                        self.visit_expr(arenas, *key);
                     }
                     if let Some(target) = &item.target {
-                        self.assign(target, Held::Other);
+                        self.assign(arenas, *target, Held::Other);
                     }
                 }
             }
-            ExprKind::PropertyAccess(base, _, _) => self.kept(base),
+            ExprKind::PropertyAccess(base, _, _) => self.kept(arenas, *base),
             ExprKind::DynamicPropertyAccess(base, name, _) => {
-                self.kept(base);
-                self.visit_expr(name);
+                self.kept(arenas, *base);
+                self.visit_expr(arenas, *name);
             }
-            _ => self.visit_expr(target),
+            _ => self.visit_expr(arenas, id),
         }
     }
 }
 
 /// What the scope made or wrote that `e` evaluates to.
-fn held_by(e: &ExprNode) -> Held {
-    let e = e.peeled();
+fn held_by(arenas: &NodeArenas, id: ExprId) -> Held {
+    let Some(id) = arenas.peeled(id) else {
+        return Held::Other;
+    };
+    let Some(e) = arenas.expr(id) else {
+        return Held::Other;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::New(..) | ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Held::Made,
         ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
-            Held::Closures(vec![BodySummary::of_closure(e)])
+            Held::Closures(vec![BodySummary::of_closure(arenas, id)])
         }
-        ExprKind::Assign(_, rhs) => held_by(rhs),
+        ExprKind::Assign(_, rhs) => held_by(arenas, *rhs),
         _ => Held::Other,
     })
 }
 
-impl<'ast> Visitor<'ast> for Scan {
+impl Visitor for Scan {
     // A declaration nested in the scope is a scope of its own.
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
 
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Global(vars) => {
                 for var in vars {
@@ -222,7 +234,7 @@ impl<'ast> Visitor<'ast> for Scan {
                         }
                         GlobalVar::Dynamic(e) => {
                             self.any_global = true;
-                            self.visit_expr(e);
+                            self.visit_expr(arenas, *e);
                         }
                     }
                 }
@@ -232,13 +244,13 @@ impl<'ast> Visitor<'ast> for Scan {
                     self.statics.insert(name.name.clone());
                     self.note(&name.name, Held::Other);
                     if let Some(default) = default {
-                        self.visit_expr(default);
+                        self.visit_expr(arenas, *default);
                     }
                 }
             }
             StmtKind::Unset(targets) => {
-                for target in targets {
-                    self.kept(target);
+                for target in arenas.expr_ids(targets) {
+                    self.kept(arenas, *target);
                 }
             }
             StmtKind::Foreach {
@@ -248,90 +260,99 @@ impl<'ast> Visitor<'ast> for Scan {
                 by_ref,
                 body,
             } => {
-                self.visit_expr(subject);
+                self.visit_expr(arenas, *subject);
                 if let Some(key) = key {
-                    self.assign(key, Held::Other);
+                    self.assign(arenas, *key, Held::Other);
                 }
-                match &value.peeled().kind {
-                    ExprKind::Variable(name) if *by_ref => {
-                        let place = Place::of(subject)
+                match arenas.peeled(*value).and_then(|id| arenas.expr(id)) {
+                    Some(ExprNode {
+                        kind: ExprKind::Variable(name),
+                        ..
+                    }) if *by_ref => {
+                        let place = Place::of(arenas, *subject)
                             .unwrap_or_else(Place::value)
                             .then(Step::Element);
                         self.references.insert(name.clone(), place);
                         self.note(name, Held::Other);
                     }
-                    _ => self.assign(value, Held::Other),
+                    _ => self.assign(arenas, *value, Held::Other),
                 }
-                self.visit_stmt(body);
+                self.visit_stmt(arenas, *body);
             }
-            _ => walk_stmt(self, stmt),
+            _ => arena::walk_stmt(self, arenas, id),
         })
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => {
                 self.escaped.insert(name.clone());
             }
-            ExprKind::PropertyAccess(base, _, _) => self.kept(base),
+            ExprKind::PropertyAccess(base, _, _) => self.kept(arenas, *base),
             ExprKind::DynamicPropertyAccess(base, name, _) => {
-                self.kept(base);
-                self.visit_expr(name);
+                self.kept(arenas, *base);
+                self.visit_expr(arenas, *name);
             }
             ExprKind::Assign(lhs, rhs) => {
-                self.assign(lhs, held_by(rhs));
-                self.visit_expr(rhs);
+                self.assign(arenas, *lhs, held_by(arenas, *rhs));
+                self.visit_expr(arenas, *rhs);
             }
             ExprKind::AssignRef(lhs, rhs) => {
-                match &lhs.peeled().kind {
-                    ExprKind::Variable(name) => {
-                        let place = Place::of(rhs).unwrap_or_else(Place::value);
+                match arenas.peeled(*lhs).and_then(|id| arenas.expr(id)) {
+                    Some(ExprNode {
+                        kind: ExprKind::Variable(name),
+                        ..
+                    }) => {
+                        let place = Place::of(arenas, *rhs).unwrap_or_else(Place::value);
                         self.references.insert(name.clone(), place);
                         self.note(name, Held::Other);
                     }
-                    _ => self.assign(lhs, Held::Other),
+                    _ => self.assign(arenas, *lhs, Held::Other),
                 }
-                self.visit_expr(rhs);
+                self.visit_expr(arenas, *rhs);
             }
             ExprKind::CompoundAssign(_, lhs, rhs) => {
-                self.assign(lhs, Held::Other);
-                self.visit_expr(lhs);
-                self.visit_expr(rhs);
+                self.assign(arenas, *lhs, Held::Other);
+                self.visit_expr(arenas, *lhs);
+                self.visit_expr(arenas, *rhs);
             }
             ExprKind::Unary(
                 UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
                 target,
             ) => {
-                self.assign(target, Held::Other);
-                self.visit_expr(target);
+                self.assign(arenas, *target, Held::Other);
+                self.visit_expr(arenas, *target);
             }
             ExprKind::Binary(BinOp::Identical | BinOp::NotIdentical, a, b) => {
-                self.kept(a);
-                self.kept(b);
+                self.kept(arenas, *a);
+                self.kept(arenas, *b);
             }
             ExprKind::Instanceof(subject, target) => {
-                self.kept(subject);
+                self.kept(arenas, *subject);
                 if let InstanceofTarget::Expr(target) = target {
-                    self.visit_expr(target);
+                    self.visit_expr(arenas, *target);
                 }
             }
             ExprKind::Isset(items) => {
-                for item in items {
-                    self.kept(item);
+                for item in arenas.expr_ids(items) {
+                    self.kept(arenas, *item);
                 }
             }
-            ExprKind::Empty(item) => self.kept(item),
+            ExprKind::Empty(item) => self.kept(arenas, *item),
             // A closure's body is a scope of its own; what it captures leaves
             // this one.
-            ExprKind::Closure(closure) => {
-                for u in &closure.uses {
-                    self.escaped.insert(u.name.name.clone());
-                    if u.by_ref {
-                        self.captured.insert(u.name.name.clone());
+            ExprKind::Closure(closure_id) => {
+                if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) {
+                    for u in arenas.closure_uses(&closure.uses) {
+                        self.escaped.insert(u.name.name.clone());
+                        if u.by_ref {
+                            self.captured.insert(u.name.name.clone());
+                        }
                     }
                 }
             }
-            _ => walk_expr(self, e),
+            _ => arena::walk_expr(self, arenas, id),
         })
     }
 }

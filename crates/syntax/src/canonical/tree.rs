@@ -191,6 +191,7 @@ canonical_list_arena_range!(EnumCaseRange, enum_cases);
 canonical_list_arena_range!(TraitAliasRange, trait_aliases);
 canonical_list_arena_range!(TraitPrecedenceRange, trait_precedences);
 canonical_list_arena_range!(UseImportRange, use_imports);
+canonical_list_arena_range!(ClosureUseRange, closure_uses);
 
 impl Canonical for crate::parse::ParsedFile {
     fn canonical(&self, p: &mut Printer) {

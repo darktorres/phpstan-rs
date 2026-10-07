@@ -46,10 +46,21 @@ impl<'a> Checker<'a> {
         } else {
             self.check_expr(closure_expr, &mut seeded, label);
         }
-        let ExprKind::Closure(closure) = &closure_expr.kind else {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
             return;
         };
-        for u in closure.uses.iter().filter(|u| u.by_ref) {
+        let arenas = syntax_owner.arenas();
+        let ExprKind::Closure(id) = &closure_expr.kind else {
+            return;
+        };
+        let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) else {
+            return;
+        };
+        for u in arenas
+            .closure_uses(&closure.uses)
+            .iter()
+            .filter(|u| u.by_ref)
+        {
             let Some(ty) = seeded.get_var(&u.name).cloned() else {
                 continue;
             };
@@ -88,15 +99,26 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
     ) -> bool {
-        let closure_expr = closure_expr.peeled();
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return false;
+        };
+        let arenas = syntax_owner.arenas();
+        let Some(id) = arenas.peeled(closure_expr.id) else {
+            return false;
+        };
+        let Some(closure_expr) = arenas.expr(id) else {
+            return false;
+        };
         match &closure_expr.kind {
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    body,
-                    return_type,
-                    ..
-                } = &**arrow;
+            ExprKind::ArrowFn(id) => {
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*id) else {
+                    return false;
+                };
+                let params = arenas.params(arrow.params);
+                let body = arenas
+                    .expr(arrow.body)
+                    .expect("arrow body resolves in its owner");
+                let return_type = &arrow.return_type;
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -125,7 +147,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
                     arrow_locals.declare_var(&p.name, ty, p.name.span);
-                    arrow_locals.set_native_var(&p.name, self.closure_param_native(p));
+                    arrow_locals.set_native_var(&p.name, self.closure_param_native(arenas, p));
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
@@ -166,17 +188,17 @@ impl<'a> Checker<'a> {
                 }
                 true
             }
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    uses,
-                    body,
-                    goto_labels,
-                    is_generator,
-                    is_static,
-                    return_type,
-                    ..
-                } = &**closure;
+            ExprKind::Closure(id) => {
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) else {
+                    return false;
+                };
+                let params = arenas.params(closure.params);
+                let uses = arenas.closure_uses(&closure.uses);
+                let body = arenas.stmt_ids(&closure.body);
+                let goto_labels = &closure.goto_labels;
+                let is_generator = closure.is_generator;
+                let is_static = closure.is_static;
+                let return_type = &closure.return_type;
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -254,7 +276,7 @@ impl<'a> Checker<'a> {
                     };
                     closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
-                if !*is_static && let Some(this_ty) = locals.get_var("this") {
+                if !is_static && let Some(this_ty) = locals.get_var("this") {
                     closure_locals.insert_var("this", this_ty.clone());
                 }
                 let closure_label = format!("{label} (closure)");
@@ -277,7 +299,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
                     closure_locals.declare_var(&p.name, ty, p.name.span);
-                    closure_locals.set_native_var(&p.name, self.closure_param_native(p));
+                    closure_locals.set_native_var(&p.name, self.closure_param_native(arenas, p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -305,7 +327,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = *is_generator;
+                self.current_function_is_generator = is_generator;
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {
@@ -314,13 +336,14 @@ impl<'a> Checker<'a> {
                     });
                 let previous_goto_targets = std::mem::replace(
                     &mut self.current_function_goto_targets,
-                    GotoState::new(goto_labels.clone()),
+                    GotoState::new(goto_labels.to_vec()),
                 );
-                let previous_assigned_variables = self.enter_assigned_variables(body);
+                let previous_assigned_variables = self.enter_assigned_variables(arenas, body);
                 let enclosing_scope =
                     self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
                         closure: true,
                         ..crate::checker::shared_scope::SharedScope::of(
+                            arenas,
                             body,
                             uses,
                             Some((

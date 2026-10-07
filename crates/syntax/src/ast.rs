@@ -165,6 +165,7 @@ pub type EnumCaseRange = la_arena::IdxRange<EnumCase>;
 pub type TraitAliasRange = la_arena::IdxRange<TraitAlias>;
 pub type TraitPrecedenceRange = la_arena::IdxRange<TraitPrecedence>;
 pub type UseImportRange = la_arena::IdxRange<UseImport>;
+pub type ClosureUseRange = la_arena::IdxRange<ClosureUse>;
 
 /// A range in the file-owned decoded byte vector. Source-backed payloads
 /// continue to use [`Span`], so callers cannot confuse the two byte stores.
@@ -251,6 +252,7 @@ pub struct NodeArenas {
     pub trait_aliases: ListArena<TraitAlias>,
     pub trait_precedences: ListArena<TraitPrecedence>,
     pub use_imports: ListArena<UseImport>,
+    pub closure_uses: ListArena<ClosureUse>,
     pub expr_spans: Vec<Span>,
     pub stmt_spans: Vec<Span>,
     /// Decoded literal bytes retained by this file. Unescaped payloads
@@ -427,6 +429,7 @@ impl NodeArenas {
         fragment.trait_aliases = self.trait_aliases.fragment();
         fragment.trait_precedences = self.trait_precedences.fragment();
         fragment.use_imports = self.use_imports.fragment();
+        fragment.closure_uses = self.closure_uses.fragment();
         fragment.functions_base = self.functions_base + self.functions.len() as u32;
         fragment.methods_base = self.methods_base + self.methods.len() as u32;
         fragment.classes_base = self.classes_base + self.classes.len() as u32;
@@ -786,6 +789,17 @@ impl NodeArenas {
         self.use_imports.get(range)
     }
 
+    pub fn alloc_closure_uses(
+        &mut self,
+        values: impl IntoIterator<Item = ClosureUse>,
+    ) -> ClosureUseRange {
+        self.closure_uses.alloc_many(values)
+    }
+
+    pub fn closure_uses(&self, range: &ClosureUseRange) -> &[ClosureUse] {
+        self.closure_uses.get(range)
+    }
+
     /// Commits an expression node and its span at the matching dense index.
     pub fn alloc_expr(&mut self, node: ExprNode) -> ExprId {
         let id = node.id;
@@ -935,6 +949,7 @@ impl NodeArenas {
         self.trait_precedences
             .append_fragment(fragment.trait_precedences);
         self.use_imports.append_fragment(fragment.use_imports);
+        self.closure_uses.append_fragment(fragment.closure_uses);
         self.expr_spans.extend(fragment.expr_spans);
         self.stmt_spans.extend(fragment.stmt_spans);
         self.decoded_bytes.extend(fragment.decoded_bytes);
@@ -1012,6 +1027,7 @@ impl NodeArenas {
         self.trait_aliases.clear();
         self.trait_precedences.clear();
         self.use_imports.clear();
+        self.closure_uses.clear();
         self.expr_spans.clear();
         self.stmt_spans.clear();
         self.decoded_bytes.clear();
@@ -1061,6 +1077,7 @@ impl NodeArenas {
             self.trait_aliases.base(),
             self.trait_precedences.base(),
             self.use_imports.base(),
+            self.closure_uses.base(),
         );
         self.clear();
         (
@@ -1088,6 +1105,7 @@ impl NodeArenas {
             trait_aliases_base,
             trait_precedences_base,
             use_imports_base,
+            closure_uses_base,
         ) = bases;
         self.qualified_names.set_base(qualified_names_base);
         self.properties.set_base(properties_base);
@@ -1097,6 +1115,7 @@ impl NodeArenas {
         self.trait_aliases.set_base(trait_aliases_base);
         self.trait_precedences.set_base(trait_precedences_base);
         self.use_imports.set_base(use_imports_base);
+        self.closure_uses.set_base(closure_uses_base);
     }
 
     /// Compacts a completed tree before its arenas leave the worker.
@@ -1125,6 +1144,7 @@ impl NodeArenas {
         self.trait_aliases.shrink_to_fit();
         self.trait_precedences.shrink_to_fit();
         self.use_imports.shrink_to_fit();
+        self.closure_uses.shrink_to_fit();
         self.expr_spans.shrink_to_fit();
         self.stmt_spans.shrink_to_fit();
         self.decoded_bytes.shrink_to_fit();
@@ -2503,7 +2523,7 @@ impl ObjectOperator {
 #[derive(Debug, Clone)]
 pub struct ClosureExpr {
     pub params: ParamRange,
-    pub uses: Vec<ClosureUse>,
+    pub uses: ClosureUseRange,
     pub body: StmtIdRange,
     // The labels the body's `goto`s name; see `FunctionBody`.
     pub goto_labels: Box<[GotoLabel]>,

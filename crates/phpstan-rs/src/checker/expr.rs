@@ -120,7 +120,11 @@ impl<'a> Checker<'a> {
         label: &str,
         (identifier_prefix, operator_description, verdict_fn): (&str, &str, NullProbeVerdictFn),
     ) {
-        self.check_expr_quiet_root(operand, locals, label);
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("existence-probe operand retains its parsed file owner");
+        let arenas = syntax_owner.arenas();
+        self.check_expr_quiet_root(arenas, operand, locals, label);
         self.check_pointless_null_probe(
             operand,
             locals,
@@ -129,6 +133,7 @@ impl<'a> Checker<'a> {
             verdict_fn,
         );
         self.check_pointless_offset_or_property_probe(
+            arenas,
             operand,
             locals,
             identifier_prefix,
@@ -147,6 +152,10 @@ impl<'a> Checker<'a> {
     /// Checks anonymous class `name`'s definition `def`, written at
     /// `span`: its members, under its registry name.
     fn check_anonymous_class(&mut self, name: &str, def: &ClassDef, span: Span) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         self.check_inheritance_target_kinds(name, true, span);
         self.check_magic_serialization_methods(name, "anonymous class", span);
         self.check_property_declarations(
@@ -154,25 +163,23 @@ impl<'a> Checker<'a> {
             name,
             ClassKind::Class,
             false,
-            &def.properties,
-            &def.methods,
+            def.properties(arenas),
+            arenas.methods(def.methods),
         );
         self.check_readonly_class_version(def.is_readonly, true, span);
-        for m in &def.methods {
+        for m in arenas.methods(def.methods) {
             self.check_function(&m.function, Some(name), m.is_static, true);
         }
-        self.record_property_type_site(name, vec![Name::from(name)], def);
-        for p in &def.properties {
-            self.check_attributes(&p.attrs, name);
-            self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
+        self.record_property_type_site(arenas, name, vec![Name::from(name)], def);
+        for p in def.properties(arenas) {
+            let attrs = arenas.attributes(p.attrs);
+            self.check_attributes(attrs, name);
+            self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
         }
-        for cc in &def.consts {
-            self.check_attributes(&cc.attrs, name);
-            self.check_attribute_targets(
-                &cc.attrs,
-                ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                "class constant",
-            );
+        for cc in def.consts(arenas) {
+            let attrs = arenas.attributes(cc.attrs);
+            self.check_attributes(attrs, name);
+            self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_CLASS_CONSTANT, "class constant");
         }
     }
 
@@ -299,7 +306,16 @@ impl<'a> Checker<'a> {
                 .call_throw_types
                 .remove(&e.span)
                 .unwrap_or_else(|| Some(anything())),
-            ExprKind::Throw(inner) => Some(self.infer_expr(inner, locals)),
+            ExprKind::Throw(inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("throw expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("thrown expression belongs to its retained file owner");
+                Some(self.infer_expr(inner, locals))
+            }
             ExprKind::Clone(..) | ExprKind::Yield(..) | ExprKind::YieldFrom(_) => Some(anything()),
             ExprKind::Binary(op, _, _) | ExprKind::CompoundAssign(op, _, _) => match op {
                 BinOp::Div | BinOp::Mod => {
@@ -364,10 +380,22 @@ impl<'a> Checker<'a> {
             self.check_strict_rules_expression(e, locals);
         }
         if !is_bare_statement && let ExprKind::Match { arms, .. } = &e.kind {
-            self.check_void_match_usage(arms, locals, e.span);
+            let syntax_owner = self
+                .syntax_tree_owner()
+                .expect("match expressions retain their parsed file owner");
+            let arenas = syntax_owner.arenas();
+            self.check_void_match_usage(arenas, arenas.match_arms(*arms), locals, e.span);
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("calls retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let callee = arenas
+                    .expr(*callee)
+                    .expect("call callee belongs to its retained file owner");
+                let args = arenas.args(*args);
                 // `PHPStan\Testing\assertType('expected type string', $expr)`
                 // is PHPStan's own testing-DSL function, used to pin down
                 // an exact expected inferred type at a point of interest.
@@ -381,16 +409,23 @@ impl<'a> Checker<'a> {
                 // diagnostic anyone would trip on outside a fixture file.
                 if let ExprKind::Name(name) = &callee.kind
                     && (name == "assertType" || name.ends_with("\\assertType"))
-                    && let [expected_arg, actual_arg] = args.as_slice()
-                    && let ExprKind::Literal(Literal::String(expected)) = &expected_arg.value.kind
+                    && let [expected_arg, actual_arg] = args
+                    && let Some(expected_expr) = arenas.expr(expected_arg.value)
+                    && let ExprKind::Literal(Literal::String(expected)) = &expected_expr.kind
                 {
-                    let actual = self.infer_expr(&actual_arg.value, locals).to_string();
-                    if *actual != *expected.to_str_lossy() {
-                        self.report(format!(
+                    let actual_expr = arenas
+                        .expr(actual_arg.value)
+                        .expect("assertType argument belongs to its retained file owner");
+                    let actual = self.infer_expr(actual_expr, locals).to_string();
+                    if let Some(expected) = arenas.string_bytes(expected) {
+                        let expected = String::from_utf8_lossy(expected);
+                        if actual != expected {
+                            self.report(format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
-                            ), actual_arg.value.span, 0, "phpstanRs.assertType");
+                            ), actual_expr.span, 0, "phpstanRs.assertType");
+                        }
                     }
-                    self.check_expr(&actual_arg.value, locals, label);
+                    self.check_expr(actual_expr, locals, label);
                     return Type::mixed();
                 }
                 // `count($o)` on a `Countable` object calls its `count()`.
@@ -401,7 +436,10 @@ impl<'a> Checker<'a> {
                     )
                     && let Some(counted) = args.first()
                 {
-                    let counted_ty = self.infer_expr(&counted.value, locals);
+                    let counted = arenas
+                        .expr(counted.value)
+                        .expect("call argument belongs to its retained file owner");
+                    let counted_ty = self.infer_expr(counted, locals);
                     self.implicit_method_call(&counted_ty, "Countable", "count", e.span, locals);
                 }
                 if let ExprKind::Name(name) = &callee.kind
@@ -457,7 +495,7 @@ impl<'a> Checker<'a> {
                 // get checked as if they were positional in written
                 // order) before any consumer below sees them.
                 let resolved = sig
-                    .map(|s| resolve_call_args(args, s.params()))
+                    .map(|s| resolve_call_args(arenas, args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(sig, args);
                 // `array_pop`/`array_shift`'s by-ref first argument gets
@@ -486,8 +524,20 @@ impl<'a> Checker<'a> {
                     matches!(resolved_name, Some("array_shift") | Some("array_pop"))
                         .then(|| args.first())
                         .flatten()
-                        .map(|a| self.infer_expr(&a.value, locals));
-                self.predefine_byref_or_unknown_args(resolved_name, sig, args, &resolved, locals);
+                        .map(|a| {
+                            let value = arenas
+                                .expr(a.value)
+                                .expect("call argument belongs to its retained file owner");
+                            self.infer_expr(value, locals)
+                        });
+                self.predefine_byref_or_unknown_args(
+                    arenas,
+                    resolved_name,
+                    sig,
+                    args,
+                    &resolved,
+                    locals,
+                );
                 // `it`/`test`/`describe`/`beforeEach`/`afterEach`/
                 // `beforeAll`/`afterAll` rebind `$this` inside their
                 // closure/arrow-fn argument at runtime (Pest's own
@@ -514,7 +564,12 @@ impl<'a> Checker<'a> {
                 // restriction for the same function.
                 let array_map_elem_override = (resolved_name == Some("array_map")
                     && args.len() == 2)
-                    .then(|| self.infer_expr(&args[1].value, locals))
+                    .then(|| {
+                        let value = arenas
+                            .expr(args[1].value)
+                            .expect("call argument belongs to its retained file owner");
+                        self.infer_expr(value, locals)
+                    })
                     .and_then(|ty| ty.array_value_type());
                 // The same contextual parameter-type injection as
                 // `array_map` above, extended to `array_filter`/`usort`/
@@ -534,18 +589,27 @@ impl<'a> Checker<'a> {
                 let contextual_callback_override: Option<(usize, Vec<Type>)> = resolved_name
                     .and_then(|name| match name {
                         "array_filter" if args.len() == 2 => {
-                            let arr_ty = self.infer_expr(&args[0].value, locals);
+                            let value = arenas
+                                .expr(args[0].value)
+                                .expect("call argument belongs to its retained file owner");
+                            let arr_ty = self.infer_expr(value, locals);
                             arr_ty.array_value_type().map(|t| (1, vec![t]))
                         }
                         "usort" | "uasort" if args.len() == 2 => {
-                            let arr_ty = self.infer_expr(&args[0].value, locals);
+                            let value = arenas
+                                .expr(args[0].value)
+                                .expect("call argument belongs to its retained file owner");
+                            let arr_ty = self.infer_expr(value, locals);
                             arr_ty.array_value_type().map(|t| (1, vec![t.clone(), t]))
                         }
                         "array_walk" | "array_find" | "array_find_key" | "array_any"
                         | "array_all"
                             if args.len() == 2 =>
                         {
-                            let arr_ty = self.infer_expr(&args[0].value, locals);
+                            let value = arenas
+                                .expr(args[0].value)
+                                .expect("call argument belongs to its retained file owner");
+                            let arr_ty = self.infer_expr(value, locals);
                             match (arr_ty.array_value_type(), arr_ty.array_key_type()) {
                                 (Some(elem), Some(key)) => Some((1, vec![elem, key])),
                                 _ => None,
@@ -568,6 +632,13 @@ impl<'a> Checker<'a> {
                         _ => None,
                     });
                 for (i, a) in args.iter().enumerate() {
+                    let argument = arenas
+                        .expr(a.value)
+                        .expect("call argument belongs to its retained file owner");
+                    let peeled_argument = arenas
+                        .peeled(a.value)
+                        .and_then(|id| arenas.expr(id))
+                        .expect("call argument belongs to its retained file owner");
                     // `argument.unpackNonIterable` - `foo(...$x)` where
                     // `$x` is confirmed to never be iterable at all.
                     // Checked via `infer_expr` (read-only, no side
@@ -576,13 +647,13 @@ impl<'a> Checker<'a> {
                     // per-argument dispatch already has four different
                     // shapes, none of which uniformly produce one.
                     if a.spread {
-                        let spread_ty = self.infer_expr(&a.value, locals);
+                        let spread_ty = self.infer_expr(argument, locals);
                         if let Some(level) = self
                             .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
                         {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
-                                a.value.span,
+                                argument.span,
                                 level,
                                 "argument.unpackNonIterable",
                             );
@@ -590,8 +661,8 @@ impl<'a> Checker<'a> {
                     }
                     if is_this_binding_call
                         && matches!(
-                            a.value.peeled().kind,
-                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            &peeled_argument.kind,
+                            ExprKind::Closure(_) | ExprKind::ArrowFn(_)
                         )
                     {
                         let this_ty = self.pest_this_type.clone();
@@ -603,7 +674,7 @@ impl<'a> Checker<'a> {
                         // reflect Pest's file-scoped binding.
                         let scope_class = this_ty.single_object_class().map(|c| c.to_string());
                         self.check_closure_literal_with_this_and_scope(
-                            a.value.peeled(),
+                            peeled_argument,
                             locals,
                             label,
                             this_ty,
@@ -612,12 +683,12 @@ impl<'a> Checker<'a> {
                         if self.settings.phpunit.check_risky_tests
                             && let Some(name) = pest_call_name
                         {
-                            self.check_pest_risky_test(name, a.value.peeled(), e.span);
+                            self.check_pest_risky_test(name, peeled_argument, e.span);
                         }
                     } else if i == 0
                         && let Some(elem_ty) = &array_map_elem_override
                         && self.check_closure_literal_with_param_overrides(
-                            a.value.peeled(),
+                            peeled_argument,
                             std::slice::from_ref(elem_ty),
                             locals,
                             label,
@@ -628,7 +699,7 @@ impl<'a> Checker<'a> {
                     } else if let Some((idx, overrides)) = &contextual_callback_override
                         && i == *idx
                         && self.check_closure_literal_with_param_overrides(
-                            a.value.peeled(),
+                            peeled_argument,
                             overrides,
                             locals,
                             label,
@@ -641,8 +712,8 @@ impl<'a> Checker<'a> {
                         .and_then(|s| s.params().get(i))
                         .and_then(|p| p.closure_this_type().clone())
                         && matches!(
-                            a.value.peeled().kind,
-                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            &peeled_argument.kind,
+                            ExprKind::Closure(_) | ExprKind::ArrowFn(_)
                         )
                     {
                         // `@param-closure-this` - a Closure/arrow-fn
@@ -654,7 +725,7 @@ impl<'a> Checker<'a> {
                         // a closure passed by variable falls through to
                         // plain `check_expr`, unchanged.
                         self.check_closure_literal_with_this_and_scope(
-                            a.value.peeled(),
+                            peeled_argument,
                             locals,
                             label,
                             this_ty,
@@ -664,11 +735,11 @@ impl<'a> Checker<'a> {
                         .and_then(|s| s.params().get(i))
                         .and_then(|p| p.ty().callable_sig())
                         && matches!(
-                            a.value.peeled().kind,
-                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            &peeled_argument.kind,
+                            ExprKind::Closure(_) | ExprKind::ArrowFn(_)
                         )
                         && self.check_closure_literal_with_param_overrides(
-                            a.value.peeled(),
+                            peeled_argument,
                             &callable_sig
                                 .params
                                 .iter()
@@ -685,7 +756,7 @@ impl<'a> Checker<'a> {
                         // the four other special-cased functions above
                         // use.
                     } else {
-                        self.check_expr(&a.value, locals, label);
+                        self.check_expr(argument, locals, label);
                     }
                 }
                 // `function.impossibleType`/`function.alreadyNarrowedType`
@@ -697,6 +768,7 @@ impl<'a> Checker<'a> {
                 // always-global builtin predicate names with no
                 // legitimate user override to resolve against.
                 self.check_impossible_type_check_call(
+                    arenas,
                     callee,
                     args,
                     locals,
@@ -712,13 +784,15 @@ impl<'a> Checker<'a> {
                             .next()
                             .unwrap_or(name)
                             .to_ascii_lowercase();
-                        let dynamic_throw = self.dynamic_function_throw_type(&bare, args, locals);
+                        let dynamic_throw =
+                            self.dynamic_function_throw_type(arenas, &bare, args, locals);
                         self.record_call_throw_point(dynamic_throw, Some(sig), e.span);
                         self.check_internal_function_call(name, sig, e.span);
                         self.check_restricted_function_call(name, args, locals, e.span);
                         self.check_deprecated_function_call(name, sig, e.span);
                         if self.settings.slam.check_current_time_dependence {
                             self.check_current_time_call(
+                                arenas,
                                 &name.to_ascii_lowercase(),
                                 args,
                                 locals,
@@ -728,26 +802,32 @@ impl<'a> Checker<'a> {
                         self.record_function_usage_token(name, sig, callee.span);
                         match *name {
                             "array_filter" => {
-                                self.check_array_filter_no_op(args, locals, e.span);
+                                self.check_array_filter_no_op(arenas, args, locals, e.span);
                                 if self.settings.strict_rules.check_strict_array_filter {
-                                    self.check_strict_array_filter(sig, args, locals, e.span);
+                                    self.check_strict_array_filter(
+                                        arenas, sig, args, locals, e.span,
+                                    );
                                 }
                             }
-                            "array_values" => self.check_array_values_no_op(args, locals, e.span),
+                            "array_values" => {
+                                self.check_array_values_no_op(arenas, args, locals, e.span)
+                            }
                             "ini_get" | "ini_set" | "ini_alter" | "ini_restore" | "get_cfg_var" => {
-                                self.check_ini_directive_call(name, args, locals)
+                                self.check_ini_directive_call(arenas, name, args, locals)
                             }
                             "in_array" | "array_search" | "array_keys" | "base64_decode"
                             | "iterator_to_array"
                                 if self.settings.strict_rules.check_strict_function_calls =>
                             {
-                                self.check_strict_function_call(name, sig, args, locals, e.span)
+                                self.check_strict_function_call(
+                                    arenas, name, sig, args, locals, e.span,
+                                )
                             }
                             "in_array" | "array_search" | "array_keys"
                                 if self.settings.extras.check_loose_haystack_comparison =>
                             {
                                 self.check_loose_haystack_comparison(
-                                    name, sig, args, locals, e.span,
+                                    arenas, name, sig, args, locals, e.span,
                                 )
                             }
                             _ => {}
@@ -773,12 +853,15 @@ impl<'a> Checker<'a> {
                             span: e.span,
                         });
                         self.apply_param_out_types(sig, args, locals);
-                        self.check_castable_array_arguments(name, sig, args, &resolved, locals);
-                        self.check_impossible_haystack_values(name, args, locals, e.span);
+                        self.check_castable_array_arguments(
+                            arenas, name, sig, args, &resolved, locals,
+                        );
+                        self.check_impossible_haystack_values(arenas, name, args, locals, e.span);
                         if name.eq_ignore_ascii_case("define") {
-                            self.check_define_value(args, locals, e.span);
+                            self.check_define_value(arenas, args, locals, e.span);
                         }
                         self.check_format_string_call(
+                            arenas,
                             &name.to_ascii_lowercase(),
                             args,
                             locals,
@@ -802,7 +885,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("random_int")
                         {
-                            self.check_random_int_call(args, locals);
+                            self.check_random_int_call(arenas, args, locals);
                         }
                         let bare = name
                             .rsplit('\\')
@@ -813,7 +896,7 @@ impl<'a> Checker<'a> {
                             bare.as_str(),
                             "array_combine" | "array_flip" | "array_count_values"
                         ) {
-                            self.check_value_to_key_call(&bare, args, locals);
+                            self.check_value_to_key_call(arenas, &bare, args, locals);
                         }
                         if name
                             .rsplit('\\')
@@ -822,7 +905,7 @@ impl<'a> Checker<'a> {
                             .eq_ignore_ascii_case("filter_var")
                             && args.len() >= 3
                         {
-                            self.check_filter_var_flag_conflict(args, e.span);
+                            self.check_filter_var_flag_conflict(arenas, args, e.span);
                         }
                         if name
                             .rsplit('\\')
@@ -830,25 +913,27 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("simplexml_load_string")
                         {
-                            self.check_simplexml_load_string_call(args, e.span);
+                            self.check_simplexml_load_string_call(arenas, args, e.span);
                         }
-                        self.check_preg_pattern_validity(name, args);
+                        self.check_preg_pattern_validity(arenas, name, args);
                         {
                             let bare = name.rsplit('\\').next().unwrap_or(name);
                             if bare.eq_ignore_ascii_case("sscanf")
                                 || bare.eq_ignore_ascii_case("fscanf")
                             {
-                                self.check_scanf_argument_count(bare, args, e.span);
+                                self.check_scanf_argument_count(arenas, bare, args, e.span);
                             }
                             if bare.eq_ignore_ascii_case("call_user_func")
                                 || bare.eq_ignore_ascii_case("call_user_func_array")
                             {
-                                self.check_call_user_func(bare, args, locals, e.span);
+                                self.check_call_user_func(arenas, bare, args, locals, e.span);
                             }
-                            self.check_preg_quote_delimiter(bare, args);
+                            self.check_preg_quote_delimiter(arenas, bare, args);
                         }
                         if !is_bare_statement {
-                            self.check_useless_return_value_call(name, args, locals, e.span);
+                            self.check_useless_return_value_call(
+                                arenas, name, args, locals, e.span,
+                            );
                         }
                     } else if locals.guarded_functions().is_empty()
                         || !locals.guarded_functions().contains(
@@ -908,7 +993,13 @@ impl<'a> Checker<'a> {
                         );
                     }
                     if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
-                        self.check_dynamic_callable_args(&callable_sig, args, locals, e.span);
+                        self.check_dynamic_callable_args(
+                            arenas,
+                            &callable_sig,
+                            args,
+                            locals,
+                            e.span,
+                        );
                     } else {
                         self.check_named_callable_invocation(&callee_ty, args, locals, e.span);
                     }
@@ -923,7 +1014,7 @@ impl<'a> Checker<'a> {
                 // `check_args`, which checks `$matches`'s pre-call type
                 // against the `?array<string>` parameter.
                 if matches!(resolved_name, Some("preg_match" | "preg_match_all"))
-                    && let Some(call) = preg_call(e)
+                    && let Some(call) = preg_call(arenas, e.id)
                     && call.subject.is_some()
                     && let Some(matches_arg) = call.matches
                     && let Some(outcome) = preg_result_outcome(&preg_result_type(call.all))
@@ -937,8 +1028,8 @@ impl<'a> Checker<'a> {
                         } else {
                             locals.declare_var(matches_name, shape, matches_arg.span);
                         }
-                    } else if locals.key_of(matches_arg).is_some() {
-                        self.bind_assignment_target(matches_arg, shape, locals);
+                    } else if self.key_of_expr(locals, matches_arg).is_some() {
+                        self.bind_assignment_target(arenas, matches_arg, shape, locals);
                     }
                 }
                 // `proc_open()`'s by-ref `$pipes` out-parameter (its 3rd
@@ -976,7 +1067,9 @@ impl<'a> Checker<'a> {
                             locals,
                         )
                     })
-                    .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals));
+                    .unwrap_or_else(|| {
+                        self.call_fallback_return_type(arenas, callee, args, locals)
+                    });
                 match array_shift_pop_pre_widen_ty.and_then(|pre_widen_ty| {
                     pre_widen_ty.array_value_type().map(|elem_ty| {
                         Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::null(), false)
@@ -987,6 +1080,18 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("method calls retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let recv = arenas
+                    .expr(*recv)
+                    .expect("method receiver belongs to its retained file owner");
+                let recv_peeled = arenas
+                    .peeled(recv.id)
+                    .and_then(|id| arenas.expr(id))
+                    .expect("method receiver belongs to its retained file owner");
+                let args = arenas.args(*args);
                 // `(function () {...})->bindTo($newThis, $scope)` - same
                 // idea as `Closure::bind`, just on the receiver instead
                 // of the first argument.
@@ -999,18 +1104,24 @@ impl<'a> Checker<'a> {
                 // `infer_expr` call there specifically.
                 let recv_ty = if **method == *"bindTo"
                     && matches!(
-                        recv.peeled().kind,
-                        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                        &recv_peeled.kind,
+                        ExprKind::Closure(_) | ExprKind::ArrowFn(_)
                     ) {
                     let this_ty = args
                         .first()
-                        .map(|a| self.infer_expr(&a.value, locals))
+                        .map(|a| {
+                            let value = arenas
+                                .expr(a.value)
+                                .expect("bindTo argument belongs to its retained file owner");
+                            self.infer_expr(value, locals)
+                        })
                         .unwrap_or(Type::mixed());
                     let scope_class = args
                         .get(1)
-                        .and_then(|a| self.literal_class_name_from_expr(&a.value));
+                        .and_then(|a| arenas.expr(a.value))
+                        .and_then(|value| self.literal_class_name_from_expr(value));
                     self.check_closure_literal_with_this_and_scope(
-                        recv.peeled(),
+                        recv_peeled,
                         locals,
                         label,
                         this_ty,
@@ -1022,7 +1133,10 @@ impl<'a> Checker<'a> {
                 };
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this call.
-                let recv_ty = if postfix_chain_has_nullsafe(recv) {
+                let recv_ty = if self
+                    .syntax_arenas()
+                    .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, recv))
+                {
                     self.chain_link_type(recv, locals)
                 } else {
                     recv_ty
@@ -1094,7 +1208,10 @@ impl<'a> Checker<'a> {
                     // the call here; a partly failing one is still read.
                     if level == 0 {
                         for a in args {
-                            self.check_expr(&a.value, locals, label);
+                            let value = arenas
+                                .expr(a.value)
+                                .expect("method argument belongs to its retained file owner");
+                            self.check_expr(value, locals, label);
                         }
                         return Type::mixed();
                     }
@@ -1148,7 +1265,7 @@ impl<'a> Checker<'a> {
                     self.check_phpstan_api_method_call(owner, method, s, e.span);
                 }
                 if let Some(class) = &recv_class {
-                    self.check_node_connecting_attribute(class, method, args, e.span);
+                    self.check_node_connecting_attribute(arenas, class, method, args, e.span);
                 }
                 // This method call's own throw contribution.
                 if let Some((class, _, _, _)) = &receiver {
@@ -1160,21 +1277,28 @@ impl<'a> Checker<'a> {
                     self.current_function_has_unannotated_call = true;
                 }
                 let resolved = sig
-                    .map(|s| resolve_call_args(args, s.params()))
+                    .map(|s| resolve_call_args(arenas, args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(sig, args);
-                self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(arenas, None, sig, args, &resolved, locals);
                 for (i, a) in args.iter().enumerate() {
+                    let argument = arenas
+                        .expr(a.value)
+                        .expect("method argument belongs to its retained file owner");
+                    let peeled_argument = arenas
+                        .peeled(a.value)
+                        .and_then(|id| arenas.expr(id))
+                        .expect("method argument belongs to its retained file owner");
                     // `argument.unpackNonIterable` - see `ExprKind::Call`'s
                     // identical check above.
                     if a.spread {
-                        let spread_ty = self.infer_expr(&a.value, locals);
+                        let spread_ty = self.infer_expr(argument, locals);
                         if let Some(level) = self
                             .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
                         {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
-                                a.value.span,
+                                argument.span,
                                 level,
                                 "argument.unpackNonIterable",
                             );
@@ -1185,21 +1309,21 @@ impl<'a> Checker<'a> {
                         .and_then(|p| p.closure_this_type().clone());
                     if let Some(this_ty) = closure_this
                         && matches!(
-                            a.value.peeled().kind,
-                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            &peeled_argument.kind,
+                            ExprKind::Closure(_) | ExprKind::ArrowFn(_)
                         )
                     {
                         // `@param-closure-this` - see `ExprKind::Call`'s
                         // identical branch.
                         self.check_closure_literal_with_this_and_scope(
-                            a.value.peeled(),
+                            peeled_argument,
                             locals,
                             label,
                             this_ty,
                             None,
                         );
                     } else {
-                        self.check_expr(&a.value, locals, label);
+                        self.check_expr(argument, locals, label);
                     }
                 }
                 if let Some(class) = &recv_class {
@@ -1229,7 +1353,7 @@ impl<'a> Checker<'a> {
                     // recorded against.
                     let method_exists_guarded = !locals.guarded_methods().is_empty()
                         && matches!(
-                            &recv.peeled().kind,
+                            &recv_peeled.kind,
                             ExprKind::Variable(name)
                                 if locals.find_var(name).is_some_and(|receiver| locals
                                     .guarded_methods()
@@ -1296,11 +1420,11 @@ impl<'a> Checker<'a> {
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
                         // deprecated checks above.
-                        self.check_dom_create_element(class, method, args, e.span);
+                        self.check_dom_create_element(arenas, class, method, args, e.span);
                         // SQL parameter binding validation - independent of
                         // the internal/deprecated checks above too.
                         self.check_dbal_parameter_binding(
-                            class, method, recv, args, locals, e.span,
+                            arenas, class, method, recv, args, locals, e.span,
                         );
                         // Renamed named arguments - see `checker::named_argument_renames`'s own
                         // module doc comment.
@@ -1341,7 +1465,8 @@ impl<'a> Checker<'a> {
                 // plain `DateInterval` for `$diff`, discarding the
                 // `days: int` refinement the identical call written as
                 // one direct chain (`$a->diff($b)->days`) gets right.
-                let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
+                let result =
+                    self.method_call_return_type(arenas, recv, &recv_ty, method, args, locals);
                 if let Some((class, _, _, s)) = &receiver {
                     let s: &FunctionReflection = std::borrow::Borrow::borrow(s);
                     self.apply_self_out(recv, s, &resolved, locals, class);
@@ -1350,7 +1475,10 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(recv))
+                if (nullsafe.is_nullsafe()
+                    || self
+                        .syntax_arenas()
+                        .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, recv)))
                     && !result.is_mixed()
                 {
                     self.relation().union(result, Type::null())
@@ -1373,6 +1501,16 @@ impl<'a> Checker<'a> {
             // `check_boolean_and_or`/`infer_binary` so each renders the
             // spelling the source actually used.
             ExprKind::Binary(op @ (BinOp::And | BinOp::LogicalAnd), l, r) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("binary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let l = arenas
+                    .expr(*l)
+                    .expect("binary left operand belongs to its retained file owner");
+                let r = arenas
+                    .expr(*r)
+                    .expect("binary right operand belongs to its retained file owner");
                 let sigil = binop_sigil(op);
                 let l_ty = self.check_expr(l, locals, label);
                 self.check_non_boolean_and_or_operand(
@@ -1414,6 +1552,16 @@ impl<'a> Checker<'a> {
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Binary(op @ (BinOp::Or | BinOp::LogicalOr), l, r) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("binary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let l = arenas
+                    .expr(*l)
+                    .expect("binary left operand belongs to its retained file owner");
+                let r = arenas
+                    .expr(*r)
+                    .expect("binary right operand belongs to its retained file owner");
                 let sigil = binop_sigil(op);
                 let l_ty = self.check_expr(l, locals, label);
                 self.check_non_boolean_and_or_operand(
@@ -1460,7 +1608,17 @@ impl<'a> Checker<'a> {
             // says the left side's type carries real information the
             // right side's bare fallback would otherwise discard.
             ExprKind::Binary(BinOp::Coalesce, l, r) => {
-                self.check_expr_quiet_root(l, locals, label);
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("binary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let l = arenas
+                    .expr(*l)
+                    .expect("binary left operand belongs to its retained file owner");
+                let r = arenas
+                    .expr(*r)
+                    .expect("binary right operand belongs to its retained file owner");
+                self.check_expr_quiet_root(arenas, l, locals, label);
                 self.check_pointless_null_probe(
                     l,
                     locals,
@@ -1469,6 +1627,7 @@ impl<'a> Checker<'a> {
                     null_probe_verdict,
                 );
                 self.check_pointless_offset_or_property_probe(
+                    arenas,
                     l,
                     locals,
                     "nullCoalesce",
@@ -1480,6 +1639,16 @@ impl<'a> Checker<'a> {
                 self.widen_coalesce_result(l, r_ty, locals)
             }
             ExprKind::Binary(op, l, r) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("binary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let l = arenas
+                    .expr(*l)
+                    .expect("binary left operand belongs to its retained file owner");
+                let r = arenas
+                    .expr(*r)
+                    .expect("binary right operand belongs to its retained file owner");
                 let l_ty = self.check_expr(l, locals, label);
                 let r_ty = self.check_expr(r, locals, label);
                 self.binary_string_conversions(op, (l, &l_ty), (r, &r_ty), locals);
@@ -1487,9 +1656,10 @@ impl<'a> Checker<'a> {
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
                 self.check_duplicate_operands(op, l, r);
                 self.check_division_by_zero(op, &r_ty, r.span);
-                self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span);
-                self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span);
+                self.check_constant_loose_comparison(arenas, op, l, r, &l_ty, &r_ty, e.span);
+                self.check_constant_numeric_comparison(arenas, op, l, r, &l_ty, &r_ty, e.span);
                 self.check_strict_comparison_of_different_types(
+                    arenas,
                     op,
                     l,
                     r,
@@ -1547,6 +1717,13 @@ impl<'a> Checker<'a> {
                 op @ (UnaryOp::PreInc | UnaryOp::PostInc | UnaryOp::PreDec | UnaryOp::PostDec),
                 inner,
             ) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_incdec_validity(op, inner, &inner_ty, e.span);
                 // A literal or range steps by one, so a counter widened to
@@ -1576,7 +1753,7 @@ impl<'a> Checker<'a> {
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
                 self.implicit_array_access_write(inner, e.span, locals);
-                self.bind_assignment_target(inner, updated.clone(), locals);
+                self.bind_assignment_target(arenas, inner, updated.clone(), locals);
                 // `++$x` is the value after the step, `$x++` the one before.
                 if matches!(op, UnaryOp::PreInc | UnaryOp::PreDec) {
                     updated
@@ -1585,6 +1762,13 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_non_boolean_condition(
                     inner,
@@ -1629,6 +1813,13 @@ impl<'a> Checker<'a> {
             // same implicit-numeric-coercion rule arithmetic operators
             // apply generally.
             ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
                 if inner_ty.is_string().yes() {
@@ -1640,14 +1831,35 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
                 self.bitwise_not_type(&inner_ty)
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("grouped expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("grouped expression belongs to its retained file owner");
                 self.check_expr(inner, locals, label)
             }
             ExprKind::Cast(cast, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("cast expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("cast operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(cast.kind(), &inner_ty, inner.span);
                 if cast.kind() == CastKind::Unset {
@@ -1667,7 +1879,7 @@ impl<'a> Checker<'a> {
                     self.check_implicit_tostring_usage(&inner_ty, e.span);
                     self.forget_what_an_operation_may_change(
                         &inner_ty,
-                        is_this(inner),
+                        is_this(self, inner),
                         Operation::String,
                         locals,
                     );
@@ -1680,7 +1892,7 @@ impl<'a> Checker<'a> {
             // `null_probe_verdict` (nullability) for `isset`,
             // `empty_probe_verdict` (falsiness) for `empty`.
             ExprKind::Isset(operands) => {
-                for operand in operands {
+                for operand in arenas.expr_ids(operands) {
                     self.check_existence_probe(
                         operand,
                         locals,
@@ -1714,7 +1926,7 @@ impl<'a> Checker<'a> {
                 self.check_implicit_tostring_usage(&ty, inner.span);
                 self.forget_what_an_operation_may_change(
                     &ty,
-                    is_this(inner),
+                    is_this(self, inner),
                     Operation::String,
                     locals,
                 );
@@ -1724,13 +1936,21 @@ impl<'a> Checker<'a> {
             // PHP 8.4 (`string|int $status = 0`), where the stubs have it.
             ExprKind::Exit(kind, args) => {
                 if let Some(args) = args {
+                    let syntax_owner = self
+                        .syntax_tree_owner()
+                        .expect("exit arguments retain their parsed file owner");
+                    let arenas = syntax_owner.arenas();
+                    let args = arenas.args(*args);
                     for (i, arg) in args.iter().enumerate() {
-                        let ty = self.check_expr(&arg.value, locals, label);
+                        let Some(value) = arenas.expr(arg.value) else {
+                            continue;
+                        };
+                        let ty = self.check_expr(value, locals, label);
                         // A status that is not an int is printed.
                         if i == 0 {
                             self.forget_what_an_operation_may_change(
                                 &ty,
-                                is_this(&arg.value),
+                                is_this(self, value),
                                 Operation::String,
                                 locals,
                             );
@@ -1780,6 +2000,13 @@ impl<'a> Checker<'a> {
             // is exactly the right type for it, the same way it's used
             // for a function that always throws or exits.
             ExprKind::Throw(inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("throw expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("thrown expression belongs to its retained file owner");
                 // A `throw` expression (`$x ?? throw new Foo();`,
                 // `default => throw ...`, an arrow function body, ...) is
                 // the same language construct as a bare `throw $x;`
@@ -1804,10 +2031,17 @@ impl<'a> Checker<'a> {
                 Type::never()
             }
             ExprKind::YieldFrom(inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("yield-from expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("yield-from operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.forget_what_an_operation_may_change(
                     &inner_ty,
-                    is_this(inner),
+                    is_this(self, inner),
                     Operation::Iterate { keys: true },
                     locals,
                 );
@@ -1826,6 +2060,18 @@ impl<'a> Checker<'a> {
             // this checker tracks - the clone target's own type is the
             // honest answer.
             ExprKind::Clone(inner, overrides) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("clone expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("clone target belongs to its retained file owner");
+                let overrides = overrides.map(|id| {
+                    arenas
+                        .expr(id)
+                        .expect("clone overrides belong to their retained file owner")
+                });
                 let inner_ty = self.check_expr(inner, locals, label);
                 // `clone.nonObject` - shares `property.nonObject`'s own
                 // `stdClass`-unaware classifier, not `method.nonObject`'s:
@@ -1846,7 +2092,7 @@ impl<'a> Checker<'a> {
                 }
                 self.forget_what_an_operation_may_change(
                     &inner_ty,
-                    is_this(inner),
+                    is_this(self, inner),
                     Operation::Clone {
                         with: overrides.is_some(),
                     },
@@ -1855,10 +2101,20 @@ impl<'a> Checker<'a> {
                 inner_ty
             }
             ExprKind::Yield(key, value) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("yield expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
                 if let Some(k) = key {
+                    let k = arenas
+                        .expr(*k)
+                        .expect("yield key belongs to its retained file owner");
                     self.check_expr(k, locals, label);
                 }
                 if let Some(v) = value {
+                    let v = arenas
+                        .expr(*v)
+                        .expect("yield value belongs to its retained file owner");
                     self.check_expr(v, locals, label);
                 }
                 self.current_declared_return_type
@@ -1867,9 +2123,19 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::mixed())
             }
             ExprKind::Instanceof(inner, target) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("instanceof expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("instanceof operand belongs to its retained file owner");
                 self.check_expr(inner, locals, label);
                 match target {
                     InstanceofTarget::Expr(inner_target) => {
+                        let inner_target = arenas
+                            .expr(*inner_target)
+                            .expect("instanceof target belongs to its retained file owner");
                         self.check_expr(inner_target, locals, label);
                     }
                     // Mirrors real PHPStan's `ExistingClassInInstanceOfRule` -
@@ -1910,6 +2176,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.check_impossible_instanceof(
+                    arenas,
                     inner,
                     target,
                     e.span,
@@ -1919,6 +2186,16 @@ impl<'a> Checker<'a> {
                 self.infer_expr(e, locals)
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("assignment expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let lhs = arenas
+                    .expr(*lhs)
+                    .expect("assignment target belongs to its retained file owner");
+                let rhs = arenas
+                    .expr(*rhs)
+                    .expect("assigned value belongs to its retained file owner");
                 self.check_nullsafe_assignment_target(lhs);
                 self.check_assignable_target(lhs);
                 if matches!(&e.kind, ExprKind::AssignRef(..)) {
@@ -1928,10 +2205,13 @@ impl<'a> Checker<'a> {
                 // `$r = &$a[];` legally creates the new element it refers to.
                 let rhs_ty = match &rhs.kind {
                     ExprKind::Index(base, None) if matches!(&e.kind, ExprKind::AssignRef(..)) => {
+                        let base = arenas
+                            .expr(*base)
+                            .expect("empty index base belongs to its retained file owner");
                         let base_ty = self.check_expr(base, locals, label);
                         self.implicit_array_access_call(
                             &base_ty,
-                            is_this(base),
+                            is_this(self, base),
                             Access::Read,
                             e.span,
                             locals,
@@ -1946,7 +2226,7 @@ impl<'a> Checker<'a> {
                 if let ExprKind::Destructure(items, _) = &lhs.kind
                     && !self.relation().is_destructurable(&rhs_ty).no()
                 {
-                    self.check_destructuring_offsets(items, &rhs_ty, locals);
+                    self.check_destructuring_offsets(arenas, items, &rhs_ty, locals);
                 }
                 self.check_offset_assignment(lhs, &rhs_ty, false, locals);
                 if matches!(&lhs.kind, ExprKind::Destructure(..))
@@ -1978,7 +2258,7 @@ impl<'a> Checker<'a> {
                 // statement that defines it. PropertyAccess/Index targets
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
-                self.check_assignment_target(lhs, locals, label);
+                self.check_assignment_target(arenas, lhs, locals, label);
                 match &lhs.kind {
                     _ if matches!(&e.kind, ExprKind::AssignRef(..)) => {
                         self.implicit_reference(lhs, e.span, locals);
@@ -1986,7 +2266,7 @@ impl<'a> Checker<'a> {
                     // Destructuring an `ArrayAccess` object reads each
                     // key through `offsetGet`.
                     ExprKind::Destructure(items, _) => {
-                        self.implicit_destructure(items, &rhs_ty, e.span, locals);
+                        self.implicit_destructure(arenas, items, &rhs_ty, e.span, locals);
                     }
                     _ => self.implicit_array_access_write(lhs, e.span, locals),
                 }
@@ -1997,10 +2277,10 @@ impl<'a> Checker<'a> {
                 // destructured by-ref target (`[$byRef] = $arr;`) - see
                 // `check_by_ref_destructuring`'s own doc comment.
                 self.check_param_out_assignment(lhs, &rhs_ty);
-                self.check_by_ref_destructuring(lhs, &rhs_ty);
+                self.check_by_ref_destructuring(arenas, lhs, &rhs_ty);
                 let native = match (&e.kind, &lhs.kind) {
                     (ExprKind::Assign(..), ExprKind::Variable(name)) => {
-                        Some((name.clone(), self.native_expr_type(rhs, locals)))
+                        Some((name.clone(), self.native_expr_type_id(arenas, *rhs, locals)))
                     }
                     _ => None,
                 };
@@ -2008,7 +2288,7 @@ impl<'a> Checker<'a> {
                     e.span,
                     (rhs_ty.clone(), native.as_ref().map(|(_, n)| n.clone())),
                 );
-                self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
+                self.bind_assignment_target(arenas, lhs, rhs_ty.clone(), locals);
                 if let Some((name, native)) = native {
                     locals.set_native_var(&name, native);
                 }
@@ -2027,9 +2307,14 @@ impl<'a> Checker<'a> {
                 // from the ordinary `key_of` fast path, so this is
                 // deliberately gated to the dynamic-key case only.
                 if let ExprKind::Variable(target_name) = &lhs.kind
-                    && let ExprKind::Index(base, Some(idx)) = &rhs.peeled().kind
-                    && let ExprKind::Variable(container_name) = &base.peeled().kind
-                    && literal_string_key(idx).is_none()
+                    && let Some(rhs_id) = arenas.peeled(rhs.id)
+                    && let Some(rhs_node) = arenas.expr(rhs_id)
+                    && let ExprKind::Index(base, Some(idx)) = &rhs_node.kind
+                    && let Some(base_id) = arenas.peeled(*base)
+                    && let Some(base_node) = arenas.expr(base_id)
+                    && let ExprKind::Variable(container_name) = &base_node.kind
+                    && let Some(idx) = arenas.expr(*idx)
+                    && literal_string_key(arenas, idx).is_none()
                 {
                     let target = locals.var_key(target_name);
                     let container = locals.var_key(container_name);
@@ -2038,6 +2323,16 @@ impl<'a> Checker<'a> {
                 rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("compound assignments retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let lhs = arenas
+                    .expr(*lhs)
+                    .expect("compound assignment target belongs to its retained file owner");
+                let rhs = arenas
+                    .expr(*rhs)
+                    .expect("compound assigned value belongs to its retained file owner");
                 self.check_nullsafe_assignment_target(lhs);
                 self.check_assignable_target(lhs);
                 // `$x ??= $default;` is defined as exactly
@@ -2055,7 +2350,7 @@ impl<'a> Checker<'a> {
                             .non_ignorable(),
                         );
                     }
-                    let ty = self.check_expr_quiet_root(lhs, locals, label);
+                    let ty = self.check_expr_quiet_root(arenas, lhs, locals, label);
                     self.check_pointless_null_probe(
                         lhs,
                         locals,
@@ -2064,6 +2359,7 @@ impl<'a> Checker<'a> {
                         null_probe_verdict,
                     );
                     self.check_pointless_offset_or_property_probe(
+                        arenas,
                         lhs,
                         locals,
                         "nullCoalesce",
@@ -2101,17 +2397,32 @@ impl<'a> Checker<'a> {
                 self.check_param_out_assignment(lhs, &ty);
                 let native = match &lhs.kind {
                     ExprKind::Variable(name) => {
-                        Some((name.clone(), self.native_expr_type(e, locals)))
+                        Some((name.clone(), self.native_expr_type_id(arenas, e.id, locals)))
                     }
                     _ => None,
                 };
-                self.bind_assignment_target(lhs, ty, locals);
+                self.bind_assignment_target(arenas, lhs, ty, locals);
                 if let Some((name, native)) = native {
                     locals.set_native_var(&name, native);
                 }
                 Type::mixed()
             }
             ExprKind::Ternary(cond, then_, else_) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("ternary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let cond = arenas
+                    .expr(*cond)
+                    .expect("ternary condition belongs to its retained file owner");
+                let then_ = then_.as_ref().map(|id| {
+                    arenas
+                        .expr(*id)
+                        .expect("ternary branch belongs to its retained file owner")
+                });
+                let else_ = arenas
+                    .expr(*else_)
+                    .expect("ternary else branch belongs to its retained file owner");
                 self.in_condition_position = true;
                 let cond_ty = self.check_expr(cond, locals, label);
                 // The short/"elvis" `$cond ?: $else` form is exempted,
@@ -2188,20 +2499,32 @@ impl<'a> Checker<'a> {
             // Only ever a target, checked as one where it's assigned to.
             ExprKind::Destructure(..) => Type::mixed(),
             ExprKind::ArrayLiteral(items) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("array literals retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let items = arenas.array_items(*items);
                 for item in items {
-                    if let Some(k) = &item.key {
+                    if let Some(k) = item.key.map(|id| {
+                        arenas
+                            .expr(id)
+                            .expect("array item key belongs to its retained file owner")
+                    }) {
                         self.check_expr(k, locals, label);
                         self.check_array_item_key_type(k, locals);
                     }
+                    let value = arenas
+                        .expr(item.value)
+                        .expect("array item value belongs to its retained file owner");
                     // `[&$x]` makes `$x` a reference, creating it as `null`
                     // when it doesn't exist.
                     if item.by_ref
-                        && let ExprKind::Variable(name) = &item.value.kind
+                        && let ExprKind::Variable(name) = &value.kind
                         && !locals.contains_var(name)
                     {
-                        locals.declare_var(name, Type::null(), item.value.span);
+                        locals.declare_var(name, Type::null(), value.span);
                     }
-                    let value_ty = self.check_expr(&item.value, locals, label);
+                    let value_ty = self.check_expr(value, locals, label);
                     // `arrayUnpacking.nonIterable` - `[...$x]` where
                     // `$x` is confirmed to never be iterable at all.
                     // Shares `foreach.nonIterable`'s own classifier.
@@ -2211,29 +2534,44 @@ impl<'a> Checker<'a> {
                     {
                         self.report(
                             format!("Only iterables can be unpacked, {value_ty} given."),
-                            item.value.span,
+                            value.span,
                             level,
                             "arrayUnpacking.nonIterable",
                         );
                     }
                     if item.spread {
-                        self.check_unpacked_string_keys(&value_ty, item.value.span);
+                        self.check_unpacked_string_keys(&value_ty, value.span);
                         self.forget_what_an_operation_may_change(
                             &value_ty,
-                            is_this(&item.value),
+                            is_this(self, value),
                             Operation::Iterate { keys: true },
                             locals,
                         );
                     }
                 }
-                self.check_array_literal_duplicate_keys(items, locals);
-                self.infer_array_literal_type(items, locals)
+                self.check_array_literal_duplicate_keys(arenas, items, locals);
+                self.infer_array_literal_type(arenas, items, locals)
             }
             ExprKind::Index(base, idx) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("index expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let base = arenas
+                    .expr(*base)
+                    .expect("index base belongs to its retained file owner");
+                let idx = idx.as_ref().map(|id| {
+                    arenas
+                        .expr(*id)
+                        .expect("index expression belongs to its retained file owner")
+                });
                 let base_ty = self.check_expr(base, locals, label);
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this one.
-                let base_ty = if postfix_chain_has_nullsafe(base) {
+                let base_ty = if self
+                    .syntax_arenas()
+                    .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, base))
+                {
                     self.chain_link_type(base, locals)
                 } else {
                     base_ty
@@ -2244,14 +2582,14 @@ impl<'a> Checker<'a> {
                         self.check_offset_accessibility(&base_ty, i);
                         self.check_offset_existence(e, base, i, locals);
                         self.check_dim_fetch_key_type(base, i, locals);
-                        let key_ty = match crate::checker::literal_shape_key(i) {
+                        let key_ty = match crate::checker::literal_shape_key(arenas, i) {
                             Some(key) => key.to_type(),
                             None => self.infer_expr(i, locals),
                         };
                         self.check_array_access_offset(&base_ty, "offsetGet", &key_ty, i.span);
                         self.implicit_array_access_call(
                             &base_ty,
-                            is_this(base),
+                            is_this(self, base),
                             Access::Read,
                             e.span,
                             locals,
@@ -2267,7 +2605,7 @@ impl<'a> Checker<'a> {
                         // after narrowing `$x['k']` would otherwise see
                         // the un-narrowed type.
                         if locals.may_have_member_narrowing()
-                            && let Some(key) = locals.find_key(e)
+                            && let Some(key) = self.find_expr_key(locals, e)
                             && let Some(narrowed) = locals.get(key)
                         {
                             return narrowed.clone();
@@ -2296,6 +2634,14 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::New(class_expr, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("instantiations retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let class_expr = arenas
+                    .expr(*class_expr)
+                    .expect("instantiation target belongs to its retained file owner");
+                let args = arenas.args(*args);
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
                 // `new Foo<Bar>()` at all - but `infer_expr`'s `New` arm
@@ -2326,21 +2672,30 @@ impl<'a> Checker<'a> {
                     .as_deref()
                     .and_then(|class| self.registry.lookup_method(class, "__construct"));
                 let resolved = ctor_sig
-                    .map(|s| resolve_call_args(args, s.params()))
+                    .map(|s| resolve_call_args(arenas, args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(ctor_sig, args);
-                self.predefine_byref_or_unknown_args(None, ctor_sig, args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(
+                    arenas, None, ctor_sig, args, &resolved, locals,
+                );
                 for (i, a) in args.iter().enumerate() {
+                    let argument = arenas
+                        .expr(a.value)
+                        .expect("constructor argument belongs to its retained file owner");
+                    let peeled_argument = arenas
+                        .peeled(a.value)
+                        .and_then(|id| arenas.expr(id))
+                        .expect("constructor argument belongs to its retained file owner");
                     // `argument.unpackNonIterable` - see `ExprKind::Call`'s
                     // identical check above.
                     if a.spread {
-                        let spread_ty = self.infer_expr(&a.value, locals);
+                        let spread_ty = self.infer_expr(argument, locals);
                         if let Some(level) = self
                             .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
                         {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
-                                a.value.span,
+                                argument.span,
                                 level,
                                 "argument.unpackNonIterable",
                             );
@@ -2351,21 +2706,21 @@ impl<'a> Checker<'a> {
                         .and_then(|p| p.closure_this_type().clone());
                     if let Some(this_ty) = closure_this
                         && matches!(
-                            a.value.peeled().kind,
-                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            &peeled_argument.kind,
+                            ExprKind::Closure(_) | ExprKind::ArrowFn(_)
                         )
                     {
                         // `@param-closure-this` - see `ExprKind::Call`'s
                         // identical branch.
                         self.check_closure_literal_with_this_and_scope(
-                            a.value.peeled(),
+                            peeled_argument,
                             locals,
                             label,
                             this_ty,
                             None,
                         );
                     } else {
-                        self.check_expr(&a.value, locals, label);
+                        self.check_expr(argument, locals, label);
                     }
                 }
                 if let Some(class) = &resolved_class {
@@ -2400,15 +2755,15 @@ impl<'a> Checker<'a> {
                     // validation - independent of whether the class is
                     // otherwise instantiable, so this runs unconditionally
                     // before that dispatch.
-                    self.check_date_interval_constructor(class, args, e.span, locals);
+                    self.check_date_interval_constructor(arenas, class, args, e.span, locals);
                     // `DateTime`/`DateTimeImmutable`'s own constructor-
                     // string validation - same shape.
-                    self.check_date_time_constructor(class, args, e.span, locals);
+                    self.check_date_time_constructor(arenas, class, args, e.span, locals);
                     // `SimpleXMLElement`'s construction well-formedness
                     // validation - same shape.
-                    self.check_simplexml_element_constructor(class, args, e.span);
+                    self.check_simplexml_element_constructor(arenas, class, args, e.span);
                     // This constructor's own throw contribution.
-                    let dynamic_throw = self.dynamic_new_throw_type(class, args);
+                    let dynamic_throw = self.dynamic_new_throw_type(arenas, class, args);
                     self.record_call_throw_point(dynamic_throw, ctor_sig, e.span);
                     let (is_name, is_static) = match &class_expr.kind {
                         ExprKind::Name(raw) => (true, raw.eq_ignore_ascii_case("static")),
@@ -2459,36 +2814,58 @@ impl<'a> Checker<'a> {
                 }
                 new_ty
             }
-            ExprKind::NewAnonymousClass(class) => {
-                self.check_enum_cases_outside_enum(&class.def.enum_cases);
-                let ctor_params = class
-                    .def
-                    .constructor()
-                    .map(|m| m.function.params.as_slice())
-                    .unwrap_or_default();
-                for (i, a) in class.args.iter().enumerate() {
+            ExprKind::NewAnonymousClass(class_id) => {
+                let Some(syntax_owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let arenas = syntax_owner.arenas();
+                let Some(class) = arenas.anonymous_class(*class_id) else {
+                    return Type::mixed();
+                };
+                let Some(def) = arenas.class(class.def) else {
+                    return Type::mixed();
+                };
+                self.check_enum_cases_outside_enum(def.enum_cases(arenas));
+                let ctor_params: Vec<_> = def
+                    .constructor(arenas)
+                    .map(|m| arenas.params(m.function.params))
+                    .into_iter()
+                    .flatten()
+                    .map(|param| (param.name.to_string(), param.by_ref, param.variadic))
+                    .collect();
+                for (i, a) in arenas.args(class.args).iter().enumerate() {
+                    let Some(value) = arenas.expr(a.value) else {
+                        continue;
+                    };
                     let param = match &a.name {
-                        Some(name) => ctor_params.iter().find(|p| *p.name == **name),
+                        Some(name) => ctor_params.iter().find(|p| p.0 == **name),
                         None => ctor_params
                             .get(i)
-                            .or_else(|| ctor_params.last().filter(|p| p.variadic)),
+                            .or_else(|| ctor_params.last().filter(|p| p.2)),
                     };
-                    if matches!(a.value.kind, ExprKind::Index(_, None))
-                        && param.is_some_and(|p| p.by_ref)
+                    if matches!(value.kind, ExprKind::Index(_, None)) && param.is_some_and(|p| p.1)
                     {
-                        self.by_ref_empty_dim_args.borrow_mut().insert(a.value.span);
+                        self.by_ref_empty_dim_args.borrow_mut().insert(value.span);
                     }
-                    self.check_expr(&a.value, locals, label);
+                    self.check_expr(value, locals, label);
                 }
-                if let Some(name) = &class.name {
-                    self.check_anonymous_class(name, &class.def, e.span);
+                let name = arenas.anonymous_class_name(*class_id);
+                if let Some(name) = name {
+                    self.check_anonymous_class(name, def, e.span);
                 }
-                anonymous_class_type(class)
+                anonymous_class_type(name)
             }
             ExprKind::StaticCall(target, method, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static-call arguments retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let args = arenas.args(*args);
                 if let Some(property) = target.parent_hook_property() {
                     for a in args {
-                        self.check_expr(&a.value, locals, label);
+                        if let Some(value) = arenas.expr(a.value) {
+                            self.check_expr(value, locals, label);
+                        }
                     }
                     return self.parent_hook_call_type(property, method);
                 }
@@ -2530,10 +2907,10 @@ impl<'a> Checker<'a> {
                     self.current_function_has_unannotated_call = true;
                 }
                 let resolved = sig
-                    .map(|s| resolve_call_args(args, s.params()))
+                    .map(|s| resolve_call_args(arenas, args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(sig, args);
-                self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(arenas, None, sig, args, &resolved, locals);
                 // `Closure::bind($closure, $newThis, $scope)` makes
                 // `$this` (and, for private/protected access, the
                 // calling scope) available inside a closure that
@@ -2547,37 +2924,51 @@ impl<'a> Checker<'a> {
                 if resolved_class.as_deref() == Some("Closure")
                     && method == "bind"
                     && !args.is_empty()
-                    && matches!(
-                        args[0].value.peeled().kind,
-                        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
-                    )
+                    && arenas
+                        .peeled(args[0].value)
+                        .and_then(|id| arenas.expr(id))
+                        .is_some_and(|value| {
+                            matches!(
+                                value.kind,
+                                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            )
+                        })
                 {
                     let this_ty = args
                         .get(1)
-                        .map(|a| self.infer_expr(&a.value, locals))
+                        .and_then(|a| arenas.expr(a.value))
+                        .map(|value| self.infer_expr(value, locals))
                         .unwrap_or(Type::mixed());
                     let scope_class = args
                         .get(2)
-                        .and_then(|a| self.literal_class_name_from_expr(&a.value));
+                        .and_then(|a| arenas.expr(a.value))
+                        .and_then(|value| self.literal_class_name_from_expr(value));
+                    let closure = arenas
+                        .peeled(args[0].value)
+                        .and_then(|id| arenas.expr(id))
+                        .expect("Closure::bind literal belongs to its parsed file owner");
                     self.check_closure_literal_with_this_and_scope(
-                        args[0].value.peeled(),
+                        closure,
                         locals,
                         label,
                         this_ty,
                         scope_class,
                     );
                     for a in &args[1..] {
-                        self.check_expr(&a.value, locals, label);
+                        let Some(value) = arenas.expr(a.value) else {
+                            continue;
+                        };
+                        self.check_expr(value, locals, label);
                         // `argument.unpackNonIterable` - see
                         // `ExprKind::Call`'s identical check above.
                         if a.spread {
-                            let spread_ty = self.infer_expr(&a.value, locals);
+                            let spread_ty = self.infer_expr(value, locals);
                             if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
                                 self.relation().is_iterable(m).no()
                             }) {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
-                                    a.value.span,
+                                    value.span,
                                     level,
                                     "argument.unpackNonIterable",
                                 );
@@ -2586,16 +2977,19 @@ impl<'a> Checker<'a> {
                     }
                 } else {
                     for (i, a) in args.iter().enumerate() {
+                        let Some(value) = arenas.expr(a.value) else {
+                            continue;
+                        };
                         // `argument.unpackNonIterable` - see
                         // `ExprKind::Call`'s identical check above.
                         if a.spread {
-                            let spread_ty = self.infer_expr(&a.value, locals);
+                            let spread_ty = self.infer_expr(value, locals);
                             if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
                                 self.relation().is_iterable(m).no()
                             }) {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
-                                    a.value.span,
+                                    value.span,
                                     level,
                                     "argument.unpackNonIterable",
                                 );
@@ -2605,22 +2999,20 @@ impl<'a> Checker<'a> {
                             .and_then(|s| s.params().get(i))
                             .and_then(|p| p.closure_this_type().clone());
                         if let Some(this_ty) = closure_this
+                            && let Some(closure_id) = arenas.peeled(a.value)
+                            && let Some(closure) = arenas.expr(closure_id)
                             && matches!(
-                                a.value.peeled().kind,
+                                closure.kind,
                                 ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                             )
                         {
                             // `@param-closure-this` - see
                             // `ExprKind::Call`'s identical branch.
                             self.check_closure_literal_with_this_and_scope(
-                                a.value.peeled(),
-                                locals,
-                                label,
-                                this_ty,
-                                None,
+                                closure, locals, label, this_ty, None,
                             );
                         } else {
-                            self.check_expr(&a.value, locals, label);
+                            self.check_expr(value, locals, label);
                         }
                     }
                 }
@@ -2676,7 +3068,7 @@ impl<'a> Checker<'a> {
                             method,
                             e.span,
                             Span {
-                                start: static_target_end(target),
+                                start: self.static_target_end(target),
                                 end: e.span.end,
                             },
                         );
@@ -2741,8 +3133,14 @@ impl<'a> Checker<'a> {
                 match (&resolved_class, sig) {
                     (Some(class), Some(s)) => {
                         let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
-                        let resolved_ty =
-                            self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
+                        let resolved_ty = self.narrow_enum_from_call(
+                            arenas,
+                            class,
+                            method,
+                            args,
+                            resolved_ty,
+                            locals,
+                        );
                         // The `::from()`/`::tryFrom()` literal-argument
                         // signal - see `project::whole_program::
                         // dead_enum_cases`'s own doc comment. Reads the
@@ -2752,7 +3150,7 @@ impl<'a> Checker<'a> {
                         if let Some((case_class, case)) = resolved_ty.as_enum_case() {
                             self.record_member_ref(e.span, case_class, case);
                         }
-                        match self.class_argument_return(class, method, args, locals) {
+                        match self.class_argument_return(arenas, class, method, args, locals) {
                             Some(ty) => ty,
                             None => self.resolve_static_call_return(&resolved_ty, target, class),
                         }
@@ -2766,6 +3164,13 @@ impl<'a> Checker<'a> {
                 let receiver = match target {
                     StaticTarget::Name(..) => None,
                     StaticTarget::Expr(receiver) => {
+                        let syntax_owner = self
+                            .syntax_tree_owner()
+                            .expect("static target belongs to its retained file owner");
+                        let receiver = syntax_owner
+                            .arenas()
+                            .expr(*receiver)
+                            .expect("static target receiver belongs to its retained file owner");
                         Some(receiver_class(self.check_expr(receiver, locals, label)))
                     }
                 };
@@ -2780,7 +3185,9 @@ impl<'a> Checker<'a> {
                         let fetched: Vec<Type> = names
                             .into_iter()
                             .map(|n| {
-                                self.check_expr(&constant_fetch(target, n, e.span), locals, label)
+                                let arena = self.synthetic_expr_arena();
+                                let fetch = self.constant_fetch(&arena, target, n, e.span);
+                                self.check_expr(fetch, locals, label)
                             })
                             .collect();
                         self.relation().union_of(fetched)
@@ -2825,7 +3232,7 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name, locals, label);
                 self.forget_what_an_operation_may_change(
                     &name_ty,
-                    is_this(name),
+                    is_this(self, name),
                     Operation::String,
                     locals,
                 );
@@ -2845,16 +3252,30 @@ impl<'a> Checker<'a> {
                 self.check_static_member_fetch(e, target, name, true, locals, label)
             }
             ExprKind::DynamicVariable(name_expr) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("dynamic variables retain their parsed file owner");
+                let name_expr = syntax_owner
+                    .arenas()
+                    .expr(*name_expr)
+                    .expect("dynamic variable name belongs to its retained file owner");
                 let name_ty = self.check_expr(name_expr, locals, label);
                 self.forget_what_an_operation_may_change(
                     &name_ty,
-                    is_this(name_expr),
+                    is_this(self, name_expr),
                     Operation::String,
                     locals,
                 );
                 Type::mixed()
             }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("property accesses retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let base = arenas
+                    .expr(*base)
+                    .expect("property receiver belongs to its retained file owner");
                 // Unlike a write (check_property_assignment, and the
                 // Assign/destructuring arms below that
                 // deliberately route a PropertyAccess target through only
@@ -2872,7 +3293,10 @@ impl<'a> Checker<'a> {
                 self.probe_hit_at(base.span, &base_ty);
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this one.
-                let base_ty = if postfix_chain_has_nullsafe(base) {
+                let base_ty = if self
+                    .syntax_arenas()
+                    .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, base))
+                {
                     self.chain_link_type(base, locals)
                 } else {
                     base_ty
@@ -3021,12 +3445,12 @@ impl<'a> Checker<'a> {
                 }
                 self.forget_what_an_operation_may_change(
                     &base_ty,
-                    is_this(base),
+                    is_this(self, base),
                     Operation::Property(Some(prop.name.clone()), Access::Read),
                     locals,
                 );
                 if locals.may_have_member_narrowing()
-                    && let Some(base_key) = locals.find_key(base)
+                    && let Some(base_key) = self.find_expr_key(locals, base)
                     && let Some(narrowed) = locals
                         .find(&KeyData::Prop {
                             base: base_key,
@@ -3041,7 +3465,10 @@ impl<'a> Checker<'a> {
                 // shared with `infer_expr`'s identical arm - see its doc
                 // comment.
                 let result = self.property_access_type(&base_ty.without(&Type::null()), prop);
-                if (nullsafe.is_nullsafe() || postfix_chain_has_nullsafe(base))
+                if (nullsafe.is_nullsafe()
+                    || self
+                        .syntax_arenas()
+                        .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, base)))
                     && !result.is_mixed()
                 {
                     self.relation().union(result, Type::null())
@@ -3059,10 +3486,23 @@ impl<'a> Checker<'a> {
             // back to `escape_targets_for_receiver_type`'s conservative
             // whole-class escape hatch.
             ExprKind::DynamicPropertyAccess(base, name_expr, operator) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("dynamic property accesses retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let base = arenas
+                    .expr(*base)
+                    .expect("dynamic property receiver belongs to its retained file owner");
+                let name_expr = arenas
+                    .expr(*name_expr)
+                    .expect("dynamic property name belongs to its retained file owner");
                 let base_ty = self.check_expr(base, locals, label);
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this one.
-                let base_ty = if postfix_chain_has_nullsafe(base) {
+                let base_ty = if self
+                    .syntax_arenas()
+                    .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, base))
+                {
                     self.chain_link_type(base, locals)
                 } else {
                     base_ty
@@ -3070,13 +3510,13 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name_expr, locals, label);
                 self.forget_what_an_operation_may_change(
                     &name_ty,
-                    is_this(name_expr),
+                    is_this(self, name_expr),
                     Operation::String,
                     locals,
                 );
                 self.forget_what_an_operation_may_change(
                     &base_ty,
-                    is_this(base),
+                    is_this(self, base),
                     Operation::Property(None, Access::Read),
                     locals,
                 );
@@ -3084,7 +3524,7 @@ impl<'a> Checker<'a> {
                 // can't have this one.
                 self.check_dynamic_member_receiver(&base_ty, *operator, false, e.span);
                 if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind
-                    && let Some(name) = name.as_str()
+                    && let Some(name) = self.syntax_string_text(name)
                 {
                     if let Some((owner, _)) = self.find_property_owner(&base_ty, name) {
                         self.record_member_ref(e.span, &owner, name);
@@ -3105,22 +3545,31 @@ impl<'a> Checker<'a> {
             // Same literal-name-is-real-usage/genuinely-dynamic-name-
             // escapes split as `DynamicPropertyAccess` just above.
             ExprKind::DynamicMethodCall(recv, name_expr, args, operator) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("dynamic method-call arguments retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
                 let recv_ty = self.check_expr(recv, locals, label);
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this one.
-                let recv_ty = if postfix_chain_has_nullsafe(recv) {
+                let recv_ty = if self
+                    .syntax_arenas()
+                    .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, recv))
+                {
                     self.chain_link_type(recv, locals)
                 } else {
                     recv_ty
                 };
                 self.check_expr(name_expr, locals, label);
                 self.check_dynamic_member_receiver(&recv_ty, *operator, true, e.span);
-                for a in args {
-                    self.check_expr(&a.value, locals, label);
+                for a in arenas.args(*args) {
+                    if let Some(value) = arenas.expr(a.value) {
+                        self.check_expr(value, locals, label);
+                    }
                 }
                 let mut callee = None;
                 if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind
-                    && let Some(name) = name.as_str()
+                    && let Some(name) = self.syntax_string_text(name)
                 {
                     if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
                         self.record_method_ref(e.span, &owner, name);
@@ -3135,16 +3584,25 @@ impl<'a> Checker<'a> {
                 Type::mixed()
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("dynamic static-call arguments retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let args = arenas.args(*args);
                 let name_ty = self.check_expr(name, locals, label);
                 // `Foo::{'bar'}()`, or a name variable holding one known
                 // string: a call to that method.
                 if let [method] = &name_ty.constant_strings_text()[..] {
-                    let call = static_call(target, method.to_string(), args, e.span);
-                    return self.check_expr(&call, locals, label);
+                    let arena = self.synthetic_expr_arena();
+                    let call =
+                        self.static_call(&arena, target, method.to_string(), args.clone(), e.span);
+                    return self.check_expr(call, locals, label);
                 }
                 let class = self.resolve_static_target_class(target, locals, label);
                 for a in args {
-                    self.check_expr(&a.value, locals, label);
+                    if let Some(value) = arenas.expr(a.value) {
+                        self.check_expr(value, locals, label);
+                    }
                 }
                 self.record_dynamic_static_member_escape(target);
                 if self.collect_member_refs
@@ -3156,6 +3614,10 @@ impl<'a> Checker<'a> {
                 Type::mixed()
             }
             ExprKind::Interpolated(parts) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("interpolated expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
                 // Mirrors real PHPStan's `InvalidPartOfEncapsedStringRule`
                 // (`encapsedStringPart.nonString`) - an interpolated
                 // `"{$x}"` part implicitly casts `$x` to string exactly
@@ -3173,8 +3635,12 @@ impl<'a> Checker<'a> {
                 // its own `ExprPrinter`; this project has no general
                 // expression-to-source printer, so the message here names
                 // only the type, not the source snippet.
+                let parts = arenas.expr_ids(parts);
                 let mut part_types = Vec::with_capacity(parts.len());
-                for p in parts {
+                for part in parts {
+                    let p = arenas
+                        .expr(*part)
+                        .expect("interpolation part belongs to its retained file owner");
                     let part_ty = self.check_expr(p, locals, label);
                     part_types.push(
                         part_ty
@@ -3187,7 +3653,7 @@ impl<'a> Checker<'a> {
                     self.check_implicit_tostring_usage(&part_ty, p.span);
                     self.forget_what_an_operation_may_change(
                         &part_ty,
-                        is_this(p),
+                        is_this(self, p),
                         Operation::String,
                         locals,
                     );
@@ -3205,7 +3671,20 @@ impl<'a> Checker<'a> {
                 concat_string_parts(part_types, self.registry)
             }
             ExprKind::Match { subject, arms } => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("match expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let arms = arenas.match_arms(*arms);
+                let subject = arenas
+                    .expr(*subject)
+                    .expect("match subject belongs to its retained file owner");
                 let default = match_default(arms);
+                let default_expr = default.map(|id| {
+                    arenas
+                        .expr(id)
+                        .expect("match default body belongs to its retained file owner")
+                });
                 let before_match = (default.is_none() && !self.try_throw_states.is_empty())
                     .then(|| locals.clone());
                 self.check_expr(subject, locals, label);
@@ -3295,11 +3774,19 @@ impl<'a> Checker<'a> {
                 for (i, (conds, result)) in
                     arms.iter().filter_map(MatchArm::conditioned).enumerate()
                 {
-                    for c in conds {
+                    for c in conds.iter().map(|id| {
+                        arenas
+                            .expr(*id)
+                            .expect("match condition belongs to its retained file owner")
+                    }) {
                         self.check_expr(c, locals, label);
                     }
                     if self.loop_depth == 0 && !next_arm_is_dead {
-                        for c in conds {
+                        for c in conds.iter().map(|id| {
+                            arenas
+                                .expr(*id)
+                                .expect("match condition belongs to its retained file owner")
+                        }) {
                             let cond_ty = self.infer_expr(c, &accumulated);
                             let Some(outcome) = self
                                 .registry
@@ -3340,8 +3827,16 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    let mut arm_locals =
-                        self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
+                    let mut arm_locals = self.narrow_match_arm_conditions(
+                        arenas,
+                        subject,
+                        conds,
+                        &accumulated,
+                        match_true,
+                    );
+                    let result = arenas
+                        .expr(result)
+                        .expect("match arm body belongs to its retained file owner");
                     result_types.push(self.check_expr(result, &mut arm_locals, label));
                     merged = Some(match merged {
                         Some(m) => merge_scopes(&self.relation(), &m, &arm_locals),
@@ -3352,11 +3847,19 @@ impl<'a> Checker<'a> {
                     }
                     if match_true {
                         // A skipped arm had every condition false.
-                        for c in conds {
+                        for c in conds.iter().map(|id| {
+                            arenas
+                                .expr(*id)
+                                .expect("match condition belongs to its retained file owner")
+                        }) {
                             self.apply_narrowing(c, &mut accumulated, false);
                         }
                     } else {
-                        for c in conds {
+                        for c in conds.iter().map(|id| {
+                            arenas
+                                .expr(*id)
+                                .expect("match condition belongs to its retained file owner")
+                        }) {
                             self.apply_equality_narrowing(subject, c, &mut accumulated, false);
                             // `remaining_subject_ty`'s own incremental
                             // exclusion - see this loop's own leading
@@ -3399,9 +3902,12 @@ impl<'a> Checker<'a> {
                             .iter()
                             .filter_map(MatchArm::conditioned)
                             .next_back()
-                            .is_some_and(|(conds, _)| {
+                        .is_some_and(|(conds, _)| {
                             matches!(conds.as_slice(), [only_cond]
-                                if self.condition_is_provably_true(only_cond, &accumulated_before_last_arm))
+                                if self.condition_is_provably_true(
+                                    arenas.expr(*only_cond).expect("match condition belongs to its retained file owner"),
+                                    &accumulated_before_last_arm
+                                ))
                         });
                         if !last_is_exhaustive && let Some(before) = &before_match {
                             self.record_throw_state(unhandled_match_error(), before);
@@ -3448,7 +3954,11 @@ impl<'a> Checker<'a> {
                         let subject_ty = self.infer_expr(subject, locals);
                         let mut remaining = self.expand_enum_cases(&subject_ty);
                         for (conds, _) in arms.iter().filter_map(MatchArm::conditioned) {
-                            for c in conds {
+                            for c in conds.iter().map(|id| {
+                                arenas
+                                    .expr(*id)
+                                    .expect("match condition belongs to its retained file owner")
+                            }) {
                                 let cond_ty = self.infer_expr(c, locals);
                                 if cond_ty.is_single_value() {
                                     remaining = remaining.without(&cond_ty);
@@ -3472,7 +3982,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                if let Some(d) = default {
+                if let Some(d) = default_expr {
                     let mut default_locals = accumulated.clone();
                     result_types.push(self.check_expr(d, &mut default_locals, label));
                     merged = Some(match merged {
@@ -3500,18 +4010,22 @@ impl<'a> Checker<'a> {
                     .union_all_with(&self.relation())
                     .unwrap_or(Type::never())
             }
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    uses,
-                    body,
-                    goto_labels,
-                    is_generator,
-                    is_static,
-                    return_type,
-                    attrs,
-                    ..
-                } = &**closure;
+            ExprKind::Closure(closure_id) => {
+                let Some(syntax_owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let arenas = syntax_owner.arenas();
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
+                    return Type::mixed();
+                };
+                let params = arenas.params(closure.params);
+                let uses = arenas.closure_uses(&closure.uses);
+                let body = arenas.stmt_ids(&closure.body);
+                let goto_labels = &closure.goto_labels;
+                let is_generator = closure.is_generator;
+                let is_static = closure.is_static;
+                let return_type = closure.return_type.as_deref();
+                let attrs = arenas.attributes(closure.attrs);
                 // Mirrors real PHPStan's `ClosureAttributesRule` -
                 // existence plus target-validity for a closure
                 // expression's own `#[Attr]` group.
@@ -3613,7 +4127,7 @@ impl<'a> Checker<'a> {
                     };
                     closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
-                if !*is_static && let Some(this_ty) = locals.get_var("this") {
+                if !is_static && let Some(this_ty) = locals.get_var("this") {
                     closure_locals.insert_var("this", this_ty.clone());
                 }
                 // `record_branch_implied_facts`'s own facts don't
@@ -3679,10 +4193,10 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     closure_locals.declare_var(&p.name, ty, p.name.span);
-                    closure_locals.set_native_var(&p.name, self.closure_param_native(p));
+                    closure_locals.set_native_var(&p.name, self.closure_param_native(arenas, p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
-                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
+                    self.resolve_type_hint_with_case_refs(return_type);
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),
@@ -3718,7 +4232,7 @@ impl<'a> Checker<'a> {
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type,
                     e.span,
                     false,
                     current_class_for_internal_check.as_deref(),
@@ -3726,7 +4240,7 @@ impl<'a> Checker<'a> {
                 );
                 self.check_restricted_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type,
                     e.span,
                     current_class_for_internal_check.as_deref(),
                 );
@@ -3736,7 +4250,7 @@ impl<'a> Checker<'a> {
                 // check_block never routes through check_function at
                 // all.
                 let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = *is_generator;
+                self.current_function_is_generator = is_generator;
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {
@@ -3754,11 +4268,17 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     GotoState::new(goto_labels.clone()),
                 );
-                let previous_assigned_variables = self.enter_assigned_variables(body);
+                let previous_assigned_variables = self.enter_assigned_variables(
+                    self.syntax_arenas()
+                        .expect("closure checks require the syntax tree owner"),
+                    body,
+                );
                 let enclosing_scope =
                     self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
                         closure: true,
                         ..crate::checker::shared_scope::SharedScope::of(
+                            self.syntax_arenas()
+                                .expect("closure checks require the syntax tree owner"),
                             body,
                             uses,
                             Some((
@@ -3963,17 +4483,23 @@ impl<'a> Checker<'a> {
                         closure_falls_off_end,
                     )
                 });
-                self.closure_literal_type(params, return_type.as_deref(), inferred_return, None)
+                self.closure_literal_type(params, return_type, inferred_return, None)
             }
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    body,
-                    is_generator,
-                    return_type,
-                    attrs,
-                    ..
-                } = &**arrow;
+            ExprKind::ArrowFn(closure_id) => {
+                let Some(syntax_owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let arenas = syntax_owner.arenas();
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*closure_id) else {
+                    return Type::mixed();
+                };
+                let params = arenas.params(arrow.params);
+                let Some(body) = arenas.expr(arrow.body) else {
+                    return Type::mixed();
+                };
+                let is_generator = arrow.is_generator;
+                let return_type = arrow.return_type.as_deref();
+                let attrs = arenas.attributes(arrow.attrs);
                 // Mirrors real PHPStan's `ArrowFunctionAttributesRule` -
                 // see the `Closure` arm's identical comment above.
                 self.check_attributes(attrs, label);
@@ -4007,7 +4533,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     arrow_locals.declare_var(&p.name, ty, p.name.span);
-                    arrow_locals.set_native_var(&p.name, self.closure_param_native(p));
+                    arrow_locals.set_native_var(&p.name, self.closure_param_native(arenas, p));
                 }
                 // Same save/set/restore
                 // `check_function`/the Closure literal arms do: without
@@ -4015,10 +4541,8 @@ impl<'a> Checker<'a> {
                 // leak the flag into whatever comes after it in the
                 // enclosing scope's checking pass.
                 let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = *is_generator;
-                let declared_return = return_type
-                    .as_deref()
-                    .map(|_| self.resolve_type_hint(return_type.as_deref()));
+                self.current_function_is_generator = is_generator;
+                let declared_return = return_type.map(|_| self.resolve_type_hint(return_type));
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {
@@ -4051,7 +4575,11 @@ impl<'a> Checker<'a> {
                 let enclosing_scope =
                     self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
                         closure: true,
-                        ..crate::checker::shared_scope::SharedScope::of_arrow_function(body)
+                        ..crate::checker::shared_scope::SharedScope::of_arrow_function(
+                            self.syntax_arenas()
+                                .expect("arrow checks require the syntax tree owner"),
+                            body,
+                        )
                     });
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.leave_shared_scope(enclosing_scope);
@@ -4072,7 +4600,7 @@ impl<'a> Checker<'a> {
                 // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
                     let (expected, expected_case_refs) =
-                        self.resolve_type_hint_with_case_refs(return_type.as_deref());
+                        self.resolve_type_hint_with_case_refs(return_type);
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
@@ -4111,7 +4639,7 @@ impl<'a> Checker<'a> {
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type,
                     e.span,
                     false,
                     current_class_for_internal_check.as_deref(),
@@ -4119,14 +4647,14 @@ impl<'a> Checker<'a> {
                 );
                 self.check_restricted_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type,
                     e.span,
                     current_class_for_internal_check.as_deref(),
                 );
                 self.closure_literal_type(
                     params,
-                    return_type.as_deref(),
-                    (!*is_generator).then(|| body_ty.clone()),
+                    return_type,
+                    (!is_generator).then(|| body_ty.clone()),
                     None,
                 )
             }
@@ -4295,7 +4823,7 @@ impl<'a> Checker<'a> {
                                 method,
                                 e.span,
                                 Span {
-                                    start: static_target_end(target),
+                                    start: self.static_target_end(target),
                                     end: e.span.end,
                                 },
                             );
@@ -4378,7 +4906,11 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
                 Literal::Float(f) => Type::float_literal(*f),
-                Literal::String(s) => Type::string_literal_ref(s),
+                Literal::String(s) => self
+                    .syntax_arenas()
+                    .and_then(|arenas| arenas.owned_php_string(s))
+                    .map(Type::string_literal)
+                    .unwrap_or_else(Type::string),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),
                 Literal::Null => Type::null(),
@@ -4421,11 +4953,14 @@ impl<'a> Checker<'a> {
                 // What the method is looked up on is the receiver's object
                 // part; a `null` one is reported where it's checked.
                 let recv_ty = self.chain_link_type(recv, locals).without(&Type::null());
-                self.method_call_return_type(recv, &recv_ty, method, args, locals)
+                let arenas = self
+                    .syntax_arenas()
+                    .expect("method-call chain links retain their parsed file owner");
+                self.method_call_return_type(arenas, recv, &recv_ty, method, args, locals)
             }
             ExprKind::PropertyAccess(base, prop, _) => {
                 if locals.may_have_member_narrowing()
-                    && let Some(base_key) = locals.find_key(base)
+                    && let Some(base_key) = self.find_expr_key(locals, base)
                     && let Some(narrowed) = locals
                         .find(&KeyData::Prop {
                             base: base_key,
@@ -4447,12 +4982,15 @@ impl<'a> Checker<'a> {
                 // narrowed type under `key_of`'s `"base[key]"`
                 // (e.g. after `is_string($info['code'])`).
                 if locals.may_have_member_narrowing()
-                    && let Some(key) = locals.find_key(e)
+                    && let Some(key) = self.find_expr_key(locals, e)
                     && let Some(narrowed) = locals.get(key)
                 {
                     return narrowed.clone();
                 }
-                let key_ty = match crate::checker::literal_shape_key(idx) {
+                let key_ty = match self
+                    .syntax_arenas()
+                    .and_then(|arenas| crate::checker::literal_shape_key(arenas, idx))
+                {
                     Some(key) => key.to_type(),
                     None => self.infer_expr(idx, locals),
                 };
@@ -4511,7 +5049,7 @@ impl<'a> Checker<'a> {
         // token slice into a cloned scope from the loaded file. Those two
         // trees have independent file-local ids; the short-lived probe
         // bypasses this one-file cache rather than mixing their slots.
-        if id == syntax::ast::SYNTHETIC_EXPR_ID
+        if self.is_synthetic_expr_id(id)
             || self.probe_span.get().is_some()
             || self.infer_cache.borrow().is_none()
         {
@@ -4538,7 +5076,11 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
                 Literal::Float(f) => Type::float_literal(*f),
-                Literal::String(s) => Type::string_literal_ref(s),
+                Literal::String(s) => self
+                    .syntax_arenas()
+                    .and_then(|arenas| arenas.owned_php_string(s))
+                    .map(Type::string_literal)
+                    .unwrap_or_else(Type::string),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),
                 Literal::Null => Type::null(),
@@ -4549,7 +5091,16 @@ impl<'a> Checker<'a> {
                 .unwrap_or_else(|| unassigned_variable_type(name)),
             ExprKind::Grouping(inner)
             | ExprKind::ErrorSuppress(inner)
-            | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
+            | ExprKind::Clone(inner, _) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("wrapped expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("wrapped expression belongs to its retained file owner");
+                self.infer_expr(inner, locals)
+            }
             // First-class-callable syntax (`strlen(...)`, `$obj->
             // method(...)`) produces a real `Closure` instance at runtime
             // - infer the same `Object("Closure", ...)` the native
@@ -4559,30 +5110,55 @@ impl<'a> Checker<'a> {
             // `Closure`-typed parameter correctly accepts it. A closure/
             // arrow-fn literal additionally carries its own signature
             // (`closure_literal_type`).
-            ExprKind::FirstClassCallable(inner) => self.first_class_callable_type(inner, locals),
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    return_type,
-                    ..
-                } = &**closure;
-                let inferred = self.closure_syntactic_return_type(closure, locals, None);
-                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
+            ExprKind::FirstClassCallable(inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("first-class callables retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("callable target belongs to its retained file owner");
+                self.first_class_callable_type(inner, locals)
             }
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    return_type,
-                    body,
-                    is_generator,
-                    ..
-                } = &**arrow;
-                let inferred =
-                    self.arrow_fn_inferred_return(params, body, *is_generator, locals, None);
-                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
+            ExprKind::Closure(closure_id) => {
+                let Some(arenas) = self.syntax_arenas() else {
+                    return Type::mixed();
+                };
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
+                    return Type::mixed();
+                };
+                let params = arenas.params(closure.params);
+                let inferred = self.closure_syntactic_return_type(arenas, closure, locals, None);
+                self.closure_literal_type(params, closure.return_type.as_deref(), inferred, None)
+            }
+            ExprKind::ArrowFn(closure_id) => {
+                let Some(arenas) = self.syntax_arenas() else {
+                    return Type::mixed();
+                };
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*closure_id) else {
+                    return Type::mixed();
+                };
+                let params = arenas.params(arrow.params);
+                let body = arenas.expr(arrow.body);
+                let inferred = body.and_then(|body| {
+                    self.arrow_fn_inferred_return(params, body, arrow.is_generator, locals, None)
+                });
+                self.closure_literal_type(params, arrow.return_type.as_deref(), inferred, None)
             }
             ExprKind::Match { subject, arms } => {
-                let default = match_default(arms);
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("match expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let arms = arenas.match_arms(*arms);
+                let subject = arenas
+                    .expr(*subject)
+                    .expect("match subject belongs to its retained file owner");
+                let default = match_default(arms).map(|id| {
+                    arenas
+                        .expr(id)
+                        .expect("match default body belongs to its retained file owner")
+                });
                 // Same "don't let an unknown branch compose into a
                 // partial Union that looks more precise than it is" rule
                 // Ternary applies, generalized to N arms plus an optional
@@ -4594,10 +5170,21 @@ impl<'a> Checker<'a> {
                 let mut accumulated = locals.clone();
                 let mut result_types: Vec<Type> = Vec::new();
                 for (conds, result) in arms.iter().filter_map(MatchArm::conditioned) {
-                    let arm_locals =
-                        self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
+                    let arm_locals = self.narrow_match_arm_conditions(
+                        arenas,
+                        subject,
+                        conds,
+                        &accumulated,
+                        match_true,
+                    );
+                    let result = arenas
+                        .expr(result)
+                        .expect("match arm body belongs to its retained file owner");
                     result_types.push(self.infer_expr(result, &arm_locals));
                     if let [only_cond] = conds.as_slice() {
+                        let only_cond = arenas
+                            .expr(*only_cond)
+                            .expect("match condition belongs to its retained file owner");
                         if match_true {
                             self.apply_narrowing(only_cond, &mut accumulated, false);
                         } else {
@@ -4610,7 +5197,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                if let Some(d) = default {
+                if let Some(d) = default_expr {
                     result_types.push(self.infer_expr(d, &accumulated));
                 }
                 // See `check_expr`'s identical arm's doc comment for
@@ -4625,14 +5212,24 @@ impl<'a> Checker<'a> {
             // is exactly the right type for it, the same way it's used for
             // a function that always throws or exits.
             ExprKind::Throw(_) => Type::never(),
-            ExprKind::NewAnonymousClass(class) => anonymous_class_type(class),
+            ExprKind::NewAnonymousClass(class_id) => self
+                .syntax_arenas()
+                .map(|arenas| anonymous_class_type(arenas.anonymous_class_name(*class_id)))
+                .unwrap_or_else(Type::mixed),
             ExprKind::ShellExec(_) => self.shell_exec_type(),
             ExprKind::Print(_) => Type::int_literal(1),
             ExprKind::Isset(_) | ExprKind::Empty(_) => Type::bool(),
             // `true` or `false` when the subject's type decides it.
             ExprKind::Instanceof(inner, target) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("instanceof expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("instanceof operand belongs to its retained file owner");
                 let subject = self.infer_expr(inner, locals);
-                match self.instanceof_outcome(&subject, target, locals) {
+                match self.instanceof_outcome(arenas, &subject, target, locals) {
                     Some((always, _)) => Type::bool_literal(always),
                     None => Type::bool(),
                 }
@@ -4640,6 +5237,13 @@ impl<'a> Checker<'a> {
             ExprKind::Exit(..) => Type::never(),
             ExprKind::Eval(_) | ExprKind::Include(..) => Type::mixed(),
             ExprKind::Cast(cast, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("cast expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("cast operand belongs to its retained file owner");
                 let inner_ty = self.infer_expr(inner, locals);
                 self.cast_type(cast.kind(), &inner_ty)
             }
@@ -4649,6 +5253,13 @@ impl<'a> Checker<'a> {
             // the same implicit-numeric-coercion rule arithmetic
             // operators apply generally.
             ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.infer_expr(inner, locals);
                 if inner_ty.is_string().yes() {
                     Type::int()
@@ -4659,147 +5270,234 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Unary(UnaryOp::BitNot, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.infer_expr(inner, locals);
                 self.bitwise_not_type(&inner_ty)
             }
             ExprKind::Unary(UnaryOp::PreInc, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 self.infer_expr(inner, locals).increment_type()
             }
             ExprKind::Unary(UnaryOp::PreDec, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
                 self.infer_expr(inner, locals).decrement_type()
             }
-            ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
-            ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
-            ExprKind::Assign(_, rhs) | ExprKind::AssignRef(_, rhs) => self.infer_expr(rhs, locals),
+            ExprKind::Unary(_, inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("unary expressions retain their parsed file owner");
+                let inner = syntax_owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("unary operand belongs to its retained file owner");
+                self.infer_expr(inner, locals)
+            }
+            ExprKind::Binary(op, l, r) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("binary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let l = arenas
+                    .expr(*l)
+                    .expect("left operand belongs to its retained file owner");
+                let r = arenas
+                    .expr(*r)
+                    .expect("right operand belongs to its retained file owner");
+                self.infer_binary(op, l, r, locals)
+            }
+            ExprKind::Assign(_, rhs) | ExprKind::AssignRef(_, rhs) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("assignment expressions retain their parsed file owner");
+                let rhs = syntax_owner
+                    .arenas()
+                    .expr(*rhs)
+                    .expect("assigned value belongs to its retained file owner");
+                self.infer_expr(rhs, locals)
+            }
             // `self`/`parent`/`static` aren't lexed as keywords (see the
             // parser: they're indistinguishable from any other identifier),
             // so a literal `ExprKind::Name("self")` has to be special-cased
             // here rather than showing up as an Object of that name.
-            ExprKind::New(class_expr, args) => match &class_expr.kind {
-                ExprKind::Name(name) => match name.written.as_ref() {
-                    "self" | "parent" | "static" => {
-                        let raw = match name.written.as_ref() {
-                            "self" => Type::self_ref(Vec::new()),
-                            "parent" => Type::parent_ref(),
-                            _ => Type::static_ref(Vec::new()),
-                        };
-                        match &self.current_class {
-                            Some(c) => self.resolve_pseudo(&raw, c),
-                            None => raw,
-                        }
-                    }
-                    // `new ReflectionClass($view)`-shaped constructor-
-                    // argument-driven class-level generic inference - the
-                    // same `Relation::infer_template_bindings`/`TemplateBindings`
-                    // primitive `infer_call_return_type` uses for
-                    // ordinary call-site inference, just binding against
-                    // a constructor's params instead of a function's.
-                    // Rebind to the registry's canonical-case spelling
-                    // first (mirroring `check_expr`'s identical fix)
-                    // since `lookup_method`'s ancestor walk needs exact
-                    // case.
-                    _ => {
-                        let canonical = self.resolve_class_name(name);
-                        let templates = self
-                            .registry
-                            .class_by_name(canonical.as_str())
-                            .map(|info| info.templates().as_slice())
-                            .unwrap_or(&[]);
-                        if templates.is_empty() {
-                            Type::object(canonical.into(), Vec::new())
-                        } else {
-                            let mut bindings: TemplateBindings = TemplateBindings::default();
-                            if let Some(sig) =
-                                self.registry.lookup_method(&canonical, "__construct")
-                            {
-                                let resolved_args = resolve_call_args(args, sig.params());
-                                for (param, slot) in sig.params().iter().zip(resolved_args.iter()) {
-                                    let Some(arg) = slot else { continue };
-                                    let arg_ty = self.infer_expr(arg, locals);
-                                    // A bare string literal naming a
-                                    // real, registered class binds a
-                                    // `class-string<T>` slot exactly like
-                                    // an explicit `Foo::class` would,
-                                    // mirroring real PHPStan's
-                                    // `ConstantStringType::isClassString()`.
-                                    let promoted =
-                                        param.ty().promote_class_string_literals(&arg_ty, &|s| {
-                                            self.registry
-                                                .lookup_class(s)
-                                                .map(|(c, _)| c.to_string())
-                                        });
-                                    self.relation().infer_template_bindings(
-                                        param.ty(),
-                                        &promoted,
-                                        &mut bindings,
-                                    );
-                                }
+            ExprKind::New(class_expr, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("instantiations retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let class_expr = arenas
+                    .expr(*class_expr)
+                    .expect("instantiation target belongs to its retained file owner");
+                let args = arenas.args(*args);
+                match &class_expr.kind {
+                    ExprKind::Name(name) => match name.written.as_ref() {
+                        "self" | "parent" | "static" => {
+                            let raw = match name.written.as_ref() {
+                                "self" => Type::self_ref(Vec::new()),
+                                "parent" => Type::parent_ref(),
+                                _ => Type::static_ref(Vec::new()),
+                            };
+                            match &self.current_class {
+                                Some(c) => self.resolve_pseudo(&raw, c),
+                                None => raw,
                             }
-                            // A template the constructor's arguments
-                            // never bound is left erased (trimmed off the
-                            // trailing end, same as a real bare `new Box()`
-                            // reference with fewer type arguments than
-                            // declared) rather than eagerly filled with
-                            // `Mixed`: `substitute_scoped`'s `@template
-                            // T = Default` fallback only triggers for a
-                            // name genuinely absent from the zip against
-                            // `templates`, not one explicitly bound to
-                            // `Mixed`. A template bound in the middle
-                            // with a later one still unbound has no such
-                            // "erase the tail" option (PHP's type-argument
-                            // syntax can't skip a middle position
-                            // either), so it does still fall back to
-                            // `Mixed` there.
-                            let last_bound = templates
-                                .iter()
-                                .rposition(|t| bindings.contains_key(t.as_ref()))
-                                .map(|i| i + 1)
-                                .unwrap_or(0);
-                            let info = self.registry.class_by_name(canonical.as_str());
-                            let bounds = self
-                                .registry
-                                .effective_template_bounds_by_name(canonical.as_str());
-                            let bound_args = templates[..last_bound]
-                                .iter()
-                                .map(|t| match bindings.get(t.as_ref()) {
-                                    Some(ty) => match info {
-                                        Some(info) => {
-                                            generalize_inferred_class_template(info, &bounds, t, ty)
-                                        }
-                                        None => ty.clone(),
-                                    },
-                                    None => Type::mixed(),
-                                })
-                                .collect();
-                            Type::object(canonical.into(), bound_args)
                         }
-                    }
-                },
-                _ => Type::mixed(),
-            },
-            ExprKind::Call(callee, args) => match &callee.kind {
-                ExprKind::Name(name) => self
-                    .registry
-                    .resolve_function(name)
-                    .map(|(resolved_name, sig)| {
-                        self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
-                    })
-                    .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals)),
-                _ => self.call_fallback_return_type(callee, args, locals),
-            },
+                        // `new ReflectionClass($view)`-shaped constructor-
+                        // argument-driven class-level generic inference - the
+                        // same `Relation::infer_template_bindings`/`TemplateBindings`
+                        // primitive `infer_call_return_type` uses for
+                        // ordinary call-site inference, just binding against
+                        // a constructor's params instead of a function's.
+                        // Rebind to the registry's canonical-case spelling
+                        // first (mirroring `check_expr`'s identical fix)
+                        // since `lookup_method`'s ancestor walk needs exact
+                        // case.
+                        _ => {
+                            let canonical = self.resolve_class_name(name);
+                            let templates = self
+                                .registry
+                                .class_by_name(canonical.as_str())
+                                .map(|info| info.templates().as_slice())
+                                .unwrap_or(&[]);
+                            if templates.is_empty() {
+                                Type::object(canonical.into(), Vec::new())
+                            } else {
+                                let mut bindings: TemplateBindings = TemplateBindings::default();
+                                if let Some(sig) =
+                                    self.registry.lookup_method(&canonical, "__construct")
+                                {
+                                    let resolved_args =
+                                        resolve_call_args(arenas, args, sig.params());
+                                    for (param, slot) in
+                                        sig.params().iter().zip(resolved_args.iter())
+                                    {
+                                        let Some(arg) = slot else { continue };
+                                        let arg_ty = self.infer_expr(arg, locals);
+                                        // A bare string literal naming a
+                                        // real, registered class binds a
+                                        // `class-string<T>` slot exactly like
+                                        // an explicit `Foo::class` would,
+                                        // mirroring real PHPStan's
+                                        // `ConstantStringType::isClassString()`.
+                                        let promoted = param.ty().promote_class_string_literals(
+                                            &arg_ty,
+                                            &|s| {
+                                                self.registry
+                                                    .lookup_class(s)
+                                                    .map(|(c, _)| c.to_string())
+                                            },
+                                        );
+                                        self.relation().infer_template_bindings(
+                                            param.ty(),
+                                            &promoted,
+                                            &mut bindings,
+                                        );
+                                    }
+                                }
+                                // A template the constructor's arguments
+                                // never bound is left erased (trimmed off the
+                                // trailing end, same as a real bare `new Box()`
+                                // reference with fewer type arguments than
+                                // declared) rather than eagerly filled with
+                                // `Mixed`: `substitute_scoped`'s `@template
+                                // T = Default` fallback only triggers for a
+                                // name genuinely absent from the zip against
+                                // `templates`, not one explicitly bound to
+                                // `Mixed`. A template bound in the middle
+                                // with a later one still unbound has no such
+                                // "erase the tail" option (PHP's type-argument
+                                // syntax can't skip a middle position
+                                // either), so it does still fall back to
+                                // `Mixed` there.
+                                let last_bound = templates
+                                    .iter()
+                                    .rposition(|t| bindings.contains_key(t.as_ref()))
+                                    .map(|i| i + 1)
+                                    .unwrap_or(0);
+                                let info = self.registry.class_by_name(canonical.as_str());
+                                let bounds = self
+                                    .registry
+                                    .effective_template_bounds_by_name(canonical.as_str());
+                                let bound_args = templates[..last_bound]
+                                    .iter()
+                                    .map(|t| match bindings.get(t.as_ref()) {
+                                        Some(ty) => match info {
+                                            Some(info) => generalize_inferred_class_template(
+                                                info, &bounds, t, ty,
+                                            ),
+                                            None => ty.clone(),
+                                        },
+                                        None => Type::mixed(),
+                                    })
+                                    .collect();
+                                Type::object(canonical.into(), bound_args)
+                            }
+                        }
+                    },
+                    _ => Type::mixed(),
+                }
+            }
+            ExprKind::Call(callee, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("calls retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let callee = arenas
+                    .expr(*callee)
+                    .expect("call callee belongs to its retained file owner");
+                let args = arenas.args(*args);
+                match &callee.kind {
+                    ExprKind::Name(name) => self
+                        .registry
+                        .resolve_function(name)
+                        .map(|(resolved_name, sig)| {
+                            self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
+                        })
+                        .unwrap_or_else(|| {
+                            self.call_fallback_return_type(arenas, callee, args, locals)
+                        }),
+                    _ => self.call_fallback_return_type(arenas, callee, args, locals),
+                }
+            }
             ExprKind::MethodCall(..)
             | ExprKind::PropertyAccess(..)
             | ExprKind::Index(_, Some(_)) => {
                 let link = self.chain_link_type(e, locals);
                 // A nullsafe access in the chain that meets `null` makes the
                 // whole chain `null`.
-                if postfix_chain_has_nullsafe(e) && !link.is_mixed() {
+                if self
+                    .syntax_arenas()
+                    .is_some_and(|arenas| postfix_chain_has_nullsafe(arenas, e))
+                    && !link.is_mixed()
+                {
                     self.relation().union(link, Type::null())
                 } else {
                     link
                 }
             }
             ExprKind::StaticCall(target, method, args) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static calls retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let args = arenas.args(*args);
                 if let Some(property) = target.parent_hook_property() {
                     return self.parent_hook_call_type(property, method);
                 }
@@ -4827,11 +5525,12 @@ impl<'a> Checker<'a> {
                         self.static_call_method(target, &class, method)
                             .map(|(_, sig)| {
                                 let sig = sig.as_ref();
-                                let resolved_args = resolve_call_args(args, sig.params());
+                                let resolved_args = resolve_call_args(arenas, args, sig.params());
                                 let resolved =
                                     self.infer_call_return_type(sig, &resolved_args, locals);
-                                let resolved = self
-                                    .narrow_enum_from_call(&class, method, args, resolved, locals);
+                                let resolved = self.narrow_enum_from_call(
+                                    arenas, &class, method, args, resolved, locals,
+                                );
                                 // The `::from()`/`::tryFrom()` literal-argument
                                 // signal - see `check_expr`'s
                                 // identical fix just above `ExprKind::
@@ -4843,7 +5542,7 @@ impl<'a> Checker<'a> {
                                     self.record_member_ref(e.span, case_class, case);
                                 }
                                 if let Some(ty) =
-                                    self.class_argument_return(&class, method, args, locals)
+                                    self.class_argument_return(arenas, &class, method, args, locals)
                                 {
                                     return ty;
                                 }
@@ -4854,10 +5553,17 @@ impl<'a> Checker<'a> {
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
                 match &self.infer_expr(name, locals).constant_strings_text()[..] {
-                    [method] => self.infer_expr(
-                        &static_call(target, method.to_string(), args, e.span),
-                        locals,
-                    ),
+                    [method] => {
+                        let arena = self.synthetic_expr_arena();
+                        let call = self.static_call(
+                            &arena,
+                            target,
+                            method.to_string(),
+                            args.clone(),
+                            e.span,
+                        );
+                        self.infer_expr(call, locals)
+                    }
                     _ => Type::mixed(),
                 }
             }
@@ -4867,10 +5573,14 @@ impl<'a> Checker<'a> {
                     let names = names.constant_strings_text();
                     (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
                 };
+                let arena = self.synthetic_expr_arena();
                 names
                     .into_iter()
                     .flatten()
-                    .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
+                    .map(|member| {
+                        let fetch = self.constant_fetch(&arena, target, member, e.span);
+                        self.infer_expr(fetch, locals)
+                    })
                     .union_all_with(&self.relation())
                     .unwrap_or(Type::mixed())
             }
@@ -4935,6 +5645,21 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::mixed())
             }
             ExprKind::Ternary(cond, then_, else_) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("ternary expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let cond = arenas
+                    .expr(*cond)
+                    .expect("ternary condition belongs to its retained file owner");
+                let then_ = then_.as_ref().map(|id| {
+                    arenas
+                        .expr(*id)
+                        .expect("ternary branch belongs to its retained file owner")
+                });
+                let else_ = arenas
+                    .expr(*else_)
+                    .expect("ternary else branch belongs to its retained file owner");
                 let mut else_locals = locals.clone();
                 self.apply_narrowing(cond, &mut else_locals, false);
                 let else_ty = self.infer_expr(else_, &else_locals);
@@ -4951,7 +5676,14 @@ impl<'a> Checker<'a> {
                     None => Type::mixed(),
                 }
             }
-            ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
+            ExprKind::ArrayLiteral(items) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("array literals retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let items = arenas.array_items(*items);
+                self.infer_array_literal_type(arenas, items, locals)
+            }
             // Routed through the identical `resolve_concat_type` engine
             // as `BinOp::Concat`, as a left-fold over each part (an
             // interpolated string is exactly a chain of concatenations) -
@@ -4961,17 +5693,29 @@ impl<'a> Checker<'a> {
             // return a refined type. An empty `parts` list can't occur in
             // practice, but folds to plain `string` rather than
             // panicking if it somehow did.
-            ExprKind::Interpolated(parts) => concat_string_parts(
-                parts
-                    .iter()
-                    .map(|p| {
-                        self.infer_expr(p, locals)
+            ExprKind::Interpolated(parts) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("interpolated expressions retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                concat_string_parts(
+                    arenas
+                        .expr_ids(parts)
+                        .iter()
+                        .map(|part| {
+                            self.infer_expr(
+                                arenas.expr(*part).expect(
+                                    "interpolation part belongs to its retained file owner",
+                                ),
+                                locals,
+                            )
                             .to_string_type(self.registry)
                             .unwrap_or(Type::string())
-                    })
-                    .collect(),
-                self.registry,
-            ),
+                        })
+                        .collect(),
+                    self.registry,
+                )
+            }
             // A homogeneous array's element type applies regardless of
             // which key is accessed; optimistically assumes the access is
             // in bounds/present rather than widening to `V|null` for a
@@ -5052,14 +5796,14 @@ impl<'a> Checker<'a> {
         param_overrides: &[Type],
         locals: &Locals,
     ) -> Option<Type> {
+        let syntax_owner = self.syntax_tree_owner()?;
+        let arenas = syntax_owner.arenas();
         match &callback.kind {
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    body,
-                    return_type,
-                    ..
-                } = &**arrow;
+            ExprKind::ArrowFn(closure_id) => {
+                let ClosurePayload::ArrowFn(arrow) = arenas.closure(*closure_id)? else {
+                    return None;
+                };
+                let params = arenas.params(arrow.params);
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -5069,29 +5813,32 @@ impl<'a> Checker<'a> {
                 for (p, ty) in params.iter().zip(param_overrides) {
                     arrow_locals.insert_var(&p.name, ty.clone());
                 }
-                let inferred = self.infer_expr(body, &arrow_locals);
-                Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
+                let inferred = self.infer_expr(arenas.expr(arrow.body)?, &arrow_locals);
+                Some(
+                    self.prefer_inferred_over_declared_return(
+                        arrow.return_type.as_deref(),
+                        inferred,
+                    ),
+                )
             }
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    uses,
-                    body,
-                    is_static,
-                    return_type,
-                    ..
-                } = &**closure;
+            ExprKind::Closure(closure_id) => {
+                let ClosurePayload::Closure(closure) = arenas.closure(*closure_id)? else {
+                    return None;
+                };
+                let params = arenas.params(closure.params);
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
                     return None;
                 }
                 let mut closure_locals: Locals = locals.closure_scope();
-                for u in uses {
+                for u in arenas.closure_uses(&closure.uses) {
                     let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
                     closure_locals.insert_var(&u.name, ty);
                 }
-                if !*is_static && let Some(this_ty) = locals.get_var("this") {
+                if !closure.is_static
+                    && let Some(this_ty) = locals.get_var("this")
+                {
                     closure_locals.insert_var("this", this_ty.clone());
                 }
                 for (p, ty) in params.iter().zip(param_overrides) {
@@ -5109,22 +5856,21 @@ impl<'a> Checker<'a> {
                 // corpus shape) used to still return the hint here, since
                 // the old code checked for one before ever looking at the
                 // body at all.
-                match body.as_slice() {
-                    [
-                        StmtNode {
-                            kind: StmtKind::Return(Some(e)),
+                match arenas.stmt_ids(&closure.body) {
+                    [stmt_id]
+                        if let Some(StmtNode {
+                            kind: StmtKind::Return(Some(expr_id)),
                             ..
-                        },
-                    ] => {
-                        let inferred = self.infer_expr(e, &closure_locals);
-                        Some(
-                            self.prefer_inferred_over_declared_return(
-                                return_type.as_deref(),
-                                inferred,
-                            ),
-                        )
+                        }) = arenas.stmt(*stmt_id) =>
+                    {
+                        let inferred = self.infer_expr(arenas.expr(*expr_id)?, &closure_locals);
+                        Some(self.prefer_inferred_over_declared_return(
+                            closure.return_type.as_deref(),
+                            inferred,
+                        ))
                     }
-                    _ => return_type
+                    _ => closure
+                        .return_type
                         .as_deref()
                         .map(|hint| self.resolve_type_hint(Some(hint))),
                 }
@@ -5204,49 +5950,74 @@ impl<'a> Checker<'a> {
     /// top-level/method-parameter gap this method's own trace found,
     /// disclosed rather than silently dropped (see this item's own
     /// PROGRESS notes).
-    pub(crate) fn collect_default_and_const_value_member_refs(&mut self, program: &[StmtNode]) {
-        for stmt in program {
-            self.collect_member_ref_defaults_stmt(stmt);
+    pub(crate) fn collect_default_and_const_value_member_refs(
+        &mut self,
+        arenas: &syntax::ast::NodeArenas,
+        program: &[StmtId],
+    ) {
+        for &stmt in program {
+            self.collect_member_ref_defaults_stmt(arenas, stmt);
         }
     }
 
-    fn collect_member_ref_defaults_params(&mut self, params: &[Param]) {
+    fn collect_member_ref_defaults_params(
+        &mut self,
+        arenas: &syntax::ast::NodeArenas,
+        params: &[Param],
+    ) {
         for p in params {
-            if let Some(d) = &p.default {
+            if let Some(d) = p.default.and_then(|id| arenas.expr(id)) {
                 self.infer_expr(d, &self.new_locals());
             }
         }
     }
 
-    fn collect_member_ref_defaults_function(&mut self, f: &FunctionDecl) {
-        self.collect_member_ref_defaults_params(&f.params);
-        for s in f.body_stmts() {
-            self.collect_member_ref_defaults_stmt(s);
+    fn collect_member_ref_defaults_function(
+        &mut self,
+        arenas: &syntax::ast::NodeArenas,
+        f: &FunctionDecl,
+    ) {
+        self.collect_member_ref_defaults_params(arenas, arenas.params(f.params));
+        for &s in f.body_stmts(arenas) {
+            self.collect_member_ref_defaults_stmt(arenas, s);
         }
     }
 
     /// Every declaration in `stmt`'s body, nested ones included.
-    fn collect_member_ref_defaults_stmt(&mut self, stmt: &StmtNode) {
-        syntax::visit::any_stmt_in_body(stmt, |s| {
-            self.collect_member_ref_defaults_decl(s);
+    fn collect_member_ref_defaults_stmt(&mut self, arenas: &syntax::ast::NodeArenas, stmt: StmtId) {
+        syntax::visit::arena::any_stmt_in_body(arenas, stmt, |s| {
+            self.collect_member_ref_defaults_decl(arenas, s);
             false
         });
     }
 
-    fn collect_member_ref_defaults_decl(&mut self, stmt: &StmtNode) {
+    fn collect_member_ref_defaults_decl(
+        &mut self,
+        arenas: &syntax::ast::NodeArenas,
+        stmt: &StmtNode,
+    ) {
         match &stmt.kind {
-            StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
+            StmtKind::FunctionDecl(id) => {
+                if let Some(function) = arenas.function(*id) {
+                    self.collect_member_ref_defaults_function(arenas, function);
+                }
+            }
             StmtKind::ClassDecl(c) => {
-                for p in &c.def.properties {
-                    if let Some(d) = &p.default {
+                let Some(def) = arenas.class(c.def) else {
+                    return;
+                };
+                for p in def.properties(arenas) {
+                    if let Some(d) = p.default.and_then(|id| arenas.expr(id)) {
                         self.infer_expr(d, &self.new_locals());
                     }
                 }
-                for cst in &c.def.consts {
-                    self.infer_expr(&cst.value, &self.new_locals());
+                for cst in def.consts(arenas) {
+                    if let Some(value) = arenas.expr(cst.value) {
+                        self.infer_expr(value, &self.new_locals());
+                    }
                 }
-                for m in &c.def.methods {
-                    self.collect_member_ref_defaults_function(&m.function);
+                for m in arenas.methods(def.methods) {
+                    self.collect_member_ref_defaults_function(arenas, &m.function);
                 }
             }
             _ => {}
@@ -5627,7 +6398,13 @@ impl<'a> Checker<'a> {
     /// shape's declared return type instead of `Mixed` - the same fix
     /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
     /// side.
-    fn call_fallback_return_type(&self, callee: &ExprNode, args: &[Arg], locals: &Locals) -> Type {
+    fn call_fallback_return_type(
+        &self,
+        arenas: &crate::syntax::NodeArenas,
+        callee: &ExprNode,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Type {
         self.infer_expr(callee, locals)
             .callable_sig()
             .map_or(Type::mixed(), |sig| {
@@ -5636,7 +6413,8 @@ impl<'a> Checker<'a> {
                 }
                 let arg_types: Vec<Type> = args
                     .iter()
-                    .map(|a| self.infer_expr(&a.value, locals))
+                    .filter_map(|a| arenas.expr(a.value))
+                    .map(|value| self.infer_expr(value, locals))
                     .collect();
                 sig.instantiated_return(&arg_types, &self.relation())
             })
@@ -5656,7 +6434,7 @@ impl<'a> Checker<'a> {
         let Some(out) = sig.self_out() else {
             return;
         };
-        let Some(key) = locals.key_of(recv) else {
+        let Some(key) = self.key_of_expr(locals, recv) else {
             return;
         };
         let as_return = sig.with_return_type(out.clone());
@@ -5858,6 +6636,7 @@ impl<'a> Checker<'a> {
     /// precise where a return depends on a guard.
     fn closure_syntactic_return_type(
         &self,
+        arenas: &NodeArenas,
         closure: &syntax::ast::ClosureExpr,
         locals: &Locals,
         overrides: Option<&[Type]>,
@@ -5870,6 +6649,7 @@ impl<'a> Checker<'a> {
             is_static,
             ..
         } = closure;
+        let uses = arenas.closure_uses(uses);
         if *is_generator {
             return None;
         }
@@ -5892,31 +6672,39 @@ impl<'a> Checker<'a> {
             scope.insert_var(&p.name, ty);
         }
         // Every `return` in the body, last first.
-        struct Returns<'ast>(Vec<&'ast StmtNode>);
-        impl<'ast> syntax::visit::Visitor<'ast> for Returns<'ast> {
-            fn visit_expr(&mut self, _: &'ast ExprNode) {}
-            fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-            fn visit_class_def(&mut self, _: &'ast ClassDef) {}
-            fn visit_stmt(&mut self, s: &'ast StmtNode) {
-                syntax::visit::walk_stmt(self, s);
-                if matches!(s.kind, StmtKind::Return(_)) {
-                    self.0.push(s);
+        let arenas = self.syntax_arenas()?;
+        struct Returns(Vec<StmtId>);
+        impl syntax::visit::arena::Visitor for Returns {
+            fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+            fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
+            fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
+            fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+                syntax::visit::arena::walk_stmt(self, arenas, id);
+                if arenas
+                    .stmt(id)
+                    .is_some_and(|stmt| matches!(stmt.kind, StmtKind::Return(_)))
+                {
+                    self.0.push(id);
                 }
             }
         }
         let mut returns = Returns(Vec::new());
-        syntax::visit::walk_stmts(&mut returns, body);
+        syntax::visit::arena::walk_stmts(&mut returns, arenas, arenas.stmt_ids(body));
         let mut points = Vec::new();
         let mut saw_explicit_return = false;
-        for s in returns.0.into_iter().rev() {
+        for id in returns.0.into_iter().rev() {
             saw_explicit_return = true;
+            let Some(s) = arenas.stmt(id) else {
+                continue;
+            };
             points.push(match &s.kind {
-                StmtKind::Return(Some(value)) => self.infer_expr(value, &scope),
+                StmtKind::Return(Some(value)) => self.infer_expr(arenas.expr(*value)?, &scope),
                 _ => Type::void(),
             });
         }
         let falls_off_end = !body
             .last()
+            .and_then(|id| arenas.stmt(*id))
             .is_some_and(|s| matches!(s.kind, StmtKind::Return(_) | StmtKind::Throw(_)));
         Some(closure_inferred_return_type(
             &self.relation(),
@@ -5983,40 +6771,34 @@ impl<'a> Checker<'a> {
             .callable_sig()
             .or_else(|| expected.union_members().iter().find_map(Type::callable_sig))?;
         let overrides: Vec<Type> = sig.params.iter().map(|p| p.ty.clone()).collect();
-        match &arg.peeled().kind {
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    return_type,
-                    body,
-                    is_generator,
-                    ..
-                } = &**arrow;
-                let inferred = self.arrow_fn_inferred_return(
-                    params,
-                    body,
-                    *is_generator,
-                    locals,
-                    Some(&overrides),
-                );
+        let syntax_owner = self.syntax_tree_owner()?;
+        let arenas = syntax_owner.arenas();
+        let arg = arenas.peeled(arg.id).and_then(|id| arenas.expr(id))?;
+        match &arg.kind {
+            ExprKind::ArrowFn(closure_id) => {
+                let ClosurePayload::ArrowFn(arrow) = arenas.closure(*closure_id)? else {
+                    return None;
+                };
+                let params = arenas.params(arrow.params);
+                let inferred =
+                    self.infer_closure_return_with_param_overrides(arg, &overrides, locals);
                 Some(self.closure_literal_type(
                     params,
-                    return_type.as_deref(),
+                    arrow.return_type.as_deref(),
                     inferred,
                     Some(&overrides),
                 ))
             }
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    return_type,
-                    ..
-                } = &**closure;
+            ExprKind::Closure(closure_id) => {
+                let ClosurePayload::Closure(closure) = arenas.closure(*closure_id)? else {
+                    return None;
+                };
+                let params = arenas.params(closure.params);
                 let inferred =
-                    self.closure_syntactic_return_type(closure, locals, Some(&overrides));
+                    self.infer_closure_return_with_param_overrides(arg, &overrides, locals);
                 Some(self.closure_literal_type(
                     params,
-                    return_type.as_deref(),
+                    closure.return_type.as_deref(),
                     inferred,
                     Some(&overrides),
                 ))
@@ -6056,41 +6838,52 @@ fn forwards_static_binding(target: &StaticTarget) -> bool {
     )
 }
 
-fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> ExprNode {
-    ExprNode {
-        id: syntax::ast::SYNTHETIC_EXPR_ID,
-        kind: ExprKind::StaticCall(
-            target.clone(),
-            Ident {
-                name: method.as_str().into(),
-                span,
-                name_id: None,
-            },
-            args.to_vec(),
-        ),
-        span,
-    }
-}
-
-/// A synthetic `target::NAME` fetch, for a computed constant name whose
-/// possible values are known.
-fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> ExprNode {
-    let kind = if name == "class" {
-        ExprKind::ClassNameFetch(target.clone())
-    } else {
-        ExprKind::ClassConstFetch(
-            target.clone(),
-            Ident {
-                name: name.as_str().into(),
-                span,
-                name_id: None,
-            },
+impl Checker<'_> {
+    fn static_call<'s>(
+        &self,
+        arena: &'s bumpalo::Bump,
+        target: &StaticTarget,
+        method: String,
+        args: ArgRange,
+        span: Span,
+    ) -> &'s ExprNode {
+        self.synthetic_expr_in(
+            arena,
+            ExprKind::StaticCall(
+                target.clone(),
+                Ident {
+                    name: method.as_str().into(),
+                    span,
+                    name_id: None,
+                },
+                args,
+            ),
+            span,
         )
-    };
-    ExprNode {
-        id: syntax::ast::SYNTHETIC_EXPR_ID,
-        kind,
-        span,
+    }
+
+    /// A synthetic `target::NAME` fetch, for a computed constant name whose
+    /// possible values are known.
+    fn constant_fetch<'s>(
+        &self,
+        arena: &'s bumpalo::Bump,
+        target: &StaticTarget,
+        name: String,
+        span: Span,
+    ) -> &'s ExprNode {
+        let kind = if name == "class" {
+            ExprKind::ClassNameFetch(target.clone())
+        } else {
+            ExprKind::ClassConstFetch(
+                target.clone(),
+                Ident {
+                    name: name.as_str().into(),
+                    span,
+                    name_id: None,
+                },
+            )
+        };
+        self.synthetic_expr_in(arena, kind, span)
     }
 }
 
@@ -6150,6 +6943,13 @@ impl<'a> Checker<'a> {
             StaticTarget::Name(name) => name,
             // `$obj::X` / `$obj::$x`: the class of the receiver's value.
             StaticTarget::Expr(receiver) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static target belongs to its retained file owner");
+                let receiver = syntax_owner
+                    .arenas()
+                    .expr(*receiver)
+                    .expect("static target receiver belongs to its retained file owner");
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
                     return Type::mixed();
                 };
@@ -6358,12 +7158,16 @@ impl<'a> Checker<'a> {
     /// locals, applied here across one arm's multiple conditions.
     fn narrow_match_arm_conditions(
         &self,
+        arenas: &syntax::ast::NodeArenas,
         subject: &ExprNode,
-        conds: &[ExprNode],
+        conds: &[ExprId],
         base: &Locals,
         match_true: bool,
     ) -> Locals {
-        let narrow_one = |cond: &ExprNode| {
+        let narrow_one = |cond_id: &ExprId| {
+            let cond = arenas
+                .expr(*cond_id)
+                .expect("match condition belongs to its retained file owner");
             let mut locals = base.clone();
             if match_true {
                 self.apply_narrowing(cond, &mut locals, true);
@@ -6614,16 +7418,23 @@ impl<'a> Checker<'a> {
 /// (e.g. a plain `$nullableVar->prop`) - that's a real mistake elsewhere,
 /// and re-widening its result to include `Null` here would risk masking
 /// further bugs rather than fixing anything.
-pub(crate) fn postfix_chain_has_nullsafe(base: &ExprNode) -> bool {
-    let base = base.peeled();
+pub(crate) fn postfix_chain_has_nullsafe(arenas: &NodeArenas, base: &ExprNode) -> bool {
+    let Some(base) = arenas.peeled(base.id).and_then(|id| arenas.expr(id)) else {
+        return false;
+    };
     syntax::stack::guard(|| match &base.kind {
         ExprKind::PropertyAccess(inner, _, operator)
         | ExprKind::MethodCall(inner, _, _, operator)
         | ExprKind::DynamicPropertyAccess(inner, _, operator)
         | ExprKind::DynamicMethodCall(inner, _, _, operator) => {
-            operator.is_nullsafe() || postfix_chain_has_nullsafe(inner)
+            operator.is_nullsafe()
+                || arenas
+                    .expr(*inner)
+                    .is_some_and(|inner| postfix_chain_has_nullsafe(arenas, inner))
         }
-        ExprKind::Index(inner, _) => postfix_chain_has_nullsafe(inner),
+        ExprKind::Index(inner, _) => arenas
+            .expr(*inner)
+            .is_some_and(|inner| postfix_chain_has_nullsafe(arenas, inner)),
         _ => false,
     })
 }
@@ -6669,12 +7480,23 @@ fn closure_inferred_return_type(
     relation.union_of(members)
 }
 
-/// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj` in
-/// `$obj::bar()`) ends.
-fn static_target_end(target: &StaticTarget) -> u32 {
-    match target {
-        StaticTarget::Name(name) => name.span.end,
-        StaticTarget::Expr(expr) => expr.span.end,
+impl<'a> Checker<'a> {
+    /// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj`
+    /// in `$obj::bar()`) ends.
+    fn static_target_end(&self, target: &StaticTarget) -> u32 {
+        match target {
+            StaticTarget::Name(name) => name.span.end,
+            StaticTarget::Expr(expr) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static target belongs to its retained file owner");
+                syntax_owner
+                    .arenas()
+                    .expr_span(*expr)
+                    .expect("static target receiver belongs to its retained file owner")
+                    .end
+            }
+        }
     }
 }
 
@@ -6690,11 +7512,8 @@ fn concat_string_parts(parts: Vec<Type>, hierarchy: &dyn types::ClassHierarchy) 
 /// A `new class { ... }` expression's type: an instance of the class
 /// under its registry name, or `mixed` before the file's anonymous
 /// classes are named.
-fn anonymous_class_type(class: &AnonymousClass) -> Type {
-    class
-        .name
-        .as_ref()
-        .map_or(Type::mixed(), |name| Type::object_ref(name, &[]))
+fn anonymous_class_type(name: Option<&Name>) -> Type {
+    name.map_or(Type::mixed(), |name| Type::object_ref(name, &[]))
 }
 
 /// How a receiver failing at `level` is described: wholly a non-object at

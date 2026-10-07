@@ -282,7 +282,9 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7.a.d | same step | Build name, type, import, catch, closure-use and trait-adaptation lists in reusable scratch | — | perf | PART; see 9.7.a.d.a-9.7.a.d.c |
 | 9.7.a.d.a | same step | Build class inheritance, catch-type and trait-precedence name lists in reusable scratch | — | perf | DONE (unvalidated; extends/implements, trait names, catch types and `insteadof` names use the parser's qualified-name scratch before owner-arena commit.) |
 | 9.7.a.d.b | same step | Build `use` imports and trait adaptation aliases/precedences in reusable scratch | — | perf | DONE (unvalidated; grouped/comma imports, trait aliases, and precedence clauses build in reusable scratch before their owner ranges are committed.) |
-| 9.7.a.d.c | same step | Build union/intersection type members and closure captures in reusable scratch | — | perf | OPEN |
+| 9.7.a.d.c | same step | Build union/intersection type members and closure captures in reusable scratch | — | perf | PART; see 9.7.a.d.c.a-9.7.a.d.c.b |
+| 9.7.a.d.c.a | same step | Build union/intersection type-hint members in reusable scratch before owner-arena commit | — | perf | OPEN |
+| 9.7.a.d.c.b | same step | Build closure captures in reusable scratch before owner-arena commit | — | perf | DONE (unvalidated; closure capture ranges are owned by `NodeArenas`, committed after the body parse and resolved by parser consumers through the owner.) |
 | 9.7.b | step 7 | Store list fields as contiguous typed `IdxRange`s and migrate owner-backed readers | — | perf | PART; see 9.7.b.a-9.7.b.e |
 | 9.7.b.a | same step | Move statement and control-flow body lists to typed ranges | — | perf | DONE (unvalidated; the root `ParsedProgram`, `ParsedFile` and retained project tree, `StmtKind::Block`, `StmtKind::Declare`, `SwitchCase`, `Try`/catch/finally, closure, property-hook and function bodies use `StmtIdRange`; parser builders, canonical output and owner-backed readers are migrated.) |
 | 9.7.b.b | same step | Move expression operand and element lists to typed ranges | — | perf | DONE (unvalidated; `Isset`, match-arm conditions, interpolation parts, `Echo`, `For`, and `Unset` lists use `ExprIdRange`; destructuring items use `DestructureItemRange`. Builders commit complete lists to file-owned arenas, fragment offsets and arena lifecycle are wired, and canonical, visitor, printer, checker and summary readers are migrated.) |
@@ -293,7 +295,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7.b.d.c | same step | Move `use` import lists to owner-backed ranges | — | perf | DONE (unvalidated; grouped and comma-separated imports commit to the file-owned import arena; parser name context, declaration collection, reference recording, checker rules, project visitors, Composer, and parser tests resolve through the owner.) |
 | 9.7.b.d.d | same step | Move trait names and adaptation lists to owner-backed ranges | — | perf | DONE (unvalidated; trait names, aliases, precedence clauses and `insteadof` names are covered by 9.7.b.c.) |
 | 9.7.b.e | same step | Move closure-use and property-hook lists to typed ranges | — | perf | OPEN; see 9.7.b.e.a-9.7.b.e.b |
-| 9.7.b.e.a | same step | Move closure `use` captures to an owner-backed range | — | perf | OPEN |
+| 9.7.b.e.a | same step | Move closure `use` captures to an owner-backed range | — | perf | DONE (unvalidated; `ClosureExpr::uses` is a typed owner range, with fragment lifecycle, parser construction, canonical output, visitors, checker readers and printing migrated.) |
 | 9.7.b.e.b | same step | Move property-hook-related lists to owner-backed ranges | — | perf | OPEN |
 | 9.7.c | step 7 | Assign element IDs at commit time and update any recorder that captures list-element IDs | — | perf | OPEN; see 9.7.c.a-9.7.c.b |
 | 9.7.c.a | same step | Assign child element IDs only when each list is committed | — | perf | OPEN |

@@ -2,7 +2,7 @@ use syntax::name::NameSet;
 use types::Name;
 
 use syntax::ast::*;
-use syntax::visit::{Visitor, walk_expr, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 // ---------------------------------------------------------------------
 // Variable-name usage (constructor parameters / closure `use(...)`)
@@ -40,12 +40,12 @@ impl VarUsage {
     }
 }
 
-pub(crate) fn collect_var_usage(stmts: &[StmtNode]) -> VarUsage {
+pub(crate) fn collect_var_usage(arenas: &NodeArenas, stmts: &[StmtId]) -> VarUsage {
     let mut vars = Vars {
         names: NameSet::default(),
         escaped: false,
     };
-    walk_stmts(&mut vars, stmts);
+    arena::walk_stmts(&mut vars, arenas, stmts);
     if vars.escaped {
         VarUsage::Escaped
     } else {
@@ -55,8 +55,8 @@ pub(crate) fn collect_var_usage(stmts: &[StmtNode]) -> VarUsage {
 
 /// Whether `callee` names the global function `target`, as an unqualified
 /// call in a namespace falls back to.
-fn is_call_to(callee: &ExprNode, target: &str) -> bool {
-    matches!(&callee.kind, ExprKind::Name(n) if {
+fn is_call_to(arenas: &NodeArenas, callee: ExprId, target: &str) -> bool {
+    matches!(arenas.expr(callee).map(|node| &node.kind), Some(ExprKind::Name(n)) if {
         let (primary, fallback) = n.candidates();
         fallback.unwrap_or(primary).eq_ignore_ascii_case(target)
     })
@@ -70,13 +70,14 @@ struct Vars {
     escaped: bool,
 }
 
-impl<'ast> Visitor<'ast> for Vars {
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+impl Visitor for Vars {
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
 
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         syntax::stack::guard(|| {
+            let Some(expr) = arenas.expr(id) else { return };
             match &expr.kind {
                 ExprKind::Variable(name) => {
                     if **name != *"this" {
@@ -84,8 +85,16 @@ impl<'ast> Visitor<'ast> for Vars {
                     }
                 }
                 ExprKind::DynamicVariable(inner) => {
+                    let Some(inner) = arenas.expr(*inner) else {
+                        return;
+                    };
                     if let ExprKind::Literal(Literal::String(s)) = &inner.kind {
-                        self.names.insert(Name::from(&*s.to_str_lossy()));
+                        if let Some(bytes) = arenas.string_bytes(s) {
+                            self.names
+                                .insert(Name::from(String::from_utf8_lossy(bytes).into_owned()));
+                        } else {
+                            self.escaped = true;
+                        }
                     } else {
                         self.escaped = true;
                     }
@@ -93,12 +102,18 @@ impl<'ast> Visitor<'ast> for Vars {
                 // The included file or evaluated code can read any variable.
                 ExprKind::Include(..) | ExprKind::Eval(_) => self.escaped = true,
                 ExprKind::Call(callee, args) => {
-                    if is_call_to(callee, "func_get_args") || is_call_to(callee, "get_defined_vars")
+                    if is_call_to(arenas, *callee, "func_get_args")
+                        || is_call_to(arenas, *callee, "get_defined_vars")
                     {
                         self.escaped = true;
-                    } else if is_call_to(callee, "compact") {
-                        for arg in args {
-                            collect_compact_names(&arg.value, &mut self.names, &mut self.escaped);
+                    } else if is_call_to(arenas, *callee, "compact") {
+                        for arg in arenas.args(*args) {
+                            collect_compact_names(
+                                arenas,
+                                arg.value,
+                                &mut self.names,
+                                &mut self.escaped,
+                            );
                         }
                     }
                 }
@@ -110,8 +125,12 @@ impl<'ast> Visitor<'ast> for Vars {
                 // variable would otherwise read as a use of the outer one.
                 // An arrow function implicitly captures every outer variable
                 // it references by value, so its body is walked.
-                ExprKind::Closure(closure) => {
-                    let syntax::ast::ClosureExpr { uses, .. } = &**closure;
+                ExprKind::Closure(closure_id) => {
+                    let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
+                        self.escaped = true;
+                        return;
+                    };
+                    let uses = arenas.closure_uses(&closure.uses);
                     for u in uses {
                         self.names.insert(u.name.name.clone());
                     }
@@ -119,7 +138,7 @@ impl<'ast> Visitor<'ast> for Vars {
                 }
                 _ => {}
             }
-            walk_expr(self, expr);
+            arena::walk_expr(self, arenas, id);
         })
     }
 }
@@ -131,18 +150,26 @@ impl<'ast> Visitor<'ast> for Vars {
 /// spread, ...) has no static name to resolve here, so it escalates to the
 /// same blanket "everything is used" fallback as `func_get_args()`/
 /// `get_defined_vars()` rather than risk a false "unused" report.
-fn collect_compact_names(e: &ExprNode, names: &mut NameSet, escaped: &mut bool) {
+fn collect_compact_names(arenas: &NodeArenas, id: ExprId, names: &mut NameSet, escaped: &mut bool) {
+    let Some(e) = arenas.expr(id) else {
+        *escaped = true;
+        return;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
-            names.insert(Name::from(&*s.to_str_lossy()));
+            if let Some(bytes) = arenas.string_bytes(s) {
+                names.insert(Name::from(String::from_utf8_lossy(bytes).into_owned()));
+            } else {
+                *escaped = true;
+            }
         }
         ExprKind::ArrayLiteral(items) => {
-            for item in items {
+            for item in arenas.array_items(*items) {
                 if item.spread {
                     *escaped = true;
                     continue;
                 }
-                collect_compact_names(&item.value, names, escaped);
+                collect_compact_names(arenas, item.value, names, escaped);
             }
         }
         _ => *escaped = true,

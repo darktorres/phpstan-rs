@@ -361,7 +361,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
                 for param in arenas.params(closure.params) {
                     v.visit_param(arenas, param);
                 }
-                for closure_use in &closure.uses {
+                for closure_use in arenas.closure_uses(&closure.uses) {
                     v.visit_closure_use(closure_use);
                 }
                 if let Some(hint) = &closure.return_type {

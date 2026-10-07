@@ -125,6 +125,7 @@ pub struct Parser<'a> {
     use_import_scratch: Vec<UseImport>,
     trait_alias_scratch: Vec<TraitAlias>,
     trait_precedence_scratch: Vec<TraitPrecedence>,
+    closure_use_scratch: Vec<ClosureUse>,
     // One reusable parameter buffer per nesting depth; defaults may contain
     // closures with their own parameter lists.
     param_list_scratch: Vec<Vec<Param>>,
@@ -368,6 +369,7 @@ impl<'a> Parser<'a> {
             use_import_scratch: Vec::new(),
             trait_alias_scratch: Vec::new(),
             trait_precedence_scratch: Vec::new(),
+            closure_use_scratch: Vec::new(),
             param_list_scratch: Vec::new(),
             param_list_depth: 0,
             destructure_item_scratch: Vec::new(),
