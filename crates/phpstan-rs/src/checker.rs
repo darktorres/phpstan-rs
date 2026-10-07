@@ -1816,11 +1816,8 @@ impl<'a> Checker<'a> {
         {
             debug_assert_eq!(program.as_ptr(), tree.statements().as_ptr());
             debug_assert_eq!(program.len(), tree.statements().len());
-            debug_assert!(
-                program
-                    .iter()
-                    .all(|stmt| tree.stmt_span(stmt.id) == Some(stmt.span))
-            );
+            #[cfg(debug_assertions)]
+            assert_tree_node_spans(tree, program);
         }
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
@@ -2109,6 +2106,25 @@ impl<'a> Checker<'a> {
             self.diagnostics.extend(found);
         }
     }
+}
+
+#[cfg(debug_assertions)]
+fn assert_tree_node_spans(tree: &crate::project::SyntaxTree, program: &[StmtNode]) {
+    struct CheckSpans<'a>(&'a crate::project::SyntaxTree);
+
+    impl<'ast> syntax::visit::Visitor<'ast> for CheckSpans<'_> {
+        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+            debug_assert_eq!(self.0.stmt_span(stmt.id), Some(stmt.span));
+            syntax::visit::walk_stmt(self, stmt);
+        }
+
+        fn visit_expr(&mut self, expr: &'ast ExprNode) {
+            debug_assert_eq!(self.0.expr_span(expr.id), Some(expr.span));
+            syntax::visit::walk_expr(self, expr);
+        }
+    }
+
+    syntax::visit::walk_stmts(&mut CheckSpans(tree), program);
 }
 
 /// What `Checker::enter_shared_scope` set aside for the scope a nested one
