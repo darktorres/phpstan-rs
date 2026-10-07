@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `a80b0201`. Counts below were read from the files on
+State as of 2026-10-06, `113f3259`. Counts below were read from the files on
 that date.
 
 ## Where to resume
