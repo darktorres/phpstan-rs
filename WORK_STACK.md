@@ -256,8 +256,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   attribute list arenas (`6e5a6382`); `NodeArenas` now bundles them and
   provides capacity-preserving clear and shrink-to-fit operations
   (`edb038c1`); an unrun unit test checks expression/statement typed indices
-  restart after scratch clearing (`2e0f3e9a`). The parser and file owner do
-  not yet own or populate the bundle. The IDs target
+  restart after scratch clearing (`2e0f3e9a`). Parser span recording now writes
+  into the bundle, and both `ParsedFile` and the project `SyntaxTree` own it
+  (`669bbd3b`); interpolation span vectors merge into the parent's bundle.
+  The node payload arenas remain empty and the bundle is not yet reused as
+  per-worker scratch. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
   and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
   return those explicit node values (`36d608ba`), and AST child fields use the
