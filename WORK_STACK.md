@@ -245,8 +245,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `ParsedFile::ident_name` now resolves parser IDs through the file table
   (`8607a515`). Retained project trees group their AST, source, name table, and
   typed-ID spans under one `SyntaxTree` owner (`21adb973`), with file-scoped
-  source/name/span accessors (`c7ceb219`); the context AST LRU still drops the
-  auxiliary tables. Syntax depends on `la-arena` with typed
+  source/name/span accessors (`c7ceb219`); `parse_recording` now carries that
+  owner directly into project state (`8a5c16ce`), while the context AST LRU
+  still drops the auxiliary tables. Syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are now named
   (`6611157d`), but are not yet owned or populated by the parser. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
