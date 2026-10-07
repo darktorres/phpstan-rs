@@ -282,6 +282,9 @@ pub struct Checker<'a> {
     // The owning file for this check's node IDs and file-local payloads.
     // Standalone checkers may not have a parsed-file owner.
     pub(crate) syntax_tree: Option<&'a crate::project::SyntaxTree>,
+    // Context files reparsed through `Project::ast_of` keep their owner in
+    // the AST LRU. The checker holds a shared owner while it reads that tree.
+    syntax_tree_owned: Option<Arc<crate::project::SyntaxTree>>,
     // The class the last `class_info` was asked for.
     class_memo: std::cell::RefCell<(String, Option<&'a crate::registry::ClassReflection>)>,
     // Each statement's resolved `@var` tags, by the address and length of
@@ -1054,6 +1057,14 @@ impl<'a> Checker<'a> {
         self
     }
 
+    pub(crate) fn with_owned_syntax_tree(
+        mut self,
+        syntax_tree: Arc<crate::project::SyntaxTree>,
+    ) -> Self {
+        self.syntax_tree_owned = Some(syntax_tree);
+        self
+    }
+
     /// The lines of the file to check, for its diagnostics' lines and
     /// columns.
     pub fn with_line_index(mut self, line_index: &Arc<LineIndex>) -> Self {
@@ -1146,6 +1157,7 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             syntax_tree: None,
+            syntax_tree_owned: None,
             class_memo: std::cell::RefCell::new((String::new(), None)),
             var_tag_memo: std::cell::RefCell::new(FxHashMap::default()),
             method_memo: std::cell::RefCell::new(FxHashMap::default()),
@@ -1798,7 +1810,10 @@ impl<'a> Checker<'a> {
 
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[StmtNode]) {
-        if let Some(tree) = self.syntax_tree {
+        if let Some(tree) = self
+            .syntax_tree
+            .or_else(|| self.syntax_tree_owned.as_deref())
+        {
             debug_assert_eq!(program.as_ptr(), tree.statements().as_ptr());
             debug_assert_eq!(program.len(), tree.statements().len());
             debug_assert!(

@@ -3045,8 +3045,11 @@ impl Project {
             .with_settings(&self.settings)
             .with_bodies(&self.files)
             .with_line_index(&file.line_index);
-        if let AstRef::Kept(tree) = &ast {
-            checker = checker.with_syntax_tree(tree);
+        match &ast {
+            AstRef::Kept(tree) => checker = checker.with_syntax_tree(tree),
+            AstRef::Parsed(tree) => {
+                checker = checker.with_owned_syntax_tree(Arc::clone(tree));
+            }
         }
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
