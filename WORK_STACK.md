@@ -873,8 +873,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   constant, trait-use/adaptation and enum-case lists now use owner-backed
   ranges, with parser, checker, registry, project, Composer, LSP and parser
   fixture readers migrated (9.7.b.a-c, unvalidated). Catch-type name lists
-  now use the same qualified-name arena (9.7.b.d.a, unvalidated). Other
-  type/import lists,
+  now use the same qualified-name arena, and `use` imports commit to their
+  owner-backed import arena with parser, checker, project, registry, Composer,
+  dependency and parser-test readers migrated (9.7.b.d.a/c, unvalidated). Union
+  and intersection type-hint lists,
   closure-use lists, remaining scratch builders, list-element recorder IDs,
   exact-size kept arenas and item 9.8 remain. Items 10-19 have
   complete child-task and tests-only gate rows.

@@ -36,11 +36,15 @@ impl<'a> Checker<'a> {
     /// check_function_name_case`, mirroring real PHPStan's own
     /// `checkFunctionNameCase`-gated half of the same rule, default
     /// `false` at every level).
-    pub(crate) fn check_use_function_imports(&mut self, program: &[StmtNode]) {
-        for stmt in program {
+    pub(crate) fn check_use_function_imports(&mut self, arenas: &NodeArenas, program: &[StmtId]) {
+        for &id in program {
+            let Some(stmt) = arenas.stmt(id) else {
+                continue;
+            };
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;
             };
+            let imports = arenas.use_imports(imports);
             for import in imports {
                 if import.kind != UseKind::Function {
                     continue;
@@ -111,11 +115,15 @@ impl<'a> Checker<'a> {
     /// inside a function/method body is invisible to it, so a `use
     /// const` importing one stays unflagged either way rather than
     /// risking a false positive on a shape this project can't see.
-    pub(crate) fn check_use_const_imports(&mut self, program: &[StmtNode]) {
-        for stmt in program {
+    pub(crate) fn check_use_const_imports(&mut self, arenas: &NodeArenas, program: &[StmtId]) {
+        for &id in program {
+            let Some(stmt) = arenas.stmt(id) else {
+                continue;
+            };
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;
             };
+            let imports = arenas.use_imports(imports);
             for import in imports {
                 if import.kind != UseKind::Const {
                     continue;
@@ -157,11 +165,15 @@ impl<'a> Checker<'a> {
     /// `class.nameCase` itself is already built and wired at other
     /// class-reference sites project-wide (`checker/resolve.rs`'s
     /// `check_type_class_names_exist` pipeline).
-    pub(crate) fn check_use_class_imports(&mut self, program: &[StmtNode]) {
-        for stmt in program {
+    pub(crate) fn check_use_class_imports(&mut self, arenas: &NodeArenas, program: &[StmtId]) {
+        for &id in program {
+            let Some(stmt) = arenas.stmt(id) else {
+                continue;
+            };
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;
             };
+            let imports = arenas.use_imports(imports);
             for import in imports {
                 if import.kind != UseKind::Class {
                     continue;
@@ -205,20 +217,24 @@ impl<'a> Checker<'a> {
     /// active at each point, matching real PHPStan's own per-namespace
     /// scoping (and real PHP's: two same-named classes in two different
     /// namespaces never collide).
-    pub(crate) fn check_used_names(&mut self, program: &[StmtNode]) {
+    pub(crate) fn check_used_names(&mut self, arenas: &NodeArenas, program: &[StmtId]) {
         // Original-case (for display in a message) and lowercased (the
         // real map key, since PHP namespace/name comparison here is
         // case-insensitive) kept side by side.
         let mut current_namespace = String::new();
         let mut current_namespace_lower = String::new();
         let mut used_names: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
-        for stmt in program {
+        for &id in program {
+            let Some(stmt) = arenas.stmt(id) else {
+                continue;
+            };
             match &stmt.kind {
                 StmtKind::Namespace(name) => {
                     current_namespace = name.clone();
                     current_namespace_lower = name.to_ascii_lowercase();
                 }
                 StmtKind::Use(imports) => {
+                    let imports = arenas.use_imports(imports);
                     for import in imports {
                         if import.kind != UseKind::Class {
                             continue;
@@ -244,7 +260,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 StmtKind::ClassDecl(c) => {
-                    let kind = class_kind_identifier(&c.def.kind);
+                    let Some(def) = arenas.class(c.def) else {
+                        continue;
+                    };
+                    let kind = class_kind_identifier(&def.kind);
                     let scope = used_names
                         .entry(current_namespace_lower.clone())
                         .or_default();
@@ -258,7 +277,7 @@ impl<'a> Checker<'a> {
                             DiagnosticBuilder::new(format!(
                                     "Cannot declare {kind} {qualified} because the name is already in use."
                                 ),
-                                c.def.span,
+                                def.span,
                                 0,
                                 format!("{kind}.nameInUse"),
                             )

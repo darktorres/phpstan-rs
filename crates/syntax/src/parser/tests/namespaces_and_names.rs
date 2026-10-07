@@ -40,6 +40,7 @@ fn qualified_name_with_keyword_segment_parses() {
     let StmtKind::Use(imports) = &program[0].kind else {
         panic!("expected Use");
     };
+    let imports = program.arenas.use_imports(imports);
     assert_eq!(imports[0].path, "Piwigo\\Common\\Enum\\AlbumSortOrder");
 }
 
@@ -52,7 +53,7 @@ fn keyword_as_method_and_static_member_name_parses() {
             $z = Foo::list();
         "#,
     );
-    assert_eq!(program.len(), 3);
+    assert_eq!(program.statements().len(), 3);
 }
 
 #[test]
@@ -101,10 +102,11 @@ fn namespace_relative_name_parses_as_expression_and_as_type() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert!(matches!(
-        &f.params[0].default,
-        Some(ExprNode { kind: ExprKind::Name(n), .. }) if n == "namespace\\unknown"
-    ));
+    let default = f.params[0]
+        .default
+        .and_then(|id| program.arenas.expr(id))
+        .expect("default expression");
+    assert!(matches!(&default.kind, ExprKind::Name(n) if n == "namespace\\unknown"));
 
     let StmtKind::FunctionDecl(g) = &program[1].kind else {
         panic!("expected FunctionDecl");
@@ -134,6 +136,7 @@ fn use_with_comma_separated_list_parses() {
     let StmtKind::Use(imports) = &program[0].kind else {
         panic!("expected Use");
     };
+    let imports = program.arenas.use_imports(imports);
     assert_eq!(imports.len(), 2);
     assert_eq!(imports[0].path, "foo\\bar\\baz");
     assert_eq!(imports[1].path, "foo\\bar\\qux");
@@ -146,6 +149,7 @@ fn use_group_expands_each_member_with_the_shared_prefix() {
     let StmtKind::Use(imports) = &program[0].kind else {
         panic!("expected Use");
     };
+    let imports = program.arenas.use_imports(imports);
     assert_eq!(imports.len(), 2);
     assert_eq!(imports[0].path, "Foo\\Bar\\Baz");
     assert!(imports[0].alias.is_none());
@@ -173,13 +177,12 @@ fn readonly_abstract_final_usable_as_plain_names() {
         "#,
     );
     assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "readonly"));
-    for stmt in &program[1..] {
+    for id in program.statements().iter().skip(1) {
+        let stmt = program.arenas.stmt(*id).expect("statement");
         assert!(matches!(
             &stmt.kind,
-            StmtKind::Expression(ExprNode {
-                kind: ExprKind::Call(_, _),
-                ..
-            })
+            StmtKind::Expression(expr)
+                if program.arenas.expr(*expr).is_some_and(|expr| matches!(expr.kind, ExprKind::Call(..)))
         ));
     }
 }
@@ -196,27 +199,38 @@ fn enum_usable_as_plain_function_and_constant_name() {
     );
     assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum"));
     assert!(
-        matches!(&program[3].kind, StmtKind::ClassDecl(e) if e.def.kind == ClassKind::Enum && Some(&*e.name) == Some("Suit"))
+        matches!(&program[3].kind, StmtKind::ClassDecl(e) if program.class_def(e.def).kind == ClassKind::Enum && Some(&*e.name) == Some("Suit"))
     );
 }
 
 #[test]
 fn fn_usable_as_namespace_segment_when_not_a_signature() {
     let program = parse(r#"<?php fn\test();"#);
+    let StmtKind::Expression(call) = &program[0].kind else {
+        panic!("expected expression statement");
+    };
+    let call = program.arenas.expr(*call).expect("call expression");
+    let ExprKind::Call(callee, _) = &call.kind else {
+        panic!("expected call");
+    };
     assert!(
-        matches!(&program[0].kind, StmtKind::Expression(ExprNode { kind: ExprKind::Call(callee, _), .. })
-            if matches!(&callee.kind, ExprKind::Name(n) if n == "fn\\test"))
+        matches!(program.arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(n)) if n == "fn\\test")
     );
 }
 
 #[test]
 fn namespace_relative_call_statement_is_not_a_declaration() {
     let program = parse(r#"<?php namespace\foo();"#);
-    assert!(matches!(
-        &program[0].kind,
-        StmtKind::Expression(ExprNode { kind: ExprKind::Call(callee, _), .. })
-            if matches!(&callee.kind, ExprKind::Name(n) if n == "namespace\\foo")
-    ));
+    let StmtKind::Expression(call) = &program[0].kind else {
+        panic!("expected expression statement");
+    };
+    let call = program.arenas.expr(*call).expect("call expression");
+    let ExprKind::Call(callee, _) = &call.kind else {
+        panic!("expected call");
+    };
+    assert!(
+        matches!(program.arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(n)) if n == "namespace\\foo")
+    );
 }
 
 #[test]

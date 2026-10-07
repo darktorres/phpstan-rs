@@ -21,12 +21,28 @@ pub struct ParseErrorData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError(Box<ParseErrorData>);
 
+/// A standalone parsed program and the file-local arenas its IDs address.
+#[derive(Debug)]
+pub struct ParsedProgram {
+    pub stmts: StmtIdRange,
+    pub arenas: NodeArenas,
+    #[cfg(test)]
+    pub(crate) test_source: Box<[u8]>,
+}
+
 impl ParseError {
     pub(crate) fn new(message: impl Into<String>, span: Span) -> Self {
         Self(Box::new(ParseErrorData {
             message: message.into(),
             span,
         }))
+    }
+}
+
+impl ParsedProgram {
+    /// Resolves the root statement range through its owning arena.
+    pub fn statements(&self) -> &[StmtId] {
+        self.arenas.stmt_ids(&self.stmts)
     }
 }
 
@@ -56,6 +72,11 @@ pub struct Parser<'a> {
     // What the file refers to: the names as they are resolved, and the doc
     // comments with the names in effect where they are.
     pub(crate) recorder: std::cell::RefCell<crate::references::Recorder>,
+    // Text fallback for token-list parser constructors that have no source
+    // owner. The live lexer-backed path resolves ranges directly from source.
+    doc_texts: std::cell::RefCell<rustc_hash::FxHashMap<DocCommentRanges, Arc<str>>>,
+    source: Option<&'a [u8]>,
+    source_backed_strings: bool,
     // The tokens not yet consumed, the current one first: the parser looks
     // a few tokens ahead and never back, so these are all of the file it
     // holds. Filled to `LOOKAHEAD` tokens past the current one whenever
@@ -82,6 +103,15 @@ pub struct Parser<'a> {
     pub(crate) expr_span_base: u32,
     pub(crate) stmt_span_base: u32,
     node_arenas: std::cell::RefCell<NodeArenas>,
+    // Reused for complete statement lists before their elements are
+    // committed together to `NodeArenas::stmt_ids`.
+    stmt_list_scratch: Vec<StmtId>,
+    // Reused for expression-ID lists before their elements are committed
+    // together to `NodeArenas::expr_ids`.
+    expr_id_list_scratch: Vec<ExprId>,
+    // Reused for destructuring patterns before their elements are committed
+    // together to `NodeArenas::destructure_items`.
+    destructure_item_scratch: Vec<DestructureItem>,
     // What names in the tree are interned into.
     pub(crate) interner: &'static Interner,
     // Errors that stand unless the node they're keyed by turns out to be
@@ -102,6 +132,13 @@ pub struct Parser<'a> {
     pub(crate) saw_nested_declaration: std::cell::Cell<bool>,
     // Whether the parse has built an `unset` of a property.
     pub(crate) saw_property_unset: bool,
+    // Whether the opt-in PHPStan stub-attribute rules changed a declaration
+    // while it was being built. A caller then rebuilds reference products
+    // from this final tree instead of using records from discarded nodes.
+    pub(crate) stub_attributes_changed: bool,
+    // Whether any parsed attribute resolves to one of the historical stub
+    // attributes. Once false, parser hooks can skip the stub-rule scans.
+    pub(crate) stub_attributes_mentioned: bool,
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
@@ -126,10 +163,25 @@ enum Supply<'a> {
 }
 
 impl Supply<'_> {
-    fn next(&mut self) -> Option<Tok> {
+    fn next(&mut self) -> Option<(Tok, bool)> {
         match self {
-            Supply::Lexer(lexer) => Some(lexer.next_tok()),
-            Supply::List(tokens) => tokens.next(),
+            Supply::Lexer(lexer) => {
+                let token = lexer.next_tok();
+                Some((token, lexer.has_decoded_bytes()))
+            }
+            Supply::List(tokens) => tokens.next().map(|token| (token, false)),
+        }
+    }
+
+    fn set_decoded_bytes_base(&mut self, base: u32) {
+        if let Supply::Lexer(lexer) = self {
+            lexer.set_decoded_bytes_base(base);
+        }
+    }
+
+    fn drain_decoded_bytes_to(&mut self, destination: &mut Vec<u8>) {
+        if let Supply::Lexer(lexer) = self {
+            lexer.drain_decoded_bytes_to(destination);
         }
     }
 }
@@ -164,6 +216,7 @@ mod postfix;
 mod primary;
 mod property_hooks;
 mod stmt;
+mod stub_attributes;
 mod tokens;
 mod type_hints;
 
@@ -218,26 +271,35 @@ impl<'a> Parser<'a> {
     /// A parser that lexes as it reads: the tokens past the few it looks
     /// at are not lexed until they are needed.
     pub fn from_lexer(lexer: Lexer<'a>) -> Parser<'a> {
-        Self::from_lexer_with_node_arenas(lexer, NodeArenas::default())
+        // This standalone parser returns arenas without a source owner.
+        // Keep its string payloads resolvable in those arenas.
+        Self::from_lexer_with_node_arenas(
+            lexer.with_source_backed_strings(false),
+            NodeArenas::default(),
+        )
     }
 
     pub(crate) fn from_lexer_with_node_arenas(
-        lexer: Lexer<'a>,
+        mut lexer: Lexer<'a>,
         mut node_arenas: NodeArenas,
     ) -> Parser<'a> {
         let line_index = lexer.line_index();
+        let source = lexer.source_bytes();
         let tracks_name_ids = lexer.tracks_file_names();
-        node_arenas.clear();
+        node_arenas.clear_preserving_bases();
+        let decoded_bytes_base = node_arenas.decoded_bytes_base;
+        lexer.set_decoded_bytes_base(decoded_bytes_base);
         Parser::with_supply_and_node_arenas(
             Supply::Lexer(Box::new(lexer)),
             line_index,
             node_arenas,
             tracks_name_ids,
+            Some(source),
         )
     }
 
     fn with_supply(supply: Supply<'a>, line_index: Arc<LineIndex>) -> Parser<'a> {
-        Self::with_supply_and_node_arenas(supply, line_index, NodeArenas::default(), true)
+        Self::with_supply_and_node_arenas(supply, line_index, NodeArenas::default(), true, None)
     }
 
     fn with_supply_and_node_arenas(
@@ -245,11 +307,21 @@ impl<'a> Parser<'a> {
         line_index: Arc<LineIndex>,
         node_arenas: NodeArenas,
         tracks_name_ids: bool,
+        source: Option<&'a [u8]>,
     ) -> Parser<'a> {
+        let source_backed_strings = matches!(
+            &supply,
+            Supply::Lexer(lexer) if lexer.source_backed_strings()
+        );
+        let expr_base = node_arenas.expr_base;
+        let stmt_base = node_arenas.stmt_base;
         let mut parser = Parser {
             supply: std::cell::RefCell::new(supply),
             ctx: std::cell::RefCell::default(),
             recorder: std::cell::RefCell::default(),
+            doc_texts: std::cell::RefCell::default(),
+            source,
+            source_backed_strings,
             ahead: std::collections::VecDeque::with_capacity(LOOKAHEAD + 2),
             eof_queued: false,
             pos: 0,
@@ -257,11 +329,14 @@ impl<'a> Parser<'a> {
             last_span: Span::default(),
             line_index,
             tracks_name_ids,
-            next_expr_id: std::cell::Cell::new(0),
-            next_stmt_id: std::cell::Cell::new(0),
-            expr_span_base: 0,
-            stmt_span_base: 0,
+            next_expr_id: std::cell::Cell::new(expr_base),
+            next_stmt_id: std::cell::Cell::new(stmt_base),
+            expr_span_base: expr_base,
+            stmt_span_base: stmt_base,
             node_arenas: std::cell::RefCell::new(node_arenas),
+            stmt_list_scratch: Vec::new(),
+            expr_id_list_scratch: Vec::new(),
+            destructure_item_scratch: Vec::new(),
             interner: Interner::global(),
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),
@@ -270,6 +345,8 @@ impl<'a> Parser<'a> {
             nested_depth: std::cell::Cell::new(0),
             saw_nested_declaration: std::cell::Cell::new(false),
             saw_property_unset: false,
+            stub_attributes_changed: false,
+            stub_attributes_mentioned: false,
             goto_scopes: vec![GotoScope::default()],
         };
         parser.fill(LOOKAHEAD);
@@ -280,10 +357,42 @@ impl<'a> Parser<'a> {
     /// the supply has no more.
     pub(crate) fn fill(&mut self, count: usize) {
         while !self.eof_queued && self.ahead.len() <= count {
-            let Some(tok) = self.supply.get_mut().next() else {
+            let Some((tok, has_decoded_bytes)) = self.supply.get_mut().next() else {
                 self.eof_queued = true;
                 break;
             };
+            if has_decoded_bytes {
+                let mut arenas = self.node_arenas.borrow_mut();
+                self.supply
+                    .get_mut()
+                    .drain_decoded_bytes_to(&mut arenas.decoded_bytes);
+            }
+            if self.source.is_none()
+                && let Some(group) = tok.docs.as_deref()
+            {
+                let mut texts = self.doc_texts.borrow_mut();
+                if let Some(span) = group.last_range {
+                    let ranges = DocCommentRanges::One(span);
+                    let text = self
+                        .source
+                        .and_then(|source| ranges.text(source))
+                        .map(|text| Arc::<str>::from(text.as_ref()))
+                        .or_else(|| group.last.clone());
+                    if let Some(text) = text {
+                        texts.insert(ranges, text);
+                    }
+                }
+                if let Some(ranges) = group.folded_ranges.as_ref() {
+                    let text = self
+                        .source
+                        .and_then(|source| ranges.text(source))
+                        .map(|text| Arc::<str>::from(text.as_ref()))
+                        .or_else(|| group.folded.clone());
+                    if let Some(text) = text {
+                        texts.insert(ranges.clone(), text);
+                    }
+                }
+            }
             self.eof_queued = matches!(tok.token, Token::Eof);
             self.ahead.push_back(tok);
         }
@@ -415,7 +524,7 @@ impl Parser<'_> {
         self.ahead.front().map_or(self.last_span, |tok| tok.span)
     }
 
-    /// The position a `StmtNode`/`ExprNode` about to be parsed starts at - call
+    /// The position a `StmtId`/`ExprId` about to be parsed starts at - call
     /// before consuming its first token. Falls back to the last known
     /// span: `self.pos` can run one past the last real token
     /// (`__halt_compiler()` jumps there), as `peek()` and `skip()` also
@@ -503,7 +612,7 @@ impl Parser<'_> {
     }
 
     /// The end of the last token actually consumed - call right before
-    /// returning a `StmtNode`/`ExprNode` to close out its span. Same defensive
+    /// returning a `StmtId`/`ExprId` to close out its span. Same defensive
     /// fallback as `current_pos` for the same reason.
     pub(crate) fn previous_end(&self) -> u32 {
         self.last_end
@@ -582,29 +691,47 @@ impl Parser<'_> {
     }
 
     /// Records `doc`, the doc comment of the node that starts at `pos`.
-    pub(crate) fn note_doc(&self, doc: &Option<Arc<str>>, pos: u32) {
-        if doc.is_some() {
-            self.recorder.borrow_mut().doc(doc, pos, &self.ctx.borrow());
-        }
+    pub(crate) fn note_doc(&self, doc: &Option<DocCommentRanges>, pos: u32) {
+        let Some(text) = doc.as_ref().and_then(|range| self.doc_text(range)) else {
+            return;
+        };
+        self.recorder
+            .borrow_mut()
+            .doc(&Some(text), pos, &self.ctx.borrow());
+    }
+
+    /// Resolves a doc range from the live file source, or uses the token-list
+    /// fallback where a parser was built without a source owner.
+    fn doc_text(&self, range: &DocCommentRanges) -> Option<Arc<str>> {
+        self.source
+            .and_then(|source| range.text(source))
+            .map(|text| Arc::<str>::from(text.as_ref()))
+            .or_else(|| self.doc_texts.borrow().get(range).cloned())
     }
 
     /// Records the doc comment of a function or method, and what it
     /// encloses.
     pub(crate) fn note_function(&self, function: &FunctionDecl) {
         self.note_doc(&function.doc_comment, function.span.start);
-        self.recorder.borrow_mut().frame(
-            &function.doc_comment,
-            function.span.start,
-            function.span.end,
-        );
+        let doc = function
+            .doc_comment
+            .as_ref()
+            .and_then(|range| self.doc_text(range));
+        self.recorder
+            .borrow_mut()
+            .frame(&doc, function.span.start, function.span.end);
     }
 
     /// Records the doc comment of a class-like, and what it encloses.
     pub(crate) fn note_class(&self, def: &ClassDef) {
         self.note_doc(&def.doc_comment, def.span.start);
+        let doc = def
+            .doc_comment
+            .as_ref()
+            .and_then(|range| self.doc_text(range));
         self.recorder
             .borrow_mut()
-            .frame(&def.doc_comment, def.span.start, def.span.end);
+            .frame(&doc, def.span.start, def.span.end);
     }
 
     /// The name a resolution gave: the one written when it is that.
@@ -640,19 +767,21 @@ impl Parser<'_> {
         StmtId::from_raw(la_arena::RawIdx::from_u32(id))
     }
 
-    /// Builds a `StmtNode` spanning from `start` (the position captured before
+    /// Builds a `StmtId` spanning from `start` (the position captured before
     /// this statement's first token was consumed) to whatever token was
     /// last consumed.
-    pub(crate) fn stmt(&self, mut kind: StmtKind, start: u32) -> StmtNode {
+    pub(crate) fn stmt(&self, mut kind: StmtKind, start: u32) -> StmtId {
         // What a statement changes in the names that follow it, and the
         // names a declaration gets, are settled as it is made: PHP reads a
         // file in this order.
         match &mut kind {
             StmtKind::Namespace(name) => self.ctx.borrow_mut().set_namespace(name),
             StmtKind::Use(imports) => {
+                let arenas = self.node_arenas.borrow();
+                let imports = arenas.use_imports(imports);
                 self.ctx.borrow_mut().add_uses(imports);
                 let mut recorder = self.recorder.borrow_mut();
-                for import in imports.iter() {
+                for import in imports {
                     recorder.import(import.kind, &import.path);
                 }
             }
@@ -662,8 +791,20 @@ impl Parser<'_> {
                     recorder.global_variable(name);
                 }
             }
-            StmtKind::FunctionDecl(f) => {
-                f.namespaced_name = Some(self.ctx.borrow().declared_name(&f.name).into());
+            StmtKind::FunctionDecl(id) => {
+                let name = self
+                    .node_arenas
+                    .borrow()
+                    .function(*id)
+                    .expect("function declaration was just allocated")
+                    .name
+                    .clone();
+                let namespaced_name = self.ctx.borrow().declared_name(&name).into();
+                self.node_arenas
+                    .borrow_mut()
+                    .function_mut(*id)
+                    .expect("function declaration was just allocated")
+                    .namespaced_name = Some(namespaced_name);
             }
             StmtKind::ClassDecl(c) => {
                 c.namespaced_name = self.ctx.borrow().declared_name(&c.name).into();
@@ -689,21 +830,18 @@ impl Parser<'_> {
             end: self.previous_end(),
         };
         let id = self.stmt_id();
-        let mut arenas = self.node_arenas.borrow_mut();
-        let span_index = self.stmt_span_base + arenas.stmt_spans.len() as u32;
-        debug_assert_eq!(u32::from(id.into_raw()), span_index);
-        arenas.stmt_spans.push(span);
-        StmtNode {
+        let node = StmtNode {
             id,
             kind,
             span,
             doc_comment: None,
             doc_line: None,
-        }
+        };
+        self.node_arenas.borrow_mut().alloc_stmt(node)
     }
 
     /// Same as `stmt`, for expressions.
-    pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> ExprNode {
+    pub(crate) fn expr(&self, kind: ExprKind, start: u32) -> ExprId {
         self.expr_at(
             kind,
             Span {
@@ -714,44 +852,127 @@ impl Parser<'_> {
     }
 
     /// Builds an expression whose span came directly from a lexer fragment.
-    pub(crate) fn expr_at(&self, kind: ExprKind, span: Span) -> ExprNode {
+    pub(crate) fn expr_at(&self, kind: ExprKind, span: Span) -> ExprId {
         let id = self.expr_id();
-        let mut arenas = self.node_arenas.borrow_mut();
-        let span_index = self.expr_span_base + arenas.expr_spans.len() as u32;
-        debug_assert_eq!(u32::from(id.into_raw()), span_index);
-        arenas.expr_spans.push(span);
-        ExprNode { id, kind, span }
-    }
-
-    /// Takes the span side tables built by this parser. A fragment parser's
-    /// entries begin at its base and are appended by the parent parser.
-    pub(crate) fn take_node_spans(&self) -> (Vec<Span>, Vec<Span>) {
-        let mut arenas = self.node_arenas.borrow_mut();
-        (
-            std::mem::take(&mut arenas.expr_spans),
-            std::mem::take(&mut arenas.stmt_spans),
-        )
+        self.node_arenas
+            .borrow_mut()
+            .alloc_expr(ExprNode { id, kind, span })
     }
 
     pub(crate) fn take_node_arenas(&self) -> NodeArenas {
         std::mem::take(&mut *self.node_arenas.borrow_mut())
     }
 
+    pub(crate) fn begin_stmt_list(&self) -> usize {
+        self.stmt_list_scratch.len()
+    }
+
+    pub(crate) fn push_stmt_list_item(&mut self, id: StmtId) {
+        self.stmt_list_scratch.push(id);
+    }
+
+    pub(crate) fn finish_stmt_list(&mut self, start: usize) -> StmtIdRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_stmt_ids(self.stmt_list_scratch.drain(start..))
+    }
+
+    pub(crate) fn discard_stmt_list(&mut self, start: usize) {
+        self.stmt_list_scratch.truncate(start);
+    }
+
+    pub(crate) fn begin_expr_id_list(&self) -> usize {
+        self.expr_id_list_scratch.len()
+    }
+
+    pub(crate) fn push_expr_id_list_item(&mut self, id: ExprId) {
+        self.expr_id_list_scratch.push(id);
+    }
+
+    pub(crate) fn expr_id_list(&self, start: usize) -> &[ExprId] {
+        &self.expr_id_list_scratch[start..]
+    }
+
+    pub(crate) fn finish_expr_id_list(&mut self, start: usize) -> ExprIdRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_expr_ids(self.expr_id_list_scratch.drain(start..))
+    }
+
+    pub(crate) fn discard_expr_id_list(&mut self, start: usize) {
+        self.expr_id_list_scratch.truncate(start);
+    }
+
+    pub(crate) fn begin_destructure_items(&self) -> usize {
+        self.destructure_item_scratch.len()
+    }
+
+    pub(crate) fn push_destructure_item(&mut self, item: DestructureItem) {
+        self.destructure_item_scratch.push(item);
+    }
+
+    pub(crate) fn destructure_items(&self, start: usize) -> &[DestructureItem] {
+        &self.destructure_item_scratch[start..]
+    }
+
+    pub(crate) fn finish_destructure_items(&mut self, start: usize) -> DestructureItemRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_destructure_items(self.destructure_item_scratch.drain(start..))
+    }
+
+    pub(crate) fn expr_node(&self, id: ExprId) -> std::cell::Ref<'_, ExprNode> {
+        std::cell::Ref::map(self.node_arenas.borrow(), |arenas| {
+            arenas.expr(id).expect("parser expression id exists")
+        })
+    }
+
+    pub(crate) fn expr_node_mut(&self, id: ExprId) -> std::cell::RefMut<'_, ExprNode> {
+        std::cell::RefMut::map(self.node_arenas.borrow_mut(), |arenas| {
+            arenas.expr_mut(id).expect("parser expression id exists")
+        })
+    }
+
+    pub(crate) fn stmt_node(&self, id: StmtId) -> std::cell::Ref<'_, StmtNode> {
+        std::cell::Ref::map(self.node_arenas.borrow(), |arenas| {
+            arenas.stmt(id).expect("parser statement id exists")
+        })
+    }
+
+    pub(crate) fn stmt_node_mut(&self, id: StmtId) -> std::cell::RefMut<'_, StmtNode> {
+        std::cell::RefMut::map(self.node_arenas.borrow_mut(), |arenas| {
+            arenas.stmt_mut(id).expect("parser statement id exists")
+        })
+    }
+
     /// Updates the parallel span when parsing later extends a node's span.
     pub(crate) fn set_expr_span(&self, id: ExprId, span: Span) {
         let index = u32::from(id.into_raw()) - self.expr_span_base;
-        self.node_arenas.borrow_mut().expr_spans[index as usize] = span;
+        let local_id = ExprId::from_raw(la_arena::RawIdx::from_u32(index));
+        let mut arenas = self.node_arenas.borrow_mut();
+        arenas.expr_spans[index as usize] = span;
+        arenas.exprs[local_id].span = span;
     }
 
     /// Consumes any doc comment immediately preceding the current position -
     /// call this before advancing past the first token of a declaration.
-    pub(crate) fn take_doc_comment(&mut self) -> Option<Arc<str>> {
-        self.ahead.front_mut()?.docs.as_mut()?.last.take()
+    pub(crate) fn take_doc_comment(&mut self) -> Option<DocCommentRanges> {
+        self.take_doc_comment_with_range().map(|(_, range)| range)
+    }
+
+    /// Takes the temporary text projection together with its source range.
+    /// The AST migration keeps the range and drops the text after recorder
+    /// products that outlive the tree have been made.
+    pub(crate) fn take_doc_comment_with_range(&mut self) -> Option<(Arc<str>, DocCommentRanges)> {
+        let group = self.ahead.front_mut()?.docs.as_mut()?;
+        let text = group.last.take()?;
+        let range = DocCommentRanges::One(group.last_range.take()?);
+        Some((text, range))
     }
 
     #[hotpath::measure]
-    pub fn parse_program(&mut self) -> Result<Vec<StmtNode>, ParseError> {
-        let mut stmts = Vec::new();
+    pub fn parse_program(&mut self) -> Result<ParsedProgram, ParseError> {
+        let stmts_start = self.begin_stmt_list();
         while !self.at_eof() {
             // See parse_statement's own Namespace arm for why the
             // backslash check matters: `namespace\foo();` at the top
@@ -759,13 +980,19 @@ impl Parser<'_> {
             if matches!(self.peek(), Token::Keyword(Keyword::Namespace))
                 && !matches!(self.peek_at(1), Token::Backslash)
             {
-                stmts.extend(self.parse_namespace_stmt()?);
-            } else {
-                stmts.push(self.parse_statement()?);
+                self.parse_namespace_stmt()?;
+            } else if let Some(stmt) = self.parse_statement(true)? {
+                self.push_stmt_list_item(stmt);
             }
         }
         self.check_pattern_only()?;
-        Ok(stmts)
+        let stmts = self.finish_stmt_list(stmts_start);
+        Ok(ParsedProgram {
+            stmts,
+            arenas: self.take_node_arenas(),
+            #[cfg(test)]
+            test_source: Box::default(),
+        })
     }
 
     /// The older, braced namespace form - `namespace Foo\Bar { ... }`, or
@@ -773,24 +1000,30 @@ impl Parser<'_> {
     /// the common `namespace Foo\Bar;` statement form (still handled
     /// generically in parse_statement). Only legal at the top level of a
     /// file, so this is special-cased in parse_program rather than making
-    /// every parse_statement caller handle getting more than one StmtNode
+    /// every parse_statement caller handle getting more than one StmtId
     /// back. The block's body is spliced into the surrounding statement
-    /// list after a `StmtNode::Namespace` marker, the same shape the statement
+    /// list after a `StmtId::Namespace` marker, the same shape the statement
     /// form gives.
-    pub(crate) fn parse_namespace_stmt(&mut self) -> Result<Vec<StmtNode>, ParseError> {
+    pub(crate) fn parse_namespace_stmt(&mut self) -> Result<(), ParseError> {
         let start = self.current_pos();
         self.skip(); // `namespace`
         let name = self.parse_qualified_name();
         if self.check(&Token::LBrace) {
-            let mut stmts = vec![self.stmt(StmtKind::Namespace(name.to_string()), start)];
-            stmts.extend(self.parse_stmt_list_block()?);
-            Ok(stmts)
+            let marker = self.stmt(StmtKind::Namespace(name.to_string()), start);
+            self.push_stmt_list_item(marker);
+            self.expect(&Token::LBrace)?;
+            while !self.check(&Token::RBrace) && !self.at_eof() {
+                if let Some(stmt) = self.parse_statement(true)? {
+                    self.push_stmt_list_item(stmt);
+                }
+            }
+            self.expect(&Token::RBrace)?;
         } else {
             self.expect_semicolon()?;
-            Ok(vec![
-                self.stmt(StmtKind::Namespace(name.to_string()), start),
-            ])
+            let marker = self.stmt(StmtKind::Namespace(name.to_string()), start);
+            self.push_stmt_list_item(marker);
         }
+        Ok(())
     }
 }
 

@@ -284,7 +284,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7.b.d | same step | Move name, type, import and trait-adaptation lists to typed ranges | — | perf | PART; see 9.7.b.d.a-9.7.b.d.d |
 | 9.7.b.d.a | same step | Move catch-clause and other standalone qualified-name lists to owner-backed ranges | — | perf | DONE (unvalidated; catch-type names are allocated in the file's qualified-name arena and checker, summary, syntax-version, navigation, use-site, visitor and parser-test readers resolve them through the owner.) |
 | 9.7.b.d.b | same step | Move union and intersection type-hint member lists to owner-backed ranges | — | perf | OPEN |
-| 9.7.b.d.c | same step | Move `use` import lists to owner-backed ranges | — | perf | OPEN |
+| 9.7.b.d.c | same step | Move `use` import lists to owner-backed ranges | — | perf | DONE (unvalidated; grouped and comma-separated imports commit to the file-owned import arena; parser name context, declaration collection, reference recording, checker rules, project visitors, Composer, and parser tests resolve through the owner.) |
 | 9.7.b.d.d | same step | Move trait names and adaptation lists to owner-backed ranges | — | perf | DONE (unvalidated; trait names, aliases, precedence clauses and `insteadof` names are covered by 9.7.b.c.) |
 | 9.7.b.e | same step | Move closure-use and property-hook lists to typed ranges | — | perf | OPEN; see 9.7.b.e.a-9.7.b.e.b |
 | 9.7.b.e.a | same step | Move closure `use` captures to an owner-backed range | — | perf | OPEN |

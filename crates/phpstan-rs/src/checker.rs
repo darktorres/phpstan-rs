@@ -63,26 +63,26 @@ type GuardedMemberSet = imbl::GenericHashSet<
 type ReinitializedPropertySet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
-// `name -> (target_key, Rc<ExprNode>)` for a variable whose last assignment's
+// `name -> (target_key, ExprId)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
 // `condition_alias_shape`/`condition_alias_targets` in `checker/
 // narrowing.rs`), replayed through `apply_narrowing` when `name` is later
 // checked bare (`if ($name)`) - correlates a *second* variable's narrowing
-// to `name`'s own truthiness without any new type math: the stored `ExprNode`
-// is the original AST node, re-run through the exact dispatch a direct
+// to `name`'s own truthiness without any new type math: the stored ID points
+// to the original AST node, re-run through the exact dispatch a direct
 // `if (<rhsExpr>)` would use. `target_keys` (computed once at store time,
 // mirroring `key_of`'s own string form - one entry per distinct
 // subject a compound `&&`/`||` condition names, e.g. both `$isUserFound`
 // and `$email` for `! $isUserFound || $email === null || $email === ''`)
 // is what `Locals::declare` scans for to invalidate a stale alias whose
-// *any* target was rebound, not just the alias variable itself. `Rc`, not
-// a deep clone, so every branch fork of `Locals` stays O(1); a given
-// alias's `ExprNode` never changes after it's first stored, only wholesale-
-// replaced or purged, so `Rc::ptr_eq` is a correct, cheap "did both
-// branches inherit this unchanged" merge test (see `merge_scopes`).
+// *any* target was rebound, not just the alias variable itself. IDs are
+// copyable, so every branch fork of `Locals` stays O(1); a given alias's ID
+// never changes after it's first stored, only wholesale-replaced or purged,
+// so ID equality is a correct, cheap "did both branches inherit this
+// unchanged" merge test (see `merge_scopes`).
 type ConditionAliasMap = imbl::GenericHashMap<
     LocalKey,
-    (Vec<LocalKey>, std::rc::Rc<ExprNode>),
+    (Vec<LocalKey>, ExprId),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -94,7 +94,7 @@ type ConditionAliasMap = imbl::GenericHashMap<
 // replays into `locals` alongside that condition's own ordinary
 // narrowing (see `checker/narrowing.rs`'s `record_branch_implied_facts`/
 // `apply_equality_narrowing`'s own replay hook). `Rc`-wrapped `Vec`,
-// mirroring `ConditionAliasMap`'s own `Rc<ExprNode>` value, so cloning
+// so cloning
 // `Locals` (extremely frequent - one clone per branch fork) stays O(1)
 // even though a fact list itself isn't `Copy`. A recorded fact is a
 // structural fact about the code at this exact discriminant, not
@@ -144,7 +144,7 @@ type BranchImpliedFactsMap = imbl::GenericHashMap<
 // for the same reason - just the expression, no accompanying target list.
 type QueryBuilderAliasMap = imbl::GenericHashMap<
     LocalKey,
-    std::rc::Rc<ExprNode>,
+    ExprId,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -285,6 +285,17 @@ pub struct Checker<'a> {
     // Context files reparsed through `Project::ast_of` keep their owner in
     // the AST LRU. The checker holds a shared owner while it reads that tree.
     syntax_tree_owned: Option<Arc<crate::project::SyntaxTree>>,
+    // Completion's augmented, per-request file owner. Its IDs share one
+    // arena with the cloned last-good tree, receiver fragment and probes.
+    syntax_file_owned: Option<Arc<syntax::ParsedFile>>,
+    // Standalone parses may provide the source when there is no project
+    // `SyntaxTree` owner.
+    syntax_source: Option<&'a [u8]>,
+    // Nodes synthesized while checking this one file live in a bump arena
+    // owned by the checker. Their IDs occupy a reserved range disjoint from
+    // realistic parsed-file IDs and are valid only until set_current_file
+    // resets this scratch store or the checker is dropped.
+    synthetic_nodes: synthetic::SyntheticNodeScratch,
     // The class the last `class_info` was asked for.
     class_memo: std::cell::RefCell<(String, Option<&'a crate::registry::ClassReflection>)>,
     // Each statement's resolved `@var` tags, by the address and length of
@@ -617,7 +628,7 @@ pub struct Checker<'a> {
     // `Project::working_dir`); `None` is the process's working directory.
     pub(crate) working_dir: Option<std::path::PathBuf>,
     // `includes::file_constant_initializers` for the file being checked.
-    pub(crate) include_constant_initializers: FxHashMap<String, ExprNode>,
+    pub(crate) include_constant_initializers: FxHashMap<String, ExprId>,
     // The places an `include` or `require` looked for a file, in the order
     // looked at: what the file's report reads of the filesystem.
     pub(crate) include_probes: Vec<std::path::PathBuf>,
@@ -864,13 +875,12 @@ pub struct Checker<'a> {
     // `(l, r)` before checking a `Binary(Or, l, r)` condition's own
     // then-branch and pops it after, regardless of how deep a nested
     // `if` inside that branch sits; `check_if`'s own false-branch
-    // handling consults the top of this stack (`apply_narrowing`'s
-    // reach here would need span-based identity anyway, so a small
-    // owned clone of each disjunct, not a borrow, keeps this simple) -
+    // handling consults the top of this stack. The pair contains IDs into
+    // the checker's retained file tree, not cloned syntax nodes -
     // see `checker/narrowing.rs`'s `disjunctive_syllogism_atom_key` for
     // exactly which "is this the same atom" comparison is sound enough
     // to act on.
-    pub(crate) pending_or_disjunctions: Vec<(ExprNode, ExprNode)>,
+    pub(crate) pending_or_disjunctions: Vec<(ExprId, ExprId)>,
     // `--dump-types`: every tracked variable's type (and native type) after
     // each statement, keyed by the statement's start and the class it was
     // checked in, so a later loop pass or trait host overwrites an earlier
@@ -897,6 +907,25 @@ pub struct Checker<'a> {
     infer_spare: RefCell<InferCache>,
 }
 
+/// A syntax owner handle that can be held while the checker mutates its
+/// diagnostics and flow state. Project trees are borrowed for `'a`; trees
+/// reparsed from the context cache are kept alive by a cheap `Arc` clone.
+pub(crate) enum SyntaxTreeOwner<'a> {
+    Borrowed(&'a crate::project::SyntaxTree),
+    Shared(Arc<crate::project::SyntaxTree>),
+    Parsed(Arc<syntax::ParsedFile>),
+}
+
+impl SyntaxTreeOwner<'_> {
+    pub(crate) fn arenas(&self) -> &syntax::ast::NodeArenas {
+        match self {
+            Self::Borrowed(tree) => tree.arenas(),
+            Self::Shared(tree) => tree.arenas(),
+            Self::Parsed(file) => &file.arenas,
+        }
+    }
+}
+
 use infer_cache::InferCache;
 
 /// A question `infer_cache` answers.
@@ -909,6 +938,7 @@ pub(crate) enum InferQuestion {
 }
 
 mod access_attributes;
+mod synthetic;
 /// A method call statement's callee as the check of the call resolved it.
 pub(crate) struct StatementMethodCall {
     pub(crate) id: syntax::ast::ExprId,
@@ -1065,10 +1095,135 @@ impl<'a> Checker<'a> {
         self
     }
 
+    pub(crate) fn with_owned_parsed_file(mut self, parsed_file: Arc<syntax::ParsedFile>) -> Self {
+        self.syntax_file_owned = Some(parsed_file);
+        self
+    }
+
+    /// The owner of the file-local IDs used by this checker's syntax nodes.
+    pub(crate) fn syntax_arenas(&self) -> Option<&syntax::ast::NodeArenas> {
+        self.syntax_tree
+            .or_else(|| self.syntax_tree_owned.as_deref())
+            .map(crate::project::SyntaxTree::arenas)
+            .or_else(|| self.syntax_file_owned.as_deref().map(|file| &file.arenas))
+    }
+
+    /// Reads source-backed syntax payloads through the tree that owns their
+    /// file-local spans.
+    pub(crate) fn syntax_source_slice(&self, span: syntax::span::Span) -> Option<&[u8]> {
+        self.syntax_tree
+            .or_else(|| self.syntax_tree_owned.as_deref())
+            .and_then(|tree| tree.source_slice(span))
+            .or_else(|| {
+                self.syntax_file_owned
+                    .as_deref()
+                    .and_then(|file| file.source_slice(span))
+            })
+            .or_else(|| {
+                self.syntax_source
+                    .and_then(|source| source.get(span.start as usize..span.end as usize))
+            })
+    }
+
+    /// Resolves a doc range through the tree that owns its source bytes.
+    pub(crate) fn syntax_doc_comment_text<'s>(
+        &'s self,
+        ranges: &syntax::ast::DocCommentRanges,
+    ) -> Option<std::borrow::Cow<'s, str>> {
+        self.syntax_arenas()
+            .and_then(|arenas| arenas.doc_comment_text(ranges))
+            .or_else(|| self.syntax_source.and_then(|source| ranges.text(source)))
+    }
+
+    /// Resolves a literal payload through its owning parsed file.
+    pub(crate) fn syntax_string_bytes<'s>(
+        &'s self,
+        payload: &syntax::ast::StringPayload,
+    ) -> Option<&'s [u8]> {
+        self.syntax_arenas()?.string_bytes(payload)
+    }
+
+    /// Resolves a literal payload as UTF-8 text when its bytes are valid.
+    pub(crate) fn syntax_string_text<'s>(
+        &'s self,
+        payload: &syntax::ast::StringPayload,
+    ) -> Option<&'s str> {
+        std::str::from_utf8(self.syntax_string_bytes(payload)?).ok()
+    }
+
+    /// Clones the source owner's shared handle so a caller can keep borrowed
+    /// payload slices across mutable checker operations.
+    pub(crate) fn syntax_source_owner(&self) -> Option<Arc<[u8]>> {
+        self.syntax_tree
+            .or_else(|| self.syntax_tree_owned.as_deref())
+            .map(|tree| Arc::clone(&tree.source))
+            .or_else(|| {
+                self.syntax_file_owned
+                    .as_ref()
+                    .map(|file| Arc::clone(&file.source))
+            })
+    }
+
+    /// Makes the scope key of an expression through the file that owns its
+    /// ID. Keeping this lookup on `Checker` prevents callers from treating
+    /// nested expression IDs as if they were recursive node values.
+    pub(crate) fn key_of_expr(
+        &self,
+        locals: &Locals,
+        expr: &syntax::ast::ExprNode,
+    ) -> Option<LocalKey> {
+        locals.key_of(self.syntax_arenas()?, expr)
+    }
+
+    /// Finds an existing scope key through the expression's file owner.
+    pub(crate) fn find_expr_key(
+        &self,
+        locals: &Locals,
+        expr: &syntax::ast::ExprNode,
+    ) -> Option<LocalKey> {
+        locals.find_key(self.syntax_arenas()?, expr)
+    }
+
+    /// Clones only the owner handle, not its arenas, so callers can retain
+    /// arena-backed slices across mutable checker operations.
+    pub(crate) fn syntax_tree_owner(&self) -> Option<SyntaxTreeOwner<'a>> {
+        self.syntax_tree
+            .map(SyntaxTreeOwner::Borrowed)
+            .or_else(|| {
+                self.syntax_tree_owned
+                    .as_ref()
+                    .map(Arc::clone)
+                    .map(SyntaxTreeOwner::Shared)
+            })
+            .or_else(|| {
+                self.syntax_file_owned
+                    .as_ref()
+                    .map(Arc::clone)
+                    .map(SyntaxTreeOwner::Parsed)
+            })
+    }
+
+    /// The root statements for the file-local IDs used by this checker.
+    pub(crate) fn syntax_statements(&self) -> Option<&[syntax::ast::StmtId]> {
+        self.syntax_tree
+            .or_else(|| self.syntax_tree_owned.as_deref())
+            .map(crate::project::SyntaxTree::statements)
+            .or_else(|| {
+                self.syntax_file_owned
+                    .as_deref()
+                    .map(syntax::ParsedFile::statements)
+            })
+    }
+
     /// The lines of the file to check, for its diagnostics' lines and
     /// columns.
     pub fn with_line_index(mut self, line_index: &Arc<LineIndex>) -> Self {
         self.line_index = Arc::clone(line_index);
+        self
+    }
+
+    pub(crate) fn with_source(mut self, source: &'a [u8]) -> Self {
+        self.syntax_source = Some(source);
         self
     }
 
@@ -1158,6 +1313,9 @@ impl<'a> Checker<'a> {
             registry,
             syntax_tree: None,
             syntax_tree_owned: None,
+            syntax_file_owned: None,
+            syntax_source: None,
+            synthetic_nodes: synthetic::SyntheticNodeScratch::default(),
             class_memo: std::cell::RefCell::new((String::new(), None)),
             var_tag_memo: std::cell::RefCell::new(FxHashMap::default()),
             method_memo: std::cell::RefCell::new(FxHashMap::default()),
@@ -1278,7 +1436,39 @@ impl<'a> Checker<'a> {
 
     /// See `current_file`.
     pub fn set_current_file(&mut self, path: &std::path::Path) {
+        self.synthetic_nodes.clear();
         self.current_file = Some(path.to_path_buf());
+    }
+
+    /// Allocates a checker-only expression in this checker's current-file
+    /// scratch arena. The returned reference and its synthetic ID must not
+    /// outlive the current file check.
+    pub(crate) fn synthetic_expr_node(
+        &self,
+        kind: syntax::ast::ExprKind,
+        span: syntax::span::Span,
+    ) -> &syntax::ast::ExprNode {
+        self.synthetic_nodes.alloc_expr(kind, span)
+    }
+
+    pub(crate) fn synthetic_expr_arena(&self) -> std::rc::Rc<bumpalo::Bump> {
+        // A local owner handle lets a call borrow its synthetic node while
+        // mutably checking it; the arena itself remains owned by this file's
+        // checker scratch store.
+        self.synthetic_nodes.arena_handle()
+    }
+
+    pub(crate) fn synthetic_expr_in<'s>(
+        &self,
+        arena: &'s bumpalo::Bump,
+        kind: syntax::ast::ExprKind,
+        span: syntax::span::Span,
+    ) -> &'s syntax::ast::ExprNode {
+        self.synthetic_nodes.alloc_expr_in(arena, kind, span)
+    }
+
+    pub(crate) fn is_synthetic_expr_id(&self, id: ExprId) -> bool {
+        synthetic::SyntheticNodeScratch::is_synthetic_id(id)
     }
 
     pub(crate) fn set_current_file_id(&mut self, id: crate::file_id::FileId) {
@@ -1809,42 +1999,53 @@ impl<'a> Checker<'a> {
     }
 
     #[hotpath::measure]
-    pub fn check_program(&mut self, program: &[StmtNode]) {
+    pub fn check_program(&mut self, program: &[StmtId]) {
+        let arenas = self
+            .syntax_arenas()
+            .expect("checking arena-backed syntax requires its file owner");
+        let stmts = self
+            .syntax_statements()
+            .expect("checking arena-backed syntax requires its root statement IDs");
+        debug_assert_eq!(program, stmts);
         if let Some(tree) = self
             .syntax_tree
             .or_else(|| self.syntax_tree_owned.as_deref())
         {
-            debug_assert_eq!(program.as_ptr(), tree.statements().as_ptr());
-            debug_assert_eq!(program.len(), tree.statements().len());
+            debug_assert_eq!(program, tree.statements());
             #[cfg(debug_assertions)]
-            assert_tree_node_spans(tree, program);
+            assert_node_spans(tree.arenas(), program);
+        } else if let Some(file) = self.syntax_file_owned.as_deref() {
+            debug_assert_eq!(program, file.statements());
+            #[cfg(debug_assertions)]
+            assert_node_spans(&file.arenas, program);
         }
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
-                strict_rules::assigned_variables(program)
+                strict_rules::assigned_variables(arenas, stmts)
             } else {
                 Vec::new()
             };
-        self.constant_facts = global_constants::constant_facts(program);
+        self.constant_facts = global_constants::constant_facts(arenas, stmts);
         if self.current_file.is_some() {
-            self.include_constant_initializers = includes::file_constant_initializers(program);
+            self.include_constant_initializers =
+                includes::file_constant_initializers(arenas, stmts);
             (self.include_guarded_paths, self.include_path_dirs) = if self.include_guards_possible {
-                self.collect_include_guards(program)
+                self.collect_include_guards(arenas, stmts)
             } else {
                 (FxHashSet::default(), includes::default_include_dirs())
             };
         }
-        self.check_declare_directives(program);
-        self.check_file_whitespace(program);
-        self.check_statement_keywords(program);
+        self.check_declare_directives(arenas, stmts);
+        self.check_file_whitespace(arenas, program);
+        self.check_statement_keywords(stmts);
         let syntax_marks = self.syntax_marks;
-        self.check_syntax_versions(program, &syntax_marks);
-        self.check_use_function_imports(program);
-        self.check_use_const_imports(program);
-        self.check_use_class_imports(program);
-        self.check_used_names(program);
+        self.check_syntax_versions(arenas, program, &syntax_marks);
+        self.check_use_function_imports(arenas, program);
+        self.check_use_const_imports(arenas, program);
+        self.check_use_class_imports(arenas, program);
+        self.check_used_names(arenas, program);
         let (rebind_targets, rebind_escape_all) = if self.closure_rebind_possible {
-            unused::scan_program_for_rebind_targets(program)
+            unused::scan_program_for_rebind_targets(arenas, stmts)
         } else {
             (NameSet::default(), false)
         };
@@ -1855,7 +2056,7 @@ impl<'a> Checker<'a> {
         // `set_pest_this_type` from directory-scoped Pest.php config -
         // matches real Pest's resolution order (file-local checked
         // first).
-        if let Some(local_ty) = pest_config::file_local_this_type(program) {
+        if let Some(local_ty) = pest_config::file_local_this_type(arenas, program) {
             self.pest_this_type = local_ty;
         }
         // Unlike `pest_this_type` above, hook properties are unioned, not
@@ -1864,15 +2065,15 @@ impl<'a> Checker<'a> {
         // `String`s, interned here on the way in to match
         // `pest_hook_properties`'s own interned representation.
         self.pest_hook_properties.extend(
-            pest_config::file_local_hook_properties(program)
+            pest_config::file_local_hook_properties(arenas, program)
                 .into_iter()
                 .map(|p| Name::from(&p)),
         );
 
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
-        let enclosing_scope =
-            self.enter_shared_scope(shared_scope::SharedScope::of(program, &[], None, true));
+        let top_level_scope = shared_scope::SharedScope::of(arenas, stmts, &[], None, true);
+        let enclosing_scope = self.enter_shared_scope(top_level_scope);
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here: real PHP only
         // allows a `namespace`/`use` statement at the top level of a file,
@@ -1890,10 +2091,13 @@ impl<'a> Checker<'a> {
         // do not read its variables, are checked after, once.
         self.check_capturing_scope(&mut top_locals, |this, locals| {
             this.name_ctx = NameContext::default();
-            for stmt in program {
+            for &stmt_id in program {
+                let Some(stmt) = arenas.stmt(stmt_id) else {
+                    continue;
+                };
                 match &stmt.kind {
                     StmtKind::Namespace(name) => this.name_ctx.set_namespace(name),
-                    StmtKind::Use(imports) => this.name_ctx.add_uses(imports),
+                    StmtKind::Use(imports) => this.name_ctx.add_uses(arenas.use_imports(imports)),
                     StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
                     _ => {
                         this.check_stmt(stmt, locals, None, "<main>");
@@ -1902,13 +2106,23 @@ impl<'a> Checker<'a> {
             }
         });
         self.name_ctx = NameContext::default();
-        for stmt in program {
-            self.check_function_like_declarations_in_stmt(stmt);
+        for &stmt_id in program {
+            let Some(stmt) = arenas.stmt(stmt_id) else {
+                continue;
+            };
+            self.check_function_like_declarations_in_stmt(arenas, stmt_id);
             match &stmt.kind {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),
-                StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
-                StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
+                StmtKind::Use(imports) => self.name_ctx.add_uses(arenas.use_imports(imports)),
+                StmtKind::FunctionDecl(id) => {
+                    if let Some(function) = arenas.function(*id) {
+                        self.check_function(function, None, false, true);
+                    }
+                }
                 StmtKind::ClassDecl(c) => {
+                    let Some(def) = arenas.class(c.def) else {
+                        continue;
+                    };
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
                     // `self.registry.classes()` (via `resolve_pseudo` for
@@ -1916,16 +2130,20 @@ impl<'a> Checker<'a> {
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
                     let fqn = c.fq_name().to_string();
-                    let is_enum = c.def.kind == ClassKind::Enum;
+                    let is_enum = def.kind == ClassKind::Enum;
+                    let class_doc = def
+                        .doc_comment
+                        .as_ref()
+                        .and_then(|ranges| arenas.doc_comment_text(ranges));
                     if is_enum {
-                        self.check_enum_template_tag(&fqn, &c.def);
-                        self.check_enum_case_values(&fqn, &c.def);
+                        self.check_enum_template_tag(&fqn, &def);
+                        self.check_enum_case_values(&fqn, &def);
                         self.check_enum_sanity(&fqn, c);
                     } else {
-                        self.check_enum_cases_outside_enum(&c.def.enum_cases);
+                        self.check_enum_cases_outside_enum(def.enum_cases(arenas));
                     }
-                    self.check_class_generic_bounds(&fqn, c);
-                    let description = match c.def.kind {
+                    self.check_class_generic_bounds(&fqn, c, def);
+                    let description = match def.kind {
                         ClassKind::Interface => Some("an interface"),
                         ClassKind::Trait => None,
                         ClassKind::Enum => Some("an enum"),
@@ -1933,70 +2151,69 @@ impl<'a> Checker<'a> {
                     };
                     if let Some(description) = description {
                         self.check_misplaced_var_tag(
-                            c.def.doc_comment.as_deref(),
+                            class_doc.as_deref(),
                             description,
                             c.name.span,
                         );
                     }
-                    self.check_class_completeness(&fqn, c.def.span);
-                    self.check_inheritance_target_kinds(&fqn, false, c.def.span);
-                    self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
+                    self.check_class_completeness(&fqn, def.span);
+                    self.check_inheritance_target_kinds(&fqn, false, def.span);
+                    self.check_readonly_class_version(def.is_readonly, false, c.name.span);
                     self.check_magic_serialization_methods(&fqn, &fqn, c.name.span);
-                    self.check_class_references_exist(&fqn, c.def.span);
-                    self.check_internal_inheritance(&fqn, c.def.kind, c.def.span);
-                    self.check_restricted_class_inheritance(&fqn, c.def.span);
-                    for name in c
-                        .def
-                        .extends
+                    self.check_class_references_exist(&fqn, def.span);
+                    self.check_internal_inheritance(&fqn, def.kind, def.span);
+                    self.check_restricted_class_inheritance(&fqn, def.span);
+                    for name in def
+                        .extends(arenas)
                         .iter()
-                        .chain(&c.def.implements)
-                        .chain(c.def.used_traits())
+                        .chain(def.implements(arenas))
+                        .chain(def.used_traits(arenas))
                     {
                         self.check_class_name_case(name);
                     }
-                    self.check_method_tag_types(&fqn, c.def.doc_comment.as_deref(), c.def.span);
-                    self.check_method_tag_templates(&fqn, c.def.doc_comment.as_deref(), c.def.span);
-                    self.check_mixin_types(&fqn, c.def.doc_comment.as_deref(), c.def.span);
-                    self.check_type_alias_types(&fqn, c.def.doc_comment.as_deref(), c.def.span);
+                    self.check_method_tag_types(&fqn, class_doc.as_deref(), def.span);
+                    self.check_method_tag_templates(&fqn, class_doc.as_deref(), def.span);
+                    self.check_mixin_types(&fqn, class_doc.as_deref(), def.span);
+                    self.check_type_alias_types(&fqn, class_doc.as_deref(), def.span);
                     self.check_method_overrides(&fqn, c);
-                    self.check_property_overrides(&fqn, &c.def);
-                    self.check_require_tags(&fqn, c.def.span);
-                    self.check_require_tag_types(&c.def);
-                    self.check_sealed_hierarchy(&fqn, c.def.span);
-                    self.check_sealed_tag_types(&c.def);
+                    self.check_property_overrides(&fqn, &def);
+                    self.check_require_tags(&fqn, def.span);
+                    self.check_require_tag_types(&def);
+                    self.check_sealed_hierarchy(&fqn, def.span);
+                    self.check_sealed_tag_types(&def);
                     self.check_unknown_phpstan_tags_in_class(c);
                     if self.settings.sidz.check_magic_numbers {
-                        self.check_magic_numbers_in_properties(&c.def.properties);
+                        self.check_magic_numbers_in_properties(arenas, def.properties(arenas));
                     }
-                    self.check_property_hooks(&fqn, &c.def);
-                    self.check_property_variances(&fqn, &c.def);
-                    self.check_trait_conflicts(&fqn, c.def.span);
+                    self.check_property_hooks(&fqn, &def);
+                    self.check_property_variances(&fqn, &def);
+                    self.check_trait_conflicts(&fqn, def.span);
                     self.check_uninitialized_properties(&fqn, c);
-                    self.check_default_property_types(&fqn, &c.def);
+                    self.check_default_property_types(arenas, &fqn, &def);
                     self.check_premature_property_access(&fqn, c);
-                    self.check_duplicate_class_members(&fqn, &c.def);
+                    self.check_duplicate_class_members(&fqn, &def);
                     if self.settings.phpunit.check_risky_tests {
-                        self.check_risky_test_methods(&fqn, &c.def);
+                        self.check_risky_test_methods(arenas, &fqn, def);
                     }
                     self.check_method_declaration_sanity(
                         &fqn,
-                        c.def.kind,
-                        c.def.is_abstract,
-                        &c.def.methods,
+                        def.kind,
+                        def.is_abstract,
+                        arenas.methods(def.methods),
                     );
                     self.check_property_declarations(
                         &fqn,
                         &fqn,
-                        c.def.kind,
-                        c.def.is_abstract,
-                        &c.def.properties,
-                        &c.def.methods,
+                        def.kind,
+                        def.is_abstract,
+                        def.properties(arenas),
+                        arenas.methods(def.methods),
                     );
-                    self.check_reserved_class_constant_name(&c.def.consts);
-                    self.check_typed_class_constant_values(&fqn, &c.def.consts);
-                    self.check_class_constant_modifiers(&fqn, c.def.kind, &c.def.consts);
-                    self.check_constant_overrides(&fqn, &c.def.consts);
-                    self.check_trait_constant_conflicts(&fqn, &c.def.consts);
+                    self.check_reserved_class_constant_name(def.consts(arenas));
+                    self.check_typed_class_constant_values(&fqn, def.consts(arenas));
+                    self.check_class_constant_modifiers(&fqn, def.kind, def.consts(arenas));
+                    self.check_constant_overrides(&fqn, def.consts(arenas));
+                    self.check_trait_constant_conflicts(&fqn, def.consts(arenas));
                     // The class's own attributes, plus every property's/
                     // const's - method/param attributes are checked
                     // per-declaration inside `check_function` below
@@ -2004,40 +2221,44 @@ impl<'a> Checker<'a> {
                     // regardless of how it's reached (a direct method
                     // here, or via `check_trait_methods`'s per-host loop
                     // for a trait).
-                    self.check_attributes(&c.def.attrs, &fqn);
-                    self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                    self.check_attributes(arenas.attributes(def.attrs), &fqn);
+                    self.check_attribute_targets(
+                        arenas.attributes(def.attrs),
+                        ATTRIBUTE_TARGET_CLASS,
+                        "class",
+                    );
                     self.check_self_attribute_class_declaration(
-                        &c.def.attrs,
+                        arenas.attributes(def.attrs),
                         &fqn,
-                        c.def.kind,
-                        c.def.is_abstract,
+                        def.kind,
+                        def.is_abstract,
                     );
                     self.check_class_like_marker_attributes(
-                        &c.def.attrs,
-                        c.def.kind,
-                        c.def.is_readonly,
+                        arenas.attributes(def.attrs),
+                        def.kind,
+                        def.is_readonly,
                         &fqn,
                     );
-                    for p in &c.def.properties {
-                        self.check_attributes(&p.attrs, &fqn);
+                    for p in def.properties(arenas) {
+                        self.check_attributes(arenas.attributes(p.attrs), &fqn);
                         self.check_attribute_targets(
-                            &p.attrs,
+                            arenas.attributes(p.attrs),
                             ATTRIBUTE_TARGET_PROPERTY,
                             "property",
                         );
                     }
-                    for case in &c.def.enum_cases {
-                        self.check_attributes(&case.attrs, &fqn);
+                    for case in def.enum_cases(arenas) {
+                        self.check_attributes(arenas.attributes(case.attrs), &fqn);
                         self.check_attribute_targets(
-                            &case.attrs,
+                            arenas.attributes(case.attrs),
                             ATTRIBUTE_TARGET_CLASS_CONSTANT,
                             "class constant",
                         );
                     }
-                    for cc in &c.def.consts {
-                        self.check_attributes(&cc.attrs, &fqn);
+                    for cc in def.consts(arenas) {
+                        self.check_attributes(arenas.attributes(cc.attrs), &fqn);
                         self.check_attribute_targets(
-                            &cc.attrs,
+                            arenas.attributes(cc.attrs),
                             ATTRIBUTE_TARGET_CLASS_CONSTANT,
                             "class constant",
                         );
@@ -2050,20 +2271,20 @@ impl<'a> Checker<'a> {
                     // a trait's methods (a method's `$this`-dependent body
                     // needs a real host; a property/const's declared type
                     // never does).
-                    self.check_missing_property_typehints(&fqn, &c.def.properties);
-                    self.check_missing_class_constant_typehints(&fqn, &c.def.consts);
+                    self.check_missing_property_typehints(&fqn, def.properties(arenas));
+                    self.check_missing_class_constant_typehints(&fqn, def.consts(arenas));
                     if self.settings.extras.check_native_type_hints {
-                        self.check_native_class_constant_types(&fqn, &c.def.consts);
+                        self.check_native_class_constant_types(&fqn, def.consts(arenas));
                     }
-                    if c.def.kind == ClassKind::Trait {
+                    if def.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
                     } else {
-                        for m in &c.def.methods {
+                        for m in arenas.methods(def.methods) {
                             self.check_function(
                                 &m.function,
                                 Some(&fqn),
                                 m.is_static,
-                                !m.is_abstract && c.def.kind != ClassKind::Interface,
+                                !m.is_abstract && def.kind != ClassKind::Interface,
                             );
                         }
                         // A class's private consts/methods/properties,
@@ -2073,15 +2294,15 @@ impl<'a> Checker<'a> {
                         // bodies scanned together, not one at a time.
                         self.check_unused_private_members(
                             &fqn,
-                            c.def.kind,
-                            &c.def.methods,
-                            &c.def.properties,
-                            &c.def.consts,
+                            def.kind,
+                            arenas.methods(def.methods),
+                            def.properties(arenas),
+                            def.consts(arenas),
                         );
-                        self.record_property_type_site(&fqn, vec![Name::from(&fqn)], &c.def);
-                        self.check_parent_constructor_call(&fqn, &c.def);
-                        self.check_class_access_attributes(&fqn, c);
-                        self.check_promoted_property_candidate(&fqn, &c.def);
+                        self.record_property_type_site(arenas, &fqn, vec![Name::from(&fqn)], &def);
+                        self.check_parent_constructor_call(&fqn, &def);
+                        self.check_class_access_attributes(arenas, &fqn, c, def);
+                        self.check_promoted_property_candidate(&fqn, &def);
                     }
                 }
                 _ => self.check_nested_declarations(stmt),
@@ -2109,22 +2330,30 @@ impl<'a> Checker<'a> {
 }
 
 #[cfg(debug_assertions)]
-fn assert_tree_node_spans(tree: &crate::project::SyntaxTree, program: &[StmtNode]) {
-    struct CheckSpans<'a>(&'a crate::project::SyntaxTree);
+fn assert_node_spans(arenas: &NodeArenas, program: &[StmtId]) {
+    struct CheckSpans<'a>(&'a NodeArenas);
 
-    impl<'ast> syntax::visit::Visitor<'ast> for CheckSpans<'_> {
-        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
-            debug_assert_eq!(self.0.stmt_span(stmt.id), Some(stmt.span));
-            syntax::visit::walk_stmt(self, stmt);
+    impl syntax::visit::arena::Visitor for CheckSpans<'_> {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                debug_assert!(false, "statement ID does not resolve in the tree owner");
+                return;
+            };
+            debug_assert_eq!(self.0.stmt_span(id), Some(stmt.span));
+            syntax::visit::arena::walk_stmt(self, arenas, id);
         }
 
-        fn visit_expr(&mut self, expr: &'ast ExprNode) {
-            debug_assert_eq!(self.0.expr_span(expr.id), Some(expr.span));
-            syntax::visit::walk_expr(self, expr);
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            let Some(expr) = arenas.expr(id) else {
+                debug_assert!(false, "expression ID does not resolve in the tree owner");
+                return;
+            };
+            debug_assert_eq!(self.0.expr_span(id), Some(expr.span));
+            syntax::visit::arena::walk_expr(self, arenas, id);
         }
     }
 
-    syntax::visit::walk_stmts(&mut CheckSpans(tree), program);
+    syntax::visit::arena::walk_stmts(&mut CheckSpans(arenas), arenas, program);
 }
 
 /// What `Checker::enter_shared_scope` set aside for the scope a nested one

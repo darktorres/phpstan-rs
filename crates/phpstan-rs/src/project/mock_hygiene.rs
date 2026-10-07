@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use syntax::ast::*;
 use syntax::span::{LineIndex, Span};
-use syntax::visit::{Visitor, walk_expr, walk_expr_in_scope, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 use super::Project;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
@@ -45,13 +45,13 @@ const MOCK_FACTORIES: [&str; 5] = [
 
 /// Whether `e` is `$this->name(...)`, `self::name(...)` or
 /// `static::name(...)`.
-fn is_test_helper_call<'e>(e: &'e ExprNode, name: &str) -> Option<&'e [Arg]> {
-    match &e.kind {
+fn is_test_helper_call(arenas: &NodeArenas, id: ExprId, name: &str) -> Option<ArgRange> {
+    match &arenas.expr(id)?.kind {
         ExprKind::MethodCall(recv, method, args, _)
             if method.eq_ignore_ascii_case(name)
-                && matches!(&recv.kind, ExprKind::Variable(v) if v.as_ref() == "this") =>
+                && matches!(arenas.expr(*recv).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") =>
         {
-            Some(args)
+            Some(*args)
         }
         ExprKind::StaticCall(StaticTarget::Name(target), method, args)
             if method.eq_ignore_ascii_case(name)
@@ -59,19 +59,21 @@ fn is_test_helper_call<'e>(e: &'e ExprNode, name: &str) -> Option<&'e [Arg]> {
                     .iter()
                     .any(|t| target.eq_ignore_ascii_case(t)) =>
         {
-            Some(args)
+            Some(*args)
         }
         _ => None,
     }
 }
 
 /// The method names of the call chain ending at `e`, innermost first.
-fn chain(e: &ExprNode) -> Vec<(&str, &[Arg], Span)> {
+fn chain(arenas: &NodeArenas, id: ExprId) -> Vec<(&str, &[Arg], Span)> {
     let mut out = Vec::new();
-    let mut current = e;
-    while let ExprKind::MethodCall(recv, method, args, _) = &current.kind {
-        out.push((method.as_ref(), args.as_slice(), current.span));
-        current = recv;
+    let mut current = id;
+    while let Some(node) = arenas.expr(current)
+        && let ExprKind::MethodCall(recv, method, args, _) = &node.kind
+    {
+        out.push((method.as_ref(), arenas.args(*args), node.span));
+        current = *recv;
     }
     out.reverse();
     out
@@ -88,57 +90,62 @@ struct Walker<'a> {
 }
 
 /// Whether `e` creates a mock (`Some(true)`) or a stub (`Some(false)`).
-fn mock_origin(e: &ExprNode) -> Option<bool> {
-    if is_test_helper_call(e, "createStub").is_some() {
+fn mock_origin(arenas: &NodeArenas, id: ExprId) -> Option<bool> {
+    if is_test_helper_call(arenas, id, "createStub").is_some() {
         return Some(false);
     }
     for factory in ["createMock", "createPartialMock", "createConfiguredMock"] {
-        if is_test_helper_call(e, factory).is_some() {
+        if is_test_helper_call(arenas, id, factory).is_some() {
             return Some(true);
         }
     }
+    let e = arenas.expr(id)?;
     if let ExprKind::MethodCall(_, method, _, _) = &e.kind
         && method.eq_ignore_ascii_case("getMock")
     {
-        let mut current = e;
-        while let ExprKind::MethodCall(recv, _, _, _) = &current.kind {
-            if is_test_helper_call(recv, "getMockBuilder").is_some() {
+        let mut current = id;
+        while let Some(node) = arenas.expr(current)
+            && let ExprKind::MethodCall(recv, _, _, _) = &node.kind
+        {
+            if is_test_helper_call(arenas, *recv, "getMockBuilder").is_some() {
                 return Some(true);
             }
-            current = recv;
+            current = *recv;
         }
     }
     None
 }
 
 /// The origin key of an assignment target or chain base.
-fn origin_key(e: &ExprNode) -> Option<String> {
-    match &e.kind {
+fn origin_key(arenas: &NodeArenas, id: ExprId) -> Option<String> {
+    match &arenas.expr(id)?.kind {
         ExprKind::Variable(name) => Some(format!("${name}")),
-        ExprKind::PropertyAccess(object, prop, _) if matches!(&object.kind, ExprKind::Variable(v) if v.as_ref() == "this") => {
+        ExprKind::PropertyAccess(object, prop, _) if matches!(arenas.expr(*object).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") => {
             Some(format!("this->{prop}"))
         }
         _ => None,
     }
 }
 
-fn collect_origins(stmts: &[StmtNode], out: &mut FxHashMap<String, bool>) {
+fn collect_origins(arenas: &NodeArenas, stmts: &[StmtId], out: &mut FxHashMap<String, bool>) {
     struct Origins<'o> {
         out: &'o mut FxHashMap<String, bool>,
     }
-    impl<'ast> Visitor<'ast> for Origins<'_> {
-        fn visit_expr(&mut self, e: &'ast ExprNode) {
-            if let ExprKind::Assign(target, value) = &e.kind
-                && let (Some(key), Some(is_mock)) = (origin_key(target), mock_origin(value))
+    impl Visitor for Origins<'_> {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            if let Some(e) = arenas.expr(id)
+                && let ExprKind::Assign(target, value) = &e.kind
+                && let (Some(key), Some(is_mock)) =
+                    (origin_key(arenas, *target), mock_origin(arenas, *value))
             {
                 self.out.insert(key, is_mock);
             }
-            walk_expr_in_scope(self, e);
+            arena::walk_expr_in_scope(self, arenas, id);
         }
-        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-        fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+        fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
+        fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
     }
-    walk_stmts(&mut Origins { out }, stmts);
+    arena::walk_stmts(&mut Origins { out }, arenas, stmts);
 }
 
 impl<'a> Walker<'a> {
@@ -157,14 +164,16 @@ impl<'a> Walker<'a> {
             .push(DiagnosticBuilder::new(message, span, 2, id).build(self.line_index));
     }
 
-    fn class(&mut self, c: &ClassDecl) {
+    fn class(&mut self, arenas: &NodeArenas, c: &ClassDecl, def: &ClassDef) {
         let mut mock_properties = 0;
-        for p in &c.def.properties {
+        for p in def.properties(arenas) {
             let (hint, members) = match &p.type_hint {
                 Some(native) => (native.to_string(), native_members(native)),
                 None => {
                     let Some(node) = p
                         .doc_comment
+                        .as_ref()
+                        .and_then(|ranges| arenas.doc_comment_text(ranges))
                         .as_deref()
                         .and_then(|doc| phpdoc::docblock::parse_shared(doc).var_type.clone())
                     else {
@@ -204,9 +213,9 @@ impl<'a> Walker<'a> {
             }
         }
         if mock_properties > 0
-            && mock_properties == c.def.properties.len()
-            && c.def
-                .extends
+            && mock_properties == def.properties(arenas).len()
+            && def
+                .extends(arenas)
                 .first()
                 .and_then(QualifiedName::resolved_class)
                 .is_some_and(|e| e.ends_with("TestCase"))
@@ -221,26 +230,32 @@ impl<'a> Walker<'a> {
             );
         }
         let mut class_origins = FxHashMap::default();
-        for m in &c.def.methods {
-            collect_origins(m.function.body_stmts(), &mut class_origins);
+        for m in arenas.methods(def.methods) {
+            collect_origins(arenas, m.function.body_stmts(arenas), &mut class_origins);
         }
         class_origins.retain(|k, _| k.starts_with("this->"));
-        for m in &c.def.methods {
+        for m in arenas.methods(def.methods) {
             let mut origins = class_origins.clone();
-            collect_origins(m.function.body_stmts(), &mut origins);
+            collect_origins(arenas, m.function.body_stmts(arenas), &mut origins);
             let previous = std::mem::replace(&mut self.origins, origins);
-            walk_stmts(self, m.function.body_stmts());
+            arena::walk_stmts(self, arenas, m.function.body_stmts(arenas));
             self.origins = previous;
         }
     }
 
     /// Rules over one statement's mock-configuration chain.
-    fn configuration_chain(&mut self, e: &ExprNode) {
-        let e = match &e.kind {
-            ExprKind::Assign(_, value) => value.as_ref(),
-            _ => e,
+    fn configuration_chain(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(original) = arenas.expr(id) else {
+            return;
         };
-        let calls = chain(e);
+        let base_id = match &original.kind {
+            ExprKind::Assign(_, value) => *value,
+            _ => id,
+        };
+        let Some(e) = arenas.expr(base_id) else {
+            return;
+        };
+        let calls = chain(arenas, base_id);
         if calls.is_empty() {
             return;
         }
@@ -256,13 +271,15 @@ impl<'a> Walker<'a> {
                 "mock.withWithoutExpects",
             );
         }
-        let mut base = e;
-        while let ExprKind::MethodCall(recv, _, _, _) = &base.kind {
-            base = recv;
+        let mut base = base_id;
+        while let Some(node) = arenas.expr(base)
+            && let ExprKind::MethodCall(recv, _, _, _) = &node.kind
+        {
+            base = *recv;
         }
         if has("method")
             && !has("expects")
-            && origin_key(base).and_then(|k| self.origins.get(&k).copied()) == Some(true)
+            && origin_key(arenas, base).and_then(|k| self.origins.get(&k).copied()) == Some(true)
         {
             self.report(
                 e.span,
@@ -280,36 +297,41 @@ impl<'a> Walker<'a> {
     }
 }
 
-impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Walker<'_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.add_uses(imports),
-            StmtKind::Expression(e) => self.configuration_chain(e),
+            StmtKind::Use(imports) => self.ctx.add_uses(arenas.use_imports(imports)),
+            StmtKind::Expression(e) => self.configuration_chain(arenas, *e),
             _ => {}
         }
-        walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_function_decl(&mut self, f: &'ast FunctionDecl) {
-        walk_stmts(self, f.body_stmts());
+    fn visit_function_decl(&mut self, arenas: &NodeArenas, f: &FunctionDecl) {
+        arena::walk_stmts(self, arenas, f.body_stmts(arenas));
     }
 
-    fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
-        if c.def.kind == ClassKind::Enum {
-            for m in &c.def.methods {
-                walk_stmts(self, m.function.body_stmts());
+    fn visit_class_decl(&mut self, arenas: &NodeArenas, c: &ClassDecl) {
+        let Some(def) = arenas.class(c.def) else {
+            return;
+        };
+        if def.kind == ClassKind::Enum {
+            for m in arenas.methods(def.methods) {
+                arena::walk_stmts(self, arenas, m.function.body_stmts(arenas));
             }
         } else {
-            self.class(c);
+            self.class(arenas, c, def);
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
         if let ExprKind::MethodCall(_, method, args, _) = &e.kind
             && method.eq_ignore_ascii_case("expects")
-            && let Some(arg) = args.first()
-            && is_test_helper_call(&arg.value, "any").is_some()
+            && let Some(arg) = arenas.args(*args).first()
+            && is_test_helper_call(arenas, arg.value, "any").is_some()
         {
             self.report(
                 e.span,
@@ -318,9 +340,13 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 "mock.expectsAny",
             );
         }
-        if let Some(args) = is_test_helper_call(e, "atLeast")
+        if let Some(args) = is_test_helper_call(arenas, id, "atLeast")
             && matches!(
-                args.first().map(|a| &a.value.kind),
+                arenas
+                    .args(args)
+                    .first()
+                    .and_then(|a| arenas.expr(a.value))
+                    .map(|e| &e.kind),
                 Some(ExprKind::Literal(Literal::Int(0)))
             )
         {
@@ -332,9 +358,11 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
         }
         if !self.banned.is_empty() {
             for factory in MOCK_FACTORIES {
-                if let Some(args) = is_test_helper_call(e, factory)
-                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class))) =
-                        args.first().map(|a| &a.value.kind)
+                if let Some(args) = is_test_helper_call(arenas, id, factory)
+                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class))) = args
+                        .first()
+                        .and_then(|a| arenas.expr(a.value))
+                        .map(|e| &e.kind)
                 {
                     let Some(resolved) = class.resolved_class() else {
                         continue;
@@ -353,7 +381,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 }
             }
         }
-        walk_expr(self, e);
+        arena::walk_expr(self, arenas, id);
     }
 }
 
@@ -373,7 +401,10 @@ impl Project {
                 out: Vec::new(),
                 origins: FxHashMap::default(),
             };
-            walk_stmts(&mut walker, file.ast());
+            let tree = file
+                .tree()
+                .expect("analyzed mock-hygiene file must retain its syntax tree");
+            arena::walk_stmts(&mut walker, tree.arenas(), tree.statements());
             if !walker.out.is_empty() {
                 let mut found = walker.out;
                 found.sort_by_key(|d| (d.span.start.line, d.span.start.col));

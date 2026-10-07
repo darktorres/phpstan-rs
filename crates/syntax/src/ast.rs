@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::name::Name;
@@ -11,7 +12,7 @@ use crate::span::Span;
 #[derive(Debug, Clone)]
 pub struct Attribute {
     pub name: QualifiedName,
-    pub args: Vec<Arg>,
+    pub args: ArgRange,
     pub span: Span,
     // What deleting this attribute removes: its whole `#[...]` group up
     // to the next token when it's alone in the group, else its own entry
@@ -27,20 +28,17 @@ pub struct StmtNode {
     pub id: StmtId,
     pub kind: StmtKind,
     pub span: Span,
-    // The raw text of a `/** ... */` doc comment immediately preceding this
-    // statement, if any - lets the checker recognize an inline `@var`
+    // The source range(s) of a `/** ... */` doc comment immediately
+    // preceding this statement, if any. Readers resolve text through the
+    // parsed file that owns these nodes. This lets the checker recognize an inline `@var`
     // assertion sitting on an arbitrary statement, not just on an actual
     // declaration (see `checker::stmt::inline_var_annotation`). A statement
     // that's also a declaration (e.g. a function) claiming its own doc
     // comment via `Parser::take_doc_comment` still gets the same raw text
     // here too - harmless, since a declaration's own docblock never has a
-    // `@var $name` tag for that logic to act on. `Arc<str>`, not `String`:
-    // moved straight out of the lexer's own interned `Token::DocComment`
-    // (via `Parser`'s `doc_comments` map), and cloned onto more than one
-    // statement/declaration when several share one preceding doc comment
-    // (e.g. a comma-separated `use`/`const` list) - a refcount bump instead
-    // of a full text copy each time.
-    pub doc_comment: Option<Arc<str>>,
+    // `@var $name` tag for that logic to act on. Several nodes can refer to
+    // the same source ranges (e.g. a comma-separated `use`/`const` list).
+    pub doc_comment: Option<DocCommentRanges>,
     // The line `doc_comment` starts on - where real PHPStan reports a
     // finding about the comment itself (`varTag.unresolvableType`).
     pub doc_line: Option<u32>,
@@ -63,21 +61,167 @@ pub type StmtArena = la_arena::Arena<StmtNode>;
 pub type FunctionArena = la_arena::Arena<FunctionDecl>;
 pub type MethodArena = la_arena::Arena<MethodDecl>;
 pub type ClassArena = la_arena::Arena<ClassDef>;
-pub type ClosureArena = la_arena::Arena<ClosureExpr>;
+pub type ClosureArena = la_arena::Arena<ClosurePayload>;
 pub type AnonymousClassArena = la_arena::Arena<AnonymousClass>;
+pub type FunctionId = la_arena::Idx<FunctionDecl>;
+pub type ClassId = la_arena::Idx<ClassDef>;
+pub type ClosureId = la_arena::Idx<ClosurePayload>;
+pub type AnonymousClassId = la_arena::Idx<AnonymousClass>;
+
+/// Source locations for one doc comment or a group of consecutive comments.
+/// A single comment is stored inline; only grouped comments need shared
+/// range storage.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DocCommentRanges {
+    One(Span),
+    Group(Arc<[Span]>),
+    /// A doc comment whose source text was extended by a parser-time
+    /// transformation. Keep the original spans for navigation while the
+    /// owner text carries the final annotation payload.
+    Appended {
+        spans: Arc<[Span]>,
+        text: Arc<str>,
+    },
+}
+
+impl DocCommentRanges {
+    pub fn one(span: Span) -> Self {
+        Self::One(span)
+    }
+
+    pub fn group(spans: impl Into<Arc<[Span]>>) -> Self {
+        let spans = spans.into();
+        assert!(spans.len() > 1, "a doc group has multiple comments");
+        Self::Group(spans)
+    }
+
+    pub fn spans(&self) -> &[Span] {
+        match self {
+            Self::One(span) => std::slice::from_ref(span),
+            Self::Group(spans) => spans,
+            Self::Appended { spans, .. } => spans,
+        }
+    }
+
+    /// Resolves these source ranges to the text consumed by docblock readers.
+    pub fn text<'a>(&'a self, source: &[u8]) -> Option<Cow<'a, str>> {
+        let text = |span: &Span| {
+            let bytes = source.get(span.start as usize..span.end as usize)?;
+            Some(crate::lexer::lossy(bytes))
+        };
+        match self {
+            Self::One(span) => text(span),
+            Self::Group(spans) => {
+                let bodies = spans
+                    .iter()
+                    .map(|span| {
+                        text(span).map(|text| {
+                            text.trim()
+                                .trim_start_matches("/**")
+                                .trim_end_matches("*/")
+                                .to_owned()
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(Cow::Owned(format!("/**{}\n*/", bodies.join("\n"))))
+            }
+            Self::Appended { text, .. } => Some(Cow::Borrowed(text)),
+        }
+    }
+
+    /// Replaces the reader text with a version that includes a synthesized
+    /// PHPDoc tag while preserving the source locations of the original doc.
+    pub fn with_appended_text(&self, text: impl Into<Arc<str>>) -> Self {
+        Self::Appended {
+            spans: Arc::from(self.spans()),
+            text: text.into(),
+        }
+    }
+}
 
 /// Storage for list elements addressed by ranges in the file-owned tree.
 pub type ArgArena = la_arena::Arena<Arg>;
+pub type StmtIdArena = la_arena::Arena<StmtId>;
+pub type ExprIdArena = la_arena::Arena<ExprId>;
+pub type DestructureItemArena = la_arena::Arena<DestructureItem>;
 pub type ArrayItemArena = la_arena::Arena<ArrayItem>;
 pub type ParamArena = la_arena::Arena<Param>;
 pub type MatchArmArena = la_arena::Arena<MatchArm>;
 pub type AttributeArena = la_arena::Arena<Attribute>;
+pub type ArgRange = la_arena::IdxRange<Arg>;
+pub type StmtIdRange = la_arena::IdxRange<StmtId>;
+pub type ExprIdRange = la_arena::IdxRange<ExprId>;
+pub type DestructureItemRange = la_arena::IdxRange<DestructureItem>;
+pub type ArrayItemRange = la_arena::IdxRange<ArrayItem>;
+pub type MatchArmRange = la_arena::IdxRange<MatchArm>;
+pub type ParamRange = la_arena::IdxRange<Param>;
+pub type AttributeRange = la_arena::IdxRange<Attribute>;
+pub type MethodRange = la_arena::IdxRange<MethodDecl>;
+pub type QualifiedNameRange = la_arena::IdxRange<QualifiedName>;
+pub type PropertyRange = la_arena::IdxRange<PropertyDecl>;
+pub type ClassConstRange = la_arena::IdxRange<ClassConst>;
+pub type TraitUseRange = la_arena::IdxRange<TraitUse>;
+pub type EnumCaseRange = la_arena::IdxRange<EnumCase>;
+pub type TraitAliasRange = la_arena::IdxRange<TraitAlias>;
+pub type TraitPrecedenceRange = la_arena::IdxRange<TraitPrecedence>;
+pub type UseImportRange = la_arena::IdxRange<UseImport>;
+
+/// A range in the file-owned decoded byte vector. Source-backed payloads
+/// continue to use [`Span`], so callers cannot confuse the two byte stores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct DecodedBytesRange(Span);
+
+impl DecodedBytesRange {
+    pub fn new(start: u32, end: u32) -> Self {
+        Self(Span { start, end })
+    }
+
+    pub fn start(self) -> u32 {
+        self.0.start
+    }
+
+    pub fn end(self) -> u32 {
+        self.0.end
+    }
+}
+
+/// A string literal payload: either a source slice, bytes decoded once into
+/// the owning file's decoded-byte vector, or an owned value for synthetic
+/// syntax built outside a parsed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringPayload {
+    Source(Span),
+    Decoded(DecodedBytesRange),
+    Owned(PhpString),
+}
+
+impl From<PhpString> for StringPayload {
+    fn from(value: PhpString) -> Self {
+        Self::Owned(value)
+    }
+}
+
+impl From<&str> for StringPayload {
+    fn from(value: &str) -> Self {
+        Self::Owned(PhpString::from(value))
+    }
+}
+
+#[cfg(feature = "fuzzing")]
+impl<'a> arbitrary::Arbitrary<'a> for StringPayload {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::Owned(PhpString::arbitrary(u)?))
+    }
+}
 
 /// The typed vector storage for one file's syntax tree. A worker can clear
 /// this bundle between context files to retain its warmed capacities; a
 /// kept tree can shrink each vector before it leaves the worker.
 #[derive(Debug, Default, Clone)]
 pub struct NodeArenas {
+    /// Source bytes shared with the retained `ParsedFile` owner. Transient
+    /// worker arenas leave this empty.
+    pub source: Arc<[u8]>,
     pub exprs: ExprArena,
     pub stmts: StmtArena,
     pub functions: FunctionArena,
@@ -85,68 +229,765 @@ pub struct NodeArenas {
     pub classes: ClassArena,
     pub closures: ClosureArena,
     pub anonymous_classes: AnonymousClassArena,
+    /// File-local names assigned to anonymous classes after parsing,
+    /// indexed by the same ID as `anonymous_classes`.
+    anonymous_class_names: Vec<Option<Name>>,
     pub args: ArgArena,
+    /// Statement IDs grouped into immutable body and statement lists.
+    pub stmt_ids: StmtIdArena,
+    /// Expression IDs grouped into immutable operand and part lists.
+    pub expr_ids: ExprIdArena,
+    /// Destructuring pattern elements grouped into contiguous lists.
+    pub destructure_items: DestructureItemArena,
     pub array_items: ArrayItemArena,
     pub params: ParamArena,
     pub match_arms: MatchArmArena,
     pub attributes: AttributeArena,
+    pub qualified_names: ListArena<QualifiedName>,
+    pub properties: ListArena<PropertyDecl>,
+    pub class_consts: ListArena<ClassConst>,
+    pub trait_uses: ListArena<TraitUse>,
+    pub enum_cases: ListArena<EnumCase>,
+    pub trait_aliases: ListArena<TraitAlias>,
+    pub trait_precedences: ListArena<TraitPrecedence>,
+    pub use_imports: ListArena<UseImport>,
     pub expr_spans: Vec<Span>,
     pub stmt_spans: Vec<Span>,
+    /// Decoded literal bytes retained by this file. Unescaped payloads
+    /// refer to `ParsedFile::source` instead of being copied here.
+    pub decoded_bytes: Vec<u8>,
+    /// File-local ID offset for parser fragments before they are appended.
+    pub expr_base: u32,
+    pub stmt_base: u32,
+    /// File-local offsets for list arenas in interpolation parser fragments.
+    pub args_base: u32,
+    /// File-local offset for statement-list elements in parser fragments.
+    pub stmt_ids_base: u32,
+    /// File-local offset for expression-list elements in parser fragments.
+    pub expr_ids_base: u32,
+    /// File-local offset for destructuring element ranges in fragments.
+    pub destructure_items_base: u32,
+    pub array_items_base: u32,
+    pub params_base: u32,
+    pub match_arms_base: u32,
+    pub attributes_base: u32,
+    /// File-local offsets for large payload arenas in interpolation fragments.
+    pub functions_base: u32,
+    pub methods_base: u32,
+    pub classes_base: u32,
+    pub closures_base: u32,
+    pub anonymous_classes_base: u32,
+    /// File-local offset for decoded-byte ranges in parser fragments.
+    pub decoded_bytes_base: u32,
+}
+
+fn idx_with_base<T>(index: la_arena::Idx<T>, base: u32) -> la_arena::Idx<T> {
+    let raw = u32::from(index.into_raw())
+        .checked_add(base)
+        .expect("payload arena exhausted");
+    la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(raw))
+}
+
+fn local_idx<T>(index: la_arena::Idx<T>, base: u32) -> Option<la_arena::Idx<T>> {
+    let raw = u32::from(index.into_raw()).checked_sub(base)?;
+    Some(la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(raw)))
+}
+
+fn arena_get<T>(arena: &la_arena::Arena<T>, index: la_arena::Idx<T>, base: u32) -> Option<&T> {
+    let local = local_idx(index, base)?;
+    ((u32::from(local.into_raw()) as usize) < arena.len()).then(|| &arena[local])
+}
+
+fn arena_get_mut<T>(
+    arena: &mut la_arena::Arena<T>,
+    index: la_arena::Idx<T>,
+    base: u32,
+) -> Option<&mut T> {
+    let local = local_idx(index, base)?;
+    ((u32::from(local.into_raw()) as usize) < arena.len()).then(|| &mut arena[local])
+}
+
+fn range_with_base<T>(range: la_arena::IdxRange<T>, base: u32) -> la_arena::IdxRange<T> {
+    let start = u32::from(range.start().into_raw())
+        .checked_add(base)
+        .expect("list arena exhausted");
+    let end = u32::from(range.end().into_raw())
+        .checked_add(base)
+        .expect("list arena exhausted");
+    la_arena::IdxRange::new(
+        la_arena::Idx::<T>::from_raw(la_arena::RawIdx::from_u32(start))
+            ..la_arena::Idx::<T>::from_raw(la_arena::RawIdx::from_u32(end)),
+    )
+}
+
+fn local_range<T>(range: la_arena::IdxRange<T>, base: u32) -> la_arena::IdxRange<T> {
+    let start = u32::from(range.start().into_raw())
+        .checked_sub(base)
+        .expect("list range belongs to an earlier arena fragment");
+    let end = u32::from(range.end().into_raw())
+        .checked_sub(base)
+        .expect("list range belongs to an earlier arena fragment");
+    la_arena::IdxRange::new(
+        la_arena::Idx::<T>::from_raw(la_arena::RawIdx::from_u32(start))
+            ..la_arena::Idx::<T>::from_raw(la_arena::RawIdx::from_u32(end)),
+    )
+}
+
+/// A typed arena for one family of child-list elements. Fragment parsers
+/// receive a fresh arena whose base follows the owning file's current
+/// elements, then append their completed ranges without changing the IDs.
+#[derive(Debug, Clone)]
+pub struct ListArena<T> {
+    values: la_arena::Arena<T>,
+    base: u32,
+}
+
+impl<T> Default for ListArena<T> {
+    fn default() -> Self {
+        Self {
+            values: la_arena::Arena::default(),
+            base: 0,
+        }
+    }
+}
+
+impl<T> ListArena<T> {
+    fn fragment(&self) -> Self {
+        Self {
+            values: la_arena::Arena::default(),
+            base: self
+                .base
+                .checked_add(u32::try_from(self.values.len()).expect("list arena exhausted"))
+                .expect("list arena exhausted"),
+        }
+    }
+
+    fn append_fragment(&mut self, fragment: Self) {
+        assert_eq!(
+            self.base + self.values.len() as u32,
+            fragment.base,
+            "list fragment must immediately follow its owner"
+        );
+        self.values
+            .extend(fragment.values.into_iter().map(|(_, value)| value));
+    }
+
+    pub fn alloc_many(&mut self, values: impl IntoIterator<Item = T>) -> la_arena::IdxRange<T> {
+        range_with_base(self.values.alloc_many(values), self.base)
+    }
+
+    pub fn get(&self, range: &la_arena::IdxRange<T>) -> &[T] {
+        &self.values[local_range(range.clone(), self.base)]
+    }
+
+    pub fn get_mut(&mut self, range: &la_arena::IdxRange<T>) -> &mut [T] {
+        let local = local_range(range.clone(), self.base);
+        &mut self.values[local]
+    }
+
+    pub fn clear(&mut self) {
+        self.values.clear();
+        self.base = 0;
+    }
+
+    fn base(&self) -> u32 {
+        self.base
+    }
+
+    fn set_base(&mut self, base: u32) {
+        self.base = base;
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.values.shrink_to_fit();
+    }
 }
 
 impl NodeArenas {
+    /// Creates an empty append fragment whose IDs begin immediately after
+    /// this owner's current nodes and payloads.
+    pub fn append_fragment(&self) -> Self {
+        let mut fragment = Self::default();
+        fragment.expr_base = self.expr_base + self.expr_spans.len() as u32;
+        fragment.stmt_base = self.stmt_base + self.stmt_spans.len() as u32;
+        fragment.args_base = self.args_base + self.args.len() as u32;
+        fragment.stmt_ids_base = self.stmt_ids_base + self.stmt_ids.len() as u32;
+        fragment.expr_ids_base = self.expr_ids_base + self.expr_ids.len() as u32;
+        fragment.destructure_items_base =
+            self.destructure_items_base + self.destructure_items.len() as u32;
+        fragment.array_items_base = self.array_items_base + self.array_items.len() as u32;
+        fragment.params_base = self.params_base + self.params.len() as u32;
+        fragment.match_arms_base = self.match_arms_base + self.match_arms.len() as u32;
+        fragment.attributes_base = self.attributes_base + self.attributes.len() as u32;
+        fragment.qualified_names = self.qualified_names.fragment();
+        fragment.properties = self.properties.fragment();
+        fragment.class_consts = self.class_consts.fragment();
+        fragment.trait_uses = self.trait_uses.fragment();
+        fragment.enum_cases = self.enum_cases.fragment();
+        fragment.trait_aliases = self.trait_aliases.fragment();
+        fragment.trait_precedences = self.trait_precedences.fragment();
+        fragment.use_imports = self.use_imports.fragment();
+        fragment.functions_base = self.functions_base + self.functions.len() as u32;
+        fragment.methods_base = self.methods_base + self.methods.len() as u32;
+        fragment.classes_base = self.classes_base + self.classes.len() as u32;
+        fragment.closures_base = self.closures_base + self.closures.len() as u32;
+        fragment.anonymous_classes_base =
+            self.anonymous_classes_base + self.anonymous_classes.len() as u32;
+        fragment.decoded_bytes_base = self.decoded_bytes_base + self.decoded_bytes.len() as u32;
+        fragment
+    }
+
+    /// The next expression ID this file owner will allocate.
+    pub fn next_expr_id(&self) -> ExprId {
+        ExprId::from_raw(la_arena::RawIdx::from_u32(
+            self.expr_base + self.expr_spans.len() as u32,
+        ))
+    }
+
+    /// The next statement ID this file owner will allocate.
+    pub fn next_stmt_id(&self) -> StmtId {
+        StmtId::from_raw(la_arena::RawIdx::from_u32(
+            self.stmt_base + self.stmt_spans.len() as u32,
+        ))
+    }
+
+    /// Reads a source-backed payload range.
+    pub fn source_slice(&self, span: Span) -> Option<&[u8]> {
+        self.source.get(span.start as usize..span.end as usize)
+    }
+
+    /// Resolves source-backed doc-comment ranges to their reader text.
+    pub fn doc_comment_text(&self, ranges: &DocCommentRanges) -> Option<Cow<'_, str>> {
+        ranges.text(&self.source)
+    }
+
+    /// Appends decoded bytes and returns their file-local range.
+    pub fn alloc_decoded_bytes(&mut self, bytes: &[u8]) -> DecodedBytesRange {
+        let start = self
+            .decoded_bytes_base
+            .checked_add(
+                u32::try_from(self.decoded_bytes.len()).expect("decoded byte vector exhausted"),
+            )
+            .expect("decoded byte vector exhausted");
+        let end = start
+            .checked_add(u32::try_from(bytes.len()).expect("decoded payload too large"))
+            .expect("decoded byte vector exhausted");
+        self.decoded_bytes.extend_from_slice(bytes);
+        DecodedBytesRange(Span { start, end })
+    }
+
+    /// Reads decoded bytes by their file-local range.
+    pub fn decoded_bytes(&self, range: DecodedBytesRange) -> Option<&[u8]> {
+        let start = range.0.start.checked_sub(self.decoded_bytes_base)? as usize;
+        let end = range.0.end.checked_sub(self.decoded_bytes_base)? as usize;
+        self.decoded_bytes.get(start..end)
+    }
+
+    /// Resolves literal bytes through this file's source and decoded-byte
+    /// storage. Owned payloads are reserved for synthetic nodes.
+    pub fn string_bytes<'a>(&'a self, payload: &'a StringPayload) -> Option<&'a [u8]> {
+        match payload {
+            StringPayload::Source(span) => self.source_slice(*span),
+            StringPayload::Decoded(range) => self.decoded_bytes(*range),
+            StringPayload::Owned(value) => Some(value.as_bytes()),
+        }
+    }
+
+    /// Makes a durable PHP string only for products that outlive this file.
+    pub fn owned_php_string(&self, payload: &StringPayload) -> Option<PhpString> {
+        Some(PhpString::from_bytes(Arc::<[u8]>::from(
+            self.string_bytes(payload)?,
+        )))
+    }
+
+    pub fn alloc_function(&mut self, value: FunctionDecl) -> FunctionId {
+        idx_with_base(self.functions.alloc(value), self.functions_base)
+    }
+
+    pub fn function(&self, id: FunctionId) -> Option<&FunctionDecl> {
+        arena_get(&self.functions, id, self.functions_base)
+    }
+
+    pub fn function_mut(&mut self, id: FunctionId) -> Option<&mut FunctionDecl> {
+        arena_get_mut(&mut self.functions, id, self.functions_base)
+    }
+
+    pub fn alloc_class(&mut self, value: ClassDef) -> ClassId {
+        idx_with_base(self.classes.alloc(value), self.classes_base)
+    }
+
+    pub fn class(&self, id: ClassId) -> Option<&ClassDef> {
+        arena_get(&self.classes, id, self.classes_base)
+    }
+
+    pub fn class_mut(&mut self, id: ClassId) -> Option<&mut ClassDef> {
+        arena_get_mut(&mut self.classes, id, self.classes_base)
+    }
+
+    pub fn alloc_methods(&mut self, values: impl IntoIterator<Item = MethodDecl>) -> MethodRange {
+        range_with_base(self.methods.alloc_many(values), self.methods_base)
+    }
+
+    pub fn methods(&self, range: MethodRange) -> &[MethodDecl] {
+        &self.methods[local_range(range, self.methods_base)]
+    }
+
+    pub fn alloc_closure(&mut self, value: ClosurePayload) -> ClosureId {
+        idx_with_base(self.closures.alloc(value), self.closures_base)
+    }
+
+    pub fn closure(&self, id: ClosureId) -> Option<&ClosurePayload> {
+        arena_get(&self.closures, id, self.closures_base)
+    }
+
+    pub fn closure_mut(&mut self, id: ClosureId) -> Option<&mut ClosurePayload> {
+        arena_get_mut(&mut self.closures, id, self.closures_base)
+    }
+
+    pub fn alloc_anonymous_class(&mut self, value: AnonymousClass) -> AnonymousClassId {
+        let id = idx_with_base(
+            self.anonymous_classes.alloc(value),
+            self.anonymous_classes_base,
+        );
+        self.anonymous_class_names.push(None);
+        id
+    }
+
+    pub fn anonymous_class(&self, id: AnonymousClassId) -> Option<&AnonymousClass> {
+        arena_get(&self.anonymous_classes, id, self.anonymous_classes_base)
+    }
+
+    pub fn anonymous_class_name(&self, id: AnonymousClassId) -> Option<&Name> {
+        let local = local_idx(id, self.anonymous_classes_base)?;
+        self.anonymous_class_names
+            .get(u32::from(local.into_raw()) as usize)?
+            .as_ref()
+    }
+
+    /// Assigns the post-parse synthetic name for one anonymous-class node.
+    pub fn set_anonymous_class_name(&mut self, id: AnonymousClassId, name: Name) -> bool {
+        let Some(local) = local_idx(id, self.anonymous_classes_base) else {
+            return false;
+        };
+        let Some(slot) = self
+            .anonymous_class_names
+            .get_mut(u32::from(local.into_raw()) as usize)
+        else {
+            return false;
+        };
+        *slot = Some(name);
+        true
+    }
+
+    /// Commits a complete argument list contiguously and returns its range.
+    /// Parser callers build the temporary list before this call so a kept
+    /// tree never grows an argument list one element at a time.
+    pub fn alloc_args(&mut self, values: impl IntoIterator<Item = Arg>) -> ArgRange {
+        range_with_base(self.args.alloc_many(values), self.args_base)
+    }
+
+    /// Reads a committed argument list from this file's arena.
+    pub fn args(&self, range: ArgRange) -> &[Arg] {
+        &self.args[local_range(range, self.args_base)]
+    }
+
+    /// Commits one complete statement-ID list and returns its owner-local range.
+    pub fn alloc_stmt_ids(&mut self, values: impl IntoIterator<Item = StmtId>) -> StmtIdRange {
+        range_with_base(self.stmt_ids.alloc_many(values), self.stmt_ids_base)
+    }
+
+    /// Reads a statement-ID list committed to this file's arena.
+    pub fn stmt_ids(&self, range: &StmtIdRange) -> &[StmtId] {
+        &self.stmt_ids[local_range(range.clone(), self.stmt_ids_base)]
+    }
+
+    /// Commits a complete expression-ID list contiguously and returns its range.
+    pub fn alloc_expr_ids(&mut self, values: impl IntoIterator<Item = ExprId>) -> ExprIdRange {
+        range_with_base(self.expr_ids.alloc_many(values), self.expr_ids_base)
+    }
+
+    /// Reads an expression-ID list committed to this file's arena.
+    pub fn expr_ids(&self, range: &ExprIdRange) -> &[ExprId] {
+        &self.expr_ids[local_range(range.clone(), self.expr_ids_base)]
+    }
+
+    /// Commits a complete destructuring pattern contiguously and returns its range.
+    pub fn alloc_destructure_items(
+        &mut self,
+        values: impl IntoIterator<Item = DestructureItem>,
+    ) -> DestructureItemRange {
+        range_with_base(
+            self.destructure_items.alloc_many(values),
+            self.destructure_items_base,
+        )
+    }
+
+    /// Reads a destructuring pattern committed to this file's arena.
+    pub fn destructure_items(&self, range: &DestructureItemRange) -> &[DestructureItem] {
+        &self.destructure_items[local_range(range.clone(), self.destructure_items_base)]
+    }
+
+    /// Commits a complete array-item list contiguously and returns its range.
+    pub fn alloc_array_items(
+        &mut self,
+        values: impl IntoIterator<Item = ArrayItem>,
+    ) -> la_arena::IdxRange<ArrayItem> {
+        range_with_base(self.array_items.alloc_many(values), self.array_items_base)
+    }
+
+    /// Reads a committed array-item list from this file's arena.
+    pub fn array_items(&self, range: la_arena::IdxRange<ArrayItem>) -> &[ArrayItem] {
+        &self.array_items[local_range(range, self.array_items_base)]
+    }
+
+    /// Commits a complete parameter list contiguously and returns its range.
+    pub fn alloc_params(
+        &mut self,
+        values: impl IntoIterator<Item = Param>,
+    ) -> la_arena::IdxRange<Param> {
+        range_with_base(self.params.alloc_many(values), self.params_base)
+    }
+
+    /// Reads a committed parameter list from this file's arena.
+    pub fn params(&self, range: la_arena::IdxRange<Param>) -> &[Param] {
+        &self.params[local_range(range, self.params_base)]
+    }
+
+    /// Mutably reads a committed parameter list during parse-time
+    /// declaration normalization.
+    pub fn params_mut(&mut self, range: la_arena::IdxRange<Param>) -> &mut [Param] {
+        let local = local_range(range, self.params_base);
+        &mut self.params[local]
+    }
+
+    /// Commits a complete match-arm list contiguously and returns its range.
+    pub fn alloc_match_arms(
+        &mut self,
+        values: impl IntoIterator<Item = MatchArm>,
+    ) -> la_arena::IdxRange<MatchArm> {
+        range_with_base(self.match_arms.alloc_many(values), self.match_arms_base)
+    }
+
+    /// Reads a committed match-arm list from this file's arena.
+    pub fn match_arms(&self, range: la_arena::IdxRange<MatchArm>) -> &[MatchArm] {
+        &self.match_arms[local_range(range, self.match_arms_base)]
+    }
+
+    /// Commits a complete attribute list contiguously and returns its range.
+    pub fn alloc_attributes(
+        &mut self,
+        values: impl IntoIterator<Item = Attribute>,
+    ) -> la_arena::IdxRange<Attribute> {
+        range_with_base(self.attributes.alloc_many(values), self.attributes_base)
+    }
+
+    /// Reads a committed attribute list from this file's arena.
+    pub fn attributes(&self, range: la_arena::IdxRange<Attribute>) -> &[Attribute] {
+        &self.attributes[local_range(range, self.attributes_base)]
+    }
+
+    pub fn alloc_qualified_names(
+        &mut self,
+        values: impl IntoIterator<Item = QualifiedName>,
+    ) -> QualifiedNameRange {
+        self.qualified_names.alloc_many(values)
+    }
+
+    pub fn qualified_names(&self, range: &QualifiedNameRange) -> &[QualifiedName] {
+        self.qualified_names.get(range)
+    }
+
+    pub fn alloc_properties(
+        &mut self,
+        values: impl IntoIterator<Item = PropertyDecl>,
+    ) -> PropertyRange {
+        self.properties.alloc_many(values)
+    }
+
+    pub fn properties(&self, range: &PropertyRange) -> &[PropertyDecl] {
+        self.properties.get(range)
+    }
+
+    pub fn properties_mut(&mut self, range: &PropertyRange) -> &mut [PropertyDecl] {
+        self.properties.get_mut(range)
+    }
+
+    pub fn alloc_class_consts(
+        &mut self,
+        values: impl IntoIterator<Item = ClassConst>,
+    ) -> ClassConstRange {
+        self.class_consts.alloc_many(values)
+    }
+
+    pub fn class_consts(&self, range: &ClassConstRange) -> &[ClassConst] {
+        self.class_consts.get(range)
+    }
+
+    pub fn class_consts_mut(&mut self, range: &ClassConstRange) -> &mut [ClassConst] {
+        self.class_consts.get_mut(range)
+    }
+
+    pub fn alloc_trait_uses(
+        &mut self,
+        values: impl IntoIterator<Item = TraitUse>,
+    ) -> TraitUseRange {
+        self.trait_uses.alloc_many(values)
+    }
+
+    pub fn trait_uses(&self, range: &TraitUseRange) -> &[TraitUse] {
+        self.trait_uses.get(range)
+    }
+
+    pub fn trait_uses_mut(&mut self, range: &TraitUseRange) -> &mut [TraitUse] {
+        self.trait_uses.get_mut(range)
+    }
+
+    pub fn alloc_enum_cases(
+        &mut self,
+        values: impl IntoIterator<Item = EnumCase>,
+    ) -> EnumCaseRange {
+        self.enum_cases.alloc_many(values)
+    }
+
+    pub fn enum_cases(&self, range: &EnumCaseRange) -> &[EnumCase] {
+        self.enum_cases.get(range)
+    }
+
+    pub fn alloc_trait_aliases(
+        &mut self,
+        values: impl IntoIterator<Item = TraitAlias>,
+    ) -> TraitAliasRange {
+        self.trait_aliases.alloc_many(values)
+    }
+
+    pub fn trait_aliases(&self, range: &TraitAliasRange) -> &[TraitAlias] {
+        self.trait_aliases.get(range)
+    }
+
+    pub fn alloc_trait_precedences(
+        &mut self,
+        values: impl IntoIterator<Item = TraitPrecedence>,
+    ) -> TraitPrecedenceRange {
+        self.trait_precedences.alloc_many(values)
+    }
+
+    pub fn trait_precedences(&self, range: &TraitPrecedenceRange) -> &[TraitPrecedence] {
+        self.trait_precedences.get(range)
+    }
+
+    pub fn alloc_use_imports(
+        &mut self,
+        values: impl IntoIterator<Item = UseImport>,
+    ) -> UseImportRange {
+        self.use_imports.alloc_many(values)
+    }
+
+    pub fn use_imports(&self, range: &UseImportRange) -> &[UseImport] {
+        self.use_imports.get(range)
+    }
+
     /// Commits an expression node and its span at the matching dense index.
     pub fn alloc_expr(&mut self, node: ExprNode) -> ExprId {
+        let id = node.id;
         let span = node.span;
-        let id = self.exprs.alloc(node);
         assert_eq!(
             u32::from(id.into_raw()),
-            u32::try_from(self.expr_spans.len()).expect("expression arena exhausted")
+            self.expr_base
+                .checked_add(
+                    u32::try_from(self.expr_spans.len()).expect("expression arena exhausted")
+                )
+                .expect("expression arena exhausted")
         );
-        assert_eq!(self.exprs[id].id, id);
+        let local_id = self.exprs.alloc(node);
+        assert_eq!(u32::from(local_id.into_raw()), self.expr_spans.len() as u32);
         self.expr_spans.push(span);
         id
     }
 
     /// Commits a statement node and its span at the matching dense index.
     pub fn alloc_stmt(&mut self, node: StmtNode) -> StmtId {
+        let id = node.id;
         let span = node.span;
-        let id = self.stmts.alloc(node);
         assert_eq!(
             u32::from(id.into_raw()),
-            u32::try_from(self.stmt_spans.len()).expect("statement arena exhausted")
+            self.stmt_base
+                .checked_add(
+                    u32::try_from(self.stmt_spans.len()).expect("statement arena exhausted")
+                )
+                .expect("statement arena exhausted")
         );
-        assert_eq!(self.stmts[id].id, id);
+        let local_id = self.stmts.alloc(node);
+        assert_eq!(u32::from(local_id.into_raw()), self.stmt_spans.len() as u32);
         self.stmt_spans.push(span);
         id
     }
 
+    /// Appends a parser fragment's nodes and side tables after its parent.
+    pub fn append_fragment(&mut self, fragment: Self) {
+        assert_eq!(
+            self.expr_base + self.expr_spans.len() as u32,
+            fragment.expr_base
+        );
+        assert_eq!(
+            self.stmt_base + self.stmt_spans.len() as u32,
+            fragment.stmt_base
+        );
+        assert_eq!(self.args_base + self.args.len() as u32, fragment.args_base);
+        assert_eq!(
+            self.stmt_ids_base + self.stmt_ids.len() as u32,
+            fragment.stmt_ids_base
+        );
+        assert_eq!(
+            self.expr_ids_base + self.expr_ids.len() as u32,
+            fragment.expr_ids_base
+        );
+        assert_eq!(
+            self.destructure_items_base + self.destructure_items.len() as u32,
+            fragment.destructure_items_base
+        );
+        assert_eq!(
+            self.array_items_base + self.array_items.len() as u32,
+            fragment.array_items_base
+        );
+        assert_eq!(
+            self.params_base + self.params.len() as u32,
+            fragment.params_base
+        );
+        assert_eq!(
+            self.match_arms_base + self.match_arms.len() as u32,
+            fragment.match_arms_base
+        );
+        assert_eq!(
+            self.attributes_base + self.attributes.len() as u32,
+            fragment.attributes_base
+        );
+        assert_eq!(
+            self.functions_base + self.functions.len() as u32,
+            fragment.functions_base
+        );
+        assert_eq!(
+            self.methods_base + self.methods.len() as u32,
+            fragment.methods_base
+        );
+        assert_eq!(
+            self.classes_base + self.classes.len() as u32,
+            fragment.classes_base
+        );
+        assert_eq!(
+            self.closures_base + self.closures.len() as u32,
+            fragment.closures_base
+        );
+        assert_eq!(
+            self.anonymous_classes_base + self.anonymous_classes.len() as u32,
+            fragment.anonymous_classes_base
+        );
+        assert_eq!(
+            self.anonymous_class_names.len(),
+            self.anonymous_classes.len()
+        );
+        assert_eq!(
+            fragment.anonymous_class_names.len(),
+            fragment.anonymous_classes.len()
+        );
+        assert_eq!(
+            self.decoded_bytes_base + self.decoded_bytes.len() as u32,
+            fragment.decoded_bytes_base
+        );
+        self.exprs
+            .extend(fragment.exprs.into_iter().map(|(_, node)| node));
+        self.stmts
+            .extend(fragment.stmts.into_iter().map(|(_, node)| node));
+        self.functions
+            .extend(fragment.functions.into_iter().map(|(_, node)| node));
+        self.methods
+            .extend(fragment.methods.into_iter().map(|(_, node)| node));
+        self.classes
+            .extend(fragment.classes.into_iter().map(|(_, node)| node));
+        self.closures
+            .extend(fragment.closures.into_iter().map(|(_, node)| node));
+        self.anonymous_classes
+            .extend(fragment.anonymous_classes.into_iter().map(|(_, node)| node));
+        self.anonymous_class_names
+            .extend(fragment.anonymous_class_names);
+        self.args
+            .extend(fragment.args.into_iter().map(|(_, node)| node));
+        self.stmt_ids
+            .extend(fragment.stmt_ids.into_iter().map(|(_, id)| id));
+        self.expr_ids
+            .extend(fragment.expr_ids.into_iter().map(|(_, id)| id));
+        self.destructure_items
+            .extend(fragment.destructure_items.into_iter().map(|(_, item)| item));
+        self.array_items
+            .extend(fragment.array_items.into_iter().map(|(_, node)| node));
+        self.params
+            .extend(fragment.params.into_iter().map(|(_, node)| node));
+        self.match_arms
+            .extend(fragment.match_arms.into_iter().map(|(_, node)| node));
+        self.attributes
+            .extend(fragment.attributes.into_iter().map(|(_, node)| node));
+        self.qualified_names
+            .append_fragment(fragment.qualified_names);
+        self.properties.append_fragment(fragment.properties);
+        self.class_consts.append_fragment(fragment.class_consts);
+        self.trait_uses.append_fragment(fragment.trait_uses);
+        self.enum_cases.append_fragment(fragment.enum_cases);
+        self.trait_aliases.append_fragment(fragment.trait_aliases);
+        self.trait_precedences
+            .append_fragment(fragment.trait_precedences);
+        self.use_imports.append_fragment(fragment.use_imports);
+        self.expr_spans.extend(fragment.expr_spans);
+        self.stmt_spans.extend(fragment.stmt_spans);
+        self.decoded_bytes.extend(fragment.decoded_bytes);
+    }
+
     /// Looks up an expression in this file's expression arena.
     pub fn expr(&self, id: ExprId) -> Option<&ExprNode> {
-        self.exprs.get(id)
+        arena_get(&self.exprs, id, self.expr_base)
+    }
+
+    pub fn expr_mut(&mut self, id: ExprId) -> Option<&mut ExprNode> {
+        let local = u32::from(id.into_raw()).checked_sub(self.expr_base)?;
+        ((local as usize) < self.exprs.len())
+            .then(|| &mut self.exprs[ExprId::from_raw(la_arena::RawIdx::from_u32(local))])
     }
 
     /// Looks up a statement in this file's statement arena.
     pub fn stmt(&self, id: StmtId) -> Option<&StmtNode> {
-        self.stmts.get(id)
+        arena_get(&self.stmts, id, self.stmt_base)
+    }
+
+    pub fn stmt_mut(&mut self, id: StmtId) -> Option<&mut StmtNode> {
+        let local = u32::from(id.into_raw()).checked_sub(self.stmt_base)?;
+        ((local as usize) < self.stmts.len())
+            .then(|| &mut self.stmts[StmtId::from_raw(la_arena::RawIdx::from_u32(local))])
+    }
+
+    /// Follows grouping and error-suppression wrappers to the expression
+    /// they contain.
+    pub fn peeled(&self, mut id: ExprId) -> Option<ExprId> {
+        loop {
+            match &self.expr(id)?.kind {
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => id = *inner,
+                _ => return Some(id),
+            }
+        }
     }
 
     /// Looks up an expression's source span by its file-local arena id.
     pub fn expr_span(&self, id: ExprId) -> Option<Span> {
-        self.expr_spans
-            .get(u32::from(id.into_raw()) as usize)
-            .copied()
+        let local = u32::from(id.into_raw()).checked_sub(self.expr_base)?;
+        self.expr_spans.get(local as usize).copied()
     }
 
     /// Looks up a statement's source span by its file-local arena id.
     pub fn stmt_span(&self, id: StmtId) -> Option<Span> {
-        self.stmt_spans
-            .get(u32::from(id.into_raw()) as usize)
-            .copied()
+        let local = u32::from(id.into_raw()).checked_sub(self.stmt_base)?;
+        self.stmt_spans.get(local as usize).copied()
     }
 
     /// Drops the current file's nodes but keeps the worker's allocations.
     pub fn clear(&mut self) {
+        self.source = Arc::from([]);
         self.exprs.clear();
         self.stmts.clear();
         self.functions.clear();
@@ -154,13 +995,108 @@ impl NodeArenas {
         self.classes.clear();
         self.closures.clear();
         self.anonymous_classes.clear();
+        self.anonymous_class_names.clear();
         self.args.clear();
+        self.stmt_ids.clear();
+        self.expr_ids.clear();
+        self.destructure_items.clear();
         self.array_items.clear();
         self.params.clear();
         self.match_arms.clear();
         self.attributes.clear();
+        self.qualified_names.clear();
+        self.properties.clear();
+        self.class_consts.clear();
+        self.trait_uses.clear();
+        self.enum_cases.clear();
+        self.trait_aliases.clear();
+        self.trait_precedences.clear();
+        self.use_imports.clear();
         self.expr_spans.clear();
         self.stmt_spans.clear();
+        self.decoded_bytes.clear();
+        self.expr_base = 0;
+        self.stmt_base = 0;
+        self.args_base = 0;
+        self.stmt_ids_base = 0;
+        self.expr_ids_base = 0;
+        self.destructure_items_base = 0;
+        self.array_items_base = 0;
+        self.params_base = 0;
+        self.match_arms_base = 0;
+        self.attributes_base = 0;
+        self.functions_base = 0;
+        self.methods_base = 0;
+        self.classes_base = 0;
+        self.closures_base = 0;
+        self.anonymous_classes_base = 0;
+        self.decoded_bytes_base = 0;
+    }
+
+    /// Clears all node payloads while retaining the global offsets of an
+    /// append fragment.
+    pub(crate) fn clear_preserving_bases(&mut self) {
+        let bases = (
+            self.expr_base,
+            self.stmt_base,
+            self.args_base,
+            self.stmt_ids_base,
+            self.expr_ids_base,
+            self.destructure_items_base,
+            self.array_items_base,
+            self.params_base,
+            self.match_arms_base,
+            self.attributes_base,
+            self.functions_base,
+            self.methods_base,
+            self.classes_base,
+            self.closures_base,
+            self.anonymous_classes_base,
+            self.decoded_bytes_base,
+            self.qualified_names.base(),
+            self.properties.base(),
+            self.class_consts.base(),
+            self.trait_uses.base(),
+            self.enum_cases.base(),
+            self.trait_aliases.base(),
+            self.trait_precedences.base(),
+            self.use_imports.base(),
+        );
+        self.clear();
+        (
+            self.expr_base,
+            self.stmt_base,
+            self.args_base,
+            self.stmt_ids_base,
+            self.expr_ids_base,
+            self.destructure_items_base,
+            self.array_items_base,
+            self.params_base,
+            self.match_arms_base,
+            self.attributes_base,
+            self.functions_base,
+            self.methods_base,
+            self.classes_base,
+            self.closures_base,
+            self.anonymous_classes_base,
+            self.decoded_bytes_base,
+            qualified_names_base,
+            properties_base,
+            class_consts_base,
+            trait_uses_base,
+            enum_cases_base,
+            trait_aliases_base,
+            trait_precedences_base,
+            use_imports_base,
+        ) = bases;
+        self.qualified_names.set_base(qualified_names_base);
+        self.properties.set_base(properties_base);
+        self.class_consts.set_base(class_consts_base);
+        self.trait_uses.set_base(trait_uses_base);
+        self.enum_cases.set_base(enum_cases_base);
+        self.trait_aliases.set_base(trait_aliases_base);
+        self.trait_precedences.set_base(trait_precedences_base);
+        self.use_imports.set_base(use_imports_base);
     }
 
     /// Compacts a completed tree before its arenas leave the worker.
@@ -172,13 +1108,26 @@ impl NodeArenas {
         self.classes.shrink_to_fit();
         self.closures.shrink_to_fit();
         self.anonymous_classes.shrink_to_fit();
+        self.anonymous_class_names.shrink_to_fit();
         self.args.shrink_to_fit();
+        self.stmt_ids.shrink_to_fit();
+        self.expr_ids.shrink_to_fit();
+        self.destructure_items.shrink_to_fit();
         self.array_items.shrink_to_fit();
         self.params.shrink_to_fit();
         self.match_arms.shrink_to_fit();
         self.attributes.shrink_to_fit();
+        self.qualified_names.shrink_to_fit();
+        self.properties.shrink_to_fit();
+        self.class_consts.shrink_to_fit();
+        self.trait_uses.shrink_to_fit();
+        self.enum_cases.shrink_to_fit();
+        self.trait_aliases.shrink_to_fit();
+        self.trait_precedences.shrink_to_fit();
+        self.use_imports.shrink_to_fit();
         self.expr_spans.shrink_to_fit();
         self.stmt_spans.shrink_to_fit();
+        self.decoded_bytes.shrink_to_fit();
     }
 }
 
@@ -190,52 +1139,52 @@ pub const SYNTHETIC_STMT_ID: StmtId = StmtId::from_raw(la_arena::RawIdx::from_u3
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    InlineHtml(Arc<str>),
-    Expression(ExprNode),
-    Echo(Vec<ExprNode>),
-    Return(Option<ExprNode>),
-    Block(Vec<StmtNode>),
+    InlineHtml(Span),
+    Expression(ExprId),
+    Echo(ExprIdRange),
+    Return(Option<ExprId>),
+    Block(StmtIdRange),
     If(IfStmt),
     While {
-        cond: ExprNode,
-        body: Box<StmtNode>,
+        cond: ExprId,
+        body: StmtId,
     },
     DoWhile {
-        body: Box<StmtNode>,
-        cond: ExprNode,
+        body: StmtId,
+        cond: ExprId,
     },
     For {
-        init: Vec<ExprNode>,
-        cond: Vec<ExprNode>,
-        step: Vec<ExprNode>,
-        body: Box<StmtNode>,
+        init: ExprIdRange,
+        cond: ExprIdRange,
+        step: ExprIdRange,
+        body: StmtId,
     },
     Foreach {
-        subject: Box<ExprNode>,
-        key: Option<Box<ExprNode>>,
-        value: Box<ExprNode>,
+        subject: ExprId,
+        key: Option<ExprId>,
+        value: ExprId,
         by_ref: bool,
-        body: Box<StmtNode>,
+        body: StmtId,
     },
     // `declare(name=value, ...)`: each directive's name and value, and
     // the statements of a `declare(...) { ... }` or `declare(...): ...
     // enddeclare;` block.
     Declare {
-        directives: Vec<(Ident, ExprNode)>,
-        body: Option<Vec<StmtNode>>,
+        directives: Vec<(Ident, ExprId)>,
+        body: Option<StmtIdRange>,
     },
     Break(Option<i64>),
     Continue(Option<i64>),
     Global(Vec<GlobalVar>),
     // `unset($a, $b[1], ...)`.
-    Unset(Vec<ExprNode>),
-    FunctionDecl(Box<FunctionDecl>),
-    ClassDecl(Box<ClassDecl>),
+    Unset(ExprIdRange),
+    FunctionDecl(FunctionId),
+    ClassDecl(ClassDecl),
     Namespace(String),
     // Every import a `use` statement brings in - a plain `use A, B;`
     // list and a group `use Foo\{A, B as C};` both expand to one
     // `UseImport` per name here.
-    Use(Vec<UseImport>),
+    Use(UseImportRange),
     // Top-level `const NAME = value, ...;`, distinct from a class's own
     // consts (ClassConst is reused for the shape, since it's identical).
     GlobalConst(Vec<ClassConst>),
@@ -244,17 +1193,17 @@ pub enum StmtKind {
     // modeled - only its scoping (the variable is defined from here on)
     // matters for a single-call static analysis pass. The name is
     // without its `$`.
-    StaticVar(Vec<(Ident, Option<ExprNode>)>),
+    StaticVar(Vec<(Ident, Option<ExprId>)>),
     Switch {
-        subject: ExprNode,
+        subject: ExprId,
         cases: Vec<SwitchCase>,
     },
     Try {
-        body: Vec<StmtNode>,
+        body: StmtIdRange,
         catches: Vec<CatchClause>,
-        finally: Option<Vec<StmtNode>>,
+        finally: Option<StmtIdRange>,
     },
-    Throw(ExprNode),
+    Throw(ExprId),
     Goto(Ident),
     // `label:` - a goto target. Control flow through goto/labels isn't
     // modeled (no effect on narrowing, terminal-statement detection,
@@ -266,49 +1215,49 @@ pub enum StmtKind {
 /// `else if` is an `else` whose statement is another `if`.
 #[derive(Debug, Clone)]
 pub struct IfStmt {
-    pub cond: ExprNode,
-    pub then_branch: Box<StmtNode>,
+    pub cond: ExprId,
+    pub then_branch: StmtId,
     pub elseifs: Vec<ElseIf>,
-    pub else_branch: Option<Box<StmtNode>>,
+    pub else_branch: Option<StmtId>,
 }
 
 /// One `elseif (cond) body` of an `if` chain.
 #[derive(Debug, Clone)]
 pub struct ElseIf {
-    pub cond: ExprNode,
-    pub body: Box<StmtNode>,
+    pub cond: ExprId,
+    pub body: StmtId,
     pub span: Span,
 }
 
 impl IfStmt {
     /// Every condition of the chain in order: the `if`'s, then each
     /// `elseif`'s.
-    pub fn conditions(&self) -> impl Iterator<Item = &ExprNode> {
-        std::iter::once(&self.cond).chain(self.elseifs.iter().map(|e| &e.cond))
+    pub fn conditions(&self) -> impl Iterator<Item = ExprId> + '_ {
+        std::iter::once(self.cond).chain(self.elseifs.iter().map(|e| e.cond))
     }
 
     /// Every branch body in order: the `if`'s, each `elseif`'s, then the
     /// `else`.
-    pub fn bodies(&self) -> impl Iterator<Item = &StmtNode> {
-        std::iter::once(&*self.then_branch)
-            .chain(self.elseifs.iter().map(|e| &*e.body))
-            .chain(self.else_branch.as_deref())
+    pub fn bodies(&self) -> impl Iterator<Item = StmtId> + '_ {
+        std::iter::once(self.then_branch)
+            .chain(self.elseifs.iter().map(|e| e.body))
+            .chain(self.else_branch)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SwitchCase {
-    pub test: Option<ExprNode>, // None = `default:`
-    pub body: Vec<StmtNode>,
+    pub test: Option<ExprId>, // None = `default:`
+    pub body: StmtIdRange,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct CatchClause {
-    pub types: Vec<QualifiedName>,
+    pub types: QualifiedNameRange,
     // The bound variable without its `$`; `None` for `catch (Foo) {}`.
     pub var: Option<Ident>,
-    pub body: Vec<StmtNode>,
+    pub body: StmtIdRange,
     pub span: Span,
 }
 
@@ -330,7 +1279,7 @@ pub struct Param {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Ident,
     pub type_hint: Option<TypeHint>,
-    pub default: Option<ExprNode>,
+    pub default: Option<ExprId>,
     pub by_ref: bool,
     pub variadic: bool,
     // The property a constructor parameter promotes to, e.g.
@@ -344,13 +1293,13 @@ pub struct Param {
     // `#[Attr]` groups written directly on this parameter
     // (`function f(#[SensitiveParameter] string $password) {}`) - empty
     // for the overwhelming majority of parameters, which have none.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     // Raw `/** ... */` text immediately preceding this
     // parameter, if any - real, idiomatic PHP for a promoted
     // constructor property (`/** @var array<string, mixed>|null */
     // public ?array $details,`), since it doubles as that property's own
     // docblock. `None` for the overwhelming majority of parameters.
-    pub doc_comment: Option<Arc<str>>,
+    pub doc_comment: Option<DocCommentRanges>,
     pub span: Span,
 }
 
@@ -367,7 +1316,7 @@ pub struct GotoLabel {
 pub struct FunctionBody {
     // The opening `{`.
     pub open: Span,
-    pub stmts: Arc<Vec<StmtNode>>,
+    pub stmts: StmtIdRange,
     // The labels its `goto`s name, outside nested functions and classes;
     // empty for nearly every body.
     pub goto_labels: Box<[GotoLabel]>,
@@ -382,36 +1331,29 @@ pub struct FunctionDecl {
     // The name with the file's namespace, for a function declared as a
     // statement; `None` for a method. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    pub params: Vec<Param>,
+    pub params: ParamRange,
     pub return_type: Option<TypeHint>,
-    // `Arc`, not a plain `Vec` - `registry::FunctionReflection::from_decl` shares
-    // this exact allocation into its own `body: Option<Arc<Vec<StmtNode>>>`
-    // field (an `Arc` clone, not a deep AST clone) rather than
-    // re-materializing an owned copy at that boundary, the same
-    // move/share-not-reallocate reasoning as `name`'s own doc comment
-    // above. Never mutated after `parse_function_decl` builds it, so
-    // sharing it needs no `Arc::make_mut` anywhere. `Arc`, not `Rc`: like
-    // `src/intern.rs`'s own table, parsing/registry-building runs in
-    // parallel across files via a real `rayon` thread pool.
     // `None` for a bodiless `function f();` declaration (abstract and
     // interface methods), distinct from an empty `{}` body.
     pub body: Option<FunctionBody>,
     // `function &f()` - returns by reference.
     pub by_ref: bool,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
-    pub doc_comment: Option<Arc<str>>,
+    pub doc_comment: Option<DocCommentRanges>,
     // `#[Attr]` groups preceding this declaration - shared by a
     // top-level function and (via `MethodDecl.function`) a class method,
     // since real PHP attaches attributes to the same source position
     // either way (before any `public`/`static`/... modifiers).
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     pub span: Span,
 }
 
 impl FunctionDecl {
     /// The body's statements; none for a bodiless declaration.
-    pub fn body_stmts(&self) -> &[StmtNode] {
-        self.body.as_ref().map_or(&[], |body| body.stmts.as_slice())
+    pub fn body_stmts(&self, arenas: &NodeArenas) -> &[StmtId] {
+        self.body
+            .as_ref()
+            .map_or(&[], |body| arenas.stmt_ids(&body.stmts))
     }
 
     /// The fully-qualified name a function statement declares; a method's
@@ -466,8 +1408,8 @@ pub struct PropertyDecl {
     pub is_abstract: bool,
     pub is_final: bool,
     pub type_hint: Option<TypeHint>,
-    pub default: Option<ExprNode>,
-    pub doc_comment: Option<Arc<str>>,
+    pub default: Option<ExprId>,
+    pub doc_comment: Option<DocCommentRanges>,
     // PHP 8.4 property hooks (`{ get => ...; set(Type $value) { ... } }`).
     // Parsed so the file doesn't fail to parse at all, but the hook bodies
     // aren't type-checked (they're arbitrary code referencing $this/$value
@@ -475,7 +1417,7 @@ pub struct PropertyDecl {
     // scope for now, same as FirstClassCallable's args.
     pub hooks: Option<PropertyHooks>,
     // `#[Attr]` groups preceding this property declaration.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     pub span: Span,
     // What deleting this member removes (its doc comment and attributes
     // included, and its whole lines when it has them to itself); `None`
@@ -486,9 +1428,9 @@ pub struct PropertyDecl {
 #[derive(Debug, Clone)]
 pub enum PropertyHookBody {
     // `get => expr;` / `set(...) => expr;`
-    Arrow(ExprNode),
+    Arrow(ExprId),
     // `get { ... }` / `set(...) { ... }`
-    Block(Vec<StmtNode>),
+    Block(StmtIdRange),
     // `get;` / `set(...);` - a hook declared, with no
     // body at all (only legal inside an abstract class/interface). Real
     // PHP distinguishes this from "no hook declared" (`PropertyHooks::
@@ -530,11 +1472,11 @@ pub struct PropertyHook {
     pub param: Option<Param>,
     // The `#[Attr]` group(s) immediately preceding the hook's own
     // `get`/`set` keyword - see `PropertyHookAttributesRule`.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     // The `/** ... */` doc comment immediately preceding the hook's own
     // keyword (after any `#[Attr]` group(s)), so a hook can carry its own
     // `@throws` tag the way a method does.
-    pub doc: Option<Arc<str>>,
+    pub doc: Option<DocCommentRanges>,
     // The hook's own `final` modifier (independent of the property's or
     // its class's finality).
     pub is_final: bool,
@@ -587,7 +1529,7 @@ pub struct ClassConst {
     // The name with the file's namespace, for a global `const`; `None` in
     // a class. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
-    pub value: ExprNode,
+    pub value: ExprId,
     // The `public`/`private`/`protected` modifier a real class's own
     // `const` declaration can carry (PHP 7.1+), needed by
     // `UnusedPrivateConstantRule` to tell a private constant candidate
@@ -606,12 +1548,12 @@ pub struct ClassConst {
     // directly above it (the common case) or one parsed via the rarer
     // top-level (non-class) `const` statement path, which doesn't thread
     // a doc comment through at all.
-    pub doc_comment: Option<Arc<str>>,
+    pub doc_comment: Option<DocCommentRanges>,
     // `#[Attr]` groups preceding this const declaration - the
     // same group applies to every name in a comma-separated
     // `const A = 1, B = 2;` list, mirroring how `visibility`/`doc_comment`
     // are already cloned onto each one.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     // PHP 8.3 typed class constants (`const TYPE NAME = value;`) - same
     // "one type applies to every name in a comma-separated list" cloning
     // as `visibility`/`doc_comment`/`attrs` above.
@@ -654,7 +1596,7 @@ pub struct ClassDecl {
     // The name with the file's namespace. The name as written until name
     // resolution fills it in.
     pub namespaced_name: Arc<str>,
-    pub def: ClassDef,
+    pub def: ClassId,
 }
 
 impl ClassDecl {
@@ -668,11 +1610,8 @@ impl ClassDecl {
 /// definition with no name in the source, and its constructor arguments.
 #[derive(Debug, Clone)]
 pub struct AnonymousClass {
-    pub def: ClassDef,
-    pub args: Vec<Arg>,
-    // The name the analysis knows it by, derived from where it is; `None`
-    // until the file's anonymous classes are named after parsing.
-    pub name: Option<Name>,
+    pub def: ClassId,
+    pub args: ArgRange,
 }
 
 /// A class-like's definition: everything but its name, shared by a
@@ -683,8 +1622,8 @@ pub struct ClassDef {
     // An enum's backing type (`int` or `string`); `None` for a pure enum
     // and every other class-like.
     pub backing_type: Option<TypeHint>,
-    pub extends: Vec<QualifiedName>,
-    pub implements: Vec<QualifiedName>,
+    pub extends: QualifiedNameRange,
+    pub implements: QualifiedNameRange,
     pub is_abstract: bool,
     pub is_final: bool,
     // `readonly class` (PHP 8.2), surfaced at the class level (in
@@ -693,63 +1632,130 @@ pub struct ClassDef {
     // `#[\AllowDynamicProperties]`-on-a-readonly-class check (real
     // PHPStan's own `ClassAttributesRule`).
     pub is_readonly: bool,
-    pub properties: Vec<PropertyDecl>,
-    pub methods: Vec<MethodDecl>,
-    pub consts: Vec<ClassConst>,
+    pub properties: PropertyRange,
+    pub methods: MethodRange,
+    pub consts: ClassConstRange,
     // Each `use TraitA, TraitB { ... }` statement in the body.
-    pub trait_uses: Vec<TraitUse>,
+    pub trait_uses: TraitUseRange,
     // `case` members, which PHP parses in any class-like body but only
     // allows in an enum (`enum.caseOutsideOfEnum`).
-    pub enum_cases: Vec<EnumCase>,
+    pub enum_cases: EnumCaseRange,
     // The class's own `/** ... */` doc comment, if any - needed for its
     // own `@template T` declarations (class-level generics).
-    pub doc_comment: Option<Arc<str>>,
+    pub doc_comment: Option<DocCommentRanges>,
     // `#[Attr]` groups preceding this class/interface/trait
     // declaration (e.g. `#[Attribute(Attribute::TARGET_CLASS)]`, marking
     // the class itself usable as an attribute).
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     pub span: Span,
 }
 
 impl ClassDef {
+    pub fn extends<'a>(&self, arenas: &'a NodeArenas) -> &'a [QualifiedName] {
+        arenas.qualified_names(&self.extends)
+    }
+
+    pub fn implements<'a>(&self, arenas: &'a NodeArenas) -> &'a [QualifiedName] {
+        arenas.qualified_names(&self.implements)
+    }
+
+    pub fn properties<'a>(&self, arenas: &'a NodeArenas) -> &'a [PropertyDecl] {
+        arenas.properties(&self.properties)
+    }
+
+    pub fn consts<'a>(&self, arenas: &'a NodeArenas) -> &'a [ClassConst] {
+        arenas.class_consts(&self.consts)
+    }
+
+    pub fn trait_uses<'a>(&self, arenas: &'a NodeArenas) -> &'a [TraitUse] {
+        arenas.trait_uses(&self.trait_uses)
+    }
+
+    pub fn enum_cases<'a>(&self, arenas: &'a NodeArenas) -> &'a [EnumCase] {
+        arenas.enum_cases(&self.enum_cases)
+    }
+
     /// Its `__construct` method, matched case-insensitively.
-    pub fn constructor(&self) -> Option<&MethodDecl> {
-        self.methods.iter().find(|m| m.function.is_constructor())
+    pub fn constructor<'a>(&self, arenas: &'a NodeArenas) -> Option<&'a MethodDecl> {
+        arenas
+            .methods(self.methods)
+            .iter()
+            .find(|m| m.function.is_constructor())
     }
 
     /// Every trait its `use` statements name, in source order.
-    pub fn used_traits(&self) -> impl Iterator<Item = &QualifiedName> {
-        self.trait_uses.iter().flat_map(|u| &u.traits)
+    pub fn used_traits<'a>(
+        &'a self,
+        arenas: &'a NodeArenas,
+    ) -> impl Iterator<Item = &'a QualifiedName> + 'a {
+        arenas
+            .trait_uses(&self.trait_uses)
+            .iter()
+            .flat_map(|u| arenas.qualified_names(&u.traits))
     }
 
     /// Every `as` clause of its `use` statements.
-    pub fn trait_aliases(&self) -> impl Iterator<Item = &TraitAlias> {
-        self.trait_uses.iter().flat_map(|u| &u.adaptations.aliases)
+    pub fn trait_aliases<'a>(
+        &'a self,
+        arenas: &'a NodeArenas,
+    ) -> impl Iterator<Item = &'a TraitAlias> + 'a {
+        arenas
+            .trait_uses(&self.trait_uses)
+            .iter()
+            .flat_map(|u| arenas.trait_aliases(&u.adaptations.aliases))
     }
 
     /// Every `insteadof` clause of its `use` statements.
-    pub fn trait_precedences(&self) -> impl Iterator<Item = &TraitPrecedence> {
-        self.trait_uses
+    pub fn trait_precedences<'a>(
+        &'a self,
+        arenas: &'a NodeArenas,
+    ) -> impl Iterator<Item = &'a TraitPrecedence> + 'a {
+        arenas
+            .trait_uses(&self.trait_uses)
             .iter()
-            .flat_map(|u| &u.adaptations.precedences)
+            .flat_map(|u| arenas.trait_precedences(&u.adaptations.precedences))
     }
 
     /// Every method name an adaptation clause of its `use` statements
     /// mentions.
-    pub fn resolved_trait_conflicts(&self) -> impl Iterator<Item = &Name> {
-        self.trait_uses
+    pub fn resolved_trait_conflicts<'a>(
+        &'a self,
+        arenas: &'a NodeArenas,
+    ) -> impl Iterator<Item = &'a Name> + 'a {
+        arenas
+            .trait_uses(&self.trait_uses)
             .iter()
-            .flat_map(|u| u.adaptations.mentioned_methods())
+            .flat_map(|u| u.adaptations.mentioned_methods(arenas))
+    }
+}
+
+impl TraitUse {
+    pub fn traits<'a>(&self, arenas: &'a NodeArenas) -> &'a [QualifiedName] {
+        arenas.qualified_names(&self.traits)
+    }
+
+    pub fn aliases<'a>(&self, arenas: &'a NodeArenas) -> &'a [TraitAlias] {
+        arenas.trait_aliases(&self.adaptations.aliases)
+    }
+
+    pub fn precedences<'a>(&self, arenas: &'a NodeArenas) -> &'a [TraitPrecedence] {
+        arenas.trait_precedences(&self.adaptations.precedences)
+    }
+}
+
+impl TraitPrecedence {
+    pub fn instead_of<'a>(&self, arenas: &'a NodeArenas) -> &'a [QualifiedName] {
+        arenas.qualified_names(&self.instead_of)
     }
 }
 
 /// `use A, B;` or `use A, B { ... }` inside a class-like body.
 #[derive(Debug, Clone)]
 pub struct TraitUse {
-    pub traits: Vec<QualifiedName>,
+    pub traits: QualifiedNameRange,
     // The statement's own doc comment, which carries `@use Trait<Args>`
     // (not the class's).
-    pub doc_comment: Option<Arc<str>>,
+    pub doc_comment: Option<DocCommentRanges>,
     pub adaptations: TraitAdaptations,
     pub span: Span,
 }
@@ -759,9 +1765,9 @@ pub struct EnumCase {
     pub name: Ident,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
-    pub value: Option<ExprNode>,
+    pub value: Option<ExprId>,
     // `#[Attr]` groups preceding this case.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
     pub span: Span,
 }
 
@@ -780,24 +1786,33 @@ pub struct TraitAlias {
 pub struct TraitPrecedence {
     pub trait_name: QualifiedName,
     pub method: Name,
-    pub instead_of: Vec<QualifiedName>,
+    pub instead_of: QualifiedNameRange,
 }
 
 /// A trait-use block's adaptations: `B::hello as protected helloB;` and
 /// `B::hello insteadof A;` clauses.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TraitAdaptations {
-    pub aliases: Vec<TraitAlias>,
-    pub precedences: Vec<TraitPrecedence>,
+    pub aliases: TraitAliasRange,
+    pub precedences: TraitPrecedenceRange,
 }
 
 impl TraitAdaptations {
     /// Every method name a clause mentions.
-    pub fn mentioned_methods(&self) -> impl Iterator<Item = &Name> {
-        self.aliases
+    pub fn mentioned_methods<'a>(
+        &'a self,
+        arenas: &'a NodeArenas,
+    ) -> impl Iterator<Item = &'a Name> + 'a {
+        arenas
+            .trait_aliases(&self.aliases)
             .iter()
             .map(|a| &a.method)
-            .chain(self.precedences.iter().map(|p| &p.method))
+            .chain(
+                arenas
+                    .trait_precedences(&self.precedences)
+                    .iter()
+                    .map(|p| &p.method),
+            )
     }
 }
 
@@ -811,7 +1826,7 @@ pub struct Arg {
     // `name:` for a named argument.
     pub name: Option<Ident>,
     pub spread: bool,
-    pub value: ExprNode,
+    pub value: ExprId,
 }
 
 /// One element of an `ExprKind::ArrayLiteral` (`[...]`) - `key` is
@@ -822,8 +1837,8 @@ pub struct Arg {
 /// statically.
 #[derive(Debug, Clone)]
 pub struct ArrayItem {
-    pub key: Option<ExprNode>,
-    pub value: ExprNode,
+    pub key: Option<ExprId>,
+    pub value: ExprId,
     pub spread: bool,
     /// `&$x`: the element is a reference to the variable (created as
     /// `null` if it doesn't exist).
@@ -844,10 +1859,10 @@ pub enum DestructureSyntax {
 /// (or at the element's position, when there is no key) goes.
 #[derive(Debug, Clone)]
 pub struct DestructureItem {
-    pub key: Option<ExprNode>,
+    pub key: Option<ExprId>,
     /// Where the value is written: a variable, property, element, or a
     /// nested pattern. `None` for a skipped slot (`[, $b]`).
-    pub target: Option<ExprNode>,
+    pub target: Option<ExprId>,
     /// `&$x`: the target becomes a reference to the element.
     pub by_ref: bool,
 }
@@ -857,7 +1872,7 @@ pub enum Literal {
     Int(i64),
     Float(f64),
     // The string's bytes: PHP strings aren't necessarily UTF-8.
-    String(PhpString),
+    String(StringPayload),
     Bool(bool),
     Null,
 }
@@ -937,7 +1952,7 @@ pub struct ClosureUse {
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
     Name(QualifiedName),
-    Expr(Box<ExprNode>),
+    Expr(ExprId),
 }
 
 /// `ExprKind::StaticCall`'s own receiver - `InstanceofTarget`'s identical
@@ -950,7 +1965,7 @@ pub enum InstanceofTarget {
 #[derive(Debug, Clone)]
 pub enum StaticTarget {
     Name(Box<QualifiedName>),
-    Expr(Box<ExprNode>),
+    Expr(ExprId),
 }
 
 impl StaticTarget {
@@ -963,17 +1978,17 @@ impl StaticTarget {
     }
 
     /// The receiver expression, or `None` for a literal class name.
-    pub fn expr(&self) -> Option<&ExprNode> {
+    pub fn expr(&self) -> Option<ExprId> {
         match self {
             StaticTarget::Name(..) => None,
-            StaticTarget::Expr(e) => Some(e),
+            StaticTarget::Expr(id) => Some(*id),
         }
     }
 
     /// The property of a parent hook call's target, `parent::$property`
     /// in `parent::$property::get()`.
-    pub fn parent_hook_property(&self) -> Option<&str> {
-        match &self.expr()?.kind {
+    pub fn parent_hook_property<'a>(&self, arenas: &'a NodeArenas) -> Option<&'a str> {
+        match &arenas.expr(self.expr()?)?.kind {
             ExprKind::StaticPropertyFetch(StaticTarget::Name(class), property)
                 if class.eq_ignore_ascii_case("parent") =>
             {
@@ -986,8 +2001,8 @@ impl StaticTarget {
 
 /// A reference to a class, function or constant by name: as written, and
 /// what it refers to given the file's `namespace` and `use` statements
-/// (filled in by `name_resolution::resolve_names` after parsing). Derefs
-/// to the name as written.
+/// (resolved by the parser as it reads the name). Derefs to the name as
+/// written.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QualifiedName {
     pub written: Name,
@@ -1311,7 +2326,7 @@ pub enum GlobalVar {
     /// `global $name;` (the name is without its `$`).
     Name(Ident),
     /// `global ${expr};` / `global $$name;`: the name is computed.
-    Dynamic(ExprNode),
+    Dynamic(ExprId),
 }
 
 impl GlobalVar {
@@ -1487,9 +2502,9 @@ impl ObjectOperator {
 /// `function (...) use (...) { ... }`.
 #[derive(Debug, Clone)]
 pub struct ClosureExpr {
-    pub params: Vec<Param>,
+    pub params: ParamRange,
     pub uses: Vec<ClosureUse>,
-    pub body: Vec<StmtNode>,
+    pub body: StmtIdRange,
     // The labels the body's `goto`s name; see `FunctionBody`.
     pub goto_labels: Box<[GotoLabel]>,
     // Whether the body is a generator; see `FunctionBody`.
@@ -1500,14 +2515,14 @@ pub struct ClosureExpr {
     pub return_type: Option<Box<TypeHint>>,
     // `#[Attr]` groups on the closure expression itself
     // (`$f = #[Foo] function () {};`), not on any of its parameters.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
 }
 
 /// `fn (...) => expr`.
 #[derive(Debug, Clone)]
 pub struct ArrowFnExpr {
-    pub params: Vec<Param>,
-    pub body: Box<ExprNode>,
+    pub params: ParamRange,
+    pub body: ExprId,
     // Whether the body is a generator; see `FunctionBody`.
     pub is_generator: bool,
     pub is_static: bool,
@@ -1516,7 +2531,13 @@ pub struct ArrowFnExpr {
     // See `ClosureExpr::return_type`.
     pub return_type: Option<Box<TypeHint>>,
     // See `ClosureExpr::attrs`.
-    pub attrs: Vec<Attribute>,
+    pub attrs: AttributeRange,
+}
+
+#[derive(Debug, Clone)]
+pub enum ClosurePayload {
+    Closure(ClosureExpr),
+    ArrowFn(ArrowFnExpr),
 }
 
 /// An expression, plus the real source span it occupies - see `StmtNode`'s
@@ -1528,50 +2549,6 @@ pub struct ExprNode {
     pub span: Span,
 }
 
-impl ExprNode {
-    /// This expression inside any parentheses and `@`s: what it
-    /// evaluates to, the wrappers being transparent.
-    pub fn peeled(&self) -> &ExprNode {
-        let mut expression = self;
-        loop {
-            match &expression.kind {
-                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                    expression = inner;
-                }
-                _ => return expression,
-            }
-        }
-    }
-
-    /// The expression's kind, taken out of it.
-    pub fn into_kind(mut self) -> ExprKind {
-        std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null))
-    }
-}
-
-impl StmtNode {
-    /// The statement's kind, taken out of it.
-    pub fn into_kind(mut self) -> StmtKind {
-        std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()))
-    }
-}
-
-/// Dropping a tree goes one level at a time on a guarded stack, so a deep
-/// tree (a long `.` chain is one) drops without overflowing it.
-impl Drop for ExprNode {
-    fn drop(&mut self) {
-        let kind = std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null));
-        crate::stack::guard(|| drop(kind));
-    }
-}
-
-impl Drop for StmtNode {
-    fn drop(&mut self) {
-        let kind = std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()));
-        crate::stack::guard(|| drop(kind));
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     Literal(Literal),
@@ -1581,19 +2558,19 @@ pub enum ExprKind {
     // `${expr}` - the older "variable variable" syntax: the variable's own
     // name is computed at runtime by evaluating expr, so unlike Variable
     // there's no fixed name here to look up or bind in `locals`.
-    DynamicVariable(Box<ExprNode>),
-    ArrayLiteral(Vec<ArrayItem>),
+    DynamicVariable(ExprId),
+    ArrayLiteral(ArrayItemRange),
     // `@expr`: the error-control operator, which silences the warnings
     // evaluating `expr` raises. Its value is `expr`'s.
-    ErrorSuppress(Box<ExprNode>),
+    ErrorSuppress(ExprId),
     // `[...]` or `list(...)` as the target of an assignment or a
     // `foreach`: takes the array apart into the item targets. Only ever
     // the left of an `Assign`, a `foreach` value, or an item target of
     // another pattern.
-    Destructure(Vec<DestructureItem>, DestructureSyntax),
-    Unary(UnaryOp, Box<ExprNode>),
-    Binary(BinOp, Box<ExprNode>, Box<ExprNode>),
-    Assign(Box<ExprNode>, Box<ExprNode>),
+    Destructure(DestructureItemRange, DestructureSyntax),
+    Unary(UnaryOp, ExprId),
+    Binary(BinOp, ExprId, ExprId),
+    Assign(ExprId, ExprId),
     // `$a = &$b;` - reference assignment, only ever valid on a plain
     // `=` (never a compound one). A genuinely distinct variant, not a
     // flag on `Assign`, specifically so a `nullsafe.byRef` check
@@ -1604,11 +2581,11 @@ pub enum ExprKind {
     // `Assign`). Every other consumer that doesn't care about the
     // by-ref distinction folds this into the same arm as `Assign` via
     // an or-pattern.
-    AssignRef(Box<ExprNode>, Box<ExprNode>),
-    CompoundAssign(BinOp, Box<ExprNode>, Box<ExprNode>),
-    Ternary(Box<ExprNode>, Option<Box<ExprNode>>, Box<ExprNode>),
-    Call(Box<ExprNode>, Vec<Arg>),
-    New(Box<ExprNode>, Vec<Arg>),
+    AssignRef(ExprId, ExprId),
+    CompoundAssign(BinOp, ExprId, ExprId),
+    Ternary(ExprId, Option<ExprId>, ExprId),
+    Call(ExprId, ArgRange),
+    New(ExprId, ArgRange),
     // The trailing `bool` is `true` for a nullsafe access (`$x?->prop`),
     // `false` for a plain `$x->prop` - the two are otherwise identical
     // syntactically, but real PHP's `?->` implicitly makes the whole
@@ -1621,16 +2598,16 @@ pub enum ExprKind {
     // access is a `DynamicPropertyAccess`/`DynamicMethodCall` below, not
     // this variant - `$prop`'s own runtime value, not its declared name,
     // is the real member name.
-    PropertyAccess(Box<ExprNode>, Ident, ObjectOperator),
-    MethodCall(Box<ExprNode>, Ident, Vec<Arg>, ObjectOperator),
+    PropertyAccess(ExprId, Ident, ObjectOperator),
+    MethodCall(ExprId, Ident, ArgRange, ObjectOperator),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still
     // worth its own base+name-expr(+args) checking (undefined variables
     // inside the {} can still be caught), even though the accessed
     // member's own type never can be.
-    DynamicPropertyAccess(Box<ExprNode>, Box<ExprNode>, ObjectOperator),
-    DynamicMethodCall(Box<ExprNode>, Box<ExprNode>, Vec<Arg>, ObjectOperator),
+    DynamicPropertyAccess(ExprId, ExprId, ObjectOperator),
+    DynamicMethodCall(ExprId, ExprId, ArgRange, ObjectOperator),
     /// `Foo::BAR`.
     ClassConstFetch(StaticTarget, Ident),
     /// `Foo::class` (any case).
@@ -1638,9 +2615,9 @@ pub enum ExprKind {
     /// `Foo::$bar`; the name is without its `$`.
     StaticPropertyFetch(StaticTarget, Ident),
     /// `Foo::${expr}` / `Foo::$$name`: the property name is computed.
-    DynamicStaticPropertyFetch(StaticTarget, Box<ExprNode>),
+    DynamicStaticPropertyFetch(StaticTarget, ExprId),
     /// `Foo::{$expr}` (PHP 8.3): the constant name is computed.
-    DynamicClassConstFetch(StaticTarget, Box<ExprNode>),
+    DynamicClassConstFetch(StaticTarget, ExprId),
     // `Name` mirrors `InstanceofTarget::Name`'s own (name, name-span)
     // shape exactly - a `Foo::method()` receiver, unchanged from before
     // this variant existed. `ExprNode` is a real, non-`Name` receiver
@@ -1649,60 +2626,60 @@ pub enum ExprKind {
     // already-parsed receiver `ExprNode` survives into the AST, letting
     // `check_static_call` resolve its inferred type and check the call
     // against it, the same way a literal class name already is.
-    StaticCall(StaticTarget, Ident, Vec<Arg>),
+    StaticCall(StaticTarget, Ident, ArgRange),
     /// `Foo::$name()` / `Foo::{$expr}()`: the method name is computed.
-    DynamicStaticCall(StaticTarget, Box<ExprNode>, Vec<Arg>),
-    Index(Box<ExprNode>, Option<Box<ExprNode>>),
+    DynamicStaticCall(StaticTarget, ExprId, ArgRange),
+    Index(ExprId, Option<ExprId>),
     Name(QualifiedName),
-    Instanceof(Box<ExprNode>, InstanceofTarget),
-    Cast(CastSpelling, Box<ExprNode>),
-    Grouping(Box<ExprNode>),
+    Instanceof(ExprId, InstanceofTarget),
+    Cast(CastSpelling, ExprId),
+    Grouping(ExprId),
     // `clone $x` / PHP 8.5's `clone($x, $overrides)` (the second field is
     // the property-overrides array, when present). Both produce an object
     // of the same type as the first operand, so infer_expr treats them
     // identically - the overrides themselves aren't otherwise modeled.
-    Clone(Box<ExprNode>, Option<Box<ExprNode>>),
+    Clone(ExprId, Option<ExprId>),
     // `foo(...)` / `$obj->method(...)` (PHP 8.1): a reference to the
     // callable itself, not a call - wraps a Call/MethodCall/StaticCall
     // that was parsed with an empty argument list specifically because of
     // this syntax, so it's never mistaken for (and argument-count-checked
     // as) a real zero-argument call.
-    FirstClassCallable(Box<ExprNode>),
+    FirstClassCallable(ExprId),
     // `` `cmd $interpolated` ``: runs the command, as `shell_exec()` does.
     // Holds the command string.
-    ShellExec(Box<ExprNode>),
+    ShellExec(ExprId),
     // `isset($a, $b, ...)`: whether every operand is set and not null.
-    Isset(Vec<ExprNode>),
+    Isset(ExprIdRange),
     // `empty(expr)`: whether the operand is unset or falsy.
-    Empty(Box<ExprNode>),
+    Empty(ExprId),
     // `print expr`, which evaluates to `1`.
-    Print(Box<ExprNode>),
+    Print(ExprId),
     // `exit`/`die`: `None` written bare, `Some` with its parenthesized
     // arguments (PHP 8.4 makes both functions of `string|int $status`).
-    Exit(ExitKind, Option<Vec<Arg>>),
+    Exit(ExitKind, Option<ArgRange>),
     // `eval(code)`.
-    Eval(Box<ExprNode>),
+    Eval(ExprId),
     // `include`/`include_once`/`require`/`require_once path`.
-    Include(IncludeKind, Box<ExprNode>),
+    Include(IncludeKind, ExprId),
     // `throw` as an expression (PHP 8.0+): valid in match arms, ternary
     // branches, ??'s right side, arrow function bodies, etc - as opposed
     // to StmtKind::Throw, a bare `throw expr;` statement, which is still
     // dispatched separately and takes priority at statement position.
-    Throw(Box<ExprNode>),
-    NewAnonymousClass(Box<AnonymousClass>),
+    Throw(ExprId),
+    NewAnonymousClass(AnonymousClassId),
     // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
     // enclosing function a generator.
-    Yield(Option<Box<ExprNode>>, Option<Box<ExprNode>>),
+    Yield(Option<ExprId>, Option<ExprId>),
     // `yield from $generator;`
-    YieldFrom(Box<ExprNode>),
-    Interpolated(Vec<ExprNode>),
+    YieldFrom(ExprId),
+    Interpolated(ExprIdRange),
     // Boxed: keeps `ExprNode` small, since expression parsing recurses.
-    Closure(Box<ClosureExpr>),
-    ArrowFn(Box<ArrowFnExpr>),
+    Closure(ClosureId),
+    ArrowFn(ClosureId),
     // The arms in written order, `default` among them.
     Match {
-        subject: Box<ExprNode>,
-        arms: Vec<MatchArm>,
+        subject: ExprId,
+        arms: MatchArmRange,
     },
 }
 
@@ -1710,23 +2687,23 @@ pub enum ExprKind {
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     // `None` for the `default` arm.
-    pub conditions: Option<Vec<ExprNode>>,
-    pub body: ExprNode,
+    pub conditions: Option<ExprIdRange>,
+    pub body: ExprId,
     pub span: Span,
 }
 
 impl MatchArm {
     /// A non-default arm's conditions and body.
-    pub fn conditioned(&self) -> Option<(&Vec<ExprNode>, &ExprNode)> {
-        Some((self.conditions.as_ref()?, &self.body))
+    pub fn conditioned(&self) -> Option<(ExprIdRange, ExprId)> {
+        Some((self.conditions.clone()?, self.body))
     }
 }
 
 /// The body of a `match`'s `default` arm.
-pub fn match_default(arms: &[MatchArm]) -> Option<&ExprNode> {
+pub fn match_default(arms: &[MatchArm]) -> Option<ExprId> {
     arms.iter()
         .find(|arm| arm.conditions.is_none())
-        .map(|arm| &arm.body)
+        .map(|arm| arm.body)
 }
 
 /// A literal string's text, or a statically-foldable `.`-concatenation of
@@ -1738,13 +2715,22 @@ pub fn match_default(arms: &[MatchArm]) -> Option<&ExprNode> {
 /// Purely syntactic: a concatenation with a variable operand is never
 /// resolved here even if a caller's type tracking knows it's a literal
 /// value, since this function only sees the raw `ExprNode`.
-pub fn literal_string_value(e: &ExprNode) -> Option<std::borrow::Cow<'_, str>> {
-    let e = e.peeled();
+pub fn literal_string_value<'a>(
+    arenas: &'a NodeArenas,
+    id: ExprId,
+) -> Option<std::borrow::Cow<'a, str>> {
+    let id = arenas.peeled(id)?;
+    let e = arenas.expr(id)?;
     crate::stack::guard(|| match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
+        ExprKind::Literal(Literal::String(s)) => {
+            let bytes = arenas.string_bytes(s)?;
+            std::str::from_utf8(&bytes)
+                .ok()
+                .map(std::borrow::Cow::Borrowed)
+        }
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-            let l = literal_string_value(lhs)?;
-            let r = literal_string_value(rhs)?;
+            let l = literal_string_value(arenas, *lhs)?;
+            let r = literal_string_value(arenas, *rhs)?;
             Some(std::borrow::Cow::Owned(format!("{l}{r}")))
         }
         _ => None,
@@ -1754,6 +2740,260 @@ pub fn literal_string_value(e: &ExprNode) -> Option<std::borrow::Cow<'_, str>> {
 #[cfg(test)]
 mod arena_tests {
     use super::*;
+
+    fn arg(value: u32) -> Arg {
+        Arg {
+            name: None,
+            value: ExprId::from_raw(la_arena::RawIdx::from_u32(value)),
+            unpack: false,
+            by_ref: false,
+            span: Span::default(),
+        }
+    }
+
+    fn array_item(value: u32) -> ArrayItem {
+        ArrayItem {
+            key: None,
+            value: ExprId::from_raw(la_arena::RawIdx::from_u32(value)),
+            spread: false,
+            by_ref: false,
+        }
+    }
+
+    fn parameter(attrs: AttributeRange) -> Param {
+        Param {
+            name: Ident {
+                name: crate::name::Interner::global().name("parameter"),
+                name_id: None,
+                span: Span::default(),
+            },
+            type_hint: None,
+            default: None,
+            by_ref: false,
+            variadic: false,
+            promotion: None,
+            hooks: None,
+            attrs,
+            doc_comment: None,
+            span: Span::default(),
+        }
+    }
+
+    fn attribute(args: ArgRange) -> Attribute {
+        Attribute {
+            name: QualifiedName {
+                written: crate::name::Interner::global().name("Attribute"),
+                resolved: ResolvedName::Unresolved,
+                span: Span::default(),
+            },
+            args,
+            span: Span::default(),
+            removal_span: Span::default(),
+        }
+    }
+
+    fn class_def(arenas: &mut NodeArenas) -> ClassDef {
+        let methods = arenas.alloc_methods([]);
+        let attrs = arenas.alloc_attributes([]);
+        ClassDef {
+            kind: ClassKind::Class,
+            backing_type: None,
+            extends: Vec::new(),
+            implements: Vec::new(),
+            is_abstract: false,
+            is_final: false,
+            is_readonly: false,
+            properties: Vec::new(),
+            methods,
+            consts: Vec::new(),
+            trait_uses: Vec::new(),
+            enum_cases: Vec::new(),
+            doc_comment: None,
+            attrs,
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    fn list_allocators_commit_contiguous_ranges_and_reuse_capacity() {
+        let mut arenas = NodeArenas::default();
+        let first = arenas.alloc_args([arg(0), arg(1)]);
+        assert_eq!(arenas.args(first).len(), 2);
+        assert_eq!(u32::from(first.start().into_raw()), 0);
+        assert_eq!(u32::from(first.end().into_raw()), 2);
+        let capacity = arenas.args.capacity();
+
+        arenas.clear();
+        let second = arenas.alloc_args([arg(2)]);
+        assert_eq!(u32::from(second.start().into_raw()), 0);
+        assert!(arenas.args.capacity() >= capacity);
+
+        let statements = arenas.alloc_stmt_ids([
+            StmtId::from_raw(la_arena::RawIdx::from_u32(4)),
+            StmtId::from_raw(la_arena::RawIdx::from_u32(5)),
+        ]);
+        assert_eq!(u32::from(statements.start().into_raw()), 0);
+        assert_eq!(arenas.stmt_ids(&statements).len(), 2);
+    }
+
+    #[test]
+    fn list_ranges_keep_file_ids_across_fragment_append() {
+        let mut parent = NodeArenas::default();
+        let original = parent.alloc_args([arg(0), arg(1)]);
+        let original_stmts = parent.alloc_stmt_ids([
+            StmtId::from_raw(la_arena::RawIdx::from_u32(0)),
+            StmtId::from_raw(la_arena::RawIdx::from_u32(1)),
+        ]);
+        let original_expr_ids = parent.alloc_expr_ids([
+            ExprId::from_raw(la_arena::RawIdx::from_u32(0)),
+            ExprId::from_raw(la_arena::RawIdx::from_u32(1)),
+        ]);
+        let original_pattern = parent.alloc_destructure_items([DestructureItem {
+            key: None,
+            target: Some(ExprId::from_raw(la_arena::RawIdx::from_u32(0))),
+            by_ref: false,
+        }]);
+        let original_items = parent.alloc_array_items([array_item(0)]);
+        let empty_attribute_range = parent.alloc_attributes([]);
+        let original_params = parent.alloc_params([parameter(empty_attribute_range)]);
+        let match_condition =
+            parent.alloc_expr_ids([ExprId::from_raw(la_arena::RawIdx::from_u32(0))]);
+        let original_arms = parent.alloc_match_arms([MatchArm {
+            conditions: Some(match_condition),
+            body: ExprId::from_raw(la_arena::RawIdx::from_u32(1)),
+            span: Span::default(),
+        }]);
+        let empty_args_range = parent.alloc_args([]);
+        let original_attributes = parent.alloc_attributes([attribute(empty_args_range)]);
+        let original_class_def = class_def(&mut parent);
+        let original_class = parent.alloc_class(original_class_def);
+        let original_anonymous_class = parent.alloc_anonymous_class(AnonymousClass {
+            def: original_class,
+            args: original,
+        });
+        assert!(parent.set_anonymous_class_name(
+            original_anonymous_class,
+            crate::name::Name::from("class@anonymous/original:1"),
+        ));
+
+        let mut fragment = NodeArenas {
+            args_base: u32::try_from(parent.args.len()).unwrap(),
+            stmt_ids_base: u32::try_from(parent.stmt_ids.len()).unwrap(),
+            expr_ids_base: u32::try_from(parent.expr_ids.len()).unwrap(),
+            destructure_items_base: u32::try_from(parent.destructure_items.len()).unwrap(),
+            array_items_base: u32::try_from(parent.array_items.len()).unwrap(),
+            params_base: u32::try_from(parent.params.len()).unwrap(),
+            match_arms_base: u32::try_from(parent.match_arms.len()).unwrap(),
+            attributes_base: u32::try_from(parent.attributes.len()).unwrap(),
+            methods_base: u32::try_from(parent.methods.len()).unwrap(),
+            classes_base: u32::try_from(parent.classes.len()).unwrap(),
+            anonymous_classes_base: u32::try_from(parent.anonymous_classes.len()).unwrap(),
+            ..NodeArenas::default()
+        };
+        let appended = fragment.alloc_args([arg(2)]);
+        let appended_stmts =
+            fragment.alloc_stmt_ids([StmtId::from_raw(la_arena::RawIdx::from_u32(2))]);
+        let appended_expr_ids =
+            fragment.alloc_expr_ids([ExprId::from_raw(la_arena::RawIdx::from_u32(2))]);
+        let appended_pattern = fragment.alloc_destructure_items([DestructureItem {
+            key: None,
+            target: Some(ExprId::from_raw(la_arena::RawIdx::from_u32(3))),
+            by_ref: true,
+        }]);
+        let appended_items = fragment.alloc_array_items([array_item(2)]);
+        let empty_fragment_attribute_range = fragment.alloc_attributes([]);
+        let appended_params = fragment.alloc_params([parameter(empty_fragment_attribute_range)]);
+        let appended_arms = fragment.alloc_match_arms([MatchArm {
+            conditions: None,
+            body: ExprId::from_raw(la_arena::RawIdx::from_u32(3)),
+            span: Span::default(),
+        }]);
+        let empty_fragment_args_range = fragment.alloc_args([]);
+        let appended_attributes = fragment.alloc_attributes([attribute(empty_fragment_args_range)]);
+        let appended_class_def = class_def(&mut fragment);
+        let appended_class = fragment.alloc_class(appended_class_def);
+        let appended_anonymous_class = fragment.alloc_anonymous_class(AnonymousClass {
+            def: appended_class,
+            args: appended,
+        });
+        assert!(fragment.set_anonymous_class_name(
+            appended_anonymous_class,
+            crate::name::Name::from("class@anonymous/fragment:1"),
+        ));
+        assert_eq!(u32::from(appended.start().into_raw()), 2);
+        assert_eq!(u32::from(fragment.args(appended)[0].value.into_raw()), 2);
+        assert_eq!(u32::from(appended_stmts.start().into_raw()), 2);
+        assert_eq!(
+            u32::from(fragment.stmt_ids(&appended_stmts)[0].into_raw()),
+            2
+        );
+        assert_eq!(u32::from(appended_expr_ids.start().into_raw()), 3);
+        assert_eq!(
+            u32::from(fragment.expr_ids(&appended_expr_ids)[0].into_raw()),
+            2
+        );
+        assert_eq!(u32::from(appended_pattern.start().into_raw()), 1);
+        assert!(fragment.destructure_items(&appended_pattern)[0].by_ref);
+        assert_eq!(
+            u32::from(appended_items.start().into_raw()),
+            u32::try_from(parent.array_items.len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_params.start().into_raw()),
+            u32::try_from(parent.params.len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_arms.start().into_raw()),
+            u32::try_from(parent.match_arms.len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_attributes.start().into_raw()),
+            u32::try_from(parent.attributes.len()).unwrap()
+        );
+        assert_eq!(u32::from(appended_class.into_raw()), 1);
+        assert_eq!(u32::from(appended_anonymous_class.into_raw()), 1);
+
+        parent.append_fragment(fragment);
+        assert_eq!(parent.args(original).len(), 2);
+        assert_eq!(parent.expr_ids(&original_expr_ids).len(), 2);
+        assert_eq!(parent.destructure_items(&original_pattern).len(), 1);
+        assert_eq!(parent.stmt_ids(&original_stmts).len(), 2);
+        assert_eq!(parent.stmt_ids(&appended_stmts).len(), 1);
+        assert_eq!(u32::from(parent.stmt_ids(&appended_stmts)[0].into_raw()), 2);
+        assert_eq!(parent.expr_ids(&appended_expr_ids).len(), 1);
+        assert_eq!(
+            u32::from(parent.expr_ids(&appended_expr_ids)[0].into_raw()),
+            2
+        );
+        assert_eq!(parent.destructure_items(&appended_pattern).len(), 1);
+        assert!(parent.destructure_items(&appended_pattern)[0].by_ref);
+        assert_eq!(u32::from(parent.args(appended)[0].value.into_raw()), 2);
+        assert_eq!(parent.array_items(original_items).len(), 1);
+        assert_eq!(
+            u32::from(parent.array_items(appended_items)[0].value.into_raw()),
+            2
+        );
+        assert_eq!(parent.params(original_params).len(), 1);
+        assert_eq!(parent.params(appended_params).len(), 1);
+        assert_eq!(parent.match_arms(original_arms).len(), 1);
+        assert_eq!(parent.match_arms(appended_arms).len(), 1);
+        assert_eq!(parent.attributes(original_attributes).len(), 1);
+        assert_eq!(parent.attributes(appended_attributes).len(), 1);
+        assert!(parent.class(original_class).is_some());
+        assert!(parent.class(appended_class).is_some());
+        assert_eq!(
+            parent
+                .anonymous_class_name(original_anonymous_class)
+                .map(|name| name.as_str()),
+            Some("class@anonymous/original:1")
+        );
+        assert_eq!(
+            parent
+                .anonymous_class_name(appended_anonymous_class)
+                .map(|name| name.as_str()),
+            Some("class@anonymous/fragment:1")
+        );
+    }
 
     #[test]
     fn node_arena_scratch_clear_reuses_typed_indices() {

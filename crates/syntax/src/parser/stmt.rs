@@ -7,11 +7,17 @@ use crate::token::{Keyword, Token};
 impl Parser<'_> {
     // ---- statements ----
 
-    pub(crate) fn parse_statement(&mut self) -> Result<StmtNode, ParseError> {
-        crate::stack::guard(|| self.parse_statement_unguarded())
+    pub(crate) fn parse_statement(
+        &mut self,
+        in_statement_list: bool,
+    ) -> Result<Option<StmtId>, ParseError> {
+        crate::stack::guard(|| self.parse_statement_unguarded(in_statement_list))
     }
 
-    fn parse_statement_unguarded(&mut self) -> Result<StmtNode, ParseError> {
+    fn parse_statement_unguarded(
+        &mut self,
+        in_statement_list: bool,
+    ) -> Result<Option<StmtId>, ParseError> {
         // Captured before any leading `#[Attr]` group(s) are consumed, so
         // a declaration's own span includes them - matches how `start`
         // already includes a class's own `abstract`/`final` modifiers.
@@ -28,33 +34,41 @@ impl Parser<'_> {
         // that's also a declaration (e.g. a function) consuming its own
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
-        let (leading_doc_comment, leading_doc_line) =
+        let (mut leading_doc_comment, mut leading_doc_line) =
             match self.ahead.front().and_then(|tok| tok.docs.as_deref()) {
                 Some(group) => (
-                    group.folded.as_ref().or(group.last.as_ref()).cloned(),
+                    group
+                        .folded_ranges
+                        .clone()
+                        .or_else(|| group.last_range.map(DocCommentRanges::One)),
                     group.first_start.map(|start| self.line_index.line(start)),
                 ),
                 None => (None, None),
             };
         let mut stmt = match self.peek() {
             Token::InlineHtml(_) => {
-                let Token::InlineHtml(s) = self.take_token() else {
+                let Token::InlineHtml(span) = self.take_token() else {
                     unreachable!()
                 };
-                self.stmt(StmtKind::InlineHtml(s), start)
+                self.stmt(StmtKind::InlineHtml(span), start)
             }
             Token::Semicolon => {
                 self.skip();
-                self.stmt(StmtKind::Block(Vec::new()), start)
+                let empty = self.node_arenas.borrow_mut().alloc_stmt_ids([]);
+                self.stmt(StmtKind::Block(empty), start)
             }
             Token::LBrace => self.parse_block()?,
             Token::Keyword(Keyword::Echo) => {
                 self.skip();
-                let mut exprs = vec![self.parse_expression()?];
+                let exprs_start = self.begin_expr_id_list();
+                let first = self.parse_expression()?;
+                self.push_expr_id_list_item(first);
                 while self.eat(&Token::Comma) {
-                    exprs.push(self.parse_expression()?);
+                    let expr = self.parse_expression()?;
+                    self.push_expr_id_list_item(expr);
                 }
                 self.expect_semicolon()?;
+                let exprs = self.finish_expr_id_list(exprs_start);
                 self.stmt(StmtKind::Echo(exprs), start)
             }
             Token::Keyword(Keyword::Return) => {
@@ -128,18 +142,23 @@ impl Parser<'_> {
             // name for a declaration, `(` directly for an anonymous one.
             Token::Keyword(Keyword::Function) if self.looks_like_function_decl() => {
                 let doc = self.take_doc_comment();
-                let mut f = self.parse_function_decl()?;
-                f.doc_comment = doc;
-                f.attrs = attrs;
-                self.note_function(&f);
-                self.stmt(StmtKind::FunctionDecl(Box::new(f)), start)
+                let dropped = in_statement_list && self.stub_drops_function(attrs.clone());
+                let f =
+                    self.parse_function_decl(attrs, doc, Some(&mut leading_doc_comment), !dropped)?;
+                if dropped {
+                    leading_doc_comment = None;
+                    leading_doc_line = None;
+                    return Ok(None);
+                } else {
+                    let function = self.node_arenas.borrow_mut().alloc_function(f);
+                    self.stmt(StmtKind::FunctionDecl(function), start)
+                }
             }
             Token::Keyword(Keyword::Class)
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => {
-                let mut c = self.parse_class_decl()?;
-                c.def.attrs = attrs;
-                self.stmt(StmtKind::ClassDecl(Box::new(c)), start)
+                let c = self.parse_class_decl(attrs.clone(), &mut leading_doc_comment)?;
+                self.stmt(StmtKind::ClassDecl(c), start)
             }
             // `abstract`/`final`/`readonly` are only reserved as class
             // *modifiers* - each is also legal as an ordinary
@@ -152,9 +171,8 @@ impl Parser<'_> {
             Token::Keyword(Keyword::Abstract | Keyword::Final | Keyword::Readonly)
                 if self.looks_like_class_decl() =>
             {
-                let mut c = self.parse_class_decl()?;
-                c.def.attrs = attrs;
-                self.stmt(StmtKind::ClassDecl(Box::new(c)), start)
+                let c = self.parse_class_decl(attrs.clone(), &mut leading_doc_comment)?;
+                self.stmt(StmtKind::ClassDecl(c), start)
             }
             // Like abstract/final/readonly above, `enum` is only reserved
             // as a declaration keyword - `function enum() {}` and a bare
@@ -163,9 +181,8 @@ impl Parser<'_> {
             Token::Keyword(Keyword::Enum)
                 if matches!(self.peek_at(1), Token::Identifier(_) | Token::Keyword(_)) =>
             {
-                let mut e = self.parse_enum_decl()?;
-                e.def.attrs = attrs;
-                self.stmt(StmtKind::ClassDecl(Box::new(e)), start)
+                let e = self.parse_enum_decl(attrs, &mut leading_doc_comment)?;
+                self.stmt(StmtKind::ClassDecl(e), start)
             }
             // `namespace\foo();` - a relative-name expression statement,
             // not a declaration (a real namespace declaration never
@@ -245,6 +262,7 @@ impl Parser<'_> {
                     }
                     self.expect(&Token::RBrace)?;
                     self.expect_semicolon()?;
+                    let imports = self.node_arenas.borrow_mut().alloc_use_imports(imports);
                     return Ok(self.stmt(StmtKind::Use(imports), start));
                 }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
@@ -277,6 +295,7 @@ impl Parser<'_> {
                     });
                 }
                 self.expect_semicolon()?;
+                let imports = self.node_arenas.borrow_mut().alloc_use_imports(imports);
                 self.stmt(StmtKind::Use(imports), start)
             }
             Token::Keyword(Keyword::Const) => {
@@ -335,13 +354,22 @@ impl Parser<'_> {
                 self.skip();
                 let (args, _) = self.parse_args()?;
                 self.expect_semicolon()?;
-                let targets: Vec<ExprNode> = args.into_iter().map(|a| a.value).collect();
-                self.saw_property_unset |= targets.iter().any(|target| {
-                    matches!(
-                        target.peeled().kind,
-                        ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..)
-                    )
+                let targets_start = self.begin_expr_id_list();
+                for arg in args {
+                    self.push_expr_id_list_item(arg.value);
+                }
+                self.saw_property_unset |= self.expr_id_list(targets_start).iter().any(|target| {
+                    let arenas = self.node_arenas.borrow();
+                    arenas.peeled(*target).is_some_and(|id| {
+                        matches!(
+                            arenas.expr(id).map(|node| &node.kind),
+                            Some(
+                                ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..)
+                            )
+                        )
+                    })
                 });
+                let targets = self.finish_expr_id_list(targets_start);
                 self.stmt(StmtKind::Unset(targets), start)
             }
             // `declare(strict_types=1);` / `declare(ticks=1) { ... }` -
@@ -366,17 +394,25 @@ impl Parser<'_> {
                 }
                 self.expect(&Token::RParen)?;
                 let body = if self.check(&Token::LBrace) {
-                    Some(self.parse_stmt_list_block()?)
+                    Some(self.parse_stmt_list_block_range()?)
                 } else if self.eat(&Token::Colon) {
-                    let mut stmts = Vec::new();
-                    while !matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("enddeclare"))
-                        && !self.at_eof()
-                    {
-                        stmts.push(self.parse_statement()?);
+                    let list_start = self.begin_stmt_list();
+                    let parsed = (|| {
+                        while !matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("enddeclare"))
+                            && !self.at_eof()
+                        {
+                            if let Some(stmt) = self.parse_statement(true)? {
+                                self.push_stmt_list_item(stmt);
+                            }
+                        }
+                        self.skip();
+                        self.expect_semicolon()
+                    })();
+                    if let Err(error) = parsed {
+                        self.discard_stmt_list(list_start);
+                        return Err(error);
                     }
-                    self.skip();
-                    self.expect_semicolon()?;
-                    Some(stmts)
+                    Some(self.finish_stmt_list(list_start))
                 } else {
                     self.expect_semicolon()?;
                     None
@@ -394,7 +430,8 @@ impl Parser<'_> {
                     && matches!(self.peek_at(1), Token::LParen) =>
             {
                 self.skip_to_eof();
-                self.stmt(StmtKind::Block(Vec::new()), start)
+                let empty = self.node_arenas.borrow_mut().alloc_stmt_ids([]);
+                self.stmt(StmtKind::Block(empty), start)
             }
             Token::Keyword(Keyword::Goto) => {
                 self.skip();
@@ -421,17 +458,33 @@ impl Parser<'_> {
         };
         // A declaration's own doc comment is recorded with the declaration; a
         // different one before it is the statement's.
-        let declaration_doc = match &stmt.kind {
-            StmtKind::FunctionDecl(function) => Some(function.doc_comment.as_deref()),
-            StmtKind::ClassDecl(class) => Some(class.def.doc_comment.as_deref()),
-            _ => None,
+        let (declaration, stmt_start) = {
+            let stmt = self.stmt_node(stmt);
+            let declaration = match &stmt.kind {
+                StmtKind::FunctionDecl(function) => Some(Ok(*function)),
+                StmtKind::ClassDecl(class) => Some(Err(class.def)),
+                _ => None,
+            };
+            (declaration, stmt.span.start)
         };
-        if declaration_doc != Some(leading_doc_comment.as_deref()) {
-            self.note_doc(&leading_doc_comment, stmt.span.start);
+        let declaration_doc = declaration.and_then(|declaration| {
+            let arenas = self.node_arenas.borrow();
+            match declaration {
+                Ok(id) => arenas
+                    .function(id)
+                    .and_then(|function| function.doc_comment.clone()),
+                Err(id) => arenas.class(id).and_then(|class| class.doc_comment.clone()),
+            }
+        });
+        if declaration_doc != leading_doc_comment {
+            self.note_doc(&leading_doc_comment, stmt_start);
         }
-        stmt.doc_comment = leading_doc_comment;
-        stmt.doc_line = leading_doc_line;
-        Ok(stmt)
+        {
+            let mut stmt = self.stmt_node_mut(stmt);
+            stmt.doc_comment = leading_doc_comment;
+            stmt.doc_line = leading_doc_line;
+        }
+        Ok(Some(stmt))
     }
 
     /// `break`/`continue`'s optional level - real PHP's own grammar is
@@ -457,7 +510,7 @@ impl Parser<'_> {
             return Ok(None);
         }
         let expr = self.parse_expression()?;
-        Ok(const_fold_level(&expr))
+        Ok(const_fold_level(&self.node_arenas.borrow(), expr))
     }
 
     /// A `global` statement's target - almost always a plain `$name`, but
@@ -483,11 +536,12 @@ impl Parser<'_> {
 
 /// `parse_optional_level`'s own constant-folder - see that function's
 /// doc comment for why only these three shapes matter.
-fn const_fold_level(e: &ExprNode) -> Option<i64> {
-    let e = e.peeled();
+fn const_fold_level(arenas: &NodeArenas, id: ExprId) -> Option<i64> {
+    let id = arenas.peeled(id)?;
+    let e = arenas.expr(id)?;
     crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
-        ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(inner).map(|n| -n),
+        ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(arenas, *inner).map(|n| -n),
         _ => None,
     })
 }

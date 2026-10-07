@@ -7,8 +7,8 @@
 //! class.
 //!
 //! `name_anonymous_classes` computes these names once, right after
-//! parsing, and stores each on its `AnonymousClass` node, so the registry
-//! entry and everything that reads the AST agree by construction.
+//! parsing, and stores each in the file owner's side table keyed by its
+//! `AnonymousClassId`, so the parsed syntax tree stays immutable.
 //!
 //! Unlike `registry::build_declarations` (top-level declarations only),
 //! this walks every function/method/closure/arrow-fn body too - an
@@ -22,8 +22,8 @@ use syntax::span::LineIndex;
 
 use crate::registry::{BuiltDecl, ClassReflection};
 use syntax::ast::*;
-use syntax::name_resolution::{NameContext, for_each_in_context};
-use syntax::visit::{Visitor, VisitorMut, walk_expr, walk_expr_mut};
+use syntax::name_resolution::NameContext;
+use syntax::visit::arena::{self, Visitor as ArenaVisitor};
 
 pub(crate) fn synthetic_name(
     relative_file: &str,
@@ -43,46 +43,72 @@ pub(crate) fn synthetic_name(
 /// file across one analysis run, not to match real PHPStan's own path
 /// convention exactly, since nothing compares the two.
 pub(crate) fn name_anonymous_classes(
-    stmts: &mut [StmtNode],
+    arenas: &mut NodeArenas,
+    stmts: &syntax::ast::StmtIdRange,
     relative_file: &str,
     line_index: &LineIndex,
 ) {
     let mut lines = Lines(Vec::new(), line_index);
-    for stmt in stmts.iter() {
-        lines.visit_stmt(stmt);
-    }
+    arena::walk_stmts(&mut lines, arenas, arenas.stmt_ids(stmts));
     if lines.0.is_empty() {
         return;
     }
     let mut per_line: FxHashMap<u32, u32> = FxHashMap::default();
-    for line in &lines.0 {
+    for (_, line) in &lines.0 {
         *per_line.entry(*line).or_insert(0) += 1;
     }
-    let mut namer = Namer {
-        relative_file,
-        line_index,
-        per_line,
-        seen_on_line: FxHashMap::default(),
-    };
-    for stmt in stmts.iter_mut() {
-        namer.visit_stmt(stmt);
+    let mut seen_on_line: FxHashMap<u32, u32> = FxHashMap::default();
+    for (class_id, line) in lines.0 {
+        let line_index = if per_line.get(&line).is_some_and(|n| *n > 1) {
+            let counter = seen_on_line.entry(line).or_insert(0);
+            *counter += 1;
+            Some(*counter)
+        } else {
+            None
+        };
+        arenas.set_anonymous_class_name(
+            class_id,
+            Name::from(synthetic_name(relative_file, line, line_index)),
+        );
     }
 }
 
 /// The registry entry of every named anonymous class in `stmts`, each
 /// recorded as declared at its `new class` expression in `origin`.
-pub(crate) fn anonymous_class_decls(stmts: &[StmtNode], origin: &Origin) -> Vec<BuiltDecl> {
+pub(crate) fn anonymous_class_decls(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    origin: &Origin,
+) -> Vec<BuiltDecl> {
     let mut decls = Vec::new();
-    let mut in_stmt = Found(Vec::new());
-    for_each_in_context(stmts, |stmt, ctx: &NameContext| {
-        in_stmt.visit_stmt(stmt);
-        for (expr, class) in in_stmt.0.drain(..) {
-            let Some(name) = &class.name else {
+    let mut ctx = NameContext::default();
+    for &id in stmts {
+        let Some(stmt) = arenas.stmt(id) else {
+            continue;
+        };
+        match &stmt.kind {
+            StmtKind::Namespace(name) => ctx.set_namespace(name),
+            StmtKind::Use(imports) => ctx.add_uses(arenas.use_imports(imports)),
+            _ => {}
+        }
+        let mut found = Found(Vec::new());
+        found.visit_stmt(arenas, id);
+        for (expr_id, class_id) in found.0 {
+            let Some(class) = arenas.anonymous_class(class_id) else {
                 continue;
             };
-            let mut info = ClassReflection::from_def(name, &class.def, ctx);
+            let Some(name) = arenas.anonymous_class_name(class_id) else {
+                continue;
+            };
+            let Some(def) = arenas.class(class.def) else {
+                continue;
+            };
+            let mut info = ClassReflection::from_def(arenas, name, def, &ctx);
             info.is_anonymous = true;
-            info.record_provenance(origin, name, expr.span, &MemberSpans::of_class(&class.def));
+            let Some(span) = arenas.expr_span(expr_id) else {
+                continue;
+            };
+            info.record_provenance(origin, name, span, &MemberSpans::of_class(arenas, def));
             decls.push(BuiltDecl::Class {
                 name: name.clone(),
                 conditional: false,
@@ -91,59 +117,33 @@ pub(crate) fn anonymous_class_decls(stmts: &[StmtNode], origin: &Origin) -> Vec<
                 namespace: Name::from(ctx.namespace()),
             });
         }
-    });
+    }
     decls
 }
 
+struct Found(Vec<(ExprId, AnonymousClassId)>);
+
+impl ArenaVisitor for Found {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        if let Some(expr) = arenas.expr(id)
+            && let ExprKind::NewAnonymousClass(class_id) = &expr.kind
+        {
+            self.0.push((id, *class_id));
+        }
+        arena::walk_expr(self, arenas, id);
+    }
+}
+
 /// The start line of every anonymous class, in source order.
-struct Lines<'i>(Vec<u32>, &'i LineIndex);
+struct Lines<'i>(Vec<(AnonymousClassId, u32)>, &'i LineIndex);
 
-impl<'a> Visitor<'a> for Lines<'_> {
-    fn visit_expr(&mut self, expr: &'a ExprNode) {
-        if let ExprKind::NewAnonymousClass(_) = &expr.kind {
-            self.0.push(self.1.line(expr.span.start));
+impl ArenaVisitor for Lines<'_> {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        if let Some(expr) = arenas.expr(id)
+            && let ExprKind::NewAnonymousClass(class_id) = &expr.kind
+        {
+            self.0.push((*class_id, self.1.line(expr.span.start)));
         }
-        walk_expr(self, expr);
-    }
-}
-
-/// Names each anonymous class in the order `Lines` found them.
-struct Namer<'a> {
-    relative_file: &'a str,
-    line_index: &'a LineIndex,
-    per_line: FxHashMap<u32, u32>,
-    seen_on_line: FxHashMap<u32, u32>,
-}
-
-impl VisitorMut for Namer<'_> {
-    fn visit_expr(&mut self, expr: &mut ExprNode) {
-        if let ExprKind::NewAnonymousClass(class) = &mut expr.kind {
-            let line = self.line_index.line(expr.span.start);
-            let line_index = if self.per_line.get(&line).is_some_and(|n| *n > 1) {
-                let counter = self.seen_on_line.entry(line).or_insert(0);
-                *counter += 1;
-                Some(*counter)
-            } else {
-                None
-            };
-            class.name = Some(Name::from(synthetic_name(
-                self.relative_file,
-                line,
-                line_index,
-            )));
-        }
-        walk_expr_mut(self, expr);
-    }
-}
-
-/// Every anonymous class, in source order, wherever it is.
-struct Found<'a>(Vec<(&'a ExprNode, &'a AnonymousClass)>);
-
-impl<'a> Visitor<'a> for Found<'a> {
-    fn visit_expr(&mut self, expr: &'a ExprNode) {
-        if let ExprKind::NewAnonymousClass(class) = &expr.kind {
-            self.0.push((expr, class));
-        }
-        walk_expr(self, expr);
+        arena::walk_expr(self, arenas, id);
     }
 }

@@ -4,10 +4,7 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::name_resolution::NameContext;
 pub use syntax::references::RefKey;
-use syntax::visit::{
-    Visitor, walk_args, walk_class_const, walk_class_def, walk_expr, walk_function_decl,
-    walk_param, walk_property_decl, walk_property_hooks, walk_stmt, walk_stmts,
-};
+use syntax::visit::arena::{self, Visitor};
 
 /// The key a declaration's or reference's fully-qualified name (with or
 /// without its leading `\`) is tracked under in the registry: PHP matches
@@ -32,9 +29,9 @@ pub fn global_variable_key(name: &str) -> String {
 /// over-collecting: an unqualified function or constant name in a
 /// namespace yields both the namespaced and the global name, and the
 /// names in PHPDoc tags are taken from the tag text without parsing it.
-pub fn referenced_names(stmts: &[StmtNode]) -> FxHashSet<RefKey> {
+pub fn referenced_names(arenas: &NodeArenas, stmts: &[StmtId]) -> FxHashSet<RefKey> {
     let mut collector = Collector::new(false);
-    walk_stmts(&mut collector, stmts);
+    arena::walk_stmts(&mut collector, arenas, stmts);
     collector.names
 }
 
@@ -129,9 +126,12 @@ pub(crate) fn doc_site_references(
 }
 
 /// `referenced_names` and `declaration_referenced_names`, in one walk.
-pub fn both_referenced_names(stmts: &[StmtNode]) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
+pub fn both_referenced_names(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+) -> (FxHashSet<RefKey>, FxHashSet<RefKey>) {
     let mut collector = Collector::new(true);
-    walk_stmts(&mut collector, stmts);
+    arena::walk_stmts(&mut collector, arenas, stmts);
     (collector.names, collector.outside)
 }
 
@@ -214,9 +214,11 @@ impl Collector {
     /// constant-named type's global fallback), a template parameter in
     /// scope not being a class; and the classes its `@see` tags name,
     /// which no declaration takes its shape from.
-    fn doc_names(&mut self, doc: Option<&str>) {
-        let Some(doc) = doc else { return };
-        let parsed = doc_names_of(doc);
+    fn doc_names(&mut self, arenas: &NodeArenas, doc: Option<&DocCommentRanges>) {
+        let Some(doc) = doc.and_then(|ranges| arenas.doc_comment_text(ranges)) else {
+            return;
+        };
+        let parsed = doc_names_of(&doc);
         for token in &parsed.tokens {
             if parsed.declared.contains(token)
                 || self
@@ -238,16 +240,23 @@ impl Collector {
     }
 
     /// `doc`'s names, for the template parameters it declares.
-    fn templates_of(doc: Option<&str>) -> Option<std::sync::Arc<DocNames>> {
-        doc.map(doc_names_of)
+    fn templates_of(
+        arenas: &NodeArenas,
+        doc: Option<&DocCommentRanges>,
+    ) -> Option<std::sync::Arc<DocNames>> {
+        doc.and_then(|ranges| arenas.doc_comment_text(ranges))
+            .as_deref()
+            .map(doc_names_of)
     }
 }
 
-impl<'ast> Visitor<'ast> for Collector {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Collector {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => {
+                let imports = arenas.use_imports(imports);
                 self.ctx.add_uses(imports);
                 for import in imports {
                     let path = &import.path;
@@ -270,100 +279,118 @@ impl<'ast> Visitor<'ast> for Collector {
         // `visit_class_def`, to the same names: only a comment the
         // declaration does not have is read here.
         let declaration_doc = match &stmt.kind {
-            StmtKind::FunctionDecl(function) => Some(function.doc_comment.as_deref()),
-            StmtKind::ClassDecl(class) => Some(class.def.doc_comment.as_deref()),
+            StmtKind::FunctionDecl(function) => function.doc_comment.as_ref(),
+            StmtKind::ClassDecl(class) => arenas
+                .class(class.def)
+                .and_then(|def| def.doc_comment.as_ref()),
             _ => None,
         };
-        if declaration_doc != Some(stmt.doc_comment.as_deref()) {
-            self.doc_names(stmt.doc_comment.as_deref());
+        if declaration_doc != stmt.doc_comment.as_ref() {
+            self.doc_names(arenas, stmt.doc_comment.as_ref());
         }
-        walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
-        self.doc_names(function.doc_comment.as_deref());
-        self.templates
-            .push(Collector::templates_of(function.doc_comment.as_deref()));
+    fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
+        self.doc_names(arenas, function.doc_comment.as_ref());
+        self.templates.push(Collector::templates_of(
+            arenas,
+            function.doc_comment.as_ref(),
+        ));
         if self.track_outside {
             // The parts that are not the body count as outside it.
-            for attr in &function.attrs {
-                self.visit_attribute(attr);
+            for attr in arenas.attributes(function.attrs) {
+                self.visit_attribute(arenas, attr);
             }
-            for param in &function.params {
-                self.visit_param(param);
+            for param in arenas.params(function.params) {
+                self.visit_param(arenas, param);
             }
             if let Some(hint) = &function.return_type {
-                self.visit_type_hint(hint);
+                self.visit_type_hint(arenas, hint);
             }
             self.body_depth += 1;
-            walk_stmts(self, function.body_stmts());
+            arena::walk_stmts(self, arenas, function.body_stmts(arenas));
             self.body_depth -= 1;
         } else {
-            walk_function_decl(self, function);
+            arena::walk_function_decl(self, arenas, function);
         }
         self.templates.pop();
     }
 
-    fn visit_class_def(&mut self, class: &'ast ClassDef) {
-        self.doc_names(class.doc_comment.as_deref());
+    fn visit_class_def(&mut self, arenas: &NodeArenas, class: &ClassDef) {
+        self.doc_names(arenas, class.doc_comment.as_ref());
         self.templates
-            .push(Collector::templates_of(class.doc_comment.as_deref()));
-        for trait_use in &class.trait_uses {
-            self.doc_names(trait_use.doc_comment.as_deref());
+            .push(Collector::templates_of(arenas, class.doc_comment.as_ref()));
+        for trait_use in class.trait_uses(arenas) {
+            self.doc_names(arenas, trait_use.doc_comment.as_ref());
         }
-        walk_class_def(self, class);
+        arena::walk_class_def(self, arenas, class);
         self.templates.pop();
     }
 
-    fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {
-        self.doc_names(property.doc_comment.as_deref());
-        walk_property_decl(self, property);
+    fn visit_property_decl(&mut self, arenas: &NodeArenas, property: &PropertyDecl) {
+        self.doc_names(arenas, property.doc_comment.as_ref());
+        arena::walk_property_decl(self, arenas, property);
     }
 
-    fn visit_class_const(&mut self, constant: &'ast ClassConst) {
-        self.doc_names(constant.doc_comment.as_deref());
-        walk_class_const(self, constant);
+    fn visit_class_const(&mut self, arenas: &NodeArenas, constant: &ClassConst) {
+        self.doc_names(arenas, constant.doc_comment.as_ref());
+        arena::walk_class_const(self, arenas, constant);
     }
 
-    fn visit_param(&mut self, param: &'ast Param) {
-        self.doc_names(param.doc_comment.as_deref());
-        walk_param(self, param);
+    fn visit_param(&mut self, arenas: &NodeArenas, param: &Param) {
+        self.doc_names(arenas, param.doc_comment.as_ref());
+        arena::walk_param(self, arenas, param);
     }
 
-    fn visit_property_hooks(&mut self, hooks: &'ast PropertyHooks) {
+    fn visit_property_hooks(&mut self, arenas: &NodeArenas, hooks: &PropertyHooks) {
         for hook in hooks.iter() {
-            self.doc_names(hook.doc.as_deref());
+            self.doc_names(arenas, hook.doc.as_ref());
         }
-        walk_property_hooks(self, hooks);
+        arena::walk_property_hooks(self, arenas, hooks);
     }
 
     /// The names in an expression: a constant, the callee of a call, and
     /// every other name - the class of a `new`, a static access, an
     /// `instanceof` - as what each is.
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else { return };
         match &expr.kind {
             ExprKind::Name(name) => self.add_name(name, NameKind::Constant),
-            ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
-                if let ExprKind::Name(name) = &callee.kind {
+            ExprKind::Call(callee, args)
+                if matches!(
+                    arenas.expr(*callee).map(|e| &e.kind),
+                    Some(ExprKind::Name(_))
+                ) =>
+            {
+                if let Some(ExprNode {
+                    kind: ExprKind::Name(name),
+                    ..
+                }) = arenas.expr(*callee)
+                {
                     self.add_name(name, NameKind::Function);
                 }
-                walk_args(self, args);
+                for arg in args {
+                    arena::walk_arg(self, arenas, arg);
+                }
             }
             ExprKind::New(class, args) => {
-                match &class.kind {
-                    ExprKind::Name(name) => self.add_name(name, NameKind::Class),
-                    _ => self.visit_expr(class),
+                match arenas.expr(*class).map(|e| &e.kind) {
+                    Some(ExprKind::Name(name)) => self.add_name(name, NameKind::Class),
+                    _ => self.visit_expr(arenas, *class),
                 }
-                walk_args(self, args);
+                for arg in args {
+                    arena::walk_arg(self, arenas, arg);
+                }
             }
-            _ => walk_expr(self, expr),
+            _ => arena::walk_expr(self, arenas, id),
         }
     }
 
     /// Every class reference in declarations' `extends`/`implements`/`use`,
     /// catch clauses, attributes and type declarations, and in the places
     /// of an expression the arms above leave to it.
-    fn visit_name(&mut self, name: &'ast QualifiedName) {
+    fn visit_name(&mut self, name: &QualifiedName) {
         self.add_name(name, NameKind::Class);
     }
 }
