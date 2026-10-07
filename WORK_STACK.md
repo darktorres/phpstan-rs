@@ -265,7 +265,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   name/source lookup and span alignment (`eee0c503`, `d0a45686`, `a42f63ab`),
   plus `Send + Sync`/`Copy` type invariants (`113b7869`); none have run. The
   workspace call sites are being migrated from the `Expr`/`Stmt` aliases to
-  `ExprNode`/`StmtNode`; the AST remains a recursive value tree. Arena commits
+  `ExprNode`/`StmtNode` (`1de1a21a`); the unused public aliases were removed
+  (`11e69fee`). The AST remains a recursive value tree. Arena commits
   are not implemented, and no item gate or full
   validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
