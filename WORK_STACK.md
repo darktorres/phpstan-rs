@@ -619,6 +619,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   receiver probe needs the synthetic per-file owner support in 9.5.c/d, so
   that work is tracked there; remaining LSP test builders already retain
   `ParsedProgram`. Formatting ran; no tests/builds have run.
+  Row 9.3.b's typed child links and owner-bearing parsed-file interfaces are
+  complete by source audit; the member-completion probe is the sole reader
+  integration assigned to 9.5.c/d. Item 9.3 reader implementation is now
+  closed; continue with payload ranges at 9.4. The item gate remains pending.
   `cargo fmt --all` completed; tests/builds remain deferred until item 9's
   implementation rows are complete.
   The five specified list arenas and large-payload arenas are implemented;
