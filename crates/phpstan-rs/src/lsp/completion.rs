@@ -48,8 +48,8 @@ use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 use crate::project::{self, Project};
 use crate::registry::Registry;
 use syntax::ast::{
-    ClassKind, ExprKind, ExprNode, FunctionBody, FunctionDecl, SYNTHETIC_EXPR_ID,
-    SYNTHETIC_STMT_ID, StmtKind, StmtNode, Visibility,
+    ClassKind, ExprKind, ExprNode, FunctionBody, FunctionDecl, NodeArenas, SYNTHETIC_EXPR_ID,
+    SYNTHETIC_STMT_ID, StmtId, StmtKind, StmtNode, Visibility,
 };
 use syntax::span::{LineIndex, Span, Unit};
 use syntax::token::{Keyword, Token};
@@ -57,7 +57,7 @@ use types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::Positions;
-use syntax::name_resolution::{NameContext, context_at};
+use syntax::name_resolution::{NameContext, context_at, context_at_ids};
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.
@@ -525,10 +525,11 @@ fn short_name(fqn: &str) -> &str {
 /// (neither exists) degrades to a fully-qualified insert with no edit at
 /// all (see `resolve_import`) rather than guessing a top-of-file
 /// insertion point.
-fn find_use_insertion_point(stmts: &[StmtNode]) -> Option<u32> {
+fn find_use_insertion_point(arenas: &NodeArenas, stmts: &[StmtId]) -> Option<u32> {
     stmts
         .iter()
-        .rfind(|s| matches!(&s.kind, StmtKind::Use(_) | StmtKind::Namespace(_)))
+        .filter_map(|id| arenas.stmt(*id))
+        .rfind(|stmt| matches!(&stmt.kind, StmtKind::Use(_) | StmtKind::Namespace(_)))
         .map(|s| s.span.end)
 }
 
@@ -541,7 +542,8 @@ fn find_use_insertion_point(stmts: &[StmtNode]) -> Option<u32> {
 /// fully-qualified `\Some\Fqn` with no edit at all, rather than silently
 /// importing over an unrelated existing name.
 fn resolve_import(
-    stmts: &[StmtNode],
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
     index: Positions<'_>,
     ctx: &NameContext,
     fqn: &str,
@@ -553,7 +555,7 @@ fn resolve_import(
     if ctx.is_use_imported(short) {
         return (format!("\\{fqn}"), None);
     }
-    match find_use_insertion_point(stmts) {
+    match find_use_insertion_point(arenas, stmts) {
         Some(pos) => {
             let insert_span = Span {
                 start: pos,
@@ -587,11 +589,12 @@ fn resolve_import(
 pub(super) fn enumerate_bare(
     project: &Project,
     path: &Path,
-    current_stmts: &[StmtNode],
+    current_arenas: &NodeArenas,
+    current_stmts: &[StmtId],
     cursor: u32,
     unit: Unit,
 ) -> Vec<CompletionItem> {
-    let ctx = context_at(current_stmts, cursor);
+    let ctx = context_at_ids(current_arenas, current_stmts, cursor);
     let registry = project.registry();
     let Some(index) = project.line_index(path) else {
         return Vec::new();
@@ -602,7 +605,8 @@ pub(super) fn enumerate_bare(
 
     for (_, fqn, info) in registry.classes_by_id() {
         if seen.insert(fqn.to_string()) {
-            let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
+            let (insert_text, edit) =
+                resolve_import(current_arenas, current_stmts, index, &ctx, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
                 kind: Some(class_kind_completion_kind(info.kind())),
@@ -614,7 +618,8 @@ pub(super) fn enumerate_bare(
     }
     for (_, fqn, _) in registry.functions_by_id() {
         if seen.insert(fqn.to_string()) {
-            let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
+            let (insert_text, edit) =
+                resolve_import(current_arenas, current_stmts, index, &ctx, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
                 kind: Some(CompletionItemKind::FUNCTION),
@@ -634,10 +639,17 @@ pub(super) fn enumerate_bare(
     // traversal `update_file` itself uses to know what to remove/re-add
     // - reused here, not re-derived.
     if let Some(current_ast) = project.ast_of(path) {
-        let (functions, classes) = project::declared_names(current_ast.statements());
+        let (functions, classes) =
+            project::declared_names(current_ast.arenas(), current_ast.statements());
         for fqn in functions.iter().chain(&classes) {
             if seen.insert(fqn.to_string()) {
-                let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);
+                let (insert_text, edit) = resolve_import(
+                    current_ast.arenas(),
+                    current_ast.statements(),
+                    index,
+                    &ctx,
+                    fqn,
+                );
                 let kind = if classes.contains(fqn) {
                     CompletionItemKind::CLASS
                 } else {

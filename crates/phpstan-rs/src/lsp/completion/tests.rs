@@ -7,11 +7,12 @@
 
 use super::*;
 
-fn resolve_import_at_end(stmts: &[StmtNode], fqn: &str) -> (String, Option<TextEdit>) {
+fn resolve_import_at_end(parsed: &syntax::ParsedFile, fqn: &str) -> (String, Option<TextEdit>) {
     resolve_import(
-        stmts,
+        &parsed.arenas,
+        &parsed.stmts,
         Positions::utf16(&LineIndex::default()),
-        &context_at(stmts, u32::MAX),
+        &context_at_ids(&parsed.arenas, &parsed.stmts, u32::MAX),
         fqn,
     )
 }
@@ -21,9 +22,8 @@ fn pos_after(text: &str, needle: &str) -> u32 {
     (text.find(needle).unwrap() + needle.len()) as u32
 }
 
-fn parse(text: &str) -> Vec<StmtNode> {
-    let tokens = syntax::lexer::Lexer::new(text).tokenize_with_spans();
-    syntax::parser::Parser::new(tokens).parse_program().unwrap()
+fn parse(text: &str) -> syntax::ParsedFile {
+    syntax::parse(text).unwrap()
 }
 
 #[test]
@@ -180,20 +180,20 @@ fn find_enclosing_names_does_not_mistake_an_if_block_for_a_function() {
 #[test]
 fn find_use_insertion_point_lands_after_the_last_use() {
     let stmts = parse("<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\nclass C {}\n");
-    let point = find_use_insertion_point(&stmts);
+    let point = find_use_insertion_point(&stmts.arenas, &stmts.stmts);
     assert!(point.is_some());
 }
 
 #[test]
 fn find_use_insertion_point_lands_after_a_bare_namespace_with_no_use() {
     let stmts = parse("<?php\nnamespace App;\nclass C {}\n");
-    assert!(find_use_insertion_point(&stmts).is_some());
+    assert!(find_use_insertion_point(&stmts.arenas, &stmts.stmts).is_some());
 }
 
 #[test]
 fn find_use_insertion_point_is_none_with_neither_namespace_nor_use() {
     let stmts = parse("<?php\nclass C {}\n");
-    assert!(find_use_insertion_point(&stmts).is_none());
+    assert!(find_use_insertion_point(&stmts.arenas, &stmts.stmts).is_none());
 }
 
 #[test]

@@ -1464,11 +1464,12 @@ impl Workspace {
 
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = uri_to_path(uri)?;
-        let stmts = self.project.ast_of(&path)?;
-        let stmts = stmts.statements();
+        let tree = self.project.ast_of(&path)?;
+        let stmts = tree.statements();
+        let arenas = tree.arenas();
         let index = self.positions(&path)?;
         Some(DocumentSymbolResponse::Nested(
-            document_symbol::document_symbols(stmts, index),
+            document_symbol::document_symbols(arenas, stmts, index),
         ))
     }
 
@@ -1959,8 +1960,9 @@ impl Workspace {
             .get(&path)
             .cloned()
             .or_else(|| self.project.source(&path).map(str::to_string))?;
-        let stmts = self.project.ast_of(&path)?;
-        let stmts = stmts.statements();
+        let ast = self.project.ast_of(&path)?;
+        let stmts = ast.statements();
+        let arenas = ast.arenas();
         let tokens = completion::tokenize(&text);
         let live_index = LineIndex::new(text.as_bytes());
         let stale_index = self.project.line_index(&path)?;
@@ -2005,6 +2007,7 @@ impl Workspace {
             None => Some(CompletionResponse::Array(completion::enumerate_bare(
                 &self.project,
                 &path,
+                arenas,
                 stmts,
                 cursor.stale,
                 self.unit,

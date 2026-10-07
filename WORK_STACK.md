@@ -610,6 +610,15 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   after `value` became an `ExprId`; it now resolves each argument span through
   `NodeArenas::expr_span`. Formatting ran; tests/builds remain deferred until
   item 9's implementation rows are complete.
+  A static audit found recursive checker, registry and project traversals on
+  the owner-aware arena visitor; item 9.3.e.a-d are now recorded complete,
+  unvalidated. The remaining 9.3.f.c work is completion and parser/tooling
+  builder ownership; 9.V remains closed.
+  Bare-completion import-context and insertion-point readers, including their
+  unit-test parser builder, now use `ParsedFile` arenas. The member-completion
+  receiver probe needs the synthetic per-file owner support in 9.5.c/d, so
+  that work is tracked there; remaining LSP test builders already retain
+  `ParsedProgram`. Formatting ran; no tests/builds have run.
   `cargo fmt --all` completed; tests/builds remain deferred until item 9's
   implementation rows are complete.
   The five specified list arenas and large-payload arenas are implemented;
