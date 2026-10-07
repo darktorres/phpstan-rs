@@ -262,7 +262,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   file's active expression check. Its checker entry point now takes that id
   directly (`e5c79b48`). Project checkers now carry the retained `SyntaxTree`
   owner and assert that their root statement slice belongs to it and that
-  statement IDs resolve through its span table (`ab80189f`, `b53aa02e`). `AstRef`
+  statement IDs resolve through its span table (`ab80189f`, `b53aa02e`).
+  Context-file checkers now retain an `Arc<SyntaxTree>` owner and make the
+  same assertions (`19b30dd3`, unvalidated). `AstRef`
   carries the owner explicitly and no longer dereferences to a statement slice
   (`abf88e87`); callers now request statements explicitly (`c568d7b6`). Expression
   and statement readers still use recursive values. Commit `36ad3c08` removes the address key
