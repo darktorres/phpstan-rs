@@ -262,7 +262,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   owner and assert that their root statement slice belongs to it and that
   statement IDs resolve through its span table (`ab80189f`, `b53aa02e`). `AstRef`
   carries the owner explicitly and no longer dereferences to a statement slice
-  (`abf88e87`); expression and statement readers still use recursive values. Commit `36ad3c08` removes the address key
+  (`abf88e87`); callers now request statements explicitly (`c568d7b6`). Expression
+  and statement readers still use recursive values. Commit `36ad3c08` removes the address key
   and adds cache coverage for ID, question, and scope; completion's mixed-tree
   probe bypasses it (`a6960c97`). Parser errors are boxed and their canonical
   print is preserved (`2e33f369`); an unrun regression test asserts their
