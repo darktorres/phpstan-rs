@@ -5,7 +5,7 @@ use crate::checker::{
     generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for_var,
 };
 use syntax::ast::*;
-use syntax::visit::{Visitor, walk_stmt};
+use syntax::visit::arena::{self, Visitor};
 use types::Name;
 use types::Type;
 
@@ -58,11 +58,14 @@ fn level_of(level: Option<i64>) -> u32 {
 impl<'a> Checker<'a> {
     pub(crate) fn check_block(
         &mut self,
-        stmts: &[StmtNode],
+        stmts: &[StmtId],
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
     ) -> BlockCompletion {
+        if stmts.is_empty() {
+            return BlockCompletion::default();
+        }
         let mut state = BlockState::default();
         let regions = self.goto_regions(stmts);
         let mut next = 0;
@@ -93,7 +96,7 @@ impl<'a> Checker<'a> {
     /// goes in `state`.
     fn check_stmt_range(
         &mut self,
-        stmts: &[StmtNode],
+        stmts: &[StmtId],
         range: std::ops::Range<usize>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
@@ -115,8 +118,14 @@ impl<'a> Checker<'a> {
         // `UnreachableStatementNode` for every other rule, and stopping
         // early here would silently drop real, unrelated diagnostics
         // sitting in a since-dead branch.
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("checking a statement block requires its syntax owner");
+        let arenas = syntax_owner.arenas();
         for i in range {
-            let stmt = &stmts[i];
+            let stmt = arenas
+                .stmt(stmts[i])
+                .expect("statement block ID must resolve in its syntax owner");
             if let StmtKind::Label(name) = &stmt.kind
                 && self.current_function_goto_targets.is_target(&name.name)
             {
@@ -154,7 +163,7 @@ impl<'a> Checker<'a> {
             state.reach.add(last);
             if !state.reported_unreachable
                 && last.terminates
-                && let Some(next) = stmts.get(i + 1)
+                && let Some(next) = stmts.get(i + 1).and_then(|id| arenas.stmt(*id))
                 // A labeled statement `goto`-targeted somewhere else in
                 // this same function is a real jump target, not dead
                 // code, whatever the statement immediately before it
@@ -177,13 +186,17 @@ impl<'a> Checker<'a> {
     /// it, where both are in this list and not in one statement of it (the
     /// list inside that statement has the stretch then). Overlapping
     /// stretches are one.
-    fn goto_regions(&self, stmts: &[StmtNode]) -> Vec<GotoRegion> {
+    fn goto_regions(&self, stmts: &[StmtId]) -> Vec<GotoRegion> {
         let labels = &self.current_function_goto_targets.labels;
         if !labels.iter().any(|l| l.backward) {
             return Vec::new();
         }
-        let holds = |stmt: &StmtNode, is_label: bool, name: &syntax::name::Name| {
-            syntax::visit::any_stmt_in_body(stmt, |s| match &s.kind {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("a backward goto requires its syntax owner");
+        let arenas = syntax_owner.arenas();
+        let holds = |id: StmtId, is_label: bool, name: &syntax::name::Name| {
+            arena::any_stmt_in_body(arenas, id, |s| match &s.kind {
                 StmtKind::Label(n) => is_label && n.name == *name,
                 StmtKind::Goto(n) => !is_label && n.name == *name,
                 _ => false,
@@ -191,10 +204,10 @@ impl<'a> Checker<'a> {
         };
         let mut regions: Vec<GotoRegion> = Vec::new();
         for label in labels.iter().filter(|l| l.backward) {
-            let Some(first) = stmts.iter().position(|s| holds(s, true, &label.name)) else {
+            let Some(first) = stmts.iter().position(|id| holds(*id, true, &label.name)) else {
                 continue;
             };
-            let Some(last) = stmts.iter().rposition(|s| holds(s, false, &label.name)) else {
+            let Some(last) = stmts.iter().rposition(|id| holds(*id, false, &label.name)) else {
                 continue;
             };
             if first >= last {
@@ -226,7 +239,7 @@ impl<'a> Checker<'a> {
     /// back, and only the last pass's findings stay.
     fn check_goto_region(
         &mut self,
-        stmts: &[StmtNode],
+        stmts: &[StmtId],
         region: &GotoRegion,
         locals: &mut Locals,
         declared_return: Option<&Type>,
@@ -317,15 +330,30 @@ impl<'a> Checker<'a> {
     /// assignment; a function/class/enum declaration's own docblock is
     /// skipped here, since the declaration-level half already covers it.
     fn check_statement_doc_tag_values(&mut self, stmt: &StmtNode) {
-        let Some(doc) = stmt.doc_comment.as_deref() else {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
+        let Some(doc) = stmt
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+        else {
+            return;
+        };
+        let Some(arenas) = arenas else {
             return;
         };
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
             StmtKind::Expression(e)
                 if !matches!(
-                    e.kind,
-                    ExprKind::Assign(..) | ExprKind::AssignRef(..) | ExprKind::CompoundAssign(..)
+                    arenas.expr(*e).map(|e| &e.kind),
+                    Some(
+                        ExprKind::Assign(..)
+                            | ExprKind::AssignRef(..)
+                            | ExprKind::CompoundAssign(..)
+                    )
                 ) =>
             {
                 return;
@@ -347,7 +375,15 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         label: &str,
     ) -> bool {
-        let Some(doc) = stmt.doc_comment.as_deref() else {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
+        let Some(doc) = stmt
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+        else {
             return true;
         };
         if !doc.contains("var")
@@ -365,6 +401,10 @@ impl<'a> Checker<'a> {
         if tags.is_empty() {
             return true;
         }
+        let Some(owner) = self.syntax_tree_owner() else {
+            return true;
+        };
+        let arenas = owner.arenas();
         // Reported on the statement itself, unlike the comment-line
         // `varTag.unresolvableType`.
         let span = stmt.span;
@@ -396,19 +436,26 @@ impl<'a> Checker<'a> {
                 .join(", ")
         };
         match &stmt.kind {
-            StmtKind::Expression(e)
+            StmtKind::Expression(e_id)
                 if matches!(
-                    e.kind,
-                    ExprKind::Assign(..) | ExprKind::AssignRef(..) | ExprKind::CompoundAssign(..)
+                    arenas.expr(*e_id).map(|e| &e.kind),
+                    Some(
+                        ExprKind::Assign(..)
+                            | ExprKind::AssignRef(..)
+                            | ExprKind::CompoundAssign(..)
+                    )
                 ) =>
             {
+                let Some(e) = arenas.expr(*e_id) else {
+                    return true;
+                };
                 let (ExprKind::Assign(lhs, _)
                 | ExprKind::AssignRef(lhs, _)
                 | ExprKind::CompoundAssign(_, lhs, _)) = &e.kind
                 else {
                     unreachable!()
                 };
-                let assigned = assigned_variable_names(lhs);
+                let assigned = assigned_variable_names(arenas, *lhs);
                 let mut reported_multiple = false;
                 for tag in &tags {
                     match tag {
@@ -450,15 +497,17 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 let mut names = Vec::new();
-                if let ExprKind::Variable(v) = &subject.kind {
+                if let Some(subject) = arenas.expr(*subject)
+                    && let ExprKind::Variable(v) = &subject.kind
+                {
                     names.push(v.to_string());
                 }
-                if let Some(k) = key
+                if let Some(k) = key.and_then(|id| arenas.expr(id))
                     && let ExprKind::Variable(v) = &k.kind
                 {
                     names.push(v.to_string());
                 }
-                names.extend(assigned_variable_names(value));
+                names.extend(assigned_variable_names(arenas, *value));
                 for tag in &tags {
                     match tag {
                         None if names.len() == 1 => {}
@@ -557,7 +606,15 @@ impl<'a> Checker<'a> {
     /// a statement (not a declaration, whose own rules check its tags),
     /// reported on the comment's own line.
     fn check_statement_var_tags_resolvable(&mut self, stmt: &StmtNode) {
-        let Some(doc) = stmt.doc_comment.as_deref() else {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
+        let Some(doc) = stmt
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+        else {
             return;
         };
         if !doc.contains("var")
@@ -628,11 +685,15 @@ impl<'a> Checker<'a> {
             (StmtKind::Return(Some(_)), [(None, ty)]) => Some(ty.clone()),
             _ => None,
         };
-        let inline_var = inline_var_annotations(stmt, var_tags);
+        let owner = self
+            .syntax_tree_owner()
+            .expect("inline variable annotations retain their parsed file owner");
+        let arenas = owner.arenas();
+        let inline_var = inline_var_annotations(arenas, stmt, var_tags);
         // A tag naming a variable this statement assigns describes the
         // assigned value, so it applies after the assignment (below) -
         // the right-hand side still reads the variable's prior type.
-        let assigned = statement_assigned_variable_names(&stmt.kind);
+        let assigned = statement_assigned_variable_names(arenas, &stmt.kind);
         for (name, ty) in &inline_var {
             if assigned.contains(name) {
                 continue;
@@ -641,12 +702,16 @@ impl<'a> Checker<'a> {
             locals.insert_var(&name.clone(), ty.clone());
         }
         match &stmt.kind {
-            StmtKind::Expression(e) => {
+            StmtKind::Expression(e_id) => {
+                let Some(e) = arenas.expr(*e_id) else {
+                    return completion;
+                };
                 self.in_bare_statement_position = true;
                 let ty = self.check_expr(e, locals, label);
                 value_is_never = ty.is_never();
                 if self.collect_inlay_hints
                     && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
+                    && let Some(lhs) = arenas.expr(*lhs)
                     && let ExprKind::Variable(name) = &lhs.kind
                     && !ty.is_mixed()
                     && !inline_var.iter().any(|(n, _)| n.as_str() == name.as_ref())
@@ -687,10 +752,11 @@ impl<'a> Checker<'a> {
                 // doc comment has the "which chain position is actually
                 // safe" reasoning.
                 // A variable an assertion narrows to `never` fails it.
+                let assert_condition = bare_assert_condition(arenas, e.id);
                 let inhabited: Vec<LocalKey> = if matches!(
                     e.kind,
                     ExprKind::Call(..) | ExprKind::MethodCall(..) | ExprKind::StaticCall(..)
-                ) || bare_assert_condition(e).is_some()
+                ) || assert_condition.is_some()
                 {
                     locals
                         .iter()
@@ -700,7 +766,9 @@ impl<'a> Checker<'a> {
                 } else {
                     Vec::new()
                 };
-                if let Some(cond) = bare_assert_condition(e) {
+                if let Some(cond) = assert_condition
+                    && let Some(cond) = arenas.expr(cond)
+                {
                     self.apply_narrowing(cond, locals, true);
                 }
                 // PHPUnit's own narrowing-relevant assertions
@@ -736,12 +804,19 @@ impl<'a> Checker<'a> {
                 // false, `B` never runs and the statement simply ends,
                 // without proving `A` either way).
                 if let ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, lhs, rhs) = &e.kind
-                    && self.infer_expr(rhs, locals).is_never()
+                    && arenas
+                        .expr(*rhs)
+                        .is_some_and(|rhs| self.infer_expr(rhs, locals).is_never())
                 {
-                    self.apply_narrowing(lhs, locals, true);
+                    if let Some(lhs) = arenas.expr(*lhs) {
+                        self.apply_narrowing(lhs, locals, true);
+                    }
                 }
             }
-            StmtKind::Return(Some(e)) => {
+            StmtKind::Return(Some(e_id)) => {
+                let Some(e) = arenas.expr(*e_id) else {
+                    return completion;
+                };
                 let checked = self.check_expr(e, locals, label);
                 let actual = return_var_tag.clone().unwrap_or(checked);
                 // Real PHPStan pushes the actual returned value's type
@@ -943,7 +1018,10 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Echo(exprs) => {
-                for (i, e) in exprs.iter().enumerate() {
+                for (i, e_id) in arenas.expr_ids(exprs).iter().enumerate() {
+                    let Some(e) = arenas.expr(*e_id) else {
+                        continue;
+                    };
                     let ty = self.check_expr(e, locals, label);
                     self.check_echo_validity(&ty, i, e.span);
                     // `echo` implicitly invokes `__toString()` on an
@@ -952,28 +1030,53 @@ impl<'a> Checker<'a> {
                     self.check_implicit_tostring_usage(&ty, e.span);
                     self.forget_what_an_operation_may_change(
                         &ty,
-                        crate::checker::call_effects::is_this(e),
+                        crate::checker::call_effects::is_this(self, e),
                         crate::registry::summaries::Operation::String,
                         locals,
                     );
                 }
             }
-            StmtKind::Block(stmts)
-            | StmtKind::Declare {
+            StmtKind::Block(stmts) => {
+                completion = self
+                    .check_block(arenas.stmt_ids(stmts), locals, declared_return, label)
+                    .completion
+            }
+            StmtKind::Declare {
                 body: Some(stmts), ..
             } => {
                 completion = self
-                    .check_block(stmts, locals, declared_return, label)
+                    .check_block(arenas.stmt_ids(stmts), locals, declared_return, label)
                     .completion
             }
             StmtKind::If(if_stmt) => {
-                let branches: Vec<(&ExprNode, &StmtNode)> =
-                    std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
-                        .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
-                        .collect();
+                let mut branches: Vec<(&ExprNode, &StmtNode)> =
+                    Vec::with_capacity(1 + if_stmt.elseifs.len());
+                branches.push((
+                    arenas
+                        .expr(if_stmt.cond)
+                        .expect("if condition belongs to its file owner"),
+                    arenas
+                        .stmt(if_stmt.then_branch)
+                        .expect("if body belongs to its file owner"),
+                ));
+                for elseif in &if_stmt.elseifs {
+                    branches.push((
+                        arenas
+                            .expr(elseif.cond)
+                            .expect("elseif condition belongs to its file owner"),
+                        arenas
+                            .stmt(elseif.body)
+                            .expect("elseif body belongs to its file owner"),
+                    ));
+                }
+                let else_branch = if_stmt.else_branch.map(|id| {
+                    arenas
+                        .stmt(id)
+                        .expect("else body belongs to its file owner")
+                });
                 completion = self.check_if(
                     &branches,
-                    if_stmt.else_branch.as_deref(),
+                    else_branch,
                     locals,
                     declared_return,
                     label,
@@ -981,11 +1084,23 @@ impl<'a> Checker<'a> {
                 );
             }
             StmtKind::While { cond, body } => {
+                let cond = arenas
+                    .expr(*cond)
+                    .expect("while condition belongs to its file owner");
+                let body = arenas
+                    .stmt(*body)
+                    .expect("while body belongs to its file owner");
                 self.check_while(cond, body, locals, declared_return, label);
                 completion =
                     Completion::while_loop(is_truthy_literal(cond), self.loop_body_completion);
             }
             StmtKind::DoWhile { body, cond } => {
+                let body = arenas
+                    .stmt(*body)
+                    .expect("do-while body belongs to its file owner");
+                let cond = arenas
+                    .expr(*cond)
+                    .expect("do-while condition belongs to its file owner");
                 self.check_do_while(body, cond, locals, declared_return, label);
                 completion =
                     Completion::do_while(is_truthy_literal(cond), self.loop_body_completion);
@@ -996,9 +1111,14 @@ impl<'a> Checker<'a> {
                 step,
                 body,
             } => {
-                self.check_for(init, cond, step, body, locals, declared_return, label);
+                let init = arenas.expr_ids(init);
+                let cond = arenas.expr_ids(cond);
+                let step = arenas.expr_ids(step);
+                self.check_for(init, cond, step, *body, locals, declared_return, label);
                 completion = Completion::while_loop(
-                    cond.last().is_none_or(is_truthy_literal),
+                    cond.last()
+                        .and_then(|id| arenas.expr(*id))
+                        .is_none_or(is_truthy_literal),
                     self.loop_body_completion,
                 );
             }
@@ -1009,6 +1129,20 @@ impl<'a> Checker<'a> {
                 by_ref,
                 body,
             } => {
+                let subject = arenas
+                    .expr(*subject)
+                    .expect("foreach subject belongs to its file owner");
+                let key = key.map(|id| {
+                    arenas
+                        .expr(id)
+                        .expect("foreach key belongs to its file owner")
+                });
+                let value = arenas
+                    .expr(*value)
+                    .expect("foreach value belongs to its file owner");
+                let body = arenas
+                    .stmt(*body)
+                    .expect("foreach body belongs to its file owner");
                 let at_least_once = self.check_foreach(
                     subject,
                     key.as_deref(),
@@ -1023,6 +1157,9 @@ impl<'a> Checker<'a> {
                 completion = Completion::foreach(at_least_once, self.loop_body_completion);
             }
             StmtKind::Switch { subject, cases } => {
+                let subject = arenas
+                    .expr(*subject)
+                    .expect("switch subject belongs to its file owner");
                 completion =
                     self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
             }
@@ -1031,9 +1168,20 @@ impl<'a> Checker<'a> {
                 catches,
                 finally,
             } => {
-                completion = self.check_try(body, catches, finally, locals, declared_return, label)
+                completion = self.check_try(
+                    arenas,
+                    *body,
+                    catches,
+                    finally,
+                    locals,
+                    declared_return,
+                    label,
+                )
             }
-            StmtKind::Throw(e) => {
+            StmtKind::Throw(e_id) => {
+                let Some(e) = arenas.expr(*e_id) else {
+                    return completion;
+                };
                 self.check_throw(e, locals, label);
                 completion = Completion::EXITS;
             }
@@ -1046,8 +1194,10 @@ impl<'a> Checker<'a> {
                 completion = Completion::TERMINATES;
             }
             StmtKind::Unset(targets) => {
-                for target in targets {
-                    self.check_unset_target(target, locals, label);
+                for target in arenas.expr_ids(targets) {
+                    if let Some(target) = arenas.expr(*target) {
+                        self.check_unset_target(target, locals, label);
+                    }
                 }
             }
             // `global $x;` binds $x to whatever the global scope holds,
@@ -1061,10 +1211,13 @@ impl<'a> Checker<'a> {
                         // `global ${expr};` imports a variable whose name
                         // is only known at runtime.
                         GlobalVar::Dynamic(e) => {
+                            let Some(e) = arenas.expr(*e) else {
+                                continue;
+                            };
                             let ty = self.check_expr(e, locals, label);
                             self.forget_what_an_operation_may_change(
                                 &ty,
-                                crate::checker::call_effects::is_this(e),
+                                crate::checker::call_effects::is_this(self, e),
                                 crate::registry::summaries::Operation::String,
                                 locals,
                             );
@@ -1121,7 +1274,7 @@ impl<'a> Checker<'a> {
                     // calls see whatever an earlier call left behind, so
                     // only its general type is known.
                     let ty = default
-                        .as_ref()
+                        .and_then(|id| arenas.expr(id))
                         .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
                         .unwrap_or(Type::mixed());
                     purge_stale_narrowing_for_var(locals, name);
@@ -1174,9 +1327,17 @@ impl<'a> Checker<'a> {
             // occurrence - `GlobalConst` needs no class/FQN context the
             // way `ClassDecl` does, so one arm here is enough.
             StmtKind::GlobalConst(consts) => {
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("global-constant values retain their parsed file owner");
+                let arenas = owner.arenas();
+                let consts = arenas.class_consts(consts);
                 self.check_global_const_attributes(consts, stmt.span, label);
                 for c in consts {
-                    let value = self.infer_expr(&c.value, locals);
+                    let expr = arenas
+                        .expr(c.value)
+                        .expect("global-constant value belongs to its parsed file owner");
+                    let value = self.infer_expr(expr, locals);
                     self.check_configured_constant_value(
                         None,
                         c.fq_name(),
@@ -1214,7 +1375,11 @@ impl<'a> Checker<'a> {
         // puts the tag on a statement *inside* the loop body, which the
         // before-dispatch application above already handles correctly
         // and completely on its own.
-        let defined = statement_defined_variable_names(&stmt.kind);
+        let owner = self
+            .syntax_tree_owner()
+            .expect("statement variable names retain their parsed file owner");
+        let arenas = owner.arenas();
+        let defined = statement_defined_variable_names(arenas, &stmt.kind);
         for (name, ty) in inline_var {
             if defined.contains(&name) {
                 purge_stale_narrowing_for_var(locals, &name);
@@ -1394,13 +1559,16 @@ impl<'a> Checker<'a> {
             // unconditionally afterward, matching an ordinary stack
             // discipline regardless of how `then_branch`'s own check
             // returns.
-            let or_disjuncts = match &cond.peeled().kind {
-                ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
-                    Some(((**l).clone(), (**r).clone()))
-                }
+            let owner = self
+                .syntax_tree_owner()
+                .expect("if narrowing requires the syntax tree owner");
+            let arenas = owner.arenas();
+            let peeled_cond = arenas.peeled(cond.id).and_then(|id| arenas.expr(id));
+            let or_disjuncts = match peeled_cond.map(|e| &e.kind) {
+                Some(ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r)) => Some((*l, *r)),
                 _ => None,
             };
-            if let Some(pair) = or_disjuncts.clone() {
+            if let Some(pair) = or_disjuncts {
                 self.pending_or_disjunctions.push(pair);
             }
             // `Checker::active_discriminant`'s own doc comment - a bare
@@ -1408,8 +1576,8 @@ impl<'a> Checker<'a> {
             // currently-recognized shape, matching this project's own
             // "narrow correctly first" precedent for a new fact-tracking
             // trigger.
-            let discriminant_subject = match &cond.peeled().kind {
-                ExprKind::Variable(name) => Some(locals.var_key(name)),
+            let discriminant_subject = match peeled_cond.map(|e| &e.kind) {
+                Some(ExprKind::Variable(name)) => Some(locals.var_key(name)),
                 _ => None,
             };
             let mut then_locals = locals.clone();
@@ -1497,7 +1665,12 @@ impl<'a> Checker<'a> {
     /// A statement's resolved `@var` tags; none on a declaration, whose
     /// own rules read its tags.
     fn statement_var_tags_of(&self, stmt: &StmtNode) -> Vec<(Option<String>, Type)> {
-        let Some(doc) = stmt.doc_comment.as_deref() else {
+        let arenas = self.syntax_arenas();
+        let Some(doc) = stmt
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+        else {
             return Vec::new();
         };
         if !doc.contains("var")
@@ -1516,47 +1689,64 @@ impl<'a> Checker<'a> {
     /// indexed into the registry, so calls to it resolve, but exempt from
     /// every diagnostic.
     pub(crate) fn check_nested_declaration(&mut self, stmt: &StmtNode) {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
         match &stmt.kind {
-            StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
+            StmtKind::FunctionDecl(id) => {
+                let arenas = arenas.expect("nested function checks retain their parsed file owner");
+                if let Some(function) = arenas.function(*id) {
+                    self.check_function(function, None, false, true);
+                }
+            }
             StmtKind::ClassDecl(c) => {
+                let arenas = arenas.expect("nested class checks retain their parsed file owner");
+                let def = arenas
+                    .class(c.def)
+                    .expect("nested class definition belongs to its retained file owner");
                 let fqn = c.fq_name().to_string();
                 self.check_nested_class_declaration(&fqn, c);
                 if self.settings.sidz.check_magic_numbers {
-                    self.check_magic_numbers_in_properties(&c.def.properties);
+                    self.check_magic_numbers_in_properties(arenas, def.properties(arenas));
                 }
-                self.check_attributes(&c.def.attrs, &fqn);
-                self.check_attribute_targets(&c.def.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                let class_attrs = arenas.attributes(def.attrs);
+                self.check_attributes(class_attrs, &fqn);
+                self.check_attribute_targets(class_attrs, ATTRIBUTE_TARGET_CLASS, "class");
                 self.check_self_attribute_class_declaration(
-                    &c.def.attrs,
+                    class_attrs,
                     &fqn,
-                    c.def.kind,
-                    c.def.is_abstract,
+                    def.kind,
+                    def.is_abstract,
                 );
                 self.check_class_like_marker_attributes(
-                    &c.def.attrs,
-                    c.def.kind,
-                    c.def.is_readonly,
+                    class_attrs,
+                    def.kind,
+                    def.is_readonly,
                     &fqn,
                 );
-                if c.def.kind != ClassKind::Enum {
-                    self.check_enum_cases_outside_enum(&c.def.enum_cases);
+                if def.kind != ClassKind::Enum {
+                    self.check_enum_cases_outside_enum(def.enum_cases(arenas));
                 }
-                for case in &c.def.enum_cases {
-                    self.check_attributes(&case.attrs, &fqn);
+                for case in def.enum_cases(arenas) {
+                    let attrs = arenas.attributes(case.attrs);
+                    self.check_attributes(attrs, &fqn);
                     self.check_attribute_targets(
-                        &case.attrs,
+                        attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,
                         "class constant",
                     );
                 }
-                for p in &c.def.properties {
-                    self.check_attributes(&p.attrs, &fqn);
-                    self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
+                for p in def.properties(arenas) {
+                    let attrs = arenas.attributes(p.attrs);
+                    self.check_attributes(attrs, &fqn);
+                    self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
                 }
-                for cc in &c.def.consts {
-                    self.check_attributes(&cc.attrs, &fqn);
+                for cc in def.consts(arenas) {
+                    let attrs = arenas.attributes(cc.attrs);
+                    self.check_attributes(attrs, &fqn);
                     self.check_attribute_targets(
-                        &cc.attrs,
+                        attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,
                         "class constant",
                     );
@@ -1573,18 +1763,18 @@ impl<'a> Checker<'a> {
                 // `current_class` set to the trait's own name, wrongly
                 // flagging a method provided only by a sibling trait on
                 // the real host class.
-                if c.def.kind == ClassKind::Trait {
+                if def.kind == ClassKind::Trait {
                     self.check_trait_methods(&fqn, c);
                 } else {
-                    for m in &c.def.methods {
+                    for m in arenas.methods(def.methods) {
                         self.check_function(
                             &m.function,
                             Some(&fqn),
                             m.is_static,
-                            !m.is_abstract && c.def.kind != ClassKind::Interface,
+                            !m.is_abstract && def.kind != ClassKind::Interface,
                         );
                     }
-                    self.record_property_type_site(&fqn, vec![Name::from(&fqn)], &c.def);
+                    self.record_property_type_site(arenas, &fqn, vec![Name::from(&fqn)], def);
                 }
             }
             _ => {}
@@ -1595,36 +1785,48 @@ impl<'a> Checker<'a> {
     /// (`check_nested_declaration`); not those in its expressions, which
     /// belong to a closure or an anonymous class and are checked with it.
     pub(crate) fn check_nested_declarations(&mut self, stmt: &StmtNode) {
-        NestedDeclarations { checker: self }.visit_stmt(stmt);
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let mut declarations = NestedDeclarations(Vec::new());
+        declarations.visit_stmt(arenas, stmt.id);
+        for declaration in declarations.0 {
+            if let Some(declaration) = arenas.stmt(declaration) {
+                self.check_nested_declaration(declaration);
+            }
+        }
     }
 }
 
 /// See `Checker::check_nested_declarations`.
-struct NestedDeclarations<'c, 'a> {
-    checker: &'c mut Checker<'a>,
-}
+struct NestedDeclarations(Vec<StmtId>);
 
-impl<'ast> Visitor<'ast> for NestedDeclarations<'_, '_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for NestedDeclarations {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {
-                self.checker.check_nested_declaration(stmt);
+                self.0.push(id);
             }
-            _ => walk_stmt(self, stmt),
+            _ => arena::walk_stmt(self, arenas, id),
         }
     }
 
-    fn visit_expr(&mut self, _: &'ast ExprNode) {}
+    fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
 }
 
 /// The `(name, type)` assertions a statement's `@var` tags make: each
 /// named tag, and a single unnamed one for the one variable the
 /// statement defines (see `statement_defined_variable_names`).
 fn inline_var_annotations(
+    arenas: &NodeArenas,
     stmt: &StmtNode,
     tags: Vec<(Option<String>, Type)>,
 ) -> Vec<(String, Type)> {
-    let unnamed_target = match statement_defined_variable_names(&stmt.kind).as_slice() {
+    let unnamed_target = match statement_defined_variable_names(arenas, &stmt.kind).as_slice() {
         [single] => Some(single.clone()),
         _ => None,
     };
@@ -1668,28 +1870,31 @@ fn inline_var_annotations(
 /// walked past the leftmost position, even for a real, common `assert(
 /// $a) && assert($b);` double-assertion, a real, disclosed scope trim
 /// rather than a wrong answer.
-fn bare_assert_condition(e: &ExprNode) -> Option<&ExprNode> {
-    fn as_bare_assert_call(e: &ExprNode) -> Option<&ExprNode> {
+fn bare_assert_condition(arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
+    fn as_bare_assert_call(arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
+        let e = arenas.expr(id)?;
         let ExprKind::Call(callee, args) = &e.kind else {
             return None;
         };
+        let callee = arenas.expr(*callee)?;
         let ExprKind::Name(name) = &callee.kind else {
             return None;
         };
         if name.trim_start_matches('\\') != "assert" {
             return None;
         }
-        args.first().map(|a| &a.value)
+        arenas.args(*args).first().map(|a| a.value)
     }
+    let e = arenas.expr(id)?;
     match &e.kind {
-        ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, _) => as_bare_assert_call(l),
-        _ => as_bare_assert_call(e),
+        ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, _) => as_bare_assert_call(arenas, *l),
+        _ => as_bare_assert_call(arenas, id),
     }
 }
 
-fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
+fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec<String> {
     match kind {
-        StmtKind::Expression(_) => statement_assigned_variable_names(kind),
+        StmtKind::Expression(_) => statement_assigned_variable_names(arenas, kind),
         // `StmtKind::StaticVar`'s own arm above infers purely from the
         // declaration's default expression (`static $x = null;` types
         // `$x` as exactly `Null`), so it needs the same "trust the
@@ -1708,23 +1913,33 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
         // declines to guess between) - the same "don't guess" scope
         // every other unlisted shape already gets by falling through to
         // the empty-`Vec` arm.
-        StmtKind::Foreach { key, value, .. } if key.is_none() => match &value.kind {
-            ExprKind::Variable(name) => vec![name.to_string()],
-            _ => Vec::new(),
-        },
+        StmtKind::Foreach { key, value, .. } if key.is_none() => arenas
+            .expr(*value)
+            .and_then(|value| match &value.kind {
+                ExprKind::Variable(name) => Some(vec![name.to_string()]),
+                _ => None,
+            })
+            .unwrap_or_default(),
         _ => Vec::new(),
     }
 }
 
 /// Every variable an assignment statement (`$x = ...`, `[$a, [$b]] =
 /// ...`, `$x = &...`) binds.
-fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
-    fn collect(target: &ExprNode, out: &mut Vec<String>) {
+fn statement_assigned_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec<String> {
+    fn collect(arenas: &NodeArenas, id: ExprId, out: &mut Vec<String>) {
+        let Some(target) = arenas.expr(id) else {
+            return;
+        };
         match &target.kind {
             ExprKind::Variable(name) => out.push(name.to_string()),
             ExprKind::Destructure(items, _) => {
-                for target in items.iter().filter_map(|item| item.target.as_ref()) {
-                    collect(target, out);
+                for target in arenas
+                    .destructure_items(items)
+                    .iter()
+                    .filter_map(|item| item.target)
+                {
+                    collect(arenas, target, out);
                 }
             }
             _ => {}
@@ -1732,9 +1947,10 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
     }
     let mut out = Vec::new();
     if let StmtKind::Expression(e) = kind
+        && let Some(e) = arenas.expr(*e)
         && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
     {
-        collect(lhs, &mut out);
+        collect(arenas, *lhs, &mut out);
     }
     out
 }
@@ -1753,13 +1969,17 @@ fn static_variable_type(initializer: &Type) -> Type {
 
 /// The plain variables an assignment target writes: `$x`, or each of a
 /// `[$a, $b]`/`list($a, $b)` destructuring's.
-pub(super) fn assigned_variable_names(target: &ExprNode) -> Vec<String> {
+pub(super) fn assigned_variable_names(arenas: &NodeArenas, target: ExprId) -> Vec<String> {
+    let Some(target) = arenas.expr(target) else {
+        return Vec::new();
+    };
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
-        ExprKind::Destructure(items, _) => items
+        ExprKind::Destructure(items, _) => arenas
+            .destructure_items(items)
             .iter()
-            .filter_map(|item| item.target.as_ref())
-            .flat_map(assigned_variable_names)
+            .filter_map(|item| item.target)
+            .flat_map(|id| assigned_variable_names(arenas, id))
             .collect(),
         _ => Vec::new(),
     })

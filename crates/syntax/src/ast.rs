@@ -1187,7 +1187,7 @@ pub enum StmtKind {
     Use(UseImportRange),
     // Top-level `const NAME = value, ...;`, distinct from a class's own
     // consts (ClassConst is reused for the shape, since it's identical).
-    GlobalConst(Vec<ClassConst>),
+    GlobalConst(ClassConstRange),
     // `static $x = 1, $y;` - a function-local static variable declaration
     // (name, optional initializer). Persistence across calls isn't
     // modeled - only its scoping (the variable is defined from here on)

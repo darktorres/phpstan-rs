@@ -1,9 +1,9 @@
 use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::visit::{Visitor, walk_expr, walk_stmts};
+use crate::visit::arena::{self, Visitor};
 
-fn parse(src: &str) -> Vec<StmtNode> {
+fn parse(src: &str) -> crate::parser::ParsedProgram {
     Parser::new(Lexer::new(src).tokenize_with_spans())
         .parse_program()
         .expect("parses")
@@ -18,8 +18,11 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
                 .push((name.written.to_string(), name.resolved.clone()));
         }
     }
-    impl<'ast> Visitor<'ast> for Collect {
-        fn visit_expr(&mut self, e: &'ast ExprNode) {
+    impl Visitor for Collect {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            let Some(e) = arenas.expr(id) else {
+                return;
+            };
             match &e.kind {
                 ExprKind::Name(n) => self.push(n),
                 ExprKind::ClassConstFetch(StaticTarget::Name(n), _)
@@ -27,24 +30,27 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
                 ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => self.push(n),
                 _ => {}
             }
-            walk_expr(self, e);
+            arena::walk_expr(self, arenas, id);
         }
-        fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
-            for n in c.def.extends.iter().chain(&c.def.implements) {
-                self.push(n);
+        fn visit_class_decl(&mut self, arenas: &NodeArenas, c: &ClassDecl) {
+            if let Some(def) = arenas.class(c.def) {
+                for n in def.extends(arenas).iter().chain(def.implements(arenas)) {
+                    self.push(n);
+                }
             }
-            crate::visit::walk_class_decl(self, c);
+            arena::walk_class_decl(self, arenas, c);
         }
-        fn visit_attribute(&mut self, a: &'ast Attribute) {
+        fn visit_attribute(&mut self, arenas: &NodeArenas, a: &Attribute) {
             self.push(&a.name);
+            arena::walk_attribute(self, arenas, a);
         }
-        fn visit_catch_clause(&mut self, c: &'ast CatchClause) {
-            for n in &c.types {
+        fn visit_catch_clause(&mut self, arenas: &NodeArenas, c: &CatchClause) {
+            for n in arenas.qualified_names(&c.types) {
                 self.push(n);
             }
-            crate::visit::walk_catch_clause(self, c);
+            arena::walk_catch_clause(self, arenas, c);
         }
-        fn visit_type_hint(&mut self, h: &'ast TypeHint) {
+        fn visit_type_hint(&mut self, _arenas: &NodeArenas, h: &TypeHint) {
             if let TypeHintKind::Name(n) = &h.kind {
                 self.push(n);
             }
@@ -52,7 +58,7 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
     }
     let program = parse(src);
     let mut c = Collect(Vec::new());
-    walk_stmts(&mut c, &program);
+    arena::walk_stmts(&mut c, &program.arenas, program.statements());
     c.0
 }
 
@@ -144,22 +150,38 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
         "<?php\nnamespace A;\nclass C {}\nconst K = 1;\nnamespace B {\n    enum E {}\n    if (true) {\n        function f() {}\n    }\n}\n",
     );
     let mut names = Vec::new();
-    for_each_in_context(&program, |stmt, _| match &stmt.kind {
-        StmtKind::ClassDecl(c) => names.push(Some(c.namespaced_name.clone())),
-        StmtKind::GlobalConst(consts) => {
-            names.extend(consts.iter().map(|c| c.namespaced_name.clone()))
-        }
-        StmtKind::If(IfStmt { then_branch, .. }) => {
-            let StmtKind::Block(body) = &then_branch.kind else {
-                panic!("expected a block, got {:?}", then_branch.kind);
-            };
-            let StmtKind::FunctionDecl(f) = &body[0].kind else {
-                panic!("expected a function, got {:?}", body[0].kind);
-            };
-            names.push(f.namespaced_name.clone());
-        }
-        _ => {}
-    });
+    for_each_in_context_ids(
+        &program.arenas,
+        program.statements(),
+        |_, stmt, _| match &stmt.kind {
+            StmtKind::ClassDecl(c) => names.push(Some(c.namespaced_name.clone())),
+            StmtKind::GlobalConst(consts) => names.extend(
+                program
+                    .arenas
+                    .class_consts(consts)
+                    .iter()
+                    .map(|c| c.namespaced_name.clone()),
+            ),
+            StmtKind::If(IfStmt { then_branch, .. }) => {
+                let StmtKind::Block(body) =
+                    &program.arenas.stmt(*then_branch).expect("then branch").kind
+                else {
+                    panic!("expected a block");
+                };
+                let StmtKind::FunctionDecl(f) = &program
+                    .arenas
+                    .stmt(program.arenas.stmt_ids(body)[0])
+                    .expect("body statement")
+                    .kind
+                else {
+                    panic!("expected a function");
+                };
+                let f = program.arenas.function(*f).expect("function payload");
+                names.push(f.namespaced_name.clone());
+            }
+            _ => {}
+        },
+    );
     let names: Vec<Option<&str>> = names.iter().map(Option::as_deref).collect();
     assert_eq!(
         names,
@@ -172,7 +194,13 @@ fn the_context_at_a_position_has_only_what_precedes_it() {
     let src = "<?php\nnamespace A;\nuse X\\Y;\nnamespace B;\nuse Z\\Y;\n";
     let program = parse(src);
     let index = crate::span::LineIndex::new(src.as_bytes());
-    let at = |line| context_at(&program, index.line_start(line).unwrap_or(u32::MAX));
+    let at = |line| {
+        context_at_ids(
+            &program.arenas,
+            program.statements(),
+            index.line_start(line).unwrap_or(u32::MAX),
+        )
+    };
     assert_eq!(at(3).resolve("Y"), "A\\Y");
     assert_eq!(at(4).resolve("Y"), "X\\Y");
     assert_eq!(at(6).resolve("Y"), "Z\\Y");
@@ -212,8 +240,8 @@ fn resolves_to_is_resolve_equal_to_the_name() {
         "",
     ];
     for source in sources {
-        let stmts = parse(source);
-        let ctx = context_at(&stmts, u32::MAX);
+        let program = parse(source);
+        let ctx = context_at_ids(&program.arenas, program.statements(), u32::MAX);
         for name in names {
             for fqn in candidates {
                 assert_eq!(
@@ -345,14 +373,16 @@ fn the_import_table_answers_as_the_table_of_owned_strings_did() {
 
 #[test]
 fn a_context_has_a_version_for_what_it_resolves_by() {
-    let stmts = parse("<?php namespace A; use B\\C; use D\\E;");
+    let program = parse("<?php namespace A; use B\\C; use D\\E;");
     let mut seen = Vec::new();
-    for_each_in_context(&stmts, |_, ctx| seen.push(ctx.version()));
+    for_each_in_context_ids(&program.arenas, program.statements(), |_, _, ctx| {
+        seen.push(ctx.version())
+    });
     // The namespace and each `use` is a state of its own.
     assert_eq!(seen.len(), 3);
     assert!(seen[0] != 0 && seen[0] != seen[1] && seen[1] != seen[2]);
     // A copy resolves as the original does, and says so.
-    let mut ctx = context_at(&stmts, u32::MAX);
+    let mut ctx = context_at_ids(&program.arenas, program.statements(), u32::MAX);
     let copy = ctx.clone();
     assert_eq!(ctx.version(), copy.version());
     ctx.set_namespace("A");

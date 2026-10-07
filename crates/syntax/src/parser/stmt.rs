@@ -300,7 +300,7 @@ impl Parser<'_> {
             }
             Token::Keyword(Keyword::Const) => {
                 self.skip();
-                let mut consts = Vec::new();
+                let consts_start = self.class_const_scratch.len();
                 loop {
                     let const_start = self.current_pos();
                     let name_start = self.current_pos();
@@ -311,7 +311,7 @@ impl Parser<'_> {
                     };
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
-                    consts.push(ClassConst {
+                    self.class_const_scratch.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
                         name: self.ident(name, name_span),
@@ -338,6 +338,10 @@ impl Parser<'_> {
                     }
                 }
                 self.expect_semicolon()?;
+                let consts = self
+                    .node_arenas
+                    .borrow_mut()
+                    .alloc_class_consts(self.class_const_scratch.drain(consts_start..));
                 self.stmt(StmtKind::GlobalConst(consts), start)
             }
             Token::Keyword(Keyword::Try) => self.parse_try()?,

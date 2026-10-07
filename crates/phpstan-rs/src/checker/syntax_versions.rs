@@ -9,10 +9,7 @@
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{
-    Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_param, walk_property_decl,
-    walk_stmt, walk_stmts,
-};
+use syntax::visit::arena::{self, Visitor};
 use syntax::{SyntaxMark, SyntaxMarks};
 use types::php_version::PhpFeature;
 
@@ -74,7 +71,12 @@ const MARKS: &[(SyntaxMark, PhpFeature, &str, &str)] = &[
 impl<'a> Checker<'a> {
     /// Reports the syntax of `program` and of `marks` that a PHP version
     /// the project runs on lacks.
-    pub(crate) fn check_syntax_versions(&mut self, program: &[StmtNode], marks: &SyntaxMarks) {
+    pub(crate) fn check_syntax_versions(
+        &mut self,
+        arenas: &NodeArenas,
+        program: &[StmtId],
+        marks: &SyntaxMarks,
+    ) {
         // Every version the project runs on has every syntax gated here.
         if self
             .registry
@@ -88,7 +90,7 @@ impl<'a> Checker<'a> {
                 self.report_unsupported_syntax(feature, what, span, identifier);
             }
         }
-        walk_stmts(&mut Gates { checker: self }, program);
+        arena::walk_stmts(&mut Gates { checker: self }, arenas, program);
     }
 
     /// Reports `what` (its subject and verb, "Enums are") at `span` when a
@@ -130,8 +132,8 @@ impl Gates<'_, '_> {
     }
 
     /// `new` in an initializer, which PHP takes only from 8.1.
-    fn initializer(&mut self, value: &ExprNode) {
-        if let Some(span) = new_in(value) {
+    fn initializer(&mut self, arenas: &NodeArenas, value: ExprId) {
+        if let Some(span) = new_in(arenas, value) {
             self.report(
                 PhpFeature::NewInInitializers,
                 "New in initializers is",
@@ -142,35 +144,42 @@ impl Gates<'_, '_> {
     }
 
     /// Member access on `new` without its parentheses (`new A()->f()`).
-    fn receiver(&mut self, receiver: &ExprNode) {
+    fn receiver(&mut self, arenas: &NodeArenas, receiver: ExprId) {
         if matches!(
-            receiver.kind,
-            ExprKind::New(..) | ExprKind::NewAnonymousClass(_)
+            arenas.expr(receiver).map(|expr| &expr.kind),
+            Some(ExprKind::New(..) | ExprKind::NewAnonymousClass(_))
         ) {
             self.report(
                 PhpFeature::NewWithoutParentheses,
                 "Member access on new without parentheses is",
-                receiver.span,
+                arenas.expr_span(receiver).unwrap_or_default(),
                 "new.withoutParenthesesNotSupported",
             );
         }
     }
 }
 
-impl<'ast> Visitor<'ast> for Gates<'_, '_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Gates<'_, '_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         match &stmt.kind {
             StmtKind::StaticVar(vars) => {
-                for value in vars.iter().filter_map(|(_, value)| value.as_ref()) {
-                    self.initializer(value);
+                for &value in vars.iter().filter_map(|(_, value)| value.as_ref()) {
+                    self.initializer(arenas, value);
                 }
             }
             StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.initializer(&c.value);
+                for c in arenas.class_consts(consts) {
+                    self.initializer(arenas, c.value);
                 }
             }
-            StmtKind::ClassDecl(class) if class.def.kind == ClassKind::Enum => {
+            StmtKind::ClassDecl(class)
+                if arenas
+                    .class(class.def)
+                    .is_some_and(|def| def.kind == ClassKind::Enum) =>
+            {
                 self.report(
                     PhpFeature::Enums,
                     "Enums are",
@@ -180,14 +189,14 @@ impl<'ast> Visitor<'ast> for Gates<'_, '_> {
             }
             _ => {}
         }
-        walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_class_def(&mut self, class: &'ast ClassDef) {
-        walk_class_def(self, class);
+    fn visit_class_def(&mut self, arenas: &NodeArenas, class: &ClassDef) {
+        arena::walk_class_def(self, arenas, class);
     }
 
-    fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {
+    fn visit_property_decl(&mut self, arenas: &NodeArenas, property: &PropertyDecl) {
         if let Some(hint) = &property.type_hint {
             self.report(
                 PhpFeature::TypedProperties,
@@ -196,24 +205,24 @@ impl<'ast> Visitor<'ast> for Gates<'_, '_> {
                 "property.typeNotSupported",
             );
         }
-        walk_property_decl(self, property);
+        arena::walk_property_decl(self, arenas, property);
     }
 
-    fn visit_param(&mut self, param: &'ast Param) {
-        if let Some(default) = &param.default {
-            self.initializer(default);
+    fn visit_param(&mut self, arenas: &NodeArenas, param: &Param) {
+        if let Some(default) = param.default {
+            self.initializer(arenas, default);
         }
-        walk_param(self, param);
+        arena::walk_param(self, arenas, param);
     }
 
-    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
-        for arg in &attribute.args {
-            self.initializer(&arg.value);
-            self.visit_expr(&arg.value);
+    fn visit_attribute(&mut self, arenas: &NodeArenas, attribute: &Attribute) {
+        for arg in arenas.args(attribute.args) {
+            self.initializer(arenas, arg.value);
+            self.visit_expr(arenas, arg.value);
         }
     }
 
-    fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
+    fn visit_catch_clause(&mut self, arenas: &NodeArenas, clause: &CatchClause) {
         if clause.types.len() > 1 {
             self.report(
                 PhpFeature::MultiCatch,
@@ -230,13 +239,17 @@ impl<'ast> Visitor<'ast> for Gates<'_, '_> {
                 "catch.nonCapturingNotSupported",
             );
         }
-        walk_catch_clause(self, clause);
+        arena::walk_catch_clause(self, arenas, clause);
     }
 
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else {
+            return;
+        };
         let span = expr.span;
         match &expr.kind {
             ExprKind::Destructure(items, syntax) => {
+                let items = arenas.destructure_items(items);
                 if *syntax == DestructureSyntax::Short {
                     self.report(
                         PhpFeature::ShortListSyntax,
@@ -341,34 +354,39 @@ impl<'ast> Visitor<'ast> for Gates<'_, '_> {
                         "nullsafe.notSupported",
                     );
                 }
-                self.receiver(receiver);
+                self.receiver(arenas, *receiver);
             }
-            ExprKind::Index(receiver, _) => self.receiver(receiver),
+            ExprKind::Index(receiver, _) => self.receiver(arenas, *receiver),
             ExprKind::ClassConstFetch(StaticTarget::Expr(receiver), _)
             | ExprKind::StaticPropertyFetch(StaticTarget::Expr(receiver), _)
-            | ExprKind::StaticCall(StaticTarget::Expr(receiver), _, _) => self.receiver(receiver),
+            | ExprKind::StaticCall(StaticTarget::Expr(receiver), _, _) => {
+                self.receiver(arenas, *receiver)
+            }
             _ => {}
         }
-        walk_expr(self, expr);
+        arena::walk_expr(self, arenas, id);
     }
 }
 
 /// Where `value` makes an object with `new`, outside the closures in it.
-fn new_in(value: &ExprNode) -> Option<Span> {
+fn new_in(arenas: &NodeArenas, value: ExprId) -> Option<Span> {
     struct Find(Option<Span>);
-    impl<'ast> Visitor<'ast> for Find {
-        fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    impl Visitor for Find {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
             if self.0.is_some() {
                 return;
             }
+            let Some(expr) = arenas.expr(id) else {
+                return;
+            };
             match &expr.kind {
                 ExprKind::New(..) | ExprKind::NewAnonymousClass(_) => self.0 = Some(expr.span),
                 ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {}
-                _ => walk_expr(self, expr),
+                _ => arena::walk_expr(self, arenas, id),
             }
         }
     }
     let mut find = Find(None);
-    find.visit_expr(value);
+    find.visit_expr(arenas, value);
     find.0
 }

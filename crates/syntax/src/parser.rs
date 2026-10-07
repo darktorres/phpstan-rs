@@ -837,7 +837,7 @@ impl Parser<'_> {
             }
             StmtKind::GlobalConst(consts) => {
                 let ctx = self.ctx.borrow();
-                for c in consts {
+                for c in self.node_arenas.borrow_mut().class_consts_mut(consts) {
                     c.namespaced_name = Some(ctx.declared_name(&c.name).into());
                 }
             }

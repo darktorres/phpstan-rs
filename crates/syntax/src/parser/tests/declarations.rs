@@ -9,6 +9,7 @@ fn top_level_const_declaration_parses() {
     let StmtKind::GlobalConst(consts) = &program[0].kind else {
         panic!("expected GlobalConst");
     };
+    let consts = program.arenas.class_consts(consts);
     assert_eq!(consts.len(), 2);
     assert_eq!(consts[0].name, "FOO");
     assert_eq!(consts[1].name, "BAR");
@@ -41,12 +42,22 @@ fn pure_enum_parses_with_unbacked_cases() {
     let StmtKind::ClassDecl(e) = &program[0].kind else {
         panic!("expected an enum");
     };
-    assert_eq!(e.def.kind, ClassKind::Enum);
+    assert_eq!(program.class_def(e.def).kind, ClassKind::Enum);
     assert_eq!(Some(&*e.name), Some("SortDirection"));
-    assert!(e.def.backing_type.is_none());
-    assert_eq!(e.def.enum_cases.len(), 2);
-    assert_eq!(e.def.enum_cases[0].name, "Ascending");
-    assert!(e.def.enum_cases[0].value.is_none());
+    assert!(program.class_def(e.def).backing_type.is_none());
+    assert_eq!(
+        program.class_def(e.def).enum_cases(&program.arenas).len(),
+        2
+    );
+    assert_eq!(
+        program.class_def(e.def).enum_cases(&program.arenas)[0].name,
+        "Ascending"
+    );
+    assert!(
+        program.class_def(e.def).enum_cases(&program.arenas)[0]
+            .value
+            .is_none()
+    );
 }
 
 #[test]
@@ -69,9 +80,10 @@ fn backed_enum_with_interface_and_method_parses() {
     let StmtKind::ClassDecl(e) = &program[0].kind else {
         panic!("expected an enum");
     };
-    assert_eq!(e.def.kind, ClassKind::Enum);
+    assert_eq!(program.class_def(e.def).kind, ClassKind::Enum);
     assert_eq!(
-        e.def
+        program
+            .class_def(e.def)
             .backing_type
             .as_ref()
             .map(TypeHint::to_string)
@@ -79,22 +91,20 @@ fn backed_enum_with_interface_and_method_parses() {
         Some("string")
     );
     assert_eq!(
-        e.def
-            .implements
+        program
+            .class_def(e.def)
+            .implements(&program.arenas)
             .iter()
             .map(|n| &*n.written)
             .collect::<Vec<_>>(),
         vec!["\\JsonSerializable"]
     );
-    assert!(matches!(
-        &e.def.enum_cases[0].value,
-        Some(ExprNode {
-            kind: ExprKind::Literal(_),
-            ..
-        })
-    ));
-    assert_eq!(e.def.methods.len(), 1);
-    assert_eq!(e.def.methods[0].function.name, "label");
+    let value = program.class_def(e.def).enum_cases(&program.arenas)[0]
+        .value
+        .expect("backed enum case should have a value");
+    assert!(matches!(program.expr(value).kind, ExprKind::Literal(_)));
+    assert_eq!(program.class_methods(e.def).len(), 1);
+    assert_eq!(program.class_methods(e.def)[0].function.name, "label");
 }
 
 #[test]
@@ -109,15 +119,15 @@ fn class_interface_and_trait_declarations_are_tagged_with_their_own_kind() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.kind, ClassKind::Class);
+    assert_eq!(program.class_def(c.def).kind, ClassKind::Class);
     let StmtKind::ClassDecl(i) = &program[1].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(i.def.kind, ClassKind::Interface);
+    assert_eq!(program.class_def(i.def).kind, ClassKind::Interface);
     let StmtKind::ClassDecl(t) = &program[2].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(t.def.kind, ClassKind::Trait);
+    assert_eq!(program.class_def(t.def).kind, ClassKind::Trait);
 }
 
 #[test]
@@ -139,11 +149,11 @@ fn a_qualified_name_segment_matching_a_keyword_keeps_its_own_case() {
     let StmtKind::ClassDecl(c) = &program[1].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.extends.len(), 1);
+    assert_eq!(program.class_def(c.def).extends(&program.arenas).len(), 1);
     assert!(
-        c.def.extends[0].ends_with("MabeEnum\\Enum"),
+        program.class_def(c.def).extends(&program.arenas)[0].ends_with("MabeEnum\\Enum"),
         "expected the qualified name's own Enum segment to keep its case, got: {:?}",
-        c.def.extends[0]
+        program.class_def(c.def).extends(&program.arenas)[0]
     );
 }
 
@@ -155,16 +165,14 @@ fn a_final_method_is_recorded_as_final_and_a_non_final_one_is_not() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let locked = c
-        .def
-        .methods
+    let locked = program
+        .class_methods(c.def)
         .iter()
         .find(|m| m.function.name == "locked")
         .unwrap();
     assert!(locked.is_final);
-    let open = c
-        .def
-        .methods
+    let open = program
+        .class_methods(c.def)
         .iter()
         .find(|m| m.function.name == "open")
         .unwrap();
@@ -177,9 +185,19 @@ fn a_readonly_property_modifier_is_recorded_per_property() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let x = c.def.properties.iter().find(|p| p.name == "x").unwrap();
+    let x = program
+        .class_def(c.def)
+        .properties(&program.arenas)
+        .iter()
+        .find(|p| p.name == "x")
+        .unwrap();
     assert!(x.is_readonly);
-    let y = c.def.properties.iter().find(|p| p.name == "y").unwrap();
+    let y = program
+        .class_def(c.def)
+        .properties(&program.arenas)
+        .iter()
+        .find(|p| p.name == "y")
+        .unwrap();
     assert!(!y.is_readonly);
 }
 
@@ -189,7 +207,13 @@ fn readonly_class_shorthand_marks_every_property_readonly() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert!(c.def.properties.iter().all(|p| p.is_readonly));
+    assert!(
+        program
+            .class_def(c.def)
+            .properties(&program.arenas)
+            .iter()
+            .all(|p| p.is_readonly)
+    );
 }
 
 #[test]
@@ -199,9 +223,8 @@ fn a_promoted_constructor_parameter_captures_its_own_readonly_modifier() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let ctor = c
-        .def
-        .methods
+    let ctor = program
+        .class_methods(c.def)
         .iter()
         .find(|m| m.function.name == "__construct")
         .unwrap();
@@ -228,19 +251,52 @@ fn each_trait_use_statement_keeps_its_own_traits_doc_comment_and_adaptations() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.trait_uses.len(), 2);
-    fn names(u: &TraitUse) -> Vec<&str> {
-        u.traits.iter().map(|t| &*t.written).collect()
-    }
-    assert_eq!(names(&c.def.trait_uses[0]), ["A", "B"]);
     assert_eq!(
-        c.def.trait_uses[0].doc_comment.as_deref(),
-        Some("/** @use A<int> */")
+        program.class_def(c.def).trait_uses(&program.arenas).len(),
+        2
     );
-    assert_eq!(c.def.trait_uses[0].adaptations.precedences.len(), 1);
-    assert_eq!(names(&c.def.trait_uses[1]), ["D"]);
-    assert!(c.def.trait_uses[1].doc_comment.is_none());
-    assert!(c.def.trait_uses[1].adaptations.precedences.is_empty());
+    fn names(u: &TraitUse, arenas: &NodeArenas) -> Vec<&str> {
+        u.traits(arenas).iter().map(|t| &*t.written).collect()
+    }
+    assert_eq!(
+        names(
+            &program.class_def(c.def).trait_uses(&program.arenas)[0],
+            &program.arenas
+        ),
+        ["A", "B"]
+    );
+    assert_eq!(
+        program.doc_comment_text(
+            program.class_def(c.def).trait_uses(&program.arenas)[0]
+                .doc_comment
+                .as_ref()
+                .unwrap()
+        ),
+        Some("/** @use A<int> */".to_owned())
+    );
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0]
+            .precedences(&program.arenas)
+            .len(),
+        1
+    );
+    assert_eq!(
+        names(
+            &program.class_def(c.def).trait_uses(&program.arenas)[1],
+            &program.arenas
+        ),
+        ["D"]
+    );
+    assert!(
+        program.class_def(c.def).trait_uses(&program.arenas)[1]
+            .doc_comment
+            .is_none()
+    );
+    assert!(
+        program.class_def(c.def).trait_uses(&program.arenas)[1]
+            .precedences(&program.arenas)
+            .is_empty()
+    );
 }
 
 #[test]
@@ -258,15 +314,24 @@ fn a_trait_as_alias_clause_is_captured_in_the_ast() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.trait_uses[0].adaptations.aliases.len(), 1);
-    let trait_name = c.def.trait_uses[0].adaptations.aliases[0]
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0]
+            .aliases(&program.arenas)
+            .len(),
+        1
+    );
+    let trait_name = program.class_def(c.def).trait_uses(&program.arenas)[0]
+        .aliases(&program.arenas)[0]
         .trait_name
         .as_ref()
         .unwrap();
     assert_eq!(&*trait_name.written, "B");
-    assert_eq!(c.def.trait_uses[0].adaptations.aliases[0].method, "hello");
     assert_eq!(
-        c.def.trait_uses[0].adaptations.aliases[0].alias,
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0].method,
+        "hello"
+    );
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0].alias,
         Some("helloB".into())
     );
 }
@@ -285,15 +350,23 @@ fn a_bare_as_alias_clause_with_no_trait_qualifier_is_captured() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.trait_uses[0].adaptations.aliases.len(), 1);
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0]
+            .aliases(&program.arenas)
+            .len(),
+        1
+    );
     assert!(
-        c.def.trait_uses[0].adaptations.aliases[0]
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0]
             .trait_name
             .is_none()
     );
-    assert_eq!(c.def.trait_uses[0].adaptations.aliases[0].method, "greet");
     assert_eq!(
-        c.def.trait_uses[0].adaptations.aliases[0].alias,
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0].method,
+        "greet"
+    );
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0].alias,
         Some("greetAlias".into())
     );
 }
@@ -312,15 +385,26 @@ fn an_as_clause_that_only_changes_visibility_captures_no_alias() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.trait_uses[0].adaptations.aliases.len(), 1);
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0]
+            .aliases(&program.arenas)
+            .len(),
+        1
+    );
     assert!(matches!(
-        c.def.trait_uses[0].adaptations.aliases[0].visibility,
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0]
+            .visibility,
         Some(Visibility::Protected)
     ));
-    assert!(c.def.trait_uses[0].adaptations.aliases[0].alias.is_none());
+    assert!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0].aliases(&program.arenas)[0]
+            .alias
+            .is_none()
+    );
     assert_eq!(
-        c.def
-            .resolved_trait_conflicts()
+        program
+            .class_def(c.def)
+            .resolved_trait_conflicts(&program.arenas)
             .map(|n| n.as_str())
             .collect::<Vec<_>>(),
         ["greet"]
@@ -341,26 +425,34 @@ fn an_insteadof_clause_records_its_method_as_a_resolved_conflict() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.trait_uses[0].adaptations.precedences.len(), 1);
     assert_eq!(
-        &*c.def.trait_uses[0].adaptations.precedences[0]
+        program.class_def(c.def).trait_uses(&program.arenas)[0]
+            .precedences(&program.arenas)
+            .len(),
+        1
+    );
+    assert_eq!(
+        &*program.class_def(c.def).trait_uses(&program.arenas)[0].precedences(&program.arenas)[0]
             .trait_name
             .written,
         "A"
     );
     assert_eq!(
-        c.def.trait_uses[0].adaptations.precedences[0].method,
+        program.class_def(c.def).trait_uses(&program.arenas)[0].precedences(&program.arenas)[0]
+            .method,
         "hello"
     );
-    let instead_of: Vec<&str> = c.def.trait_uses[0].adaptations.precedences[0]
-        .instead_of
+    let instead_of: Vec<&str> = program.class_def(c.def).trait_uses(&program.arenas)[0]
+        .precedences(&program.arenas)[0]
+        .instead_of(&program.arenas)
         .iter()
         .map(|q| &*q.written)
         .collect();
     assert_eq!(instead_of, ["B"]);
     assert_eq!(
-        c.def
-            .resolved_trait_conflicts()
+        program
+            .class_def(c.def)
+            .resolved_trait_conflicts(&program.arenas)
             .map(|n| n.as_str())
             .collect::<Vec<_>>(),
         ["hello"]
@@ -385,8 +477,9 @@ fn an_insteadof_clause_with_a_fully_qualified_trait_name_is_still_parsed() {
         panic!("expected ClassDecl");
     };
     assert_eq!(
-        c.def
-            .resolved_trait_conflicts()
+        program
+            .class_def(c.def)
+            .resolved_trait_conflicts(&program.arenas)
             .map(|n| n.as_str())
             .collect::<Vec<_>>(),
         ["hello"]
@@ -420,26 +513,26 @@ fn anonymous_class_parses_with_interface_and_constructor_args() {
             };
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(expr) = &program[0].kind else {
+        panic!("expected an expression statement");
+    };
+    let ExprKind::Assign(_, rhs) = &program.expr(*expr).kind else {
         panic!("expected an assignment");
     };
-    let ExprKind::NewAnonymousClass(class) = &rhs.kind else {
+    let ExprKind::NewAnonymousClass(class) = &program.expr(*rhs).kind else {
         panic!("expected NewAnonymousClass");
     };
-    let decl = &class.def;
-    assert_eq!(class.args.len(), 1);
+    let class = program.anonymous_class(*class);
+    let decl = program.class_def(class.def);
+    assert_eq!(program.args(class.args).len(), 1);
     assert_eq!(
-        decl.implements
+        decl.implements(&program.arenas)
             .iter()
             .map(|n| &*n.written)
             .collect::<Vec<_>>(),
         vec!["Countable"]
     );
-    assert_eq!(decl.methods.len(), 2);
+    assert_eq!(program.arenas.methods(decl.methods).len(), 2);
 }
 
 #[test]
@@ -455,21 +548,22 @@ fn anonymous_class_with_a_leading_attribute_group_parses() {
             };
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(expr) = &program[0].kind else {
+        panic!("expected an expression statement");
+    };
+    let ExprKind::Assign(_, rhs) = &program.expr(*expr).kind else {
         panic!("expected an assignment");
     };
-    let ExprKind::NewAnonymousClass(class) = &rhs.kind else {
+    let ExprKind::NewAnonymousClass(class) = &program.expr(*rhs).kind else {
         panic!("expected NewAnonymousClass");
     };
-    let decl = &class.def;
-    assert_eq!(decl.attrs.len(), 1);
-    assert_eq!(decl.attrs[0].name, "TemplateAttr");
+    let class = program.anonymous_class(*class);
+    let decl = program.class_def(class.def);
+    let attrs = program.arenas.attributes(decl.attrs);
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "TemplateAttr");
     assert_eq!(
-        decl.implements
+        decl.implements(&program.arenas)
             .iter()
             .map(|n| &*n.written)
             .collect::<Vec<_>>(),
@@ -490,11 +584,26 @@ fn asymmetric_visibility_property_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.properties.len(), 2);
-    assert_eq!(c.def.properties[0].name, "name");
-    assert_eq!(c.def.properties[0].visibility, Visibility::Public);
-    assert_eq!(c.def.properties[1].name, "count");
-    assert_eq!(c.def.properties[1].visibility, Visibility::Public);
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas).len(),
+        2
+    );
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas)[0].name,
+        "name"
+    );
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas)[0].visibility,
+        Visibility::Public
+    );
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas)[1].name,
+        "count"
+    );
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas)[1].visibility,
+        Visibility::Public
+    );
 }
 
 #[test]
@@ -518,9 +627,15 @@ fn property_hooks_parse() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.properties.len(), 2);
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas).len(),
+        2
+    );
 
-    let hooks = c.def.properties[0].hooks.as_ref().expect("expected hooks");
+    let hooks = program.class_def(c.def).properties(&program.arenas)[0]
+        .hooks
+        .as_ref()
+        .expect("expected hooks");
     assert!(matches!(
         hooks.get.as_ref().map(|hook| &hook.body),
         Some(PropertyHookBody::Arrow(_))
@@ -535,7 +650,10 @@ fn property_hooks_parse() {
     // Abstract))`, not `None` - distinguishing "an abstract hook was
     // declared with no body" from "no hook at all", which `None` alone
     // couldn't tell apart.
-    let bare_hooks = c.def.properties[1].hooks.as_ref().expect("expected hooks");
+    let bare_hooks = program.class_def(c.def).properties(&program.arenas)[1]
+        .hooks
+        .as_ref()
+        .expect("expected hooks");
     assert!(matches!(
         bare_hooks.get.as_ref().map(|hook| &hook.body),
         Some(PropertyHookBody::Abstract)
@@ -563,11 +681,32 @@ fn an_attribute_on_a_property_hook_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let hooks = c.def.properties[0].hooks.as_ref().expect("expected hooks");
-    assert_eq!(hooks.get.as_ref().unwrap().attrs.len(), 1);
-    assert_eq!(hooks.get.as_ref().unwrap().attrs[0].name, "Foo");
-    assert_eq!(hooks.set.as_ref().unwrap().attrs.len(), 1);
-    assert_eq!(hooks.set.as_ref().unwrap().attrs[0].name, "Bar");
+    let hooks = program.class_def(c.def).properties(&program.arenas)[0]
+        .hooks
+        .as_ref()
+        .expect("expected hooks");
+    assert_eq!(
+        program
+            .arenas
+            .attributes(hooks.get.as_ref().unwrap().attrs)
+            .len(),
+        1
+    );
+    assert_eq!(
+        program.arenas.attributes(hooks.get.as_ref().unwrap().attrs)[0].name,
+        "Foo"
+    );
+    assert_eq!(
+        program
+            .arenas
+            .attributes(hooks.set.as_ref().unwrap().attrs)
+            .len(),
+        1
+    );
+    assert_eq!(
+        program.arenas.attributes(hooks.set.as_ref().unwrap().attrs)[0].name,
+        "Bar"
+    );
 }
 
 #[test]
@@ -583,7 +722,7 @@ fn property_hook_declared_abstract_with_no_body_is_distinct_from_no_hook_at_all(
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let x_hooks = c.def.properties[0]
+    let x_hooks = program.class_def(c.def).properties(&program.arenas)[0]
         .hooks
         .as_ref()
         .expect("expected hooks on $x");
@@ -592,7 +731,11 @@ fn property_hook_declared_abstract_with_no_body_is_distinct_from_no_hook_at_all(
         Some(PropertyHookBody::Abstract)
     ));
     assert!(x_hooks.set.is_none());
-    assert!(c.def.properties[1].hooks.is_none());
+    assert!(
+        program.class_def(c.def).properties(&program.arenas)[1]
+            .hooks
+            .is_none()
+    );
 }
 
 #[test]
@@ -608,7 +751,7 @@ fn dnf_type_hint_parses() {
         panic!("expected ClassDecl");
     };
     assert_eq!(
-        c.def.properties[0]
+        program.class_def(c.def).properties(&program.arenas)[0]
             .type_hint
             .as_ref()
             .map(TypeHint::to_string)
@@ -631,7 +774,10 @@ fn by_reference_property_hook_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let hooks = c.def.properties[0].hooks.as_ref().expect("expected hooks");
+    let hooks = program.class_def(c.def).properties(&program.arenas)[0]
+        .hooks
+        .as_ref()
+        .expect("expected hooks");
     assert!(matches!(
         hooks.get.as_ref().map(|hook| &hook.body),
         Some(PropertyHookBody::Arrow(_))
@@ -653,7 +799,7 @@ fn public_set_and_final_promoted_params_parse() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let ctor = &c.def.methods[0].function;
+    let ctor = &program.class_methods(c.def)[0].function;
     assert_eq!(
         ctor.params[0]
             .promotion
@@ -675,10 +821,16 @@ fn legacy_var_property_declaration_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.properties[0].name, "a");
-    assert_eq!(c.def.properties[0].visibility, Visibility::Public);
     assert_eq!(
-        c.def.properties[0]
+        program.class_def(c.def).properties(&program.arenas)[0].name,
+        "a"
+    );
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas)[0].visibility,
+        Visibility::Public
+    );
+    assert_eq!(
+        program.class_def(c.def).properties(&program.arenas)[0]
             .type_hint
             .as_ref()
             .map(TypeHint::to_string)
@@ -704,7 +856,7 @@ fn hooks_on_promoted_constructor_property_parse() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let ctor = &c.def.methods[0].function;
+    let ctor = &program.class_methods(c.def)[0].function;
     let hooks = ctor.params[0].hooks.as_ref().expect("expected hooks");
     assert!(matches!(
         hooks.get.as_ref().map(|hook| &hook.body),
@@ -728,14 +880,18 @@ fn class_attribute_with_a_named_argument_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.attrs.len(), 1);
-    assert_eq!(c.def.attrs[0].name, "Entity");
-    assert_eq!(c.def.attrs[0].args.len(), 1);
-    assert_eq!(c.def.attrs[0].args[0].name.as_deref(), Some("table"));
-    assert!(matches!(
-        &c.def.attrs[0].args[0].value.kind,
-        ExprKind::Literal(Literal::String(s)) if *s == "users"
-    ));
+    let [attribute] = program.attributes(program.class_def(c.def).attrs) else {
+        panic!("expected one class attribute");
+    };
+    assert_eq!(attribute.name, "Entity");
+    let [argument] = program.arenas.args(attribute.args) else {
+        panic!("expected one attribute argument");
+    };
+    assert_eq!(argument.name.as_deref(), Some("table"));
+    let ExprKind::Literal(Literal::String(payload)) = &program.expr(argument.value).kind else {
+        panic!("expected a string literal");
+    };
+    assert_eq!(program.string_text(payload).as_deref(), Some("users"));
 }
 
 #[test]
@@ -784,16 +940,49 @@ fn method_property_const_and_param_attributes_all_parse() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.properties[0].attrs.len(), 1);
-    assert_eq!(c.def.properties[0].attrs[0].name, "Column");
-    assert_eq!(c.def.consts[0].attrs.len(), 1);
-    assert_eq!(c.def.consts[0].attrs[0].name, "Since");
-    let method = &c.def.methods[0];
-    assert_eq!(method.function.attrs.len(), 1);
-    assert_eq!(method.function.attrs[0].name, "Route");
-    assert_eq!(method.function.params[0].attrs.len(), 1);
     assert_eq!(
-        method.function.params[0].attrs[0].name,
+        program
+            .arenas
+            .attributes(program.class_def(c.def).properties(&program.arenas)[0].attrs)
+            .len(),
+        1
+    );
+    assert_eq!(
+        program
+            .arenas
+            .attributes(program.class_def(c.def).properties(&program.arenas)[0].attrs)[0]
+            .name,
+        "Column"
+    );
+    assert_eq!(
+        program
+            .arenas
+            .attributes(program.class_def(c.def).consts(&program.arenas)[0].attrs)
+            .len(),
+        1
+    );
+    assert_eq!(
+        program
+            .arenas
+            .attributes(program.class_def(c.def).consts(&program.arenas)[0].attrs)[0]
+            .name,
+        "Since"
+    );
+    let method = &program.class_methods(c.def)[0];
+    assert_eq!(program.arenas.attributes(method.function.attrs).len(), 1);
+    assert_eq!(
+        program.arenas.attributes(method.function.attrs)[0].name,
+        "Route"
+    );
+    assert_eq!(
+        program
+            .arenas
+            .attributes(method.function.params[0].attrs)
+            .len(),
+        1
+    );
+    assert_eq!(
+        program.arenas.attributes(method.function.params[0].attrs)[0].name,
         "SensitiveParameter"
     );
 }
@@ -811,9 +1000,21 @@ fn enum_case_attribute_parses() {
     let StmtKind::ClassDecl(e) = &program[0].kind else {
         panic!("expected an enum");
     };
-    assert_eq!(e.def.kind, ClassKind::Enum);
-    assert_eq!(e.def.enum_cases[0].attrs.len(), 1);
-    assert_eq!(e.def.enum_cases[0].attrs[0].name, "Label");
+    assert_eq!(program.class_def(e.def).kind, ClassKind::Enum);
+    assert_eq!(
+        program
+            .arenas
+            .attributes(program.class_def(e.def).enum_cases(&program.arenas)[0].attrs)
+            .len(),
+        1
+    );
+    assert_eq!(
+        program
+            .arenas
+            .attributes(program.class_def(e.def).enum_cases(&program.arenas)[0].attrs)[0]
+            .name,
+        "Label"
+    );
 }
 
 #[test]
@@ -832,10 +1033,10 @@ fn a_doc_comment_before_an_attribute_group_still_attaches_to_the_declaration() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.attrs.len(), 1);
+    assert_eq!(program.attributes(program.class_def(c.def).attrs).len(), 1);
     assert_eq!(
-        c.def.doc_comment.as_deref(),
-        Some("/** Handles a single widget. */")
+        program.doc_comment_text(program.class_def(c.def).doc_comment.as_ref().unwrap()),
+        Some("/** Handles a single widget. */".to_owned())
     );
 }
 
@@ -847,10 +1048,24 @@ fn a_declaration_with_no_attributes_has_an_empty_attrs_list() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert!(c.def.attrs.is_empty());
-    assert!(c.def.properties[0].attrs.is_empty());
-    assert!(c.def.methods[0].function.attrs.is_empty());
-    assert!(c.def.consts[0].attrs.is_empty());
+    assert!(
+        program
+            .attributes(program.class_def(c.def).attrs)
+            .is_empty()
+    );
+    assert!(
+        program
+            .arenas
+            .attributes(program.class_def(c.def).properties(&program.arenas)[0].attrs)
+            .is_empty()
+    );
+    assert!(program.class_methods(c.def)[0].function.attrs.is_empty());
+    assert!(
+        program
+            .arenas
+            .attributes(program.class_def(c.def).consts(&program.arenas)[0].attrs)
+            .is_empty()
+    );
 }
 
 #[test]
@@ -865,7 +1080,7 @@ fn a_promoted_parameter_keeps_its_set_visibility() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let params = &c.def.methods[0].function.params;
+    let params = &program.class_methods(c.def)[0].function.params;
     assert!(matches!(
         params[0].promotion.map(|promotion| promotion.visibility),
         Some(Visibility::Public)
@@ -901,7 +1116,7 @@ fn a_by_reference_get_hook_is_recorded() {
         panic!("expected ClassDecl");
     };
     assert!(
-        c.def.properties[0]
+        program.class_def(c.def).properties(&program.arenas)[0]
             .hooks
             .as_ref()
             .unwrap()

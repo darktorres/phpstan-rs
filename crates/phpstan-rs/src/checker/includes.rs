@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 /// The bit of `FileFacts::mentions` a file that names a function that
 /// tests a path, or sets the include path, has: only such a file has a
@@ -60,9 +60,12 @@ fn class_constant_key(class: &str, constant: &str) -> String {
 /// with a literal name, and class/enum constants - keyed by short name
 /// (`Class::NAME` lowercased on the class). A name declared twice is
 /// dropped.
-pub(crate) fn file_constant_initializers(program: &[StmtNode]) -> FxHashMap<String, ExprNode> {
+pub(crate) fn file_constant_initializers(
+    arenas: &NodeArenas,
+    program: &[StmtId],
+) -> FxHashMap<String, ExprId> {
     let mut initializers = Initializers(FxHashMap::default());
-    walk_stmts(&mut initializers, program);
+    arena::walk_stmts(&mut initializers, arenas, program);
     initializers
         .0
         .into_iter()
@@ -73,43 +76,64 @@ pub(crate) fn file_constant_initializers(program: &[StmtNode]) -> FxHashMap<Stri
 /// Each constant's initializer, `None` once a name is declared twice.
 /// Function bodies are not entered, and a `define()` counts only as a
 /// statement's own expression.
-struct Initializers(FxHashMap<String, Option<ExprNode>>);
+struct Initializers(FxHashMap<String, Option<ExprId>>);
 
 impl Initializers {
-    fn add(&mut self, key: String, value: &ExprNode) {
+    fn add(&mut self, key: String, value: ExprId) {
         self.0
             .entry(key)
             .and_modify(|v| *v = None)
-            .or_insert_with(|| Some(value.clone()));
+            .or_insert(Some(value));
     }
 }
 
-impl<'ast> Visitor<'ast> for Initializers {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Initializers {
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
+
+    fn visit_class_decl(&mut self, _: &NodeArenas, _: &ClassDecl) {}
+
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
+
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         match &stmt.kind {
             StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.add(short_name(&c.name).to_string(), &c.value);
+                for c in arenas.class_consts(consts) {
+                    self.add(short_name(&c.name).to_string(), c.value);
                 }
             }
             StmtKind::ClassDecl(c) => {
-                for k in &c.def.consts {
-                    self.add(class_constant_key(&c.name, &k.name), &k.value);
+                if let Some(def) = arenas.class(c.def) {
+                    for k in def.consts(arenas) {
+                        self.add(class_constant_key(&c.name, &k.name), k.value);
+                    }
                 }
             }
             StmtKind::FunctionDecl(_) => {}
-            _ => walk_stmt(self, stmt),
+            _ => arena::walk_stmt(self, arenas, id),
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
-        if let ExprKind::Call(callee, args) = &e.kind
-            && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
-            && let [name, value, ..] = args.as_slice()
-            && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
-        {
-            self.add(short_name(&name.to_str_lossy()).to_string(), &value.value);
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
+        if matches!(&e.kind, ExprKind::Closure(_) | ExprKind::ArrowFn(_)) {
+            return;
         }
+        if let ExprKind::Call(callee, args) = &e.kind
+            && callee_name(arenas, *callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
+            && let [name_arg, value, ..] = arenas.args(*args)
+            && let Some(ExprNode {
+                kind: ExprKind::Literal(Literal::String(name)),
+                ..
+            }) = arenas.expr(name_arg.value)
+        {
+            let Some(name) = arenas.string_bytes(name) else {
+                return;
+            };
+            let name = String::from_utf8_lossy(name);
+            self.add(short_name(&name).to_string(), value.value);
+        }
+        arena::walk_expr(self, arenas, id);
     }
 }
 
@@ -126,8 +150,8 @@ pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static st
 
 /// The function a call's callee names, as an unqualified name in a
 /// namespace falls back to the global one.
-fn callee_name(e: &ExprNode) -> Option<&str> {
-    match &e.kind {
+fn callee_name(arenas: &NodeArenas, id: ExprId) -> Option<&str> {
+    match &arenas.expr(id)?.kind {
         ExprKind::Name(n) => {
             let (primary, fallback) = n.candidates();
             Some(fallback.unwrap_or(primary))
@@ -170,11 +194,15 @@ impl<'a> Checker<'a> {
     }
 
     /// Every string `e` can evaluate to, when all of them are known.
-    fn resolve_include_paths(&self, e: &ExprNode, locals: &Locals) -> Option<Vec<String>> {
-        self.resolve_paths_at(e, locals, 0)
+    fn resolve_include_paths(&self, id: ExprId, locals: &Locals) -> Option<Vec<String>> {
+        let arenas = self
+            .syntax_arenas()
+            .expect("include path resolution requires the syntax tree owner");
+        self.resolve_paths_at(arenas, id, locals, 0)
     }
 
-    fn file_constant_initializer(&self, e: &ExprNode) -> Option<&ExprNode> {
+    fn file_constant_initializer(&self, arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
+        let e = arenas.expr(id)?;
         let key = match &e.kind {
             ExprKind::Name(n) if !(n.starts_with("__") && n.ends_with("__")) => {
                 short_name(n).to_string()
@@ -193,17 +221,24 @@ impl<'a> Checker<'a> {
             }
             _ => return None,
         };
-        self.include_constant_initializers.get(&key)
+        self.include_constant_initializers.get(&key).copied()
     }
 
-    fn resolve_paths_at(&self, e: &ExprNode, locals: &Locals, depth: usize) -> Option<Vec<String>> {
+    fn resolve_paths_at(
+        &self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        locals: &Locals,
+        depth: usize,
+    ) -> Option<Vec<String>> {
         syntax::stack::guard(|| {
-            if let Some(init) = self.file_constant_initializer(e) {
+            if let Some(init) = self.file_constant_initializer(arenas, id) {
                 return (depth < MAX_CONSTANT_DEPTH)
-                    .then(|| self.resolve_paths_at(init, &self.new_locals(), depth + 1))
+                    .then(|| self.resolve_paths_at(arenas, init, &self.new_locals(), depth + 1))
                     .flatten();
             }
-            let e = e.peeled();
+            let id = arenas.peeled(id)?;
+            let e = arenas.expr(id)?;
             match &e.kind {
                 // The platform's own separators - the paths are checked
                 // against this machine's filesystem.
@@ -215,7 +250,7 @@ impl<'a> Checker<'a> {
                 }
                 ExprKind::Call(callee, args)
                     if args.is_empty()
-                        && callee_name(callee)
+                        && callee_name(arenas, *callee)
                             .is_some_and(|n| n.eq_ignore_ascii_case("get_include_path")) =>
                 {
                     Some(vec![DEFAULT_INCLUDE_PATH.to_string()])
@@ -227,8 +262,8 @@ impl<'a> Checker<'a> {
                     self.current_file_absolute()?.to_string_lossy().into_owned(),
                 ]),
                 ExprKind::Binary(BinOp::Concat, l, r) => {
-                    let lefts = self.resolve_paths_at(l, locals, depth)?;
-                    let rights = self.resolve_paths_at(r, locals, depth)?;
+                    let lefts = self.resolve_paths_at(arenas, *l, locals, depth)?;
+                    let rights = self.resolve_paths_at(arenas, *r, locals, depth)?;
                     let mut out = Vec::new();
                     for left in &lefts {
                         for right in &rights {
@@ -238,20 +273,21 @@ impl<'a> Checker<'a> {
                     Some(out)
                 }
                 ExprKind::Call(callee, args)
-                    if callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("dirname")) =>
+                    if callee_name(arenas, *callee)
+                        .is_some_and(|n| n.eq_ignore_ascii_case("dirname")) =>
                 {
-                    let [path_arg, rest @ ..] = args.as_slice() else {
+                    let [path_arg, rest @ ..] = arenas.args(*args) else {
                         return None;
                     };
                     let levels = match rest {
                         [] => 1,
-                        [level] => match &level.value.kind {
-                            ExprKind::Literal(Literal::Int(n)) if *n >= 1 => *n as usize,
+                        [level] => match arenas.expr(level.value).map(|node| &node.kind) {
+                            Some(ExprKind::Literal(Literal::Int(n))) if *n >= 1 => *n as usize,
                             _ => return None,
                         },
                         _ => return None,
                     };
-                    let paths = self.resolve_paths_at(&path_arg.value, locals, depth)?;
+                    let paths = self.resolve_paths_at(arenas, path_arg.value, locals, depth)?;
                     Some(
                         paths
                             .into_iter()
@@ -324,7 +360,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_include_path(
         &mut self,
         (construct, identifier_prefix): (&'static str, &'static str),
-        path_expr: &ExprNode,
+        path_expr: ExprId,
         locals: &Locals,
         span: Span,
     ) {
@@ -355,7 +391,8 @@ impl<'a> Checker<'a> {
     /// file sets it to.
     pub(crate) fn collect_include_guards(
         &self,
-        program: &[StmtNode],
+        arenas: &NodeArenas,
+        program: &[StmtId],
     ) -> (FxHashSet<String>, Vec<String>) {
         let locals = self.new_locals();
         let mut guarded = FxHashSet::default();
@@ -380,7 +417,7 @@ impl<'a> Checker<'a> {
                 }
             }
         };
-        walk_stmts(&mut GuardArgs(&mut on_call), program);
+        arena::walk_stmts(&mut GuardArgs(&mut on_call), arenas, program);
         (guarded, include_dirs)
     }
 }
@@ -393,9 +430,9 @@ pub(crate) fn default_include_dirs() -> Vec<String> {
         .collect()
 }
 
-enum IncludeCall<'e> {
-    Guard(&'e ExprNode),
-    SetIncludePath(&'e ExprNode),
+enum IncludeCall {
+    Guard(ExprId),
+    SetIncludePath(ExprId),
 }
 
 /// Hands every `GUARD_FUNCTIONS`, `set_include_path()` and
@@ -403,30 +440,34 @@ enum IncludeCall<'e> {
 /// callback.
 struct GuardArgs<'o>(&'o mut dyn FnMut(IncludeCall));
 
-impl<'ast> Visitor<'ast> for GuardArgs<'_> {
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+impl Visitor for GuardArgs<'_> {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
         syntax::stack::guard(|| {
             if let ExprKind::Call(callee, args) = &e.kind
-                && let Some(name) = callee_name(callee)
+                && let Some(name) = callee_name(arenas, *callee)
             {
                 let is = |wanted: &str| name.eq_ignore_ascii_case(wanted);
-                match args.as_slice() {
+                match arenas.args(*args) {
                     [arg, ..] if GUARD_FUNCTIONS.iter().any(|f| is(f)) => {
-                        (self.0)(IncludeCall::Guard(&arg.value))
+                        (self.0)(IncludeCall::Guard(arg.value))
                     }
                     [arg] if is("set_include_path") => {
-                        (self.0)(IncludeCall::SetIncludePath(&arg.value))
+                        (self.0)(IncludeCall::SetIncludePath(arg.value))
                     }
                     [key, value]
                         if is("ini_set")
-                            && matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") =>
+                            && arenas.expr(key.value).is_some_and(|node| {
+                                matches!(&node.kind, ExprKind::Literal(Literal::String(k))
+                                    if arenas.string_bytes(k).is_some_and(|bytes| bytes == b"include_path"))
+                            }) =>
                     {
-                        (self.0)(IncludeCall::SetIncludePath(&value.value))
+                        (self.0)(IncludeCall::SetIncludePath(value.value))
                     }
                     _ => {}
                 }
             }
-            walk_expr(self, e);
+            arena::walk_expr(self, arenas, id);
         })
     }
 }

@@ -874,7 +874,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   scratch before committing. Class-body properties, methods, constants, trait
   uses and enum cases also build in reusable scratch before their owner ranges
   are committed. Parameter lists use reusable buffers by nesting depth before
-  stub transformation and arena commit. Class inheritance, property,
+  stub transformation and arena commit. Top-level constant declarations also
+  reuse class-constant scratch and commit to the owner arena. Class inheritance,
+  property,
   constant, trait-use/adaptation and enum-case lists now use owner-backed
   ranges, with parser, checker, registry, project, Composer, LSP and parser
   fixture readers migrated (9.7.b.a-c, unvalidated). Catch-type name lists

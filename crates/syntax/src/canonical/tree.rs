@@ -7,6 +7,16 @@ use crate::ast::*;
 use crate::canonical::{Canonical, Printer};
 use crate::{canonical_enum, canonical_struct};
 
+impl Canonical for DocCommentRanges {
+    fn canonical(&self, p: &mut Printer) {
+        match self {
+            DocCommentRanges::One(span) => p.tuple("doc_range", &[span]),
+            DocCommentRanges::Group(spans) => p.tuple("doc_group_ranges", &[spans]),
+            DocCommentRanges::Appended { spans, text } => p.tuple("doc_appended", &[spans, text]),
+        }
+    }
+}
+
 impl Canonical for StmtNode {
     fn canonical(&self, p: &mut Printer) {
         let StmtNode {
@@ -24,6 +34,23 @@ impl Canonical for StmtNode {
         }
         kind.canonical(p);
     }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        let StmtNode {
+            id: _,
+            kind,
+            span,
+            doc_comment,
+            doc_line,
+        } = self;
+        span.canonical(p);
+        p.atom(" ");
+        if doc_comment.is_some() || doc_line.is_some() {
+            p.tuple_with("doc", &[doc_line, doc_comment], arenas);
+            p.atom(" ");
+        }
+        kind.canonical_with(p, arenas);
+    }
 }
 
 impl Canonical for ExprNode {
@@ -32,6 +59,156 @@ impl Canonical for ExprNode {
         span.canonical(p);
         p.atom(" ");
         crate::stack::guard(|| kind.canonical(p));
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        let ExprNode { id: _, kind, span } = self;
+        span.canonical(p);
+        p.atom(" ");
+        crate::stack::guard(|| kind.canonical_with(p, arenas));
+    }
+}
+
+impl Canonical for ExprId {
+    fn canonical(&self, p: &mut Printer) {
+        p.atom(&u32::from((*self).into_raw()).to_string());
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        arenas
+            .expr(*self)
+            .expect("canonical expression id belongs to its arena owner")
+            .canonical_with(p, arenas);
+    }
+}
+
+impl Canonical for StmtId {
+    fn canonical(&self, p: &mut Printer) {
+        p.atom(&u32::from((*self).into_raw()).to_string());
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        arenas
+            .stmt(*self)
+            .expect("canonical statement id belongs to its arena owner")
+            .canonical_with(p, arenas);
+    }
+}
+
+macro_rules! canonical_arena_id {
+    ($id:ty, $get:ident, $what:literal) => {
+        impl Canonical for $id {
+            fn canonical(&self, p: &mut Printer) {
+                p.atom(&u32::from((*self).into_raw()).to_string());
+            }
+
+            fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+                arenas
+                    .$get(*self)
+                    .expect(concat!(
+                        "canonical ",
+                        $what,
+                        " id belongs to its arena owner"
+                    ))
+                    .canonical_with(p, arenas);
+            }
+        }
+    };
+}
+
+canonical_arena_id!(FunctionId, function, "function");
+canonical_arena_id!(ClassId, class, "class");
+canonical_arena_id!(ClosureId, closure, "closure");
+canonical_arena_id!(AnonymousClassId, anonymous_class, "anonymous-class");
+
+macro_rules! canonical_arena_range {
+    ($range:ty, $element:ty, $get:ident, $what:literal) => {
+        impl Canonical for $range {
+            fn canonical(&self, p: &mut Printer) {
+                let start = u32::from(self.start().into_raw());
+                let end = u32::from(self.end().into_raw());
+                p.tuple("range", &[&start, &end]);
+            }
+
+            fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+                p.list_with(arenas.$get(*self).iter(), arenas);
+            }
+        }
+    };
+}
+
+canonical_arena_range!(ArgRange, Arg, args, "argument");
+canonical_arena_range!(StmtIdRange, StmtId, stmt_ids, "statement");
+impl Canonical for ExprIdRange {
+    fn canonical(&self, p: &mut Printer) {
+        let start = u32::from(self.start().into_raw());
+        let end = u32::from(self.end().into_raw());
+        p.tuple("range", &[&start, &end]);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(arenas.expr_ids(self).iter(), arenas);
+    }
+}
+impl Canonical for DestructureItemRange {
+    fn canonical(&self, p: &mut Printer) {
+        let start = u32::from(self.start().into_raw());
+        let end = u32::from(self.end().into_raw());
+        p.tuple("range", &[&start, &end]);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(arenas.destructure_items(self).iter(), arenas);
+    }
+}
+canonical_arena_range!(ArrayItemRange, ArrayItem, array_items, "array-item");
+canonical_arena_range!(ParamRange, Param, params, "parameter");
+canonical_arena_range!(MatchArmRange, MatchArm, match_arms, "match-arm");
+canonical_arena_range!(AttributeRange, Attribute, attributes, "attribute");
+canonical_arena_range!(MethodRange, MethodDecl, methods, "method");
+
+macro_rules! canonical_list_arena_range {
+    ($range:ty, $get:ident) => {
+        impl Canonical for $range {
+            fn canonical(&self, p: &mut Printer) {
+                let start = u32::from(self.start().into_raw());
+                let end = u32::from(self.end().into_raw());
+                p.tuple("range", &[&start, &end]);
+            }
+
+            fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+                p.list_with(arenas.$get(self).iter(), arenas);
+            }
+        }
+    };
+}
+
+canonical_list_arena_range!(QualifiedNameRange, qualified_names);
+canonical_list_arena_range!(PropertyRange, properties);
+canonical_list_arena_range!(ClassConstRange, class_consts);
+canonical_list_arena_range!(TraitUseRange, trait_uses);
+canonical_list_arena_range!(EnumCaseRange, enum_cases);
+canonical_list_arena_range!(TraitAliasRange, trait_aliases);
+canonical_list_arena_range!(TraitPrecedenceRange, trait_precedences);
+canonical_list_arena_range!(UseImportRange, use_imports);
+
+impl Canonical for crate::parse::ParsedFile {
+    fn canonical(&self, p: &mut Printer) {
+        p.list_with(self.statements().iter(), &self.arenas);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(arenas.stmt_ids(&self.stmts).iter(), arenas);
+    }
+}
+
+impl Canonical for crate::parser::ParsedProgram {
+    fn canonical(&self, p: &mut Printer) {
+        p.list_with(self.statements().iter(), &self.arenas);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(arenas.stmt_ids(&self.stmts).iter(), arenas);
     }
 }
 
@@ -267,7 +444,7 @@ canonical_struct!(ClassDecl {
     def,
 });
 
-canonical_struct!(AnonymousClass { def, args, name });
+canonical_struct!(AnonymousClass { def, args });
 
 canonical_struct!(ClassDef {
     kind,
@@ -340,13 +517,50 @@ canonical_struct!(DestructureItem {
     by_ref,
 });
 
-canonical_enum!(Literal {
-    Int(value),
-    Float(value),
-    String(value),
-    Bool(value),
-    Null,
-});
+impl Canonical for Literal {
+    fn canonical(&self, p: &mut Printer) {
+        match self {
+            Literal::Int(value) => p.tuple("Int", &[value]),
+            Literal::Float(value) => p.tuple("Float", &[value]),
+            Literal::String(value) => p.tuple("String", &[value]),
+            Literal::Bool(value) => p.tuple("Bool", &[value]),
+            Literal::Null => p.atom("Null"),
+        }
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        match self {
+            Literal::Int(value) => p.tuple("Int", &[value]),
+            Literal::Float(value) => p.tuple("Float", &[value]),
+            Literal::String(value) => {
+                if let Some(bytes) = arenas.string_bytes(value) {
+                    p.tuple(
+                        "String",
+                        &[&crate::php_string::PhpString::from_bytes(std::sync::Arc::<
+                            [u8],
+                        >::from(
+                            bytes
+                        ))],
+                    );
+                } else {
+                    p.tuple("String", &[value]);
+                }
+            }
+            Literal::Bool(value) => p.tuple("Bool", &[value]),
+            Literal::Null => p.atom("Null"),
+        }
+    }
+}
+
+impl Canonical for StringPayload {
+    fn canonical(&self, p: &mut Printer) {
+        match self {
+            StringPayload::Source(span) => p.tuple("source", &[span]),
+            StringPayload::Decoded(range) => p.tuple("decoded", &[range.start(), range.end()]),
+            StringPayload::Owned(value) => p.tuple("owned", &[value]),
+        }
+    }
+}
 
 canonical_enum!(BinOp {
     Add,
@@ -487,6 +701,11 @@ canonical_struct!(ArrowFnExpr {
     by_ref,
     return_type,
     attrs,
+});
+
+canonical_enum!(ClosurePayload {
+    Closure(closure),
+    ArrowFn(arrow),
 });
 
 canonical_enum!(ExprKind {
