@@ -76,7 +76,7 @@ pub type AttributeArena = la_arena::Arena<Attribute>;
 /// The typed vector storage for one file's syntax tree. A worker can clear
 /// this bundle between context files to retain its warmed capacities; a
 /// kept tree can shrink each vector before it leaves the worker.
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct NodeArenas {
     pub exprs: ExprArena,
     pub stmts: StmtArena,
@@ -90,6 +90,8 @@ pub struct NodeArenas {
     pub params: ParamArena,
     pub match_arms: MatchArmArena,
     pub attributes: AttributeArena,
+    pub expr_spans: Vec<Span>,
+    pub stmt_spans: Vec<Span>,
 }
 
 impl NodeArenas {
@@ -107,6 +109,8 @@ impl NodeArenas {
         self.params.clear();
         self.match_arms.clear();
         self.attributes.clear();
+        self.expr_spans.clear();
+        self.stmt_spans.clear();
     }
 
     /// Compacts a completed tree before its arenas leave the worker.
@@ -123,6 +127,8 @@ impl NodeArenas {
         self.params.shrink_to_fit();
         self.match_arms.shrink_to_fit();
         self.attributes.shrink_to_fit();
+        self.expr_spans.shrink_to_fit();
+        self.stmt_spans.shrink_to_fit();
     }
 }
 

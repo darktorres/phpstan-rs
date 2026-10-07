@@ -64,8 +64,9 @@ impl Parser<'_> {
                     self.next_expr_id.set(sub.next_expr_id.get());
                     self.next_stmt_id.set(sub.next_stmt_id.get());
                     let (expr_spans, stmt_spans) = sub.take_node_spans();
-                    self.expr_spans.borrow_mut().extend(expr_spans);
-                    self.stmt_spans.borrow_mut().extend(stmt_spans);
+                    let mut arenas = self.node_arenas.borrow_mut();
+                    arenas.expr_spans.extend(expr_spans);
+                    arenas.stmt_spans.extend(stmt_spans);
                     self.recorder.borrow_mut().absorb(sub.take_references());
                     exprs.push(parsed);
                 }

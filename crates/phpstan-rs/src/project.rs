@@ -177,10 +177,7 @@ pub(crate) struct SyntaxTree {
     source: Box<[u8]>,
     #[allow(dead_code)] // Read by `NameId`-based readers in row 9.3.
     names: Box<[Name]>,
-    #[allow(dead_code)] // Read by ID-based diagnostic and editor readers.
-    expr_spans: Box<[Span]>,
-    #[allow(dead_code)] // Read by ID-based diagnostic and editor readers.
-    stmt_spans: Box<[Span]>,
+    arenas: syntax::ast::NodeArenas,
 }
 
 impl SyntaxTree {
@@ -204,13 +201,15 @@ impl SyntaxTree {
     }
 
     pub(crate) fn expr_span(&self, id: syntax::ast::ExprId) -> Option<Span> {
-        self.expr_spans
+        self.arenas
+            .expr_spans
             .get(u32::from(id.into_raw()) as usize)
             .copied()
     }
 
     pub(crate) fn stmt_span(&self, id: syntax::ast::StmtId) -> Option<Span> {
-        self.stmt_spans
+        self.arenas
+            .stmt_spans
             .get(u32::from(id.into_raw()) as usize)
             .copied()
     }
@@ -3802,8 +3801,7 @@ fn parse_recording<'a>(
             stmts: ast,
             source: parsed.source,
             names: parsed.names,
-            expr_spans: parsed.expr_spans,
-            stmt_spans: parsed.stmt_spans,
+            arenas: parsed.arenas,
         },
         references,
         ignores,

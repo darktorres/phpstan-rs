@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::ast::{GotoLabel, StmtNode};
+use crate::ast::{GotoLabel, NodeArenas, StmtNode};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
 use crate::name::{Name, NameCache, NameId};
@@ -20,10 +20,8 @@ pub struct ParsedFile {
     /// The distinct names encountered in the file, in first-use order.
     pub names: Box<[Name]>,
     pub stmts: Vec<StmtNode>,
-    /// Expression spans indexed by their file-local `ExprId`s.
-    pub expr_spans: Box<[crate::span::Span]>,
-    /// Statement spans indexed by their file-local `StmtId`s.
-    pub stmt_spans: Box<[crate::span::Span]>,
+    /// The file's typed node storage and their parallel span tables.
+    pub arenas: NodeArenas,
     /// Every comment that holds `@phpstan-ignore`, doc comments included,
     /// in source order, with what the code next to it is.
     pub ignore_marks: Vec<IgnoreMark>,
@@ -57,16 +55,26 @@ impl ParsedFile {
 
     /// The source span of an expression in this file.
     pub fn expr_span(&self, id: crate::ast::ExprId) -> Option<crate::span::Span> {
-        self.expr_spans
+        self.arenas
+            .expr_spans
             .get(u32::from(id.into_raw()) as usize)
             .copied()
     }
 
     /// The source span of a statement in this file.
     pub fn stmt_span(&self, id: crate::ast::StmtId) -> Option<crate::span::Span> {
-        self.stmt_spans
+        self.arenas
+            .stmt_spans
             .get(u32::from(id.into_raw()) as usize)
             .copied()
+    }
+
+    pub fn expr_count(&self) -> usize {
+        self.arenas.expr_spans.len()
+    }
+
+    pub fn stmt_count(&self) -> usize {
+        self.arenas.stmt_spans.len()
     }
 }
 
@@ -161,7 +169,7 @@ pub fn parse_watching<'a>(
     let syntax_marks = parser.syntax_marks();
     let goto_labels = parser.file_goto_labels();
     let references = parser.take_references();
-    let (expr_spans, stmt_spans) = parser.take_node_spans();
+    let mut arenas = parser.take_node_arenas();
     // The rest of the file is lexed even when the parse failed: a lexer
     // error anywhere in the file is the file's error, before a syntax
     // error found in the part the parse read.
@@ -178,6 +186,7 @@ pub fn parse_watching<'a>(
         return Err(ParseError::new(error.message.clone(), error.span));
     }
     let stmts = parsed?;
+    arenas.shrink_to_fit();
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
     facts.unsets_property = unsets_property;
@@ -186,8 +195,7 @@ pub fn parse_watching<'a>(
         source: source_bytes,
         names,
         stmts,
-        expr_spans: expr_spans.into_boxed_slice(),
-        stmt_spans: stmt_spans.into_boxed_slice(),
+        arenas,
         ignore_marks,
         line_index,
         warnings,
