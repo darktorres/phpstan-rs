@@ -1,12 +1,8 @@
 use super::*;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 
 /// Each declaration in `src` as `(name, conditional)`, in order.
 fn declarations(src: &str) -> Vec<(String, bool)> {
-    let parsed = Parser::from_token_stream(Lexer::new(src).lex_token_stream())
-        .parse_program()
-        .expect("parses");
+    let parsed = crate::parse(src).expect("parses");
     let mut out = Vec::new();
     for_each_declaration(&parsed.arenas, parsed.statements(), |declaration, _, _| {
         out.push((declaration.name(), declaration.conditional));

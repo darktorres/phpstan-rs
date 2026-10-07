@@ -3833,7 +3833,7 @@ fn parse_with_ignores<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
-    parse_recording(path, source, names, None, None)
+    parse_recording(path, source, names, None, None, None)
 }
 
 /// What a file's parse gives that `ParsedFile` does not keep, recorded for
@@ -3854,9 +3854,23 @@ fn parse_recording<'a>(
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
     scratch: Option<&mut syntax::ast::NodeArenas>,
+    worker_scratch: Option<(
+        &mut syntax::token::TokenStream,
+        &mut syntax::lexer::LexerScratch,
+        &mut syntax::parser::ParserScratch,
+    )>,
 ) -> Result<Parsed, ParseError> {
-    let mut parsed = match scratch {
-        Some(scratch) => {
+    let mut parsed = match (scratch, worker_scratch) {
+        (Some(node_scratch), Some((tokens, lexer, parser))) => syntax::parse_watching_with_worker_scratch(
+            source,
+            names,
+            Some(&WATCHED),
+            node_scratch,
+            tokens,
+            lexer,
+            parser,
+        )?,
+        (Some(scratch), None) => {
             // Registry declarations are built from the parsed tree before
             // it may be dropped. `DocCommentRanges` now refer into the
             // owning file's source, so even a scratch parse must retain
@@ -3864,7 +3878,8 @@ fn parse_recording<'a>(
             // their resolved types and tags into registry-owned values.
             syntax::parse_watching_with_scratch(source, names, Some(&WATCHED), scratch)?
         }
-        None => syntax::parse_watching(source, names, Some(&WATCHED))?,
+        (None, None) => syntax::parse_watching(source, names, Some(&WATCHED))?,
+        (None, Some(_)) => unreachable!("worker scratch requires node arena scratch"),
     };
     let ignores = ignore_comments::scan_parsed(&parsed);
     let ast = parsed.stmts;
@@ -4028,6 +4043,7 @@ pub(crate) fn parse_file_recording<'a>(
         record,
         Origin::Path(Arc::from(path)),
         None,
+        None,
     )
 }
 
@@ -4046,6 +4062,7 @@ pub(crate) fn parse_file_recording_with_file_id<'a>(
         names,
         record,
         Origin::File(file_id),
+        None,
         None,
     )
 }
@@ -4066,6 +4083,30 @@ pub(crate) fn parse_file_with_names_and_file_id_and_scratch<'a>(
         None,
         Origin::File(file_id),
         Some(scratch),
+        None,
+    )
+}
+
+pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    names: Option<&mut syntax::name::NameCache>,
+    file_id: FileId,
+    node_scratch: &mut syntax::ast::NodeArenas,
+    token_scratch: &mut syntax::token::TokenStream,
+    lexer_scratch: &mut syntax::lexer::LexerScratch,
+    parser_scratch: &mut syntax::parser::ParserScratch,
+) -> Result<ParsedFile, ParseError> {
+    parse_file_recording_with_origin(
+        path,
+        source,
+        is_stub,
+        names,
+        None,
+        Origin::File(file_id),
+        Some(node_scratch),
+        Some((token_scratch, lexer_scratch, parser_scratch)),
     )
 }
 
@@ -4077,6 +4118,11 @@ fn parse_file_recording_with_origin<'a>(
     record: Option<&mut ParseRecord>,
     origin: Origin,
     scratch: Option<&mut syntax::ast::NodeArenas>,
+    worker_scratch: Option<(
+        &mut syntax::token::TokenStream,
+        &mut syntax::lexer::LexerScratch,
+        &mut syntax::parser::ParserScratch,
+    )>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let content_hash = source::ContentHash::of_source(source);
@@ -4087,7 +4133,7 @@ fn parse_file_recording_with_origin<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_recording(path, source, names, record, scratch)?;
+    } = parse_recording(path, source, names, record, scratch, worker_scratch)?;
     let ast = tree.statements();
     let file_declarations::FileDeclarations {
         functions,

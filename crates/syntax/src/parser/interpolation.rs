@@ -55,7 +55,11 @@ impl Parser<'_> {
                         lexer.without_file_names()
                     };
                     let fragment_arenas = self.node_arenas.borrow().new_fragment();
-                    let mut sub = Parser::from_lexer_with_node_arenas(lexer, fragment_arenas);
+                    let mut sub = Parser::from_lexer_with_node_arenas(
+                        lexer,
+                        fragment_arenas,
+                        self.tracks_name_ids,
+                    );
                     sub.line_index = Arc::clone(&self.line_index);
                     // The fragment's names are read in the namespace and
                     // imports where it sits.

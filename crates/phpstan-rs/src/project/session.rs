@@ -154,6 +154,11 @@ struct LoadState {
     names: syntax::name::NameCache,
     /// Node and span vectors reused when a parsed file's tree is dropped.
     scratch: syntax::ast::NodeArenas,
+    /// Flat token arrays and parser temporaries reused across this load.
+    tokens: syntax::token::TokenStream,
+    /// Per-file name table reused by the lexer across this load.
+    lexer: syntax::lexer::LexerScratch,
+    parser: syntax::parser::ParserScratch,
     /// The bytes of the file the thread is parsing, kept for the next.
     buf: Vec<u8>,
     dirs: rustc_hash::FxHashMap<Vec<u8>, Placed>,
@@ -1369,6 +1374,9 @@ impl Session {
             names,
             buf,
             scratch: arenas,
+            tokens,
+            lexer,
+            parser,
             ..
         } = state;
         if self.read_into(path, absolute, buf).is_err() {
@@ -1403,42 +1411,35 @@ impl Session {
             Ok(text) => text.len(),
             Err(_) => String::from_utf8_lossy(bytes).len(),
         };
-        let scratch = reuse_scratch.then_some(arenas);
+        let mut local_arenas = syntax::ast::NodeArenas::default();
+        let node_scratch = if reuse_scratch {
+            arenas
+        } else {
+            &mut local_arenas
+        };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
-            Ok(text) => match scratch {
-                Some(scratch) => super::parse_file_with_names_and_file_id_and_scratch(
-                    path,
-                    text,
-                    is_stub,
-                    Some(names),
-                    file_id,
-                    scratch,
-                ),
-                None => super::parse_file_with_names_and_file_id(
-                    path,
-                    text,
-                    is_stub,
-                    Some(names),
-                    file_id,
-                ),
-            },
-            Err(_) => match scratch {
-                Some(scratch) => super::parse_file_with_names_and_file_id_and_scratch(
-                    path,
-                    bytes,
-                    is_stub,
-                    Some(names),
-                    file_id,
-                    scratch,
-                ),
-                None => super::parse_file_with_names_and_file_id(
-                    path,
-                    bytes,
-                    is_stub,
-                    Some(names),
-                    file_id,
-                ),
-            },
+            Ok(text) => super::parse_file_with_names_and_file_id_and_worker_scratch(
+                path,
+                text,
+                is_stub,
+                Some(names),
+                file_id,
+                node_scratch,
+                tokens,
+                lexer,
+                parser,
+            ),
+            Err(_) => super::parse_file_with_names_and_file_id_and_worker_scratch(
+                path,
+                bytes,
+                is_stub,
+                Some(names),
+                file_id,
+                node_scratch,
+                tokens,
+                lexer,
+                parser,
+            ),
         })) else {
             return Read::Unread;
         };

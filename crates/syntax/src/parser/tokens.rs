@@ -7,6 +7,9 @@ use crate::token::{Keyword, TokenKind, TokenPayload, TokenRef as Token};
 
 impl Parser<'_> {
     pub(crate) fn name_id(&self, name: &Name) -> Option<crate::name::NameId> {
+        if !self.tracks_name_ids {
+            return None;
+        }
         self.last_name_id
             .filter(|id| self.token_stream.name(*id) == Some(name))
             .or_else(|| {
@@ -149,7 +152,8 @@ impl Parser<'_> {
     }
 
     pub(crate) fn take_interpolation(&mut self) -> Option<Vec<crate::token::StringPart>> {
-        let TokenPayload::Interpolation(parts) = self.take_payload_of(TokenKind::InterpString)? else {
+        let TokenPayload::Interpolation(parts) = self.take_payload_of(TokenKind::InterpString)?
+        else {
             return None;
         };
         Some(parts)

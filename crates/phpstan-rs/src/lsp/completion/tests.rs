@@ -83,8 +83,8 @@ fn receiver_start_idx_stops_at_a_preceding_semicolon() {
     let receiver = slice_span(
         src,
         Span {
-            start: tokens[start].1.start,
-            end: tokens[anchor_idx].1.start,
+            start: tokens.span_at(start).start,
+            end: tokens.span_at(anchor_idx).start,
         },
     )
     .unwrap();
@@ -102,8 +102,8 @@ fn receiver_start_idx_stops_at_an_unmatched_opening_brace() {
     let receiver = slice_span(
         src,
         Span {
-            start: tokens[start].1.start,
-            end: tokens[anchor_idx].1.start,
+            start: tokens.span_at(start).start,
+            end: tokens.span_at(anchor_idx).start,
         },
     )
     .unwrap();
@@ -121,8 +121,8 @@ fn receiver_start_idx_keeps_a_multi_arg_call_receiver_whole() {
     let receiver = slice_span(
         src,
         Span {
-            start: tokens[start].1.start,
-            end: tokens[anchor_idx].1.start,
+            start: tokens.span_at(start).start,
+            end: tokens.span_at(anchor_idx).start,
         },
     )
     .unwrap();

@@ -24,13 +24,18 @@ fn tokens_on_a_later_line_get_real_line_and_column_positions() {
 #[test]
 fn grouped_doc_tokens_keep_each_source_span() {
     let src = "<?php /** first */ /** second */ function f() {}";
-    let (tokens, _) = Lexer::new(src).lex().lexed.into_toks();
-    let function = tokens
+    let stream = Lexer::new(src).lex_token_stream();
+    let function = stream
+        .kinds
         .iter()
-        .find(|tok| tok.token == Token::Keyword(crate::token::Keyword::Function))
+        .position(|kind| *kind == crate::token::TokenKind::KwFunction)
         .unwrap();
-    let docs = function.docs.as_deref().unwrap();
-    let spans = docs.folded_ranges.as_ref().unwrap().spans();
+    let docs = stream
+        .docs
+        .iter()
+        .filter(|doc| doc.before as usize == function)
+        .collect::<Vec<_>>();
+    let spans = docs.iter().map(|doc| doc.span).collect::<Vec<_>>();
 
     assert_eq!(spans.len(), 2);
     assert_eq!(
@@ -42,17 +47,16 @@ fn grouped_doc_tokens_keep_each_source_span() {
         "/** second */"
     );
     assert_eq!(
-        docs.last_range,
-        Some(*spans.last().unwrap()),
+        docs.last().unwrap().span,
+        *spans.last().unwrap(),
         "the declaration doc range is the last adjacent comment"
     );
     assert_eq!(
-        docs.folded_ranges
-            .as_ref()
-            .unwrap()
-            .text(src.as_bytes())
-            .unwrap(),
-        "/** first \n second \n*/"
+        spans
+            .iter()
+            .map(|span| &src[span.start as usize..span.end as usize])
+            .collect::<Vec<_>>(),
+        vec!["/** first */", "/** second */"]
     );
 }
 

@@ -57,7 +57,7 @@ impl Parser<'_> {
                     self.skip();
                 }
                 Token::Keyword(modifier @ (Keyword::Final | Keyword::Abstract)) => {
-                    let word = if *modifier == Keyword::Final {
+                    let word = if modifier == Keyword::Final {
                         "final"
                     } else {
                         "abstract"

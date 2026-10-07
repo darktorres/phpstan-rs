@@ -105,6 +105,65 @@ pub struct Parser<'a> {
     // Reused for expression-ID lists before their elements are committed
     // together to `NodeArenas::expr_ids`.
     expr_id_list_scratch: Vec<ExprId>,
+    arg_list_scratch: Vec<Arg>,
+    array_item_scratch: Vec<ArrayItem>,
+    match_arm_scratch: Vec<MatchArm>,
+    elseif_scratch: Vec<ElseIf>,
+    switch_case_scratch: Vec<SwitchCase>,
+    catch_clause_scratch: Vec<CatchClause>,
+    declare_directive_scratch: Vec<DeclareDirective>,
+    global_var_scratch: Vec<GlobalVar>,
+    static_var_scratch: Vec<StaticVarDecl>,
+    property_scratch: Vec<PropertyDecl>,
+    method_scratch: Vec<MethodDecl>,
+    class_const_scratch: Vec<ClassConst>,
+    trait_use_scratch: Vec<TraitUse>,
+    enum_case_scratch: Vec<EnumCase>,
+    qualified_name_scratch: Vec<QualifiedName>,
+    use_import_scratch: Vec<UseImport>,
+    trait_alias_scratch: Vec<TraitAlias>,
+    trait_precedence_scratch: Vec<TraitPrecedence>,
+    closure_use_scratch: Vec<ClosureUse>,
+    type_hint_scratch: Vec<TypeHint>,
+    param_list_scratch: Vec<Vec<ParamDraft>>,
+    param_list_depth: usize,
+    destructure_item_scratch: Vec<DestructureItem>,
+    // What names in the tree are interned into.
+    pub(crate) interner: &'static Interner,
+    pub(crate) pattern_only: Vec<(ExprId, ParseError)>,
+    pub(crate) long_arrays: rustc_hash::FxHashSet<ExprId>,
+    // Whether the parse has built an anonymous class (`new class`).
+    pub(crate) saw_anonymous_class: bool,
+    // Where the parse first met each syntax only some PHP versions accept.
+    pub(crate) syntax_marks: crate::lexer::SyntaxMarks,
+    // How many closure and anonymous class bodies the parse is inside, and
+    // whether it has made a class, function or constant declaration in one:
+    // a declaration a walk of the statements does not reach.
+    pub(crate) nested_depth: std::cell::Cell<u32>,
+    pub(crate) saw_nested_declaration: std::cell::Cell<bool>,
+    // Whether the parse has built an `unset` of a property.
+    pub(crate) saw_property_unset: bool,
+    // Whether the opt-in PHPStan stub-attribute rules changed a declaration
+    // while it was being built. A caller then rebuilds reference products
+    // from this final tree instead of using records from discarded nodes.
+    pub(crate) stub_attributes_changed: std::cell::Cell<bool>,
+    // Whether any parsed attribute resolves to one of the historical stub
+    // attributes. Once false, parser hooks can skip the stub-rule scans.
+    pub(crate) stub_attributes_mentioned: bool,
+    pub(crate) goto_scopes: Vec<GotoScope>,
+}
+
+/// Reusable temporary buffers for parsing one file. The worker can retain
+/// this after extracting it from a parser and pass it to the next parser;
+/// `clear` drops elements while keeping each buffer's allocation.
+#[derive(Default)]
+pub struct ParserScratch {
+    // Reused for complete statement lists before their elements are
+    // committed together to `NodeArenas::stmt_ids`.
+    stmt_list_scratch: Vec<StmtId>,
+    // Reused for expression-ID lists before their elements are committed
+    // together to `NodeArenas::expr_ids`.
+    expr_id_list_scratch: Vec<ExprId>,
     // Reused for argument lists while nested expressions are parsed.
     arg_list_scratch: Vec<Arg>,
     // Reused for array elements while nested expressions are parsed.
@@ -137,36 +196,47 @@ pub struct Parser<'a> {
     // Reused for destructuring patterns before their elements are committed
     // together to `NodeArenas::destructure_items`.
     destructure_item_scratch: Vec<DestructureItem>,
-    // What names in the tree are interned into.
-    pub(crate) interner: &'static Interner,
-    // Errors that stand unless the node they're keyed by turns out to be
-    // part of a destructuring target: a skipped array slot (`[, $b]`) and
-    // a `list(...)`. Which it is is only known once the outermost `[...]`
-    // is followed by `=`, so they wait until then.
-    pub(crate) pattern_only: Vec<(ExprId, ParseError)>,
-    // The `array(...)` literals, which can't be destructuring targets.
-    pub(crate) long_arrays: rustc_hash::FxHashSet<ExprId>,
-    // Whether the parse has built an anonymous class (`new class`).
-    pub(crate) saw_anonymous_class: bool,
-    // Where the parse first met each syntax only some PHP versions accept.
-    pub(crate) syntax_marks: crate::lexer::SyntaxMarks,
-    // How many closure and anonymous class bodies the parse is inside, and
-    // whether it has made a class, function or constant declaration in one:
-    // a declaration a walk of the statements does not reach.
-    pub(crate) nested_depth: std::cell::Cell<u32>,
-    pub(crate) saw_nested_declaration: std::cell::Cell<bool>,
-    // Whether the parse has built an `unset` of a property.
-    pub(crate) saw_property_unset: bool,
-    // Whether the opt-in PHPStan stub-attribute rules changed a declaration
-    // while it was being built. A caller then rebuilds reference products
-    // from this final tree instead of using records from discarded nodes.
-    pub(crate) stub_attributes_changed: std::cell::Cell<bool>,
-    // Whether any parsed attribute resolves to one of the historical stub
-    // attributes. Once false, parser hooks can skip the stub-rule scans.
-    pub(crate) stub_attributes_mentioned: bool,
-    // The labels `goto` statements name, one entry per function-like body
-    // being parsed, the file's own first.
-    pub(crate) goto_scopes: Vec<GotoScope>,
+    // Parser-local state that accumulates while parsing and is empty again
+    // once its owning expressions/scopes have been committed.
+    pattern_only: Vec<(ExprId, ParseError)>,
+    long_arrays: rustc_hash::FxHashSet<ExprId>,
+    goto_scopes: Vec<GotoScope>,
+}
+
+impl ParserScratch {
+    fn clear(&mut self) {
+        self.stmt_list_scratch.clear();
+        self.expr_id_list_scratch.clear();
+        self.arg_list_scratch.clear();
+        self.array_item_scratch.clear();
+        self.match_arm_scratch.clear();
+        self.elseif_scratch.clear();
+        self.switch_case_scratch.clear();
+        self.catch_clause_scratch.clear();
+        self.declare_directive_scratch.clear();
+        self.global_var_scratch.clear();
+        self.static_var_scratch.clear();
+        self.property_scratch.clear();
+        self.method_scratch.clear();
+        self.class_const_scratch.clear();
+        self.trait_use_scratch.clear();
+        self.enum_case_scratch.clear();
+        self.qualified_name_scratch.clear();
+        self.use_import_scratch.clear();
+        self.trait_alias_scratch.clear();
+        self.trait_precedence_scratch.clear();
+        self.closure_use_scratch.clear();
+        self.type_hint_scratch.clear();
+        for params in &mut self.param_list_scratch {
+            params.clear();
+        }
+        self.param_list_depth = 0;
+        self.destructure_item_scratch.clear();
+        self.pattern_only.clear();
+        self.long_arrays.clear();
+        self.goto_scopes.clear();
+        self.goto_scopes.push(GotoScope::default());
+    }
 }
 
 /// A parser-only parameter plus its doc range. The retained `Param` stays
@@ -235,7 +305,6 @@ pub(crate) struct MemberStart {
     pub(crate) consts: usize,
 }
 
-
 fn names_for_tokens(tokens: &[Token], keyword_raw: &[(usize, String)]) -> Box<[Name]> {
     let mut names = Vec::new();
     let mut seen = rustc_hash::FxHashSet::default();
@@ -246,12 +315,19 @@ fn names_for_tokens(tokens: &[Token], keyword_raw: &[(usize, String)]) -> Box<[N
     for (index, token) in tokens.iter().enumerate() {
         let name = match token {
             Token::Variable(name) | Token::Identifier(name) => Some(name.clone()),
-            Token::Keyword(keyword) => Some(Interner::global().name(
-                raw_by_token.get(&index).copied().unwrap_or_else(|| keyword.as_str()),
-            )),
+            Token::Keyword(keyword) => Some(
+                Interner::global().name(
+                    raw_by_token
+                        .get(&index)
+                        .copied()
+                        .unwrap_or_else(|| keyword.as_str()),
+                ),
+            ),
             _ => None,
         };
-        if let Some(name) = name && seen.insert(name.clone()) {
+        if let Some(name) = name
+            && seen.insert(name.clone())
+        {
             names.push(name);
         }
     }
@@ -274,8 +350,9 @@ impl<'a> Parser<'a> {
         let mut docs = Vec::new();
         for (token, span, raw) in tokens {
             match token {
-                Token::DocComment(text) => docs.push(crate::lexer::DocEntry {
-                    before: u32::try_from(lexed_tokens.len()).expect("token stream exceeds u32 indexes"),
+                Token::DocComment(text) => docs.push(crate::token::DocEntry {
+                    before: u32::try_from(lexed_tokens.len())
+                        .expect("token stream exceeds u32 indexes"),
                     span,
                     text,
                 }),
@@ -302,27 +379,71 @@ impl<'a> Parser<'a> {
             Vec::new(),
             crate::lexer::FileFacts::default(),
         );
-        Parser::from_token_stream(stream)
+        Parser::<'static>::from_token_stream(stream)
     }
 
     /// A parser of legacy lexer output, retained while readers migrate.
     pub fn from_lexed(lexed: Lexed) -> Parser<'static> {
-        let Lexed { tokens, spans, keyword_raw, docs, line_index } = lexed;
+        let Lexed {
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+            line_index,
+        } = lexed;
         let names = names_for_tokens(&tokens, &keyword_raw);
-        let docs = docs.into_iter().map(|doc| crate::lexer::DocEntry {
-            before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
-            span: doc.span,
-            text: doc.text,
-        }).collect();
-        Parser::from_token_stream(TokenStream::from_lexed_parts(
-            tokens, spans, keyword_raw, docs, line_index, names,
-            Vec::new(), Vec::new(), Vec::new(), Vec::new(), crate::lexer::FileFacts::default(),
+        let docs = docs
+            .into_iter()
+            .map(|doc| crate::token::DocEntry {
+                before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
+                span: doc.span,
+                text: doc.text,
+            })
+            .collect();
+        Parser::<'static>::from_token_stream(TokenStream::from_lexed_parts(
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+            line_index,
+            names,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            crate::lexer::FileFacts::default(),
         ))
     }
 
     /// Parses an already lexed flat stream.
     pub fn from_token_stream(stream: TokenStream) -> Parser<'static> {
-        Self::from_token_stream_with_node_arenas(stream, NodeArenas::default(), None, false)
+        Parser::<'static>::from_token_stream_with_node_arenas(
+            stream,
+            NodeArenas::default(),
+            None,
+            false,
+        )
+    }
+
+    /// Creates a parser using reusable transient buffers supplied by a
+    /// worker. The caller recovers them with [`Parser::take_scratch`] after
+    /// parsing, including when parsing returned an error.
+    pub fn from_token_stream_with_scratch(
+        stream: TokenStream,
+        arenas: NodeArenas,
+        source: Option<&'a [u8]>,
+        source_backed_strings: bool,
+        scratch: ParserScratch,
+        tracks_name_ids: bool,
+    ) -> Parser<'a> {
+        Self::from_token_stream_with_node_arenas_and_scratch(
+            stream,
+            arenas,
+            source,
+            source_backed_strings,
+            scratch,
+            tracks_name_ids,
+        )
     }
 
     /// A parser that consumes the lexer's complete flat stream.
@@ -334,28 +455,55 @@ impl<'a> Parser<'a> {
     pub(crate) fn from_lexer_with_node_arenas(
         mut lexer: Lexer<'a>,
         mut node_arenas: NodeArenas,
+        tracks_name_ids: bool,
     ) -> Parser<'a> {
         let source = lexer.source_bytes();
         let source_backed_strings = lexer.source_backed_strings();
         node_arenas.clear_preserving_bases();
         lexer.set_decoded_bytes_base(node_arenas.decoded_bytes_base);
-        Self::from_token_stream_with_node_arenas(
-            lexer.lex_token_stream(), node_arenas, Some(source), source_backed_strings,
+        Self::from_token_stream_with_node_arenas_and_scratch(
+            lexer.lex_token_stream(),
+            node_arenas,
+            Some(source),
+            source_backed_strings,
+            ParserScratch::default(),
+            tracks_name_ids,
         )
     }
 
     pub(crate) fn from_token_stream_with_node_arenas(
+        token_stream: TokenStream,
+        node_arenas: NodeArenas,
+        source: Option<&'a [u8]>,
+        source_backed_strings: bool,
+    ) -> Parser<'a> {
+        let tracks_name_ids = !token_stream.names.is_empty();
+        Self::from_token_stream_with_node_arenas_and_scratch(
+            token_stream,
+            node_arenas,
+            source,
+            source_backed_strings,
+            ParserScratch::default(),
+            tracks_name_ids,
+        )
+    }
+
+    fn from_token_stream_with_node_arenas_and_scratch(
         mut token_stream: TokenStream,
         mut node_arenas: NodeArenas,
         source: Option<&'a [u8]>,
         source_backed_strings: bool,
+        mut scratch: ParserScratch,
+        tracks_name_ids: bool,
     ) -> Parser<'a> {
+        scratch.clear();
         node_arenas.clear_preserving_bases();
-        node_arenas.decoded_bytes.append(&mut token_stream.decoded_bytes);
+        node_arenas
+            .decoded_bytes
+            .append(&mut token_stream.decoded_bytes);
         let expr_base = node_arenas.expr_base;
         let stmt_base = node_arenas.stmt_base;
         let line_index = Arc::clone(&token_stream.line_index);
-        let tracks_name_ids = !token_stream.names.is_empty();
         let mut parser = Parser {
             token_stream,
             ctx: std::cell::RefCell::default(),
@@ -377,34 +525,34 @@ impl<'a> Parser<'a> {
             expr_span_base: expr_base,
             stmt_span_base: stmt_base,
             node_arenas: std::cell::RefCell::new(node_arenas),
-            stmt_list_scratch: Vec::new(),
-            expr_id_list_scratch: Vec::new(),
-            arg_list_scratch: Vec::new(),
-            array_item_scratch: Vec::new(),
-            match_arm_scratch: Vec::new(),
-            elseif_scratch: Vec::new(),
-            switch_case_scratch: Vec::new(),
-            catch_clause_scratch: Vec::new(),
-            declare_directive_scratch: Vec::new(),
-            global_var_scratch: Vec::new(),
-            static_var_scratch: Vec::new(),
-            property_scratch: Vec::new(),
-            method_scratch: Vec::new(),
-            class_const_scratch: Vec::new(),
-            trait_use_scratch: Vec::new(),
-            enum_case_scratch: Vec::new(),
-            qualified_name_scratch: Vec::new(),
-            use_import_scratch: Vec::new(),
-            trait_alias_scratch: Vec::new(),
-            trait_precedence_scratch: Vec::new(),
-            closure_use_scratch: Vec::new(),
-            type_hint_scratch: Vec::new(),
-            param_list_scratch: Vec::new(),
-            param_list_depth: 0,
-            destructure_item_scratch: Vec::new(),
+            stmt_list_scratch: scratch.stmt_list_scratch,
+            expr_id_list_scratch: scratch.expr_id_list_scratch,
+            arg_list_scratch: scratch.arg_list_scratch,
+            array_item_scratch: scratch.array_item_scratch,
+            match_arm_scratch: scratch.match_arm_scratch,
+            elseif_scratch: scratch.elseif_scratch,
+            switch_case_scratch: scratch.switch_case_scratch,
+            catch_clause_scratch: scratch.catch_clause_scratch,
+            declare_directive_scratch: scratch.declare_directive_scratch,
+            global_var_scratch: scratch.global_var_scratch,
+            static_var_scratch: scratch.static_var_scratch,
+            property_scratch: scratch.property_scratch,
+            method_scratch: scratch.method_scratch,
+            class_const_scratch: scratch.class_const_scratch,
+            trait_use_scratch: scratch.trait_use_scratch,
+            enum_case_scratch: scratch.enum_case_scratch,
+            qualified_name_scratch: scratch.qualified_name_scratch,
+            use_import_scratch: scratch.use_import_scratch,
+            trait_alias_scratch: scratch.trait_alias_scratch,
+            trait_precedence_scratch: scratch.trait_precedence_scratch,
+            closure_use_scratch: scratch.closure_use_scratch,
+            type_hint_scratch: scratch.type_hint_scratch,
+            param_list_scratch: scratch.param_list_scratch,
+            param_list_depth: scratch.param_list_depth,
+            destructure_item_scratch: scratch.destructure_item_scratch,
             interner: Interner::global(),
-            pattern_only: Vec::new(),
-            long_arrays: rustc_hash::FxHashSet::default(),
+            pattern_only: scratch.pattern_only,
+            long_arrays: scratch.long_arrays,
             saw_anonymous_class: false,
             syntax_marks: crate::lexer::SyntaxMarks::default(),
             nested_depth: std::cell::Cell::new(0),
@@ -412,7 +560,7 @@ impl<'a> Parser<'a> {
             saw_property_unset: false,
             stub_attributes_changed: std::cell::Cell::new(false),
             stub_attributes_mentioned: false,
-            goto_scopes: vec![GotoScope::default()],
+            goto_scopes: scratch.goto_scopes,
         };
         parser.load_current_docs();
         parser
@@ -455,7 +603,9 @@ impl<'a> Parser<'a> {
             if let (Some(span), Some(text)) = (group.last_range, group.last.as_ref()) {
                 texts.insert(DocCommentRanges::One(span), Arc::clone(text));
             }
-            if let (Some(ranges), Some(text)) = (group.folded_ranges.as_ref(), group.folded.as_ref()) {
+            if let (Some(ranges), Some(text)) =
+                (group.folded_ranges.as_ref(), group.folded.as_ref())
+            {
                 texts.insert(ranges.clone(), Arc::clone(text));
             }
         }
@@ -496,14 +646,65 @@ impl<'a> Parser<'a> {
         self.last_name_id = id;
     }
 
-    pub(crate) fn into_lex_end(self) -> Option<LexEnd> {
-        let stream = self.token_stream;
+    pub(crate) fn into_lex_end(mut self) -> Option<LexEnd> {
+        self.take_lex_end(true)
+    }
+
+    /// Returns cleared transient buffers to their owner while preserving
+    /// allocations for reuse by the next parser.
+    pub fn take_scratch(&mut self) -> ParserScratch {
+        let mut scratch = ParserScratch {
+            stmt_list_scratch: std::mem::take(&mut self.stmt_list_scratch),
+            expr_id_list_scratch: std::mem::take(&mut self.expr_id_list_scratch),
+            arg_list_scratch: std::mem::take(&mut self.arg_list_scratch),
+            array_item_scratch: std::mem::take(&mut self.array_item_scratch),
+            match_arm_scratch: std::mem::take(&mut self.match_arm_scratch),
+            elseif_scratch: std::mem::take(&mut self.elseif_scratch),
+            switch_case_scratch: std::mem::take(&mut self.switch_case_scratch),
+            catch_clause_scratch: std::mem::take(&mut self.catch_clause_scratch),
+            declare_directive_scratch: std::mem::take(&mut self.declare_directive_scratch),
+            global_var_scratch: std::mem::take(&mut self.global_var_scratch),
+            static_var_scratch: std::mem::take(&mut self.static_var_scratch),
+            property_scratch: std::mem::take(&mut self.property_scratch),
+            method_scratch: std::mem::take(&mut self.method_scratch),
+            class_const_scratch: std::mem::take(&mut self.class_const_scratch),
+            trait_use_scratch: std::mem::take(&mut self.trait_use_scratch),
+            enum_case_scratch: std::mem::take(&mut self.enum_case_scratch),
+            qualified_name_scratch: std::mem::take(&mut self.qualified_name_scratch),
+            use_import_scratch: std::mem::take(&mut self.use_import_scratch),
+            trait_alias_scratch: std::mem::take(&mut self.trait_alias_scratch),
+            trait_precedence_scratch: std::mem::take(&mut self.trait_precedence_scratch),
+            closure_use_scratch: std::mem::take(&mut self.closure_use_scratch),
+            type_hint_scratch: std::mem::take(&mut self.type_hint_scratch),
+            param_list_scratch: std::mem::take(&mut self.param_list_scratch),
+            param_list_depth: std::mem::take(&mut self.param_list_depth),
+            destructure_item_scratch: std::mem::take(&mut self.destructure_item_scratch),
+            pattern_only: std::mem::take(&mut self.pattern_only),
+            long_arrays: std::mem::take(&mut self.long_arrays),
+            goto_scopes: std::mem::take(&mut self.goto_scopes),
+        };
+        scratch.clear();
+        scratch
+    }
+
+    /// Moves the consumed token tables out so a worker can reuse their
+    /// allocations for its next file.
+    pub fn take_token_stream(&mut self) -> TokenStream {
+        std::mem::take(&mut self.token_stream)
+    }
+
+    /// Extracts lexer metadata before the token stream is retained for reuse.
+    pub fn take_lex_end(&mut self, retain_names: bool) -> Option<LexEnd> {
         Some(LexEnd {
-            ignore_marks: stream.ignore_marks,
-            warnings: stream.warnings,
-            facts: stream.facts,
-            line_index: stream.line_index,
-            names: stream.names,
+            ignore_marks: std::mem::take(&mut self.token_stream.ignore_marks),
+            warnings: std::mem::take(&mut self.token_stream.warnings),
+            facts: std::mem::take(&mut self.token_stream.facts),
+            line_index: Arc::clone(&self.token_stream.line_index),
+            names: if retain_names {
+                std::mem::take(&mut self.token_stream.names).into_boxed_slice()
+            } else {
+                Box::default()
+            },
             decoded_bytes: Vec::new(),
         })
     }
@@ -631,7 +832,9 @@ impl Parser<'_> {
         consts: usize,
     ) -> MemberStart {
         MemberStart {
-            start: self.current_docs.as_deref()
+            start: self
+                .current_docs
+                .as_deref()
                 .and_then(|docs| docs.first_start)
                 .unwrap_or_else(|| self.current_pos()),
             previous_end: (self.pos > 0).then_some(self.last_end),

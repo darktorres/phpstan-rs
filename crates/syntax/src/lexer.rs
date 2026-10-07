@@ -2,7 +2,8 @@ use std::borrow::Cow;
 
 use crate::name::{Interner, Name, NameCache, NameId};
 use crate::span::{LineIndex, Span};
-use crate::token::{DocEntry, Keyword, Token, TokenPayloadEntry, TokenStream};
+pub use crate::token::DocEntry;
+use crate::token::{Keyword, Token, TokenPayloadEntry, TokenStream};
 use std::sync::Arc;
 
 mod strings;
@@ -86,6 +87,13 @@ pub struct Lexer<'a> {
     track_file_names: bool,
     // The spellings whose mention the file's facts hold.
     watch: Option<&'static WatchList>,
+}
+
+/// Per-worker hash table mapping names met in the current file to their
+/// file-local `NameId`. Its allocation is cleared and reused for each file.
+#[derive(Default)]
+pub struct LexerScratch {
+    names: hashbrown::HashTable<(u64, Name, u32, Option<NameId>)>,
 }
 
 /// A comment that holds `@phpstan-ignore`, which every inline suppression
@@ -181,17 +189,6 @@ pub struct Lexed {
     pub line_index: Arc<LineIndex>,
 }
 
-/// A token with what the parser reads along with it.
-#[derive(Debug, Clone)]
-pub struct Tok {
-    pub token: Token,
-    pub span: Span,
-    /// The doc comments right before it.
-    pub docs: Option<Box<DocGroup>>,
-    /// A keyword's spelling when it is not in lower case.
-    pub raw_keyword: Option<Box<str>>,
-}
-
 /// The doc comments right before a token: the last, which is the token's
 /// doc comment, and the several folded into one when there are several.
 #[derive(Debug, Clone)]
@@ -209,15 +206,6 @@ pub struct DocGroup {
     /// Where the first starts; none for a group made of a doc comment
     /// moved from before attributes.
     pub first_start: Option<u32>,
-}
-
-/// Several consecutive `/** ... */` comments as one: each one's body, in
-/// order, inside a single pair of delimiters.
-fn fold_doc_comments<'t>(docs: impl Iterator<Item = &'t Arc<str>>) -> Arc<str> {
-    let bodies: Vec<&str> = docs
-        .map(|d| d.trim().trim_start_matches("/**").trim_end_matches("*/"))
-        .collect();
-    Arc::from(format!("/**{}\n*/", bodies.join("\n")).as_str())
 }
 
 /// What the lexer knows of a file once it has lexed all of it.
@@ -349,56 +337,6 @@ pub struct LexedDoc {
 }
 
 impl Lexed {
-    /// The tokens the way the lexer hands them out one at a time: each
-    /// with the doc comments before it and its keyword's spelling.
-    pub fn into_toks(self) -> (Vec<Tok>, Arc<LineIndex>) {
-        let Lexed {
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index,
-        } = self;
-        let mut out: Vec<Tok> = Vec::with_capacity(tokens.len());
-        let mut docs = docs.into_iter().peekable();
-        let mut raws = keyword_raw.into_iter().peekable();
-        for (index, (token, span)) in tokens.into_iter().zip(spans).enumerate() {
-            let mut group: Vec<(Arc<str>, Span)> = Vec::new();
-            while let Some(doc) = docs.next_if(|doc| doc.before == index) {
-                group.push((doc.text, doc.span));
-            }
-            let docs = match group.as_slice() {
-                [] => None,
-                [(text, span)] => Some(Box::new(DocGroup {
-                    last: Some(Arc::clone(text)),
-                    last_range: Some(*span),
-                    folded: None,
-                    folded_ranges: None,
-                    first_start: Some(span.start),
-                })),
-                several => Some(Box::new(DocGroup {
-                    last: Some(Arc::clone(&several[several.len() - 1].0)),
-                    folded: Some(fold_doc_comments(several.iter().map(|(text, _)| text))),
-                    last_range: Some(several[several.len() - 1].1),
-                    folded_ranges: Some(crate::ast::DocCommentRanges::group(
-                        several.iter().map(|(_, span)| *span).collect::<Vec<_>>(),
-                    )),
-                    first_start: Some(several[0].1.start),
-                })),
-            };
-            let raw_keyword = raws
-                .next_if(|(i, _)| *i == index)
-                .map(|(_, raw)| raw.into_boxed_str());
-            out.push(Tok {
-                token,
-                span,
-                docs,
-                raw_keyword,
-            });
-        }
-        (out, line_index)
-    }
-
     /// The tokens as the spanned list the lexer made before the parser read
     /// the vectors of `Lexed`: a doc comment a token of its own, before the
     /// token it precedes, and every keyword with its spelling or none.
@@ -445,16 +383,42 @@ impl LexOutput {
     /// Converts the legacy owned-token result to the flat token stream.
     /// This is an adapter only; parser input continues to use `Lexed`.
     pub fn into_token_stream(self) -> TokenStream {
-        let Self { lexed, comments, ignore_marks, warnings, facts, names, decoded_bytes } = self;
-        let Lexed { tokens, spans, keyword_raw, docs, line_index } = lexed;
-        let docs = docs.into_iter().map(|doc| DocEntry {
-            before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
-            span: doc.span,
-            text: doc.text,
-        }).collect();
+        let Self {
+            lexed,
+            comments,
+            ignore_marks,
+            warnings,
+            facts,
+            names,
+            decoded_bytes,
+        } = self;
+        let Lexed {
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+            line_index,
+        } = lexed;
+        let docs = docs
+            .into_iter()
+            .map(|doc| DocEntry {
+                before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
+                span: doc.span,
+                text: doc.text,
+            })
+            .collect();
         TokenStream::from_lexed_parts(
-            tokens, spans, keyword_raw, docs, line_index, names, decoded_bytes,
-            comments, ignore_marks, warnings, facts,
+            tokens,
+            spans,
+            keyword_raw,
+            docs,
+            line_index,
+            names,
+            decoded_bytes,
+            comments,
+            ignore_marks,
+            warnings,
+            facts,
         )
     }
 }
@@ -689,65 +653,66 @@ impl<'a> Lexer<'a> {
     ///
     /// This shares the same lexer pass and metadata collection as [`Self::lex`]
     /// but preserves source and decoded-byte ranges for the owning parser.
-    pub fn lex_token_stream(mut self) -> TokenStream {
+    pub fn lex_token_stream(self) -> TokenStream {
+        self.lex_token_stream_with_scratch(TokenStream::default())
+    }
+
+    /// Lexes into a worker-owned stream buffer, reusing its allocations.
+    /// Pass the previous file's stream back on the next call to reuse its
+    /// token, payload, name, and metadata allocations.
+    pub fn lex_token_stream_with_scratch(self, stream: TokenStream) -> TokenStream {
+        self.lex_token_stream_with_worker_scratch(stream, &mut LexerScratch::default())
+    }
+
+    /// Lexes into reusable token and identifier buffers owned by a worker.
+    pub fn lex_token_stream_with_worker_scratch(
+        mut self,
+        mut stream: TokenStream,
+        scratch: &mut LexerScratch,
+    ) -> TokenStream {
+        self.keep_comments = true;
+        // Every Name payload stores a file-local NameId, even when the
+        // caller does not retain that table after parsing.
+        self.track_file_names = true;
+        scratch.names.clear();
+        std::mem::swap(&mut self.names, &mut scratch.names);
+        stream.clear_for_reuse();
+        std::mem::swap(&mut self.file_names, &mut stream.names);
+        std::mem::swap(&mut self.decoded_bytes, &mut stream.decoded_bytes);
+        std::mem::swap(&mut self.ignore_marks, &mut stream.ignore_marks);
+        std::mem::swap(&mut self.warnings, &mut stream.warnings);
         let estimate = self.src.len() / 4;
-        let mut kinds = Vec::with_capacity(estimate);
-        let mut spans = Vec::with_capacity(estimate);
-        let mut payloads = Vec::new();
-        let mut docs = Vec::new();
-        let mut keyword_raw = Vec::new();
+        stream.kinds.reserve(estimate);
+        stream.spans.reserve(estimate);
         loop {
             let (token, span, raw_keyword) = self.next_raw();
             if let Token::DocComment(text) = token {
-                docs.push(DocEntry {
-                    before: u32::try_from(kinds.len()).expect("token stream exceeds u32 indexes"),
-                    span,
-                    text,
-                });
+                stream.push_doc(span, text);
                 continue;
-            }
-            let index = kinds.len();
-            if let Some(raw) = raw_keyword {
-                keyword_raw.push((
-                    u32::try_from(index).expect("token stream exceeds u32 indexes"),
-                    raw,
-                ));
             }
             let done = matches!(token, Token::Eof);
             let (kind, payload) = token.into_kind_payload(|name| {
                 self.name_id(name)
                     .expect("token name is in the file name table")
             });
-            kinds.push(kind);
-            spans.push(span);
-            if let Some(payload) = payload {
-                payloads.push(TokenPayloadEntry {
-                    token: u32::try_from(index).expect("token stream exceeds u32 indexes"),
-                    payload,
-                });
-            }
+            stream.push_token(kind, span, payload, raw_keyword);
             if done {
                 break;
             }
         }
-        let comments = std::mem::take(&mut self.comments)
-            .into_iter()
-            .map(|(start, end)| (self.span(start, end), self.slice(start..end).into_owned()))
-            .collect();
-        TokenStream::from_parts(
-            kinds,
-            spans,
-            payloads,
-            docs,
-            keyword_raw,
-            Arc::clone(&self.line_index),
-            std::mem::take(&mut self.file_names).into_boxed_slice(),
-            std::mem::take(&mut self.decoded_bytes),
-            comments,
-            std::mem::take(&mut self.ignore_marks),
-            std::mem::take(&mut self.warnings),
-            self.facts,
-        )
+        stream.comments.extend(
+            std::mem::take(&mut self.comments)
+                .into_iter()
+                .map(|(start, end)| (self.span(start, end), self.slice(start..end).into_owned())),
+        );
+        stream.line_index = Arc::clone(&self.line_index);
+        stream.facts = self.facts;
+        std::mem::swap(&mut self.file_names, &mut stream.names);
+        std::mem::swap(&mut self.decoded_bytes, &mut stream.decoded_bytes);
+        std::mem::swap(&mut self.ignore_marks, &mut stream.ignore_marks);
+        std::mem::swap(&mut self.warnings, &mut stream.warnings);
+        std::mem::swap(&mut self.names, &mut scratch.names);
+        stream
     }
 
     fn own_source_string_tokens(&self, tokens: &mut [Token]) {
@@ -863,45 +828,6 @@ impl<'a> Lexer<'a> {
         (token, span, raw)
     }
 
-    /// The next token that is not a doc comment, with the doc comments
-    /// right before it, which a declaration or a statement reads. Past
-    /// the end it is `Token::Eof` again.
-    pub fn next_tok(&mut self) -> Tok {
-        let mut docs: Vec<(Arc<str>, Span)> = Vec::new();
-        loop {
-            let (token, span, raw_keyword) = self.next_raw();
-            if let Token::DocComment(text) = token {
-                docs.push((text, span));
-                continue;
-            }
-            let docs = match docs.as_slice() {
-                [] => None,
-                [(text, span)] => Some(Box::new(DocGroup {
-                    last: Some(Arc::clone(text)),
-                    last_range: Some(*span),
-                    folded: None,
-                    folded_ranges: None,
-                    first_start: Some(span.start),
-                })),
-                several => Some(Box::new(DocGroup {
-                    last: Some(Arc::clone(&several[several.len() - 1].0)),
-                    folded: Some(fold_doc_comments(several.iter().map(|(text, _)| text))),
-                    last_range: Some(several[several.len() - 1].1),
-                    folded_ranges: Some(crate::ast::DocCommentRanges::group(
-                        several.iter().map(|(_, span)| *span).collect::<Vec<_>>(),
-                    )),
-                    first_start: Some(several[0].1.start),
-                })),
-            };
-            return Tok {
-                token,
-                span,
-                docs,
-                raw_keyword: raw_keyword.map(String::into_boxed_str),
-            };
-        }
-    }
-
     /// The lines of the file being lexed.
     pub fn line_index(&self) -> Arc<LineIndex> {
         Arc::clone(&self.line_index)
@@ -922,7 +848,7 @@ impl<'a> Lexer<'a> {
 
     /// Lexes what is left, which the lexer's own record of the file holds.
     pub fn finish(mut self) -> LexEnd {
-        while !matches!(self.next_tok().token, Token::Eof) {}
+        while !matches!(self.next_raw().0, Token::Eof) {}
         LexEnd {
             ignore_marks: std::mem::take(&mut self.ignore_marks),
             warnings: std::mem::take(&mut self.warnings),

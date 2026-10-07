@@ -63,9 +63,12 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    `.cargo-test-9V.log`; all 2,127 tests across 30 test executables pass,
    including phpstan-rs and syntax/parser suites, and the generated stub-index
    check is current.
-   Rows 9.V.a-9.V.c are DONE. Item 10.1 has aligned TokenStream storage and
-   parser-cursor changes in the worktree, not yet validated; direct stream
-   emission, worker buffer reuse, and remaining reader migration are unfinished.
+   Rows 9.V.a-9.V.c are DONE. Item 10.1 is DONE: direct flat-stream emission,
+   parser cursors, and per-worker token, lexer name-table, and parser scratch
+   reuse are implemented. Item 10.2.a is also DONE because its reusable lexer
+   table was required to complete worker scratch reuse.
+   The binary builds and the workspace tests pass (2,127 tests across 30
+   executables). Resume item 10 at 10.2.
    Full §11
    validation remains deferred until item 19.
    Each item's gate runs workspace and item-specific tests only (including their inherent compile).

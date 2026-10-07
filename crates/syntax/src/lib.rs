@@ -25,7 +25,8 @@ pub use lexer::WatchList;
 pub use lexer::{SyntaxMark, SyntaxMarks};
 pub use parse::{
     FileFacts, ParsedFile, Source, parse, parse_expression_into_arenas, parse_watching,
-    parse_watching_transient_with_scratch, parse_watching_with_scratch, parse_with_names,
+    parse_watching_transient_with_scratch, parse_watching_with_scratch,
+    parse_watching_with_worker_scratch, parse_with_names,
 };
 pub use span::LineIndex;
 pub use token::{DocEntry, TokenKind, TokenPayload, TokenPayloadEntry, TokenStream};

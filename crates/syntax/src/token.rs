@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use crate::ast::{StringPart, StringPayload};
+use crate::ast::StringPayload;
 use crate::lexer::{FileFacts, IgnoreMark, LexWarning};
 use crate::name::{Name, NameId, name_id};
-use crate::php_string::PhpString;
 use crate::span::{LineIndex, Span};
 
 /// A fieldless, byte-sized token tag. Payloads and locations live in parallel
@@ -61,7 +60,7 @@ pub enum TokenPayload {
 
 /// A borrowed view of one flat-stream token. Payload-bearing variants borrow
 /// the sparse payload entry so parser peeks never rebuild an owned `Token`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenRef<'a> {
     InlineHtml(Span), DocComment(&'a str), Variable(&'a Name), Integer(i64),
     Float(f64), StringLit(&'a StringPayload), InterpString(&'a [StringPart]),
@@ -143,7 +142,7 @@ pub struct TokenStream {
     pub docs: Vec<DocEntry>,
     pub keyword_raw: Vec<(u32, String)>,
     pub line_index: Arc<LineIndex>,
-    pub names: Box<[Name]>,
+    pub names: Vec<Name>,
     pub decoded_bytes: Vec<u8>,
     pub comments: Vec<(Span, String)>,
     pub ignore_marks: Vec<IgnoreMark>,
@@ -151,7 +150,66 @@ pub struct TokenStream {
     pub facts: FileFacts,
 }
 
+impl Default for TokenStream {
+    fn default() -> Self {
+        Self {
+            kinds: Vec::new(), spans: Vec::new(), payloads: Vec::new(), docs: Vec::new(),
+            keyword_raw: Vec::new(), line_index: Arc::new(LineIndex::default()), names: Vec::new(),
+            decoded_bytes: Vec::new(), comments: Vec::new(), ignore_marks: Vec::new(),
+            warnings: Vec::new(), facts: FileFacts::default(),
+        }
+    }
+}
+
 impl TokenStream {
+    /// Clears per-file contents while retaining vector allocations.
+    pub fn clear_for_reuse(&mut self) {
+        self.kinds.clear();
+        self.spans.clear();
+        self.payloads.clear();
+        self.docs.clear();
+        self.keyword_raw.clear();
+        self.names.clear();
+        self.decoded_bytes.clear();
+        self.comments.clear();
+        self.ignore_marks.clear();
+        self.warnings.clear();
+        self.line_index = Arc::new(LineIndex::default());
+        self.facts = FileFacts::default();
+    }
+
+    pub(crate) fn push_token(
+        &mut self,
+        kind: TokenKind,
+        span: Span,
+        payload: Option<TokenPayload>,
+        raw_keyword: Option<String>,
+    ) {
+        let index = self.kinds.len();
+        self.kinds.push(kind);
+        self.spans.push(span);
+        if let Some(payload) = payload {
+            self.payloads.push(TokenPayloadEntry {
+                token: u32::try_from(index).expect("token stream exceeds u32 indexes"),
+                payload,
+            });
+        }
+        if let Some(raw) = raw_keyword {
+            self.keyword_raw.push((
+                u32::try_from(index).expect("token stream exceeds u32 indexes"),
+                raw,
+            ));
+        }
+    }
+
+    pub(crate) fn push_doc(&mut self, span: Span, text: Arc<str>) {
+        self.docs.push(DocEntry {
+            before: u32::try_from(self.kinds.len()).expect("token stream exceeds u32 indexes"),
+            span,
+            text,
+        });
+    }
+
     /// The kind at `index`, or the EOF sentinel past the stream.
     #[inline]
     pub fn kind_at(&self, index: usize) -> TokenKind {
@@ -211,7 +269,6 @@ impl TokenStream {
             K::InterpString => match self.payload_at(index) { Some(P::Interpolation(parts)) => R::InterpString(parts), _ => R::Eof },
             K::ShellExec => match self.payload_at(index) { Some(P::Shell(parts)) => R::ShellExec(parts), _ => R::Eof },
             K::Identifier => match self.payload_at(index) { Some(P::Name(id)) => self.name(*id).map_or(R::Eof, R::Identifier), _ => R::Eof },
-            _ if kind.keyword().is_some() => R::Keyword(kind.keyword().expect("checked keyword kind")),
             K::LParen => R::LParen, K::RParen => R::RParen, K::LBrace => R::LBrace, K::RBrace => R::RBrace,
             K::LBracket => R::LBracket, K::RBracket => R::RBracket, K::Semicolon => R::Semicolon,
             K::Comma => R::Comma, K::Colon => R::Colon, K::DoubleColon => R::DoubleColon,
@@ -233,6 +290,7 @@ impl TokenStream {
             K::Backslash => R::Backslash, K::Ellipsis => R::Ellipsis, K::PipeGt => R::PipeGt,
             K::DollarBrace => R::DollarBrace, K::AttributeStart => R::AttributeStart, K::Dollar => R::Dollar,
             K::Eof => R::Eof,
+            keyword_or_unhandled => keyword_or_unhandled.keyword().map_or(R::Eof, R::Keyword),
         }
     }
 
@@ -260,7 +318,7 @@ impl TokenStream {
         docs: Vec<DocEntry>,
         keyword_raw: Vec<(u32, String)>,
         line_index: Arc<LineIndex>,
-        names: Box<[Name]>,
+        names: Vec<Name>,
         decoded_bytes: Vec<u8>,
         comments: Vec<(Span, String)>,
         ignore_marks: Vec<IgnoreMark>,
@@ -322,9 +380,9 @@ impl TokenStream {
                     collected.push(name);
                 }
             }
-            collected.into_boxed_slice()
+            collected
         } else {
-            names
+            names.into_vec()
         };
         let by_name: std::collections::HashMap<Name, NameId> = names
             .iter()
@@ -453,7 +511,7 @@ impl Keyword {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum Keyword {
     Function,

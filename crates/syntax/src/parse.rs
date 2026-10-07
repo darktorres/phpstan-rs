@@ -29,10 +29,12 @@ pub fn parse_expression_into_arenas(
     let source = lexer.source_bytes();
     lexer.set_decoded_bytes_base(fragment.decoded_bytes_base);
     let stream = lexer.lex_token_stream();
-    let mut parser = Parser::from_token_stream_with_node_arenas(
+    let mut parser = Parser::from_token_stream_with_scratch(
         stream,
         fragment,
         Some(source),
+        false,
+        crate::parser::ParserScratch::default(),
         false,
     );
     *parser.ctx.borrow_mut() = context.clone();
@@ -239,6 +241,7 @@ pub fn parse_watching<'a>(
         true,
         true,
         None,
+        None,
     )
 }
 
@@ -253,7 +256,40 @@ pub fn parse_watching_with_scratch<'a>(
     scratch: &mut NodeArenas,
 ) -> Result<ParsedFile, ParseError> {
     let arenas = std::mem::take(scratch);
-    parse_watching_in_arenas(source, names, watch, arenas, false, true, Some(scratch))
+    parse_watching_in_arenas(
+        source,
+        names,
+        watch,
+        arenas,
+        false,
+        true,
+        Some(scratch),
+        None,
+    )
+}
+
+/// Reuses the token tables and parser temporaries a worker keeps between
+/// files, alongside the parsed node arenas.
+pub fn parse_watching_with_worker_scratch<'a>(
+    source: impl Into<Source<'a>>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+    arenas: &mut NodeArenas,
+    tokens: &mut crate::token::TokenStream,
+    lexer_scratch: &mut crate::lexer::LexerScratch,
+    parser_scratch: &mut crate::parser::ParserScratch,
+) -> Result<ParsedFile, ParseError> {
+    let node_arenas = std::mem::take(arenas);
+    parse_watching_in_arenas(
+        source,
+        names,
+        watch,
+        node_arenas,
+        false,
+        true,
+        Some(arenas),
+        Some((tokens, lexer_scratch, parser_scratch)),
+    )
 }
 
 /// Parses a file whose tree is used only while its products are collected.
@@ -268,7 +304,16 @@ pub fn parse_watching_transient_with_scratch<'a>(
     scratch: &mut NodeArenas,
 ) -> Result<ParsedFile, ParseError> {
     let arenas = std::mem::take(scratch);
-    parse_watching_in_arenas(source, names, watch, arenas, false, false, Some(scratch))
+    parse_watching_in_arenas(
+        source,
+        names,
+        watch,
+        arenas,
+        false,
+        false,
+        Some(scratch),
+        None,
+    )
 }
 
 fn parse_watching_in_arenas<'a>(
@@ -279,6 +324,11 @@ fn parse_watching_in_arenas<'a>(
     compact_arenas: bool,
     retain_file_data: bool,
     mut scratch: Option<&mut NodeArenas>,
+    mut worker_scratch: Option<(
+        &mut crate::token::TokenStream,
+        &mut crate::lexer::LexerScratch,
+        &mut crate::parser::ParserScratch,
+    )>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let source_bytes: Arc<[u8]> = if retain_file_data {
@@ -291,29 +341,45 @@ fn parse_watching_in_arenas<'a>(
     };
     arenas.decoded_bytes_base = 0;
     let mut lexer = Lexer::from_source(source).with_source_backed_strings(retain_file_data);
-    let lexer = match watch {
+    let mut lexer = match watch {
         Some(watch) => lexer.watching(watch),
         None => lexer,
     };
-    let lexer = match names {
+    let mut lexer = match names {
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
     };
-    let lexer = if retain_file_data {
-        lexer
-    } else {
-        lexer.without_file_names()
-    };
+    // The flat stream's NameIds need their per-file table while the parser
+    // reads them, even for transient parses. The table is released with the
+    // worker token buffer after parsing when ParsedFile does not retain it.
     let source = lexer.source_bytes();
     let source_backed_strings = lexer.source_backed_strings();
     lexer.set_decoded_bytes_base(arenas.decoded_bytes_base);
-    let token_stream = lexer.lex_token_stream();
-    let mut parser = Parser::from_token_stream_with_node_arenas(
-        token_stream,
-        arenas,
-        Some(source),
-        source_backed_strings,
-    );
+    let token_stream = match worker_scratch.as_mut() {
+        Some((tokens, lexer_scratch, _)) => lexer.lex_token_stream_with_worker_scratch(
+            std::mem::take(tokens),
+            lexer_scratch,
+        ),
+        None => lexer.lex_token_stream(),
+    };
+    let mut parser = match worker_scratch.as_mut() {
+        Some((_, _, parser_scratch)) => Parser::from_token_stream_with_scratch(
+            token_stream,
+            arenas,
+            Some(source),
+            source_backed_strings,
+            std::mem::take(parser_scratch),
+            retain_file_data,
+        ),
+        None => Parser::from_token_stream_with_scratch(
+            token_stream,
+            arenas,
+            Some(source),
+            source_backed_strings,
+            crate::parser::ParserScratch::default(),
+            retain_file_data,
+        ),
+    };
     let (parsed_stmts, parse_error, mut arenas) = match parser.parse_program() {
         Ok(program) => (Some(program.stmts), None, program.arenas),
         Err(error) => (None, Some(error), parser.take_node_arenas()),
@@ -337,8 +403,12 @@ fn parse_watching_in_arenas<'a>(
         names,
         decoded_bytes,
     } = parser
-        .into_lex_end()
+        .take_lex_end(retain_file_data)
         .expect("a parser of a lexer ends with the lexer's record");
+    if let Some((tokens, _, parser_scratch)) = worker_scratch.as_mut() {
+        **tokens = parser.take_token_stream();
+        **parser_scratch = parser.take_scratch();
+    }
     if let Some(error) = warnings.iter().find(|w| w.is_error) {
         if let Some(scratch) = scratch.as_deref_mut() {
             *scratch = arenas;
