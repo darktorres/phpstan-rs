@@ -1365,7 +1365,12 @@ impl Session {
         file_id: FileId,
         reuse_scratch: bool,
     ) -> Read {
-        let LoadState { names, buf, .. } = state;
+        let LoadState {
+            names,
+            buf,
+            scratch: arenas,
+            ..
+        } = state;
         if self.read_into(path, absolute, buf).is_err() {
             return Read::Unread;
         }
@@ -1398,7 +1403,7 @@ impl Session {
             Ok(text) => text.len(),
             Err(_) => String::from_utf8_lossy(bytes).len(),
         };
-        let scratch = reuse_scratch.then(|| std::mem::take(&mut state.scratch));
+        let scratch = reuse_scratch.then_some(arenas);
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
             Ok(text) => match scratch {
                 Some(scratch) => super::parse_file_with_names_and_file_id_and_scratch(

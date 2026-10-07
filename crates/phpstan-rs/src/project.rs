@@ -3773,7 +3773,7 @@ fn parse_recording<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
-    scratch: Option<syntax::ast::NodeArenas>,
+    scratch: Option<&mut syntax::ast::NodeArenas>,
 ) -> Result<Parsed, ParseError> {
     let parsed = match scratch {
         Some(scratch) => {
@@ -3970,7 +3970,7 @@ pub(crate) fn parse_file_with_names_and_file_id_and_scratch<'a>(
     is_stub: bool,
     names: Option<&mut syntax::name::NameCache>,
     file_id: FileId,
-    scratch: syntax::ast::NodeArenas,
+    scratch: &mut syntax::ast::NodeArenas,
 ) -> Result<ParsedFile, ParseError> {
     parse_file_recording_with_origin(
         path,

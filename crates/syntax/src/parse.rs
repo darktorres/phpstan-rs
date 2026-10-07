@@ -158,19 +158,21 @@ pub fn parse_watching<'a>(
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
 ) -> Result<ParsedFile, ParseError> {
-    parse_watching_in_arenas(source, names, watch, NodeArenas::default(), true)
+    parse_watching_in_arenas(source, names, watch, NodeArenas::default(), true, None)
 }
 
-/// Parses with reusable node arenas. The returned file owns the bundle
-/// until its products are consumed; `ParsedFile::into_node_arenas` returns
-/// it for reuse after the tree is no longer needed.
+/// Parses with reusable node arenas. On success, the returned file owns the
+/// bundle until its products are consumed; `ParsedFile::into_node_arenas`
+/// returns it for reuse. On a parse error, the arenas are returned to
+/// `scratch` so a worker can keep its warmed capacity.
 pub fn parse_watching_with_scratch<'a>(
     source: impl Into<Source<'a>>,
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
-    scratch: NodeArenas,
+    scratch: &mut NodeArenas,
 ) -> Result<ParsedFile, ParseError> {
-    parse_watching_in_arenas(source, names, watch, scratch, false)
+    let arenas = std::mem::take(scratch);
+    parse_watching_in_arenas(source, names, watch, arenas, false, Some(scratch))
 }
 
 fn parse_watching_in_arenas<'a>(
@@ -179,6 +181,7 @@ fn parse_watching_in_arenas<'a>(
     watch: Option<&'static WatchList>,
     arenas: NodeArenas,
     compact_arenas: bool,
+    mut scratch: Option<&mut NodeArenas>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let source_bytes: Box<[u8]> = match source {
@@ -216,9 +219,20 @@ fn parse_watching_in_arenas<'a>(
         .into_lex_end()
         .expect("a parser of a lexer ends with the lexer's record");
     if let Some(error) = warnings.iter().find(|w| w.is_error) {
+        if let Some(scratch) = scratch.as_deref_mut() {
+            *scratch = arenas;
+        }
         return Err(ParseError::new(error.message.clone(), error.span));
     }
-    let stmts = parsed?;
+    let stmts = match parsed {
+        Ok(stmts) => stmts,
+        Err(error) => {
+            if let Some(scratch) = scratch.as_deref_mut() {
+                *scratch = arenas;
+            }
+            return Err(error);
+        }
+    };
     if compact_arenas {
         arenas.shrink_to_fit();
     }
@@ -357,14 +371,20 @@ mod tests {
     #[test]
     fn parse_watching_with_scratch_reuses_node_span_capacity() {
         let first = parse(b"<?php $first = 1;").unwrap();
-        let scratch = first.into_node_arenas();
+        let mut scratch = first.into_node_arenas();
         let expr_capacity = scratch.expr_spans.capacity();
         let stmt_capacity = scratch.stmt_spans.capacity();
         assert!(expr_capacity > 0);
         assert!(stmt_capacity > 0);
 
+        assert!(
+            parse_watching_with_scratch(b"<?php $broken = 08;", None, None, &mut scratch,).is_err()
+        );
+        assert!(scratch.expr_spans.capacity() >= expr_capacity);
+        assert!(scratch.stmt_spans.capacity() >= stmt_capacity);
+
         let second =
-            parse_watching_with_scratch(b"<?php $second = 2;", None, None, scratch).unwrap();
+            parse_watching_with_scratch(b"<?php $second = 2;", None, None, &mut scratch).unwrap();
 
         assert!(second.expr_count() > 0);
         assert!(second.stmt_count() > 0);
