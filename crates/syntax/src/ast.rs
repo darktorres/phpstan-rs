@@ -95,6 +95,32 @@ pub struct NodeArenas {
 }
 
 impl NodeArenas {
+    /// Commits an expression node and its span at the matching dense index.
+    pub fn alloc_expr(&mut self, node: ExprNode) -> ExprId {
+        let span = node.span;
+        let id = self.exprs.alloc(node);
+        debug_assert_eq!(
+            u32::from(id.into_raw()),
+            u32::try_from(self.expr_spans.len()).expect("expression arena exhausted")
+        );
+        debug_assert_eq!(self.exprs[id].id, id);
+        self.expr_spans.push(span);
+        id
+    }
+
+    /// Commits a statement node and its span at the matching dense index.
+    pub fn alloc_stmt(&mut self, node: StmtNode) -> StmtId {
+        let span = node.span;
+        let id = self.stmts.alloc(node);
+        debug_assert_eq!(
+            u32::from(id.into_raw()),
+            u32::try_from(self.stmt_spans.len()).expect("statement arena exhausted")
+        );
+        debug_assert_eq!(self.stmts[id].id, id);
+        self.stmt_spans.push(span);
+        id
+    }
+
     /// Looks up an expression in this file's expression arena.
     pub fn expr(&self, id: ExprId) -> Option<&ExprNode> {
         self.exprs.get(id)
