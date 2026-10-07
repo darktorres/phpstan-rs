@@ -100,19 +100,10 @@ impl StubFileSet {
 /// That undo/redo pair is the difference between an incremental update and
 /// a full reload.
 pub(crate) struct FileState {
-    // Its tree. An analysed file's is kept, as is the tree of a document
-    // an editor has open; a context file's is not: what the passes and the
-    // checks read of it was taken when it was parsed, and `ast_of` parses
-    // it again for a reader of the rest.
-    kept_ast: Option<Vec<StmtNode>>,
-    // Parsed bytes live beside a retained tree so source-backed payloads do
-    // not depend on the caller's read buffer.
-    kept_source: Option<Box<[u8]>>,
-    // Node spans share the same file-local ids as the parsed tree.
-    kept_expr_spans: Option<Box<[Span]>>,
-    kept_stmt_spans: Option<Box<[Span]>>,
-    // Distinct file names in first-use order, shared by node `NameId`s.
-    kept_names: Option<Box<[Name]>>,
+    // The AST and all file-local data its node IDs refer into. An analysed
+    // file's tree is kept, as is a document an editor has open; a context
+    // file's tree is parsed again by `ast_of` for a later reader.
+    kept_tree: Option<SyntaxTree>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
     // Where the file came in the order files were loaded, which a rebuild of
@@ -175,6 +166,35 @@ pub(crate) struct FileState {
     content_hash: source::ContentHash,
 }
 
+/// The file-owned syntax data. Keeping the source, name table and node
+/// side tables with the tree makes node IDs meaningful only inside their
+/// owning file and gives the AST one storage boundary for the arena
+/// migration.
+#[cfg_attr(test, derive(Clone))]
+struct SyntaxTree {
+    stmts: Vec<StmtNode>,
+    #[allow(dead_code)] // Read by source-backed payloads in rows 9.3-9.4.
+    source: Box<[u8]>,
+    #[allow(dead_code)] // Read by `NameId`-based readers in row 9.3.
+    names: Box<[Name]>,
+    #[allow(dead_code)] // Read by ID-based diagnostic and editor readers.
+    expr_spans: Box<[Span]>,
+    #[allow(dead_code)] // Read by ID-based diagnostic and editor readers.
+    stmt_spans: Box<[Span]>,
+}
+
+impl SyntaxTree {
+    fn statements(&self) -> &[StmtNode] {
+        &self.stmts
+    }
+}
+
+impl syntax::canonical::Canonical for SyntaxTree {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        syntax::canonical::Canonical::canonical(&self.stmts, p);
+    }
+}
+
 struct DeclarationSource<'a> {
     analyzed: bool,
     load_order: u64,
@@ -232,27 +252,15 @@ impl FileState {
     /// tree of a file that has none.
     fn ast(&self) -> &[StmtNode] {
         debug_assert!(
-            self.kept_ast.is_some(),
+            self.kept_tree.is_some(),
             "a reader asked for the tree of a context file that dropped it"
         );
-        debug_assert!(
-            self.kept_source.is_some(),
-            "a retained tree must own the bytes it was parsed from"
-        );
-        debug_assert!(
-            self.kept_names.is_some(),
-            "a retained tree must own its distinct-name table"
-        );
-        debug_assert!(
-            self.kept_expr_spans.is_some() && self.kept_stmt_spans.is_some(),
-            "a retained tree must own its node-span tables"
-        );
-        self.kept_ast.as_deref().unwrap_or(&[])
+        self.kept_tree.as_ref().map_or(&[], SyntaxTree::statements)
     }
 
     /// The file's tree, when it is kept.
     fn tree(&self) -> Option<&[StmtNode]> {
-        self.kept_ast.as_deref()
+        self.kept_tree.as_ref().map(SyntaxTree::statements)
     }
 }
 
@@ -1218,14 +1226,16 @@ impl Project {
         if retain_source {
             file.source = Some(text.to_string());
         }
-        if file.kept_ast.is_none()
+        if file.kept_tree.is_none()
             && let Ok(parsed) = parse_with_ignores(path, text, None)
         {
-            file.kept_ast = Some(parsed.ast);
-            file.kept_source = Some(parsed.source);
-            file.kept_expr_spans = Some(parsed.expr_spans);
-            file.kept_stmt_spans = Some(parsed.stmt_spans);
-            file.kept_names = Some(parsed.names);
+            file.kept_tree = Some(SyntaxTree {
+                stmts: parsed.ast,
+                source: parsed.source,
+                names: parsed.names,
+                expr_spans: parsed.expr_spans,
+                stmt_spans: parsed.stmt_spans,
+            });
             file.ignores = parsed.ignores;
         }
     }
@@ -1237,11 +1247,7 @@ impl Project {
         if let Some(file) = self.files.get_mut(path) {
             file.source = None;
             if !file.analyzed {
-                file.kept_ast = None;
-                file.kept_source = None;
-                file.kept_expr_spans = None;
-                file.kept_stmt_spans = None;
-                file.kept_names = None;
+                file.kept_tree = None;
                 file.ignores = Default::default();
             }
         }
@@ -1362,11 +1368,7 @@ impl Project {
             load_order,
         } = placed;
         let ParsedFile {
-            ast,
-            source: parsed_source,
-            names: parsed_names,
-            expr_spans,
-            stmt_spans,
+            tree,
             lex_warnings: _,
             functions,
             classes,
@@ -1394,12 +1396,13 @@ impl Project {
         let declaration_references = sorted_ref_keys(declaration_references);
         let keeps_tree = self.keeps_tree(path, analyzed);
         debug_assert!(
-            ast.is_some() || !keeps_tree,
+            tree.is_some() || !keeps_tree,
             "a file whose tree is needed was read back from the cache"
         );
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
-            ast.as_deref()
-                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, &source))
+            tree.as_ref().map_or_else(Vec::new, |tree| {
+                self.class_fn_refs_of(tree.statements(), &source)
+            })
         });
         if self.defer_reference_index {
             self.pending_use_sites
@@ -1432,11 +1435,7 @@ impl Project {
         self.files.insert_at(
             id,
             FileState {
-                kept_ast: ast.filter(|_| keeps_tree),
-                kept_source: parsed_source.filter(|_| keeps_tree),
-                kept_expr_spans: expr_spans.filter(|_| keeps_tree),
-                kept_stmt_spans: stmt_spans.filter(|_| keeps_tree),
-                kept_names: parsed_names.filter(|_| keeps_tree),
+                kept_tree: tree.filter(|_| keeps_tree),
                 source_len: len,
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, references.iter()),
@@ -1668,8 +1667,8 @@ impl Project {
     /// Indexes `parsed`'s use sites ahead of `install_parsed_file`, so a
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
-        if let Some(ast) = &parsed.ast {
-            parsed.class_fn_refs = Some(self.class_fn_refs_of(ast, source));
+        if let Some(tree) = &parsed.tree {
+            parsed.class_fn_refs = Some(self.class_fn_refs_of(tree.statements(), source));
         }
     }
 
@@ -3800,16 +3799,9 @@ fn parse_recording<'a>(
 /// collision-resolution policy needs (see that method's own doc comment).
 #[cfg_attr(test, derive(Clone))]
 pub struct ParsedFile {
-    // The tree; none for a file read back from the per-file cache, which
-    // keeps what its tree gave and not the tree.
-    ast: Option<Vec<StmtNode>>,
-    // Present with a parsed tree; absent for a cache-only context entry.
-    source: Option<Box<[u8]>>,
-    // The per-file distinct-name table, retained with the tree.
-    names: Option<Box<[Name]>>,
-    // The parallel spans for file-local syntax-node indices.
-    expr_spans: Option<Box<[Span]>>,
-    stmt_spans: Option<Box<[Span]>>,
+    // The tree and all file-local data its IDs address; absent for a
+    // cache-only context entry, which stores the facts derived from it.
+    tree: Option<SyntaxTree>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
     lex_warnings: Vec<LexWarning>,
     functions: Vec<Name>,
@@ -3982,11 +3974,13 @@ fn parse_file_recording_with_origin<'a>(
     let global_facts = Arc::new(GlobalFacts::of(&ast));
     let pest_facts = PestFacts::of(path, &ast);
     Ok(ParsedFile {
-        ast: Some(ast),
-        source: Some(parsed_source),
-        names: Some(parsed_names),
-        expr_spans: Some(expr_spans),
-        stmt_spans: Some(stmt_spans),
+        tree: Some(SyntaxTree {
+            stmts: ast,
+            source: parsed_source,
+            names: parsed_names,
+            expr_spans,
+            stmt_spans,
+        }),
         lex_warnings,
         functions,
         classes,
@@ -4020,11 +4014,7 @@ impl ParsedFile {
     /// Drops the tree and the ignore comments, which only a file whose tree
     /// is kept has; a file read back from the per-file cache has neither.
     pub(crate) fn drop_tree(&mut self) {
-        self.ast = None;
-        self.source = None;
-        self.names = None;
-        self.expr_spans = None;
-        self.stmt_spans = None;
+        self.tree = None;
         self.ignores = Default::default();
     }
 
@@ -4039,11 +4029,7 @@ impl ParsedFile {
 impl syntax::canonical::Canonical for ParsedFile {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
         let ParsedFile {
-            ast,
-            source: _,
-            names: _,
-            expr_spans: _,
-            stmt_spans: _,
+            tree,
             lex_warnings,
             functions,
             classes,
@@ -4069,7 +4055,7 @@ impl syntax::canonical::Canonical for ParsedFile {
         p.node(
             "ParsedFile",
             &[
-                ("ast", ast),
+                ("ast", tree),
                 ("lex_warnings", lex_warnings),
                 ("functions", functions),
                 ("classes", classes),

@@ -194,9 +194,7 @@ fn write_file(
 ) {
     debug_assert!(state.file_decls.validate().is_ok());
     let FileState {
-        kept_ast,
-        kept_source: _,
-        kept_names: _,
+        kept_tree,
         source_len,
         load_order,
         functions,
@@ -242,7 +240,7 @@ fn write_file(
             ("mentions_phpstan", mentions_phpstan),
             // The tree and the text, which the front end's dump prints; whether
             // they are kept.
-            ("kept_ast", &kept_ast.is_some()),
+            ("kept_ast", &kept_tree.is_some()),
             ("source", &source.is_some()),
             ("source_len", source_len),
             ("functions", functions),

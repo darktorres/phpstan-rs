@@ -274,11 +274,7 @@ impl CachedFile {
         drop(classes);
         drop(functions);
         Some(ParsedFile {
-            ast: None,
-            source: None,
-            names: None,
-            expr_spans: None,
-            stmt_spans: None,
+            tree: None,
             lex_warnings: self.lex_warnings,
             functions: self.functions,
             classes: self.classes,

@@ -345,7 +345,7 @@ fn a_load_keeps_the_tree_of_an_analysed_file_and_none_of_a_context_one() {
             .files
             .get(Path::new(path))
             .unwrap()
-            .kept_ast
+            .kept_tree
             .is_some()
     };
     assert!(kept("src/A.php"));
@@ -376,7 +376,7 @@ fn a_context_file_an_editor_has_open_keeps_its_tree_through_a_load() {
             .files
             .get(Path::new(path))
             .unwrap()
-            .kept_ast
+            .kept_tree
             .is_some()
     };
     assert!(kept("lib/C.php"));
