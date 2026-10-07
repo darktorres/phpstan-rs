@@ -11,10 +11,7 @@ use crate::banned::BannedConstruct;
 use crate::registry::Registry;
 use syntax::ast::*;
 use syntax::span::{LineIndex, Span};
-use syntax::visit::{
-    Visitor, walk_attribute, walk_class_const, walk_expr, walk_method_decl, walk_param,
-    walk_property_decl, walk_stmt,
-};
+use syntax::visit::arena::{self, Visitor};
 use types::Type;
 
 use super::Project;
@@ -25,6 +22,7 @@ const SUPERGLOBALS: [&str; 9] = [
 ];
 
 struct Walker<'a> {
+    arenas: &'a NodeArenas,
     constructs: &'a FxHashSet<BannedConstruct>,
     types: &'a [String],
     registry: &'a Registry,
@@ -105,20 +103,36 @@ impl<'a> Walker<'a> {
 
     /// A closure's or arrow function's native signature, which has no
     /// reflection to refine it.
-    fn hint_types(&mut self, params: &[Param], return_type: Option<&TypeHint>, what: &str) {
+    fn hint_types(
+        &mut self,
+        arenas: &NodeArenas,
+        params: &[Param],
+        return_type: Option<&TypeHint>,
+        what: &str,
+    ) {
         for p in params {
             if let Some(hint) = &p.type_hint {
-                self.ban_hint(p.span, format!("Parameter ${} of {what}", p.name), hint);
+                self.ban_hint(
+                    arenas,
+                    p.span,
+                    format!("Parameter ${} of {what}", p.name),
+                    hint,
+                );
             }
         }
         if let Some(hint) = return_type {
-            self.ban_hint(hint.span, format!("The return type of {what}"), hint);
+            self.ban_hint(
+                arenas,
+                hint.span,
+                format!("The return type of {what}"),
+                hint,
+            );
         }
     }
 
-    fn ban_hint(&mut self, span: Span, subject: String, hint: &TypeHint) {
+    fn ban_hint(&mut self, arenas: &NodeArenas, span: Span, subject: String, hint: &TypeHint) {
         for name in self.types {
-            if hint_mentions(hint, name) {
+            if hint_mentions(arenas, hint, name) {
                 self.out.push(
                     DiagnosticBuilder::new(
                         format!("{subject} uses banned type {name}."),
@@ -132,7 +146,8 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn arguments(&mut self, args: &[Arg], span: Span) {
+    fn arguments(&mut self, arenas: &NodeArenas, args: ArgRange, span: Span) {
+        let args = arenas.args(args);
         if args.iter().any(|a| a.name.is_some()) {
             self.ban(
                 BannedConstruct::NamedArguments,
@@ -148,10 +163,17 @@ impl<'a> Walker<'a> {
     }
 
     /// The constructs `e` itself is; its children are walked after.
-    fn expr_itself(&mut self, e: &ExprNode) {
+    fn expr_itself(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else {
+            return;
+        };
         match &e.kind {
             ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(name) = &callee.kind {
+                if let Some(ExprNode {
+                    kind: ExprKind::Name(name),
+                    ..
+                }) = arenas.expr(*callee)
+                {
                     let lower = name.trim_start_matches('\\').to_ascii_lowercase();
                     let construct = match lower.as_str() {
                         "compact" => Some(BannedConstruct::Compact),
@@ -162,7 +184,7 @@ impl<'a> Walker<'a> {
                         self.ban(construct, e.span, format!("{lower}()"));
                     }
                 }
-                self.arguments(args, e.span);
+                self.arguments(arenas, *args, e.span);
             }
             ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
             // Reported at the `@` itself.
@@ -194,7 +216,7 @@ impl<'a> Walker<'a> {
             | ExprKind::StaticCall(_, _, args)
             | ExprKind::DynamicMethodCall(_, _, args, _)
             | ExprKind::DynamicStaticCall(_, _, args) => {
-                self.arguments(args, e.span);
+                self.arguments(arenas, *args, e.span);
             }
             ExprKind::AssignRef(target, _) => {
                 self.ban(
@@ -202,20 +224,26 @@ impl<'a> Walker<'a> {
                     e.span,
                     "Assignment by reference".to_string(),
                 );
-                if matches!(target.kind, ExprKind::Index(_, None)) {
+                if matches!(
+                    arenas.expr(*target).map(|e| &e.kind),
+                    Some(ExprKind::Index(_, None))
+                ) {
                     self.ban(
                         BannedConstruct::ArrayAppend,
-                        target.span,
+                        arenas.expr_span(*target).unwrap_or(e.span),
                         "Appending with []".to_string(),
                     );
                 }
             }
             ExprKind::Assign(target, _) | ExprKind::CompoundAssign(_, target, _)
-                if matches!(target.kind, ExprKind::Index(_, None)) =>
+                if matches!(
+                    arenas.expr(*target).map(|e| &e.kind),
+                    Some(ExprKind::Index(_, None))
+                ) =>
             {
                 self.ban(
                     BannedConstruct::ArrayAppend,
-                    target.span,
+                    arenas.expr_span(*target).unwrap_or(e.span),
                     "Appending with []".to_string(),
                 );
             }
@@ -284,7 +312,7 @@ impl<'a> Walker<'a> {
                 if *by_ref {
                     self.by_ref_return(e.span, "a closure");
                 }
-                self.hint_types(params, return_type.as_deref(), "a closure");
+                self.hint_types(arenas, params, return_type.as_deref(), "a closure");
             }
             ExprKind::ArrowFn(arrow) => {
                 let syntax::ast::ArrowFnExpr {
@@ -296,9 +324,13 @@ impl<'a> Walker<'a> {
                 if *by_ref {
                     self.by_ref_return(e.span, "an arrow function");
                 }
-                self.hint_types(params, return_type.as_deref(), "an arrow function");
+                self.hint_types(arenas, params, return_type.as_deref(), "an arrow function");
             }
-            ExprKind::NewAnonymousClass(class) => self.arguments(&class.args, e.span),
+            ExprKind::NewAnonymousClass(class_id) => {
+                if let Some(class) = arenas.anonymous_class(*class_id) {
+                    self.arguments(arenas, class.args, e.span);
+                }
+            }
             _ => {}
         }
         if let ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) = &e.kind {
@@ -313,19 +345,23 @@ impl<'a> Walker<'a> {
 
 /// Whether a native type hint names the banned type `name` (lowercase,
 /// without a leading backslash).
-fn hint_mentions(hint: &TypeHint, name: &str) -> bool {
+fn hint_mentions(arenas: &NodeArenas, hint: &TypeHint, name: &str) -> bool {
     match &hint.kind {
         TypeHintKind::Keyword(keyword, _) => keyword.as_str() == name,
         TypeHintKind::Name(written) => written.trim_start_matches('\\').eq_ignore_ascii_case(name),
-        TypeHintKind::Nullable(inner) => hint_mentions(inner, name),
-        TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
-            members.iter().any(|m| hint_mentions(m, name))
-        }
+        TypeHintKind::Nullable(inner) => hint_mentions(arenas, inner, name),
+        TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => arenas
+            .type_hints(members)
+            .iter()
+            .any(|m| hint_mentions(arenas, m, name)),
     }
 }
 
-impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Walker<'_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         match &stmt.kind {
             StmtKind::Switch { .. } => {
                 self.ban(BannedConstruct::Switch, stmt.span, "switch".to_string())
@@ -343,7 +379,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                         .map(|v| match v {
                             GlobalVar::Name(n) => format!("${n}"),
                             GlobalVar::Dynamic(e) => {
-                                format!("${{{}}}", syntax::printer::print_expr(e))
+                                format!("${{{}}}", syntax::printer::print_expr(self.arenas, *e))
                             }
                         })
                         .collect::<Vec<_>>()
@@ -363,28 +399,31 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
             StmtKind::ClassDecl(c) => {
                 let fqn = c.fq_name().to_string();
                 self.classes.push(Some(fqn));
-                walk_stmt(self, stmt);
+                arena::walk_stmt(self, arenas, id);
                 self.classes.pop();
                 return;
             }
             _ => {}
         }
-        walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
-        self.expr_itself(e);
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        self.expr_itself(arenas, id);
+        let Some(e) = arenas.expr(id) else {
+            return;
+        };
         if let ExprKind::NewAnonymousClass(class) = &e.kind {
             self.classes
-                .push(class.name.as_ref().map(|name| name.to_string()));
-            walk_expr(self, e);
+                .push(arenas.anonymous_class_name(*class).map(ToString::to_string));
+            arena::walk_expr(self, arenas, id);
             self.classes.pop();
         } else {
-            walk_expr(self, e);
+            arena::walk_expr(self, arenas, id);
         }
     }
 
-    fn visit_method_decl(&mut self, m: &'ast MethodDecl) {
+    fn visit_method_decl(&mut self, arenas: &NodeArenas, m: &MethodDecl) {
         if let Some(fqn) = self.class().map(str::to_string) {
             let f = &m.function;
             let what = format!("{fqn}::{}()", f.name);
@@ -395,10 +434,10 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 self.signature_types(sig, f, &what);
             }
         }
-        walk_method_decl(self, m);
+        arena::walk_method_decl(self, arenas, m);
     }
 
-    fn visit_property_decl(&mut self, p: &'ast PropertyDecl) {
+    fn visit_property_decl(&mut self, arenas: &NodeArenas, p: &PropertyDecl) {
         if let Some(fqn) = self.class().map(str::to_string) {
             if let Some(prop) = self.registry.lookup_property(&fqn, &p.name) {
                 self.ban_type(p.span, format!("Property {fqn}::${}", p.name), prop.ty());
@@ -411,10 +450,10 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 self.by_ref_return(p.span, &format!("{fqn}::${}'s get hook", p.name));
             }
         }
-        walk_property_decl(self, p);
+        arena::walk_property_decl(self, arenas, p);
     }
 
-    fn visit_class_const(&mut self, c: &'ast ClassConst) {
+    fn visit_class_const(&mut self, arenas: &NodeArenas, c: &ClassConst) {
         if let Some(fqn) = self.class().map(str::to_string)
             && let Some(native) = self
                 .registry
@@ -425,10 +464,10 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
             let native = native.clone();
             self.ban_type(c.span, format!("Constant {fqn}::{}", c.name), &native);
         }
-        walk_class_const(self, c);
+        arena::walk_class_const(self, arenas, c);
     }
 
-    fn visit_param(&mut self, p: &'ast Param) {
+    fn visit_param(&mut self, arenas: &NodeArenas, p: &Param) {
         if p.by_ref {
             self.ban(
                 BannedConstruct::ByReferenceParameters,
@@ -436,12 +475,12 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 format!("By-reference parameter ${}", p.name),
             );
         }
-        walk_param(self, p);
+        arena::walk_param(self, arenas, p);
     }
 
-    fn visit_attribute(&mut self, a: &'ast Attribute) {
-        self.arguments(&a.args, a.span);
-        walk_attribute(self, a);
+    fn visit_attribute(&mut self, arenas: &NodeArenas, a: &Attribute) {
+        self.arguments(arenas, a.args, a.span);
+        arena::walk_attribute(self, arenas, a);
     }
 }
 
@@ -465,7 +504,12 @@ impl Project {
             if !file.analyzed {
                 continue;
             }
+            let tree = file
+                .tree()
+                .expect("analyzed banned-check file must retain its syntax tree");
+            let arenas = tree.arenas();
             let mut walker = Walker {
+                arenas,
                 constructs: &constructs,
                 types: &types,
                 registry: &self.registry,
@@ -473,9 +517,7 @@ impl Project {
                 classes: Vec::new(),
                 out: Vec::new(),
             };
-            for stmt in file.ast() {
-                walker.visit_stmt(stmt);
-            }
+            arena::walk_stmts(&mut walker, arenas, file.ast());
             let mut ignore_lines: Vec<u32> = file
                 .ignores
                 .lines

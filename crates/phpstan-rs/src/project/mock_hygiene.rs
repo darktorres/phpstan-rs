@@ -168,7 +168,10 @@ impl<'a> Walker<'a> {
         let mut mock_properties = 0;
         for p in def.properties(arenas) {
             let (hint, members) = match &p.type_hint {
-                Some(native) => (native.to_string(), native_members(native)),
+                Some(native) => (
+                    native.to_string_with(arenas),
+                    native_members(native, arenas),
+                ),
                 None => {
                     let Some(node) = p
                         .doc_comment
@@ -418,23 +421,33 @@ impl Project {
 /// The members of a PHPDoc union as written, `?T` as `T` and `null`.
 /// A native type's union members, each as its intersected parts: a class
 /// by its resolved name, a keyword type in lowercase.
-fn native_members(hint: &TypeHint) -> Vec<Vec<String>> {
-    fn part(hint: &TypeHint) -> String {
+fn native_members(hint: &TypeHint, arenas: &NodeArenas) -> Vec<Vec<String>> {
+    fn part(hint: &TypeHint, arenas: &NodeArenas) -> String {
         match &hint.kind {
             TypeHintKind::Name(name) => name.resolved_class().unwrap_or(&name.written).to_string(),
             TypeHintKind::Keyword(_, written) => written.to_ascii_lowercase(),
-            _ => hint.to_string(),
+            _ => hint.to_string_with(arenas),
         }
     }
     match &hint.kind {
-        TypeHintKind::Union(members) => members.iter().flat_map(native_members).collect(),
+        TypeHintKind::Union(members) => arenas
+            .type_hints(members)
+            .iter()
+            .flat_map(|member| native_members(member, arenas))
+            .collect(),
         TypeHintKind::Nullable(inner) => {
-            let mut out = native_members(inner);
+            let mut out = native_members(inner, arenas);
             out.push(vec!["null".to_string()]);
             out
         }
-        TypeHintKind::Intersection(parts) => vec![parts.iter().map(part).collect()],
-        _ => vec![vec![part(hint)]],
+        TypeHintKind::Intersection(parts) => vec![
+            arenas
+                .type_hints(parts)
+                .iter()
+                .map(|part_hint| part(part_hint, arenas))
+                .collect(),
+        ],
+        _ => vec![vec![part(hint, arenas)]],
     }
 }
 

@@ -46,11 +46,17 @@ impl Parser<'_> {
         crate::stack::guard(|| {
             let start = self.current_pos();
             if self.eat(&Token::LParen) {
-                let mut members = vec![self.parse_type_atom()?];
+                let members_start = self.begin_type_hint_list();
+                self.push_type_hint(self.parse_type_atom()?);
                 while self.eat(&Token::Amp) {
-                    members.push(self.parse_type_atom()?);
+                    self.push_type_hint(self.parse_type_atom()?);
                 }
                 self.expect(&Token::RParen)?;
+                let len = self.type_hint_scratch.len() - members_start;
+                if len == 1 {
+                    return Ok(self.type_hint_scratch.pop().expect("one type member"));
+                }
+                let members = self.finish_type_hint_list(members_start);
                 return Ok(self.type_hint(TypeHintKind::Intersection(members), start));
             }
             // These are single keyword tokens - namespaced forms like
@@ -99,43 +105,50 @@ impl Parser<'_> {
         let inner_start = self.current_pos();
         // `|` binds looser than `&`: the terms of a union, each a run of
         // `&`-joined atoms.
-        let mut terms: Vec<Vec<TypeHint>> = vec![vec![self.parse_type_atom()?]];
+        let terms_start = self.begin_type_hint_list();
         loop {
-            if self.eat(&Token::Pipe) {
-                terms.push(vec![self.parse_type_atom()?]);
-                continue;
-            }
+            let members_start = self.begin_type_hint_list();
+            let first = self.parse_type_atom()?;
+            let member_start = first.span.start;
+            self.push_type_hint(first);
             // `&` is ambiguous between an intersection type (`A&B`) and a
             // by-ref marker before a param's `$name` - only treat it as part
             // of the type when another type atom actually follows.
             if self.check(&Token::Amp) && self.is_type_start_at(1) {
-                self.skip();
-                let atom = self.parse_type_atom()?;
-                terms.last_mut().expect("at least one term").push(atom);
-                continue;
-            }
-            break;
-        }
-        let mut terms: Vec<TypeHint> = terms
-            .into_iter()
-            .map(|mut atoms| {
-                if atoms.len() == 1 {
-                    atoms.pop().expect("one atom")
-                } else {
-                    let span = Span {
-                        start: atoms[0].span.start,
-                        end: atoms[atoms.len() - 1].span.end,
-                    };
-                    TypeHint {
-                        kind: TypeHintKind::Intersection(atoms),
-                        span,
-                    }
+                while self.check(&Token::Amp) && self.is_type_start_at(1) {
+                    self.skip();
+                    self.push_type_hint(self.parse_type_atom()?);
                 }
-            })
-            .collect();
-        let inner = if terms.len() == 1 {
-            terms.pop().expect("one term")
+            }
+            let member_count = self.type_hint_scratch.len() - members_start;
+            let member_end = self
+                .type_hint_scratch
+                .last()
+                .expect("a type member was just parsed")
+                .span
+                .end;
+            let term = if member_count == 1 {
+                self.type_hint_scratch.pop().expect("one type member")
+            } else {
+                let members = self.finish_type_hint_list(members_start);
+                TypeHint {
+                    kind: TypeHintKind::Intersection(members),
+                    span: Span {
+                        start: member_start,
+                        end: member_end,
+                    },
+                }
+            };
+            self.push_type_hint(term);
+            if !self.eat(&Token::Pipe) {
+                break;
+            }
+        }
+        let term_count = self.type_hint_scratch.len() - terms_start;
+        let inner = if term_count == 1 {
+            self.type_hint_scratch.pop().expect("one union term")
         } else {
+            let terms = self.finish_type_hint_list(terms_start);
             self.type_hint(TypeHintKind::Union(terms), inner_start)
         };
         Ok(Some(if nullable {

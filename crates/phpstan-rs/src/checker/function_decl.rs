@@ -50,18 +50,24 @@ impl<'a> Checker<'a> {
         // function of `(c, ctx)`, and no later pass ever mutates a
         // trait's registry entry after indexing, so this is a no-op
         // reconstruction for the common non-duplicated-trait case.
-        let own_info = ClassReflection::from_decl(c, &self.name_ctx);
+        let arenas = self
+            .syntax_arenas()
+            .expect("checker retains syntax arenas for class declarations");
+        let def = arenas
+            .class(c.def)
+            .expect("class definition ID belongs to the checked file");
+        let own_info = ClassReflection::from_decl(arenas, c, &self.name_ctx);
         let host_count = contexts.len();
         // A trait's private properties are written in its hosts' scope, or
         // in its own when it has none.
-        self.record_property_type_site(fqn, contexts.clone(), &c.def);
+        self.record_property_type_site(arenas, fqn, contexts.clone(), def);
         let mut family_verdicts_by_span: rustc_hash::FxHashMap<
             syntax::span::Range,
             (rustc_hash::FxHashSet<usize>, rustc_hash::FxHashSet<bool>),
         > = rustc_hash::FxHashMap::default();
         for (host_index, host) in contexts.into_iter().enumerate() {
             let host_start = self.diagnostics.len();
-            for m in &c.def.methods {
+            for m in arenas.methods(def.methods) {
                 let site = m.function.name.span.start;
                 let own_sig = own_info
                     .redeclared_methods()
@@ -222,8 +228,10 @@ impl<'a> Checker<'a> {
         if slot_site == Some(&Some(site)) && same_file {
             return None;
         }
+        let arenas = self.syntax_arenas()?;
         let fresh = FunctionReflection::from_decl(
             f,
+            arenas,
             &self.name_ctx,
             &rustc_hash::FxHashMap::default(),
             &NameMap::default(),
@@ -275,6 +283,20 @@ impl<'a> Checker<'a> {
         is_concrete: bool,
         own_sig_override: Option<&FunctionReflection>,
     ) {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
+        let function_doc_text = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)));
+        let params = arenas
+            .map(|arenas| arenas.params(f.params))
+            .unwrap_or_default();
+        let function_attrs = arenas
+            .map(|arenas| arenas.attributes(f.attrs))
+            .unwrap_or_default();
         let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
         let label = match class_name {
             Some(c) => format!("{c}::{}", f.name),
@@ -285,15 +307,30 @@ impl<'a> Checker<'a> {
         // class-declaration loop) - only a genuine top-level function
         // needs it here, or every method would get double-checked.
         if class_name.is_none() {
-            self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name.span);
+            self.check_unknown_phpstan_tags_on(function_doc_text.as_deref(), f.name.span);
         }
         if self.settings.sidz.check_magic_numbers {
-            self.check_magic_numbers_in_params(&f.params);
+            self.check_magic_numbers_in_params(
+                arenas.expect("function checks retain their parsed file owner"),
+                params,
+            );
         }
         self.check_declared_purity_tag(f, sig, class_name, &label);
-        self.check_declared_param_callable_tags(f);
-        self.check_internal_param_and_return_types(f, class_name, &label);
-        self.check_restricted_param_and_return_types(f, class_name);
+        self.check_declared_param_callable_tags(f, params);
+        self.check_internal_param_and_return_types_raw(
+            params,
+            f.return_type.as_ref(),
+            f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
+            class_name.is_some(),
+            class_name,
+            &label,
+        );
+        self.check_restricted_param_and_return_types_raw(
+            params,
+            f.return_type.as_ref(),
+            f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
+            class_name,
+        );
         self.check_assert_tag_types(sig, f.span);
         // `method.templateTypeNotInParameter` - neither a closure nor an
         // arrow-fn is indexed into the registry at all (see
@@ -309,22 +346,22 @@ impl<'a> Checker<'a> {
         // here to a named function/method only, a deliberate narrower
         // cut given this family's low expected value against a project
         // targeting a modern PHP version.
-        self.check_native_union_types_supported(f, class_name.is_some(), &label);
-        self.check_unresolvable_native_types(f, &label);
-        self.check_implicitly_nullable_params(f);
-        self.check_required_parameter_after_optional(f);
+        self.check_native_union_types_supported(params, f, class_name.is_some(), &label);
+        self.check_unresolvable_native_types(params, f, &label);
+        self.check_implicitly_nullable_params(params);
+        self.check_required_parameter_after_optional(params);
         if let Some(sig) = sig {
             let previous_class =
                 std::mem::replace(&mut self.current_class, class_name.map(str::to_string));
-            self.check_default_parameter_types(f, sig, class_name);
-            self.check_phpdoc_types_against_native(f, sig, class_name);
+            self.check_default_parameter_types(params, f, sig, class_name, arenas);
+            self.check_phpdoc_types_against_native(params, f, sig, class_name);
             self.check_conditional_types(f, sig, class_name);
             let description = if class_name.is_some() {
                 "a method"
             } else {
                 "a function"
             };
-            self.check_misplaced_var_tag(f.doc_comment.as_deref(), description, f.name.span);
+            self.check_misplaced_var_tag(function_doc_text.as_deref(), description, f.name.span);
             if let Some(class) = class_name {
                 self.check_self_out(f, sig, class, is_static, &label);
             }
@@ -348,12 +385,11 @@ impl<'a> Checker<'a> {
         // `@psalm-`/`@phan-template*` identically to `@template*`, and
         // a filter checking only some spellings would silently stop
         // catching the rest.
-        let has_own_template = f
-            .doc_comment
+        let has_own_template = function_doc_text
             .as_deref()
             .is_some_and(|d| d.contains("template"));
         if has_own_template
-            && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse_shared)
+            && let Some(doc) = function_doc_text.as_deref().map(docblock::parse_shared)
             && !doc.templates.is_empty()
         {
             let shallow: rustc_hash::FxHashMap<String, types::TemplateParam> = doc
@@ -427,7 +463,7 @@ impl<'a> Checker<'a> {
         // a genuinely untyped `...$args` would have (implicit `mixed`),
         // not the already-array-wrapped type `locals` needs for checking
         // the function's body.
-        let mut resolved_params: Vec<(String, Type, Span)> = Vec::with_capacity(f.params.len());
+        let mut resolved_params: Vec<(String, Type, Span)> = Vec::with_capacity(params.len());
 
         let mut locals: Locals = self.new_locals();
         // Turns declaration-span tracking on for this whole function-
@@ -437,12 +473,11 @@ impl<'a> Checker<'a> {
         locals.set_track(self.probe_span.get().is_some());
         // A PHPDoc type that can't be resolved is ignored: its position has
         // the native type (its tag is reported as unresolvable).
-        let doc_nodes = f
-            .doc_comment
+        let doc_nodes = function_doc_text
             .as_deref()
             .filter(|doc| doc.contains('@'))
             .map(super::phpdoc_unresolvable::tag_type_nodes);
-        let function_doc = f.doc_comment.as_deref().map(docblock::parse_shared);
+        let function_doc = function_doc_text.as_deref().map(docblock::parse_shared);
         let doc_unresolvable = |this: &Self, node: Option<&phpdoc::grammar::TypeNode>| {
             node.is_some_and(|n| this.type_node_unresolvable(n, class_name))
         };
@@ -458,7 +493,7 @@ impl<'a> Checker<'a> {
             // commented parameter usable inside its own function body,
             // not just checkable from the outside at call sites.
             Some(sig) => {
-                for (param, ast_param) in sig.params().iter().zip(&f.params) {
+                for (param, ast_param) in sig.params().iter().zip(params) {
                     // `self`/`static`/`parent` need resolving against the
                     // enclosing class the same way `$this` and a return
                     // type already are - without this, a `self`-typed
@@ -565,8 +600,8 @@ impl<'a> Checker<'a> {
             // `self`/`static`/`parent` pseudo-type against the enclosing
             // class.
             None => {
-                let doc = f.doc_comment.as_deref().map(docblock::parse_shared);
-                for p in &f.params {
+                let doc = function_doc_text.as_deref().map(docblock::parse_shared);
+                for p in params {
                     // Same inline-`@var`-on-a-promoted-property fallback
                     // as `FunctionReflection::from_decl`'s param loop.
                     let doc_ty: Option<phpdoc::DocType> = doc
@@ -575,6 +610,10 @@ impl<'a> Checker<'a> {
                         .cloned()
                         .or_else(|| {
                             p.doc_comment
+                                .as_ref()
+                                .and_then(|ranges| {
+                                    arenas.and_then(|arenas| arenas.doc_comment_text(ranges))
+                                })
                                 .as_deref()
                                 .map(docblock::parse_shared)
                                 .and_then(|d| d.var_type.clone())
@@ -654,8 +693,7 @@ impl<'a> Checker<'a> {
             })
             .or_else(|| {
                 // The return-position sibling of the param loop above.
-                let doc_return = f
-                    .doc_comment
+                let doc_return = function_doc_text
                     .as_deref()
                     .map(docblock::parse_shared)
                     .and_then(|d| d.return_type.clone());
@@ -755,17 +793,20 @@ impl<'a> Checker<'a> {
         // method re-checked once per host, a declaration nested inside
         // a block) - checking `f.attrs`/each parameter's attrs here
         // covers all of them at once.
-        self.check_attributes(&f.attrs, &label);
+        self.check_attributes(function_attrs, &label);
         // Target-validity, mirroring real PHPStan's split between
         // `MethodAttributesRule`/`FunctionAttributesRule` (one or the
         // other, never both, for this same choke point).
         if class_name.is_some() {
-            self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_METHOD, "method");
+            self.check_attribute_targets(function_attrs, ATTRIBUTE_TARGET_METHOD, "method");
         } else {
-            self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
+            self.check_attribute_targets(function_attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
         }
-        for p in &f.params {
-            self.check_attributes(&p.attrs, &label);
+        for p in params {
+            let param_attrs = arenas
+                .map(|arenas| arenas.attributes(p.attrs))
+                .unwrap_or_default();
+            self.check_attributes(param_attrs, &label);
             // `ParamAttributesRule`: a promoted param's own attributes
             // may target either a parameter or the property it also
             // declares - real PHP itself doesn't distinguish which one
@@ -778,7 +819,7 @@ impl<'a> Checker<'a> {
             } else {
                 (ATTRIBUTE_TARGET_PARAMETER, "parameter")
             };
-            self.check_attribute_targets(&p.attrs, target, target_name);
+            self.check_attribute_targets(param_attrs, target, target_name);
         }
 
         // Bound-enforcement: checked once here, against the declaration
@@ -787,7 +828,7 @@ impl<'a> Checker<'a> {
         // violation is about the signature as written, not something an
         // `extract()` in the body should be able to hide.
         if let Some(sig) = sig {
-            for (param, ast_param) in sig.params().iter().zip(&f.params) {
+            for (param, ast_param) in sig.params().iter().zip(params) {
                 self.check_generic_bounds(
                     param.ty(),
                     &format!("PHPDoc tag @param for parameter ${}", param.name()),
@@ -844,7 +885,7 @@ impl<'a> Checker<'a> {
         self.current_class = class_name.map(|s| s.to_string());
         let previous_method = self.current_method.take();
         self.current_method = Some(f.name.to_string());
-        let own_templates = match f.doc_comment.as_deref() {
+        let own_templates = match function_doc_text.as_deref() {
             Some(doc) if doc.contains("template") => crate::registry::build_template_params(
                 &phpdoc::docblock::parse_shared(doc),
                 &f.name,
@@ -908,16 +949,28 @@ impl<'a> Checker<'a> {
                 .map(|b| GotoState::new(b.goto_labels.clone()))
                 .unwrap_or_default(),
         );
-        let previous_assigned_variables = self.enter_assigned_variables(f.body_stmts());
-        let enclosing_scope =
-            self.enter_shared_scope(crate::checker::shared_scope::SharedScope::of(
-                f.body_stmts(),
-                &[],
-                // By the name the registry declares it under: a function's
-                // with its namespace, a method's as written.
-                Some((class_name.map(Name::from), Name::from(f.fq_name()))),
-                false,
-            ));
+        let previous_assigned_variables = self.enter_assigned_variables(
+            self.syntax_arenas()
+                .expect("function checks require the syntax tree owner"),
+            f.body_stmts(
+                self.syntax_arenas()
+                    .expect("function checks require the syntax tree owner"),
+            ),
+        );
+        let scope = crate::checker::shared_scope::SharedScope::of(
+            self.syntax_arenas()
+                .expect("function checks require the syntax tree owner"),
+            f.body_stmts(
+                self.syntax_arenas()
+                    .expect("function checks require the syntax tree owner"),
+            ),
+            &[],
+            // By the name the registry declares it under: a function's
+            // with its namespace, a method's as written.
+            Some((class_name.map(Name::from), Name::from(f.fq_name()))),
+            false,
+        );
+        let enclosing_scope = self.enter_shared_scope(scope);
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
@@ -959,7 +1012,7 @@ impl<'a> Checker<'a> {
                 }
             }
             None => {
-                for p in &f.params {
+                for p in params {
                     if p.by_ref {
                         let ty = self.resolve_type_hint(p.type_hint.as_ref());
                         self.current_function_by_ref_params
@@ -976,9 +1029,17 @@ impl<'a> Checker<'a> {
         // through the one place that check lives.
         let previous_implicit_calls = std::mem::take(&mut self.implicit_calls);
         let body_terminates = self.check_capturing_scope(&mut locals, |this, locals| {
-            this.check_block(f.body_stmts(), locals, declared_return.as_ref(), &label)
-                .completion
-                .terminates
+            this.check_block(
+                f.body_stmts(
+                    this.syntax_arenas()
+                        .expect("function checks require the syntax tree owner"),
+                ),
+                locals,
+                declared_return.as_ref(),
+                &label,
+            )
+            .completion
+            .terminates
         });
         let implicit_calls = std::mem::replace(&mut self.implicit_calls, previous_implicit_calls);
         // Judged after the body, which finds the offsets that are calls.
@@ -1036,7 +1097,12 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(expected) = &declared_return
-            && (!f.body_stmts().is_empty()
+            && (!f
+                .body_stmts(
+                    self.syntax_arenas()
+                        .expect("function checks require the syntax tree owner"),
+                )
+                .is_empty()
                 || (self.settings.extras.check_empty_method_bodies && is_concrete))
             && body_falls_off_end
             && (!self.current_function_is_generator || generator_treturn.is_some())
@@ -1085,7 +1151,12 @@ impl<'a> Checker<'a> {
         // normally". Scoped to an undeclared (reads as `Mixed`) or
         // `void`-declared return type only.
         if self.settings.extras.check_never_return_suggestions
-            && !f.body_stmts().is_empty()
+            && !f
+                .body_stmts(
+                    self.syntax_arenas()
+                        .expect("function checks require the syntax tree owner"),
+                )
+                .is_empty()
             && !self.current_function_is_generator
             && !body_falls_off_end
             && !self.current_function_saw_explicit_return
@@ -1122,7 +1193,12 @@ impl<'a> Checker<'a> {
         // "nothing was thrown at all, flag every declared member"
         // fallback would otherwise unconditionally fire on every
         // `@throws` tag any interface/abstract method ever carries.
-        if !f.body_stmts().is_empty()
+        if !f
+            .body_stmts(
+                self.syntax_arenas()
+                    .expect("function checks require the syntax tree owner"),
+            )
+            .is_empty()
             || (self.settings.extras.check_empty_method_bodies && is_concrete)
         {
             let subject = match class_name {
@@ -1254,13 +1330,14 @@ impl<'a> Checker<'a> {
     /// to hand this.
     fn check_native_union_types_supported(
         &mut self,
+        params: &[Param],
         f: &FunctionDecl,
         is_method: bool,
         label: &str,
     ) {
         let kind_word = if is_method { "Method" } else { "Function" };
         self.check_native_union_types_supported_raw(
-            f.params.iter().map(|p| p.type_hint.as_ref()),
+            params.iter().map(|p| p.type_hint.as_ref()),
             f.return_type.as_ref(),
             format_args!(
                 "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
@@ -1294,8 +1371,12 @@ impl<'a> Checker<'a> {
         {
             return;
         }
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         for hint in param_hints {
-            if is_bare_native_union(hint) {
+            if is_bare_native_union(hint, arenas) {
                 self.report(
                     message.to_string(),
                     span,
@@ -1305,7 +1386,7 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        if is_bare_native_union(return_hint) {
+        if is_bare_native_union(return_hint, arenas) {
             self.report(message.to_string(), span, 0, "return.unionTypeNotSupported");
         }
     }
@@ -1315,8 +1396,8 @@ impl<'a> Checker<'a> {
     /// 8.1 pure-intersection-type support) - fires once per parameter,
     /// unlike `check_native_union_types_supported_raw`'s single-report
     /// latch, matching real PHPStan's own per-parameter loop.
-    fn check_unresolvable_native_types(&mut self, f: &FunctionDecl, label: &str) {
-        for p in &f.params {
+    fn check_unresolvable_native_types(&mut self, params: &[Param], f: &FunctionDecl, label: &str) {
+        for p in params {
             self.check_unresolvable_native_type(
                 p.type_hint.as_ref(),
                 format_args!(
@@ -1394,7 +1475,7 @@ impl<'a> Checker<'a> {
     /// `FunctionDefinitionCheck::checkImplicitlyNullableType` is the
     /// parameter's 1-based position among every parameter, typed or not -
     /// `i` below mirrors that exactly, not a typed-only counter.
-    fn check_implicitly_nullable_params(&mut self, f: &FunctionDecl) {
+    fn check_implicitly_nullable_params(&mut self, params: &[Param]) {
         if self
             .registry
             .php_supports_somewhere(PhpFeature::ImplicitlyNullableParameterDeprecated)
@@ -1402,7 +1483,11 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        for (i, p) in f.params.iter().enumerate() {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        for (i, p) in params.iter().enumerate() {
             let Some(hint) = &p.type_hint else {
                 continue;
             };
@@ -1410,7 +1495,7 @@ impl<'a> Checker<'a> {
                 TypeHintKind::Nullable(_)
                 | TypeHintKind::Intersection(_)
                 | TypeHintKind::Keyword(NativeType::Mixed | NativeType::Null, _) => true,
-                TypeHintKind::Union(members) => members.iter().any(|m| {
+                TypeHintKind::Union(members) => arenas.type_hints(members).iter().any(|m| {
                     matches!(
                         m.kind,
                         TypeHintKind::Intersection(_) | TypeHintKind::Keyword(NativeType::Null, _)
@@ -1421,13 +1506,10 @@ impl<'a> Checker<'a> {
             if admits_null_or_is_intersection {
                 continue;
             }
-            let is_default_null = matches!(
-                &p.default,
-                Some(ExprNode {
-                    kind: ExprKind::Literal(Literal::Null),
-                    ..
-                })
-            );
+            let is_default_null = p
+                .default
+                .and_then(|id| arenas.expr(id))
+                .is_some_and(|expr| matches!(&expr.kind, ExprKind::Literal(Literal::Null)));
             if !is_default_null {
                 continue;
             }
@@ -1452,7 +1534,7 @@ impl<'a> Checker<'a> {
     /// 8.1/8.3 special cases (a typed, `= null`-defaulted parameter only
     /// sometimes counting as "optional," depending on whether its type
     /// is nullable/a union naming `null`/`mixed`) are left unbuilt.
-    fn check_required_parameter_after_optional(&mut self, f: &FunctionDecl) {
+    fn check_required_parameter_after_optional(&mut self, params: &[Param]) {
         if self
             .registry
             .php_supports_somewhere(PhpFeature::RequiredParameterAfterOptionalDeprecated)
@@ -1461,7 +1543,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let mut optional_param: Option<&str> = None;
-        for p in &f.params {
+        for p in params {
             if let Some(optional) = optional_param
                 && p.default.is_none()
                 && !p.variadic
@@ -1503,11 +1585,16 @@ impl<'a> Checker<'a> {
     /// there, so a default whose type isn't known is never reported.
     fn check_default_parameter_types(
         &mut self,
+        params: &[Param],
         f: &FunctionDecl,
         sig: &FunctionReflection,
         class_name: Option<&str>,
+        arenas: Option<&NodeArenas>,
     ) {
-        for (i, p) in f.params.iter().enumerate() {
+        let Some(arenas) = arenas else {
+            return;
+        };
+        for (i, p) in params.iter().enumerate() {
             let Some(default) = &p.default else {
                 continue;
             };
@@ -1522,7 +1609,10 @@ impl<'a> Checker<'a> {
                 &|_| true,
                 &self.relation(),
             );
-            let default_ty = self.infer_expr(default, &self.new_locals());
+            let Some(default_expr) = arenas.expr(*default) else {
+                continue;
+            };
+            let default_ty = self.infer_expr(default_expr, &self.new_locals());
             if default_ty.is_mixed() || self.accepts(param_ty, &default_ty).yes() {
                 continue;
             }
@@ -1535,7 +1625,7 @@ impl<'a> Checker<'a> {
                     i + 1,
                     p.name,
                 ),
-                default.span,
+                default_expr.span,
                 2,
                 "parameter.defaultValue",
             );
@@ -1621,9 +1711,10 @@ pub(crate) fn missing_return_level(
 
 /// Whether a native type declaration is a plain union (`int|string`),
 /// not a nullable single type or a DNF type with an intersection term.
-fn is_bare_native_union(hint: Option<&TypeHint>) -> bool {
+fn is_bare_native_union(hint: Option<&TypeHint>, arenas: &syntax::ast::NodeArenas) -> bool {
     hint.is_some_and(|h| match &h.kind {
-        TypeHintKind::Union(members) => members
+        TypeHintKind::Union(members) => arenas
+            .type_hints(members)
             .iter()
             .all(|m| !matches!(m.kind, TypeHintKind::Intersection(_))),
         _ => false,

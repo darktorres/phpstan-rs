@@ -166,6 +166,7 @@ pub type TraitAliasRange = la_arena::IdxRange<TraitAlias>;
 pub type TraitPrecedenceRange = la_arena::IdxRange<TraitPrecedence>;
 pub type UseImportRange = la_arena::IdxRange<UseImport>;
 pub type ClosureUseRange = la_arena::IdxRange<ClosureUse>;
+pub type TypeHintRange = la_arena::IdxRange<TypeHint>;
 
 /// A range in the file-owned decoded byte vector. Source-backed payloads
 /// continue to use [`Span`], so callers cannot confuse the two byte stores.
@@ -253,6 +254,7 @@ pub struct NodeArenas {
     pub trait_precedences: ListArena<TraitPrecedence>,
     pub use_imports: ListArena<UseImport>,
     pub closure_uses: ListArena<ClosureUse>,
+    pub type_hints: ListArena<TypeHint>,
     pub expr_spans: Vec<Span>,
     pub stmt_spans: Vec<Span>,
     /// Decoded literal bytes retained by this file. Unescaped payloads
@@ -430,6 +432,7 @@ impl NodeArenas {
         fragment.trait_precedences = self.trait_precedences.fragment();
         fragment.use_imports = self.use_imports.fragment();
         fragment.closure_uses = self.closure_uses.fragment();
+        fragment.type_hints = self.type_hints.fragment();
         fragment.functions_base = self.functions_base + self.functions.len() as u32;
         fragment.methods_base = self.methods_base + self.methods.len() as u32;
         fragment.classes_base = self.classes_base + self.classes.len() as u32;
@@ -800,6 +803,21 @@ impl NodeArenas {
         self.closure_uses.get(range)
     }
 
+    pub fn alloc_type_hints(
+        &mut self,
+        values: impl IntoIterator<Item = TypeHint>,
+    ) -> TypeHintRange {
+        self.type_hints.alloc_many(values)
+    }
+
+    pub fn type_hints(&self, range: &TypeHintRange) -> &[TypeHint] {
+        self.type_hints.get(range)
+    }
+
+    pub fn type_hints_mut(&mut self, range: &TypeHintRange) -> &mut [TypeHint] {
+        self.type_hints.get_mut(range)
+    }
+
     /// Commits an expression node and its span at the matching dense index.
     pub fn alloc_expr(&mut self, node: ExprNode) -> ExprId {
         let id = node.id;
@@ -950,6 +968,7 @@ impl NodeArenas {
             .append_fragment(fragment.trait_precedences);
         self.use_imports.append_fragment(fragment.use_imports);
         self.closure_uses.append_fragment(fragment.closure_uses);
+        self.type_hints.append_fragment(fragment.type_hints);
         self.expr_spans.extend(fragment.expr_spans);
         self.stmt_spans.extend(fragment.stmt_spans);
         self.decoded_bytes.extend(fragment.decoded_bytes);
@@ -1028,6 +1047,7 @@ impl NodeArenas {
         self.trait_precedences.clear();
         self.use_imports.clear();
         self.closure_uses.clear();
+        self.type_hints.clear();
         self.expr_spans.clear();
         self.stmt_spans.clear();
         self.decoded_bytes.clear();
@@ -1078,6 +1098,7 @@ impl NodeArenas {
             self.trait_precedences.base(),
             self.use_imports.base(),
             self.closure_uses.base(),
+            self.type_hints.base(),
         );
         self.clear();
         (
@@ -1106,6 +1127,7 @@ impl NodeArenas {
             trait_precedences_base,
             use_imports_base,
             closure_uses_base,
+            type_hints_base,
         ) = bases;
         self.qualified_names.set_base(qualified_names_base);
         self.properties.set_base(properties_base);
@@ -1116,6 +1138,7 @@ impl NodeArenas {
         self.trait_precedences.set_base(trait_precedences_base);
         self.use_imports.set_base(use_imports_base);
         self.closure_uses.set_base(closure_uses_base);
+        self.type_hints.set_base(type_hints_base);
     }
 
     /// Compacts a completed tree before its arenas leave the worker.
@@ -1145,6 +1168,7 @@ impl NodeArenas {
         self.trait_precedences.shrink_to_fit();
         self.use_imports.shrink_to_fit();
         self.closure_uses.shrink_to_fit();
+        self.type_hints.shrink_to_fit();
         self.expr_spans.shrink_to_fit();
         self.stmt_spans.shrink_to_fit();
         self.decoded_bytes.shrink_to_fit();
@@ -2191,9 +2215,9 @@ pub enum TypeHintKind {
     /// `?T`.
     Nullable(Box<TypeHint>),
     /// `A|B`.
-    Union(Vec<TypeHint>),
+    Union(TypeHintRange),
     /// `A&B`, or a parenthesized `(A&B)` term of a union.
-    Intersection(Vec<TypeHint>),
+    Intersection(TypeHintRange),
 }
 
 /// A type keyword PHP recognizes in a native declaration, whatever its
@@ -2270,73 +2294,97 @@ impl NativeType {
 impl TypeHint {
     /// Whether two optional declarations are written the same (spans
     /// aside).
-    pub fn same(a: Option<&TypeHint>, b: Option<&TypeHint>) -> bool {
-        a.map(TypeHint::to_string) == b.map(TypeHint::to_string)
+    pub fn same(a: Option<&TypeHint>, b: Option<&TypeHint>, arenas: &NodeArenas) -> bool {
+        a.map(|hint| hint.to_string_with(arenas)) == b.map(|hint| hint.to_string_with(arenas))
     }
 
     /// Whether this declares `mixed`.
-    pub fn is_mixed(&self) -> bool {
+    pub fn is_mixed(&self, arenas: &NodeArenas) -> bool {
         match &self.kind {
             TypeHintKind::Keyword(NativeType::Mixed, _) => true,
-            TypeHintKind::Nullable(inner) => inner.is_mixed(),
+            TypeHintKind::Nullable(inner) => inner.is_mixed(arenas),
             // A union holding `mixed` is `mixed`.
-            TypeHintKind::Union(members) => members.iter().any(TypeHint::is_mixed),
+            TypeHintKind::Union(members) => arenas
+                .type_hints(members)
+                .iter()
+                .any(|member| member.is_mixed(arenas)),
             _ => false,
         }
     }
 
     /// Every class the declaration names (keyword types like `int` or
     /// `static` left out), as written, in source order.
-    pub fn class_names(&self) -> Vec<&QualifiedName> {
+    pub fn class_names<'a>(&'a self, arenas: &'a NodeArenas) -> Vec<&'a QualifiedName> {
         let mut out = Vec::new();
-        self.collect_class_names(&mut out);
+        self.collect_class_names(arenas, &mut out);
         out
     }
 
-    fn collect_class_names<'a>(&'a self, out: &mut Vec<&'a QualifiedName>) {
+    fn collect_class_names<'a>(&'a self, arenas: &'a NodeArenas, out: &mut Vec<&'a QualifiedName>) {
         match &self.kind {
             TypeHintKind::Keyword(..) => {}
             TypeHintKind::Name(name) => out.push(name),
-            TypeHintKind::Nullable(inner) => inner.collect_class_names(out),
+            TypeHintKind::Nullable(inner) => inner.collect_class_names(arenas, out),
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
-                for member in members {
-                    member.collect_class_names(out);
+                for member in arenas.type_hints(members) {
+                    member.collect_class_names(arenas, out);
                 }
             }
         }
     }
+
+    pub fn to_string_with(&self, arenas: &NodeArenas) -> String {
+        format!("{}", TypeHintDisplay { hint: self, arenas })
+    }
 }
 
-impl std::fmt::Display for TypeHint {
-    /// The declaration's text, normalized: no whitespace, and a union's
-    /// intersection terms parenthesized.
+pub struct TypeHintDisplay<'a> {
+    hint: &'a TypeHint,
+    arenas: &'a NodeArenas,
+}
+
+impl std::fmt::Display for TypeHintDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind {
-            TypeHintKind::Keyword(_, written) => f.write_str(written),
-            TypeHintKind::Name(name) => f.write_str(name),
-            TypeHintKind::Nullable(inner) => write!(f, "?{inner}"),
-            TypeHintKind::Union(members) => {
-                for (i, member) in members.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str("|")?;
-                    }
-                    match member.kind {
-                        TypeHintKind::Intersection(_) => write!(f, "({member})")?,
-                        _ => write!(f, "{member}")?,
-                    }
+        fn write_hint(
+            hint: &TypeHint,
+            arenas: &NodeArenas,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
+            match &hint.kind {
+                TypeHintKind::Keyword(_, written) => f.write_str(written),
+                TypeHintKind::Name(name) => f.write_str(name),
+                TypeHintKind::Nullable(inner) => {
+                    f.write_str("?")?;
+                    write_hint(inner, arenas, f)
                 }
-                Ok(())
-            }
-            TypeHintKind::Intersection(members) => {
-                for (i, member) in members.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str("&")?;
+                TypeHintKind::Union(members) => {
+                    for (i, member) in arenas.type_hints(members).iter().enumerate() {
+                        if i > 0 {
+                            f.write_str("|")?;
+                        }
+                        match &member.kind {
+                            TypeHintKind::Intersection(_) => {
+                                f.write_str("(")?;
+                                write_hint(member, arenas, f)?;
+                                f.write_str(")")?;
+                            }
+                            _ => write_hint(member, arenas, f)?,
+                        }
                     }
-                    write!(f, "{member}")?;
+                    Ok(())
                 }
-                Ok(())
+                TypeHintKind::Intersection(members) => {
+                    for (i, member) in arenas.type_hints(members).iter().enumerate() {
+                        if i > 0 {
+                            f.write_str("&")?;
+                        }
+                        write_hint(member, arenas, f)?;
+                    }
+                    Ok(())
+                }
             }
         }
+        write_hint(self.hint, self.arenas, f)
     }
 }
 

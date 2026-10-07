@@ -80,20 +80,25 @@ fn atoms(members: &[TypeHint]) -> Vec<Atom<'_>> {
 }
 
 /// `hint`'s shape; `None` for a nesting PHP's grammar doesn't produce.
-fn shape(hint: &TypeHint) -> Option<Shape<'_>> {
+fn shape<'h>(hint: &'h TypeHint, arenas: &'h syntax::ast::NodeArenas) -> Option<Shape<'h>> {
     Some(match &hint.kind {
         TypeHintKind::Keyword(..) | TypeHintKind::Name(_) => Shape::Single(Atom::of(hint)?),
         TypeHintKind::Nullable(inner) => Shape::Nullable(Atom::of(inner)?),
         TypeHintKind::Union(members) => Shape::Union(
-            members
+            arenas
+                .type_hints(members)
                 .iter()
                 .map(|m| match &m.kind {
-                    TypeHintKind::Intersection(group) => Some(Member::Group(atoms(group))),
+                    TypeHintKind::Intersection(group) => {
+                        Some(Member::Group(atoms(arenas.type_hints(group))))
+                    }
                     _ => Atom::of(m).map(Member::Name),
                 })
                 .collect::<Option<_>>()?,
         ),
-        TypeHintKind::Intersection(members) => Shape::Intersection(atoms(members)),
+        TypeHintKind::Intersection(members) => {
+            Shape::Intersection(atoms(arenas.type_hints(members)))
+        }
     })
 }
 
@@ -117,10 +122,14 @@ impl<'a> Checker<'a> {
         let Some(hint) = hint else {
             return;
         };
-        let Some(shape) = shape(hint) else {
+        let Some(owner) = self.syntax_tree_owner() else {
             return;
         };
-        self.check_type_version_support(hint, &shape, position, span);
+        let arenas = owner.arenas();
+        let Some(shape) = shape(hint, arenas) else {
+            return;
+        };
+        self.check_type_version_support(&shape, position, span);
         match shape {
             Shape::Single(atom) => self.check_type_position(atom, position, span),
             Shape::Nullable(inner) => {
@@ -172,13 +181,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_type_version_support(
-        &mut self,
-        hint: &TypeHint,
-        shape: &Shape,
-        position: TypePosition,
-        span: Span,
-    ) {
+    fn check_type_version_support(&mut self, shape: &Shape, position: TypePosition, span: Span) {
         if self.registry.php_versions.is_none() {
             return;
         }

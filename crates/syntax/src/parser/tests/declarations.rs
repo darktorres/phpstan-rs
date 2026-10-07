@@ -24,7 +24,10 @@ fn true_and_false_are_valid_return_types() {
         panic!("expected FunctionDecl");
     };
     assert_eq!(
-        f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+        f.return_type
+            .as_ref()
+            .map(|hint| hint.to_string_with(&program.arenas))
+            .as_deref(),
         Some("string|false")
     );
 }
@@ -86,7 +89,7 @@ fn backed_enum_with_interface_and_method_parses() {
             .class_def(e.def)
             .backing_type
             .as_ref()
-            .map(TypeHint::to_string)
+            .map(|hint| hint.to_string_with(&program.arenas))
             .as_deref(),
         Some("string")
     );
@@ -754,7 +757,7 @@ fn dnf_type_hint_parses() {
         program.class_def(c.def).properties(&program.arenas)[0]
             .type_hint
             .as_ref()
-            .map(TypeHint::to_string)
+            .map(|hint| hint.to_string_with(&program.arenas))
             .as_deref(),
         Some("(A&B)|X")
     );
@@ -833,7 +836,7 @@ fn legacy_var_property_declaration_parses() {
         program.class_def(c.def).properties(&program.arenas)[0]
             .type_hint
             .as_ref()
-            .map(TypeHint::to_string)
+            .map(|hint| hint.to_string_with(&program.arenas))
             .as_deref(),
         Some("A|(B&C)")
     );

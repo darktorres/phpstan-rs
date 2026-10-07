@@ -491,7 +491,7 @@ pub fn walk_type_hint<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, hint:
         TypeHintKind::Name(name) => v.visit_name(name),
         TypeHintKind::Nullable(inner) => v.visit_type_hint(arenas, inner),
         TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
-            for member in members {
+            for member in arenas.type_hints(members) {
                 v.visit_type_hint(arenas, member);
             }
         }

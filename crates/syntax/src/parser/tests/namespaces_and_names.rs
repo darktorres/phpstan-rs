@@ -23,7 +23,7 @@ fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
         f.params[0]
             .type_hint
             .as_ref()
-            .map(TypeHint::to_string)
+            .map(|hint| hint.to_string_with(&program.arenas))
             .as_deref(),
         Some("Enum")
     );
@@ -115,7 +115,7 @@ fn namespace_relative_name_parses_as_expression_and_as_type() {
         g.params[0]
             .type_hint
             .as_ref()
-            .map(TypeHint::to_string)
+            .map(|hint| hint.to_string_with(&program.arenas))
             .as_deref(),
         Some("namespace\\integer")
     );

@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use syntax::FileFacts;
-use syntax::ast::StmtNode;
+use syntax::ast::{NodeArenas, StmtId};
 use syntax::declarations::{Declared, for_each_declaration_in};
 use syntax::name::Name;
 
@@ -62,7 +62,8 @@ pub(crate) fn declares_in_expressions(facts: &FileFacts) -> bool {
 /// (`anonymous_class_decls`) can find, and whether its declarations can be
 /// inside expressions.
 pub(super) fn collect(
-    ast: &[StmtNode],
+    arenas: &NodeArenas,
+    ast: &[StmtId],
     path: &Path,
     is_stub: bool,
     origin: &Origin,
@@ -80,18 +81,24 @@ pub(super) fn collect(
         duplicate_class_sites: DuplicateClassSites::default(),
         declared_classes: Vec::new(),
     };
-    for_each_declaration_in(ast, in_expressions, |declaration, ctx, guards| {
+    for_each_declaration_in(arenas, ast, in_expressions, |declaration, ctx, guards| {
         let name = declaration.name();
         match declaration.declared {
             Declared::Function(f) => {
                 if !declaration.conditional {
-                    found.duplicate_fn_sites.record(name.clone(), path, f);
+                    found
+                        .duplicate_fn_sites
+                        .record(name.clone(), path, f, arenas);
                 }
                 found.functions.push(Name::from(name));
             }
             Declared::Class(c) => {
+                let Some(def) = arenas.class(c.def) else {
+                    return;
+                };
                 if !declaration.conditional {
                     found.declared_classes.push(DeclaredClass::of(
+                        arenas,
                         name.clone(),
                         declaration.span,
                         c,
@@ -100,7 +107,7 @@ pub(super) fn collect(
                         name.clone(),
                         path,
                         c.name.span,
-                        c.def.kind,
+                        def.kind,
                         is_stub,
                     );
                 }
@@ -112,10 +119,19 @@ pub(super) fn collect(
                     .push(Name::from(name.trim_start_matches('\\')));
             }
         }
-        built_declaration(declaration, ctx, guards, origin, &mut found.built_decls);
+        built_declaration(
+            arenas,
+            declaration,
+            ctx,
+            guards,
+            origin,
+            &mut found.built_decls,
+        );
     });
     if has_anonymous_class {
-        found.built_decls.extend(anonymous_class_decls(ast, origin));
+        found
+            .built_decls
+            .extend(anonymous_class_decls(arenas, ast, origin));
     }
     for decl in &found.built_decls {
         match decl {

@@ -9,7 +9,7 @@ use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::span::{LineIndex, Span};
-use syntax::visit::any_stmt_in_body;
+use syntax::visit::arena::{self, Visitor};
 use types::{self, Type};
 
 mod attributes;
@@ -433,7 +433,12 @@ impl<'a> Checker<'a> {
     /// dedicated `class.nameCase` pipeline-wide expansion, not
     /// re-litigated per tag family.
     pub(crate) fn check_require_tag_types(&mut self, c: &ClassDef) {
-        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse_shared) else {
+        let source = self.syntax_source_owner();
+        let doc_text = c
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+        let Some(doc) = doc_text.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.require_extends.len() > 1 {
@@ -573,7 +578,12 @@ impl<'a> Checker<'a> {
     /// rather than read back from the already-flattened
     /// `ClassReflection::sealed`.
     pub(crate) fn check_sealed_tag_types(&mut self, c: &ClassDef) {
-        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse_shared) else {
+        let source = self.syntax_source_owner();
+        let doc_text = c
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+        let Some(doc) = doc_text.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.sealed.is_empty() {
@@ -748,18 +758,39 @@ impl<'a> Checker<'a> {
     /// `@phpstan-*` tags are overwhelmingly declaration-level in
     /// practice.
     pub(crate) fn check_unknown_phpstan_tags_in_class(&mut self, c: &ClassDecl) {
-        self.check_unknown_phpstan_tags_on(c.def.doc_comment.as_deref(), c.name.span);
-        for m in &c.def.methods {
-            self.check_unknown_phpstan_tags_on(
-                m.function.doc_comment.as_deref(),
-                m.function.name.span,
-            );
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let Some(def) = arenas.class(c.def) else {
+            return;
+        };
+        let class_doc = def
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.doc_comment_text(ranges));
+        self.check_unknown_phpstan_tags_on(class_doc.as_deref(), c.name.span);
+        for m in arenas.methods(def.methods) {
+            let doc = m
+                .function
+                .doc_comment
+                .as_ref()
+                .and_then(|ranges| arenas.doc_comment_text(ranges));
+            self.check_unknown_phpstan_tags_on(doc.as_deref(), m.function.name.span);
         }
-        for p in &c.def.properties {
-            self.check_unknown_phpstan_tags_on(p.doc_comment.as_deref(), p.span);
+        for p in def.properties(arenas) {
+            let doc = p
+                .doc_comment
+                .as_ref()
+                .and_then(|ranges| arenas.doc_comment_text(ranges));
+            self.check_unknown_phpstan_tags_on(doc.as_deref(), p.span);
         }
-        for cc in &c.def.consts {
-            self.check_unknown_phpstan_tags_on(cc.doc_comment.as_deref(), cc.name.span);
+        for cc in def.consts(arenas) {
+            let doc = cc
+                .doc_comment
+                .as_ref()
+                .and_then(|ranges| arenas.doc_comment_text(ranges));
+            self.check_unknown_phpstan_tags_on(doc.as_deref(), cc.name.span);
         }
     }
 
@@ -902,6 +933,10 @@ impl<'a> Checker<'a> {
         // whatever it was (typically `None` here).
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("class-constant values retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         for c in consts {
             let has_phpdoc_type = self
                 .registry
@@ -911,7 +946,10 @@ impl<'a> Checker<'a> {
                 .then(|| self.registry.lookup_const_type(fqn, &c.name).cloned())
                 .flatten();
             if phpdoc_ty.is_none() && c.type_hint.is_none() {
-                let value_ty = self.infer_expr(&c.value, &self.new_locals());
+                let value = arenas
+                    .expr(c.value)
+                    .expect("class-constant value belongs to its parsed file owner");
+                let value_ty = self.infer_expr(value, &self.new_locals());
                 self.check_configured_constant_value(
                     Some(fqn),
                     &c.name,
@@ -922,7 +960,10 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if let Some(phpdoc_ty) = &phpdoc_ty {
-                let value_ty = self.infer_expr(&c.value, &self.new_locals());
+                let value = arenas
+                    .expr(c.value)
+                    .expect("class-constant value belongs to its parsed file owner");
+                let value_ty = self.infer_expr(value, &self.new_locals());
                 if !value_ty.is_mixed() {
                     self.check_constant_phpdoc_value(
                         fqn,
@@ -940,7 +981,10 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let declared_ty = self.resolve_type_hint(Some(raw_hint));
-            let value_ty = self.infer_expr(&c.value, &self.new_locals());
+            let value = arenas
+                .expr(c.value)
+                .expect("class-constant value belongs to its parsed file owner");
+            let value_ty = self.infer_expr(value, &self.new_locals());
             // `mixed` here almost always means "this checker
             // couldn't resolve it" (an unrecognized global constant,
             // e.g. `DEBUG_BACKTRACE_IGNORE_ARGS`, a real PHP builtin,
@@ -1010,18 +1054,26 @@ impl<'a> Checker<'a> {
     /// this very declaration's `extends`/`implements`/`use` lists, since
     /// conditional duplicate declarations share one entry.
     pub(crate) fn check_nested_class_declaration(&mut self, fqn: &str, c: &ClassDecl) {
-        self.check_readonly_class_version(c.def.is_readonly, false, c.name.span);
-        self.check_method_declaration_sanity(fqn, c.def.kind, c.def.is_abstract, &c.def.methods);
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let Some(def) = arenas.class(c.def) else {
+            return;
+        };
+        let methods = arenas.methods(def.methods);
+        self.check_readonly_class_version(def.is_readonly, false, c.name.span);
+        self.check_method_declaration_sanity(fqn, def.kind, def.is_abstract, methods);
         self.check_property_declarations(
             fqn,
             fqn,
-            c.def.kind,
-            c.def.is_abstract,
-            &c.def.properties,
-            &c.def.methods,
+            def.kind,
+            def.is_abstract,
+            def.properties(arenas),
+            methods,
         );
-        self.check_class_constant_modifiers(fqn, c.def.kind, &c.def.consts);
-        let own = crate::registry::ClassReflection::from_decl(c, &self.name_ctx);
+        self.check_class_constant_modifiers(fqn, def.kind, def.consts(arenas));
+        let own = crate::registry::ClassReflection::from_decl(arenas, c, &self.name_ctx);
         let registry_matches =
             self.registry
                 .class_references_by_name(fqn)
@@ -1031,10 +1083,10 @@ impl<'a> Checker<'a> {
                         && references.uses == own.uses().as_slice()
                 });
         if registry_matches {
-            self.check_inheritance_target_kinds(fqn, false, c.def.span);
+            self.check_inheritance_target_kinds(fqn, false, def.span);
             self.check_magic_serialization_methods(fqn, fqn, c.name.span);
-            self.check_constant_overrides(fqn, &c.def.consts);
-            self.check_trait_constant_conflicts(fqn, &c.def.consts);
+            self.check_constant_overrides(fqn, def.consts(arenas));
+            self.check_trait_constant_conflicts(fqn, def.consts(arenas));
         }
     }
 
@@ -1189,6 +1241,10 @@ impl<'a> Checker<'a> {
         if immediate.is_empty() {
             return;
         }
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("trait-constant values retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         let mut all_traits: Vec<Name> = Vec::new();
         let mut stack = immediate.clone();
         while let Some(t) = stack.pop() {
@@ -1224,7 +1280,10 @@ impl<'a> Checker<'a> {
                     own_native.as_ref(),
                 );
                 if immediate.contains(trait_fqn) {
-                    let own_value = self.infer_expr(&cc.value, &self.new_locals());
+                    let own_value = arenas
+                        .expr(cc.value)
+                        .map(|value| self.infer_expr(value, &self.new_locals()))
+                        .expect("trait-constant value belongs to its parsed file owner");
                     if !own_value.is_mixed() && own_value != *trait_const.value_ty() {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
@@ -1702,7 +1761,11 @@ impl<'a> Checker<'a> {
         if c.kind == ClassKind::Trait || c.kind == ClassKind::Interface {
             return;
         }
-        let Some(ctor) = c.constructor() else {
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = owner.arenas();
+        let Some(ctor) = c.constructor(arenas) else {
             return;
         };
         if ctor.is_abstract {
@@ -1720,7 +1783,7 @@ impl<'a> Checker<'a> {
         if self.registry.method_is_abstract(&ancestor, "__construct") {
             return;
         }
-        if body_calls_parent_construct(ctor.function.body_stmts()) {
+        if body_calls_parent_construct(arenas, ctor.function.body_stmts(arenas)) {
             return;
         }
         let mut builder = DiagnosticBuilder::new(
@@ -1759,10 +1822,13 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let Some(ctor) = c.constructor() else {
+        let Some(arenas) = self.syntax_arenas() else {
             return;
         };
-        let params = &ctor.function.params;
+        let Some(ctor) = c.constructor(arenas) else {
+            return;
+        };
+        let params = arenas.params(ctor.function.params);
         if params.is_empty()
             || params
                 .iter()
@@ -1770,37 +1836,50 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let body = ctor.function.body_stmts();
+        let body = ctor.function.body_stmts(arenas);
         if body.len() != params.len() {
             return;
         }
-        for (param, stmt) in params.iter().zip(body.iter()) {
+        for (param, stmt_id) in params.iter().zip(body.iter()) {
+            let Some(stmt) = arenas.stmt(*stmt_id) else {
+                return;
+            };
             let StmtKind::Expression(e) = &stmt.kind else {
                 return;
             };
-            let ExprKind::Assign(lhs, rhs) = &e.peeled().kind else {
+            let Some(e) = arenas.peeled(*e).and_then(|id| arenas.expr(id)) else {
                 return;
             };
-            let ExprKind::PropertyAccess(recv, prop_name, ObjectOperator::Arrow) =
-                &lhs.peeled().kind
-            else {
+            let ExprKind::Assign(lhs, rhs) = &e.kind else {
                 return;
             };
-            if !matches!(&recv.peeled().kind, ExprKind::Variable(v) if **v == *"this") {
+            let Some(lhs) = arenas.peeled(*lhs).and_then(|id| arenas.expr(id)) else {
+                return;
+            };
+            let ExprKind::PropertyAccess(recv, prop_name, ObjectOperator::Arrow) = &lhs.kind else {
+                return;
+            };
+            let Some(recv) = arenas.peeled(*recv).and_then(|id| arenas.expr(id)) else {
+                return;
+            };
+            if !matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this") {
+                return;
+            }
+            let Some(rhs) = arenas.peeled(*rhs).and_then(|id| arenas.expr(id)) else {
+                return;
+            };
+            if !matches!(&rhs.kind, ExprKind::Variable(v) if v == &param.name) {
                 return;
             }
             if **prop_name != *param.name {
                 return;
             }
-            if !matches!(&rhs.peeled().kind, ExprKind::Variable(v) if v == &param.name) {
-                return;
-            }
-            let Some(prop) = c.properties.iter().find(|p| *p.name == **prop_name) else {
+            let Some(prop) = c.properties(arenas).iter().find(|p| *p.name == **prop_name) else {
                 return;
             };
             if prop.is_static
                 || prop.hooks.is_some()
-                || !TypeHint::same(prop.type_hint.as_ref(), param.type_hint.as_ref())
+                || !TypeHint::same(prop.type_hint.as_ref(), param.type_hint.as_ref(), arenas)
             {
                 return;
             }
@@ -1952,15 +2031,35 @@ impl<'a> Checker<'a> {
 /// statement anywhere in the body, nested blocks (`if`/`else`/`try`/
 /// `switch`/loops) included - real PHP call resolution is
 /// case-insensitive, so the class/method names are compared that way too.
-fn body_calls_parent_construct(stmts: &[StmtNode]) -> bool {
-    stmts.iter().any(|stmt| {
-        any_stmt_in_body(stmt, |s| {
-            matches!(&s.kind, StmtKind::Expression(e)
-                if matches!(&e.peeled().kind, ExprKind::StaticCall(class, method, _)
-                    if class.as_name().is_some_and(|n| n.is_keyword("parent"))
-                        && syntax::ast::is_constructor_name(method)))
-        })
-    })
+fn body_calls_parent_construct(arenas: &NodeArenas, stmts: &[StmtId]) -> bool {
+    struct Search(bool);
+    impl Visitor for Search {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            if self.0 {
+                return;
+            }
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            if let StmtKind::Expression(expr) = &stmt.kind
+                && let Some(expr) = arenas.peeled(*expr).and_then(|id| arenas.expr(id))
+                && let ExprKind::StaticCall(class, method, _) = &expr.kind
+                && class
+                    .as_name()
+                    .is_some_and(|name| name.is_keyword("parent"))
+                && syntax::ast::is_constructor_name(method)
+            {
+                self.0 = true;
+                return;
+            }
+            arena::walk_stmt(self, arenas, id);
+        }
+
+        fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+    }
+    let mut search = Search(false);
+    arena::walk_stmts(&mut search, arenas, stmts);
+    search.0
 }
 
 pub(crate) fn visibility_word(v: &Visibility) -> &'static str {
@@ -1998,7 +2097,7 @@ pub(crate) fn signatures_compatible(a: &FunctionReflection, b: &FunctionReflecti
 /// onto its own lines.
 fn parent_call_insertion(ctor: &MethodDecl, index: &LineIndex) -> Option<(Span, String)> {
     const CALL: &str = "parent::__construct();";
-    if let Some(first) = ctor.function.body_stmts().first() {
+    if let Some(first) = ctor.function.body_stmts(arenas).first() {
         let at = first.span.start;
         let indent = " ".repeat(index.line_col(at).col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("{CALL}\n{indent}")));

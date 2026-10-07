@@ -7,13 +7,14 @@
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
+use std::borrow::Cow;
 use syntax::ast::*;
 use syntax::span::Span;
 use types::php_version::PhpFeature;
 
 /// One property's declaration-relevant facts, shared by a plain
 /// `PropertyDecl` and a promoted constructor parameter.
-struct PropertyView<'a> {
+struct PropertyView<'a, 's> {
     name: &'a str,
     span: Span,
     visibility: Visibility,
@@ -25,10 +26,10 @@ struct PropertyView<'a> {
     type_hint: Option<&'a TypeHint>,
     has_default: bool,
     hooks: Option<&'a PropertyHooks>,
-    doc_comment: Option<&'a str>,
+    doc_comment: Option<Cow<'s, str>>,
 }
 
-impl PropertyView<'_> {
+impl PropertyView<'_, '_> {
     fn hook_bodies(&self) -> Vec<(&PropertyHookBody, bool)> {
         let Some(hooks) = self.hooks else {
             return Vec::new();
@@ -71,7 +72,12 @@ impl<'a> Checker<'a> {
         properties: &[PropertyDecl],
         methods: &[MethodDecl],
     ) {
-        let mut views: Vec<PropertyView> = properties
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let source = self.syntax_source_owner();
+        let mut views: Vec<PropertyView<'_, '_>> = properties
             .iter()
             .map(|p| PropertyView {
                 name: &p.name,
@@ -85,7 +91,10 @@ impl<'a> Checker<'a> {
                 type_hint: p.type_hint.as_ref(),
                 has_default: p.default.is_some(),
                 hooks: p.hooks.as_ref(),
-                doc_comment: p.doc_comment.as_deref(),
+                doc_comment: p
+                    .doc_comment
+                    .as_ref()
+                    .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source))),
             })
             .collect();
         if let Some(ctor) = methods.iter().find(|m| m.function.is_constructor()) {
@@ -109,7 +118,9 @@ impl<'a> Checker<'a> {
                         type_hint: p.type_hint.as_ref(),
                         has_default: false,
                         hooks: p.hooks.as_deref(),
-                        doc_comment: p.doc_comment.as_deref(),
+                        doc_comment: p.doc_comment.as_ref().and_then(|ranges| {
+                            source.as_ref().and_then(|source| ranges.text(source))
+                        }),
                     }),
             );
         }
@@ -139,7 +150,7 @@ impl<'a> Checker<'a> {
             );
             if view
                 .type_hint
-                .is_some_and(|h| native_hint_mentions_callable(&h.to_string()))
+                .is_some_and(|h| native_hint_mentions_callable(&h.to_string_with(arenas)))
             {
                 self.report_property_declaration(
                     format!(

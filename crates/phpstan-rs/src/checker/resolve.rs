@@ -54,7 +54,13 @@ impl<'a> Checker<'a> {
 
     /// The type a native type declaration declares.
     pub(crate) fn resolve_type_hint(&self, hint: Option<&TypeHint>) -> Type {
-        hint.map_or_else(Type::mixed, types::native_type)
+        let Some(hint) = hint else {
+            return Type::mixed();
+        };
+        let Some(owner) = self.syntax_tree_owner() else {
+            return Type::mixed();
+        };
+        types::native_type(hint, owner.arenas())
     }
 
     /// `resolve_type_hint`, with the `(written, resolved)` pairs of the
@@ -67,15 +73,19 @@ impl<'a> Checker<'a> {
         let Some(hint) = hint else {
             return (Type::mixed(), Vec::new());
         };
+        let Some(owner) = self.syntax_tree_owner() else {
+            return (Type::mixed(), Vec::new());
+        };
+        let arenas = owner.arenas();
         let case_refs = hint
-            .class_names()
+            .class_names(arenas)
             .into_iter()
             .filter_map(|name| {
                 let resolved = name.resolved_class()?;
                 Some((Name::from(&name.written), Name::from(resolved)))
             })
             .collect();
-        (types::native_type(hint), case_refs)
+        (types::native_type(hint, arenas), case_refs)
     }
 
     /// `resolve_type_hint` for a parsed PHPDoc type, which `site` reads.
@@ -309,6 +319,13 @@ impl<'a> Checker<'a> {
         match target {
             StaticTarget::Name(name) => self.resolve_static_class_name(name),
             StaticTarget::Expr(receiver) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static target belongs to its retained file owner");
+                let receiver = syntax_owner
+                    .arenas()
+                    .expr(*receiver)
+                    .expect("static target receiver belongs to its retained file owner");
                 receiver_class(self.check_expr(receiver, locals, label))
             }
         }
@@ -325,7 +342,16 @@ impl<'a> Checker<'a> {
     ) -> Option<String> {
         match target {
             StaticTarget::Name(name) => self.resolve_static_class_name(name),
-            StaticTarget::Expr(receiver) => receiver_class(self.infer_expr(receiver, locals)),
+            StaticTarget::Expr(receiver) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static target belongs to its retained file owner");
+                let receiver = syntax_owner
+                    .arenas()
+                    .expr(*receiver)
+                    .expect("static target receiver belongs to its retained file owner");
+                receiver_class(self.infer_expr(receiver, locals))
+            }
         }
     }
 

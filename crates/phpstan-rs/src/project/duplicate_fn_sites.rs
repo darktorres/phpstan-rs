@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 
 use crate::file_id::FileId;
-use syntax::ast::{FunctionDecl, TypeHint};
+use syntax::ast::{FunctionDecl, NodeArenas};
 use syntax::name::Name;
 use syntax::span::Span;
 
@@ -44,16 +44,25 @@ impl DuplicateFunctionSites {
     /// the identical polyfill name) - a deliberate, stricter departure
     /// from literal real-PHPStan behavior, matching this project's own
     /// "favor false negatives over false positives" precedent.
-    pub(crate) fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {
+    pub(crate) fn record(
+        &mut self,
+        fqn: String,
+        path: &Path,
+        f: &FunctionDecl,
+        arenas: &NodeArenas,
+    ) {
         self.sites.entry(fqn).or_default().push(FnDeclSite {
             path: path.to_path_buf(),
             span: f.name.span,
             param_hints: f
                 .params
                 .iter()
-                .map(|p| p.type_hint.as_ref().map(TypeHint::to_string))
+                .map(|p| p.type_hint.as_ref().map(|hint| hint.to_string_with(arenas)))
                 .collect(),
-            return_hint: f.return_type.as_ref().map(TypeHint::to_string),
+            return_hint: f
+                .return_type
+                .as_ref()
+                .map(|hint| hint.to_string_with(arenas)),
         });
     }
 

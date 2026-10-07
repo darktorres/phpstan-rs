@@ -866,7 +866,7 @@ pub(crate) fn parse_type_atom_by_form(s: &str) -> Type {
 
 /// The type a native type declaration denotes, its class names as name
 /// resolution resolved them.
-pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
+pub fn native_type(hint: &syntax::ast::TypeHint, arenas: &syntax::ast::NodeArenas) -> Type {
     use syntax::ast::TypeHintKind;
     syntax::stack::guard(|| match &hint.kind {
         TypeHintKind::Keyword(kind, _) => keyword_type(*kind),
@@ -875,13 +875,21 @@ pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
             Vec::new(),
         ),
         TypeHintKind::Nullable(inner) => {
-            Type::new(Repr::Union(vec![native_type(inner), Type::null()]))
+            Type::new(Repr::Union(vec![native_type(inner, arenas), Type::null()]))
         }
-        TypeHintKind::Union(members) => {
-            Type::new(Repr::Union(members.iter().map(native_type).collect()))
-        }
+        TypeHintKind::Union(members) => Type::new(Repr::Union(
+            arenas
+                .type_hints(members)
+                .iter()
+                .map(|member| native_type(member, arenas))
+                .collect(),
+        )),
         TypeHintKind::Intersection(members) => Type::new(Repr::Intersection(
-            members.iter().map(native_type).collect(),
+            arenas
+                .type_hints(members)
+                .iter()
+                .map(|member| native_type(member, arenas))
+                .collect(),
         )),
     })
 }

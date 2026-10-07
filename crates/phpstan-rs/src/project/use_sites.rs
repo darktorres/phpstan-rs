@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_args, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
@@ -365,12 +365,16 @@ fn resolve_class_ref(name: &QualifiedName) -> Option<String> {
 /// `navigation.rs` does via `registry.classes()`, harmless to add later but
 /// unneeded for Tier 1's own class/function scope; the member half is
 /// Tier 2's job entirely, via a real Checker-resolved declaring owner).
-pub(crate) fn index_class_fn_refs(stmts: &[StmtNode], source: &str) -> Vec<(Span, RefTarget)> {
+pub(crate) fn index_class_fn_refs(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    source: &str,
+) -> Vec<(Span, RefTarget)> {
     let mut w = ClassFnRefWalker {
         source: Some(source),
         out: Vec::new(),
     };
-    walk_stmts(&mut w, stmts);
+    arena::walk_stmts(&mut w, arenas, stmts);
     w.out
 }
 
@@ -383,12 +387,15 @@ pub(crate) fn index_class_fn_refs(stmts: &[StmtNode], source: &str) -> Vec<(Span
 /// characters. A caller that reads only whether a name is referenced never
 /// reads a span; the index `textDocument/references`/`rename` read is built
 /// with `index_class_fn_refs`.
-pub(crate) fn index_class_fn_refs_without_source(stmts: &[StmtNode]) -> Vec<(Span, RefTarget)> {
+pub(crate) fn index_class_fn_refs_without_source(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+) -> Vec<(Span, RefTarget)> {
     let mut w = ClassFnRefWalker {
         source: None,
         out: Vec::new(),
     };
-    walk_stmts(&mut w, stmts);
+    arena::walk_stmts(&mut w, arenas, stmts);
     w.out
 }
 
@@ -423,54 +430,63 @@ impl ClassFnRefWalker<'_> {
     }
 }
 
-impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
-    fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
-        for name in hint.class_names() {
+impl Visitor for ClassFnRefWalker<'_> {
+    fn visit_type_hint(&mut self, arenas: &NodeArenas, hint: &TypeHint) {
+        for name in hint.class_names(arenas) {
             self.class_at(name, hint.span);
         }
     }
 
-    fn visit_class_def(&mut self, class: &'ast ClassDef) {
+    fn visit_class_def(&mut self, arenas: &NodeArenas, class: &ClassDef) {
         for name in class
-            .extends
+            .extends(arenas)
             .iter()
-            .chain(&class.implements)
-            .chain(class.used_traits())
+            .chain(class.implements(arenas))
+            .chain(class.used_traits(arenas))
         {
             self.class_at(name, name.span);
         }
-        walk_class_def(self, class);
+        arena::walk_class_def(self, arenas, class);
     }
 
-    fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
-        for name in &clause.types {
+    fn visit_catch_clause(&mut self, arenas: &NodeArenas, clause: &CatchClause) {
+        for name in arenas.qualified_names(&clause.types) {
             self.class_at(name, name.span);
         }
-        walk_catch_clause(self, clause);
+        arena::walk_catch_clause(self, arenas, clause);
     }
 
-    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+    fn visit_attribute(&mut self, arenas: &NodeArenas, attribute: &Attribute) {
         self.class_at(&attribute.name, attribute.name.span);
-        walk_args(self, &attribute.args);
+        for arg in arenas.args(attribute.args) {
+            self.visit_arg(arenas, arg);
+        }
     }
 
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else { return };
         syntax::stack::guard(|| {
             match &expr.kind {
                 // The callee's name is recorded here, as a function or a
                 // class; only the arguments are walked.
                 ExprKind::Call(callee, args) | ExprKind::New(callee, args)
-                    if matches!(callee.kind, ExprKind::Name(_)) =>
+                    if matches!(
+                        arenas.expr(*callee).map(|node| &node.kind),
+                        Some(ExprKind::Name(_))
+                    ) =>
                 {
-                    let ExprKind::Name(n) = &callee.kind else {
+                    let Some(callee_node) = arenas.expr(*callee) else {
+                        return;
+                    };
+                    let ExprKind::Name(n) = &callee_node.kind else {
                         unreachable!()
                     };
                     if matches!(expr.kind, ExprKind::Call(..)) {
-                        self.function_at(n, callee.span);
+                        self.function_at(n, callee_node.span);
                     } else {
-                        self.class_at(n, callee.span);
+                        self.class_at(n, callee_node.span);
                     }
-                    for arg in args {
+                    for arg in arenas.args(*args) {
                         self.visit_arg(arg);
                     }
                     return;
@@ -487,7 +503,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
                 }
                 _ => {}
             }
-            walk_expr(self, expr);
+            arena::walk_expr(self, arenas, id);
         })
     }
 }
