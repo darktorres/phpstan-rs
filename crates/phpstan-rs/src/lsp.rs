@@ -1465,7 +1465,7 @@ impl Workspace {
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = uri_to_path(uri)?;
         let stmts = self.project.ast_of(&path)?;
-        let stmts = &*stmts;
+        let stmts = stmts.statements();
         let index = self.positions(&path)?;
         Some(DocumentSymbolResponse::Nested(
             document_symbol::document_symbols(stmts, index),
@@ -1960,7 +1960,7 @@ impl Workspace {
             .cloned()
             .or_else(|| self.project.source(&path).map(str::to_string))?;
         let stmts = self.project.ast_of(&path)?;
-        let stmts = &*stmts;
+        let stmts = stmts.statements();
         let tokens = completion::tokenize(&text);
         let live_index = LineIndex::new(text.as_bytes());
         let stale_index = self.project.line_index(&path)?;

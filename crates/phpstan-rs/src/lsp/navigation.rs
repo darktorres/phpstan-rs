@@ -166,7 +166,7 @@ pub(crate) fn collect_all(project: &Project, path: &Path) -> Vec<(Span, Resolved
 
 fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span, Resolved)>> {
     let stmts = project.ast_of(path)?;
-    let stmts = &*stmts;
+    let stmts = stmts.statements();
     let registry = project.registry();
     let mut w = Walker {
         registry,

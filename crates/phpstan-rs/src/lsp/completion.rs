@@ -634,7 +634,7 @@ pub(super) fn enumerate_bare(
     // traversal `update_file` itself uses to know what to remove/re-add
     // - reused here, not re-derived.
     if let Some(current_ast) = project.ast_of(path) {
-        let (functions, classes) = project::declared_names(&current_ast);
+        let (functions, classes) = project::declared_names(current_ast.statements());
         for fqn in functions.iter().chain(&classes) {
             if seen.insert(fqn.to_string()) {
                 let (insert_text, edit) = resolve_import(current_stmts, index, &ctx, fqn);

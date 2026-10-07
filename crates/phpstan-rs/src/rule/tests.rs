@@ -57,7 +57,7 @@ fn diagnostics_with(src: &str, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
     let program = project.ast_of(path).unwrap();
     let mut checker = Checker::new(project.registry());
     checker.set_external_rules(rules);
-    checker.check_program(&program);
+    checker.check_program(program.statements());
     checker.into_diagnostics()
 }
 
