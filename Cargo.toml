@@ -73,6 +73,16 @@ opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
 
+# `release` with fat LTO: whole-program inlining across the workspace and
+# its dependencies, one codegen unit. Not incremental (LTO discards it), so
+# build it in a target directory of its own:
+# `CARGO_TARGET_DIR=<dir> nice -n 19 cargo build --profile fat -p phpstan-rs --bin phpstan-rs`.
+[profile.fat]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+incremental = false
+
 # The regression gates' corpus, type and baseline snapshots: release
 # optimizations without LTO, since those outputs don't depend on
 # optimization and the gate rebuilds on every commit. The performance
