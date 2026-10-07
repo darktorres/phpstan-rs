@@ -253,8 +253,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are named
   (`6611157d`), and typed aliases now also name the function/method/class/
   closure payload arenas and the argument/array-item/parameter/match-arm/
-  attribute list arenas (`6e5a6382`). None are yet owned or populated by the
-  parser. The IDs target
+  attribute list arenas (`6e5a6382`); `NodeArenas` now bundles them and
+  provides capacity-preserving clear and shrink-to-fit operations
+  (`edb038c1`). The parser and file owner do not yet own or populate the
+  bundle. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
   and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
   return those explicit node values (`36d608ba`), and AST child fields use the
