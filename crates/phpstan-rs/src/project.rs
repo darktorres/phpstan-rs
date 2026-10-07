@@ -3777,7 +3777,7 @@ fn parse_recording<'a>(
 ) -> Result<Parsed, ParseError> {
     let parsed = match scratch {
         Some(scratch) => {
-            syntax::parse_watching_with_scratch(source, names, Some(&WATCHED), scratch)?
+            syntax::parse_watching_transient_with_scratch(source, names, Some(&WATCHED), scratch)?
         }
         None => syntax::parse_watching(source, names, Some(&WATCHED))?,
     };

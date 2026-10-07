@@ -56,9 +56,15 @@ fn a_dropped_project_tree_returns_arenas_for_the_next_parse() {
     assert!(expr_capacity > 0);
     assert!(stmt_capacity > 0);
 
-    let reparsed =
-        syntax::parse_watching_with_scratch(b"<?php $next = 2;", None, None, &mut scratch).unwrap();
+    let reparsed = syntax::parse_watching_transient_with_scratch(
+        b"<?php $next = 2;",
+        None,
+        None,
+        &mut scratch,
+    )
+    .unwrap();
 
+    assert!(reparsed.source.is_empty());
     assert!(reparsed.arenas.expr_spans.capacity() >= expr_capacity);
     assert!(reparsed.arenas.stmt_spans.capacity() >= stmt_capacity);
 }

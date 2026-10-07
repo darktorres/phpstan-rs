@@ -14,8 +14,9 @@ use crate::span::LineIndex;
 /// A parsed file.
 #[derive(Debug)]
 pub struct ParsedFile {
-    /// The bytes this tree was parsed from. AST payloads will become ranges
-    /// into this buffer as the tree moves to typed arenas.
+    /// The bytes this tree was parsed from. Empty when the transient-scratch
+    /// entry point is used. AST payloads will become ranges into this buffer
+    /// as the tree moves to typed arenas.
     pub source: Box<[u8]>,
     /// The distinct names encountered in the file, in first-use order.
     pub names: Box<[Name]>,
@@ -49,6 +50,7 @@ impl ParsedFile {
     }
 
     /// Reads an in-file byte range, such as a source-backed AST payload.
+    /// Returns `None` for a transient-scratch parse, which retains no source.
     pub fn source_slice(&self, span: crate::span::Span) -> Option<&[u8]> {
         self.source.get(span.start as usize..span.end as usize)
     }
@@ -158,7 +160,15 @@ pub fn parse_watching<'a>(
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
 ) -> Result<ParsedFile, ParseError> {
-    parse_watching_in_arenas(source, names, watch, NodeArenas::default(), true, None)
+    parse_watching_in_arenas(
+        source,
+        names,
+        watch,
+        NodeArenas::default(),
+        true,
+        true,
+        None,
+    )
 }
 
 /// Parses with reusable node arenas. On success, the returned file owns the
@@ -172,7 +182,22 @@ pub fn parse_watching_with_scratch<'a>(
     scratch: &mut NodeArenas,
 ) -> Result<ParsedFile, ParseError> {
     let arenas = std::mem::take(scratch);
-    parse_watching_in_arenas(source, names, watch, arenas, false, Some(scratch))
+    parse_watching_in_arenas(source, names, watch, arenas, false, true, Some(scratch))
+}
+
+/// Parses a file whose tree is used only while its products are collected.
+/// It reuses `scratch`, returns its arenas with the parsed file on success,
+/// and restores them to `scratch` on a parse error. The source bytes are
+/// not copied into `ParsedFile::source`; the caller must not retain the tree
+/// or use its source-slice accessors.
+pub fn parse_watching_transient_with_scratch<'a>(
+    source: impl Into<Source<'a>>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+    scratch: &mut NodeArenas,
+) -> Result<ParsedFile, ParseError> {
+    let arenas = std::mem::take(scratch);
+    parse_watching_in_arenas(source, names, watch, arenas, false, false, Some(scratch))
 }
 
 fn parse_watching_in_arenas<'a>(
@@ -181,12 +206,17 @@ fn parse_watching_in_arenas<'a>(
     watch: Option<&'static WatchList>,
     arenas: NodeArenas,
     compact_arenas: bool,
+    retain_source: bool,
     mut scratch: Option<&mut NodeArenas>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
-    let source_bytes: Box<[u8]> = match source {
-        Source::Text(text) => text.as_bytes().into(),
-        Source::Bytes(bytes) => bytes.into(),
+    let source_bytes: Box<[u8]> = if retain_source {
+        match source {
+            Source::Text(text) => text.as_bytes().into(),
+            Source::Bytes(bytes) => bytes.into(),
+        }
+    } else {
+        Box::default()
     };
     let lexer = Lexer::from_source(source);
     let lexer = match watch {
@@ -398,5 +428,23 @@ mod tests {
             let id = StmtId::from_raw(la_arena::RawIdx::from_u32(index as u32));
             assert_eq!(second.stmt_span(id), Some(*span));
         }
+    }
+
+    #[test]
+    fn transient_scratch_parse_does_not_copy_source_bytes() {
+        let mut scratch = NodeArenas::default();
+        let parsed =
+            parse_watching_transient_with_scratch(b"<?php $value = 1;", None, None, &mut scratch)
+                .unwrap();
+
+        assert!(parsed.source.is_empty());
+        assert!(
+            parsed
+                .source_slice(crate::span::Span { start: 0, end: 5 })
+                .is_none()
+        );
+        assert!(!parsed.names.is_empty());
+        assert!(parsed.expr_count() > 0);
+        assert!(parsed.stmt_count() > 0);
     }
 }
