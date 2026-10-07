@@ -532,13 +532,14 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 14.8.c.d | same step | Store `@var` winners in the docblock memo | — | perf | OPEN |
 | 14.8.d | same step | Keep the tag-effect memo and remove the separate tag-value and prefix memos | — | perf | OPEN |
 | 14.8.e | same step | Remove `DocNames` after references read names from the docblock memo | — | perf | OPEN |
-| 14.9 | step 7 | Nodes in their owner's `la-arena`; `DocType` as (owner, `Idx`, `Type`); a serialized `DocType` holds its subtree and type | 14.8 | perf | OPEN; see 14.9.a-14.9.c |
+| 14.9 | step 7 | Nodes in their owner's `la-arena`; `DocType` as (owner, `Idx`, `Type`); a serialized `DocType` holds its subtree and type | 14.8 | perf | OPEN; see 14.9.a-14.9.d |
 | 14.9.a | same step | Store PHPDoc nodes in their owner’s `la-arena` | — | perf | OPEN; see 14.9.a.a-14.9.a.c |
 | 14.9.a.a | same step | Store each `TagEffect`'s nodes in its own arena | — | perf | OPEN |
-| 14.9.a.b | same step | Store residual `DocBlock` nodes in a docblock-owned arena | — | perf | OPEN |
+| 14.9.a.b | same step | Store only nodes not held by a shared tag effect in a docblock-owned arena | — | perf | OPEN |
 | 14.9.a.c | same step | Resolve nodes through owner-carrying references such as `DocType::node` or `NodeRef` | — | perf | OPEN |
 | 14.9.b | same step | Represent `DocType` as owner, index and type | — | perf | OPEN |
 | 14.9.c | same step | Serialize a `DocType` with its subtree and type | — | perf | OPEN |
+| 14.9.d | same step | Advance per-file and stub cache records and keys for serialized `DocType` subtrees and lowered types | 5.8 | perf | OPEN |
 | 14.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 14.9 | val | OPEN; see 14.V.a-14.V.b |
 | 14.V.a | same gate | Run `cargo test --workspace` after item 14 implementation rows are complete | — | val | OPEN |
 | 14.V.b | same gate | Run item-specific PHPDoc parsing, lowering, resolution and memo tests | — | val | OPEN; see 14.V.b.a-14.V.b.d |
@@ -595,7 +596,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.4.b | same step | Escape non-displayable name bytes as `\x{NN}` wherever name text is shown | — | sem | DEFERRED (after O3, not optimization) |
 | 15.4.c | same step | Decode escaped names in `parse_display` | — | sem | DEFERRED (after O3, not optimization) |
 | 15.5 | fixes | `DiagnosticFix` holds bytes; `apply_fixes` and `resolve_span` work on bytes | 15.4 | sem | DEFERRED (after O3, not optimization); see subtask rows 15.5.a, 15.5.b |
-| 15.5.a | same step | Store diagnostic fix `replacement` and `within` as bytes | — | sem | DEFERRED (after O3, not optimization) |
+| 15.5.a | same step | Store diagnostic fix `replacement` and `within` values as bytes | — | sem | DEFERRED (after O3, not optimization) |
 | 15.5.b | same step | Apply fixes and resolve spans against byte-oriented source text | — | sem | DEFERRED (after O3, not optimization) |
 | 15.6 | serde | `Name` serializes its bytes | 15.4 | perf | DEFERRED (after O3, not optimization); see 15.6.a-15.6.b |
 | 15.6.a | same step | Serialize and deserialize non-human-readable `Name` values as bytes | — | perf | DEFERRED (after O3, not optimization) |
@@ -607,11 +608,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.8.a | same step | Use ASCII-only folding for repeated-attribute names | — | sem | DEFERRED (after O3, not optimization) |
 | 15.8.b | same step | Use ASCII-only folding at all restricted-symbol usage sites | — | sem | DEFERRED (after O3, not optimization) |
 | 15.8.c | same step | Use ASCII-only folding at all restricted-symbol definition sites | — | sem | DEFERRED (after O3, not optimization) |
-| 15.9 | documents | Each open document's encoding found with `encoding_rs` (new dependency); overlays encoded back; fixes offered only when encodable | 15.4, 1.4 | sem | DEFERRED (after O3, not optimization); see subtask rows 15.9.a-15.9.d |
+| 15.9 | documents | Each open document's encoding found with `encoding_rs` (new dependency); overlays encoded back; fixes offered only when encodable | 15.4, 1.4 | sem | DEFERRED (after O3, not optimization); see subtask rows 15.9.a-15.9.e |
 | 15.9.a | same step | Detect and retain each open document’s encoding with `encoding_rs` | — | sem | DEFERRED (after O3, not optimization) |
 | 15.9.b | same step | Encode overlays back to their document encoding | — | sem | DEFERRED (after O3, not optimization) |
 | 15.9.c | same step | Offer fixes only when their replacement text is encodable in the document | — | sem | DEFERRED (after O3, not optimization) |
 | 15.9.d | same step | When no lossless encoding matches, analyze as UTF-8 and report that non-ASCII names may not match the disk file | — | sem | DEFERRED (after O3, not optimization) |
+| 15.9.e | same step | Add a server-session test for the unmatched-encoding UTF-8 fallback and diagnostic | — | infra | DEFERRED (after O3, not optimization) |
 | 15.10 | short names | `NameData.last_segment`; a short name is a slice | 15.3 | perf | OPEN; see 15.10.a-15.10.b |
 | 15.10.a | same step | Store `NameData.last_segment` with the name | — | perf | OPEN |
 | 15.10.b | same step | Return a borrowed slice for short-name access | — | perf | OPEN |
@@ -657,12 +659,11 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.1.a | same step | Represent platform-specific stat fields in the index | — | perf | OPEN |
 | 17.1.b | same step | Apply the racy-file rule where the file is read | — | perf | OPEN |
 | 17.1.c | same step | Trust `stat` only on filesystems identified as local and sufficiently precise | — | perf | OPEN |
-| 17.2 | step 1 | Every content hash is BLAKE3 with full digests (`blake3`, new), the build's hash and `SOURCES_HASH` included; `twox-hash` removed | 6.8 | perf | OPEN; see 17.2.a-17.2.b |
+| 17.2 | step 1 | Every content hash is BLAKE3 with full digests (`blake3`, new), the build's hash and `SOURCES_HASH` included; `twox-hash` removed | 5.8 | perf | OPEN; see 17.2.a-17.2.d |
 | 17.2.a | same step | Use full BLAKE3 digests for every content hash | — | perf | OPEN |
-| 17.2.b | same step | Include the build hash and `SOURCES_HASH`, then remove `twox-hash` | — | perf | OPEN; see 17.2.b.a-17.2.b.c |
-| 17.2.b.a | same step | Include the build hash in cache inputs | — | perf | OPEN |
-| 17.2.b.b | same step | Include `SOURCES_HASH` in cache inputs | — | perf | OPEN |
-| 17.2.b.c | same step | Remove `twox-hash` after all content hashes use BLAKE3 | — | perf | OPEN |
+| 17.2.b | same step | Include the build hash in cache inputs | — | perf | OPEN |
+| 17.2.c | same step | Include `SOURCES_HASH` in cache inputs | — | perf | OPEN |
+| 17.2.d | same step | Remove `twox-hash` after all content hashes use BLAKE3 | — | perf | OPEN |
 | 17.3 | step 1 | The server writes neither the index nor the base from overlays | 17.1 | perf | OPEN; see subtask rows 17.3.a, 17.3.b |
 | 17.3.a | same step | Write persistent index entries only from file content read from disk, never from overlays | — | perf | OPEN |
 | 17.3.b | same step | Write the context base from the initial disk load before applying overlays | — | perf | OPEN |
@@ -837,19 +838,16 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.5.a | same step | Use a weighted `quick_cache` bounded by each tree’s arena bytes | — | perf | OPEN |
 | 19.5.b | same step | Key cached trees by `(FileId, content hash)` and keep open-document trees outside the cache | — | perf | OPEN |
 | 19.5.c | same step | Reparse evicted trees through `ast_of` after validating the loaded-content hash | — | perf | OPEN; see 19.5.c.a-19.5.c.b |
-| 19.5.c.a | same step | Reparse an evicted tree on demand through `ast_of` | — | perf | OPEN |
-| 19.5.c.b | same step | Validate reread content against the loaded-content hash before returning a cached or parsed tree | — | perf | OPEN |
+| 19.5.c.a | same step | Validate reread content for an evicted tree against item 1’s recorded hash | — | perf | OPEN |
+| 19.5.c.b | same step | Reparse an evicted tree on demand through `ast_of` | — | perf | OPEN |
 | 19.5.d | same step | Treat a changed reread as an edit and update declarations/references before checking dependents | — | perf | OPEN |
 | 19.6 | readers | `FileState::ast` goes; every reader asks `ast_of` | 19.2 | perf | OPEN; see 19.6.a-19.6.c |
 | 19.6.a | same step | Remove `FileState::ast` and its empty-tree release fallback | — | perf | OPEN |
-| 19.6.b | same step | Route every reader through `ast_of` so an evicted tree is reparsed on demand | — | perf | OPEN; see 19.6.b.a-19.6.b.g |
-| 19.6.b.a | same step | Route architecture, banned-construct and class-shape readers through `ast_of` | — | perf | OPEN |
-| 19.6.b.b | same step | Route Composer and mock-hygiene readers through `ast_of` | — | perf | OPEN |
-| 19.6.b.c | same step | Route use-site and unmatched-ignore readers through `ast_of` | — | perf | OPEN |
-| 19.6.b.d | same step | Route checker and declaration readers through `ast_of` | — | perf | OPEN |
-| 19.6.b.e | same step | Route LSP readers through `ast_of` | — | perf | OPEN |
-| 19.6.b.f | same step | Route dependency and other project readers through `ast_of` | — | perf | OPEN |
-| 19.6.b.g | same step | Audit remaining AST readers and remove direct reads of retained file trees | — | perf | OPEN |
+| 19.6.b | same step | Route every remaining tree reader through `ast_of` so an evicted tree is reparsed on demand | — | perf | OPEN; see 19.6.b.a-19.6.b.d |
+| 19.6.b.a | same step | Route remaining project and finishing-pass tree readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.b | same step | Route language-server navigation and document-symbol readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.c | same step | Route dependency, declaration and checker-side tree readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.d | same step | Search remaining workspace tree reads and migrate each uncovered reader through `ast_of` | — | perf | OPEN |
 | 19.6.c | same step | Ensure edits that recheck dependents reparse evicted dependent trees | — | perf | OPEN |
 | 19.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation and O3 follow after this gate | 19.6 | val | OPEN; see 19.V.a-19.V.b |
 | 19.V.a | same gate | Run `cargo test --workspace` after item 19 implementation rows are complete | — | val | OPEN |

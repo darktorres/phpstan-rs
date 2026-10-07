@@ -890,7 +890,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   and printer readers (9.7.a.d.c.b/9.7.b.e.a, unvalidated). Remaining scratch
   builders, property-hook list review, list-element recorder IDs,
   exact-size kept arenas and item 9.8 remain. Items 10-19 have
-  complete child-task and tests-only gate rows.
+  complete child-task and tests-only gate rows. A follow-up granularity pass
+  added the PHPDoc cache migration (14.9.d), the deferred document-encoding
+  test (15.9.e), separate hash inputs (17.2.a-d), and the remaining tree-reader
+  sweep (19.6.b.a-d); item 19's cache-validation subtasks now follow execution
+  order.
   No tests or builds were run;
   the 9.V gate stays closed until all item 9 implementation rows are complete.
 - **Passes outside the item order,** also in §13: a dependency pass (six
