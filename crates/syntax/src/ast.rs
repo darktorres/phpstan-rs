@@ -58,6 +58,21 @@ pub type ExprArena = la_arena::Arena<ExprNode>;
 /// The file-owned storage addressed by [`StmtId`].
 pub type StmtArena = la_arena::Arena<StmtNode>;
 
+/// Storage for the less common declaration payloads kept out of expression
+/// and statement nodes in the file-owned arena tree.
+pub type FunctionArena = la_arena::Arena<FunctionDecl>;
+pub type MethodArena = la_arena::Arena<MethodDecl>;
+pub type ClassArena = la_arena::Arena<ClassDef>;
+pub type ClosureArena = la_arena::Arena<ClosureExpr>;
+pub type AnonymousClassArena = la_arena::Arena<AnonymousClass>;
+
+/// Storage for list elements addressed by ranges in the file-owned tree.
+pub type ArgArena = la_arena::Arena<Arg>;
+pub type ArrayItemArena = la_arena::Arena<ArrayItem>;
+pub type ParamArena = la_arena::Arena<Param>;
+pub type MatchArmArena = la_arena::Arena<MatchArm>;
+pub type AttributeArena = la_arena::Arena<Attribute>;
+
 /// The identity used for an expression synthesized outside a parsed file.
 pub const SYNTHETIC_EXPR_ID: ExprId = ExprId::from_raw(la_arena::RawIdx::from_u32(u32::MAX));
 
