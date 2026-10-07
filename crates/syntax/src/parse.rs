@@ -80,18 +80,12 @@ impl ParsedFile {
 
     /// The source span of an expression in this file.
     pub fn expr_span(&self, id: crate::ast::ExprId) -> Option<crate::span::Span> {
-        self.arenas
-            .expr_spans
-            .get(u32::from(id.into_raw()) as usize)
-            .copied()
+        self.arenas.expr_span(id)
     }
 
     /// The source span of a statement in this file.
     pub fn stmt_span(&self, id: crate::ast::StmtId) -> Option<crate::span::Span> {
-        self.arenas
-            .stmt_spans
-            .get(u32::from(id.into_raw()) as usize)
-            .copied()
+        self.arenas.stmt_span(id)
     }
 
     pub fn expr_count(&self) -> usize {

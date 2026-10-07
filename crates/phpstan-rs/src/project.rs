@@ -211,17 +211,11 @@ impl SyntaxTree {
     }
 
     pub(crate) fn expr_span(&self, id: syntax::ast::ExprId) -> Option<Span> {
-        self.arenas
-            .expr_spans
-            .get(u32::from(id.into_raw()) as usize)
-            .copied()
+        self.arenas.expr_span(id)
     }
 
     pub(crate) fn stmt_span(&self, id: syntax::ast::StmtId) -> Option<Span> {
-        self.arenas
-            .stmt_spans
-            .get(u32::from(id.into_raw()) as usize)
-            .copied()
+        self.arenas.stmt_span(id)
     }
 }
 

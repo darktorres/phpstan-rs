@@ -105,6 +105,20 @@ impl NodeArenas {
         self.stmts.get(id)
     }
 
+    /// Looks up an expression's source span by its file-local arena id.
+    pub fn expr_span(&self, id: ExprId) -> Option<Span> {
+        self.expr_spans
+            .get(u32::from(id.into_raw()) as usize)
+            .copied()
+    }
+
+    /// Looks up a statement's source span by its file-local arena id.
+    pub fn stmt_span(&self, id: StmtId) -> Option<Span> {
+        self.stmt_spans
+            .get(u32::from(id.into_raw()) as usize)
+            .copied()
+    }
+
     /// Drops the current file's nodes but keeps the worker's allocations.
     pub fn clear(&mut self) {
         self.exprs.clear();
