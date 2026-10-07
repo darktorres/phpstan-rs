@@ -16,16 +16,16 @@ from the files on 2026-10-06.
 ## Where to resume
 
 1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
-   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, resuming at item 9.7.a; rows 9.2,
-   3.4, 9.3, 9.4, 9.5 and 9.6 are implemented but await the tests-only 9.V gate.
-   Item 9.7 has begun: statement block, `declare`, switch-case, try/catch/finally,
-   closure, property-hook and function bodies use reusable scratch and
-   `StmtIdRange`, with owner-backed readers migrated. Expression ID lists
-   (`Isset`, match conditions, interpolation parts, echo/for/unset) use
-   `ExprIdRange`; destructuring elements use `DestructureItemRange`. Root
-   statement lists now use `StmtIdRange` from parsing through retained project
-   trees. Other child-list families, list-element recorder IDs, exact-size kept
-   arenas and item 9.8 remain.
+   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, resuming at item 9.8.a. Rows 9.2,
+   3.4, 9.3, 9.4, 9.5, 9.6 and 9.7 are implemented but await the tests-only
+   9.V gate. Item 9.7's parser scratch lists commit into owner-backed typed
+   ranges; node IDs are assigned on insertion, and retained arenas are compacted
+   while transient parses reuse worker scratch. Its recorder review is complete
+   (no AST element IDs are recorded there). For 9.8, attributes already use
+   compact `AttributeRange`s (9.8.e DONE); small-node payloads, duplicated spans,
+   and statement/parameter doc-site lookup remain.
+   The ledger now tracks implementation subtasks for every item after 9 as well;
+   those items remain OPEN pending level 8's ordered work.
    Each item's gate runs workspace and item-specific tests only (including their inherent compile).
    Full §11 validation and O3 run once, after item 19. Only
    the rows that optimize are built now; the rest are DEFERRED.

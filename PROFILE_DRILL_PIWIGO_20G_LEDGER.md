@@ -314,7 +314,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.8.d | step 8 | Remove parameter doc fields and resolve parameter docs by doc-site offset; retain attributes in their nodes | — | perf | OPEN; see 9.8.d.a-9.8.d.b |
 | 9.8.d.a | same step | Remove parameter doc fields and record parameter doc sites by offset | — | perf | OPEN |
 | 9.8.d.b | same step | Migrate parameter-doc readers to resolve sites by offset while retaining attributes | — | perf | OPEN |
-| 9.8.e | step 8 | Keep attributes available in their compact node representation | — | perf | OPEN |
+| 9.8.e | step 8 | Keep attributes available in their compact node representation | — | perf | DONE (attributes already use owner-backed `AttributeRange`s, including parameters; no change required.) |
 | 9.V | §11 | Tests-only item gate: workspace tests plus item-specific tests, including 3.4's scratch-store tests; full §11 validation waits until item 19 | 9.8 | val | OPEN; see subtask rows 9.V.a-9.V.c |
 | 9.V.a | §11 | Run `cargo test --workspace` after every item 9 implementation row is complete | — | val | OPEN (must not run before 9.2/3.4, 9.3-9.8 are complete) |
 | 9.V.b | §11 | Run item-specific syntax, parser, visitor, cache and reader tests | — | val | OPEN |
