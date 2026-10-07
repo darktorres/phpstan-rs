@@ -243,7 +243,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   now carry typed `NameId`s; synthetic/list-parsed identifiers can omit
   them. They still retain their `Name` handle pending reader migration.
   `ParsedFile::ident_name` now resolves parser IDs through the file table
-  (`8607a515`). Source/name lookup is exposed, and syntax depends on `la-arena` with typed
+  (`8607a515`). Retained project trees group their AST, source, name table, and
+  typed-ID spans under one `SyntaxTree` owner (`21adb973`); the context AST
+  LRU still drops the auxiliary tables. Syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are now named
   (`6611157d`), but are not yet owned or populated by the parser. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
