@@ -40,8 +40,10 @@ impl Parser<'_> {
                     // The fragment's names are read in the namespace and
                     // imports where it sits.
                     *sub.ctx.borrow_mut() = self.ctx.borrow().clone();
-                    sub.expr_span_base = u32::from(self.expr_id().into_raw());
-                    sub.stmt_span_base = u32::from(self.stmt_id().into_raw());
+                    sub.next_expr_id.set(self.next_expr_id.get());
+                    sub.next_stmt_id.set(self.next_stmt_id.get());
+                    sub.expr_span_base = self.next_expr_id.get();
+                    sub.stmt_span_base = self.next_stmt_id.get();
                     *sub.recorder.borrow_mut() = self.recorder.borrow().fork();
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;
@@ -64,6 +66,8 @@ impl Parser<'_> {
                             sub.current_span(),
                         ));
                     }
+                    self.next_expr_id.set(sub.next_expr_id.get());
+                    self.next_stmt_id.set(sub.next_stmt_id.get());
                     let (expr_spans, stmt_spans) = sub.take_node_spans();
                     let mut arenas = self.node_arenas.borrow_mut();
                     arenas.expr_spans.extend(expr_spans);

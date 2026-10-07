@@ -296,9 +296,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   centralizes typed node and span lookup; `ParsedFile` and project
   `SyntaxTree` expose those file-local methods to parser and checker readers.
   `NodeArenas::alloc_expr/alloc_stmt` commit a node and its span at one dense
-  index, enforcing ID/span alignment in release builds too. Parser IDs now derive from parallel span-table lengths, removing separate
-  counters that could drift during interpolation. Parsed node payload arenas
-  are still empty.
+  index, enforcing ID/span alignment in release builds too. Until parser
+  nodes commit into those arenas, the existing counters reserve IDs and are
+  checked against the parallel span tables. Parsed node payload arenas are
+  still empty.
   Commit `36ad3c08` removes the address key
   and adds cache coverage for ID, question, and scope; completion's mixed-tree
   probe bypasses it (`a6960c97`). Parser errors are boxed and their canonical
