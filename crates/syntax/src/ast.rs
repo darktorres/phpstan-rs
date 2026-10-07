@@ -46,8 +46,6 @@ pub struct StmtNode {
     pub doc_line: Option<u32>,
 }
 
-pub use StmtNode as Stmt;
-
 /// A typed index into a parsed file's expression arena.
 pub type ExprId = la_arena::Idx<ExprNode>;
 
@@ -1405,8 +1403,6 @@ pub struct ExprNode {
     pub kind: ExprKind,
     pub span: Span,
 }
-
-pub use ExprNode as Expr;
 
 impl ExprNode {
     /// This expression inside any parentheses and `@`s: what it
