@@ -270,9 +270,11 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   transient source/name omission tests are added but unrun. The parser restores scratch arenas on lexer or syntax
   errors, preserving capacity in the worker. A further unrun test verifies
   dense expression/statement IDs and every node span after arena reuse
-  (`7c3a4fac`). Row 3.4 is implemented with item 9.2;
-  item 9.V remains the pending tests-only gate. The node payload arenas remain
-  empty. The IDs target
+  (`7c3a4fac`). Row 3.4 is partial: workers pass the `NodeArenas` bundle
+  across transient parses and reuse span-table capacity, but the payload/list
+  arenas remain empty, so recursive AST nodes and lists still allocate per
+  file. Completing that reuse depends on item 9.2/9.3; the 9.V tests-only
+  gate remains pending. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
   and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
   return those explicit node values (`36d608ba`), and AST child fields use the
