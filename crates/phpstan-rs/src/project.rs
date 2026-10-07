@@ -3753,7 +3753,7 @@ fn parse_with_ignores<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
-    parse_recording(path, source, names, None)
+    parse_recording(path, source, names, None, None)
 }
 
 /// What a file's parse gives that `ParsedFile` does not keep, recorded for
@@ -3773,8 +3773,14 @@ fn parse_recording<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
+    scratch: Option<syntax::ast::NodeArenas>,
 ) -> Result<Parsed, ParseError> {
-    let parsed = syntax::parse_watching(source, names, Some(&WATCHED))?;
+    let parsed = match scratch {
+        Some(scratch) => {
+            syntax::parse_watching_with_scratch(source, names, Some(&WATCHED), scratch)?
+        }
+        None => syntax::parse_watching(source, names, Some(&WATCHED))?,
+    };
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
@@ -3935,6 +3941,7 @@ pub(crate) fn parse_file_recording<'a>(
         names,
         record,
         Origin::Path(Arc::from(path)),
+        None,
     )
 }
 
@@ -3946,7 +3953,34 @@ pub(crate) fn parse_file_recording_with_file_id<'a>(
     record: Option<&mut ParseRecord>,
     file_id: FileId,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_recording_with_origin(path, source, is_stub, names, record, Origin::File(file_id))
+    parse_file_recording_with_origin(
+        path,
+        source,
+        is_stub,
+        names,
+        record,
+        Origin::File(file_id),
+        None,
+    )
+}
+
+pub(crate) fn parse_file_with_names_and_file_id_and_scratch<'a>(
+    path: &Path,
+    source: impl Into<syntax::Source<'a>>,
+    is_stub: bool,
+    names: Option<&mut syntax::name::NameCache>,
+    file_id: FileId,
+    scratch: syntax::ast::NodeArenas,
+) -> Result<ParsedFile, ParseError> {
+    parse_file_recording_with_origin(
+        path,
+        source,
+        is_stub,
+        names,
+        None,
+        Origin::File(file_id),
+        Some(scratch),
+    )
 }
 
 fn parse_file_recording_with_origin<'a>(
@@ -3956,6 +3990,7 @@ fn parse_file_recording_with_origin<'a>(
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
     origin: Origin,
+    scratch: Option<syntax::ast::NodeArenas>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let content_hash = source::ContentHash::of_source(source);
@@ -3966,7 +4001,7 @@ fn parse_file_recording_with_origin<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_recording(path, source, names, record)?;
+    } = parse_recording(path, source, names, record, scratch)?;
     let ast = tree.statements();
     let file_declarations::FileDeclarations {
         functions,
@@ -4025,9 +4060,10 @@ impl ParsedFile {
 
     /// Drops the tree and the ignore comments, which only a file whose tree
     /// is kept has; a file read back from the per-file cache has neither.
-    pub(crate) fn drop_tree(&mut self) {
-        self.tree = None;
+    pub(crate) fn drop_tree(&mut self) -> Option<syntax::ast::NodeArenas> {
+        let tree = self.tree.take()?;
         self.ignores = Default::default();
+        Some(tree.arenas)
     }
 
     /// What the lexer skipped over rather than failing on.

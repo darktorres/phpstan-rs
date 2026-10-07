@@ -152,6 +152,8 @@ const MAX_KEPT_BUFFER: usize = 1 << 20;
 #[derive(Default)]
 struct LoadState {
     names: syntax::name::NameCache,
+    /// Node and span vectors reused when a parsed file's tree is dropped.
+    scratch: syntax::ast::NodeArenas,
     /// The bytes of the file the thread is parsing, kept for the next.
     buf: Vec<u8>,
     dirs: rustc_hash::FxHashMap<Vec<u8>, Placed>,
@@ -1329,7 +1331,9 @@ impl Session {
             if let Read::Loaded(file) = &mut read {
                 shared.index_use_sites(&mut file.parsed, &file.source);
                 if !keeps_tree {
-                    file.parsed.drop_tree();
+                    if let Some(scratch) = file.parsed.drop_tree() {
+                        state.scratch = scratch;
+                    }
                 }
                 if !(self.settings.retain_source && held) {
                     file.source = String::new();
@@ -1392,13 +1396,24 @@ impl Session {
             Ok(text) => text.len(),
             Err(_) => String::from_utf8_lossy(bytes).len(),
         };
+        let scratch = std::mem::take(&mut state.scratch);
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
-            Ok(text) => {
-                super::parse_file_with_names_and_file_id(path, text, is_stub, Some(names), file_id)
-            }
-            Err(_) => {
-                super::parse_file_with_names_and_file_id(path, bytes, is_stub, Some(names), file_id)
-            }
+            Ok(text) => super::parse_file_with_names_and_file_id_and_scratch(
+                path,
+                text,
+                is_stub,
+                Some(names),
+                file_id,
+                scratch,
+            ),
+            Err(_) => super::parse_file_with_names_and_file_id_and_scratch(
+                path,
+                bytes,
+                is_stub,
+                Some(names),
+                file_id,
+                scratch,
+            ),
         })) else {
             return Read::Unread;
         };
