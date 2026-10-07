@@ -51,7 +51,7 @@
 
 use crate::checker::{Checker, Locals};
 use diagnostics::Diagnostic;
-use syntax::ast::{ExprKind, ExprNode, StmtKind, StmtNode};
+use syntax::ast::{ExprKind, ExprNode, NodeArenas, StmtKind, StmtNode};
 use types::Type;
 
 /// One flow-sensitive, per-node-kind rule - see this module's own doc
@@ -67,8 +67,8 @@ pub trait Rule: Send + Sync {
     /// exactly one `TNodeType`). Checked *before* `check_expr` is ever
     /// called, so a rule that returns `false` here pays nothing beyond
     /// this one match.
-    fn wants_expr(&self, kind: &ExprKind) -> bool {
-        let _ = kind;
+    fn wants_expr(&self, arenas: &NodeArenas, kind: &ExprKind) -> bool {
+        let _ = (arenas, kind);
         false
     }
 
@@ -77,8 +77,14 @@ pub trait Rule: Send + Sync {
     /// `Type` - the same value `Checker::check_expr` itself just
     /// computed, handed over so a rule never needs its own duplicate
     /// inference pass.
-    fn check_expr(&self, scope: &Scope, expr: &ExprNode, ty: &Type) -> Vec<Diagnostic> {
-        let _ = (scope, expr, ty);
+    fn check_expr(
+        &self,
+        scope: &Scope,
+        arenas: &NodeArenas,
+        expr: &ExprNode,
+        ty: &Type,
+    ) -> Vec<Diagnostic> {
+        let _ = (scope, arenas, expr, ty);
         Vec::new()
     }
 
@@ -120,6 +126,16 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// top-level function or file-level code).
     pub fn current_method(&self) -> Option<&str> {
         self.checker.current_method.as_deref()
+    }
+
+    /// The expression's source span, resolved from its retained file owner.
+    pub fn expr_span(&self, expr: &ExprNode) -> syntax::span::Span {
+        self.checker.expr_span(expr.id)
+    }
+
+    /// The statement's source span, resolved from its retained file owner.
+    pub fn stmt_span(&self, stmt: &StmtNode) -> syntax::span::Span {
+        self.checker.stmt_span(stmt.id)
     }
 
     /// `$name`'s own currently-inferred type on this exact control-flow

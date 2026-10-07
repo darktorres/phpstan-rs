@@ -133,7 +133,10 @@ impl<'a> Checker<'a> {
             match arg {
                 None => Some(default.to_string()),
                 Some(e) => match &e.kind {
-                    ExprKind::Name(name) => Some(name.trim_start_matches('\\').to_string()),
+                    ExprKind::Name(name) => self
+                        .syntax_arenas()?
+                        .qualified_name(name)
+                        .map(|name| name.trim_start_matches('\\').to_string()),
                     ExprKind::Literal(Literal::Int(1)) => Some("MYSQLI_ASSOC".to_string()),
                     ExprKind::Literal(Literal::Int(2)) => Some("MYSQLI_NUM".to_string()),
                     ExprKind::Literal(Literal::Int(3)) => Some("MYSQLI_BOTH".to_string()),

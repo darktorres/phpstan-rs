@@ -751,7 +751,7 @@ mod tests {
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let registry = crate::registry::Registry::build(&program);
+        let registry = crate::registry::Registry::build(&program.arenas, program.statements());
         let class = registry.lookup_class("Demo").unwrap().1.clone();
         let function = registry.lookup_function("helper").unwrap().clone();
 
@@ -868,7 +868,7 @@ mod tests {
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let built = crate::registry::Registry::build(&program);
+        let built = crate::registry::Registry::build(&program.arenas, program.statements());
         let class = Arc::new(built.lookup_class("Demo").unwrap().1.clone());
         let function = Arc::new(built.lookup_function("helper").unwrap().clone());
         let mut registry = crate::registry::Registry::default();
@@ -953,7 +953,7 @@ mod tests {
     fn function_declarations_stay_as_built_while_class_state_resets() {
         let tokens = Lexer::new("<?php function helper(): int {}").tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let mut registry = crate::registry::Registry::build(&program);
+        let mut registry = crate::registry::Registry::build(&program.arenas, program.statements());
         let all = crate::registry::scope::Scope::all();
         registry.end_declaration_changes(&all, None, true, None);
 
@@ -1018,7 +1018,7 @@ mod tests {
         let tokens =
             Lexer::new("<?php function strlen(string $value): int {}").tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let built = crate::registry::Registry::build(&program);
+        let built = crate::registry::Registry::build(&program.arenas, program.statements());
         let signature = built.lookup_function("strlen").unwrap().clone();
         let mut registry = crate::registry::Registry::default();
         registry.merge_stubs(vec![("strlen", signature)]);
@@ -1037,7 +1037,7 @@ mod tests {
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let mut registry = crate::registry::Registry::build(&program);
+        let mut registry = crate::registry::Registry::build(&program.arenas, program.statements());
         let old_id = registry.class("Demo").unwrap().0;
         assert!(registry.class_has_phpstan_ancestry("Demo"));
         assert!(registry.is_subclass_of("Demo", "PHPStan\\Rules\\Rule"));
@@ -1047,7 +1047,8 @@ mod tests {
                 .map(|(owner, _)| owner),
             Some(syntax::name::Name::from("ParentDemo"))
         );
-        let mut replacement = crate::registry::Registry::build(&program);
+        let mut replacement =
+            crate::registry::Registry::build(&program.arenas, program.statements());
         replacement.freeze();
 
         registry.switch_base(replacement);
@@ -1076,7 +1077,7 @@ mod tests {
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let registry = crate::registry::Registry::build(&program);
+        let registry = crate::registry::Registry::build(&program.arenas, program.statements());
         let (class_id, _, class) = registry.class("Host").unwrap();
 
         let expected = ["ownBefore", "ownAfter", "zebraAlias", "zebra", "alpha"];

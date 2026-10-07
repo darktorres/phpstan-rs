@@ -4,11 +4,11 @@ use crate::parser::Parser;
 
 /// Each declaration in `src` as `(name, conditional)`, in order.
 fn declarations(src: &str) -> Vec<(String, bool)> {
-    let stmts = Parser::new(Lexer::new(src).tokenize_with_spans())
+    let parsed = Parser::from_token_stream(Lexer::new(src).lex_token_stream())
         .parse_program()
         .expect("parses");
     let mut out = Vec::new();
-    for_each_declaration(&stmts, |declaration, _, _| {
+    for_each_declaration(&parsed.arenas, parsed.statements(), |declaration, _, _| {
         out.push((declaration.name(), declaration.conditional));
     });
     out

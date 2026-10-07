@@ -14,7 +14,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::literal_string_value;
-use syntax::ast::{Arg, ExprKind, ExprNode};
+use syntax::ast::{Arg, ExprId, ExprKind, ExprNode, NodeArenas};
 
 /// A cheap syntactic pre-check mirroring `resolve_query_builder_chain`'s
 /// own `MethodCall`/`Grouping` walk - "does this expression's own chain
@@ -24,11 +24,16 @@ use syntax::ast::{Arg, ExprKind, ExprNode};
 /// (nothing ever reads an entry whose name is never tested via a later
 /// `->getQuery()`), but costs a real `ExprNode` clone per assignment,
 /// project-wide; this keeps that cost to the rare, actually-relevant one.
-fn looks_like_query_builder_chain(e: &ExprNode) -> bool {
-    let e = e.peeled();
+fn looks_like_query_builder_chain(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(id) = arenas.peeled(id) else {
+        return false;
+    };
+    let Some(e) = arenas.expr(id) else {
+        return false;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
-        ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
+        ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(arenas, *inner),
         _ => false,
     })
 }
@@ -87,36 +92,21 @@ pub(crate) struct QueryBuilderChain {
 /// identified, since a fluent chain reads outer-to-inner in the AST but
 /// executes root-to-outer chronologically. Owns its own data (not
 /// borrowed from the walked expression) since the walk's own `cursor`
-/// may switch from borrowing the original expression tree to an owned
-/// `Rc<ExprNode>` read back from `QueryBuilderAliasMap` partway through
-/// (`Cursor`'s own doc comment) - a borrow tied to one generation of
-/// `cursor` can't outlive its own replacement.
+/// may switch from the original expression node to an `ExprId` read back
+/// from `QueryBuilderAliasMap` partway through (`Cursor`'s own doc comment).
 struct ChainCall {
     method: String,
     args: Vec<Arg>,
 }
 
 /// `resolve_query_builder_chain`'s own walk cursor - starts borrowing the
-/// real receiver expression tree (the common case, no clone needed), but
-/// switches to owning a cloned `Rc<ExprNode>` the moment the walk reads
-/// through a `$qb = <chain>;` variable alias (`QueryBuilderAliasMap`'s
-/// own doc comment) - the stored expression's lifetime is independent of
-/// the original receiver's, so continuing to borrow from it isn't an
-/// option once that happens.
+/// real receiver expression tree (the common case), but switches to an
+/// `ExprId` the moment the walk reads through a `$qb = <chain>;` variable
+/// alias (`QueryBuilderAliasMap`'s own doc comment). Both forms resolve
+/// through the file owner.
 enum Cursor<'a> {
     Borrowed(&'a ExprNode),
-    Owned(std::rc::Rc<ExprNode>),
-}
-
-impl std::ops::Deref for Cursor<'_> {
-    type Target = ExprNode;
-
-    fn deref(&self) -> &ExprNode {
-        match self {
-            Cursor::Borrowed(e) => e,
-            Cursor::Owned(e) => e,
-        }
-    }
+    Owned(ExprId),
 }
 
 impl<'a> Checker<'a> {
@@ -134,9 +124,12 @@ impl<'a> Checker<'a> {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };
-        if looks_like_query_builder_chain(rhs) {
+        let arenas = self
+            .syntax_arenas()
+            .expect("query-builder aliases require the syntax tree owner");
+        if looks_like_query_builder_chain(arenas, rhs.id) {
             let alias = locals.var_key(name);
-            locals.set_query_builder_alias(alias, std::rc::Rc::new(rhs.clone()));
+            locals.set_query_builder_alias(alias, rhs.id);
         }
     }
 
@@ -150,10 +143,15 @@ impl<'a> Checker<'a> {
         recv: &ExprNode,
         locals: &crate::checker::Locals,
     ) -> Option<QueryBuilderChain> {
+        let arenas = self.syntax_arenas()?;
         let mut calls: Vec<ChainCall> = Vec::new();
         let mut cursor = Cursor::Borrowed(recv);
         loop {
-            match &cursor.peeled().kind {
+            let current = match &cursor {
+                Cursor::Borrowed(e) => arenas.expr(arenas.peeled(e.id)?)?,
+                Cursor::Owned(id) => arenas.expr(arenas.peeled(*id)?)?,
+            };
+            match &current.kind {
                 // `createQueryBuilder(...)` is the chain root itself
                 // (`resolve_chain_root`'s own job to interpret), not
                 // just another call to collect and descend past -
@@ -163,9 +161,9 @@ impl<'a> Checker<'a> {
                 ExprKind::MethodCall(inner, method, args, _) => {
                     calls.push(ChainCall {
                         method: method.to_string(),
-                        args: args.clone(),
+                        args: arenas.args(args.clone()).to_vec(),
                     });
-                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
+                    cursor = Cursor::Owned(*inner);
                 }
                 // `$qb = $this->createQueryBuilder(...)->...; ...; $qb->
                 // getQuery()...` - a chain split into a variable before
@@ -177,9 +175,9 @@ impl<'a> Checker<'a> {
                 // resolve the same way, one substitution at a time.
                 ExprKind::Variable(name) => match locals
                     .find_var(name)
-                    .and_then(|alias| locals.query_builder_aliases().get(&alias))
+                    .and_then(|alias| locals.query_builder_aliases().get(&alias).copied())
                 {
-                    Some(rhs) => cursor = Cursor::Owned(rhs.clone()),
+                    Some(rhs) => cursor = Cursor::Owned(rhs),
                     None => break,
                 },
                 _ => break,
@@ -190,7 +188,11 @@ impl<'a> Checker<'a> {
         // caller) can just read it in real chronological call order.
         calls.reverse();
 
-        let mut chain = self.resolve_chain_root(&cursor, locals)?;
+        let root = match cursor {
+            Cursor::Borrowed(e) => arenas.expr(arenas.peeled(e.id)?)?,
+            Cursor::Owned(id) => arenas.expr(arenas.peeled(id)?)?,
+        };
+        let mut chain = self.resolve_chain_root(root, locals)?;
         for call in &calls {
             self.apply_chain_call(&mut chain, &call.method, &call.args, locals)?;
         }
@@ -219,15 +221,19 @@ impl<'a> Checker<'a> {
         // corpus-dominant shape (100+ real call sites across 18
         // repository files), likely more common than the explicit-
         // `from()` form below.
-        if matches!(&target.kind, ExprKind::Variable(v) if **v == *"this")
-            && let Some(alias) = args
+        if matches!(self.syntax_arenas()?.expr(*target).map(|e| &e.kind), Some(ExprKind::Variable(v)) if **v == *"this")
+            && let Some(alias) = self
+                .syntax_arenas()?
+                .args(args.clone())
                 .first()
                 .and_then(|a| self.foldable_arg_string(a, locals))
             && let Some(current_class) = &self.current_class
             && let Some(entity) = self.registry.repository_entity(current_class)
         {
             // `createQueryBuilder($alias, $indexBy)`.
-            let index_by = args
+            let index_by = self
+                .syntax_arenas()?
+                .args(args.clone())
                 .get(1)
                 .and_then(|a| self.foldable_arg_string(a, locals));
             return Some(QueryBuilderChain {
@@ -332,7 +338,8 @@ impl<'a> Checker<'a> {
     /// `use` imports via `self.name_ctx`, matching how a real DQL
     /// `FROM`/`JOIN` clause names its own target class.
     fn foldable_class_name(&self, arg: &Arg, _locals: &crate::checker::Locals) -> Option<String> {
-        match &arg.value.kind {
+        let e = self.syntax_arenas()?.expr(arg.value)?;
+        match &e.kind {
             ExprKind::ClassNameFetch(target) => {
                 target.as_name().map(|n| self.resolve_class_name(n))
             }
@@ -341,10 +348,11 @@ impl<'a> Checker<'a> {
     }
 
     fn foldable_arg_string(&self, arg: &Arg, locals: &crate::checker::Locals) -> Option<String> {
-        if let Some(s) = literal_string_value(&arg.value) {
+        let e = self.syntax_arenas()?.expr(arg.value)?;
+        if let Some(s) = literal_string_value(self.syntax_arenas()?, e.id) {
             return Some(s.into_owned());
         }
-        self.infer_expr(&arg.value, locals)
+        self.infer_expr(e, locals)
             .string_literal_value()
             .map(|s| s.to_string())
     }

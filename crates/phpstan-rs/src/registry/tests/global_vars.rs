@@ -5,14 +5,10 @@
 use std::path::Path;
 
 use super::super::*;
-use syntax::ast::StmtNode;
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
 use types::Type;
 
-fn parse(src: &str) -> Vec<StmtNode> {
-    let tokens = Lexer::new(src).tokenize_with_spans();
-    Parser::new(tokens).parse_program().unwrap()
+fn parse(src: &str) -> syntax::ParsedFile {
+    syntax::parse(src.as_bytes()).unwrap()
 }
 
 /// Builds a `Registry` with every function/class across `sources`
@@ -21,13 +17,21 @@ fn parse(src: &str) -> Vec<StmtNode> {
 /// genuinely separate files - real per-file `NameContext` isolation and
 /// include-graph resolution, not one concatenated blob.
 fn build_with_files(sources: &[(&str, &str)]) -> Registry {
-    let parsed: Vec<(String, Vec<StmtNode>)> = sources
+    let parsed: Vec<(String, syntax::ParsedFile)> = sources
         .iter()
         .map(|(path, src)| (path.to_string(), parse(src)))
         .collect();
-    let combined: Vec<StmtNode> = parsed.iter().flat_map(|(_, p)| p.clone()).collect();
-    let mut registry = Registry::build(&combined);
-    let facts: Vec<GlobalFacts> = parsed.iter().map(|(_, p)| GlobalFacts::of(p)).collect();
+    let combined_source = sources
+        .iter()
+        .map(|(_, src)| src.strip_prefix("<?php").unwrap_or(src))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let combined = parse(&format!("<?php\n{combined_source}"));
+    let mut registry = Registry::build(&combined.arenas, combined.statements());
+    let facts: Vec<GlobalFacts> = parsed
+        .iter()
+        .map(|(_, file)| GlobalFacts::of(&file.arenas, file.statements()))
+        .collect();
     let files: Vec<(crate::file_id::FileId, &Path, &GlobalFacts)> = parsed
         .iter()
         .zip(&facts)

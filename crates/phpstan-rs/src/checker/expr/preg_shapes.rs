@@ -399,20 +399,31 @@ pub(super) struct PregFlags {
 /// (and, when `allow_order` is set, `PREG_PATTERN_ORDER`/
 /// `PREG_SET_ORDER`). `None` if any leaf name isn't one of these, or if
 /// both `PATTERN_ORDER` and `SET_ORDER` appear together - never guessed.
-pub(super) fn parse_preg_flags(e: &ExprNode, allow_order: bool) -> Option<PregFlags> {
-    fn collect<'a>(e: &'a ExprNode, out: &mut Vec<&'a str>) -> bool {
-        let e = e.peeled();
+pub(super) fn parse_preg_flags(
+    arenas: &NodeArenas,
+    e: &ExprNode,
+    allow_order: bool,
+) -> Option<PregFlags> {
+    fn collect<'a>(arenas: &'a NodeArenas, id: ExprId, out: &mut Vec<&'a str>) -> bool {
+        let Some(e) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+            return false;
+        };
         match &e.kind {
             ExprKind::Name(name) => {
+                let Some(name) = arenas.qualified_name(name) else {
+                    return false;
+                };
                 out.push(name.trim_start_matches('\\'));
                 true
             }
-            ExprKind::Binary(BinOp::BitOr, l, r) => collect(l, out) && collect(r, out),
+            ExprKind::Binary(BinOp::BitOr, l, r) => {
+                collect(arenas, *l, out) && collect(arenas, *r, out)
+            }
             _ => false,
         }
     }
     let mut names = Vec::new();
-    if !collect(e, &mut names) {
+    if !collect(arenas, e.id, &mut names) {
         return None;
     }
     let mut flags = PregFlags::default();
@@ -465,14 +476,17 @@ impl PregOutcome {
 /// `e` as a `preg_match` / `preg_match_all` call. The parameters are
 /// PHP's own (`pattern`, `subject`, `matches`, `flags`, `offset`), so
 /// named arguments resolve without the registry; a spread gives `None`.
-pub(crate) fn preg_call(e: &ExprNode) -> Option<PregCall<'_>> {
+pub(crate) fn preg_call(arenas: &NodeArenas, id: ExprId) -> Option<PregCall<'_>> {
     const PARAMS: [&str; 5] = ["pattern", "subject", "matches", "flags", "offset"];
-    let ExprKind::Call(callee, args) = &e.peeled().kind else {
+    let id = arenas.peeled(id)?;
+    let ExprKind::Call(callee, args) = &arenas.expr(id)?.kind else {
         return None;
     };
+    let callee = arenas.expr(*callee)?;
     let ExprKind::Name(name) = &callee.kind else {
         return None;
     };
+    let name = arenas.qualified_name(name)?;
     let name = name.trim_start_matches('\\');
     let all = if name.eq_ignore_ascii_case("preg_match") {
         false
@@ -483,7 +497,7 @@ pub(crate) fn preg_call(e: &ExprNode) -> Option<PregCall<'_>> {
     };
     let mut resolved: [Option<&ExprNode>; 5] = [None; 5];
     let mut position = 0;
-    for arg in args {
+    for arg in arenas.args(args.clone()) {
         if arg.spread {
             return None;
         }
@@ -494,7 +508,7 @@ pub(crate) fn preg_call(e: &ExprNode) -> Option<PregCall<'_>> {
                 position - 1
             }
         };
-        *resolved.get_mut(index)? = Some(&arg.value);
+        *resolved.get_mut(index)? = Some(arenas.expr(arg.value)?);
     }
     Some(PregCall {
         all,
@@ -560,7 +574,10 @@ impl crate::checker::Checker<'_> {
         let pattern = self.constant_string_value(call.pattern, locals)?;
         let parsed = regex_groups::parse_capture_groups(&pattern)?;
         let flags = match call.flags {
-            Some(e) => parse_preg_flags(e, call.all)?,
+            Some(e) => {
+                let arenas = self.syntax_arenas()?;
+                parse_preg_flags(arenas, e, call.all)?
+            }
             None => PregFlags::default(),
         };
         let leaf = preg_leaf_type(flags.offset_capture);

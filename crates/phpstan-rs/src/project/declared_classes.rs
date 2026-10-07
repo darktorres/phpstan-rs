@@ -2,7 +2,7 @@
 //! checks read of their declarations; made once when the file is parsed, so
 //! the checks need not keep its tree.
 
-use syntax::ast::{ClassDecl, Visibility};
+use syntax::ast::{ClassDecl, NodeArenas, Visibility};
 use syntax::span::Span;
 use types::Name;
 
@@ -24,14 +24,21 @@ pub(crate) struct DeclaredClass {
 
 impl DeclaredClass {
     /// The class `c`, declared by the statement at `span` under `name`.
-    pub(crate) fn of(name: String, span: Span, c: &ClassDecl) -> DeclaredClass {
+    pub(crate) fn of(
+        arenas: &NodeArenas,
+        name: String,
+        span: Span,
+        c: &ClassDecl,
+    ) -> DeclaredClass {
+        let Some(def) = arenas.class(c.def) else {
+            unreachable!("class declaration ID belongs to the file owner")
+        };
         DeclaredClass {
             name,
             name_span: c.name.span,
             span,
-            attributes: c
-                .def
-                .attrs
+            attributes: arenas
+                .attributes(def.attrs.clone())
                 .iter()
                 .map(|a| {
                     a.name
@@ -40,19 +47,17 @@ impl DeclaredClass {
                         .to_string()
                 })
                 .collect(),
-            own_methods: c
-                .def
-                .methods
+            own_methods: arenas
+                .methods(def.methods.clone())
                 .iter()
                 .map(|m| m.function.name.name.clone())
                 .collect(),
-            public_methods: c
-                .def
-                .methods
+            public_methods: arenas
+                .methods(def.methods.clone())
                 .iter()
                 .filter(|m| m.visibility == Visibility::Public && !m.function.is_constructor())
                 .count(),
-            uses_traits: !c.def.trait_uses.is_empty(),
+            uses_traits: !def.trait_uses(arenas).is_empty(),
         }
     }
 }

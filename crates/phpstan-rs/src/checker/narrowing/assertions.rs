@@ -49,7 +49,13 @@ impl<'a> Checker<'a> {
     ) -> std::borrow::Cow<'l, Type> {
         match locals.get(key) {
             Some(ty) => std::borrow::Cow::Borrowed(ty),
-            None => std::borrow::Cow::Owned(self.infer_expr(narrowing_infer_target(expr), locals)),
+            None => {
+                let target = self
+                    .syntax_arenas()
+                    .and_then(|arenas| narrowing_infer_target(arenas, expr.id))
+                    .unwrap_or(expr);
+                std::borrow::Cow::Owned(self.infer_expr(target, locals))
+            }
         }
     }
 
@@ -79,8 +85,14 @@ impl<'a> Checker<'a> {
         haystack: &ExprNode,
         locals: &Locals,
     ) -> Option<(Type, Option<Type>)> {
-        if let ExprKind::ArrayLiteral(items) = &haystack.peeled().kind
-            && let Some(target) = self.in_array_target_type(items, locals)
+        let arenas = self.syntax_arenas()?;
+        if let Some(haystack_id) = arenas.peeled(haystack.id)
+            && let Some(ExprNode {
+                kind: ExprKind::ArrayLiteral(items),
+                ..
+            }) = arenas.expr(haystack_id)
+            && let Some(target) =
+                self.in_array_target_type(arenas, arenas.array_items(items.clone()), locals)
         {
             let excluded = single_values_of(&target);
             return Some((target, excluded));
@@ -112,6 +124,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn in_array_target_type(
         &self,
+        arenas: &NodeArenas,
         items: &[ArrayItem],
         locals: &Locals,
     ) -> Option<Type> {
@@ -120,9 +133,12 @@ impl<'a> Checker<'a> {
             if item.spread || item.key.is_some() {
                 return None;
             }
-            let ty = match &item.value.kind {
-                ExprKind::Literal(_) => self.infer_expr(&item.value, locals),
-                ExprKind::ArrayLiteral(inner) if inner.is_empty() => {
+            let Some(value) = arenas.expr(item.value) else {
+                return None;
+            };
+            let ty = match &value.kind {
+                ExprKind::Literal(_) => self.infer_expr(value, locals),
+                ExprKind::ArrayLiteral(inner) if arenas.array_items(inner.clone()).is_empty() => {
                     Type::array_shape(types::Shape::sealed(Vec::new()))
                 }
                 _ => return None,
@@ -145,11 +161,14 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         matches_when_true: bool,
     ) {
+        let arenas = self
+            .syntax_arenas()
+            .expect("equality narrowing requires the syntax tree owner");
         // `key_of` on each side, not a bare `ExprKind::
         // Variable` match - the same array-index gap the `Call` arm above
         // has, for the `$arr['key'] === null` idiom instead of an
         // `is_*()` predicate.
-        let pair = match (locals.key_of(l), locals.key_of(r)) {
+        let pair = match (self.key_of_expr(locals, l), self.key_of_expr(locals, r)) {
             (Some(key), _) => Some((key, l, self.infer_expr(r, locals))),
             (None, Some(key)) => Some((key, r, self.infer_expr(l, locals))),
             (None, None) => None,
@@ -161,13 +180,16 @@ impl<'a> Checker<'a> {
         // `l`/`r`, independent of whether `pair` succeeded, rather than
         // being reached only through `narrowed_expr`.
         if !matches_when_true {
-            let nullsafe_side = match (super::nullsafe_receiver(l), super::nullsafe_receiver(r)) {
+            let nullsafe_side = match (
+                super::nullsafe_receiver(arenas, l.id),
+                super::nullsafe_receiver(arenas, r.id),
+            ) {
                 (Some(receiver), _) if self.infer_expr(r, locals).is_null().yes() => Some(receiver),
                 (_, Some(receiver)) if self.infer_expr(l, locals).is_null().yes() => Some(receiver),
                 _ => None,
             };
             if let Some(receiver) = nullsafe_side
-                && let Some(receiver_key) = locals.key_of(receiver)
+                && let Some(receiver_key) = self.key_of_expr(locals, receiver)
             {
                 let current = self.current_narrowed_type(receiver, receiver_key, locals);
                 locals.insert(receiver_key, current.without(&Type::null()));
@@ -236,8 +258,9 @@ impl<'a> Checker<'a> {
         // the chain's.
         if !matches_when_true
             && target_ty.is_null().yes()
-            && let Some((alias_targets, alias_expr)) = locals.condition_aliases().get(&key).cloned()
-            && let Some(receiver) = super::nullsafe_receiver(&alias_expr)
+            && let Some((alias_targets, alias_expr)) = locals.condition_aliases().get(&key)
+            && let Some(alias_expr) = arenas.expr(*alias_expr)
+            && let Some(receiver) = super::nullsafe_receiver(arenas, alias_expr.id)
             && let [alias_target] = alias_targets.as_slice()
         {
             let current = self.current_narrowed_type(receiver, *alias_target, locals);
@@ -245,8 +268,8 @@ impl<'a> Checker<'a> {
         }
         locals.insert(key, narrowed);
         // With keys on both sides, the right one narrows against the left.
-        if locals.key_of(l).is_some()
-            && let Some(r_key) = locals.key_of(r)
+        if self.key_of_expr(locals, l).is_some()
+            && let Some(r_key) = self.key_of_expr(locals, r)
         {
             let l_ty = self.infer_expr(l, locals);
             if !l_ty.is_mixed() {
@@ -273,7 +296,7 @@ impl<'a> Checker<'a> {
         equal: bool,
     ) {
         for (side, other) in [(l, r), (r, l)] {
-            let Some(key) = locals.key_of(side) else {
+            let Some(key) = self.key_of_expr(locals, side) else {
                 continue;
             };
             let other_ty = self.infer_expr(other, locals);
@@ -311,7 +334,7 @@ impl<'a> Checker<'a> {
         };
         let version = self.comparison_php_version();
         for (side, other, side_op) in [(l, r, op), (r, l, mirrored)] {
-            let Some(key) = locals.key_of(side) else {
+            let Some(key) = self.key_of_expr(locals, side) else {
                 continue;
             };
             let other_ty = self.infer_expr(other, locals);
@@ -399,7 +422,10 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &mut Locals,
     ) {
-        let resolved = crate::checker::resolve_call_args(args, sig.params());
+        let arenas = self
+            .syntax_arenas()
+            .expect("assertion arguments retain their parsed file owner");
+        let resolved = crate::checker::resolve_call_args(arenas, args, sig.params());
         let bindings = self.call_template_bindings(sig, &resolved, locals);
         for info in infos {
             let Some((key, current)) =
@@ -448,13 +474,13 @@ impl<'a> Checker<'a> {
             AssertTarget::Param(name) => {
                 let idx = sig.params().iter().position(|p| p.name() == name)?;
                 let arg = (*resolved.get(idx)?)?;
-                let key = locals.key_of(arg)?;
+                let key = self.key_of_expr(locals, arg)?;
                 let current = self.current_narrowed_type(arg, key, locals);
                 Some((key, current))
             }
             AssertTarget::ThisSelf => {
                 let recv = recv?;
-                let key = locals.key_of(recv)?;
+                let key = self.key_of_expr(locals, recv)?;
                 let current = self.current_narrowed_type(recv, key, locals);
                 Some((key, current))
             }
@@ -463,7 +489,7 @@ impl<'a> Checker<'a> {
             AssertTarget::NotFound(_) | AssertTarget::Unknown(_) => None,
             AssertTarget::ThisProp(prop) => {
                 let recv = recv?;
-                let base = locals.key_of(recv)?;
+                let base = self.key_of_expr(locals, recv)?;
                 let key = locals.intern(KeyData::Prop {
                     base,
                     prop: Name::from(prop),

@@ -10,7 +10,7 @@
 use crate::checker::call_effects::is_this;
 use crate::checker::{Checker, Locals};
 use crate::registry::summaries::{Access, Operation};
-use syntax::ast::{DestructureItem, ExprKind, ExprNode};
+use syntax::ast::{DestructureItem, DestructureItemRange, ExprKind, ExprNode, NodeArenas};
 use syntax::span::Span;
 use types::Type;
 
@@ -129,6 +129,7 @@ impl<'a> Checker<'a> {
     /// property name becomes a string.
     fn implicit_member_access(
         &mut self,
+        arenas: &NodeArenas,
         operand: &ExprNode,
         accesses: &[Access],
         span: Span,
@@ -136,14 +137,31 @@ impl<'a> Checker<'a> {
     ) {
         let (base, prop) = match &operand.kind {
             ExprKind::Index(base, _) => {
+                let Some(base) = arenas.expr(*base) else {
+                    return;
+                };
                 let base_ty = self.infer_expr(base, locals);
                 for access in accesses {
-                    self.implicit_array_access_call(&base_ty, is_this(base), *access, span, locals);
+                    self.implicit_array_access_call(
+                        &base_ty,
+                        is_this(self, base),
+                        *access,
+                        span,
+                        locals,
+                    );
                 }
                 return;
             }
-            ExprKind::PropertyAccess(base, prop, _) => (base, Some(prop.name.clone())),
+            ExprKind::PropertyAccess(base, prop, _) => {
+                let Some(base) = arenas.expr(*base) else {
+                    return;
+                };
+                (base, Some(prop.name.clone()))
+            }
             ExprKind::DynamicPropertyAccess(base, name, _) => {
+                let (Some(base), Some(name)) = (arenas.expr(*base), arenas.expr(*name)) else {
+                    return;
+                };
                 self.forget_what_an_operation_on_may_change(name, Operation::String, locals);
                 (base, None)
             }
@@ -153,7 +171,7 @@ impl<'a> Checker<'a> {
         for access in accesses {
             self.forget_what_an_operation_may_change(
                 &base_ty,
-                is_this(base),
+                is_this(self, base),
                 Operation::Property(prop.clone(), *access),
                 locals,
             );
@@ -200,14 +218,30 @@ impl<'a> Checker<'a> {
         span: Span,
         locals: &mut Locals,
     ) {
-        self.implicit_member_access(lhs, &[access], span, locals);
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        self.implicit_member_access(arenas, lhs, &[access], span, locals);
         let ExprKind::Index(base, _) = &lhs.kind else {
             return;
         };
-        let mut link: &ExprNode = base;
-        while let ExprKind::Index(inner, _) = &link.kind {
+        let mut link_id = *base;
+        while let Some(link) = arenas.expr(link_id)
+            && let ExprKind::Index(inner, _) = &link.kind
+        {
+            let inner_id = *inner;
+            let Some(inner) = arenas.expr(inner_id) else {
+                break;
+            };
             let inner_ty = self.infer_expr(inner, locals);
-            self.implicit_array_access_call(&inner_ty, is_this(inner), Access::Read, span, locals);
+            self.implicit_array_access_call(
+                &inner_ty,
+                is_this(self, inner),
+                Access::Read,
+                span,
+                locals,
+            );
             let by_value = self
                 .array_access_members(&inner_ty)
                 .into_iter()
@@ -222,12 +256,12 @@ impl<'a> Checker<'a> {
                     format!(
                         "Indirect modification of overloaded element of {class} has no effect."
                     ),
-                    link.span,
+                    self.expr_span(link.id),
                     3,
                     "offsetAssign.indirectModification",
                 );
             }
-            link = inner;
+            link_id = inner_id;
         }
     }
 
@@ -238,20 +272,24 @@ impl<'a> Checker<'a> {
     /// it (`implicit_reference`).
     pub(crate) fn implicit_destructure(
         &mut self,
-        items: &[DestructureItem],
+        arenas: &NodeArenas,
+        items: &DestructureItemRange,
         source_ty: &Type,
         span: Span,
         locals: &mut Locals,
     ) {
         self.implicit_array_access_call(source_ty, false, Access::Read, span, locals);
         let element = source_ty.array_value_type().unwrap_or_else(Type::mixed);
-        for item in items {
-            let Some(target) = &item.target else {
+        for item in arenas.destructure_items(items) {
+            let Some(target_id) = item.target else {
                 continue;
             };
+            let target = arenas
+                .expr(target_id)
+                .expect("destructuring target belongs to its retained file owner");
             match &target.kind {
                 ExprKind::Destructure(nested, _) => {
-                    self.implicit_destructure(nested, &element, span, locals);
+                    self.implicit_destructure(arenas, nested, &element, span, locals);
                 }
                 _ if item.by_ref => self.implicit_reference(target, span, locals),
                 _ => self.implicit_array_access_write(target, span, locals),
@@ -271,19 +309,27 @@ impl<'a> Checker<'a> {
         span: Span,
         locals: &mut Locals,
     ) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         let links: &[Access] = if root.contains(&Access::Unset) {
             &[Access::Read]
         } else {
             &[Access::Isset, Access::Read]
         };
-        self.implicit_member_access(operand, root, span, locals);
-        let mut link: &ExprNode = operand;
-        while let ExprKind::Index(inner, _)
-        | ExprKind::PropertyAccess(inner, _, _)
-        | ExprKind::DynamicPropertyAccess(inner, _, _) = &link.kind
+        self.implicit_member_access(arenas, operand, root, span, locals);
+        let mut link_id = operand.id;
+        while let Some(link) = arenas.expr(link_id)
+            && let ExprKind::Index(inner, _)
+            | ExprKind::PropertyAccess(inner, _, _)
+            | ExprKind::DynamicPropertyAccess(inner, _, _) = &link.kind
         {
-            self.implicit_member_access(inner, links, span, locals);
-            link = inner;
+            let Some(inner) = arenas.expr(*inner) else {
+                break;
+            };
+            self.implicit_member_access(arenas, inner, links, span, locals);
+            link_id = inner.id;
         }
     }
 

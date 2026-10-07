@@ -12,7 +12,7 @@
 
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
-use syntax::ast::Arg;
+use syntax::ast::{Arg, NodeArenas};
 use syntax::span::Span;
 
 use types::{Type, is_numeric_string_literal};
@@ -20,6 +20,7 @@ use types::{Type, is_numeric_string_literal};
 impl<'a> Checker<'a> {
     pub(crate) fn check_impossible_haystack_values(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         args: &[Arg],
         locals: &Locals,
@@ -37,13 +38,30 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let needle = self.infer_expr(&args[needle_index].value, locals);
-        let haystack = self.infer_expr(&args[haystack_index].value, locals);
+        let needle = self.infer_expr(
+            arenas
+                .expr(args[needle_index].value)
+                .expect("comparison needle belongs to its retained file owner"),
+            locals,
+        );
+        let haystack = self.infer_expr(
+            arenas
+                .expr(args[haystack_index].value)
+                .expect("comparison haystack belongs to its retained file owner"),
+            locals,
+        );
         let shapes = haystack.constant_arrays();
         if shapes.is_empty() {
             return;
         }
-        let strict = match args.get(2).map(|a| self.infer_expr(&a.value, locals)) {
+        let strict = match args.get(2).map(|a| {
+            self.infer_expr(
+                arenas
+                    .expr(a.value)
+                    .expect("comparison strictness argument belongs to its retained file owner"),
+                locals,
+            )
+        }) {
             None => Some(false),
             Some(ty) => ty.bool_literal_value(),
         };
@@ -103,12 +121,17 @@ impl<'a> Checker<'a> {
     /// `void`.
     pub(crate) fn check_void_match_usage(
         &mut self,
+        arenas: &syntax::ast::NodeArenas,
         arms: &[syntax::ast::MatchArm],
         locals: &Locals,
         span: Span,
     ) {
         let mut saw_void = false;
-        for result in arms.iter().map(|arm| &arm.body) {
+        for result in arms.iter().map(|arm| {
+            arenas
+                .expr(arm.body)
+                .expect("match arm body belongs to its retained file owner")
+        }) {
             let ty = self.infer_expr(result, locals);
             if ty.is_void() {
                 saw_void = true;
@@ -222,6 +245,7 @@ impl<'a> Checker<'a> {
     /// `array_keys()`.
     pub(crate) fn check_loose_haystack_comparison(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         sig: &FunctionReflection,
         args: &[Arg],
@@ -252,12 +276,30 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some(strict) = bound(2)
-            && self.infer_expr(&strict.value, locals).bool_literal_value() != Some(false)
+            && self
+                .infer_expr(
+                    arenas.expr(strict.value).expect(
+                        "comparison strictness argument belongs to its retained file owner",
+                    ),
+                    locals,
+                )
+                .bool_literal_value()
+                != Some(false)
         {
             return;
         }
-        let needle_ty = self.infer_expr(&needle.value, locals);
-        let haystack_ty = self.infer_expr(&haystack.value, locals);
+        let needle_ty = self.infer_expr(
+            arenas
+                .expr(needle.value)
+                .expect("comparison needle belongs to its retained file owner"),
+            locals,
+        );
+        let haystack_ty = self.infer_expr(
+            arenas
+                .expr(haystack.value)
+                .expect("comparison haystack belongs to its retained file owner"),
+            locals,
+        );
         let Some(values) = haystack_ty.array_value_type() else {
             return;
         };

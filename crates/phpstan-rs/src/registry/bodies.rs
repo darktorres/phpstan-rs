@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use syntax::ast::{
-    ExprKind, FunctionDecl, MethodDecl, Param, PropertyDecl, PropertyHooks, StmtKind, StmtNode,
+    ExprId, ExprKind, FunctionDecl, NodeArenas, Param, PropertyDecl, PropertyHooks, StmtId,
+    StmtKind,
 };
 use syntax::name::Name;
 use syntax::span::Span;
-use syntax::visit::{self, Visitor};
+use syntax::visit::arena::{self, Visitor as ArenaVisitor};
 
 use crate::registry::{BodySummary, InitFlow, Provenance};
 
@@ -69,13 +70,20 @@ pub struct UnsetProperties {
 impl UnsetProperties {
     /// The properties the statements `stmts` unset, those of the closures,
     /// the functions and the classes they declare included.
-    fn of(stmts: &[StmtNode]) -> UnsetProperties {
+    fn of(arenas: &NodeArenas, stmts: &[StmtId]) -> UnsetProperties {
         struct Unsets(UnsetProperties);
-        impl<'ast> Visitor<'ast> for Unsets {
-            fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+        impl ArenaVisitor for Unsets {
+            fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+                let Some(stmt) = arenas.stmt(id) else {
+                    return;
+                };
                 if let StmtKind::Unset(targets) = &stmt.kind {
-                    for target in targets {
-                        match &target.peeled().kind {
+                    for target in arenas.expr_ids(targets) {
+                        let Some(target) = arenas.peeled(*target).and_then(|id| arenas.expr(id))
+                        else {
+                            continue;
+                        };
+                        match &target.kind {
                             ExprKind::PropertyAccess(_, prop, _) => {
                                 self.0.names.push(prop.name.clone());
                             }
@@ -84,11 +92,11 @@ impl UnsetProperties {
                         }
                     }
                 }
-                visit::walk_stmt(self, stmt);
+                arena::walk_stmt(self, arenas, id);
             }
         }
         let mut walk = Unsets(UnsetProperties::default());
-        visit::walk_stmts(&mut walk, stmts);
+        arena::walk_stmts(&mut walk, arenas, stmts);
         let mut unset = walk.0;
         unset.settle();
         unset
@@ -152,23 +160,29 @@ pub struct FileBodies {
 }
 
 impl FileBodies {
-    pub fn of(stmts: &[StmtNode]) -> FileBodies {
-        FileBodies::collect(stmts, true, true)
+    pub fn of(arenas: &NodeArenas, stmts: &[StmtId]) -> FileBodies {
+        FileBodies::collect(arenas, stmts, true, true)
     }
 
     /// The bodies of a file whose facts are known: its expressions are
     /// walked only when a body can be in one, in an anonymous class or a
     /// closure, and the whole file for what it unsets only when it unsets
     /// a property.
-    pub fn of_file(stmts: &[StmtNode], facts: &syntax::FileFacts) -> FileBodies {
+    pub fn of_file(arenas: &NodeArenas, stmts: &[StmtId], facts: &syntax::FileFacts) -> FileBodies {
         FileBodies::collect(
+            arenas,
             stmts,
             facts.has_anonymous_class || facts.has_nested_declaration,
             facts.unsets_property,
         )
     }
 
-    fn collect(stmts: &[StmtNode], in_expressions: bool, unsets: bool) -> FileBodies {
+    fn collect(
+        arenas: &NodeArenas,
+        stmts: &[StmtId],
+        in_expressions: bool,
+        unsets: bool,
+    ) -> FileBodies {
         struct Collect {
             bodies: FxHashMap<Span, Body>,
             hooks: FxHashMap<Span, Hooks>,
@@ -177,13 +191,18 @@ impl FileBodies {
             in_expressions: bool,
         }
         impl Collect {
-            fn hooks(&mut self, name: &syntax::ast::Ident, hooks: &PropertyHooks) {
+            fn hooks(
+                &mut self,
+                arenas: &NodeArenas,
+                name: &syntax::ast::Ident,
+                hooks: &PropertyHooks,
+            ) {
                 let get = hooks
                     .get
                     .as_ref()
-                    .and_then(|hook| BodySummary::of_hook(hook, &name.name, false));
+                    .and_then(|hook| BodySummary::of_hook(arenas, hook, &name.name, false));
                 let set = hooks.set.as_ref().and_then(|hook| {
-                    let summary = BodySummary::of_hook(hook, &name.name, true)?;
+                    let summary = BodySummary::of_hook(arenas, hook, &name.name, true)?;
                     let value = hook
                         .param
                         .as_ref()
@@ -196,50 +215,56 @@ impl FileBodies {
                 }
             }
         }
-        impl<'ast> Visitor<'ast> for Collect {
-            fn visit_expr(&mut self, expr: &'ast syntax::ast::ExprNode) {
+        impl ArenaVisitor for Collect {
+            fn visit_expr(&mut self, arenas: &NodeArenas, expr: ExprId) {
                 if self.in_expressions {
-                    visit::walk_expr(self, expr);
+                    arena::walk_expr(self, arenas, expr);
                 }
             }
 
-            fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
+            fn visit_method_decl(&mut self, arenas: &NodeArenas, method: &syntax::ast::MethodDecl) {
                 self.method = true;
-                visit::walk_method_decl(self, method);
+                arena::walk_method_decl(self, arenas, method);
             }
 
-            fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {
+            fn visit_property_decl(&mut self, arenas: &NodeArenas, property: &PropertyDecl) {
                 if let Some(hooks) = &property.hooks {
-                    self.hooks(&property.name, hooks);
+                    self.hooks(arenas, &property.name, hooks);
                 }
-                visit::walk_property_decl(self, property);
+                arena::walk_property_decl(self, arenas, property);
             }
 
-            fn visit_param(&mut self, param: &'ast Param) {
+            fn visit_param(&mut self, arenas: &NodeArenas, param: &Param) {
                 if let Some(hooks) = &param.hooks
                     && param.promotion.is_some()
                 {
-                    self.hooks(&param.name, hooks);
+                    self.hooks(arenas, &param.name, hooks);
                 }
-                visit::walk_param(self, param);
+                arena::walk_param(self, arenas, param);
             }
 
-            fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+            fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
                 let is_method = std::mem::take(&mut self.method);
                 if let Some(body) = &function.body {
                     self.bodies.insert(
                         function.name.span,
                         Body {
                             summary: Arc::new(BodySummary::of_function(
-                                &function.params,
-                                &body.stmts,
+                                arenas,
+                                arenas.params(function.params.clone()),
+                                arenas.stmt_ids(&body.stmts),
                             )),
-                            flow: is_method
-                                .then(|| Arc::new(InitFlow::of(&body.stmts, &body.goto_labels))),
+                            flow: is_method.then(|| {
+                                Arc::new(InitFlow::of(
+                                    arenas,
+                                    arenas.stmt_ids(&body.stmts),
+                                    &body.goto_labels,
+                                ))
+                            }),
                         },
                     );
                 }
-                visit::walk_function_decl(self, function);
+                arena::walk_function_decl(self, arenas, function);
             }
         }
         let mut collect = Collect {
@@ -248,12 +273,12 @@ impl FileBodies {
             method: false,
             in_expressions,
         };
-        visit::walk_stmts(&mut collect, stmts);
+        arena::walk_stmts(&mut collect, arenas, stmts);
         FileBodies {
             bodies: collect.bodies,
             hooks: collect.hooks,
             unset: if unsets {
-                UnsetProperties::of(stmts)
+                UnsetProperties::of(arenas, stmts)
             } else {
                 UnsetProperties::default()
             },

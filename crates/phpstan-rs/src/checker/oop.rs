@@ -770,7 +770,7 @@ impl<'a> Checker<'a> {
             .as_ref()
             .and_then(|ranges| arenas.doc_comment_text(ranges));
         self.check_unknown_phpstan_tags_on(class_doc.as_deref(), c.name.span);
-        for m in arenas.methods(def.methods) {
+        for m in arenas.methods(def.methods.clone()) {
             let doc = m
                 .function
                 .doc_comment
@@ -1061,7 +1061,7 @@ impl<'a> Checker<'a> {
         let Some(def) = arenas.class(c.def) else {
             return;
         };
-        let methods = arenas.methods(def.methods);
+        let methods = arenas.methods(def.methods.clone());
         self.check_readonly_class_version(def.is_readonly, false, c.name.span);
         self.check_method_declaration_sanity(fqn, def.kind, def.is_abstract, methods);
         self.check_property_declarations(
@@ -1797,7 +1797,7 @@ impl<'a> Checker<'a> {
             .iter()
             .any(|p| !p.has_default() && !p.variadic());
         if !needs_arguments
-            && let Some((span, text)) = parent_call_insertion(ctor, &self.line_index)
+            && let Some((span, text)) = parent_call_insertion(arenas, ctor, &self.line_index)
         {
             builder = builder.fix(span, text, "Call parent::__construct()");
         }
@@ -1828,7 +1828,7 @@ impl<'a> Checker<'a> {
         let Some(ctor) = c.constructor(arenas) else {
             return;
         };
-        let params = arenas.params(ctor.function.params);
+        let params = arenas.params(ctor.function.params.clone());
         if params.is_empty()
             || params
                 .iter()
@@ -2095,10 +2095,17 @@ pub(crate) fn signatures_compatible(a: &FunctionReflection, b: &FunctionReflecti
 /// `parent::__construct();`: before its first statement at that
 /// statement's indentation, or, for an empty body, the body rewritten
 /// onto its own lines.
-fn parent_call_insertion(ctor: &MethodDecl, index: &LineIndex) -> Option<(Span, String)> {
+fn parent_call_insertion(
+    arenas: &NodeArenas,
+    ctor: &MethodDecl,
+    index: &LineIndex,
+) -> Option<(Span, String)> {
     const CALL: &str = "parent::__construct();";
     if let Some(first) = ctor.function.body_stmts(arenas).first() {
-        let at = first.span.start;
+        let at = arenas
+            .stmt_span(*first)
+            .expect("constructor statement has a parallel span")
+            .start;
         let indent = " ".repeat(index.line_col(at).col.saturating_sub(1) as usize);
         return Some((Span { start: at, end: at }, format!("{CALL}\n{indent}")));
     }

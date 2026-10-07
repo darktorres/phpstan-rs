@@ -98,31 +98,28 @@ impl<'a> Checker<'a> {
             })
             .collect();
         if let Some(ctor) = methods.iter().find(|m| m.function.is_constructor()) {
-            views.extend(
-                ctor.function
-                    .params
-                    .iter()
-                    .filter(|p| p.promotion.is_some())
-                    .map(|p| PropertyView {
-                        name: &p.name,
-                        span: p.span,
-                        visibility: p
-                            .promotion
-                            .map(|promotion| promotion.visibility)
-                            .unwrap_or(Visibility::Public),
-                        write_visibility: None,
-                        is_static: false,
-                        is_readonly: p.promotion.is_some_and(|promotion| promotion.readonly),
-                        is_abstract: false,
-                        is_final: p.promotion.is_some_and(|promotion| promotion.is_final),
-                        type_hint: p.type_hint.as_ref(),
-                        has_default: false,
-                        hooks: p.hooks.as_deref(),
-                        doc_comment: arenas
-                            .doc_site(p.span.start)
-                            .map(|site| Cow::Borrowed(site.text.as_ref())),
-                    }),
-            );
+            let params = arenas.params(ctor.function.params.clone());
+            views.extend(params.iter().filter(|p| p.promotion.is_some()).map(|p| {
+                PropertyView {
+                    name: &p.name,
+                    span: p.span,
+                    visibility: p
+                        .promotion
+                        .map(|promotion| promotion.visibility)
+                        .unwrap_or(Visibility::Public),
+                    write_visibility: None,
+                    is_static: false,
+                    is_readonly: p.promotion.is_some_and(|promotion| promotion.readonly),
+                    is_abstract: false,
+                    is_final: p.promotion.is_some_and(|promotion| promotion.is_final),
+                    type_hint: p.type_hint.as_ref(),
+                    has_default: false,
+                    hooks: p.hooks.as_deref(),
+                    doc_comment: arenas
+                        .doc_site(p.span.start)
+                        .map(|site| Cow::Borrowed(site.text.as_ref())),
+                }
+            }));
         }
         for p in properties {
             let property = format!("{display}::${}", p.name);
@@ -367,7 +364,7 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        let Some(doc) = view.doc_comment.map(docblock::parse_shared) else {
+        let Some(doc) = view.doc_comment.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.readonly && !doc.allow_private_mutation && view.has_default {

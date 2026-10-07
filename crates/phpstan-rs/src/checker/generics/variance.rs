@@ -104,19 +104,24 @@ impl<'a> Checker<'a> {
         label: &str,
         span: Span,
     ) {
+        let source = self.syntax_source_owner();
+        let doc_text = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
         // Cheap substring pre-filter before the real docblock::parse_shared below
         // - this runs unconditionally on every checked function/method,
         // and the overwhelming majority declare no `@template-covariant`/
         // `-contravariant` tag at all. Matched without the leading `@`
         // so every spelling `docblock::parse_shared` treats identically
         // (`@phpstan-`/`@psalm-`-prefixed aliases included) passes.
-        let has_variance_tag = f.doc_comment.as_deref().is_some_and(|d| {
+        let has_variance_tag = doc_text.as_deref().is_some_and(|d| {
             d.contains("template-covariant") || d.contains("template-contravariant")
         });
         if !has_variance_tag {
             return;
         }
-        let Some(doc) = f.doc_comment.as_deref().map(docblock::parse_shared) else {
+        let Some(doc) = doc_text.as_deref().map(docblock::parse_shared) else {
             return;
         };
         if doc.covariant_templates.is_empty() && doc.contravariant_templates.is_empty() {
@@ -175,13 +180,17 @@ impl<'a> Checker<'a> {
     /// judged worth it for how rarely a property is both generic-
     /// template-typed and hits this specific violation.
     pub(crate) fn check_property_variances(&mut self, fqn: &str, c: &ClassDef) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         let Some(info) = self.class_info(fqn) else {
             return;
         };
         if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {
             return;
         }
-        for p in &c.properties {
+        for p in c.properties(arenas) {
             let Some(prop_sig) = self.registry.lookup_property(fqn, p.name.as_ref()) else {
                 continue;
             };
@@ -211,35 +220,40 @@ impl<'a> Checker<'a> {
         // real PHPStan's own `PropertyVarianceRule` runs over a
         // `ClassPropertyNode` built uniformly for plain and promoted
         // shapes, so this project's own variance walk should too.
-        if let Some(ctor) = c.constructor() {
-            for param in &ctor.function.params {
-                if param.promotion.is_none() {
-                    continue;
-                }
-                let Some(prop_sig) = self.registry.lookup_property(fqn, param.name.as_ref()) else {
-                    continue;
-                };
-                if prop_sig.visibility() == Visibility::Private {
-                    continue;
-                }
-                let has_restricted_write_access = prop_sig.is_readonly()
-                    || prop_sig.write_visibility() == Visibility::Private
-                    || param
-                        .hooks
-                        .as_deref()
-                        .is_some_and(|h| h.set.is_none() && h.get.is_some());
-                let pos = if has_restricted_write_access {
-                    PositionVariance::Covariant
-                } else {
-                    PositionVariance::Invariant
-                };
-                let mut violations: Vec<String> = Vec::new();
-                self.walk_variance(prop_sig.ty(), pos, fqn, &mut violations);
-                violations.sort();
-                violations.dedup();
-                for message in violations {
-                    self.report(message, param.span, 6, "generics.variance");
-                }
+        let promoted: Vec<_> = self
+            .syntax_arenas()
+            .and_then(|arenas| {
+                c.constructor(arenas)
+                    .map(|ctor| arenas.params(ctor.function.params.clone()))
+            })
+            .into_iter()
+            .flatten()
+            .filter(|param| param.promotion.is_some())
+            .map(|param| (param.name.clone(), param.span, param.hooks.clone()))
+            .collect();
+        for (name, span, hooks) in promoted {
+            let Some(prop_sig) = self.registry.lookup_property(fqn, name.as_ref()) else {
+                continue;
+            };
+            if prop_sig.visibility() == Visibility::Private {
+                continue;
+            }
+            let has_restricted_write_access = prop_sig.is_readonly()
+                || prop_sig.write_visibility() == Visibility::Private
+                || hooks
+                    .as_deref()
+                    .is_some_and(|h| h.set.is_none() && h.get.is_some());
+            let pos = if has_restricted_write_access {
+                PositionVariance::Covariant
+            } else {
+                PositionVariance::Invariant
+            };
+            let mut violations: Vec<String> = Vec::new();
+            self.walk_variance(prop_sig.ty(), pos, fqn, &mut violations);
+            violations.sort();
+            violations.dedup();
+            for message in violations {
+                self.report(message, span, 6, "generics.variance");
             }
         }
     }

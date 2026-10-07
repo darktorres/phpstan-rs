@@ -3,7 +3,7 @@ use crate::lexer::Lexer;
 
 #[test]
 fn parser_identifiers_reuse_the_files_distinct_name_id() {
-    let mut parser = Parser::from_lexer(Lexer::new("$item $item $other"));
+    let mut parser = Parser::from_lexer(Lexer::new_in_php("$item $item $other"));
     let first = parser.expect_variable_spanned().unwrap();
     let repeated = parser.expect_variable_spanned().unwrap();
     let other = parser.expect_variable_spanned().unwrap();
@@ -20,9 +20,14 @@ fn parser_identifiers_reuse_the_files_distinct_name_id() {
 #[test]
 fn parsed_file_resolves_identifier_ids_and_source_spans() {
     let parsed = crate::parse("<?php $object->member;").unwrap();
-    let StmtKind::Expression(expression) = &parsed.stmts[0].kind else {
+    let stmt = parsed
+        .arenas
+        .stmt(parsed.statements()[0])
+        .expect("statement");
+    let StmtKind::Expression(expression) = &stmt.kind else {
         panic!("expected an expression statement");
     };
+    let expression = parsed.arenas.expr(*expression).expect("expression");
     let ExprKind::PropertyAccess(_, member, _) = &expression.kind else {
         panic!("expected a property access");
     };

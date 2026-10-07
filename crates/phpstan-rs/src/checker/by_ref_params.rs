@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };
-        self.check_by_ref_value(name, actual, lhs.span);
+        self.check_by_ref_value(name, actual, self.expr_span(lhs.id));
     }
 
     /// The shared "does this by-ref parameter's own declared type accept

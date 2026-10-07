@@ -16,7 +16,10 @@ impl<'a> Checker<'a> {
         e: &ExprNode,
         locals: &Locals,
     ) -> Option<bool> {
-        if should_skip_constant_condition(e) {
+        let Some(arenas) = self.syntax_arenas() else {
+            return None;
+        };
+        if should_skip_constant_condition(arenas, e) {
             return None;
         }
         self.infer_expr(e, locals).bool_literal_value()
@@ -96,7 +99,7 @@ impl<'a> Checker<'a> {
                     "Left side of {symbol} is always {}.",
                     if value { "true" } else { "false" }
                 ),
-                l.span,
+                self.expr_span(l.id),
                 4,
                 format!("{kind}.leftAlways{}", if value { "True" } else { "False" }),
             );
@@ -112,7 +115,7 @@ impl<'a> Checker<'a> {
                     "Right side of {symbol} is always {}.",
                     if value { "true" } else { "false" }
                 ),
-                r.span,
+                self.expr_span(r.id),
                 4,
                 format!("{kind}.rightAlways{}", if value { "True" } else { "False" }),
             );
@@ -133,7 +136,7 @@ impl<'a> Checker<'a> {
                     "Result of {symbol} is always {}.",
                     if value { "true" } else { "false" }
                 ),
-                whole.span,
+                self.expr_span(whole.id),
                 4,
                 format!("{kind}.always{}", if value { "True" } else { "False" }),
             );
@@ -152,7 +155,7 @@ impl<'a> Checker<'a> {
                     "Left side of xor is always {}.",
                     if value { "true" } else { "false" }
                 ),
-                l.span,
+                self.expr_span(l.id),
                 4,
                 format!(
                     "logicalXor.leftAlways{}",
@@ -166,7 +169,7 @@ impl<'a> Checker<'a> {
                     "Right side of xor is always {}.",
                     if value { "true" } else { "false" }
                 ),
-                r.span,
+                self.expr_span(r.id),
                 4,
                 format!(
                     "logicalXor.rightAlways{}",
@@ -202,13 +205,17 @@ pub(crate) fn is_truthy_literal(e: &ExprNode) -> bool {
 /// type-check rule reports it (`function.alreadyNarrowedType`/
 /// `function.impossibleType`). Any other call condition is answered like
 /// any other shape.
-fn should_skip_constant_condition(e: &ExprNode) -> bool {
+fn should_skip_constant_condition(arenas: &NodeArenas, e: &ExprNode) -> bool {
     // Parentheses don't change what reports the condition.
-    let e = e.peeled();
+    let Some(e) = arenas.peeled(e.id).and_then(|id| arenas.expr(id)) else {
+        return true;
+    };
     // A type-check call (`is_int($x)`) reports itself
     // (`function.alreadyNarrowedType`/`function.impossibleType`).
     if let ExprKind::Call(callee, _) = &e.kind
+        && let Some(callee) = arenas.expr(*callee)
         && let ExprKind::Name(name) = &callee.kind
+        && let Some(name) = arenas.qualified_name(name)
     {
         let name = name.trim_start_matches('\\').to_ascii_lowercase();
         if name == "is_numeric" || crate::checker::narrowing_type_for_predicate(&name).is_some() {

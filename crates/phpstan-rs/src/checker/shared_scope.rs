@@ -226,7 +226,7 @@ impl Visitor for Scan {
         let Some(stmt) = arenas.stmt(id) else { return };
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Global(vars) => {
-                for var in vars {
+                for var in arenas.global_vars(vars.clone()) {
                     match var {
                         GlobalVar::Name(name) => {
                             self.globals.insert(name.name.clone());
@@ -240,11 +240,11 @@ impl Visitor for Scan {
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (name, default) in vars {
-                    self.statics.insert(name.name.clone());
-                    self.note(&name.name, Held::Other);
-                    if let Some(default) = default {
-                        self.visit_expr(arenas, *default);
+                for variable in arenas.static_vars(vars.clone()) {
+                    self.statics.insert(variable.name.name.clone());
+                    self.note(&variable.name.name, Held::Other);
+                    if let Some(default) = variable.default {
+                        self.visit_expr(arenas, default);
                     }
                 }
             }

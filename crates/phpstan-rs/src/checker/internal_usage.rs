@@ -493,8 +493,13 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
         label: &str,
     ) {
+        let syntax_owner = self.syntax_tree_owner();
+        let params = syntax_owner
+            .as_ref()
+            .map(|owner| owner.arenas().params(f.params.clone()))
+            .unwrap_or_default();
         self.check_internal_param_and_return_types_raw(
-            &f.params,
+            params,
             f.return_type.as_ref(),
             f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
             class_name.is_some(),

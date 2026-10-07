@@ -29,9 +29,9 @@ use std::path::{Path, PathBuf};
 
 use diagnostics::Diagnostic;
 use syntax::ParsedFile;
-use syntax::ast::{ClassDef, FunctionDecl, Param, StmtKind, StmtNode};
+use syntax::ast::{ClassDef, FunctionDecl, NodeArenas, Param, StmtId, StmtKind};
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_class_def, walk_function_decl, walk_stmt};
+use syntax::visit::arena::{self, Visitor};
 
 use crate::project::Project;
 
@@ -476,7 +476,10 @@ where
             let Ok(parsed) = syntax::parse(text.as_bytes()) else {
                 continue;
             };
-            let targets: Vec<String> = crate::deps::doc_site_references(&parsed.references)
+            let Some(references) = parsed.references.as_ref() else {
+                continue;
+            };
+            let targets: Vec<String> = crate::deps::doc_site_references(references)
                 .into_iter()
                 .flat_map(|(_, keys)| keys.see)
                 .filter_map(|key| match key {
@@ -503,7 +506,8 @@ where
                 let Ok(parsed) = syntax::parse(declaring.as_bytes()) else {
                     continue;
                 };
-                let Some(span) = class_name_span(&parsed.stmts, &declared) else {
+                let Some(span) = class_name_span(&parsed.arenas, parsed.statements(), &declared)
+                else {
                     continue;
                 };
                 let picked = Picked {
@@ -656,14 +660,18 @@ where
     fn parse_error(&mut self, label: &'static str) -> Result<(), String> {
         let Some(picked) = self.pick(&|parsed, _| {
             parsed
-                .stmts
+                .statements()
                 .iter()
-                .find(|stmt| !matches!(stmt.kind, StmtKind::InlineHtml(_)))
-                .map(|stmt| {
-                    (
-                        Span::new(stmt.span.start, stmt.span.start),
-                        ") ".to_string(),
-                    )
+                .find(|stmt_id| {
+                    parsed
+                        .stmt(**stmt_id)
+                        .is_some_and(|stmt| !matches!(&stmt.kind, StmtKind::InlineHtml(_)))
+                })
+                .map(|stmt_id| {
+                    let span = parsed
+                        .stmt_span(*stmt_id)
+                        .expect("replay statement has an arena span");
+                    (Span::new(span.start, span.start), ") ".to_string())
                 })
         })?
         else {
@@ -777,24 +785,30 @@ fn declaring(class: &str) -> String {
 }
 
 /// The span of the name of the class `fqn` declares in `stmts`.
-fn class_name_span(stmts: &[StmtNode], fqn: &str) -> Option<Span> {
+fn class_name_span(arenas: &NodeArenas, stmts: &[StmtId], fqn: &str) -> Option<Span> {
     struct Named<'a> {
         fqn: &'a str,
         found: Option<Span>,
     }
-    impl<'ast> Visitor<'ast> for Named<'_> {
-        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+    impl Visitor for Named<'_> {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
             if let StmtKind::ClassDecl(decl) = &stmt.kind
                 && self.found.is_none()
-                && decl.fq_name().eq_ignore_ascii_case(self.fqn)
+                && arenas
+                    .class_decl(decl.clone())
+                    .fq_name()
+                    .eq_ignore_ascii_case(self.fqn)
             {
-                self.found = Some(decl.name.span);
+                self.found = Some(arenas.class_decl(decl.clone()).name.span);
             }
-            walk_stmt(self, stmt);
+            arena::walk_stmt(self, arenas, id);
         }
     }
     let mut named = Named { fqn, found: None };
-    stmts.iter().for_each(|stmt| named.visit_stmt(stmt));
+    arena::walk_stmts(&mut named, arenas, stmts);
     named.found
 }
 
@@ -870,7 +884,7 @@ impl<'a> Finder<'a> {
             const_value: None,
             trait_use: None,
         };
-        parsed.stmts.iter().for_each(|stmt| finder.visit_stmt(stmt));
+        arena::walk_stmts(&mut finder, &parsed.arenas, parsed.statements());
         finder
     }
 
@@ -883,42 +897,56 @@ impl<'a> Finder<'a> {
     }
 }
 
-impl<'ast> Visitor<'ast> for Finder<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Finder<'_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         if let StmtKind::ClassDecl(decl) = &stmt.kind
             && self.class.is_none()
         {
-            self.class = Some(decl.name.span);
+            self.class = Some(arenas.class_decl(decl.clone()).name.span);
         }
-        walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_class_def(&mut self, def: &'ast ClassDef) {
+    fn visit_class_def(&mut self, arenas: &NodeArenas, def: &ClassDef) {
         if self.method.is_none() {
-            self.method = def.methods.iter().find_map(|method| method.removal_span);
+            self.method = arenas
+                .methods(def.methods.clone())
+                .iter()
+                .find_map(|method| method.removal_span);
         }
-        if self.const_value.is_none() {
-            self.const_value = def.consts.first().map(|constant| constant.value.span);
+        if self.const_value.is_none()
+            && let Some(constant) = def.consts(arenas).first()
+        {
+            self.const_value = arenas.expr_span(constant.value);
         }
         if self.trait_use.is_none() {
-            self.trait_use = def.trait_uses.first().map(|trait_use| trait_use.span);
+            self.trait_use = def
+                .trait_uses(arenas)
+                .first()
+                .map(|trait_use| trait_use.span);
         }
-        walk_class_def(self, def);
+        arena::walk_class_def(self, arenas, def);
     }
 
-    fn visit_function_decl(&mut self, f: &'ast FunctionDecl) {
-        self.param(&f.params);
+    fn visit_function_decl(&mut self, arenas: &NodeArenas, f: &FunctionDecl) {
+        self.param(arenas.params(f.params.clone()));
         if self.body.is_none() {
             self.body = f.body.as_ref().map(|body| body.open);
         }
         if self.doc_type.is_none()
-            && let Some(doc) = &f.doc_comment
-            && let Some(at) = self.text[..f.name.span.start as usize].rfind(&**doc)
-            && let Some((start, end)) = doc_type(doc)
+            && let Some(doc) = f
+                .doc_comment
+                .as_ref()
+                .and_then(|ranges| arenas.doc_comment_text(ranges))
+            && let Some(at) = self.text[..f.name.span.start as usize].rfind(&*doc)
+            && let Some((start, end)) = doc_type(&doc)
         {
             self.doc_type = Some(Span::new((at + start) as u32, (at + end) as u32));
         }
-        walk_function_decl(self, f);
+        arena::walk_function_decl(self, arenas, f);
     }
 }
 

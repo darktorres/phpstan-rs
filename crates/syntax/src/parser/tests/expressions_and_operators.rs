@@ -8,14 +8,13 @@ fn word_operators_bind_looser_than_assignment() {
     // The classic PHP gotcha: `$a = $b or $c;` is `($a = $b) or $c;`,
     // not `$a = ($b or $c);` - unlike &&/||.
     let program = parse("<?php $x = 5 or die();");
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Binary(BinOp::LogicalOr, lhs, _),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(expression) = &program[0].kind else {
         panic!("expected a top-level LogicalOr binary expression");
     };
-    assert!(matches!(&lhs.kind, ExprKind::Assign(..)));
+    let ExprKind::Binary(BinOp::LogicalOr, lhs, _) = &program.expr(*expression).kind else {
+        panic!("expected a top-level LogicalOr binary expression");
+    };
+    assert!(matches!(&program.expr(*lhs).kind, ExprKind::Assign(..)));
 }
 
 // An assignment nested (unparenthesized) as a comparison operator's own
@@ -30,15 +29,18 @@ fn an_assignment_nested_as_an_identical_comparisons_rhs_parses_as_real_php_does(
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::Identical, lhs, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::Identical, lhs, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level Identical binary expression, got {cond:?}");
     };
-    assert!(matches!(&lhs.kind, ExprKind::Literal(Literal::Bool(false))));
-    let ExprKind::Assign(target, value) = &rhs.kind else {
-        panic!("expected the RHS to be an Assign, got {:?}", rhs.kind);
+    assert!(matches!(
+        &program.expr(*lhs).kind,
+        ExprKind::Literal(Literal::Bool(false))
+    ));
+    let ExprKind::Assign(target, value) = &program.expr(*rhs).kind else {
+        panic!("expected the RHS to be an Assign");
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"params"));
-    assert!(matches!(&value.kind, ExprKind::Call(..)));
+    assert!(matches!(&program.expr(*target).kind, ExprKind::Variable(name) if **name == *"params"));
+    assert!(matches!(&program.expr(*value).kind, ExprKind::Call(..)));
 }
 
 #[test]
@@ -47,11 +49,11 @@ fn a_compound_assignment_nested_as_a_not_equal_comparisons_rhs_parses_as_real_ph
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::NotIdentical, _, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::NotIdentical, _, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level NotIdentical binary expression, got {cond:?}");
     };
     assert!(matches!(
-        &rhs.kind,
+        &program.expr(*rhs).kind,
         ExprKind::CompoundAssign(BinOp::Add, ..)
     ));
 }
@@ -62,10 +64,10 @@ fn an_assignment_nested_as_a_relational_comparisons_rhs_parses_as_real_php_does(
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::Gt, _, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::Gt, _, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level Gt binary expression, got {cond:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Assign(..)));
+    assert!(matches!(&program.expr(*rhs).kind, ExprKind::Assign(..)));
 }
 
 // A plain comparison with no trailing `=` (the overwhelmingly common
@@ -77,10 +79,10 @@ fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::Identical, _, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::Identical, _, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level Identical binary expression, got {cond:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if **name == *"params"));
+    assert!(matches!(&program.expr(*rhs).kind, ExprKind::Variable(name) if **name == *"params"));
 }
 
 // An assignment nested (unparenthesized) as `&&`'s/`||`'s own RHS - the
@@ -98,15 +100,15 @@ fn an_assignment_nested_as_a_logical_and_rhs_parses_as_real_php_does() {
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::And, lhs, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::And, lhs, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level And binary expression, got {cond:?}");
     };
-    assert!(matches!(&lhs.kind, ExprKind::Instanceof(..)));
-    let ExprKind::Assign(target, value) = &rhs.kind else {
-        panic!("expected the RHS to be an Assign, got {:?}", rhs.kind);
+    assert!(matches!(&program.expr(*lhs).kind, ExprKind::Instanceof(..)));
+    let ExprKind::Assign(target, value) = &program.expr(*rhs).kind else {
+        panic!("expected the RHS to be an Assign");
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"x"));
-    assert!(matches!(&value.kind, ExprKind::Call(..)));
+    assert!(matches!(&program.expr(*target).kind, ExprKind::Variable(name) if **name == *"x"));
+    assert!(matches!(&program.expr(*value).kind, ExprKind::Call(..)));
 }
 
 #[test]
@@ -115,10 +117,10 @@ fn an_assignment_nested_as_a_logical_or_rhs_parses_as_real_php_does() {
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::Or, _, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::Or, _, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level Or binary expression, got {cond:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Assign(..)));
+    assert!(matches!(&program.expr(*rhs).kind, ExprKind::Assign(..)));
 }
 
 #[test]
@@ -127,10 +129,10 @@ fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::And, _, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::And, _, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level And binary expression, got {cond:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if **name == *"x"));
+    assert!(matches!(&program.expr(*rhs).kind, ExprKind::Variable(name) if **name == *"x"));
 }
 
 // `!$var = expr` parses as `!($var = expr)`, not `(!$var) = expr` -
@@ -146,17 +148,14 @@ fn a_bang_negated_assignment_parses_as_negating_the_assignment_result() {
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Unary(UnaryOp::Not, inner) = &cond.kind else {
+    let ExprKind::Unary(UnaryOp::Not, inner) = &program.expr(*cond).kind else {
         panic!("expected a top-level Not unary expression, got {cond:?}");
     };
-    let ExprKind::Assign(target, value) = &inner.kind else {
-        panic!(
-            "expected the Not's operand to be an Assign, got {:?}",
-            inner.kind
-        );
+    let ExprKind::Assign(target, value) = &program.expr(*inner).kind else {
+        panic!("expected the Not's operand to be an Assign");
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"dir"));
-    assert!(matches!(&value.kind, ExprKind::Call(..)));
+    assert!(matches!(&program.expr(*target).kind, ExprKind::Variable(name) if **name == *"dir"));
+    assert!(matches!(&program.expr(*value).kind, ExprKind::Call(..)));
 }
 
 #[test]
@@ -165,16 +164,13 @@ fn a_bang_negated_assignment_nested_in_a_logical_or_still_assigns() {
     let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
-    let ExprKind::Binary(BinOp::Or, _, rhs) = &cond.kind else {
+    let ExprKind::Binary(BinOp::Or, _, rhs) = &program.expr(*cond).kind else {
         panic!("expected a top-level Or binary expression, got {cond:?}");
     };
-    let ExprKind::Unary(UnaryOp::Not, inner) = &rhs.kind else {
-        panic!(
-            "expected the Or's RHS to be a Not unary expression, got {:?}",
-            rhs.kind
-        );
+    let ExprKind::Unary(UnaryOp::Not, inner) = &program.expr(*rhs).kind else {
+        panic!("expected the Or's RHS to be a Not unary expression");
     };
-    assert!(matches!(&inner.kind, ExprKind::Assign(..)));
+    assert!(matches!(&program.expr(*inner).kind, ExprKind::Assign(..)));
 }
 
 // `.`/cast get the identical "assignment as a bare operand" treatment -
@@ -188,23 +184,20 @@ fn an_assignment_nested_as_a_concat_rhs_parses_as_real_php_does() {
             program[0].kind
         );
     };
-    let ExprKind::Assign(_, value) = &e.kind else {
-        panic!("expected the statement to be an Assign, got {:?}", e.kind);
+    let ExprKind::Assign(_, value) = &program.expr(*e).kind else {
+        panic!("expected the statement to be an Assign");
     };
-    let ExprKind::Binary(BinOp::Concat, _, rhs) = &value.kind else {
+    let ExprKind::Binary(BinOp::Concat, _, rhs) = &program.expr(*value).kind else {
         panic!("expected a top-level Concat binary expression, got {value:?}");
     };
-    let ExprKind::Assign(target, inner_value) = &rhs.kind else {
-        panic!(
-            "expected the Concat's RHS to be an Assign, got {:?}",
-            rhs.kind
-        );
+    let ExprKind::Assign(target, inner_value) = &program.expr(*rhs).kind else {
+        panic!("expected the Concat's RHS to be an Assign");
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"v"));
-    assert!(matches!(
-        &inner_value.kind,
-        ExprKind::Literal(Literal::String(s)) if *s == "y"
-    ));
+    assert!(matches!(&program.expr(*target).kind, ExprKind::Variable(name) if **name == *"v"));
+    let ExprKind::Literal(Literal::String(payload)) = &program.expr(*inner_value).kind else {
+        panic!("expected a string literal");
+    };
+    assert_eq!(program.string_text(payload).as_deref(), Some("y"));
 }
 
 #[test]
@@ -216,13 +209,13 @@ fn an_ordinary_concat_with_no_trailing_assignment_is_unaffected() {
             program[0].kind
         );
     };
-    let ExprKind::Assign(_, value) = &e.kind else {
-        panic!("expected the statement to be an Assign, got {:?}", e.kind);
+    let ExprKind::Assign(_, value) = &program.expr(*e).kind else {
+        panic!("expected the statement to be an Assign");
     };
-    let ExprKind::Binary(BinOp::Concat, _, rhs) = &value.kind else {
+    let ExprKind::Binary(BinOp::Concat, _, rhs) = &program.expr(*value).kind else {
         panic!("expected a top-level Concat binary expression, got {value:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if **name == *"v"));
+    assert!(matches!(&program.expr(*rhs).kind, ExprKind::Variable(name) if **name == *"v"));
 }
 
 #[test]
@@ -237,21 +230,18 @@ fn an_assignment_nested_as_a_cast_operand_parses_as_real_php_does() {
             program[0].kind
         );
     };
-    let ExprKind::Assign(_, value) = &e.kind else {
-        panic!("expected the statement to be an Assign, got {:?}", e.kind);
+    let ExprKind::Assign(_, value) = &program.expr(*e).kind else {
+        panic!("expected the statement to be an Assign");
     };
-    let ExprKind::Cast(_, operand) = &value.kind else {
+    let ExprKind::Cast(_, operand) = &program.expr(*value).kind else {
         panic!("expected a top-level Cast expression, got {value:?}");
     };
-    let ExprKind::Assign(target, inner_value) = &operand.kind else {
-        panic!(
-            "expected the Cast's operand to be an Assign, got {:?}",
-            operand.kind
-        );
+    let ExprKind::Assign(target, inner_value) = &program.expr(*operand).kind else {
+        panic!("expected the Cast's operand to be an Assign");
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"v"));
+    assert!(matches!(&program.expr(*target).kind, ExprKind::Variable(name) if **name == *"v"));
     assert!(matches!(
-        &inner_value.kind,
+        &program.expr(*inner_value).kind,
         ExprKind::Literal(Literal::Int(5))
     ));
 }
@@ -269,7 +259,7 @@ fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration
             program[0].kind
         );
     };
-    assert!(matches!(e.kind, ExprKind::Closure { .. }));
+    assert!(matches!(program.expr(*e).kind, ExprKind::Closure { .. }));
 }
 
 #[test]
@@ -282,8 +272,15 @@ fn a_bare_anonymous_by_ref_function_statement_still_parses_as_an_expression() {
             program[0].kind
         );
     };
-    let ExprKind::Closure(closure) = &e.kind else {
-        panic!("expected a Closure, got {:?}", e.kind);
+    let ExprKind::Closure(closure_id) = &program.expr(*e).kind else {
+        panic!("expected a Closure");
+    };
+    let ClosurePayload::Closure(closure) = program
+        .arenas
+        .closure(*closure_id)
+        .expect("closure payload belongs to the parsed file")
+    else {
+        panic!("expected a closure payload");
     };
     assert!(closure.by_ref);
 }
@@ -294,9 +291,10 @@ fn a_spread_argument_sets_spread_on_its_own_arg() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
-    let ExprKind::Call(_, args) = &e.kind else {
-        panic!("expected Call, got {:?}", e.kind);
+    let ExprKind::Call(_, args) = &program.expr(*e).kind else {
+        panic!("expected Call");
     };
+    let args = program.args(args.clone());
     assert_eq!(args.len(), 1);
     assert!(args[0].spread);
 }
@@ -307,9 +305,10 @@ fn a_plain_call_with_no_spread_leaves_spread_false() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
-    let ExprKind::Call(_, args) = &e.kind else {
-        panic!("expected Call, got {:?}", e.kind);
+    let ExprKind::Call(_, args) = &program.expr(*e).kind else {
+        panic!("expected Call");
     };
+    let args = program.args(args.clone());
     assert_eq!(args.len(), 2);
     assert!(args.iter().all(|a| !a.spread));
 }
@@ -320,9 +319,10 @@ fn a_spread_argument_sets_spread_on_a_new_call() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
-    let ExprKind::New(_, args) = &e.kind else {
-        panic!("expected New, got {:?}", e.kind);
+    let ExprKind::New(_, args) = &program.expr(*e).kind else {
+        panic!("expected New");
     };
+    let args = program.args(args.clone());
     assert!(args[0].spread);
 }
 
@@ -332,8 +332,8 @@ fn exponent_assign_parses_as_pow_not_mul() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
-    let ExprKind::CompoundAssign(op, ..) = &e.kind else {
-        panic!("expected CompoundAssign, got {:?}", e.kind);
+    let ExprKind::CompoundAssign(op, ..) = &program.expr(*e).kind else {
+        panic!("expected CompoundAssign");
     };
     assert_eq!(*op, BinOp::Pow);
 }
@@ -344,12 +344,13 @@ fn a_spread_element_inside_an_array_literal_sets_its_own_spread_flag() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
-    let ExprKind::Assign(_, rhs) = &e.kind else {
-        panic!("expected Assign, got {:?}", e.kind);
+    let ExprKind::Assign(_, rhs) = &program.expr(*e).kind else {
+        panic!("expected Assign");
     };
-    let ExprKind::ArrayLiteral(items) = &rhs.kind else {
-        panic!("expected ArrayLiteral, got {:?}", rhs.kind);
+    let ExprKind::ArrayLiteral(items) = &program.expr(*rhs).kind else {
+        panic!("expected ArrayLiteral");
     };
+    let items = program.array_items(items.clone());
     assert_eq!(items.len(), 3);
     assert!(!items[0].spread);
     assert!(items[1].spread);
@@ -359,14 +360,16 @@ fn a_spread_element_inside_an_array_literal_sets_its_own_spread_flag() {
 #[test]
 fn first_class_callable_parses_distinctly_from_a_real_call() {
     let program = parse("<?php $f = strlen(...);");
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected an assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::FirstClassCallable(_)));
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::FirstClassCallable(_)
+    ));
 }
 
 #[test]
@@ -391,14 +394,16 @@ fn bitwise_compound_assignment_operators_parse() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert_eq!(f.body_stmts().len(), 5);
-    for stmt in f.body_stmts().iter() {
+    let f = program.function(*f);
+    assert_eq!(f.body_stmts(&program.arenas).len(), 5);
+    for &stmt_id in f.body_stmts(&program.arenas) {
+        let stmt = program.stmt(stmt_id);
+        let StmtKind::Expression(expr) = &stmt.kind else {
+            panic!("expected expression statement");
+        };
         assert!(matches!(
-            &stmt.kind,
-            StmtKind::Expression(ExprNode {
-                kind: ExprKind::CompoundAssign(..),
-                ..
-            })
+            &program.expr(*expr).kind,
+            ExprKind::CompoundAssign(..)
         ));
     }
 }
@@ -418,35 +423,33 @@ fn yield_forms_all_parse() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert_eq!(f.body_stmts().len(), 4);
+    let f = program.function(*f);
+    assert_eq!(f.body_stmts(&program.arenas).len(), 4);
 
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Yield(None, Some(_)),
-        ..
-    }) = &f.body_stmts()[0].kind
-    else {
+    let StmtKind::Expression(first) = &program.stmt(f.body_stmts(&program.arenas)[0]).kind else {
         panic!("expected bare-value yield");
     };
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Yield(Some(_), Some(_)),
-        ..
-    }) = f.body_stmts()[1].kind
-    else {
+    assert!(matches!(
+        &program.expr(*first).kind,
+        ExprKind::Yield(None, Some(_))
+    ));
+    let StmtKind::Expression(second) = &program.stmt(f.body_stmts(&program.arenas)[1]).kind else {
         panic!("expected key => value yield");
     };
     assert!(matches!(
-        f.body_stmts()[2].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::YieldFrom(_),
-            ..
-        })
+        &program.expr(*second).kind,
+        ExprKind::Yield(Some(_), Some(_))
     ));
+    let StmtKind::Expression(third) = &program.stmt(f.body_stmts(&program.arenas)[2]).kind else {
+        panic!("expected yield from");
+    };
+    assert!(matches!(&program.expr(*third).kind, ExprKind::YieldFrom(_)));
+    let StmtKind::Expression(fourth) = &program.stmt(f.body_stmts(&program.arenas)[3]).kind else {
+        panic!("expected empty yield");
+    };
     assert!(matches!(
-        f.body_stmts()[3].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::Yield(None, None),
-            ..
-        })
+        &program.expr(*fourth).kind,
+        ExprKind::Yield(None, None)
     ));
 }
 
@@ -459,30 +462,36 @@ fn binary_and_explicit_octal_literals_parse() {
             $c = 0x1F;
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(first) = &program[0].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Literal(Literal::Int(5))));
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[1].kind
-    else {
+    let ExprKind::Assign(_, rhs) = &program.expr(*first).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::Literal(Literal::Int(5))
+    ));
+    let StmtKind::Expression(second) = &program[1].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Literal(Literal::Int(509))));
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[2].kind
-    else {
+    let ExprKind::Assign(_, rhs) = &program.expr(*second).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::Literal(Literal::Int(509))
+    ));
+    let StmtKind::Expression(third) = &program[2].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Literal(Literal::Int(31))));
+    let ExprKind::Assign(_, rhs) = &program.expr(*third).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::Literal(Literal::Int(31))
+    ));
 }
 
 #[test]
@@ -493,29 +502,30 @@ fn instanceof_with_dynamic_class_name_parses() {
             $ok = $x instanceof Foo;
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Call(_, args),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(call) = &program[0].kind else {
         panic!("expected assert() call");
     };
-    let ExprKind::Instanceof(_, target) = &args[0].value.kind else {
+    let ExprKind::Call(_, args) = &program.expr(*call).kind else {
+        panic!("expected call expression");
+    };
+    let args = program.args(args.clone());
+    let ExprKind::Instanceof(_, target) = &program.expr(args[0].value).kind else {
         panic!("expected Instanceof");
     };
     assert!(matches!(target, InstanceofTarget::Expr(_)));
 
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[1].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[1].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Instanceof(_, target) = &rhs.kind else {
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    let ExprKind::Instanceof(_, target) = &program.expr(*rhs).kind else {
         panic!("expected Instanceof");
     };
-    assert!(matches!(target, InstanceofTarget::Name(n) if n == "Foo"));
+    assert!(
+        matches!(target, InstanceofTarget::Name(n) if program.arenas.qualified_name(n).is_some_and(|n| n == "Foo"))
+    );
 }
 
 #[test]
@@ -527,17 +537,19 @@ fn not_binds_looser_than_instanceof() {
     // produced `(!$x) instanceof Y` instead, which never matches the
     // `Unary(Not, Instanceof(..))` shape narrowing looks for.
     let program = parse("<?php $ok = ! $x instanceof Foo;");
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Unary(UnaryOp::Not, inner) = &rhs.kind else {
-        panic!("expected the Not to be the outermost node, got: {rhs:?}");
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
     };
-    assert!(matches!(&inner.kind, ExprKind::Instanceof(_, _)));
+    let ExprKind::Unary(UnaryOp::Not, inner) = &program.expr(*rhs).kind else {
+        panic!("expected the Not to be the outermost node");
+    };
+    assert!(matches!(
+        &program.expr(*inner).kind,
+        ExprKind::Instanceof(_, _)
+    ));
 }
 
 #[test]
@@ -549,29 +561,21 @@ fn reference_assignment_parses_as_assign_ref_not_plain_assign() {
             $e = $f;
         "#,
     );
-    assert!(matches!(
-        &program[0].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::AssignRef(_, _),
-            ..
-        })
-    ));
-    assert!(matches!(
-        &program[1].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::AssignRef(_, _),
-            ..
-        })
-    ));
+    for stmt in [&program[0], &program[1]] {
+        let StmtKind::Expression(expr) = &stmt.kind else {
+            panic!("expected an expression statement");
+        };
+        assert!(matches!(
+            &program.expr(*expr).kind,
+            ExprKind::AssignRef(_, _)
+        ));
+    }
     // An ordinary assignment with no `&` must still parse as plain
     // `Assign`, not `AssignRef`.
-    assert!(matches!(
-        &program[2].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::Assign(_, _),
-            ..
-        })
-    ));
+    let StmtKind::Expression(expr) = &program[2].kind else {
+        panic!("expected an expression statement");
+    };
+    assert!(matches!(&program.expr(*expr).kind, ExprKind::Assign(_, _)));
 }
 
 #[test]
@@ -582,33 +586,33 @@ fn destructuring_with_skipped_slot_parses() {
             [$a, , $c] = $t;
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(lhs, _),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Destructure(items, DestructureSyntax::Short) = &lhs.kind else {
+    let ExprKind::Assign(lhs, _) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    let ExprKind::Destructure(items, DestructureSyntax::Short) = &program.expr(*lhs).kind else {
         panic!("expected a destructuring target");
     };
+    let items = program.arenas.destructure_items(items);
     assert_eq!(items.len(), 2);
     assert!(items[0].target.is_none());
     assert!(matches!(
-        &items[1].target.as_ref().unwrap().kind,
+        &program.expr(items[1].target.expect("second target")).kind,
         ExprKind::Variable(_)
     ));
 
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(lhs, _),
-        ..
-    }) = &program[1].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[1].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Destructure(items, _) = &lhs.kind else {
+    let ExprKind::Assign(lhs, _) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    let ExprKind::Destructure(items, _) = &program.expr(*lhs).kind else {
         panic!("expected a destructuring target");
     };
+    let items = program.arenas.destructure_items(items);
     assert_eq!(items.len(), 3);
     assert!(items[1].target.is_none());
 }
@@ -619,12 +623,18 @@ fn a_foreach_value_array_is_a_destructuring_target() {
     let StmtKind::Foreach { value, key, .. } = &program[0].kind else {
         panic!("expected foreach");
     };
-    assert!(matches!(key.as_ref().unwrap().kind, ExprKind::Variable(_)));
-    let ExprKind::Destructure(items, DestructureSyntax::Short) = &value.kind else {
-        panic!("expected a destructuring target, got {:?}", value.kind);
-    };
     assert!(matches!(
-        &items[1].target.as_ref().unwrap().kind,
+        program.expr(key.expect("foreach key")).kind,
+        ExprKind::Variable(_)
+    ));
+    let ExprKind::Destructure(items, DestructureSyntax::Short) = &program.expr(*value).kind else {
+        panic!("expected a destructuring target");
+    };
+    let items = program.arenas.destructure_items(items);
+    assert!(matches!(
+        &program
+            .expr(items[1].target.expect("nested destructuring target"))
+            .kind,
         ExprKind::Destructure(_, DestructureSyntax::Short)
     ));
 }
@@ -632,20 +642,22 @@ fn a_foreach_value_array_is_a_destructuring_target() {
 #[test]
 fn an_array_that_is_not_assigned_to_stays_a_value() {
     let program = parse("<?php $x = [$a, [$b]][0] = 1;");
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Assign(inner, _) = &rhs.kind else {
-        panic!("expected an assignment, got {:?}", rhs.kind);
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
     };
-    let ExprKind::Index(base, _) = &inner.kind else {
-        panic!("expected an element write, got {:?}", inner.kind);
+    let ExprKind::Assign(inner, _) = &program.expr(*rhs).kind else {
+        panic!("expected nested assignment");
     };
-    assert!(matches!(base.kind, ExprKind::ArrayLiteral(_)));
+    let ExprKind::Index(base, _) = &program.expr(*inner).kind else {
+        panic!("expected an element write");
+    };
+    assert!(matches!(
+        program.expr(*base).kind,
+        ExprKind::ArrayLiteral(_)
+    ));
 }
 
 #[test]
@@ -653,22 +665,24 @@ fn pipe_operator_parses_left_associative_and_at_the_right_precedence() {
     // Precedence checked empirically against a real PHP 8.5 build:
     // tighter than relational, looser than additive/concat.
     let program = parse(r#"<?php $r = 1 |> 'inc' |> 'dbl' < 3;"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
     // `<` is outermost: (1 |> 'inc' |> 'dbl') < 3
-    let ExprKind::Binary(BinOp::Lt, lhs, _) = &rhs.kind else {
+    let ExprKind::Binary(BinOp::Lt, lhs, _) = &program.expr(*rhs).kind else {
         panic!("expected relational at the top");
     };
     // pipe is left-associative: (1 |> 'inc') |> 'dbl'
-    let ExprKind::Binary(BinOp::Pipe, inner, _) = &lhs.kind else {
+    let ExprKind::Binary(BinOp::Pipe, inner, _) = &program.expr(*lhs).kind else {
         panic!("expected Pipe");
     };
-    assert!(matches!(&inner.kind, ExprKind::Binary(BinOp::Pipe, _, _)));
+    assert!(matches!(
+        &program.expr(*inner).kind,
+        ExprKind::Binary(BinOp::Pipe, _, _)
+    ));
 }
 
 #[test]
@@ -680,35 +694,31 @@ fn dynamic_property_and_method_access_parse() {
             Foo::{$name}();
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
     assert!(matches!(
-        &rhs.kind,
+        &program.expr(*rhs).kind,
         ExprKind::DynamicPropertyAccess(_, _, _)
     ));
 
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::DynamicMethodCall(_, _, _, _),
-            ..
-        })
+        StmtKind::Expression(expr)
+            if matches!(program.expr(*expr).kind, ExprKind::DynamicMethodCall(_, _, _, _))
     ));
 
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::DynamicStaticCall(class, name, _),
-        ..
-    }) = &program[2].kind
-    else {
+    let StmtKind::Expression(call) = &program[2].kind else {
         panic!("expected DynamicStaticCall");
     };
+    let ExprKind::DynamicStaticCall(class, name, _) = &program.expr(*call).kind else {
+        panic!("expected dynamic static call");
+    };
     assert_eq!(class.as_name().map(|n| &*n.written), Some("Foo"));
-    assert!(matches!(&name.kind, ExprKind::Variable(v) if &**v == "name"));
+    assert!(matches!(&program.expr(*name).kind, ExprKind::Variable(v) if &**v == "name"));
 }
 
 #[test]
@@ -720,17 +730,26 @@ fn dollar_brace_variable_variable_forms_parse() {
             C::${f()} = g();
         "#,
     );
+    let left_hand_side = |index: usize| {
+        let StmtKind::Expression(statement) = &program[index].kind else {
+            panic!("expected expression statement");
+        };
+        let ExprKind::Assign(lhs, _) = &program.expr(*statement).kind else {
+            panic!("expected assignment");
+        };
+        program.expr(*lhs)
+    };
     assert!(matches!(
-        &program[0].kind,
-        StmtKind::Expression(ExprNode { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicVariable(_))
+        left_hand_side(0).kind,
+        ExprKind::DynamicVariable(_)
     ));
     assert!(matches!(
-        &program[1].kind,
-        StmtKind::Expression(ExprNode { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicPropertyAccess(_, _, _))
+        left_hand_side(1).kind,
+        ExprKind::DynamicPropertyAccess(_, _, _)
     ));
     assert!(matches!(
-        &program[2].kind,
-        StmtKind::Expression(ExprNode { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if **c == "C")
+        &left_hand_side(2).kind,
+        ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if c.written == "C"
     ));
 }
 
@@ -743,63 +762,71 @@ fn clone_with_overrides_and_classic_forms_both_parse() {
             $z = clone($a)->b;
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Clone(_, Some(_))));
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::Clone(_, Some(_))
+    ));
 
     // `clone $a->b` clones the result of `$a->b`, not `$a` itself -
     // postfix binds inside clone's operand.
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[1].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[1].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Clone(inner, None) = &rhs.kind else {
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    let ExprKind::Clone(inner, None) = &program.expr(*rhs).kind else {
         panic!("expected Clone with no overrides");
     };
-    assert!(matches!(&inner.kind, ExprKind::PropertyAccess(..)));
+    assert!(matches!(
+        &program.expr(*inner).kind,
+        ExprKind::PropertyAccess(..)
+    ));
 
     // Same rule applies even with explicit parens and no comma:
     // `clone($a)->b` clones `$a->b`, not `$a`.
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[2].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[2].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Clone(inner, None) = &rhs.kind else {
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    let ExprKind::Clone(inner, None) = &program.expr(*rhs).kind else {
         panic!("expected Clone with no overrides");
     };
-    assert!(matches!(&inner.kind, ExprKind::PropertyAccess(..)));
+    assert!(matches!(
+        &program.expr(*inner).kind,
+        ExprKind::PropertyAccess(..)
+    ));
 }
 
 #[test]
 fn void_and_binary_casts_parse() {
     let program = parse(r#"<?php (void) foo(); $x = (binary) 42;"#);
+    let StmtKind::Expression(cast) = &program[0].kind else {
+        panic!("expected cast expression");
+    };
     assert!(matches!(
-        &program[0].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::Cast(CastSpelling::Void, _),
-            ..
-        })
+        program.expr(*cast).kind,
+        ExprKind::Cast(CastSpelling::Void, _)
     ));
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[1].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[1].kind else {
         panic!("expected assignment");
     };
     // `(binary)` is `(string)`'s own non-canonical spelling.
-    assert!(matches!(&rhs.kind, ExprKind::Cast(CastSpelling::Binary, _)));
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::Cast(CastSpelling::Binary, _)
+    ));
 }
 
 #[test]
@@ -818,12 +845,11 @@ fn cast_spellings_are_recorded_as_written_with_their_kind() {
     let spellings: Vec<CastSpelling> = program
         .iter()
         .map(|s| {
-            let StmtKind::Expression(ExprNode {
-                kind: ExprKind::Cast(spelling, _),
-                ..
-            }) = &s.kind
-            else {
+            let StmtKind::Expression(expr) = &s.kind else {
                 panic!("expected a Cast expression statement, got {:?}", s.kind);
+            };
+            let ExprKind::Cast(spelling, _) = &program.expr(*expr).kind else {
+                panic!("expected cast expression");
             };
             *spelling
         })
@@ -872,18 +898,22 @@ fn yield_followed_by_pure_binary_operator_is_bare() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Call(_, args),
-        ..
-    }) = &f.body_stmts()[0].kind
-    else {
+    let f = program.function(*f);
+    let StmtKind::Expression(call) = &program.stmt(f.body_stmts(&program.arenas)[0]).kind else {
         panic!("expected var_dump() call");
     };
+    let ExprKind::Call(_, args) = &program.expr(*call).kind else {
+        panic!("expected call expression");
+    };
+    let args = program.args(args.clone());
     // (yield) * (-1), not yield applied to some malformed operand.
-    let ExprKind::Binary(BinOp::Mul, lhs, _) = &args[0].value.kind else {
+    let ExprKind::Binary(BinOp::Mul, lhs, _) = &program.expr(args[0].value).kind else {
         panic!("expected a multiplication at the top");
     };
-    assert!(matches!(&lhs.kind, ExprKind::Yield(None, None)));
+    assert!(matches!(
+        &program.expr(*lhs).kind,
+        ExprKind::Yield(None, None)
+    ));
 }
 
 #[test]
@@ -902,27 +932,28 @@ fn clone_call_form_variants_parse() {
 #[test]
 fn clone_as_first_class_callable_parses() {
     let program = parse(r#"<?php $f = clone(...);"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::FirstClassCallable(_)));
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::FirstClassCallable(_)
+    ));
 }
 
 #[test]
 fn by_reference_arrow_function_still_parses_as_arrow_fn() {
     let program = parse(r#"<?php $id = fn&(&$x) => $x;"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::ArrowFn { .. }));
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(&program.expr(*rhs).kind, ExprKind::ArrowFn { .. }));
 }
 
 // `#[Attr] function () {}` / `#[Attr] static fn() => ...` - the only
@@ -931,68 +962,90 @@ fn by_reference_arrow_function_still_parses_as_arrow_fn() {
 #[test]
 fn an_attributed_closure_expression_carries_its_own_attrs() {
     let program = parse(r#"<?php $f = #[Pure] function () { return 1; };"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Closure(closure) = &rhs.kind else {
-        panic!("expected a Closure, got {:?}", rhs.kind);
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
     };
-    assert_eq!(closure.attrs.len(), 1);
-    assert_eq!(closure.attrs[0].name, "Pure");
+    let ExprKind::Closure(closure_id) = &program.expr(*rhs).kind else {
+        panic!("expected a Closure");
+    };
+    let ClosurePayload::Closure(closure) = program
+        .arenas
+        .closure(*closure_id)
+        .expect("closure payload belongs to the parsed file")
+    else {
+        panic!("expected a closure payload");
+    };
+    let attrs = program.attributes(closure.attrs.clone());
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "Pure");
 }
 
 #[test]
 fn an_attributed_static_arrow_function_carries_its_own_attrs() {
     let program = parse(r#"<?php $f = #[Pure] static fn($x) => $x;"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::ArrowFn(arrow) = &rhs.kind else {
-        panic!("expected an ArrowFn, got {:?}", rhs.kind);
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
     };
-    assert_eq!(arrow.attrs.len(), 1);
-    assert_eq!(arrow.attrs[0].name, "Pure");
+    let ExprKind::ArrowFn(arrow_id) = &program.expr(*rhs).kind else {
+        panic!("expected an ArrowFn");
+    };
+    let ClosurePayload::ArrowFn(arrow) = program
+        .arenas
+        .closure(*arrow_id)
+        .expect("arrow payload belongs to the parsed file")
+    else {
+        panic!("expected an arrow payload");
+    };
+    let attrs = program.attributes(arrow.attrs.clone());
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "Pure");
     assert!(arrow.is_static);
 }
 
 #[test]
 fn a_plain_closure_with_no_attributes_has_an_empty_attrs_list() {
     let program = parse(r#"<?php $f = function () { return 1; };"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::Closure(closure) = &rhs.kind else {
-        panic!("expected a Closure, got {:?}", rhs.kind);
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
     };
-    assert!(closure.attrs.is_empty());
+    let ExprKind::Closure(closure_id) = &program.expr(*rhs).kind else {
+        panic!("expected a Closure");
+    };
+    let ClosurePayload::Closure(closure) = program
+        .arenas
+        .closure(*closure_id)
+        .expect("closure payload belongs to the parsed file")
+    else {
+        panic!("expected a closure payload");
+    };
+    assert!(program.attributes(closure.attrs.clone()).is_empty());
 }
 
 #[test]
 fn trailing_dot_float_literal_parses() {
     let program = parse(r#"<?php $x = [5., 6.];"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    let ExprKind::ArrayLiteral(items) = &rhs.kind else {
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    let ExprKind::ArrayLiteral(items) = &program.expr(*rhs).kind else {
         panic!("expected array literal");
     };
-    assert!(matches!(&items[0].value.kind, ExprKind::Literal(Literal::Float(f)) if *f == 5.0));
+    let items = program.array_items(items.clone());
+    assert!(
+        matches!(&program.expr(items[0].value).kind, ExprKind::Literal(Literal::Float(f)) if *f == 5.0)
+    );
 }
 
 #[test]
@@ -1005,29 +1058,32 @@ fn dynamic_class_expr_after_new_and_instanceof_parses() {
             var_dump($obj instanceof ('std'.$class));
         "#,
     );
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Call(_, args),
-        ..
-    }) = &program[1].kind
-    else {
+    let StmtKind::Expression(call) = &program[1].kind else {
         panic!("expected var_dump() call");
     };
-    let ExprKind::New(class_expr, _) = &args[0].value.kind else {
+    let ExprKind::Call(_, args) = &program.expr(*call).kind else {
+        panic!("expected call expression");
+    };
+    let args = program.args(args.clone());
+    let ExprKind::New(class_expr, _) = &program.expr(args[0].value).kind else {
         panic!("expected New");
     };
-    assert!(matches!(&class_expr.kind, ExprKind::Grouping(_)));
+    assert!(matches!(
+        &program.expr(*class_expr).kind,
+        ExprKind::Grouping(_)
+    ));
 
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Call(_, args),
-        ..
-    }) = &program[2].kind
-    else {
+    let StmtKind::Expression(call) = &program[2].kind else {
         panic!("expected var_dump() call");
     };
-    let ExprKind::New(_, ctor_args) = &args[0].value.kind else {
+    let ExprKind::Call(_, args) = &program.expr(*call).kind else {
+        panic!("expected call expression");
+    };
+    let args = program.args(args.clone());
+    let ExprKind::New(_, ctor_args) = &program.expr(args[0].value).kind else {
         panic!("expected New");
     };
-    assert_eq!(ctor_args.len(), 0);
+    assert!(program.args(ctor_args.clone()).is_empty());
 }
 
 #[test]
@@ -1036,9 +1092,10 @@ fn brace_less_double_dollar_variable_variable_parses() {
     let StmtKind::Global(vars) = &program[0].kind else {
         panic!("expected a global statement");
     };
+    let vars = program.arenas.global_vars(vars.clone());
     assert_eq!(vars[0].name().map(|n| n.as_str()), Some("a"));
     assert!(
-        matches!(&vars[1], GlobalVar::Dynamic(ExprNode { kind: ExprKind::Variable(b), .. }) if &**b == "b")
+        matches!(&vars[1], GlobalVar::Dynamic(expr) if matches!(&program.expr(*expr).kind, ExprKind::Variable(b) if &**b == "b"))
     );
 }
 
@@ -1051,23 +1108,20 @@ fn double_dollar_variable_variable_in_member_position_parses() {
             $obj->$$name();
         "#,
     );
+    let expression = |i: usize| match &program[i].kind {
+        StmtKind::Expression(expr) => program.expr(*expr),
+        other => panic!("expected expression statement, got {other:?}"),
+    };
     assert!(matches!(
-        &program[0].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::DynamicPropertyAccess(_, _, _),
-            ..
-        })
+        expression(0).kind,
+        ExprKind::DynamicPropertyAccess(_, _, _)
     ));
+    assert!(
+        matches!(&expression(1).kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _) if c.written == "Foo")
+    );
     assert!(matches!(
-        &program[1].kind,
-        StmtKind::Expression(ExprNode { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c), _), .. }) if **c == "Foo"
-    ));
-    assert!(matches!(
-        &program[2].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::DynamicMethodCall(_, _, _, _),
-            ..
-        })
+        expression(2).kind,
+        ExprKind::DynamicMethodCall(_, _, _, _)
     ));
 }
 
@@ -1087,32 +1141,38 @@ fn bare_variable_in_member_position_parses_as_dynamic() {
         "#,
     );
     assert!(matches!(
-        &program[0].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::DynamicPropertyAccess(_, _, _),
-            ..
-        })
+        &program
+            .expr(match &program[0].kind {
+                StmtKind::Expression(expr) => *expr,
+                _ => unreachable!(),
+            })
+            .kind,
+        ExprKind::DynamicPropertyAccess(_, _, _)
     ));
     assert!(matches!(
-        &program[1].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::DynamicMethodCall(_, _, _, _),
-            ..
-        })
+        &program
+            .expr(match &program[1].kind {
+                StmtKind::Expression(expr) => *expr,
+                _ => unreachable!(),
+            })
+            .kind,
+        ExprKind::DynamicMethodCall(_, _, _, _)
     ));
 }
 
 #[test]
 fn array_cast_parses() {
     let program = parse(r#"<?php $tmp = (array)$var;"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
+    let StmtKind::Expression(assignment) = &program[0].kind else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Cast(CastSpelling::Array, _)));
+    let ExprKind::Assign(_, rhs) = &program.expr(*assignment).kind else {
+        panic!("expected assignment expression");
+    };
+    assert!(matches!(
+        &program.expr(*rhs).kind,
+        ExprKind::Cast(CastSpelling::Array, _)
+    ));
 }
 
 #[test]
@@ -1125,19 +1185,19 @@ fn a_variable_variable_member_name_keeps_both_levels_of_indirection() {
         "#,
     );
     let name_of = |i: usize| match &program[i].kind {
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::DynamicPropertyAccess(_, name, _),
-            ..
-        }) => &name.kind,
-        other => panic!("expected a dynamic property access, got {other:?}"),
+        StmtKind::Expression(expr) => match &program.expr(*expr).kind {
+            ExprKind::DynamicPropertyAccess(_, name, _) => &program.expr(*name).kind,
+            other => panic!("expected a dynamic property access, got {other:?}"),
+        },
+        other => panic!("expected an expression statement, got {other:?}"),
     };
     assert!(matches!(
         name_of(0),
-        ExprKind::DynamicVariable(inner) if matches!(inner.kind, ExprKind::Variable(_))
+        ExprKind::DynamicVariable(inner) if matches!(program.expr(*inner).kind, ExprKind::Variable(_))
     ));
     assert!(matches!(
         name_of(1),
-        ExprKind::DynamicVariable(inner) if matches!(inner.kind, ExprKind::Literal(_))
+        ExprKind::DynamicVariable(inner) if matches!(program.expr(*inner).kind, ExprKind::Literal(_))
     ));
     assert!(matches!(name_of(2), ExprKind::Literal(_)));
 }
@@ -1149,13 +1209,16 @@ fn new_takes_a_property_chain_as_its_class_and_the_call_as_its_arguments() {
         let StmtKind::Expression(e) = &program[i].kind else {
             panic!("expected an expression statement");
         };
-        let ExprKind::Assign(_, rhs) = &e.kind else {
+        let ExprKind::Assign(_, rhs) = &program.expr(*e).kind else {
             panic!("expected an assignment");
         };
-        let ExprKind::New(class, args) = &rhs.kind else {
-            panic!("expected new, got {:?}", rhs.kind);
+        let ExprKind::New(class, args) = &program.expr(*rhs).kind else {
+            panic!("expected new");
         };
-        (class.kind.clone(), args.len())
+        (
+            program.expr(*class).kind.clone(),
+            program.args(args.clone()).len(),
+        )
     };
     assert!(
         matches!(class_of(0), (ExprKind::PropertyAccess(_, ref name, ObjectOperator::Arrow), 1) if &*name.name == "model")

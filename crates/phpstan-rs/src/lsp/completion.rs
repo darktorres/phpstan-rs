@@ -28,7 +28,7 @@
 //! hover) to run this through the checker recovers the receiver's real,
 //! flow-sensitive inferred type via the *already-shipped*
 //! `ExprKind::Variable` probe hook (`checker/expr.rs`'s `self.probe_hit_
-//! at(e.span, &ty)` inside that arm) - no new Checker API, and uniform
+//! at(self.expr_span(e.id), &ty)` inside that arm) - no new Checker API, and uniform
 //! for `->`/`::` alike (`ExprKind::ClassConstFetch`/`StaticCall`'s class
 //! side is a bare `String`, not an `ExprNode`, so there is no AST-node shape
 //! a `::` receiver could otherwise be spliced into).
@@ -48,16 +48,17 @@ use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 use crate::project::{self, Project};
 use crate::registry::Registry;
 use syntax::ast::{
-    ClassKind, ExprKind, ExprNode, FunctionBody, FunctionDecl, NodeArenas, SYNTHETIC_EXPR_ID,
-    SYNTHETIC_STMT_ID, StmtId, StmtKind, StmtNode, Visibility,
+    ClassKind, ExprId, ExprKind, ExprNode, FunctionBody, FunctionDecl, NodeArenas, StmtId,
+    StmtKind, StmtNode, Visibility,
 };
 use syntax::span::{LineIndex, Span, Unit};
-use syntax::token::{Keyword, Token};
+use syntax::token::{Keyword, TokenKind, TokenRef as Token, TokenStream};
 use types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::Positions;
-use syntax::name_resolution::{NameContext, context_at, context_at_ids};
+use syntax::ParsedFile;
+use syntax::name_resolution::{NameContext, context_at_ids};
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.
@@ -77,48 +78,43 @@ pub(super) enum Trigger {
     Bare,
 }
 
-/// Tokenizes a whole file buffer (`<?php` tag and all - matching every
-/// other whole-file tokenization in this project, e.g. `project.rs`'s
-/// own `parse`), dropping the raw-keyword-spelling third element
-/// `Parser::new` needs but the token-scan functions in this module
-/// don't.
-pub(super) fn tokenize(text: &str) -> Vec<(Token, Span)> {
-    syntax::lexer::Lexer::new(text)
-        .tokenize_with_spans()
-        .into_iter()
-        .map(|(tok, span, _)| (tok, span))
-        .collect()
+/// Tokenizes the live buffer into its flat stream. Completion only reads
+/// kinds, spans, and borrowed name payloads while scanning for a trigger.
+pub(super) fn tokenize(text: &str) -> TokenStream {
+    syntax::lexer::Lexer::new(text).lex_token_stream()
 }
 
 /// Classifies `cursor`'s trigger shape against an already-tokenized
 /// buffer (see `tokenize`).
-pub(super) fn classify(tokens: &[(Token, Span)], cursor: u32) -> Trigger {
+pub(super) fn classify(tokens: &TokenStream, cursor: u32) -> Trigger {
     // `Token::Eof` is a zero-width sentinel whose own span sits at (or
     // past) the very end of the buffer, so it always satisfies `span.end
     // <= cursor` too - excluded here, or it would always win `rposition`
     // over the real last token, e.g. the `Arrow` in `$x->` with the
     // cursor right after it.
     let Some(idx) = tokens
+        .kinds
         .iter()
-        .rposition(|(tok, span)| !matches!(tok, Token::Eof) && span.end <= cursor)
+        .enumerate()
+        .rposition(|(index, kind)| *kind != TokenKind::Eof && tokens.span_at(index).end <= cursor)
     else {
         return Trigger::Bare;
     };
-    match &tokens[idx].0 {
-        Token::Arrow | Token::NullsafeArrow => Trigger::Member {
+    match tokens.kind_at(idx) {
+        TokenKind::Arrow | TokenKind::NullsafeArrow => Trigger::Member {
             anchor_idx: idx,
             is_static: false,
         },
-        Token::DoubleColon => Trigger::Member {
+        TokenKind::DoubleColon => Trigger::Member {
             anchor_idx: idx,
             is_static: true,
         },
-        Token::Identifier(_) if idx > 0 => match &tokens[idx - 1].0 {
-            Token::Arrow | Token::NullsafeArrow => Trigger::Member {
+        TokenKind::Identifier if idx > 0 => match tokens.kind_at(idx - 1) {
+            TokenKind::Arrow | TokenKind::NullsafeArrow => Trigger::Member {
                 anchor_idx: idx - 1,
                 is_static: false,
             },
-            Token::DoubleColon => Trigger::Member {
+            TokenKind::DoubleColon => Trigger::Member {
                 anchor_idx: idx - 1,
                 is_static: true,
             },
@@ -139,20 +135,20 @@ pub(super) fn classify(tokens: &[(Token, Span)], cursor: u32) -> Trigger {
 /// doesn't need to find the *minimal* receiver boundary, only a safe
 /// one - either it parses as one expression (correct) or it doesn't
 /// (graceful no-completions, never a wrong answer).
-fn receiver_start_idx(tokens: &[(Token, Span)], anchor_idx: usize) -> usize {
+fn receiver_start_idx(tokens: &TokenStream, anchor_idx: usize) -> usize {
     let mut depth: i32 = 0;
     let mut i = anchor_idx;
     while i > 0 {
         i -= 1;
-        match &tokens[i].0 {
-            Token::RParen | Token::RBracket | Token::RBrace => depth += 1,
-            Token::LParen | Token::LBracket | Token::LBrace => {
+        match tokens.kind_at(i) {
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth += 1,
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
                 if depth == 0 {
                     return i + 1;
                 }
                 depth -= 1;
             }
-            Token::Semicolon if depth == 0 => return i + 1,
+            TokenKind::Semicolon if depth == 0 => return i + 1,
             _ => {}
         }
     }
@@ -167,49 +163,38 @@ fn receiver_start_idx(tokens: &[(Token, Span)], anchor_idx: usize) -> usize {
 /// receiver's internal ones, and any diagnostics this throwaway checker
 /// pass produces are discarded the same way the existing hover probe
 /// already discards its own).
-fn parse_standalone_expr(text: &str) -> Option<ExprNode> {
-    let tokens = syntax::lexer::Lexer::new_in_php(text).tokenize_with_spans();
-    let mut parser = syntax::parser::Parser::new(tokens);
-    let expr = parser.parse_expression().ok()?;
-    parser.at_eof().then_some(expr)
-}
-
 /// The header token run immediately before `end_idx` (an opening `{`) -
 /// back to the nearest preceding `;`/`}` at bracket/paren depth 0. Used
 /// to find a `function <name> (` or `class|interface|trait|enum <name>`
 /// pattern without needing to precisely skip a variable-length
 /// extends/implements list or return-type annotation: the header is
 /// captured whole, then scanned *forward* for the pattern instead.
-fn header_start(tokens: &[(Token, Span)], end_idx: usize) -> usize {
+fn header_start(tokens: &TokenStream, end_idx: usize) -> usize {
     let mut depth: i32 = 0;
     let mut i = end_idx;
     while i > 0 {
         i -= 1;
-        match &tokens[i].0 {
-            Token::RBracket | Token::RParen => depth += 1,
-            Token::LBracket | Token::LParen => depth -= 1,
-            Token::Semicolon | Token::RBrace if depth <= 0 => return i + 1,
+        match tokens.kind_at(i) {
+            TokenKind::RBracket | TokenKind::RParen => depth += 1,
+            TokenKind::LBracket | TokenKind::LParen => depth -= 1,
+            TokenKind::Semicolon | TokenKind::RBrace if depth <= 0 => return i + 1,
             _ => {}
         }
     }
     0
 }
 
-fn function_name_before(tokens: &[(Token, Span)], brace_idx: usize) -> Option<String> {
+fn function_name_before(tokens: &TokenStream, brace_idx: usize) -> Option<String> {
     let start = header_start(tokens, brace_idx);
-    tokens[start..brace_idx]
-        .windows(2)
-        .find_map(|w| match (&w[0].0, &w[1].0) {
-            (Token::Keyword(Keyword::Function), Token::Identifier(name)) => Some(name.to_string()),
-            _ => None,
-        })
+    (start..brace_idx.saturating_sub(1)).find_map(|i| match (tokens.token_at(i), tokens.token_at(i + 1)) {
+        (Token::Keyword(Keyword::Function), Token::Identifier(name)) => Some(name.to_string()),
+        _ => None,
+    })
 }
 
-fn class_name_before(tokens: &[(Token, Span)], brace_idx: usize) -> Option<String> {
+fn class_name_before(tokens: &TokenStream, brace_idx: usize) -> Option<String> {
     let start = header_start(tokens, brace_idx);
-    tokens[start..brace_idx]
-        .windows(2)
-        .find_map(|w| match (&w[0].0, &w[1].0) {
+    (start..brace_idx.saturating_sub(1)).find_map(|i| match (tokens.token_at(i), tokens.token_at(i + 1)) {
             (
                 Token::Keyword(
                     Keyword::Class | Keyword::Interface | Keyword::Trait | Keyword::Enum,
@@ -232,7 +217,7 @@ fn class_name_before(tokens: &[(Token, Span)], brace_idx: usize) -> Option<Strin
 /// finds nothing (falls back to `ProbeScope::TopLevel` below), it can
 /// never silently substitute a *different*, wrongly-matching function.
 fn find_enclosing_names(
-    tokens: &[(Token, Span)],
+    tokens: &TokenStream,
     anchor_idx: usize,
 ) -> (Option<String>, Option<String>) {
     let mut function_name = None;
@@ -241,10 +226,10 @@ fn find_enclosing_names(
     let mut i = anchor_idx;
     while i > 0 {
         i -= 1;
-        match &tokens[i].0 {
-            Token::RBrace => depth += 1,
-            Token::LBrace if depth > 0 => depth -= 1,
-            Token::LBrace => {
+        match tokens.kind_at(i) {
+            TokenKind::RBrace => depth += 1,
+            TokenKind::LBrace if depth > 0 => depth -= 1,
+            TokenKind::LBrace => {
                 if function_name.is_none() {
                     match function_name_before(tokens, i) {
                         Some(name) => function_name = Some(name),
@@ -262,23 +247,35 @@ fn find_enclosing_names(
 }
 
 fn find_function_by_name<'a>(
-    stmts: &'a [StmtNode],
+    file: &'a ParsedFile,
     class_name: Option<&str>,
     function_name: &str,
-) -> Option<(&'a FunctionDecl, bool)> {
+) -> Option<(FunctionDecl, bool)> {
+    let arenas = &file.arenas;
     match class_name {
-        Some(class_name) => stmts.iter().find_map(|stmt| match &stmt.kind {
-            StmtKind::ClassDecl(c) if *c.name == *class_name => c
-                .def
-                .methods
+        Some(class_name) => file.statements().iter().find_map(|id| {
+            let stmt = arenas.stmt(id.clone())?;
+            let StmtKind::ClassDecl(decl) = &stmt.kind else {
+                return None;
+            };
+            let decl = arenas.class_decl(decl.clone());
+            if *decl.name != *class_name {
+                return None;
+            }
+            let def = arenas.class(decl.def)?;
+            let methods = arenas.methods(def.methods.clone());
+            methods
                 .iter()
                 .find(|m| m.function.name.as_ref() == function_name)
-                .map(|m| (&m.function, m.is_static)),
-            _ => None,
+                .map(|m| (m.function.clone(), m.is_static))
         }),
-        None => stmts.iter().find_map(|stmt| match &stmt.kind {
-            StmtKind::FunctionDecl(f) if f.name.as_ref() == function_name => Some((&**f, false)),
-            _ => None,
+        None => file.statements().iter().find_map(|id| {
+            let stmt = arenas.stmt(id.clone())?;
+            let StmtKind::FunctionDecl(function) = &stmt.kind else {
+                return None;
+            };
+            let function = arenas.function(function.clone())?;
+            (function.name.as_ref() == function_name).then(|| (function.clone(), false))
         }),
     }
 }
@@ -302,34 +299,30 @@ fn sentinel_span(at: u32) -> Span {
 /// of that same variable, whose span is `probe_span` below - reusing
 /// the checker's already-shipped `ExprKind::Assign` (binds the probe
 /// variable's type from the receiver) and `ExprKind::Variable` read
-/// (`checker/expr.rs`'s own `self.probe_hit_at(e.span, &ty)`) rather
+/// (`checker/expr.rs`'s own `self.probe_hit_at(self.expr_span(e.id), &ty)`) rather
 /// than any new Checker-side mechanism.
-fn probe_statements(receiver: ExprNode) -> (StmtNode, StmtNode, Span) {
+fn probe_statements(file: &mut ParsedFile, receiver: ExprId) -> (StmtId, StmtId, Span) {
     let assign_span = sentinel_span(u32::MAX - 3);
     let read_span = sentinel_span(u32::MAX - 1);
-    let probe_var = |span: Span| ExprNode {
-        id: SYNTHETIC_EXPR_ID,
-        kind: ExprKind::Variable(PROBE_VAR.into()),
-        span,
+    let alloc_expr = |file: &mut ParsedFile, kind, span| {
+        let id = file.arenas.next_expr_id();
+        file.arenas.alloc_expr(ExprNode { id, kind }, span)
     };
+    let probe_var =
+        |file: &mut ParsedFile, span| alloc_expr(file, ExprKind::Variable(PROBE_VAR.into()), span);
+    let lhs = probe_var(file, assign_span);
+    let assign_expr = alloc_expr(file, ExprKind::Assign(lhs, receiver), assign_span);
     let assign_stmt = StmtNode {
-        id: SYNTHETIC_STMT_ID,
-        kind: StmtKind::Expression(ExprNode {
-            id: SYNTHETIC_EXPR_ID,
-            kind: ExprKind::Assign(Box::new(probe_var(assign_span)), Box::new(receiver)),
-            span: assign_span,
-        }),
-        span: assign_span,
-        doc_comment: None,
-        doc_line: None,
+        id: file.arenas.next_stmt_id(),
+        kind: StmtKind::Expression(assign_expr),
     };
+    let assign_stmt = file.arenas.alloc_stmt(assign_stmt, assign_span);
+    let read_expr = probe_var(file, read_span);
     let read_stmt = StmtNode {
-        id: SYNTHETIC_STMT_ID,
-        kind: StmtKind::Expression(probe_var(read_span)),
-        span: read_span,
-        doc_comment: None,
-        doc_line: None,
+        id: file.arenas.next_stmt_id(),
+        kind: StmtKind::Expression(read_expr),
     };
+    let read_stmt = file.arenas.alloc_stmt(read_stmt, read_span);
     (assign_stmt, read_stmt, read_span)
 }
 
@@ -346,44 +339,73 @@ fn probe_statements(receiver: ExprNode) -> (StmtNode, StmtNode, Span) {
 /// appended - see this module's own doc comment for why truncating
 /// (never "insert before") is the sound choice.
 fn build_probe_scope(
-    stmts: &[StmtNode],
+    mut file: ParsedFile,
     class_name: Option<&str>,
     function_name: Option<&str>,
     cut_line: u32,
     index: &LineIndex,
-    receiver: ExprNode,
-) -> (ProbeScope, bool, Option<String>, Span) {
-    let (assign_stmt, read_stmt, probe_span) = probe_statements(receiver);
-    let found = function_name.and_then(|f| find_function_by_name(stmts, class_name, f));
+    receiver: ExprId,
+) -> (ProbeScope, bool, Option<String>, Span, ParsedFile) {
+    let (assign_stmt, read_stmt, probe_span) = probe_statements(&mut file, receiver);
+    let found = function_name.and_then(|f| find_function_by_name(&file, class_name, f));
     match found {
-        Some((f, is_static)) => {
-            let mut cloned = f.clone();
+        Some((mut cloned, is_static)) => {
+            let f_span = cloned.span;
+            let empty_stmts = file.arenas.alloc_stmt_ids([]);
             let body = cloned.body.get_or_insert_with(|| FunctionBody {
-                open: f.span,
-                stmts: std::sync::Arc::new(Vec::new()),
+                open: f_span,
+                stmts: empty_stmts,
                 goto_labels: Box::default(),
                 is_generator: false,
             });
-            let body = std::sync::Arc::make_mut(&mut body.stmts);
-            body.retain(|s| index.line(s.span.end) < cut_line);
-            body.push(assign_stmt);
-            body.push(read_stmt);
+            let mut retained: Vec<StmtId> = file
+                .arenas
+                .stmt_ids(&body.stmts)
+                .iter()
+                .copied()
+                .filter(|id| {
+                    file.arenas
+                        .stmt_span(*id)
+                        .is_some_and(|span| index.line(span.end) < cut_line)
+                })
+                .collect();
+            retained.extend([assign_stmt, read_stmt]);
+            body.stmts = file.arenas.alloc_stmt_ids(retained);
             (
-                ProbeScope::Function(Box::new(cloned)),
+                ProbeScope::Function {
+                    function: Box::new(cloned),
+                    owner: None,
+                },
                 is_static,
                 class_name.map(str::to_string),
                 probe_span,
+                file,
             )
         }
         None => {
-            let mut top: Vec<StmtNode> = stmts
+            let mut top: Vec<StmtId> = file
+                .statements()
                 .iter()
-                .filter(|s| index.line(s.span.end) < cut_line)
-                .cloned()
+                .filter(|id| {
+                    file.arenas
+                        .stmt_span(**id)
+                        .is_some_and(|span| index.line(span.end) < cut_line)
+                })
+                .copied()
                 .collect();
             top.push(assign_stmt);
             top.push(read_stmt);
-            (ProbeScope::TopLevel(top), false, None, probe_span)
+            file.stmts = file.arenas.alloc_stmt_ids(top.iter().copied());
+            (
+                ProbeScope::TopLevel {
+                    statements: top,
+                    owner: None,
+                },
+                false,
+                None,
+                probe_span,
+                file,
+            )
         }
     }
 }
@@ -528,9 +550,9 @@ fn short_name(fqn: &str) -> &str {
 fn find_use_insertion_point(arenas: &NodeArenas, stmts: &[StmtId]) -> Option<u32> {
     stmts
         .iter()
-        .filter_map(|id| arenas.stmt(*id))
+        .filter_map(|id| arenas.stmt(id.clone()))
         .rfind(|stmt| matches!(&stmt.kind, StmtKind::Use(_) | StmtKind::Namespace(_)))
-        .map(|s| s.span.end)
+        .and_then(|s| arenas.stmt_span(s.id).map(|span| span.end))
 }
 
 /// Decides how a bare-completion candidate FQN should actually be
@@ -682,6 +704,7 @@ pub(super) enum MemberProbe {
         class: Option<String>,
     },
     NeedsProbe {
+        owner: std::sync::Arc<ParsedFile>,
         scope: ProbeScope,
         scope_is_static: bool,
         class: Option<String>,
@@ -699,9 +722,9 @@ pub(super) enum MemberProbe {
 /// function is given) or an unparseable/malformed receiver.
 pub(super) fn build_member_probe(
     text: &str,
-    tokens: &[(Token, Span)],
+    tokens: &TokenStream,
     cursor: Cursor,
-    stmts: &[StmtNode],
+    file: &ParsedFile,
     registry: &Registry,
 ) -> Option<MemberProbe> {
     let Trigger::Member {
@@ -716,11 +739,14 @@ pub(super) fn build_member_probe(
         return None;
     }
     let receiver_span = Span {
-        start: tokens[start_idx].1.start,
-        end: tokens[anchor_idx].1.start,
+        start: tokens.span_at(start_idx).start,
+        end: tokens.span_at(anchor_idx).start,
     };
     let receiver_text = slice_span(text, receiver_span)?;
-    let receiver = parse_standalone_expr(&receiver_text)?;
+    let context = context_at_ids(&file.arenas, file.statements(), cursor.stale);
+    let mut owner = file.clone();
+    let receiver =
+        syntax::parse_expression_into_arenas(&receiver_text, &context, &mut owner.arenas)?;
     let (function_name, class_name) = find_enclosing_names(tokens, anchor_idx);
 
     // The cheap path: `self`/`static`/`parent`/a literal (possibly
@@ -728,9 +754,15 @@ pub(super) fn build_member_probe(
     // all - it's a name reference, not a value, so the general
     // assign-then-read splice below (which reads back a *value*'s
     // inferred type) doesn't apply to it in the first place.
-    if is_static && let ExprKind::Name(name) = &receiver.kind {
+    if is_static
+        && let Some(ExprNode {
+            kind: ExprKind::Name(name),
+            ..
+        }) = owner.arenas.expr(receiver)
+        && let Some(name) = owner.arenas.qualified_name(name)
+    {
         let mut name = name.clone();
-        syntax::name_resolution::resolve_class_name(&mut name, &context_at(stmts, cursor.stale));
+        syntax::name_resolution::resolve_class_name(&mut name, &context);
         let resolved =
             super::navigation::resolve_class_ref(&name, class_name.as_deref(), registry)?;
         return Some(MemberProbe::Resolved {
@@ -740,9 +772,9 @@ pub(super) fn build_member_probe(
         });
     }
 
-    let cut_line = cursor.live_index.line(tokens[anchor_idx].1.start);
-    let (scope, scope_is_static, scope_class, probe_span) = build_probe_scope(
-        stmts,
+    let cut_line = cursor.live_index.line(tokens.span_at(anchor_idx).start);
+    let (scope, scope_is_static, scope_class, probe_span, owner) = build_probe_scope(
+        owner,
         class_name.as_deref(),
         function_name.as_deref(),
         cut_line,
@@ -750,6 +782,7 @@ pub(super) fn build_member_probe(
         receiver,
     );
     Some(MemberProbe::NeedsProbe {
+        owner: std::sync::Arc::new(owner),
         scope,
         scope_is_static,
         class: scope_class,

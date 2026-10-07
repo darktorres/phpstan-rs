@@ -14,7 +14,7 @@ use crate::checker::{Completion, Reach, is_truthy_literal};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::span::Span;
-use syntax::visit::for_each_child_expr;
+use syntax::visit::arena::{self, Visitor};
 
 /// One thing a body does that the dataflow follows.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -119,22 +119,27 @@ pub struct InitFlow {
 
 impl InitFlow {
     /// The flow of the statements of one body, whose `goto`s name `labels`.
-    pub fn of(body: &[StmtNode], labels: &[GotoLabel]) -> InitFlow {
+    pub fn of(arenas: &NodeArenas, body: &[StmtId], labels: &[GotoLabel]) -> InitFlow {
         InitFlow {
-            nodes: flow_of_stmts(body, labels).into_boxed_slice(),
+            nodes: flow_of_stmts(arenas, body, labels).into_boxed_slice(),
         }
     }
 }
 
-fn is_this(e: &ExprNode) -> bool {
-    matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
+fn is_this(arenas: &NodeArenas, id: ExprId) -> bool {
+    arenas
+        .expr(id)
+        .is_some_and(|e| matches!(&e.kind, ExprKind::Variable(v) if **v == *"this"))
 }
 
 /// How a statement completes, as far as the syntax shows: the rules the
 /// checker applies, with what can be told without inferring a type - a
 /// literal condition, `return`, `throw`, `exit`, `break`, `continue`.
 /// `labels` are the labels the `goto`s of the body land on.
-fn completion_of(stmt: &StmtNode, labels: &[GotoLabel]) -> Completion {
+fn completion_of(arenas: &NodeArenas, id: StmtId, labels: &[GotoLabel]) -> Completion {
+    let Some(stmt) = arenas.stmt(id) else {
+        return Completion::FALLS_THROUGH;
+    };
     syntax::stack::guard(|| match &stmt.kind {
         StmtKind::Return(_) | StmtKind::Throw(_) => Completion::EXITS,
         StmtKind::Break(level) => Completion::break_(level.unwrap_or(1)),
@@ -142,45 +147,69 @@ fn completion_of(stmt: &StmtNode, labels: &[GotoLabel]) -> Completion {
         // Nothing after a `goto` is reached by falling through.
         StmtKind::Goto(_) => Completion::TERMINATES,
         StmtKind::Expression(e)
-            if matches!(e.peeled().kind, ExprKind::Exit(..) | ExprKind::Throw(_)) =>
+            if arenas
+                .peeled(*e)
+                .and_then(|id| arenas.expr(id))
+                .is_some_and(|e| matches!(&e.kind, ExprKind::Exit(..) | ExprKind::Throw(_))) =>
         {
             Completion::EXITS
         }
-        StmtKind::Block(stmts)
-        | StmtKind::Declare {
+        StmtKind::Block(stmts) => block_completion(arenas, arenas.stmt_ids(stmts), labels),
+        StmtKind::Declare {
             body: Some(stmts), ..
-        } => block_completion(stmts, labels),
+        } => block_completion(arenas, arenas.stmt_ids(stmts), labels),
         StmtKind::If(if_stmt) => {
-            let otherwise = if_stmt
-                .else_branch
-                .as_deref()
-                .map_or(Completion::FALLS_THROUGH, |e| completion_of(e, labels));
-            let branches: Vec<(&ExprNode, &StmtNode)> =
-                std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
-                    .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
+            let otherwise = if_stmt.else_branch.map_or(Completion::FALLS_THROUGH, |e| {
+                completion_of(arenas, e, labels)
+            });
+            let branches: Vec<(ExprId, StmtId)> =
+                std::iter::once((if_stmt.cond, if_stmt.then_branch))
+                    .chain(
+                        arenas
+                            .elseifs(if_stmt.elseifs.clone())
+                            .iter()
+                            .map(|e| (e.cond, e.body)),
+                    )
                     .collect();
             branches
                 .into_iter()
                 .rev()
                 .fold(otherwise, |rest, (cond, body)| {
-                    Completion::if_chain(completion_of(body, labels), rest, known_condition(cond))
+                    Completion::if_chain(
+                        completion_of(arenas, body, labels),
+                        rest,
+                        known_condition(arenas, cond),
+                    )
                 })
         }
-        StmtKind::While { cond, body } => {
-            Completion::while_loop(is_truthy_literal(cond), completion_of(body, labels))
-        }
-        StmtKind::DoWhile { body, cond } => {
-            Completion::do_while(is_truthy_literal(cond), completion_of(body, labels))
-        }
-        StmtKind::For { cond, body, .. } => Completion::while_loop(
-            cond.last().is_none_or(is_truthy_literal),
-            completion_of(body, labels),
+        StmtKind::While { cond, body } => Completion::while_loop(
+            arenas.expr(*cond).is_some_and(is_truthy_literal),
+            completion_of(arenas, *body, labels),
         ),
-        StmtKind::Foreach { body, .. } => Completion::foreach(false, completion_of(body, labels)),
+        StmtKind::DoWhile { body, cond } => Completion::do_while(
+            arenas.expr(*cond).is_some_and(is_truthy_literal),
+            completion_of(arenas, *body, labels),
+        ),
+        StmtKind::For { cond, body, .. } => Completion::while_loop(
+            arenas
+                .expr_ids(cond)
+                .last()
+                .is_none_or(|id| arenas.expr(*id).is_some_and(is_truthy_literal)),
+            completion_of(arenas, *body, labels),
+        ),
+        StmtKind::Foreach { body, .. } => {
+            Completion::foreach(false, completion_of(arenas, *body, labels))
+        }
         StmtKind::Switch { cases, .. } => {
+            let cases = arenas.switch_cases(cases.clone());
             let completions: Vec<(Completion, bool)> = cases
                 .iter()
-                .map(|case| (block_completion(&case.body, labels), case.body.is_empty()))
+                .map(|case| {
+                    (
+                        block_completion(arenas, arenas.stmt_ids(&case.body), labels),
+                        arenas.stmt_ids(&case.body).is_empty(),
+                    )
+                })
                 .collect();
             Completion::switch(cases.iter().any(|c| c.test.is_none()), &completions)
         }
@@ -189,12 +218,19 @@ fn completion_of(stmt: &StmtNode, labels: &[GotoLabel]) -> Completion {
             catches,
             finally,
         } => {
-            let catches: Vec<Completion> = catches
+            let catches: Vec<Completion> = arenas
+                .catch_clauses(catches.clone())
                 .iter()
-                .map(|c| block_completion(&c.body, labels))
+                .map(|c| block_completion(arenas, arenas.stmt_ids(&c.body), labels))
                 .collect();
-            let finally = finally.as_ref().map(|f| block_completion(f, labels));
-            Completion::try_catch(block_completion(body, labels), &catches, finally)
+            let finally = finally
+                .as_ref()
+                .map(|f| block_completion(arenas, arenas.stmt_ids(f), labels));
+            Completion::try_catch(
+                block_completion(arenas, arenas.stmt_ids(body), labels),
+                &catches,
+                finally,
+            )
         }
         _ => Completion::FALLS_THROUGH,
     })
@@ -202,21 +238,25 @@ fn completion_of(stmt: &StmtNode, labels: &[GotoLabel]) -> Completion {
 
 /// The completion of a statement list: what follows a statement that
 /// terminates is unreachable until a label a `goto` lands on.
-fn block_completion(stmts: &[StmtNode], labels: &[GotoLabel]) -> Completion {
+fn block_completion(arenas: &NodeArenas, stmts: &[StmtId], labels: &[GotoLabel]) -> Completion {
     let mut reach = Reach::default();
-    for stmt in stmts {
+    for &id in stmts {
+        let Some(stmt) = arenas.stmt(id) else {
+            continue;
+        };
         if matches!(&stmt.kind, StmtKind::Label(name) if labels.iter().any(|l| l.name == name.name))
         {
             reach.label();
         }
-        reach.add(completion_of(stmt, labels));
+        reach.add(completion_of(arenas, id, labels));
     }
     reach.finish().completion
 }
 
 /// A condition that is a literal: always true, always false, or neither
 /// known.
-fn known_condition(cond: &ExprNode) -> Option<bool> {
+fn known_condition(arenas: &NodeArenas, id: ExprId) -> Option<bool> {
+    let cond = arenas.expr(id)?;
     match &cond.kind {
         _ if is_truthy_literal(cond) => Some(true),
         ExprKind::Literal(Literal::Bool(false)) | ExprKind::Literal(Literal::Int(0)) => Some(false),
@@ -226,18 +266,18 @@ fn known_condition(cond: &ExprNode) -> Option<bool> {
 
 /// The flow of a statement list: a nested block is part of it, and what has
 /// no event in it is not.
-fn flow_of_stmts(stmts: &[StmtNode], labels: &[GotoLabel]) -> Vec<Flow> {
+fn flow_of_stmts(arenas: &NodeArenas, stmts: &[StmtId], labels: &[GotoLabel]) -> Vec<Flow> {
     let mut out = Vec::new();
-    for stmt in stmts {
-        flow_of_stmt(stmt, labels, &mut out);
+    for &stmt in stmts {
+        flow_of_stmt(arenas, stmt, labels, &mut out);
     }
     out
 }
 
-fn events_of_each<'a>(exprs: impl IntoIterator<Item = &'a ExprNode>) -> Vec<Event> {
+fn events_of_each(arenas: &NodeArenas, exprs: impl IntoIterator<Item = ExprId>) -> Vec<Event> {
     let mut events = Vec::new();
     for e in exprs {
-        events_of(e, &mut events);
+        events_of(arenas, e, &mut events);
     }
     events
 }
@@ -249,53 +289,82 @@ fn push_events(out: &mut Vec<Flow>, events: Vec<Event>) {
     }
 }
 
-fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
+fn flow_of_stmt(arenas: &NodeArenas, id: StmtId, labels: &[GotoLabel], out: &mut Vec<Flow>) {
+    let Some(stmt) = arenas.stmt(id) else {
+        return;
+    };
     syntax::stack::guard(|| match &stmt.kind {
-        StmtKind::Expression(e) | StmtKind::Throw(e) => push_events(out, events_of_each([e])),
-        StmtKind::Return(Some(e)) => push_events(out, events_of_each([e])),
-        StmtKind::Echo(exprs) => push_events(out, events_of_each(exprs)),
+        StmtKind::Expression(e) | StmtKind::Throw(e) => {
+            push_events(out, events_of_each(arenas, [*e]))
+        }
+        StmtKind::Return(Some(e)) => push_events(out, events_of_each(arenas, [*e])),
+        StmtKind::Echo(exprs) => push_events(
+            out,
+            events_of_each(arenas, arenas.expr_ids(exprs).iter().copied()),
+        ),
         StmtKind::StaticVar(vars) => push_events(
             out,
-            events_of_each(vars.iter().filter_map(|(_, e)| e.as_ref())),
+            events_of_each(
+                arenas,
+                arenas
+                    .static_vars(vars.clone())
+                    .iter()
+                    .filter_map(|variable| variable.default),
+            ),
         ),
-        StmtKind::Block(stmts)
-        | StmtKind::Declare {
+        StmtKind::Block(stmts) => {
+            for &stmt in arenas.stmt_ids(stmts) {
+                flow_of_stmt(arenas, stmt, labels, out);
+            }
+        }
+        StmtKind::Declare {
             body: Some(stmts), ..
         } => {
-            for stmt in stmts {
-                flow_of_stmt(stmt, labels, out);
+            for &stmt in arenas.stmt_ids(stmts) {
+                flow_of_stmt(arenas, stmt, labels, out);
             }
         }
         StmtKind::Unset(targets) => {
             let mut events = Vec::new();
-            for target in targets {
-                if let ExprKind::PropertyAccess(base, name, _) = &target.kind
-                    && is_this(base)
+            for &target in arenas.expr_ids(targets) {
+                if let Some(ExprNode {
+                    kind: ExprKind::PropertyAccess(base, name, _),
+                    ..
+                }) = arenas.peeled(target).and_then(|id| arenas.expr(id))
+                    && is_this(arenas, *base)
                 {
                     events.push(Event::Unset(name.name.clone()));
                 } else {
-                    events_of(target, &mut events);
+                    events_of(arenas, target, &mut events);
                 }
             }
             push_events(out, events);
         }
         StmtKind::If(if_stmt) => {
-            let branches: Vec<IfBranch> = std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
-                .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
+            let branches: Vec<IfBranch> = std::iter::once((if_stmt.cond, if_stmt.then_branch))
+                .chain(
+                    arenas
+                        .elseifs(if_stmt.elseifs.clone())
+                        .iter()
+                        .map(|e| (e.cond, e.body)),
+                )
                 .map(|(cond, body)| {
                     let mut flow = Vec::new();
-                    flow_of_stmt(body, labels, &mut flow);
+                    flow_of_stmt(arenas, body, labels, &mut flow);
                     IfBranch {
-                        cond: events_of_each([cond]).into_boxed_slice(),
+                        cond: events_of_each(arenas, [cond]).into_boxed_slice(),
                         body: flow.into_boxed_slice(),
-                        terminates: completion_of(body, labels).terminates,
+                        terminates: completion_of(arenas, body, labels).terminates,
                     }
                 })
                 .collect();
-            let else_body = if_stmt.else_branch.as_deref().map(|e| {
+            let else_body = if_stmt.else_branch.map(|e| {
                 let mut flow = Vec::new();
-                flow_of_stmt(e, labels, &mut flow);
-                (flow.into_boxed_slice(), completion_of(e, labels).terminates)
+                flow_of_stmt(arenas, e, labels, &mut flow);
+                (
+                    flow.into_boxed_slice(),
+                    completion_of(arenas, e, labels).terminates,
+                )
             });
             let silent = branches
                 .iter()
@@ -309,8 +378,8 @@ fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
             }
         }
         StmtKind::While { cond, body } => {
-            let cond = events_of_each([cond]);
-            let body = flow_of_stmts(std::slice::from_ref(body), labels);
+            let cond = events_of_each(arenas, [*cond]);
+            let body = flow_of_stmts(arenas, &[*body], labels);
             if body.is_empty() {
                 push_events(out, cond);
             } else {
@@ -326,9 +395,16 @@ fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
             step,
             body,
         } => {
-            let before = events_of_each(init.iter().chain(cond));
-            let step = events_of_each(step);
-            let body = flow_of_stmts(std::slice::from_ref(body), labels);
+            let before = events_of_each(
+                arenas,
+                arenas
+                    .expr_ids(init)
+                    .iter()
+                    .chain(arenas.expr_ids(cond))
+                    .copied(),
+            );
+            let step = events_of_each(arenas, arenas.expr_ids(step).iter().copied());
+            let body = flow_of_stmts(arenas, &[*body], labels);
             if body.is_empty() && step.is_empty() {
                 push_events(out, before);
             } else {
@@ -340,8 +416,8 @@ fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
             }
         }
         StmtKind::Foreach { subject, body, .. } => {
-            let subject = events_of_each([&**subject]);
-            let body = flow_of_stmts(std::slice::from_ref(body), labels);
+            let subject = events_of_each(arenas, [*subject]);
+            let body = flow_of_stmts(arenas, &[*body], labels);
             if body.is_empty() {
                 push_events(out, subject);
             } else {
@@ -352,19 +428,24 @@ fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
             }
         }
         StmtKind::DoWhile { body, cond } => {
-            let body = flow_of_stmts(std::slice::from_ref(body), labels);
-            let cond = events_of_each([cond]);
+            let body = flow_of_stmts(arenas, &[*body], labels);
+            let cond = events_of_each(arenas, [*cond]);
             out.extend(body);
             push_events(out, cond);
         }
         StmtKind::Switch { subject, cases } => {
-            let subject = events_of_each([subject]);
-            let cases: Vec<Case> = cases
+            let subject = events_of_each(arenas, [*subject]);
+            let cases: Vec<Case> = arenas
+                .switch_cases(cases.clone())
                 .iter()
                 .map(|case| Case {
-                    test: events_of_each(case.test.iter()).into_boxed_slice(),
-                    body: flow_of_stmts(&case.body, labels).into_boxed_slice(),
-                    completion: block_completion(&case.body, labels),
+                    test: case
+                        .test
+                        .map_or_else(Vec::new, |test| events_of_each(arenas, [test]))
+                        .into_boxed_slice(),
+                    body: flow_of_stmts(arenas, arenas.stmt_ids(&case.body), labels)
+                        .into_boxed_slice(),
+                    completion: block_completion(arenas, arenas.stmt_ids(&case.body), labels),
                 })
                 .collect();
             if cases
@@ -384,12 +465,15 @@ fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
             catches,
             finally,
         } => {
-            let body = flow_of_stmts(body, labels);
-            let catches: Vec<Box<[Flow]>> = catches
+            let body = flow_of_stmts(arenas, arenas.stmt_ids(body), labels);
+            let catches: Vec<Box<[Flow]>> = arenas
+                .catch_clauses(catches.clone())
                 .iter()
-                .map(|c| flow_of_stmts(&c.body, labels).into_boxed_slice())
+                .map(|c| flow_of_stmts(arenas, arenas.stmt_ids(&c.body), labels).into_boxed_slice())
                 .collect();
-            let finally = finally.as_ref().map(|f| flow_of_stmts(f, labels));
+            let finally = finally
+                .as_ref()
+                .map(|f| flow_of_stmts(arenas, arenas.stmt_ids(f), labels));
             if body.is_empty()
                 && catches.iter().all(|c| c.is_empty())
                 && finally.as_ref().is_none_or(Vec::is_empty)
@@ -409,49 +493,57 @@ fn flow_of_stmt(stmt: &StmtNode, labels: &[GotoLabel], out: &mut Vec<Flow>) {
 }
 
 /// The events of evaluating `e`, in order.
-fn events_of(e: &ExprNode, out: &mut Vec<Event>) {
+fn events_of(arenas: &NodeArenas, id: ExprId, out: &mut Vec<Event>) {
+    let Some(e) = arenas.expr(id) else {
+        return;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, name, _) => {
-            events_of(base, out);
-            if is_this(base) {
-                out.push(Event::Read(name.name.clone(), e.span));
+            events_of(arenas, *base, out);
+            if is_this(arenas, *base) {
+                out.push(Event::Read(
+                    name.name.clone(),
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                ));
             }
         }
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-            events_of(rhs, out);
-            assignment_events(lhs, out);
+            events_of(arenas, *rhs, out);
+            assignment_events(arenas, *lhs, out);
         }
         // `??=`'s isset-based left check never throws even when genuinely
         // uninitialized: quiet, like bare `??` and `isset()`, and it always
         // leaves the property initialized afterward.
         ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
-            quiet_probe_events(lhs, out);
-            events_of(rhs, out);
-            assignment_events(lhs, out);
+            quiet_probe_events(arenas, *lhs, out);
+            events_of(arenas, *rhs, out);
+            assignment_events(arenas, *lhs, out);
         }
         // Any other compound operator reads its own left side first, like
         // a bare read.
         ExprKind::CompoundAssign(_, lhs, rhs) => {
-            events_of(lhs, out);
-            events_of(rhs, out);
+            events_of(arenas, *lhs, out);
+            events_of(arenas, *rhs, out);
         }
         // Bare `??`'s left side is exactly as quiet as `isset()`'s argument.
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs) => {
-            quiet_probe_events(lhs, out);
-            events_of(rhs, out);
+            quiet_probe_events(arenas, *lhs, out);
+            events_of(arenas, *rhs, out);
         }
         ExprKind::Isset(operands) => {
-            for operand in operands {
-                quiet_probe_events(operand, out);
+            for operand in arenas.expr_ids(operands) {
+                quiet_probe_events(arenas, *operand, out);
             }
         }
-        ExprKind::Empty(operand) => quiet_probe_events(operand, out),
+        ExprKind::Empty(operand) => quiet_probe_events(arenas, *operand, out),
         ExprKind::MethodCall(recv, name, args, _) => {
-            events_of(recv, out);
-            for a in args {
-                events_of(&a.value, out);
+            events_of(arenas, *recv, out);
+            for a in arenas.args(args.clone()) {
+                events_of(arenas, a.value, out);
             }
-            if let Some(chain) = this_chain(recv) {
+            if let Some(chain) = this_chain(arenas, *recv) {
                 out.push(Event::Call(Call {
                     receiver: CallReceiver::This(chain.into_boxed_slice()),
                     name: name.name.clone(),
@@ -459,8 +551,8 @@ fn events_of(e: &ExprNode, out: &mut Vec<Event>) {
             }
         }
         ExprKind::StaticCall(receiver, name, args) => {
-            for a in args {
-                events_of(&a.value, out);
+            for a in arenas.args(args.clone()) {
+                events_of(arenas, a.value, out);
             }
             let named = |keyword: &str| {
                 receiver
@@ -483,18 +575,40 @@ fn events_of(e: &ExprNode, out: &mut Vec<Event>) {
                 }));
             }
         }
-        _ => for_each_child_expr(e, |child| events_of(child, out)),
+        // Creating a closure does not execute its body. Likewise an
+        // anonymous class's methods are declarations, though its arguments
+        // are evaluated at the creation site.
+        ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {}
+        ExprKind::NewAnonymousClass(class_id) => {
+            let Some(class) = arenas.anonymous_class(*class_id) else {
+                return;
+            };
+            for arg in arenas.args(class.args.clone()) {
+                events_of(arenas, arg.value, out);
+            }
+        }
+        _ => {
+            struct Children<'a>(&'a mut Vec<Event>);
+            impl Visitor for Children<'_> {
+                fn visit_expr(&mut self, arenas: &NodeArenas, child: ExprId) {
+                    events_of(arenas, child, self.0);
+                }
+            }
+            let mut children = Children(out);
+            arena::walk_expr(&mut children, arenas, id);
+        }
     })
 }
 
 /// The names of the calls between `$this` and the end of `recv`, when `recv`
 /// is `$this` or a chain of calls on it: each must return the object for the
 /// chain to still be it.
-fn this_chain(recv: &ExprNode) -> Option<Vec<Name>> {
+fn this_chain(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Name>> {
+    let recv = arenas.expr(id)?;
     syntax::stack::guard(|| match &recv.kind {
         ExprKind::Variable(v) if **v == *"this" => Some(Vec::new()),
         ExprKind::MethodCall(inner, name, _, _) => {
-            let mut chain = this_chain(inner)?;
+            let mut chain = this_chain(arenas, *inner)?;
             chain.push(name.name.clone());
             Some(chain)
         }
@@ -505,26 +619,29 @@ fn this_chain(recv: &ExprNode) -> Option<Vec<Name>> {
 /// An assignment target: `$this->prop` becomes initialized and is no read;
 /// a list assigns each of its targets, and its keys are read; anything else
 /// is read as an expression.
-fn assignment_events(lhs: &ExprNode, out: &mut Vec<Event>) {
+fn assignment_events(arenas: &NodeArenas, id: ExprId, out: &mut Vec<Event>) {
+    let Some(lhs) = arenas.expr(id) else {
+        return;
+    };
     syntax::stack::guard(|| {
         if let ExprKind::PropertyAccess(base, name, _) = &lhs.kind
-            && is_this(base)
+            && is_this(arenas, *base)
         {
             out.push(Event::Write(name.name.clone()));
             return;
         }
         if let ExprKind::Destructure(items, _) = &lhs.kind {
-            for item in items {
+            for item in arenas.destructure_items(items) {
                 if let Some(key) = &item.key {
-                    events_of(key, out);
+                    events_of(arenas, *key, out);
                 }
                 if let Some(target) = &item.target {
-                    assignment_events(target, out);
+                    assignment_events(arenas, *target, out);
                 }
             }
             return;
         }
-        events_of(lhs, out);
+        events_of(arenas, id, out);
     })
 }
 
@@ -532,20 +649,23 @@ fn assignment_events(lhs: &ExprNode, out: &mut Vec<Event>) {
 /// the "must not be accessed before initialization" error for a property
 /// found anywhere in the chain being *tested*, however deep. An index or
 /// name expression embedded in the chain is read as any expression is.
-fn quiet_probe_events(e: &ExprNode, out: &mut Vec<Event>) {
+fn quiet_probe_events(arenas: &NodeArenas, id: ExprId, out: &mut Vec<Event>) {
+    let Some(e) = arenas.expr(id) else {
+        return;
+    };
     syntax::stack::guard(|| match &e.kind {
-        ExprKind::PropertyAccess(base, _, _) => quiet_probe_events(base, out),
+        ExprKind::PropertyAccess(base, _, _) => quiet_probe_events(arenas, *base, out),
         ExprKind::DynamicPropertyAccess(base, name_expr, _) => {
-            quiet_probe_events(base, out);
-            events_of(name_expr, out);
+            quiet_probe_events(arenas, *base, out);
+            events_of(arenas, *name_expr, out);
         }
         ExprKind::Index(base, idx) => {
-            quiet_probe_events(base, out);
+            quiet_probe_events(arenas, *base, out);
             if let Some(idx) = idx {
-                events_of(idx, out);
+                events_of(arenas, *idx, out);
             }
         }
-        _ => events_of(e, out),
+        _ => events_of(arenas, id, out),
     })
 }
 

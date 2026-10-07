@@ -342,6 +342,7 @@ impl<'a> Checker<'a> {
     /// lower case): its format's placeholders against the arguments.
     pub(crate) fn check_format_string_call(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         args: &[Arg],
         locals: &Locals,
@@ -352,15 +353,15 @@ impl<'a> Checker<'a> {
         };
         match function.kind {
             FormatKind::PrintfArray => {
-                self.check_format_array_count(name, &function, args, locals, span);
-                self.check_format_values_array_type(name, &function, args, locals);
+                self.check_format_array_count(arenas, name, &function, args, locals, span);
+                self.check_format_values_array_type(arenas, name, &function, args, locals);
             }
             FormatKind::Printf | FormatKind::Scanf => {
-                self.check_format_count(name, &function, args, locals, span);
+                self.check_format_count(arenas, name, &function, args, locals, span);
             }
         }
         if function.kind == FormatKind::Printf {
-            self.check_format_value_types(name, &function, args, locals, span);
+            self.check_format_value_types(arenas, name, &function, args, locals, span);
         }
     }
 
@@ -368,13 +369,15 @@ impl<'a> Checker<'a> {
     /// any of them; `None` when there is nothing (more) to check.
     fn format_counts(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
         span: syntax::span::Span,
     ) -> Option<Vec<usize>> {
-        let format_ty = self.infer_expr(&args.get(function.format)?.value, locals);
+        let format = arenas.expr(args.get(function.format)?.value)?;
+        let format_ty = self.infer_expr(format, locals);
         let registry = self.registry;
         let mut counts = Vec::new();
         for format in format_ty.constant_strings_text() {
@@ -401,6 +404,7 @@ impl<'a> Checker<'a> {
     /// constant strings has against the values passed.
     fn check_format_count(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         function: &FormatFunction,
         args: &[Arg],
@@ -410,7 +414,7 @@ impl<'a> Checker<'a> {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;
         }
-        let Some(counts) = self.format_counts(name, function, args, locals, span) else {
+        let Some(counts) = self.format_counts(arenas, name, function, args, locals, span) else {
             return;
         };
         let placeholders = counts.into_iter().max().unwrap_or(0);
@@ -430,6 +434,7 @@ impl<'a> Checker<'a> {
     /// constant strings can have against every size the values array can.
     fn check_format_array_count(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         function: &FormatFunction,
         args: &[Arg],
@@ -439,7 +444,7 @@ impl<'a> Checker<'a> {
         if args.len() < function.minimum {
             return;
         }
-        let Some(counts) = self.format_counts(name, function, args, locals, span) else {
+        let Some(counts) = self.format_counts(arenas, name, function, args, locals, span) else {
             return;
         };
         let placeholders = Count {
@@ -449,7 +454,10 @@ impl<'a> Checker<'a> {
         let values = match args.get(function.format + 1) {
             None => Count::exact(0),
             Some(values) => {
-                let ty = self.infer_expr(&values.value, locals);
+                let Some(values) = arenas.expr(values.value) else {
+                    return;
+                };
+                let ty = self.infer_expr(values, locals);
                 let Some(sizes) = constant_array_sizes(&ty) else {
                     return;
                 };
@@ -475,6 +483,7 @@ impl<'a> Checker<'a> {
     /// (`CallToFunctionParametersRule`).
     fn check_format_values_array_type(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         function: &FormatFunction,
         args: &[Arg],
@@ -487,7 +496,10 @@ impl<'a> Checker<'a> {
         if values.spread {
             return;
         }
-        let values_ty = self.infer_expr(&values.value, locals);
+        let Some(value) = arenas.expr(values.value) else {
+            return;
+        };
+        let values_ty = self.infer_expr(value, locals);
         let expected = Type::array(
             self.relation().union_of(vec![Type::int(), Type::string()]),
             format_value_type(),
@@ -499,7 +511,7 @@ impl<'a> Checker<'a> {
                 "Parameter #{} $values of function {name} expects array<bool|float|int|string|null>, {values_ty} given.",
                 position + 1
             ),
-            values.value.span,
+            self.expr_span(value.id),
             5,
             from,
             "argument.type",
@@ -515,6 +527,7 @@ impl<'a> Checker<'a> {
     /// made below it.
     fn check_format_value_types(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         function: &FormatFunction,
         args: &[Arg],
@@ -524,7 +537,10 @@ impl<'a> Checker<'a> {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;
         }
-        let format_ty = self.infer_expr(&args[function.format].value, locals);
+        let Some(format_expr) = arenas.expr(args[function.format].value) else {
+            return;
+        };
+        let format_ty = self.infer_expr(format_expr, locals);
         let [format] = &format_ty.constant_strings_text()[..] else {
             return;
         };
@@ -537,14 +553,17 @@ impl<'a> Checker<'a> {
         let strict = self.settings.rules.check_strict_printf_placeholder_types;
         let allowed = format_value_type();
         for (i, arg) in args.iter().enumerate().skip(function.format + 1) {
-            let arg_ty = self.infer_expr(&arg.value, locals);
+            let Some(arg_expr) = arenas.expr(arg.value) else {
+                continue;
+            };
+            let arg_ty = self.infer_expr(arg_expr, locals);
             let rejected_from = self.rejected_from(&allowed, &arg_ty);
             if let Some(from) = rejected_from {
                 self.report_found_from(format!(
                         "Parameter #{} ...$values of function {name} expects bool|float|int|string|null, {arg_ty} given.",
                         i + 1
                     ),
-                    arg.value.span,
+                    self.expr_span(arg_expr.id),
                     5,
                     from,
                     "argument.type",

@@ -13,7 +13,7 @@ use crate::restricted_symbols::{
 };
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
-use syntax::ast::{Arg, ClassKind, ExprNode, FunctionDecl, Param};
+use syntax::ast::{Arg, ClassKind, ExprNode, FunctionDecl, NodeArenas, Param};
 use syntax::span::Span;
 use types::Name;
 use types::Type;
@@ -81,6 +81,7 @@ fn is_allowed_by_position(entry: &RestrictedSymbolEntry, location: ClassUsageLoc
 /// this project's own conservative posture, matching how every other
 /// spread-aware check here already treats an unpack as "can't know."
 fn resolve_arg<'a>(
+    arenas: &'a NodeArenas,
     args: &'a [Arg],
     position: Option<u32>,
     name: Option<&str>,
@@ -90,7 +91,7 @@ fn resolve_arg<'a>(
             .iter()
             .find(|a| !a.spread && a.name.as_deref() == Some(name))
     {
-        return Some(&found.value);
+        return arenas.expr(found.value);
     }
     let pos = position?;
     let idx = pos.checked_sub(1)?;
@@ -103,7 +104,7 @@ fn resolve_arg<'a>(
             continue;
         }
         if count == idx {
-            return Some(&a.value);
+            return arenas.expr(a.value);
         }
         count += 1;
     }
@@ -147,7 +148,10 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> bool {
-        let Some(expr) = resolve_arg(args, cond.position, cond.name.as_deref()) else {
+        let Some(arenas) = self.syntax_arenas() else {
+            return false;
+        };
+        let Some(expr) = resolve_arg(arenas, args, cond.position, cond.name.as_deref()) else {
             return false;
         };
         let actual_values = self.infer_expr(expr, locals).constant_ints();
@@ -192,7 +196,10 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         case_insensitive: bool,
     ) -> bool {
-        let Some(expr) = resolve_arg(args, cond.position, cond.name.as_deref()) else {
+        let Some(arenas) = self.syntax_arenas() else {
+            return false;
+        };
+        let Some(expr) = resolve_arg(arenas, args, cond.position, cond.name.as_deref()) else {
             return false;
         };
         let ty = self.infer_expr(expr, locals);
@@ -214,7 +221,9 @@ impl<'a> Checker<'a> {
     /// `*AnyValue` siblings' own per-parameter check - present at all,
     /// regardless of value.
     fn param_ref_present(&self, r: &ParamRef, args: &[Arg]) -> bool {
-        resolve_arg(args, r.position, r.name.as_deref()).is_some()
+        self.syntax_arenas().is_some_and(|arenas| {
+            resolve_arg(arenas, args, r.position, r.name.as_deref()).is_some()
+        })
     }
 
     /// Every real `*Params*` directive is a *list* of conditions
@@ -908,8 +917,13 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         class_name: Option<&str>,
     ) {
+        let syntax_owner = self.syntax_tree_owner();
+        let params = syntax_owner
+            .as_ref()
+            .map(|owner| owner.arenas().params(f.params.clone()))
+            .unwrap_or_default();
         self.check_restricted_param_and_return_types_raw(
-            &f.params,
+            params,
             f.return_type.as_ref(),
             f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
             class_name,

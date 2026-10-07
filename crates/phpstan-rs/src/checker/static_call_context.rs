@@ -52,6 +52,13 @@ impl<'a> Checker<'a> {
                 }
             }
             StaticTarget::Expr(receiver) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("static target belongs to its retained file owner");
+                let receiver = syntax_owner
+                    .arenas()
+                    .expr(*receiver)
+                    .expect("static target receiver belongs to its retained file owner");
                 let ty = self.infer_expr(receiver, locals);
                 let Some(level) =
                     self.failing_level(&ty, 0, |m| self.relation().can_name_a_class(m).no())

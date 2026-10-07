@@ -424,26 +424,25 @@ pub(crate) fn merge_scopes(
         .union(else_locals.clone_reinitialized().clone());
     // A condition alias only survives a merge point when both incoming
     // branches still
-    // agree on the exact same stored condition - `Rc::ptr_eq` (not a
-    // deep `ExprNode` comparison) is a correct, cheap test for this: it's
-    // exactly true whenever both branches inherited the alias unchanged
-    // from before the split (the overwhelmingly common case - the
-    // assignment happened before an unrelated `if`/`else`, both forks
-    // are still the same `Rc` allocation), and correctly false whenever
+    // agree on the exact same stored condition ID - ID equality is a
+    // correct, cheap test for this: it's exactly true whenever both
+    // branches inherited the alias unchanged from before the split (the
+    // overwhelmingly common case - the assignment happened before an
+    // unrelated `if`/`else`), and correctly false whenever
     // either branch reassigned the aliased name or the alias's own
     // target in between (`Locals::declare`'s own purge already dropped
     // it on that side, so the key is simply absent there and this filter
     // drops it too) - no case needs comparing two independently-
     // constructed-but-textually-identical conditions from different
-    // branches, so no `ExprNode: PartialEq` bound is needed anywhere.
+    // branches, so no structural equality is needed anywhere.
     *merged.condition_aliases_mut() = then_locals
         .condition_aliases()
         .iter()
-        .filter(|(k, (_, rc))| {
+        .filter(|(k, (_, id))| {
             else_locals
                 .condition_aliases()
                 .get(*k)
-                .is_some_and(|(_, other_rc)| std::rc::Rc::ptr_eq(rc, other_rc))
+                .is_some_and(|(_, other_id)| id == other_id)
         })
         .map(|(k, v)| (*k, v.clone()))
         .collect();
@@ -467,17 +466,17 @@ pub(crate) fn merge_scopes(
     }
     // Same "both branches inherited the identical, unchanged alias"
     // dedup as `condition_aliases` above - a `QueryBuilder` alias has no
-    // separate target to intersect against, just the one stored `Rc<ExprNode>`.
+    // separate target to intersect against, just the one stored expression ID.
     *merged.query_builder_aliases_mut() = then_locals
         .query_builder_aliases()
         .iter()
-        .filter(|(k, rc)| {
+        .filter(|(k, id)| {
             else_locals
                 .query_builder_aliases()
                 .get(*k)
-                .is_some_and(|other_rc| std::rc::Rc::ptr_eq(rc, other_rc))
+                .is_some_and(|other_id| *id == other_id)
         })
-        .map(|(k, v)| (*k, v.clone()))
+        .map(|(k, v)| (*k, *v))
         .collect();
     // Same shape as `query_builder_aliases` above, for the identical
     // reason: a container's own per-field facts (see

@@ -7,7 +7,7 @@
 
 use syntax::name::Name;
 
-use syntax::ast::{Attribute, ExprKind, ExprNode, Literal, StaticTarget};
+use syntax::ast::{Arg, Attribute, ExprKind, Literal, NodeArenas, StaticTarget};
 
 /// `NamespaceVisibility`: callers must be in `namespace` (or, unless
 /// `exclude_sub_namespaces`, below it).
@@ -49,38 +49,56 @@ fn library_attribute(resolved: &str) -> Option<&str> {
         .then(|| resolved.rsplit('\\').next().unwrap_or(resolved))
 }
 
-fn class_names(args: &[ExprNode], out: &mut Vec<Name>) {
+fn class_name_expr(arenas: &NodeArenas, id: syntax::ast::ExprId, out: &mut Vec<Name>) {
+    let Some(value) = arenas.expr(id) else {
+        return;
+    };
+    match &value.kind {
+        ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
+            out.push(crate::registry::name_context::class_ref(class));
+        }
+        ExprKind::Literal(Literal::String(s)) => {
+            if let Some(bytes) = arenas.string_bytes(s) {
+                out.push(Name::from(
+                    String::from_utf8_lossy(bytes)
+                        .trim_start_matches('\\')
+                        .to_string(),
+                ));
+            }
+        }
+        ExprKind::ArrayLiteral(items) => {
+            for item in arenas.array_items(items.clone()) {
+                class_name_expr(arenas, item.value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn class_names(arenas: &NodeArenas, args: &[Arg], out: &mut Vec<Name>) {
     syntax::stack::guard(|| {
         for arg in args {
-            match &arg.kind {
-                ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
-                    out.push(crate::registry::name_context::class_ref(class));
-                }
-                ExprKind::Literal(Literal::String(s)) => {
-                    out.push(Name::from(s.to_str_lossy().trim_start_matches('\\')));
-                }
-                ExprKind::ArrayLiteral(items) => {
-                    let values: Vec<ExprNode> = items.iter().map(|i| i.value.clone()).collect();
-                    class_names(&values, out);
-                }
-                _ => {}
-            }
+            class_name_expr(arenas, arg.value, out);
         }
     })
 }
 
 /// The access attributes among `attrs`, on a declaration in `namespace`.
-pub(crate) fn access_attributes(attrs: &[Attribute], namespace: &str) -> AccessAttributes {
+pub(crate) fn access_attributes(
+    arenas: &NodeArenas,
+    attrs: &[Attribute],
+    namespace: &str,
+) -> AccessAttributes {
     let mut out = AccessAttributes::default();
     for attribute in attrs {
         let Some(short) = attribute.name.resolved_class().and_then(library_attribute) else {
             continue;
         };
-        let values: Vec<ExprNode> = attribute.args.iter().map(|a| a.value.clone()).collect();
+        let values = arenas.args(attribute.args.clone());
         match short {
-            "Friend" => class_names(&values, &mut out.friends),
-            "RestrictTraitTo" => class_names(&values, &mut out.restrict_trait_to),
-            "Sealed" => class_names(&values, &mut out.sealed),
+            "Friend" => class_names(arenas, values, &mut out.friends),
+            "RestrictTraitTo" => class_names(arenas, values, &mut out.restrict_trait_to),
+            "Sealed" => class_names(arenas, values, &mut out.sealed),
             "TestTag" => out.test_only = true,
             "InjectableVersion" => out.injectable_version = true,
             "CheckInjectableVersion" => out.check_injectable_version = true,
@@ -95,8 +113,11 @@ pub(crate) fn access_attributes(attrs: &[Attribute], namespace: &str) -> AccessA
                     namespace: namespace.to_string(),
                     exclude_sub_namespaces: false,
                 };
-                for arg in &attribute.args {
-                    match (&arg.name, &arg.value.kind) {
+                for arg in values {
+                    let Some(value) = arenas.expr(arg.value) else {
+                        continue;
+                    };
+                    match (&arg.name, &value.kind) {
                         (Some(name), ExprKind::Literal(Literal::Bool(b)))
                             if name == "excludeSubNamespaces" =>
                         {
@@ -105,13 +126,21 @@ pub(crate) fn access_attributes(attrs: &[Attribute], namespace: &str) -> AccessA
                         (Some(name), ExprKind::Literal(Literal::String(s)))
                             if name == "namespace" =>
                         {
-                            visibility.namespace = s.to_str_lossy().trim_matches('\\').to_string()
+                            if let Some(bytes) = arenas.string_bytes(s) {
+                                visibility.namespace = String::from_utf8_lossy(bytes)
+                                    .trim_matches('\\')
+                                    .to_string();
+                            }
                         }
                         (None, ExprKind::Literal(Literal::Bool(b))) => {
                             visibility.exclude_sub_namespaces = *b
                         }
                         (None, ExprKind::Literal(Literal::String(s))) => {
-                            visibility.namespace = s.to_str_lossy().trim_matches('\\').to_string()
+                            if let Some(bytes) = arenas.string_bytes(s) {
+                                visibility.namespace = String::from_utf8_lossy(bytes)
+                                    .trim_matches('\\')
+                                    .to_string();
+                            }
                         }
                         _ => {}
                     }

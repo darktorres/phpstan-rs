@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     pub(crate) fn parse_closure_like(&mut self, is_static: bool) -> Result<ExprId, ParseError> {

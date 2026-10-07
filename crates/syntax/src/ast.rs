@@ -20,14 +20,12 @@ pub struct Attribute {
     pub removal_span: Span,
 }
 
-/// A statement, plus the real source span it occupies - `kind` carries the
-/// actual variant data (renamed from the old bare `Stmt` enum so the two
-/// concerns - "what kind of statement" and "where it is" - stay separate).
+/// A statement. Its real source span is stored in `NodeArenas::stmt_spans`
+/// at the matching statement ID.
 #[derive(Debug, Clone)]
 pub struct StmtNode {
     pub id: StmtId,
     pub kind: StmtKind,
-    pub span: Span,
 }
 
 /// A typed index into a parsed file's expression arena.
@@ -90,7 +88,7 @@ impl DocCommentRanges {
     }
 
     /// Resolves these source ranges to the text consumed by docblock readers.
-    pub fn text<'a>(&'a self, source: &[u8]) -> Option<Cow<'a, str>> {
+    pub fn text<'a>(&'a self, source: &'a [u8]) -> Option<Cow<'a, str>> {
         let text = |span: &Span| {
             let bytes = source.get(span.start as usize..span.end as usize)?;
             Some(crate::lexer::lossy(bytes))
@@ -140,6 +138,13 @@ pub type ExprIdRange = la_arena::IdxRange<ExprId>;
 pub type DestructureItemRange = la_arena::IdxRange<DestructureItem>;
 pub type ArrayItemRange = la_arena::IdxRange<ArrayItem>;
 pub type MatchArmRange = la_arena::IdxRange<MatchArm>;
+pub type ElseIfRange = la_arena::IdxRange<ElseIf>;
+pub type SwitchCaseRange = la_arena::IdxRange<SwitchCase>;
+pub type CatchClauseRange = la_arena::IdxRange<CatchClause>;
+pub type DeclareDirectiveRange = la_arena::IdxRange<DeclareDirective>;
+pub type GlobalVarRange = la_arena::IdxRange<GlobalVar>;
+pub type StaticVarRange = la_arena::IdxRange<StaticVarDecl>;
+pub type ClassDeclRange = la_arena::IdxRange<ClassDecl>;
 pub type ParamRange = la_arena::IdxRange<Param>;
 pub type AttributeRange = la_arena::IdxRange<Attribute>;
 pub type MethodRange = la_arena::IdxRange<MethodDecl>;
@@ -230,6 +235,13 @@ pub struct NodeArenas {
     pub array_items: ArrayItemArena,
     pub params: ParamArena,
     pub match_arms: MatchArmArena,
+    pub elseifs: ListArena<ElseIf>,
+    pub switch_cases: ListArena<SwitchCase>,
+    pub catch_clauses: ListArena<CatchClause>,
+    pub declare_directives: ListArena<DeclareDirective>,
+    pub global_vars: ListArena<GlobalVar>,
+    pub static_vars: ListArena<StaticVarDecl>,
+    pub class_decls: ListArena<ClassDecl>,
     pub attributes: AttributeArena,
     pub qualified_names: ListArena<QualifiedName>,
     pub properties: ListArena<PropertyDecl>,
@@ -384,7 +396,9 @@ impl<T> ListArena<T> {
 
     pub fn get_mut(&mut self, range: &la_arena::IdxRange<T>) -> &mut [T] {
         let local = local_range(range.clone(), self.base);
-        &mut self.values[local]
+        let start = u32::from(local.start().into_raw()) as usize;
+        let end = u32::from(local.end().into_raw()) as usize;
+        &mut self.values.as_mut()[start..end]
     }
 
     pub fn clear(&mut self) {
@@ -408,7 +422,7 @@ impl<T> ListArena<T> {
 impl NodeArenas {
     /// Creates an empty append fragment whose IDs begin immediately after
     /// this owner's current nodes and payloads.
-    pub fn append_fragment(&self) -> Self {
+    pub fn new_fragment(&self) -> Self {
         let mut fragment = Self::default();
         fragment.expr_base = self.expr_base + self.expr_spans.len() as u32;
         fragment.stmt_base = self.stmt_base + self.stmt_spans.len() as u32;
@@ -421,6 +435,13 @@ impl NodeArenas {
         fragment.params_base = self.params_base + self.params.len() as u32;
         fragment.match_arms_base = self.match_arms_base + self.match_arms.len() as u32;
         fragment.attributes_base = self.attributes_base + self.attributes.len() as u32;
+        fragment.elseifs = self.elseifs.fragment();
+        fragment.switch_cases = self.switch_cases.fragment();
+        fragment.catch_clauses = self.catch_clauses.fragment();
+        fragment.declare_directives = self.declare_directives.fragment();
+        fragment.global_vars = self.global_vars.fragment();
+        fragment.static_vars = self.static_vars.fragment();
+        fragment.class_decls = self.class_decls.fragment();
         fragment.qualified_names = self.qualified_names.fragment();
         fragment.properties = self.properties.fragment();
         fragment.class_consts = self.class_consts.fragment();
@@ -461,7 +482,7 @@ impl NodeArenas {
     }
 
     /// Resolves source-backed doc-comment ranges to their reader text.
-    pub fn doc_comment_text(&self, ranges: &DocCommentRanges) -> Option<Cow<'_, str>> {
+    pub fn doc_comment_text<'a>(&'a self, ranges: &'a DocCommentRanges) -> Option<Cow<'a, str>> {
         ranges.text(&self.source)
     }
 
@@ -661,7 +682,9 @@ impl NodeArenas {
     /// declaration normalization.
     pub fn params_mut(&mut self, range: la_arena::IdxRange<Param>) -> &mut [Param] {
         let local = local_range(range, self.params_base);
-        &mut self.params[local]
+        let start = u32::from(local.start().into_raw()) as usize;
+        let end = u32::from(local.end().into_raw()) as usize;
+        &mut self.params.as_mut()[start..end]
     }
 
     /// Commits a complete match-arm list contiguously and returns its range.
@@ -675,6 +698,101 @@ impl NodeArenas {
     /// Reads a committed match-arm list from this file's arena.
     pub fn match_arms(&self, range: la_arena::IdxRange<MatchArm>) -> &[MatchArm] {
         &self.match_arms[local_range(range, self.match_arms_base)]
+    }
+
+    /// Commits a complete `elseif` chain contiguously and returns its range.
+    pub fn alloc_elseifs(&mut self, values: impl IntoIterator<Item = ElseIf>) -> ElseIfRange {
+        self.elseifs.alloc_many(values)
+    }
+
+    /// Reads a committed `elseif` chain from this file's arena.
+    pub fn elseifs(&self, range: ElseIfRange) -> &[ElseIf] {
+        self.elseifs.get(&range)
+    }
+
+    /// Commits a complete switch case list contiguously and returns its range.
+    pub fn alloc_switch_cases(
+        &mut self,
+        values: impl IntoIterator<Item = SwitchCase>,
+    ) -> SwitchCaseRange {
+        self.switch_cases.alloc_many(values)
+    }
+
+    /// Reads a committed switch case list from this file's arena.
+    pub fn switch_cases(&self, range: SwitchCaseRange) -> &[SwitchCase] {
+        self.switch_cases.get(&range)
+    }
+
+    /// Commits a complete catch clause list contiguously and returns its range.
+    pub fn alloc_catch_clauses(
+        &mut self,
+        values: impl IntoIterator<Item = CatchClause>,
+    ) -> CatchClauseRange {
+        self.catch_clauses.alloc_many(values)
+    }
+
+    /// Reads a committed catch clause list from this file's arena.
+    pub fn catch_clauses(&self, range: CatchClauseRange) -> &[CatchClause] {
+        self.catch_clauses.get(&range)
+    }
+
+    /// Commits a complete declare directive list and returns its owner range.
+    pub fn alloc_declare_directives(
+        &mut self,
+        values: impl IntoIterator<Item = DeclareDirective>,
+    ) -> DeclareDirectiveRange {
+        self.declare_directives.alloc_many(values)
+    }
+
+    /// Reads a committed declare directive list from this file's arena.
+    pub fn declare_directives(&self, range: DeclareDirectiveRange) -> &[DeclareDirective] {
+        self.declare_directives.get(&range)
+    }
+
+    /// Commits a complete global-variable list and returns its owner range.
+    pub fn alloc_global_vars(
+        &mut self,
+        values: impl IntoIterator<Item = GlobalVar>,
+    ) -> GlobalVarRange {
+        self.global_vars.alloc_many(values)
+    }
+
+    /// Reads a committed global-variable list from this file's arena.
+    pub fn global_vars(&self, range: GlobalVarRange) -> &[GlobalVar] {
+        self.global_vars.get(&range)
+    }
+
+    /// Commits a complete static-variable declaration list and returns its range.
+    pub fn alloc_static_vars(
+        &mut self,
+        values: impl IntoIterator<Item = StaticVarDecl>,
+    ) -> StaticVarRange {
+        self.static_vars.alloc_many(values)
+    }
+
+    /// Reads a committed static-variable declaration list from this file's arena.
+    pub fn static_vars(&self, range: StaticVarRange) -> &[StaticVarDecl] {
+        self.static_vars.get(&range)
+    }
+
+    /// Stores one class declaration payload outside its statement node.
+    pub fn alloc_class_decl(&mut self, decl: ClassDecl) -> ClassDeclRange {
+        self.class_decls.alloc_many([decl])
+    }
+
+    /// Resolves a statement's one class declaration payload.
+    pub fn class_decl(&self, range: ClassDeclRange) -> &ClassDecl {
+        self.class_decls
+            .get(&range)
+            .first()
+            .expect("class declaration range contains its payload")
+    }
+
+    pub(crate) fn class_decl_mut(&mut self, range: ClassDeclRange) -> &mut ClassDecl {
+        self.class_decls
+            .get_mut(&range)
+            .first_mut()
+            .expect("class declaration range contains its payload")
     }
 
     /// Commits a complete attribute list contiguously and returns its range.
@@ -699,6 +817,23 @@ impl NodeArenas {
 
     pub fn qualified_names(&self, range: &QualifiedNameRange) -> &[QualifiedName] {
         self.qualified_names.get(range)
+    }
+
+    /// Canonical and visitor readers that own a copied range use this
+    /// by-value form to resolve the qualified-name list.
+    pub fn qualified_names_range(&self, range: QualifiedNameRange) -> &[QualifiedName] {
+        self.qualified_names(&range)
+    }
+
+    /// Commits one name payload for an expression variant that must remain
+    /// small in the common expression arena.
+    pub fn alloc_qualified_name(&mut self, name: QualifiedName) -> QualifiedNameRange {
+        self.alloc_qualified_names([name])
+    }
+
+    /// Resolves a single-name range used by compact expression variants.
+    pub fn qualified_name(&self, range: &QualifiedNameRange) -> Option<&QualifiedName> {
+        self.qualified_names(range).first()
     }
 
     pub fn alloc_properties(
@@ -817,9 +952,8 @@ impl NodeArenas {
     }
 
     /// Commits an expression node and its span at the matching dense index.
-    pub fn alloc_expr(&mut self, node: ExprNode) -> ExprId {
+    pub fn alloc_expr(&mut self, node: ExprNode, span: Span) -> ExprId {
         let id = node.id;
-        let span = node.span;
         assert_eq!(
             u32::from(id.into_raw()),
             self.expr_base
@@ -835,9 +969,8 @@ impl NodeArenas {
     }
 
     /// Commits a statement node and its span at the matching dense index.
-    pub fn alloc_stmt(&mut self, node: StmtNode) -> StmtId {
+    pub fn alloc_stmt(&mut self, node: StmtNode, span: Span) -> StmtId {
         let id = node.id;
-        let span = node.span;
         assert_eq!(
             u32::from(id.into_raw()),
             self.stmt_base
@@ -957,6 +1090,14 @@ impl NodeArenas {
             .extend(fragment.attributes.into_iter().map(|(_, node)| node));
         self.qualified_names
             .append_fragment(fragment.qualified_names);
+        self.elseifs.append_fragment(fragment.elseifs);
+        self.switch_cases.append_fragment(fragment.switch_cases);
+        self.catch_clauses.append_fragment(fragment.catch_clauses);
+        self.declare_directives
+            .append_fragment(fragment.declare_directives);
+        self.global_vars.append_fragment(fragment.global_vars);
+        self.static_vars.append_fragment(fragment.static_vars);
+        self.class_decls.append_fragment(fragment.class_decls);
         self.properties.append_fragment(fragment.properties);
         self.class_consts.append_fragment(fragment.class_consts);
         self.trait_uses.append_fragment(fragment.trait_uses);
@@ -1019,6 +1160,17 @@ impl NodeArenas {
         self.stmt_spans.get(local as usize).copied()
     }
 
+    /// Updates a statement's source span after a parser fixup.
+    pub fn set_stmt_span(&mut self, id: StmtId, span: Span) {
+        let local = u32::from(id.into_raw())
+            .checked_sub(self.stmt_base)
+            .expect("statement ID belongs to this owner arena");
+        *self
+            .stmt_spans
+            .get_mut(local as usize)
+            .expect("statement span belongs to this owner arena") = span;
+    }
+
     /// Finds a doc comment recorded for a node that starts at `pos`.
     pub fn doc_site(&self, pos: u32) -> Option<&NodeDocSite> {
         let end = self.doc_sites.partition_point(|site| site.pos <= pos);
@@ -1045,6 +1197,13 @@ impl NodeArenas {
         self.array_items.clear();
         self.params.clear();
         self.match_arms.clear();
+        self.elseifs.clear();
+        self.switch_cases.clear();
+        self.catch_clauses.clear();
+        self.declare_directives.clear();
+        self.global_vars.clear();
+        self.static_vars.clear();
+        self.class_decls.clear();
         self.attributes.clear();
         self.qualified_names.clear();
         self.properties.clear();
@@ -1108,25 +1267,32 @@ impl NodeArenas {
             self.use_imports.base(),
             self.closure_uses.base(),
             self.type_hints.base(),
+            self.elseifs.base(),
+            self.switch_cases.base(),
+            self.catch_clauses.base(),
+            self.declare_directives.base(),
+            self.global_vars.base(),
+            self.static_vars.base(),
+            self.class_decls.base(),
         );
         self.clear();
-        (
-            self.expr_base,
-            self.stmt_base,
-            self.args_base,
-            self.stmt_ids_base,
-            self.expr_ids_base,
-            self.destructure_items_base,
-            self.array_items_base,
-            self.params_base,
-            self.match_arms_base,
-            self.attributes_base,
-            self.functions_base,
-            self.methods_base,
-            self.classes_base,
-            self.closures_base,
-            self.anonymous_classes_base,
-            self.decoded_bytes_base,
+        let (
+            expr_base,
+            stmt_base,
+            args_base,
+            stmt_ids_base,
+            expr_ids_base,
+            destructure_items_base,
+            array_items_base,
+            params_base,
+            match_arms_base,
+            attributes_base,
+            functions_base,
+            methods_base,
+            classes_base,
+            closures_base,
+            anonymous_classes_base,
+            decoded_bytes_base,
             qualified_names_base,
             properties_base,
             class_consts_base,
@@ -1137,7 +1303,30 @@ impl NodeArenas {
             use_imports_base,
             closure_uses_base,
             type_hints_base,
+            elseifs_base,
+            switch_cases_base,
+            catch_clauses_base,
+            declare_directives_base,
+            global_vars_base,
+            static_vars_base,
+            class_decls_base,
         ) = bases;
+        self.expr_base = expr_base;
+        self.stmt_base = stmt_base;
+        self.args_base = args_base;
+        self.stmt_ids_base = stmt_ids_base;
+        self.expr_ids_base = expr_ids_base;
+        self.destructure_items_base = destructure_items_base;
+        self.array_items_base = array_items_base;
+        self.params_base = params_base;
+        self.match_arms_base = match_arms_base;
+        self.attributes_base = attributes_base;
+        self.functions_base = functions_base;
+        self.methods_base = methods_base;
+        self.classes_base = classes_base;
+        self.closures_base = closures_base;
+        self.anonymous_classes_base = anonymous_classes_base;
+        self.decoded_bytes_base = decoded_bytes_base;
         self.qualified_names.set_base(qualified_names_base);
         self.properties.set_base(properties_base);
         self.class_consts.set_base(class_consts_base);
@@ -1148,6 +1337,13 @@ impl NodeArenas {
         self.use_imports.set_base(use_imports_base);
         self.closure_uses.set_base(closure_uses_base);
         self.type_hints.set_base(type_hints_base);
+        self.elseifs.set_base(elseifs_base);
+        self.switch_cases.set_base(switch_cases_base);
+        self.catch_clauses.set_base(catch_clauses_base);
+        self.declare_directives.set_base(declare_directives_base);
+        self.global_vars.set_base(global_vars_base);
+        self.static_vars.set_base(static_vars_base);
+        self.class_decls.set_base(class_decls_base);
     }
 
     /// Compacts a completed tree before its arenas leave the worker.
@@ -1167,6 +1363,13 @@ impl NodeArenas {
         self.array_items.shrink_to_fit();
         self.params.shrink_to_fit();
         self.match_arms.shrink_to_fit();
+        self.elseifs.shrink_to_fit();
+        self.switch_cases.shrink_to_fit();
+        self.catch_clauses.shrink_to_fit();
+        self.declare_directives.shrink_to_fit();
+        self.global_vars.shrink_to_fit();
+        self.static_vars.shrink_to_fit();
+        self.class_decls.shrink_to_fit();
         self.attributes.shrink_to_fit();
         self.qualified_names.shrink_to_fit();
         self.properties.shrink_to_fit();
@@ -1225,17 +1428,17 @@ pub enum StmtKind {
     // the statements of a `declare(...) { ... }` or `declare(...): ...
     // enddeclare;` block.
     Declare {
-        directives: Vec<(Ident, ExprId)>,
+        directives: DeclareDirectiveRange,
         body: Option<StmtIdRange>,
     },
     Break(Option<i64>),
     Continue(Option<i64>),
-    Global(Vec<GlobalVar>),
+    Global(GlobalVarRange),
     // `unset($a, $b[1], ...)`.
     Unset(ExprIdRange),
     FunctionDecl(FunctionId),
-    ClassDecl(ClassDecl),
-    Namespace(String),
+    ClassDecl(ClassDeclRange),
+    Namespace(Name),
     // Every import a `use` statement brings in - a plain `use A, B;`
     // list and a group `use Foo\{A, B as C};` both expand to one
     // `UseImport` per name here.
@@ -1248,14 +1451,14 @@ pub enum StmtKind {
     // modeled - only its scoping (the variable is defined from here on)
     // matters for a single-call static analysis pass. The name is
     // without its `$`.
-    StaticVar(Vec<(Ident, Option<ExprId>)>),
+    StaticVar(StaticVarRange),
     Switch {
         subject: ExprId,
-        cases: Vec<SwitchCase>,
+        cases: SwitchCaseRange,
     },
     Try {
         body: StmtIdRange,
-        catches: Vec<CatchClause>,
+        catches: CatchClauseRange,
         finally: Option<StmtIdRange>,
     },
     Throw(ExprId),
@@ -1266,13 +1469,20 @@ pub enum StmtKind {
     Label(Ident),
 }
 
+/// One `name=value` pair inside a `declare(...)` statement.
+#[derive(Debug, Clone)]
+pub struct DeclareDirective {
+    pub name: Ident,
+    pub value: ExprId,
+}
+
 /// `if (cond) then elseif (…) … else …`. An `elseif` is part of the chain;
 /// `else if` is an `else` whose statement is another `if`.
 #[derive(Debug, Clone)]
 pub struct IfStmt {
     pub cond: ExprId,
     pub then_branch: StmtId,
-    pub elseifs: Vec<ElseIf>,
+    pub elseifs: ElseIfRange,
     pub else_branch: Option<StmtId>,
 }
 
@@ -1287,15 +1497,16 @@ pub struct ElseIf {
 impl IfStmt {
     /// Every condition of the chain in order: the `if`'s, then each
     /// `elseif`'s.
-    pub fn conditions(&self) -> impl Iterator<Item = ExprId> + '_ {
-        std::iter::once(self.cond).chain(self.elseifs.iter().map(|e| e.cond))
+    pub fn conditions<'a>(&'a self, arenas: &'a NodeArenas) -> impl Iterator<Item = ExprId> + 'a {
+        std::iter::once(self.cond)
+            .chain(arenas.elseifs(self.elseifs.clone()).iter().map(|e| e.cond))
     }
 
     /// Every branch body in order: the `if`'s, each `elseif`'s, then the
     /// `else`.
-    pub fn bodies(&self) -> impl Iterator<Item = StmtId> + '_ {
+    pub fn bodies<'a>(&'a self, arenas: &'a NodeArenas) -> impl Iterator<Item = StmtId> + 'a {
         std::iter::once(self.then_branch)
-            .chain(self.elseifs.iter().map(|e| e.body))
+            .chain(arenas.elseifs(self.elseifs.clone()).iter().map(|e| e.body))
             .chain(self.else_branch)
     }
 }
@@ -1334,6 +1545,10 @@ pub struct Param {
     // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Ident,
     pub type_hint: Option<TypeHint>,
+    /// The selected `LanguageLevelTypeAware` type, retained independently
+    /// of the synthesized native hint so declaration readers can honor the
+    /// override even when reconciling pre-existing PHPDoc.
+    pub type_aware_override: Option<String>,
     pub default: Option<ExprId>,
     pub by_ref: bool,
     pub variadic: bool,
@@ -1399,10 +1614,11 @@ pub struct FunctionDecl {
 
 impl FunctionDecl {
     /// The body's statements; none for a bodiless declaration.
-    pub fn body_stmts(&self, arenas: &NodeArenas) -> &[StmtId] {
-        self.body
-            .as_ref()
-            .map_or(&[], |body| arenas.stmt_ids(&body.stmts))
+    pub fn body_stmts<'a>(&self, arenas: &'a NodeArenas) -> &'a [StmtId] {
+        match self.body.as_ref() {
+            Some(body) => arenas.stmt_ids(&body.stmts),
+            None => &[],
+        }
     }
 
     /// The fully-qualified name a function statement declares; a method's
@@ -1727,7 +1943,7 @@ impl ClassDef {
     /// Its `__construct` method, matched case-insensitively.
     pub fn constructor<'a>(&self, arenas: &'a NodeArenas) -> Option<&'a MethodDecl> {
         arenas
-            .methods(self.methods)
+            .methods(self.methods.clone())
             .iter()
             .find(|m| m.function.is_constructor())
     }
@@ -2000,7 +2216,7 @@ pub struct ClosureUse {
 // $className`, `$x instanceof $obj`) for a runtime-determined class.
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
-    Name(QualifiedName),
+    Name(QualifiedNameRange),
     Expr(ExprId),
 }
 
@@ -2216,7 +2432,7 @@ pub enum TypeHintKind {
     Keyword(NativeType, Arc<str>),
     /// A class name, as written (`\App\Foo`, `Foo`) - including a word
     /// PHP reads as a class in a native hint (`integer`, `resource`).
-    Name(QualifiedName),
+    Name(QualifiedNameRange),
     /// `?T`.
     Nullable(Box<TypeHint>),
     /// `A|B`.
@@ -2328,7 +2544,7 @@ impl TypeHint {
     fn collect_class_names<'a>(&'a self, arenas: &'a NodeArenas, out: &mut Vec<&'a QualifiedName>) {
         match &self.kind {
             TypeHintKind::Keyword(..) => {}
-            TypeHintKind::Name(name) => out.push(name),
+            TypeHintKind::Name(name) => out.extend(arenas.qualified_names(name)),
             TypeHintKind::Nullable(inner) => inner.collect_class_names(arenas, out),
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
                 for member in arenas.type_hints(members) {
@@ -2357,7 +2573,11 @@ impl std::fmt::Display for TypeHintDisplay<'_> {
         ) -> std::fmt::Result {
             match &hint.kind {
                 TypeHintKind::Keyword(_, written) => f.write_str(written),
-                TypeHintKind::Name(name) => f.write_str(name),
+                TypeHintKind::Name(name) => f.write_str(
+                    arenas
+                        .qualified_name(name)
+                        .expect("type-name range contains its qualified name"),
+                ),
                 TypeHintKind::Nullable(inner) => {
                     f.write_str("?")?;
                     write_hint(inner, arenas, f)
@@ -2410,6 +2630,13 @@ impl GlobalVar {
             GlobalVar::Dynamic(_) => None,
         }
     }
+}
+
+/// One function-local static variable and its optional initializer.
+#[derive(Debug, Clone)]
+pub struct StaticVarDecl {
+    pub name: Ident,
+    pub default: Option<ExprId>,
 }
 
 /// How an `ExprKind::Exit` is spelled; the two are the same construct.
@@ -2613,13 +2840,12 @@ pub enum ClosurePayload {
     ArrowFn(ArrowFnExpr),
 }
 
-/// An expression, plus the real source span it occupies - see `StmtNode`'s
-/// equivalent doc comment.
+/// An expression. Its real source span is stored in `NodeArenas::expr_spans`
+/// at the matching expression ID.
 #[derive(Debug, Clone)]
 pub struct ExprNode {
     pub id: ExprId,
     pub kind: ExprKind,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -2692,8 +2918,8 @@ pub enum ExprKind {
     /// `Foo::{$expr}` (PHP 8.3): the constant name is computed.
     DynamicClassConstFetch(StaticTarget, ExprId),
     // `Name` mirrors `InstanceofTarget::Name`'s own (name, name-span)
-    // shape exactly - a `Foo::method()` receiver, unchanged from before
-    // this variant existed. `ExprNode` is a real, non-`Name` receiver
+    // shape at parse time; the instance-of form now stores that payload in
+    // the qualified-name owner arena. `ExprNode` is a real, non-`Name` receiver
     // expression (`$obj::method()`) - previously discarded into a
     // permanent `"?"` sentinel string at parse time; now the real,
     // already-parsed receiver `ExprNode` survives into the AST, letting
@@ -2703,7 +2929,7 @@ pub enum ExprKind {
     /// `Foo::$name()` / `Foo::{$expr}()`: the method name is computed.
     DynamicStaticCall(StaticTarget, ExprId, ArgRange),
     Index(ExprId, Option<ExprId>),
-    Name(QualifiedName),
+    Name(QualifiedNameRange),
     Instanceof(ExprId, InstanceofTarget),
     Cast(CastSpelling, ExprId),
     Grouping(ExprId),
@@ -2818,9 +3044,7 @@ mod arena_tests {
         Arg {
             name: None,
             value: ExprId::from_raw(la_arena::RawIdx::from_u32(value)),
-            unpack: false,
-            by_ref: false,
-            span: Span::default(),
+            spread: false,
         }
     }
 
@@ -2840,7 +3064,8 @@ mod arena_tests {
                 name_id: None,
                 span: Span::default(),
             },
-            type_hint: None,
+                type_hint: None,
+                type_aware_override: None,
             default: None,
             by_ref: false,
             variadic: false,
@@ -2870,16 +3095,16 @@ mod arena_tests {
         ClassDef {
             kind: ClassKind::Class,
             backing_type: None,
-            extends: Vec::new(),
-            implements: Vec::new(),
+            extends: arenas.alloc_qualified_names([]),
+            implements: arenas.alloc_qualified_names([]),
             is_abstract: false,
             is_final: false,
             is_readonly: false,
-            properties: Vec::new(),
+            properties: arenas.alloc_properties([]),
             methods,
-            consts: Vec::new(),
-            trait_uses: Vec::new(),
-            enum_cases: Vec::new(),
+            consts: arenas.alloc_class_consts([]),
+            trait_uses: arenas.alloc_trait_uses([]),
+            enum_cases: arenas.alloc_enum_cases([]),
             doc_comment: None,
             attrs,
             span: Span::default(),
@@ -2890,15 +3115,15 @@ mod arena_tests {
     fn list_allocators_commit_contiguous_ranges_and_reuse_capacity() {
         let mut arenas = NodeArenas::default();
         let first = arenas.alloc_args([arg(0), arg(1)]);
-        assert_eq!(arenas.args(first).len(), 2);
+        assert_eq!(arenas.args(first.clone()).len(), 2);
         assert_eq!(u32::from(first.start().into_raw()), 0);
         assert_eq!(u32::from(first.end().into_raw()), 2);
-        let capacity = arenas.args.capacity();
+        let storage = arenas.args.as_mut().as_ptr();
 
         arenas.clear();
         let second = arenas.alloc_args([arg(2)]);
         assert_eq!(u32::from(second.start().into_raw()), 0);
-        assert!(arenas.args.capacity() >= capacity);
+        assert_eq!(arenas.args.as_mut().as_ptr(), storage);
 
         let statements = arenas.alloc_stmt_ids([
             StmtId::from_raw(la_arena::RawIdx::from_u32(4)),
@@ -2935,13 +3160,53 @@ mod arena_tests {
             body: ExprId::from_raw(la_arena::RawIdx::from_u32(1)),
             span: Span::default(),
         }]);
+        let original_elseifs = parent.alloc_elseifs([ElseIf {
+            cond: ExprId::from_raw(la_arena::RawIdx::from_u32(0)),
+            body: StmtId::from_raw(la_arena::RawIdx::from_u32(0)),
+            span: Span::default(),
+        }]);
+        let original_case_body = parent.alloc_stmt_ids([]);
+        let original_cases = parent.alloc_switch_cases([SwitchCase {
+            test: None,
+            body: original_case_body,
+            span: Span::default(),
+        }]);
+        let original_catch_types = parent.alloc_qualified_names([]);
+        let original_catch_body = parent.alloc_stmt_ids([]);
+        let original_catches = parent.alloc_catch_clauses([CatchClause {
+            types: original_catch_types,
+            var: None,
+            body: original_catch_body,
+            span: Span::default(),
+        }]);
+        let original_directives = parent.alloc_declare_directives([DeclareDirective {
+            name: Ident {
+                name: crate::name::Interner::global().name("strict_types"),
+                name_id: None,
+                span: Span::default(),
+            },
+            value: ExprId::from_raw(la_arena::RawIdx::from_u32(0)),
+        }]);
+        let original_globals = parent.alloc_global_vars([GlobalVar::Name(Ident {
+            name: crate::name::Interner::global().name("original_global"),
+            name_id: None,
+            span: Span::default(),
+        })]);
+        let original_statics = parent.alloc_static_vars([StaticVarDecl {
+            name: Ident {
+                name: crate::name::Interner::global().name("original_static"),
+                name_id: None,
+                span: Span::default(),
+            },
+            default: Some(ExprId::from_raw(la_arena::RawIdx::from_u32(0))),
+        }]);
         let empty_args_range = parent.alloc_args([]);
         let original_attributes = parent.alloc_attributes([attribute(empty_args_range)]);
         let original_class_def = class_def(&mut parent);
         let original_class = parent.alloc_class(original_class_def);
         let original_anonymous_class = parent.alloc_anonymous_class(AnonymousClass {
             def: original_class,
-            args: original,
+            args: original.clone(),
         });
         assert!(parent.set_anonymous_class_name(
             original_anonymous_class,
@@ -2957,6 +3222,12 @@ mod arena_tests {
             params_base: u32::try_from(parent.params.len()).unwrap(),
             match_arms_base: u32::try_from(parent.match_arms.len()).unwrap(),
             attributes_base: u32::try_from(parent.attributes.len()).unwrap(),
+            elseifs: parent.elseifs.fragment(),
+            switch_cases: parent.switch_cases.fragment(),
+            catch_clauses: parent.catch_clauses.fragment(),
+            declare_directives: parent.declare_directives.fragment(),
+            global_vars: parent.global_vars.fragment(),
+            static_vars: parent.static_vars.fragment(),
             methods_base: u32::try_from(parent.methods.len()).unwrap(),
             classes_base: u32::try_from(parent.classes.len()).unwrap(),
             anonymous_classes_base: u32::try_from(parent.anonymous_classes.len()).unwrap(),
@@ -2980,20 +3251,61 @@ mod arena_tests {
             body: ExprId::from_raw(la_arena::RawIdx::from_u32(3)),
             span: Span::default(),
         }]);
+        let appended_elseifs = fragment.alloc_elseifs([ElseIf {
+            cond: ExprId::from_raw(la_arena::RawIdx::from_u32(2)),
+            body: StmtId::from_raw(la_arena::RawIdx::from_u32(2)),
+            span: Span::default(),
+        }]);
+        let appended_case_body = fragment.alloc_stmt_ids([]);
+        let appended_cases = fragment.alloc_switch_cases([SwitchCase {
+            test: Some(ExprId::from_raw(la_arena::RawIdx::from_u32(2))),
+            body: appended_case_body,
+            span: Span::default(),
+        }]);
+        let appended_catch_types = fragment.alloc_qualified_names([]);
+        let appended_catch_body = fragment.alloc_stmt_ids([]);
+        let appended_catches = fragment.alloc_catch_clauses([CatchClause {
+            types: appended_catch_types,
+            var: None,
+            body: appended_catch_body,
+            span: Span::default(),
+        }]);
+        let appended_directives = fragment.alloc_declare_directives([DeclareDirective {
+            name: Ident {
+                name: crate::name::Interner::global().name("ticks"),
+                name_id: None,
+                span: Span::default(),
+            },
+            value: ExprId::from_raw(la_arena::RawIdx::from_u32(2)),
+        }]);
+        let appended_globals = fragment.alloc_global_vars([GlobalVar::Dynamic(ExprId::from_raw(
+            la_arena::RawIdx::from_u32(2),
+        ))]);
+        let appended_statics = fragment.alloc_static_vars([StaticVarDecl {
+            name: Ident {
+                name: crate::name::Interner::global().name("fragment_static"),
+                name_id: None,
+                span: Span::default(),
+            },
+            default: None,
+        }]);
         let empty_fragment_args_range = fragment.alloc_args([]);
         let appended_attributes = fragment.alloc_attributes([attribute(empty_fragment_args_range)]);
         let appended_class_def = class_def(&mut fragment);
         let appended_class = fragment.alloc_class(appended_class_def);
         let appended_anonymous_class = fragment.alloc_anonymous_class(AnonymousClass {
             def: appended_class,
-            args: appended,
+            args: appended.clone(),
         });
         assert!(fragment.set_anonymous_class_name(
             appended_anonymous_class,
             crate::name::Name::from("class@anonymous/fragment:1"),
         ));
         assert_eq!(u32::from(appended.start().into_raw()), 2);
-        assert_eq!(u32::from(fragment.args(appended)[0].value.into_raw()), 2);
+        assert_eq!(
+            u32::from(fragment.args(appended.clone())[0].value.into_raw()),
+            2
+        );
         assert_eq!(u32::from(appended_stmts.start().into_raw()), 2);
         assert_eq!(
             u32::from(fragment.stmt_ids(&appended_stmts)[0].into_raw()),
@@ -3019,6 +3331,30 @@ mod arena_tests {
             u32::try_from(parent.match_arms.len()).unwrap()
         );
         assert_eq!(
+            u32::from(appended_elseifs.start().into_raw()),
+            u32::try_from(parent.elseifs.get(&original_elseifs).len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_cases.start().into_raw()),
+            u32::try_from(parent.switch_cases.get(&original_cases).len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_catches.start().into_raw()),
+            u32::try_from(parent.catch_clauses.get(&original_catches).len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_directives.start().into_raw()),
+            u32::try_from(parent.declare_directives.get(&original_directives).len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_globals.start().into_raw()),
+            u32::try_from(parent.global_vars.get(&original_globals).len()).unwrap()
+        );
+        assert_eq!(
+            u32::from(appended_statics.start().into_raw()),
+            u32::try_from(parent.static_vars.get(&original_statics).len()).unwrap()
+        );
+        assert_eq!(
             u32::from(appended_attributes.start().into_raw()),
             u32::try_from(parent.attributes.len()).unwrap()
         );
@@ -3037,9 +3373,57 @@ mod arena_tests {
             u32::from(parent.expr_ids(&appended_expr_ids)[0].into_raw()),
             2
         );
+        assert_eq!(parent.elseifs(original_elseifs).len(), 1);
+        assert_eq!(parent.elseifs(appended_elseifs.clone()).len(), 1);
+        assert_eq!(
+            u32::from(parent.elseifs(appended_elseifs)[0].cond.into_raw()),
+            2
+        );
+        assert_eq!(parent.switch_cases(original_cases.clone()).len(), 1);
+        assert_eq!(parent.switch_cases(appended_cases.clone()).len(), 1);
+        assert_eq!(
+            u32::from(
+                parent.switch_cases(appended_cases.clone())[0]
+                    .test
+                    .unwrap()
+                    .into_raw()
+            ),
+            2
+        );
+        assert_eq!(parent.catch_clauses(original_catches.clone()).len(), 1);
+        assert_eq!(parent.catch_clauses(appended_catches.clone()).len(), 1);
+        assert_eq!(
+            parent.declare_directives(original_directives.clone()).len(),
+            1
+        );
+        assert_eq!(
+            parent.declare_directives(appended_directives.clone()).len(),
+            1
+        );
+        assert_eq!(
+            parent.declare_directives(appended_directives.clone())[0]
+                .name
+                .name,
+            "ticks"
+        );
+        assert_eq!(parent.global_vars(original_globals.clone()).len(), 1);
+        assert_eq!(parent.global_vars(appended_globals.clone()).len(), 1);
+        assert!(matches!(
+            &parent.global_vars(appended_globals.clone())[0],
+            GlobalVar::Dynamic(_)
+        ));
+        assert_eq!(parent.static_vars(original_statics.clone()).len(), 1);
+        assert_eq!(parent.static_vars(appended_statics.clone()).len(), 1);
+        assert_eq!(
+            parent.static_vars(appended_statics.clone())[0].name.name,
+            "fragment_static"
+        );
         assert_eq!(parent.destructure_items(&appended_pattern).len(), 1);
         assert!(parent.destructure_items(&appended_pattern)[0].by_ref);
-        assert_eq!(u32::from(parent.args(appended)[0].value.into_raw()), 2);
+        assert_eq!(
+            u32::from(parent.args(appended.clone())[0].value.into_raw()),
+            2
+        );
         assert_eq!(parent.array_items(original_items).len(), 1);
         assert_eq!(
             u32::from(parent.array_items(appended_items)[0].value.into_raw()),
@@ -3073,12 +3457,10 @@ mod arena_tests {
         let expression = ExprNode {
             id: SYNTHETIC_EXPR_ID,
             kind: ExprKind::Literal(Literal::Null),
-            span: Span::default(),
         };
         let statement = StmtNode {
             id: SYNTHETIC_STMT_ID,
             kind: StmtKind::Break(None),
-            span: Span::default(),
         };
 
         let expression_id = arenas.exprs.alloc(expression);
@@ -3089,7 +3471,6 @@ mod arena_tests {
             arenas.exprs.alloc(ExprNode {
                 id: SYNTHETIC_EXPR_ID,
                 kind: ExprKind::Literal(Literal::Null),
-                span: Span::default(),
             }),
             expression_id
         );
@@ -3097,7 +3478,6 @@ mod arena_tests {
             arenas.stmts.alloc(StmtNode {
                 id: SYNTHETIC_STMT_ID,
                 kind: StmtKind::Break(None),
-                span: Span::default(),
             }),
             statement_id
         );

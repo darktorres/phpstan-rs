@@ -883,7 +883,7 @@ impl<'a> MemberSpans<'a> {
             self.methods.insert(&m.function.name, m.function.name.span);
             self.method_sites
                 .insert(name_site(&m.function), m.function.name.span);
-            for p in arenas.params(m.function.params) {
+            for p in arenas.params(m.function.params.clone()) {
                 if p.promotion.is_some() {
                     self.properties.insert(&p.name, p.name.span);
                 }
@@ -899,7 +899,7 @@ impl<'a> MemberSpans<'a> {
 
     pub(crate) fn of_class(arenas: &'a NodeArenas, c: &'a ClassDef) -> MemberSpans<'a> {
         let mut spans = MemberSpans::default();
-        spans.add_methods(arenas, arenas.methods(c.methods));
+        spans.add_methods(arenas, arenas.methods(c.methods.clone()));
         spans.add_consts(c.consts(arenas));
         for p in c.properties(arenas) {
             spans.properties.insert(&p.name, p.name.span);
@@ -949,7 +949,10 @@ impl ClassReflection {
         c: &ClassDecl,
         ctx: &NameContext,
     ) -> ClassReflection {
-        Self::from_def(arenas, c.fq_name(), &c.def, ctx)
+        let def = arenas
+            .class(c.def)
+            .expect("declared class ID belongs to its retained file owner");
+        Self::from_def(arenas, c.fq_name(), def, ctx)
     }
 
     /// The reflection of class definition `c`, which declares class
@@ -1018,12 +1021,12 @@ impl ClassReflection {
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
         let mut methods_vec: Vec<(Name, u32, FunctionReflection)> =
-            Vec::with_capacity(arenas.methods(c.methods).len());
+            Vec::with_capacity(arenas.methods(c.methods.clone()).len());
         let mut abstract_methods: NameSet = NameSet::default();
         let mut final_methods: NameSet = NameSet::default();
         let mut static_methods: NameSet = NameSet::default();
         let mut final_methods_by_phpdoc: NameSet = NameSet::default();
-        for m in arenas.methods(c.methods) {
+        for m in arenas.methods(c.methods.clone()) {
             let name = Name::from(&m.function.name);
             if m.is_abstract {
                 abstract_methods.insert(name.clone());
@@ -1091,7 +1094,7 @@ impl ClassReflection {
         // (final or not) is never part of a subclass's overridable
         // surface either.
         let mut final_properties: NameSet = c
-            .properties
+            .properties(arenas)
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
             .map(|p| Name::from(&p.name))
@@ -1104,7 +1107,7 @@ impl ClassReflection {
         if let Some(ctor) = c.constructor(arenas) {
             final_properties.extend(
                 arenas
-                    .params(ctor.function.params)
+                    .params(ctor.function.params.clone())
                     .iter()
                     .filter(|p| {
                         p.promotion.is_some_and(|promotion| promotion.is_final)
@@ -1118,7 +1121,7 @@ impl ClassReflection {
         // `@final`'s docblock-only sibling to `final_properties` above -
         // same private-is-not-overridable exemption.
         let mut final_properties_by_phpdoc: NameSet = c
-            .properties
+            .properties(arenas)
             .iter()
             .filter(|p| {
                 p.visibility != Visibility::Private
@@ -1134,7 +1137,7 @@ impl ClassReflection {
         if let Some(ctor) = c.constructor(arenas) {
             final_properties_by_phpdoc.extend(
                 arenas
-                    .params(ctor.function.params)
+                    .params(ctor.function.params.clone())
                     .iter()
                     .filter(|p| {
                         p.promotion.map(|promotion| promotion.visibility).as_ref()
@@ -1150,7 +1153,7 @@ impl ClassReflection {
         }
 
         let mut properties: NameMap<PropertyReflection> = c
-            .properties
+            .properties(arenas)
             .iter()
             .map(|p| {
                 let doc_ty = p
@@ -1166,6 +1169,7 @@ impl ClassReflection {
                 } = declared_type(
                     doc_ty.as_ref().and_then(|d| d.var_type.as_ref()),
                     p.type_hint.as_ref(),
+                    arenas,
                     &template_params,
                     ctx,
                 );
@@ -1177,7 +1181,8 @@ impl ClassReflection {
                         let t = mark_template_params(parse_type_node(raw), &template_params);
                         substitute_type_aliases(resolve_names_in_type(t, ctx), &type_aliases)
                     });
-                let set_ty = property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
+                let set_ty =
+                    property_hook_set_type(arenas, p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_ref()
@@ -1185,7 +1190,10 @@ impl ClassReflection {
                 (
                     Name::from(&p.name),
                     PropertyReflection {
-                        attributes: ReflectionAttribute::all(arenas, arenas.attributes(p.attrs)),
+                        attributes: ReflectionAttribute::all(
+                            arenas,
+                            arenas.attributes(p.attrs.clone()),
+                        ),
                         provenance: Provenance::default(),
                         ty,
                         ty_native,
@@ -1241,7 +1249,7 @@ impl ClassReflection {
                 .and_then(|ranges| arenas.doc_comment_text(ranges))
                 .as_deref()
                 .map(docblock::parse_shared);
-            for p in arenas.params(ctor.function.params) {
+            for p in arenas.params(ctor.function.params.clone()) {
                 if p.promotion.is_none() {
                     continue;
                 }
@@ -1267,7 +1275,13 @@ impl ClassReflection {
                     ty,
                     native: ty_native,
                     ..
-                } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
+                } = declared_type(
+                    doc_ty.as_ref(),
+                    p.type_hint.as_ref(),
+                    arenas,
+                    &template_params,
+                    ctx,
+                );
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let own_doc_ty = doc_ty.as_ref().map(|raw| {
                     let t = mark_template_params(parse_type_node(raw), &template_params);
@@ -1289,7 +1303,8 @@ impl ClassReflection {
                 // inline PHP 8.4 hooks (`Param::hooks`) exactly like a
                 // plain property declaration can - resolved through the
                 // identical generalized helpers.
-                let set_ty = property_hook_set_type(p.hooks.as_deref(), &template_params, ctx);
+                let set_ty =
+                    property_hook_set_type(arenas, p.hooks.as_deref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_deref()
@@ -1297,7 +1312,10 @@ impl ClassReflection {
                 properties.insert(
                     Name::from(&p.name),
                     PropertyReflection {
-                        attributes: ReflectionAttribute::all(arenas, arenas.attributes(p.attrs)),
+                        attributes: ReflectionAttribute::all(
+                            arenas,
+                            arenas.attributes(p.attrs.clone()),
+                        ),
                         provenance: Provenance::default(),
                         ty,
                         ty_native,
@@ -1455,7 +1473,7 @@ impl ClassReflection {
         // undocumented const keeps `infer_const_type`'s existing
         // inference.
         let consts: OrderedNameMap<ConstantReflection> = c
-            .consts
+            .consts(arenas)
             .iter()
             .map(|cc| {
                 let doc = cc
@@ -1478,12 +1496,15 @@ impl ClassReflection {
                 (
                     Name::from(&cc.name),
                     ConstantReflection {
-                        attributes: ReflectionAttribute::all(arenas, arenas.attributes(cc.attrs)),
+                        attributes: ReflectionAttribute::all(
+                            arenas,
+                            arenas.attributes(cc.attrs.clone()),
+                        ),
                         provenance: Provenance::default(),
                         ty,
                         visibility: cc.visibility,
                         is_final: cc.is_final,
-                        native_ty: native_const_type(cc),
+                        native_ty: native_const_type(cc, arenas),
                         has_phpdoc_type,
                         value_ty: infer_class_const_type(arenas, cc.value),
                         // `@internal` on this constant's own doc
@@ -1639,16 +1660,16 @@ impl ClassReflection {
             .unwrap_or_default();
         let access = crate::registry::access_attributes::access_attributes(
             arenas,
-            arenas.attributes(c.attrs),
+            arenas.attributes(c.attrs.clone()),
             ctx.namespace(),
         );
         let method_access = arenas
-            .methods(c.methods)
+            .methods(c.methods.clone())
             .iter()
             .filter_map(|m| {
                 let a = crate::registry::access_attributes::access_attributes(
                     arenas,
-                    arenas.attributes(m.function.attrs),
+                    arenas.attributes(m.function.attrs.clone()),
                     ctx.namespace(),
                 );
                 (!a.is_empty()).then(|| (Name::from(&m.function.name.to_ascii_lowercase()), a))
@@ -1663,7 +1684,8 @@ impl ClassReflection {
             .map(|d| resolve_tag_types(&d.mixins))
             .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
-        let attribute_targets = compute_attribute_targets(arenas, arenas.attributes(c.attrs));
+        let attribute_targets =
+            compute_attribute_targets(arenas, arenas.attributes(c.attrs.clone()));
         let doctrine_entity = compute_doctrine_entity(arenas, c, &properties);
 
         let mut info = ClassReflection {
@@ -1712,7 +1734,7 @@ impl ClassReflection {
             mixins,
             deprecated,
             attribute_targets,
-            attributes: ReflectionAttribute::all(arenas, arenas.attributes(c.attrs)),
+            attributes: ReflectionAttribute::all(arenas, arenas.attributes(c.attrs.clone())),
             enum_case_values: NameMap::default(),
             type_aliases,
             type_imports,
@@ -1720,7 +1742,7 @@ impl ClassReflection {
             doctrine_entity,
         };
         if c.kind == ClassKind::Enum {
-            info.add_enum_members(c, &class_scope);
+            info.add_enum_members(arenas, c, &class_scope);
         }
         info
     }
@@ -1731,7 +1753,7 @@ impl ClassReflection {
     /// `UnitEnum`/`BackedEnum` among its interfaces.
     // Declared types are joined while the class hierarchy is being built.
     #[allow(clippy::disallowed_methods)]
-    fn add_enum_members(&mut self, e: &ClassDef, fqn: &str) {
+    fn add_enum_members(&mut self, arenas: &NodeArenas, e: &ClassDef, fqn: &str) {
         // `cases(): array` is a real, built-in static method every enum
         // gets from the language itself (`UnitEnum`), and a backed
         // enum's `from(int|string $value): static`/`tryFrom(...): ?static`
@@ -1875,7 +1897,10 @@ impl ClassReflection {
             self.consts.insert(
                 Name::from(&case.name),
                 Arc::new(ConstantReflection {
-                    attributes: ReflectionAttribute::all(arenas, arenas.attributes(case.attrs)),
+                    attributes: ReflectionAttribute::all(
+                        arenas,
+                        arenas.attributes(case.attrs.clone()),
+                    ),
                     provenance: Provenance::default(),
                     ty: Type::enum_case(Name::from(fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
@@ -1917,7 +1942,7 @@ impl ClassReflection {
             .enum_cases(arenas)
             .iter()
             .filter_map(|c| {
-                let v = c.value.as_ref()?;
+                let v = arenas.expr(c.value?)?;
                 let ty = match &v.kind {
                     ExprKind::Literal(Literal::String(s)) => {
                         let Some(bytes) = arenas.string_bytes(s) else {
@@ -2070,8 +2095,8 @@ impl ClassReflection {
 
         for builtin in ["cases", "from", "tryFrom"] {
             if self.methods.contains_key(builtin)
-                && !e
-                    .methods
+                && !arenas
+                    .methods(e.methods.clone())
                     .iter()
                     .any(|m| m.function.name.eq_ignore_ascii_case(builtin))
                 && !self.register_member_entry(MethodEntry {
@@ -2237,8 +2262,10 @@ impl ClassReflection {
 }
 
 /// A class constant's PHP 8.3 native type.
-fn native_const_type(cc: &syntax::ast::ClassConst) -> Option<Type> {
-    cc.type_hint.as_ref().map(types::native_type)
+fn native_const_type(cc: &syntax::ast::ClassConst, arenas: &NodeArenas) -> Option<Type> {
+    cc.type_hint
+        .as_ref()
+        .map(|hint| types::native_type(hint, arenas))
 }
 
 /// An ancestor tag's class and generic arguments.

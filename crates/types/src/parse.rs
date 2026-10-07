@@ -870,10 +870,15 @@ pub fn native_type(hint: &syntax::ast::TypeHint, arenas: &syntax::ast::NodeArena
     use syntax::ast::TypeHintKind;
     syntax::stack::guard(|| match &hint.kind {
         TypeHintKind::Keyword(kind, _) => keyword_type(*kind),
-        TypeHintKind::Name(name) => Type::object(
-            name.resolved_class().unwrap_or(&name.written).into(),
-            Vec::new(),
-        ),
+        TypeHintKind::Name(name) => {
+            let name = arenas
+                .qualified_name(name)
+                .expect("native type name range contains its qualified name");
+            Type::object(
+                name.resolved_class().unwrap_or(&name.written).into(),
+                Vec::new(),
+            )
+        }
         TypeHintKind::Nullable(inner) => {
             Type::new(Repr::Union(vec![native_type(inner, arenas), Type::null()]))
         }

@@ -105,20 +105,27 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_psr3_call(&mut self, e: &ExprNode, locals: &Locals) {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("PSR-3 call arguments retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         let (method, args) = match &e.kind {
             ExprKind::MethodCall(receiver, method, args, _) => {
+                let Some(receiver) = arenas.expr(*receiver) else {
+                    return;
+                };
                 let receiver_ty = self.infer_expr(receiver, locals);
                 if !self.is_psr3_logger(&receiver_ty) {
                     return;
                 }
-                (method.to_ascii_lowercase(), args)
+                (method.to_ascii_lowercase(), arenas.args(args.clone()))
             }
             ExprKind::StaticCall(StaticTarget::Name(class), method, args)
                 if self.resolve_static_class_name(class).is_some_and(|c| {
                     c.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Log")
                 }) =>
             {
-                (method.to_ascii_lowercase(), args)
+                (method.to_ascii_lowercase(), arenas.args(args.clone()))
             }
             _ => return,
         };
@@ -129,9 +136,12 @@ impl<'a> Checker<'a> {
             if args.len() < 2 {
                 return;
             }
-            let level_ty = self.infer_expr(&args[0].value, locals);
+            let Some(level) = arenas.expr(args[0].value) else {
+                return;
+            };
+            let level_ty = self.infer_expr(level, locals);
             if self.settings.psr3.check_psr3_logging {
-                self.check_psr3_level(&level_ty, args[0].value.span);
+                self.check_psr3_level(&level_ty, self.expr_span(level.id));
             }
             let levels = level_ty
                 .constant_strings_text()
@@ -144,13 +154,15 @@ impl<'a> Checker<'a> {
         } else {
             return;
         };
-        let message = &args[message_at].value;
-        let context = args.get(message_at + 1).map(|a| &a.value);
+        let Some(message) = arenas.expr(args[message_at].value) else {
+            return;
+        };
+        let context = args.get(message_at + 1).and_then(|a| arenas.expr(a.value));
         let context_ty = context.map(|c| self.infer_expr(c, locals));
         if self.settings.psr3.check_psr3_logging {
             self.check_psr3_message(&method, message, context, context_ty.as_ref(), locals);
             if let Some((context, ty)) = context.zip(context_ty.as_ref()) {
-                self.check_psr3_context(ty, context.span);
+                self.check_psr3_context(ty, self.expr_span(context.id));
             }
         }
         if self.settings.psr3.check_psr3_exception_context && !levels.is_empty() {
@@ -175,7 +187,7 @@ impl<'a> Checker<'a> {
                     .min()
             {
                 self.report(format!("Parameter $context of logger method {method}() has no 'exception' key while ${name} holds a Throwable."),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     "psr3.contextMissingException",
                 );
@@ -208,7 +220,7 @@ impl<'a> Checker<'a> {
     ) {
         if self.is_risky_log_expr(message, locals) {
             self.report("Using interpolated strings in log messages is potentially a security risk. Use PSR-3 placeholders instead.".to_string(),
-                message.span,
+                self.expr_span(message.id),
                 0,
                 "psr3.interpolated",
             );
@@ -222,7 +234,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "Parameter $message of logger method {method}() is not a static string."
                         ),
-                        message.span,
+                        self.expr_span(message.id),
                         0,
                         "psr3.messageNotStatic",
                     )
@@ -236,7 +248,7 @@ impl<'a> Checker<'a> {
             let (double, invalid) = invalid_braces(text);
             if double {
                 self.report(format!("Parameter $message of logger method {method}() should not include double braces."),
-                    message.span,
+                    self.expr_span(message.id),
                     0,
                     "psr3.placeholderDoubleBraces",
                 );
@@ -247,7 +259,7 @@ impl<'a> Checker<'a> {
                         "Parameter $message of logger method {method}() has braces with invalid placeholder characters - {}.",
                         invalid.join(", ")
                     ),
-                    message.span,
+                    self.expr_span(message.id),
                     0,
                     "psr3.placeholderInvalidChar",
                 );
@@ -261,7 +273,7 @@ impl<'a> Checker<'a> {
                         "Parameter $context of logger method {method}() is required when the message has placeholders - {}.",
                         names.iter().map(|n| format!("{{{n}}}")).collect::<Vec<_>>().join(", ")
                     ),
-                    message.span,
+                    self.expr_span(message.id),
                     0,
                     "psr3.placeholderMissingContext",
                 );
@@ -280,7 +292,7 @@ impl<'a> Checker<'a> {
                         "Parameter $message of logger method {method}() has placeholders with no context key - {}.",
                         missing.join(", ")
                     ),
-                    context.span,
+                    self.expr_span(context.id),
                     0,
                     "psr3.placeholderMissingKey",
                 );
@@ -289,7 +301,7 @@ impl<'a> Checker<'a> {
                 let (key, value) = (field.key.to_string(), &field.ty);
                 if names.contains(&key.as_str()) && !self.converts_to_string(value) {
                     self.report(format!("Context value for placeholder {{{key}}} of logger method {method}() is {value}, which has no string form."),
-                        context.span,
+                        self.expr_span(context.id),
                         0,
                         "psr3.placeholderNotStringable",
                     );
@@ -341,14 +353,24 @@ impl<'a> Checker<'a> {
     }
 
     fn is_risky_log_expr(&self, e: &ExprNode, locals: &Locals) -> bool {
-        let e = e.peeled();
+        let Some(arenas) = self.syntax_arenas() else {
+            return false;
+        };
+        let Some(e) = arenas.peeled(e.id).and_then(|id| arenas.expr(id)) else {
+            return false;
+        };
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
+                let (Some(l), Some(r)) = (arenas.expr(*l), arenas.expr(*r)) else {
+                    return false;
+                };
                 self.is_risky_log_expr(l, locals) || self.is_risky_log_expr(r, locals)
             }
-            ExprKind::Interpolated(parts) => parts.iter().any(|part| {
-                !matches!(part.kind, ExprKind::Literal(Literal::String(_)))
-                    && self.is_risky_value(part, locals)
+            ExprKind::Interpolated(parts) => arenas.expr_ids(parts).iter().any(|id| {
+                arenas.expr(*id).is_some_and(|part| {
+                    !matches!(part.kind, ExprKind::Literal(Literal::String(_)))
+                        && self.is_risky_value(part, locals)
+                })
             }),
             _ => false,
         })

@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     /// PHP 8.4 property hooks body: `{ get => expr; set(Type $value) { .. }
@@ -64,6 +64,7 @@ impl Parser<'_> {
                 Some(Param {
                     name: self.ident(name, name_span),
                     type_hint,
+                    type_aware_override: None,
                     default: None,
                     by_ref,
                     variadic: false,

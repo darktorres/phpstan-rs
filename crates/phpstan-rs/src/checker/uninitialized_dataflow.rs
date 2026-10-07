@@ -53,7 +53,7 @@ use crate::registry::FunctionReflection;
 use crate::registry::init_flow::{Call, CallReceiver, Case, Event, Flow, IfBranch, InitFlow};
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::Visitor;
+use syntax::visit::arena::{self, Visitor};
 
 /// Bare property names known-initialized on every path reaching a given
 /// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same
@@ -102,38 +102,43 @@ impl<'a> Checker<'a> {
     /// starts with everything initialized, so only its own `unset()`s
     /// can make a read premature.
     pub(crate) fn check_premature_property_access(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.settings.rules.check_uninitialized_properties || c.def.kind != ClassKind::Class {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let Some(def) = arenas.class(c.def) else {
+            return;
+        };
+        if !self.settings.rules.check_uninitialized_properties || def.kind != ClassKind::Class {
             return;
         }
-        let constructor = c.def.constructor();
+        let constructor = def.constructor(arenas);
         // A property with a default or promoted from the constructor is
         // initialized before any code runs; one without either needs an
         // assignment somewhere for a premature read to mean anything.
-        let mut initialized_up_front: Vec<String> = c
-            .def
-            .properties
+        let mut initialized_up_front: Vec<String> = def
+            .properties(arenas)
             .iter()
-            .filter(|p| trackable(&c.def, p) && p.default.is_some())
+            .filter(|p| trackable(def, p) && p.default.is_some())
             .map(|p| p.name.to_string())
             .collect();
         initialized_up_front.extend(
             constructor
                 .into_iter()
-                .flat_map(|m| m.function.params.iter())
+                .flat_map(|m| arenas.params(m.function.params.clone()))
                 .filter(|p| {
                     p.promotion.is_some()
                         && !p.promotion.is_some_and(|promotion| promotion.readonly)
-                        && !c.def.is_readonly
+                        && !def.is_readonly
                         && p.type_hint.is_some()
                 })
                 .map(|p| p.name.to_string()),
         );
-        let assigned_later: Vec<String> = c
-            .def
-            .properties
+        let assigned_later: Vec<String> = def
+            .properties(arenas)
             .iter()
             .filter(|p| {
-                trackable(&c.def, p)
+                trackable(def, p)
                     && p.default.is_none()
                     && property_assigned_anywhere_in_hierarchy(self, c, fqn, &p.name)
             })
@@ -153,7 +158,7 @@ impl<'a> Checker<'a> {
         let mut premature_reads: Vec<(String, Span)> = Vec::new();
         let mut walk = |checker: &Checker,
                         method: &str,
-                        body: &[StmtNode],
+                        body: &[StmtId],
                         labels: &[GotoLabel],
                         entry: PropertyInitState| {
             let mut ctx = PropertyInitCtx {
@@ -167,7 +172,12 @@ impl<'a> Checker<'a> {
                 )]),
                 premature_reads: Vec::new(),
             };
-            walk_nodes(&InitFlow::of(body, labels).nodes, entry, &mut ctx, fqn);
+            walk_nodes(
+                &InitFlow::of(arenas, body, labels).nodes,
+                entry,
+                &mut ctx,
+                fqn,
+            );
             for read in ctx.premature_reads {
                 if !premature_reads.contains(&read) {
                     premature_reads.push(read);
@@ -177,28 +187,28 @@ impl<'a> Checker<'a> {
         // An abstract class's constructor may rely on a subclass having
         // initialized a property first.
         if let Some(constructor) = constructor
-            && !c.def.is_abstract
+            && !def.is_abstract
         {
             walk(
                 &*self,
                 "__construct",
-                constructor.function.body_stmts(),
+                constructor.function.body_stmts(arenas),
                 goto_labels(&constructor.function),
                 initialized_up_front.iter().cloned().collect(),
             );
         }
-        for method in &c.def.methods {
+        for method in arenas.methods(def.methods.clone()) {
             if method.is_static
                 || method.is_abstract
                 || method.function.is_constructor()
-                || !unsets_this_property(method.function.body_stmts())
+                || !unsets_this_property(arenas, method.function.body_stmts(arenas))
             {
                 continue;
             }
             walk(
                 &*self,
                 &method.function.name,
-                method.function.body_stmts(),
+                method.function.body_stmts(arenas),
                 goto_labels(&method.function),
                 candidates.iter().cloned().collect(),
             );
@@ -228,31 +238,35 @@ fn trackable(c: &ClassDef, p: &PropertyDecl) -> bool {
 }
 
 /// Whether `body` contains `unset($this->prop)` anywhere.
-fn unsets_this_property(body: &[StmtNode]) -> bool {
+fn unsets_this_property(arenas: &NodeArenas, body: &[StmtId]) -> bool {
     struct Finder(bool);
-    impl<'ast> Visitor<'ast> for Finder {
-        fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+    impl Visitor for Finder {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
             if let StmtKind::Unset(targets) = &stmt.kind
-                && targets.iter().any(
-                    |t| matches!(&t.kind, ExprKind::PropertyAccess(base, _, _) if is_this(base)),
-                )
+                && arenas.expr_ids(targets).iter().any(|target| {
+                    matches!(
+                        arenas.expr(*target).map(|expr| &expr.kind),
+                        Some(ExprKind::PropertyAccess(base, _, _)) if is_this(arenas, *base)
+                    )
+                })
             {
                 self.0 = true;
             }
             if !self.0 {
-                syntax::visit::walk_stmt(self, stmt);
+                arena::walk_stmt(self, arenas, id);
             }
         }
     }
     let mut finder = Finder(false);
-    for stmt in body {
-        finder.visit_stmt(stmt);
-    }
+    arena::walk_stmts(&mut finder, arenas, body);
     finder.0
 }
 
-fn is_this(e: &ExprNode) -> bool {
-    matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
+fn is_this(arenas: &NodeArenas, id: ExprId) -> bool {
+    matches!(arenas.expr(id).map(|e| &e.kind), Some(ExprKind::Variable(v)) if **v == *"this")
 }
 
 fn intersect(a: PropertyInitState, b: &PropertyInitState) -> PropertyInitState {

@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
                 let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*id) else {
                     return false;
                 };
-                let params = arenas.params(arrow.params);
+                let params = arenas.params(arrow.params.clone());
                 let body = arenas
                     .expr(arrow.body)
                     .expect("arrow body resolves in its owner");
@@ -156,13 +156,16 @@ impl<'a> Checker<'a> {
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
-                        closure_expr.span,
+                        self.expr_span(closure_expr.id),
                     );
-                    self.check_type_class_name_case(&expected_case_refs, closure_expr.span);
+                    self.check_type_class_name_case(
+                        &expected_case_refs,
+                        self.expr_span(closure_expr.id),
+                    );
                     self.check_type_trait_refs(
                         &expected,
                         "return type of arrow function",
-                        closure_expr.span,
+                        self.expr_span(closure_expr.id),
                         "return.trait",
                     );
                     if let Some(c) = self.current_class.clone() {
@@ -170,7 +173,7 @@ impl<'a> Checker<'a> {
                         self.check_no_parent_ref(
                             &resolved_return,
                             "return type of arrow function",
-                            closure_expr.span,
+                            self.expr_span(closure_expr.id),
                             "return.noParent",
                         );
                     }
@@ -179,7 +182,7 @@ impl<'a> Checker<'a> {
                     {
                         self.report_found_from(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
-                            body.span,
+                            self.expr_span(body.id),
                             3,
                             from,
                             "return.type",
@@ -192,7 +195,7 @@ impl<'a> Checker<'a> {
                 let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) else {
                     return false;
                 };
-                let params = arenas.params(closure.params);
+                let params = arenas.params(closure.params.clone());
                 let uses = arenas.closure_uses(&closure.uses);
                 let body = arenas.stmt_ids(&closure.body);
                 let goto_labels = &closure.goto_labels;
@@ -268,7 +271,8 @@ impl<'a> Checker<'a> {
                     }
                     // See `checker::expr`'s `ExprKind::Closure` arm.
                     let ty = if u.by_ref {
-                        let ty = self.capture_entry(closure_expr.span, &u.name.name, ty);
+                        let ty =
+                            self.capture_entry(self.expr_span(closure_expr.id), &u.name.name, ty);
                         by_ref_entries.push((u.name.name.clone(), ty.clone()));
                         ty.unsealed_shapes()
                     } else {
@@ -307,22 +311,25 @@ impl<'a> Checker<'a> {
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
-                    closure_expr.span,
+                    self.expr_span(closure_expr.id),
                 );
                 self.check_type_trait_refs(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
-                    closure_expr.span,
+                    self.expr_span(closure_expr.id),
                     "return.trait",
                 );
-                self.check_type_class_name_case(&declared_return_case_refs, closure_expr.span);
+                self.check_type_class_name_case(
+                    &declared_return_case_refs,
+                    self.expr_span(closure_expr.id),
+                );
                 if let Some(c) = self.current_class.clone() {
                     let resolved_return =
                         self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), &c);
                     self.check_no_parent_ref(
                         &resolved_return,
                         "return type of anonymous function",
-                        closure_expr.span,
+                        self.expr_span(closure_expr.id),
                         "return.noParent",
                     );
                 }
@@ -336,7 +343,7 @@ impl<'a> Checker<'a> {
                     });
                 let previous_goto_targets = std::mem::replace(
                     &mut self.current_function_goto_targets,
-                    GotoState::new(goto_labels.to_vec()),
+                    GotoState::new(goto_labels.to_owned()),
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(arenas, body);
                 let enclosing_scope =
@@ -377,7 +384,10 @@ impl<'a> Checker<'a> {
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
                 let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
-                self.check_generator_return_type(declared_return.as_ref(), closure_expr.span);
+                self.check_generator_return_type(
+                    declared_return.as_ref(),
+                    self.expr_span(closure_expr.id),
+                );
                 // See `checker::expr`'s `ExprKind::Closure` arm's
                 // identical `converge_loop_body` fix and comment.
                 let mut body_terminates = false;
@@ -419,7 +429,7 @@ impl<'a> Checker<'a> {
                     body_terminates,
                     return_type.is_some(),
                     declared_return.as_ref(),
-                    closure_expr.span,
+                    self.expr_span(closure_expr.id),
                 );
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
@@ -431,9 +441,9 @@ impl<'a> Checker<'a> {
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_assigned_variables = previous_assigned_variables;
                 self.leave_shared_scope(enclosing_scope);
-                self.check_unused_closure_uses(uses, body, closure_expr.span);
+                self.check_unused_closure_uses(uses, body, self.expr_span(closure_expr.id));
                 self.write_back_captures(
-                    closure_expr.span,
+                    self.expr_span(closure_expr.id),
                     uses,
                     &by_ref_entries,
                     &closure_byref_exit_snapshots,

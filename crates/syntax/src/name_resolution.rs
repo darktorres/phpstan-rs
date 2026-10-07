@@ -3,10 +3,6 @@
 
 use crate::ast::*;
 use crate::name::Name;
-use crate::visit::{
-    VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_def_mut, walk_expr_mut,
-    walk_stmt_mut, walk_stmts_mut,
-};
 
 /// The imports of one namespace: what each name a `use` brings in was
 /// imported from, in the three key spaces of PHP's imports - classes and
@@ -164,45 +160,57 @@ pub struct NameContext {
     use_map: UseMap,
 }
 
-/// Calls `f` with each top-level statement of a file, in order, and the
-/// context in effect there. A block's or a `declare` block's statements
-/// are visited in its place, so a braced namespace body sees its `namespace` and `use`
-/// statements; a `namespace` or `use` statement is passed after it takes
-/// effect.
-pub fn for_each_in_context<'a>(
-    stmts: &'a [StmtNode],
-    mut f: impl FnMut(&'a StmtNode, &NameContext),
+/// Calls `f` for each statement in an arena-backed tree, in source order,
+/// with the namespace and imports in effect at that statement. Blocks and
+/// `declare` bodies are visited in place, matching `for_each_in_context`.
+pub fn for_each_in_context_ids(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    mut f: impl FnMut(StmtId, &StmtNode, &NameContext),
 ) {
-    fn walk<'a>(
-        stmts: &'a [StmtNode],
+    fn walk(
+        arenas: &NodeArenas,
+        stmts: &[StmtId],
         ctx: &mut NameContext,
-        f: &mut impl FnMut(&'a StmtNode, &NameContext),
+        f: &mut impl FnMut(StmtId, &StmtNode, &NameContext),
     ) {
-        for stmt in stmts {
+        for &id in stmts {
+            let Some(stmt) = arenas.stmt(id) else {
+                continue;
+            };
             match &stmt.kind {
                 StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
+                StmtKind::Use(imports) => ctx.add_uses(arenas.use_imports(imports)),
+                StmtKind::Block(inner) => {
+                    walk(arenas, arenas.stmt_ids(inner), ctx, f);
+                    continue;
+                }
+                StmtKind::Declare {
                     body: Some(inner), ..
                 } => {
-                    walk(inner, ctx, f);
+                    walk(arenas, arenas.stmt_ids(inner), ctx, f);
                     continue;
                 }
                 _ => {}
             }
-            f(stmt, ctx);
+            f(id, stmt, ctx);
         }
     }
-    walk(stmts, &mut NameContext::default(), &mut f);
+    walk(arenas, stmts, &mut NameContext::default(), &mut f);
 }
 
-/// The context in effect at the byte offset `pos`: every `namespace` and
-/// `use` statement that starts before it has taken effect.
-pub fn context_at(stmts: &[StmtNode], pos: u32) -> NameContext {
+/// The context in effect at `pos` in an arena-backed tree: every
+/// `namespace` and `use` statement that starts before it has taken effect.
+pub fn context_at_ids(arenas: &NodeArenas, stmts: &[StmtId], pos: u32) -> NameContext {
     let mut at = NameContext::default();
-    for_each_in_context(stmts, |stmt, ctx| {
-        if matches!(stmt.kind, StmtKind::Namespace(_) | StmtKind::Use(_)) && stmt.span.start < pos {
+    for_each_in_context_ids(arenas, stmts, |id, stmt, ctx| {
+        if matches!(stmt.kind, StmtKind::Namespace(_) | StmtKind::Use(_))
+            && arenas
+                .stmt_span(id)
+                .expect("namespace statement has an arena span")
+                .start
+                < pos
+        {
             at = ctx.clone();
         }
     });
@@ -433,113 +441,6 @@ pub fn qualify(namespace: &str, name: &str) -> String {
     }
 }
 
-/// Fills in [`QualifiedName::resolved`] for every name in a tree, tracking
-/// `namespace` and `use` statements in order: a braced namespace body
-/// shares the context of its `namespace` statement. Declarations get their
-/// namespaced name. The parser resolves each name as it makes it, so this
-/// is for a tree changed after: the stub attributes' types.
-pub fn resolve_names(stmts: &mut [StmtNode]) {
-    let mut resolver = Resolver {
-        ctx: NameContext::default(),
-    };
-    walk_stmts_mut(&mut resolver, stmts);
-}
-
-struct Resolver {
-    ctx: NameContext,
-}
-
-impl Resolver {
-    /// The trait names a trait-use block's clauses name.
-    fn trait_adaptations(&self, adaptations: &mut TraitAdaptations) {
-        for name in adaptations
-            .aliases
-            .iter_mut()
-            .filter_map(|a| a.trait_name.as_mut())
-        {
-            self.class(name);
-        }
-        for precedence in &mut adaptations.precedences {
-            self.class(&mut precedence.trait_name);
-            for name in &mut precedence.instead_of {
-                self.class(name);
-            }
-        }
-    }
-
-    fn class(&self, name: &mut QualifiedName) {
-        resolve_class_name(name, &self.ctx);
-    }
-
-    fn function(&self, name: &mut QualifiedName) {
-        name.resolved = self.ctx.function_reference(&name.written).into();
-    }
-
-    fn constant(&self, name: &mut QualifiedName) {
-        name.resolved = self.ctx.constant_reference(&name.written).into();
-    }
-
-    #[inline(never)]
-    fn resolve_expr(&mut self, expr: &mut ExprNode) {
-        match &mut expr.kind {
-            ExprKind::Name(name) => self.constant(name),
-
-            ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
-                if let ExprKind::Name(name) = &mut callee.kind {
-                    self.function(name);
-                }
-                for arg in args {
-                    self.visit_arg(arg);
-                }
-            }
-            ExprKind::New(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
-                if let ExprKind::Name(name) = &mut callee.kind {
-                    self.class(name);
-                }
-                for arg in args {
-                    self.visit_arg(arg);
-                }
-            }
-            ExprKind::ClassConstFetch(target, _)
-            | ExprKind::ClassNameFetch(target)
-            | ExprKind::StaticPropertyFetch(target, _) => self.static_target(target),
-            ExprKind::DynamicStaticPropertyFetch(target, name)
-            | ExprKind::DynamicClassConstFetch(target, name) => {
-                self.static_target(target);
-                self.visit_expr(name);
-            }
-            ExprKind::StaticCall(target, _, args) => {
-                self.static_target(target);
-                for arg in args {
-                    self.visit_arg(arg);
-                }
-            }
-            ExprKind::DynamicStaticCall(target, name, args) => {
-                self.static_target(target);
-                self.visit_expr(name);
-                for arg in args {
-                    self.visit_arg(arg);
-                }
-            }
-            ExprKind::Instanceof(inner, target) => {
-                self.visit_expr(inner);
-                match target {
-                    InstanceofTarget::Name(name) => self.class(name),
-                    InstanceofTarget::Expr(e) => self.visit_expr(e),
-                }
-            }
-            _ => walk_expr_mut(self, expr),
-        }
-    }
-
-    fn static_target(&mut self, target: &mut StaticTarget) {
-        match target {
-            StaticTarget::Name(name) => self.class(name),
-            StaticTarget::Expr(e) => self.visit_expr(e),
-        }
-    }
-}
-
 /// What a name written in a file refers to, as text: the result of a
 /// resolution before its name is interned.
 pub(crate) enum Resolution {
@@ -597,94 +498,6 @@ fn is_class_keyword(name: &str) -> bool {
     ["self", "parent", "static"]
         .iter()
         .any(|k| name.eq_ignore_ascii_case(k))
-}
-
-impl VisitorMut for Resolver {
-    fn visit_stmt(&mut self, stmt: &mut StmtNode) {
-        match &mut stmt.kind {
-            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.add_uses(imports),
-            _ => {
-                match &mut stmt.kind {
-                    StmtKind::FunctionDecl(f) => {
-                        f.namespaced_name = Some(self.ctx.declared_name(&f.name).into());
-                    }
-                    StmtKind::ClassDecl(c) => {
-                        c.namespaced_name = self.ctx.declared_name(&c.name).into();
-                    }
-                    StmtKind::GlobalConst(consts) => {
-                        for c in consts {
-                            c.namespaced_name = Some(self.ctx.declared_name(&c.name).into());
-                        }
-                    }
-                    _ => {}
-                }
-                walk_stmt_mut(self, stmt);
-            }
-        }
-    }
-
-    fn visit_expr(&mut self, expr: &mut ExprNode) {
-        // Only name-bearing expressions need more than the plain walk;
-        // keeping the rest out of `resolve_expr` keeps the frames of this
-        // recursion small.
-        if matches!(
-            expr.kind,
-            ExprKind::Name(_)
-                | ExprKind::Call(..)
-                | ExprKind::New(..)
-                | ExprKind::ClassConstFetch(..)
-                | ExprKind::ClassNameFetch(_)
-                | ExprKind::StaticPropertyFetch(..)
-                | ExprKind::DynamicStaticPropertyFetch(..)
-                | ExprKind::DynamicClassConstFetch(..)
-                | ExprKind::StaticCall(..)
-                | ExprKind::DynamicStaticCall(..)
-                | ExprKind::Instanceof(..)
-        ) {
-            self.resolve_expr(expr);
-        } else {
-            walk_expr_mut(self, expr);
-        }
-    }
-
-    fn visit_class_def(&mut self, class: &mut ClassDef) {
-        for name in class.extends.iter_mut().chain(class.implements.iter_mut()) {
-            self.class(name);
-        }
-        for trait_use in &mut class.trait_uses {
-            for name in &mut trait_use.traits {
-                self.class(name);
-            }
-            self.trait_adaptations(&mut trait_use.adaptations);
-        }
-        walk_class_def_mut(self, class);
-    }
-
-    fn visit_catch_clause(&mut self, clause: &mut CatchClause) {
-        for name in &mut clause.types {
-            self.class(name);
-        }
-        walk_catch_clause_mut(self, clause);
-    }
-
-    fn visit_attribute(&mut self, attribute: &mut Attribute) {
-        self.class(&mut attribute.name);
-        walk_attribute_mut(self, attribute);
-    }
-
-    fn visit_type_hint(&mut self, hint: &mut TypeHint) {
-        crate::stack::guard(|| match &mut hint.kind {
-            TypeHintKind::Keyword(..) => {}
-            TypeHintKind::Name(name) => self.class(name),
-            TypeHintKind::Nullable(inner) => self.visit_type_hint(inner),
-            TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
-                for member in members {
-                    self.visit_type_hint(member);
-                }
-            }
-        })
-    }
 }
 
 #[cfg(test)]

@@ -143,7 +143,7 @@ fn write_params(out: &mut String, arenas: &NodeArenas, params: &[Param]) {
     out.push('(');
     write_list(out, params, |out, p| {
         if let Some(ty) = &p.type_hint {
-            out.push_str(&ty.to_string());
+            out.push_str(&ty.to_string_with(arenas));
             out.push(' ');
         }
         if p.by_ref {
@@ -162,10 +162,10 @@ fn write_params(out: &mut String, arenas: &NodeArenas, params: &[Param]) {
     out.push(')');
 }
 
-fn write_return_type(out: &mut String, return_type: Option<&TypeHint>) {
+fn write_return_type(out: &mut String, arenas: &NodeArenas, return_type: Option<&TypeHint>) {
     if let Some(ty) = return_type {
         out.push_str(": ");
-        out.push_str(&ty.to_string());
+        out.push_str(&ty.to_string_with(arenas));
     }
 }
 
@@ -262,7 +262,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
         }
         ExprKind::ArrayLiteral(items) => {
             out.push('[');
-            write_list(out, arenas.array_items(*items), |out, item| {
+            write_list(out, arenas.array_items(items.clone()), |out, item| {
                 if item.spread {
                     out.push_str("...");
                 }
@@ -353,7 +353,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
         }
         ExprKind::Call(callee, args) => {
             write_expr(out, arenas, callee);
-            write_args(out, arenas, *args);
+            write_args(out, arenas, args.clone());
         }
         ExprKind::Isset(operands) => {
             out.push_str("isset(");
@@ -382,7 +382,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
         ExprKind::Exit(kind, args) => {
             out.push_str(kind.as_str());
             if let Some(args) = args {
-                write_args(out, arenas, *args);
+                write_args(out, arenas, args.clone());
             }
         }
         ExprKind::Eval(code) => {
@@ -393,7 +393,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
         ExprKind::New(class, args) => {
             out.push_str("new ");
             write_expr(out, arenas, class);
-            write_args(out, arenas, *args);
+            write_args(out, arenas, args.clone());
         }
         ExprKind::PropertyAccess(object, name, nullsafe) => {
             write_expr(out, arenas, object);
@@ -404,7 +404,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
             write_expr(out, arenas, object);
             out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
             out.push_str(name);
-            write_args(out, arenas, *args);
+            write_args(out, arenas, args.clone());
         }
         ExprKind::DynamicPropertyAccess(object, name, operator) => {
             write_expr(out, arenas, object);
@@ -415,7 +415,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
             write_expr(out, arenas, object);
             out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
             write_member_name(out, arenas, name);
-            write_args(out, arenas, *args);
+            write_args(out, arenas, args.clone());
         }
         ExprKind::ClassConstFetch(target, name) => {
             write_static_target(out, arenas, target);
@@ -447,13 +447,13 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
             write_static_target(out, arenas, target);
             out.push_str("::");
             write_member_name(out, arenas, name);
-            write_args(out, arenas, *args);
+            write_args(out, arenas, args.clone());
         }
         ExprKind::StaticCall(target, member, args) => {
             write_static_target(out, arenas, target);
             out.push_str("::");
             out.push_str(member);
-            write_args(out, arenas, *args);
+            write_args(out, arenas, args.clone());
         }
         ExprKind::Index(base, index) => {
             write_expr(out, arenas, base);
@@ -463,12 +463,20 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
             }
             out.push(']');
         }
-        ExprKind::Name(n) => out.push_str(n),
+        ExprKind::Name(n) => {
+            if let Some(name) = arenas.qualified_name(n) {
+                out.push_str(name);
+            }
+        }
         ExprKind::Instanceof(value, target) => {
             write_expr(out, arenas, value);
             out.push_str(" instanceof ");
             match target {
-                InstanceofTarget::Name(n) => out.push_str(n),
+                InstanceofTarget::Name(name) => {
+                    if let Some(name) = arenas.qualified_name(name) {
+                        out.push_str(name);
+                    }
+                }
                 InstanceofTarget::Expr(inner) => write_expr(out, arenas, inner),
             }
         }
@@ -527,8 +535,8 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
         ExprKind::NewAnonymousClass(class) => {
             out.push_str("new class");
             if let Some(class) = arenas.anonymous_class(*class) {
-                if !arenas.args(class.args).is_empty() {
-                    write_args(out, arenas, class.args);
+                if !arenas.args(class.args.clone()).is_empty() {
+                    write_args(out, arenas, class.args.clone());
                 }
             }
             out.push_str("\n{\n}");
@@ -574,7 +582,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
             if *by_ref {
                 out.push('&');
             }
-            write_params(out, arenas, arenas.params(*params));
+            write_params(out, arenas, arenas.params(params.clone()));
             if !uses.is_empty() {
                 out.push_str(" use (");
                 write_list(out, uses, |out, u| {
@@ -586,7 +594,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
                 });
                 out.push(')');
             }
-            write_return_type(out, return_type.as_deref());
+            write_return_type(out, arenas, return_type.as_deref());
             out.push_str(" {\n}");
         }
         ExprKind::ArrowFn(arrow) => {
@@ -608,8 +616,8 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
             if *by_ref {
                 out.push('&');
             }
-            write_params(out, arenas, arenas.params(*params));
-            write_return_type(out, return_type.as_deref());
+            write_params(out, arenas, arenas.params(params.clone()));
+            write_return_type(out, arenas, return_type.as_deref());
             out.push_str(" => ");
             write_expr(out, arenas, body);
         }

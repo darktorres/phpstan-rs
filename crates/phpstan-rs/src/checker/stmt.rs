@@ -172,7 +172,9 @@ impl<'a> Checker<'a> {
             {
                 self.report(
                     "Unreachable statement - code above always terminates.".to_string(),
-                    next.span,
+                    arenas
+                        .stmt_span(next.id)
+                        .expect("next statement has a parallel span"),
                     4,
                     "deadCode.unreachable",
                 );
@@ -334,7 +336,8 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner
             .as_ref()
             .map(crate::checker::SyntaxTreeOwner::arenas);
-        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(self.stmt_span(stmt.id).start))
+        else {
             return;
         };
         let doc = site.text.as_ref();
@@ -357,7 +360,7 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        self.report_invalid_doc_tag_values(doc, stmt.span);
+        self.report_invalid_doc_tag_values(doc, self.stmt_span(stmt.id));
     }
 
     /// Real PHPStan's `WrongVariableNameInVarTagRule`: a statement's
@@ -376,7 +379,8 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner
             .as_ref()
             .map(crate::checker::SyntaxTreeOwner::arenas);
-        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(self.stmt_span(stmt.id).start))
+        else {
             return true;
         };
         let doc = site.text.as_ref();
@@ -401,7 +405,7 @@ impl<'a> Checker<'a> {
         let arenas = owner.arenas();
         // Reported on the statement itself, unlike the comment-line
         // `varTag.unresolvableType`.
-        let span = stmt.span;
+        let span = self.stmt_span(stmt.id);
         let mut found: Vec<(String, &'static str)> = Vec::new();
         // Superglobals always exist; `$argv`/`$argc` in a script's own
         // top-level scope.
@@ -522,7 +526,11 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::StaticVar(vars) => {
-                let names: Vec<String> = vars.iter().map(|(n, _)| n.to_string()).collect();
+                let names: Vec<String> = arenas
+                    .static_vars(vars.clone())
+                    .iter()
+                    .map(|variable| variable.name.to_string())
+                    .collect();
                 for tag in &tags {
                     match tag {
                         None if names.len() == 1 => {}
@@ -543,7 +551,8 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Global(vars) => {
-                let names: Vec<String> = vars
+                let names: Vec<String> = arenas
+                    .global_vars(vars.clone())
                     .iter()
                     .filter_map(|v| v.name().map(Name::to_string))
                     .collect();
@@ -604,7 +613,8 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner
             .as_ref()
             .map(crate::checker::SyntaxTreeOwner::arenas);
-        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(self.stmt_span(stmt.id).start))
+        else {
             return;
         };
         let doc = site.text.as_ref();
@@ -618,9 +628,15 @@ impl<'a> Checker<'a> {
         }
         let class = self.current_class.clone();
         let line = arenas
-            .and_then(|arenas| arenas.doc_site(stmt.span.start))
-            .map_or_else(|| self.line_index.line(stmt.span.start), |site| site.line);
-        let at = self.line_index.line_start(line).unwrap_or(stmt.span.start);
+            .and_then(|arenas| arenas.doc_site(self.stmt_span(stmt.id).start))
+            .map_or_else(
+                || self.line_index.line(self.stmt_span(stmt.id).start),
+                |site| site.line,
+            );
+        let at = self
+            .line_index
+            .line_start(line)
+            .unwrap_or(self.stmt_span(stmt.id).start);
         let span = syntax::span::Span { start: at, end: at };
         for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc).iter() {
             if self.type_node_unresolvable(node, class.as_deref()) {
@@ -707,7 +723,8 @@ impl<'a> Checker<'a> {
                     && !ty.is_mixed()
                     && !inline_var.iter().any(|(n, _)| n.as_str() == name.as_ref())
                 {
-                    self.inlay_local_type_hints.push((lhs.span, ty.clone()));
+                    self.inlay_local_type_hints
+                        .push((self.expr_span(lhs.id), ty.clone()));
                 }
                 self.check_no_discard_statement(e, locals);
                 self.check_new_exception_discarded(e, locals);
@@ -851,7 +868,7 @@ impl<'a> Checker<'a> {
                     if expected.is_never() {
                         self.report(
                             "should never return, but a return statement was reached".to_string(),
-                            e.span,
+                            self.expr_span(e.id),
                             3,
                             "return.never",
                         );
@@ -872,7 +889,7 @@ impl<'a> Checker<'a> {
                         // the nonsensical "expected void, got void".
                         self.report(
                             format!("return type mismatch: expected void, got {actual}"),
-                            e.span,
+                            self.expr_span(e.id),
                             3,
                             "return.void",
                         );
@@ -908,7 +925,7 @@ impl<'a> Checker<'a> {
                         if let Some(from) = found_from {
                             self.report_found_from(
                                 format!("return type mismatch: expected {expected}, got {actual}"),
-                                e.span,
+                                self.expr_span(e.id),
                                 3,
                                 from,
                                 "return.type",
@@ -971,7 +988,7 @@ impl<'a> Checker<'a> {
                     if expected.is_never() {
                         self.report(
                             "should never return, but a return statement was reached".to_string(),
-                            stmt.span,
+                            self.stmt_span(stmt.id),
                             3,
                             "return.never",
                         );
@@ -1001,7 +1018,7 @@ impl<'a> Checker<'a> {
                     } else if !(expected.is_mixed() || expected.is_void()) {
                         self.report(
                             format!("should return {expected} but empty return statement found"),
-                            stmt.span,
+                            self.stmt_span(stmt.id),
                             3,
                             "return.empty",
                         );
@@ -1014,11 +1031,11 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let ty = self.check_expr(e, locals, label);
-                    self.check_echo_validity(&ty, i, e.span);
+                    self.check_echo_validity(&ty, i, self.expr_span(e.id));
                     // `echo` implicitly invokes `__toString()` on an
                     // object argument - see
                     // `check_implicit_tostring_usage`'s doc comment.
-                    self.check_implicit_tostring_usage(&ty, e.span);
+                    self.check_implicit_tostring_usage(&ty, self.expr_span(e.id));
                     self.forget_what_an_operation_may_change(
                         &ty,
                         crate::checker::call_effects::is_this(self, e),
@@ -1041,7 +1058,7 @@ impl<'a> Checker<'a> {
             }
             StmtKind::If(if_stmt) => {
                 let mut branches: Vec<(&ExprNode, &StmtNode)> =
-                    Vec::with_capacity(1 + if_stmt.elseifs.len());
+                    Vec::with_capacity(1 + arenas.elseifs(if_stmt.elseifs.clone()).len());
                 branches.push((
                     arenas
                         .expr(if_stmt.cond)
@@ -1050,7 +1067,7 @@ impl<'a> Checker<'a> {
                         .stmt(if_stmt.then_branch)
                         .expect("if body belongs to its file owner"),
                 ));
-                for elseif in &if_stmt.elseifs {
+                for elseif in arenas.elseifs(if_stmt.elseifs.clone()) {
                     branches.push((
                         arenas
                             .expr(elseif.cond)
@@ -1151,8 +1168,14 @@ impl<'a> Checker<'a> {
                 let subject = arenas
                     .expr(*subject)
                     .expect("switch subject belongs to its file owner");
-                completion =
-                    self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
+                completion = self.check_switch(
+                    subject,
+                    arenas.switch_cases(cases.clone()),
+                    self.stmt_span(stmt.id),
+                    locals,
+                    declared_return,
+                    label,
+                )
             }
             StmtKind::Try {
                 body,
@@ -1161,8 +1184,8 @@ impl<'a> Checker<'a> {
             } => {
                 completion = self.check_try(
                     arenas,
-                    *body,
-                    catches,
+                    body.clone(),
+                    arenas.catch_clauses(catches.clone()),
                     finally,
                     locals,
                     declared_return,
@@ -1196,7 +1219,7 @@ impl<'a> Checker<'a> {
             // answer, but the important part is that it's bound at all, so
             // using it afterward isn't flagged as undefined.
             StmtKind::Global(vars) => {
-                for var in vars {
+                for var in arenas.global_vars(vars.clone()) {
                     let name = match var {
                         GlobalVar::Name(name) => name,
                         // `global ${expr};` imports a variable whose name
@@ -1222,7 +1245,7 @@ impl<'a> Checker<'a> {
                     if &**name == "this" {
                         self.report(
                             "cannot use $this as global variable".to_string(),
-                            stmt.span,
+                            self.stmt_span(stmt.id),
                             0,
                             "global.this",
                         );
@@ -1243,19 +1266,20 @@ impl<'a> Checker<'a> {
                             .get(&**name)
                             .cloned()
                             .unwrap_or(Type::mixed());
-                        self.probe_hit_at(stmt.span, &ty);
+                        self.probe_hit_at(self.stmt_span(stmt.id), &ty);
                         locals.declare_var(name, ty, name.span);
                     }
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (name, default) in vars {
+                for variable in arenas.static_vars(vars.clone()) {
+                    let name = &variable.name;
                     // Same idea as `global $this;` just above - "Cannot
                     // use $this as static variable."
                     if **name == *"this" {
                         self.report(
                             "cannot use $this as static variable".to_string(),
-                            stmt.span,
+                            self.stmt_span(stmt.id),
                             0,
                             "static.this",
                         );
@@ -1264,12 +1288,13 @@ impl<'a> Checker<'a> {
                     // The initializer only holds on a first call; later
                     // calls see whatever an earlier call left behind, so
                     // only its general type is known.
-                    let ty = default
+                    let ty = variable
+                        .default
                         .and_then(|id| arenas.expr(id))
                         .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
                         .unwrap_or(Type::mixed());
                     purge_stale_narrowing_for_var(locals, name);
-                    self.probe_hit_at(stmt.span, &ty);
+                    self.probe_hit_at(self.stmt_span(stmt.id), &ty);
                     locals.declare_var(name, ty, name.span);
                     self.static_var_names.insert(name.name.clone());
                 }
@@ -1323,7 +1348,7 @@ impl<'a> Checker<'a> {
                     .expect("global-constant values retain their parsed file owner");
                 let arenas = owner.arenas();
                 let consts = arenas.class_consts(consts);
-                self.check_global_const_attributes(consts, stmt.span, label);
+                self.check_global_const_attributes(consts, self.stmt_span(stmt.id), label);
                 for c in consts {
                     let expr = arenas
                         .expr(c.value)
@@ -1380,15 +1405,16 @@ impl<'a> Checker<'a> {
         match &stmt.kind {
             StmtKind::Return(_) => {
                 completion = Completion::EXITS;
-                self.push_exit_point(ExitKind::Return, stmt.span);
+                self.push_exit_point(ExitKind::Return, self.stmt_span(stmt.id));
             }
-            StmtKind::Throw(_) => self.push_exit_point(ExitKind::Throw, stmt.span),
+            StmtKind::Throw(_) => self.push_exit_point(ExitKind::Throw, self.stmt_span(stmt.id)),
             StmtKind::Break(level) => {
-                self.push_exit_point(ExitKind::Break(level_of(*level)), stmt.span)
+                self.push_exit_point(ExitKind::Break(level_of(*level)), self.stmt_span(stmt.id))
             }
-            StmtKind::Continue(level) => {
-                self.push_exit_point(ExitKind::Continue(level_of(*level)), stmt.span)
-            }
+            StmtKind::Continue(level) => self.push_exit_point(
+                ExitKind::Continue(level_of(*level)),
+                self.stmt_span(stmt.id),
+            ),
             // An expression statement whose value is `never` (a call to a
             // function that never returns, `exit`), or an assertion that
             // can only fail: control does not pass it.
@@ -1423,16 +1449,29 @@ impl<'a> Checker<'a> {
     /// of "names that could possibly match" (see that field's doc
     /// comment for why it never under-approximates).
     fn apply_bare_statement_assert_narrowing(&mut self, e: &ExprNode, locals: &mut Locals) {
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = owner.arenas();
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
                 if !self.registry.names_with_assert_tags.contains(&method.name) {
                     return;
                 }
+                let Some(recv) = arenas.expr(*recv) else {
+                    return;
+                };
                 let recv_ty = self.infer_expr(recv, locals);
                 if let Some((_, sig)) = self.find_method_owner(&recv_ty, method)
                     && !sig.assert().is_empty()
                 {
-                    self.apply_assert_infos(sig.assert(), sig, Some(recv), args, locals);
+                    self.apply_assert_infos(
+                        sig.assert(),
+                        sig,
+                        Some(recv),
+                        arenas.args(args.clone()),
+                        locals,
+                    );
                 }
             }
             ExprKind::StaticCall(target, method, args) => {
@@ -1443,11 +1482,23 @@ impl<'a> Checker<'a> {
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                     && !sig.assert().is_empty()
                 {
-                    self.apply_assert_infos(sig.assert(), sig, None, args, locals);
+                    self.apply_assert_infos(
+                        sig.assert(),
+                        sig,
+                        None,
+                        arenas.args(args.clone()),
+                        locals,
+                    );
                 }
             }
             ExprKind::Call(callee, args) => {
+                let Some(callee) = arenas.expr(*callee) else {
+                    return;
+                };
                 if let ExprKind::Name(name) = &callee.kind {
+                    let Some(name) = arenas.qualified_name(name) else {
+                        return;
+                    };
                     let bare = name.rsplit('\\').next().unwrap_or(name);
                     if !self.registry.names_with_assert_tags.contains(bare) {
                         return;
@@ -1455,7 +1506,13 @@ impl<'a> Checker<'a> {
                     if let Some((_, sig)) = self.registry.resolve_function(name)
                         && !sig.assert().is_empty()
                     {
-                        self.apply_assert_infos(sig.assert(), sig, None, args, locals);
+                        self.apply_assert_infos(
+                            sig.assert(),
+                            sig,
+                            None,
+                            arenas.args(args.clone()),
+                            locals,
+                        );
                     }
                 }
             }
@@ -1516,7 +1573,7 @@ impl<'a> Checker<'a> {
                                 "Elseif condition is always {}.",
                                 if value { "true" } else { "false" }
                             ),
-                            cond.span,
+                            self.expr_span(cond.id),
                             4,
                             if value {
                                 "elseif.alwaysTrue"
@@ -1531,7 +1588,7 @@ impl<'a> Checker<'a> {
                             "If condition is always {}.",
                             if value { "true" } else { "false" }
                         ),
-                        cond.span,
+                        self.expr_span(cond.id),
                         4,
                         if value {
                             "if.alwaysTrue"
@@ -1657,7 +1714,8 @@ impl<'a> Checker<'a> {
     /// own rules read its tags.
     fn statement_var_tags_of(&self, stmt: &StmtNode) -> Vec<(Option<String>, Type)> {
         let arenas = self.syntax_arenas();
-        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(self.stmt_span(stmt.id).start))
+        else {
             return Vec::new();
         };
         let doc = site.text.as_ref();
@@ -1690,6 +1748,7 @@ impl<'a> Checker<'a> {
             }
             StmtKind::ClassDecl(c) => {
                 let arenas = arenas.expect("nested class checks retain their parsed file owner");
+                let c = arenas.class_decl(c.clone());
                 let def = arenas
                     .class(c.def)
                     .expect("nested class definition belongs to its retained file owner");
@@ -1698,7 +1757,7 @@ impl<'a> Checker<'a> {
                 if self.settings.sidz.check_magic_numbers {
                     self.check_magic_numbers_in_properties(arenas, def.properties(arenas));
                 }
-                let class_attrs = arenas.attributes(def.attrs);
+                let class_attrs = arenas.attributes(def.attrs.clone());
                 self.check_attributes(class_attrs, &fqn);
                 self.check_attribute_targets(class_attrs, ATTRIBUTE_TARGET_CLASS, "class");
                 self.check_self_attribute_class_declaration(
@@ -1717,7 +1776,7 @@ impl<'a> Checker<'a> {
                     self.check_enum_cases_outside_enum(def.enum_cases(arenas));
                 }
                 for case in def.enum_cases(arenas) {
-                    let attrs = arenas.attributes(case.attrs);
+                    let attrs = arenas.attributes(case.attrs.clone());
                     self.check_attributes(attrs, &fqn);
                     self.check_attribute_targets(
                         attrs,
@@ -1726,12 +1785,12 @@ impl<'a> Checker<'a> {
                     );
                 }
                 for p in def.properties(arenas) {
-                    let attrs = arenas.attributes(p.attrs);
+                    let attrs = arenas.attributes(p.attrs.clone());
                     self.check_attributes(attrs, &fqn);
                     self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
                 }
                 for cc in def.consts(arenas) {
-                    let attrs = arenas.attributes(cc.attrs);
+                    let attrs = arenas.attributes(cc.attrs.clone());
                     self.check_attributes(attrs, &fqn);
                     self.check_attribute_targets(
                         attrs,
@@ -1754,7 +1813,7 @@ impl<'a> Checker<'a> {
                 if def.kind == ClassKind::Trait {
                     self.check_trait_methods(&fqn, c);
                 } else {
-                    for m in arenas.methods(def.methods) {
+                    for m in arenas.methods(def.methods.clone()) {
                         self.check_function(
                             &m.function,
                             Some(&fqn),
@@ -1868,10 +1927,11 @@ fn bare_assert_condition(arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
         let ExprKind::Name(name) = &callee.kind else {
             return None;
         };
+        let name = arenas.qualified_name(name)?;
         if name.trim_start_matches('\\') != "assert" {
             return None;
         }
-        arenas.args(*args).first().map(|a| a.value)
+        arenas.args(args.clone()).first().map(|a| a.value)
     }
     let e = arenas.expr(id)?;
     match &e.kind {
@@ -1891,7 +1951,11 @@ fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec
         // so both existing mechanisms (the nameless-tag target inference
         // and the post-dispatch reapplication) pick a `static`
         // declaration up for free.
-        StmtKind::StaticVar(vars) => vars.iter().map(|(name, _)| name.to_string()).collect(),
+        StmtKind::StaticVar(vars) => arenas
+            .static_vars(vars.clone())
+            .iter()
+            .map(|variable| variable.name.to_string())
+            .collect(),
         // A bare `@var Type` header on a `foreach` targets the loop's
         // own value variable, mirroring every other statement kind
         // here - only when it's a plain `$value` (not a destructuring

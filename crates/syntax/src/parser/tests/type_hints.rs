@@ -12,12 +12,17 @@ fn param_hint(src: &str) -> (NodeArenas, TypeHint) {
     let StmtKind::FunctionDecl(f) = &stmt.kind else {
         panic!("expected a function");
     };
-    let hint = parsed
-        .arenas
-        .params(parsed.arenas.function(*f).expect("function payload").params)[0]
-        .type_hint
-        .clone()
-        .expect("a type hint");
+    let hint = parsed.arenas.params(
+        parsed
+            .arenas
+            .function(*f)
+            .expect("function payload")
+            .params
+            .clone(),
+    )[0]
+    .type_hint
+    .clone()
+    .expect("a type hint");
     (parsed.arenas, hint)
 }
 

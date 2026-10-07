@@ -9,7 +9,7 @@
 //! project already accepts for its PCRE work.
 
 use crate::checker::Checker;
-use syntax::ast::{Arg, ExprKind, Literal};
+use syntax::ast::{Arg, ExprKind, Literal, NodeArenas};
 use syntax::span::Span;
 
 impl<'a> Checker<'a> {
@@ -19,6 +19,7 @@ impl<'a> Checker<'a> {
     /// `arguments.count` check.
     pub(crate) fn check_simplexml_element_constructor(
         &mut self,
+        arenas: &NodeArenas,
         class: &str,
         args: &[Arg],
         span: Span,
@@ -30,10 +31,16 @@ impl<'a> Checker<'a> {
         if arg.name.is_some() || arg.spread {
             return;
         }
-        let ExprKind::Literal(Literal::String(xml)) = &arg.value.peeled().kind else {
+        let value = arenas
+            .peeled(arg.value)
+            .and_then(|id| arenas.expr(id))
+            .expect("constructor argument belongs to its retained file owner");
+        let ExprKind::Literal(Literal::String(xml)) = &value.kind else {
             return;
         };
-        if let Some(xml) = xml.as_str()
+        if let Some(xml) = arenas
+            .string_bytes(xml)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
             && let Some(detail) = is_well_formed_xml(xml)
         {
             self.report(format!("SimpleXMLElement constructor argument is not well-formed XML ({detail}) and will throw at runtime"),
@@ -51,15 +58,26 @@ impl<'a> Checker<'a> {
     /// this function never touches `dynamic_new_throw_type`/`dynamic_
     /// method_throw_type`/`dynamic_function_throw_type` at all, since it
     /// has no throw type to contribute).
-    pub(crate) fn check_simplexml_load_string_call(&mut self, args: &[Arg], span: Span) {
+    pub(crate) fn check_simplexml_load_string_call(
+        &mut self,
+        arenas: &NodeArenas,
+        args: &[Arg],
+        span: Span,
+    ) {
         let Some(arg) = args.first() else { return };
         if arg.name.is_some() || arg.spread {
             return;
         }
-        let ExprKind::Literal(Literal::String(xml)) = &arg.value.peeled().kind else {
+        let value = arenas
+            .peeled(arg.value)
+            .and_then(|id| arenas.expr(id))
+            .expect("call argument belongs to its retained file owner");
+        let ExprKind::Literal(Literal::String(xml)) = &value.kind else {
             return;
         };
-        if let Some(xml) = xml.as_str()
+        if let Some(xml) = arenas
+            .string_bytes(xml)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
             && let Some(detail) = is_well_formed_xml(xml)
         {
             self.report(format!("simplexml_load_string() argument is not well-formed XML ({detail}) and will return false at runtime"),

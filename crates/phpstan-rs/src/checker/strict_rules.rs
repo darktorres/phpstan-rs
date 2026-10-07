@@ -58,25 +58,33 @@ use types::{AccessoryKind, Type};
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
     pub(crate) fn check_strict_rules_expression(&mut self, e: &ExprNode, locals: &Locals) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         if self.settings.strict_rules.check_dynamic_static_calls {
             let call = match &e.kind {
-                ExprKind::FirstClassCallable(inner) => inner,
-                _ => e,
+                ExprKind::FirstClassCallable(inner) => arenas.expr(*inner),
+                _ => Some(e),
             };
-            if let ExprKind::MethodCall(receiver, method, _, _) = &call.kind
-                && let Some((owner, name)) =
+            if let Some(ExprNode {
+                kind: ExprKind::MethodCall(receiver, method, _, _),
+                ..
+            }) = call
+                && let Some((owner, name)) = arenas.expr(*receiver).and_then(|receiver| {
                     self.static_method_through_instance(receiver, method, locals)
+                })
             {
                 self.report(
                     format!("Dynamic call to static method {owner}::{name}()."),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     "staticMethod.dynamicCall",
                 );
             }
         }
         if self.settings.strict_rules.check_arithmetic_operands {
-            self.check_arithmetic_operands(e, locals);
+            self.check_arithmetic_operands(arenas, e, locals);
         }
         if self.settings.shipmonk.check_comparable_types
             && let ExprKind::Binary(
@@ -85,7 +93,7 @@ impl<'a> Checker<'a> {
                 r,
             ) = &e.kind
         {
-            self.check_comparable_types(op, l, r, e.span, locals);
+            self.check_comparable_types(arenas, op, *l, *r, self.expr_span(e.id), locals);
         }
         if self.settings.voku.check_mixed_type_operands && self.current_trait.is_none() {
             match &e.kind {
@@ -100,20 +108,40 @@ impl<'a> Checker<'a> {
                             | BinOp::Pipe
                     ) =>
                 {
-                    self.check_mixed_type_operands(op, l, r, false, e.span, locals);
+                    self.check_mixed_type_operands(
+                        arenas,
+                        op,
+                        *l,
+                        *r,
+                        false,
+                        self.expr_span(e.id),
+                        locals,
+                    );
                 }
                 ExprKind::CompoundAssign(op, l, r) => {
-                    self.check_mixed_type_operands(op, l, r, true, e.span, locals);
+                    self.check_mixed_type_operands(
+                        arenas,
+                        op,
+                        *l,
+                        *r,
+                        true,
+                        self.expr_span(e.id),
+                        locals,
+                    );
                 }
                 _ => {}
             }
         }
         if self.settings.strict_rules.check_implicit_array_creation
             && let ExprKind::Assign(target, _) = &e.kind
+            && let Some(target) = arenas.expr(*target)
             && matches!(target.kind, ExprKind::Index(..))
         {
-            let mut root = target.as_ref();
+            let mut root = target;
             while let ExprKind::Index(base, _) = &root.kind {
+                let Some(base) = arenas.expr(*base) else {
+                    break;
+                };
                 root = base;
             }
             if let ExprKind::Variable(name) = &root.kind
@@ -121,7 +149,7 @@ impl<'a> Checker<'a> {
                 && !locals.contains_var(name)
                 && !is_superglobal(name)
             {
-                let certainty = if self.might_be_assigned_before(name, root.span) {
+                let certainty = if self.might_be_assigned_before(name, self.expr_span(root.id)) {
                     "might not exist"
                 } else {
                     "does not exist"
@@ -130,7 +158,7 @@ impl<'a> Checker<'a> {
                     format!(
                         "Implicit array creation is not allowed - variable ${name} {certainty}."
                     ),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     "variable.implicitArray",
                 );
@@ -143,7 +171,7 @@ impl<'a> Checker<'a> {
                 {
                     self.report(
                         "Call to __construct() on an existing object is not allowed.".to_string(),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         "constructor.call",
                     );
@@ -153,7 +181,7 @@ impl<'a> Checker<'a> {
                         && !self.is_parent_constructor_call(target) =>
                 {
                     self.report("Static call to __construct() is only allowed on a parent class in the constructor.".to_string(),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         "constructor.call",
                     );
@@ -163,7 +191,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_arithmetic_operands(&mut self, e: &ExprNode, locals: &Locals) {
+    fn check_arithmetic_operands(&mut self, arenas: &NodeArenas, e: &ExprNode, locals: &Locals) {
         let (op, left, right) = match &e.kind {
             ExprKind::Binary(op, l, r) | ExprKind::CompoundAssign(op, l, r) => (op, l, r),
             ExprKind::Unary(op, operand) => {
@@ -176,6 +204,9 @@ impl<'a> Checker<'a> {
                     UnaryOp::PostDec => ("post-decrement", "postDec", Operand::Decrement),
                     _ => return,
                 };
+                let Some(operand) = arenas.expr(*operand) else {
+                    return;
+                };
                 let ty = self.infer_expr(operand, locals);
                 if !self.valid_operand(&ty, valid) {
                     self.report(
@@ -183,7 +214,7 @@ impl<'a> Checker<'a> {
                             "Only numeric types are allowed in {name}, {} given.",
                             ty.describe_type_only()
                         ),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         format!("{id}.nonNumeric"),
                     );
@@ -201,6 +232,9 @@ impl<'a> Checker<'a> {
             BinOp::Pow => ("**", "pow"),
             _ => return,
         };
+        let (Some(left), Some(right)) = (arenas.expr(*left), arenas.expr(*right)) else {
+            return;
+        };
         let left_ty = self.infer_expr(left, locals);
         let right_ty = self.infer_expr(right, locals);
         if *op == BinOp::Add && !left_ty.arrays().is_empty() && !right_ty.arrays().is_empty() {
@@ -213,7 +247,7 @@ impl<'a> Checker<'a> {
                         "Only numeric types are allowed in {sigil}, {} given on the {side} side.",
                         ty.describe_type_only()
                     ),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     format!("{id}.{side}NonNumeric"),
                 );
@@ -274,12 +308,16 @@ impl<'a> Checker<'a> {
 
     fn check_comparable_types(
         &mut self,
+        arenas: &NodeArenas,
         op: &BinOp,
-        l: &ExprNode,
-        r: &ExprNode,
+        l: ExprId,
+        r: ExprId,
         span: syntax::span::Span,
         locals: &Locals,
     ) {
+        let (Some(l), Some(r)) = (arenas.expr(l), arenas.expr(r)) else {
+            return;
+        };
         let left = self.infer_expr(l, locals);
         let right = self.infer_expr(r, locals);
         let describe = |ty: &Type| {
@@ -393,13 +431,17 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     fn check_mixed_type_operands(
         &mut self,
+        arenas: &NodeArenas,
         op: &BinOp,
-        l: &ExprNode,
-        r: &ExprNode,
+        l: ExprId,
+        r: ExprId,
         compound: bool,
         span: syntax::span::Span,
         locals: &Locals,
     ) {
+        let (Some(l), Some(r)) = (arenas.expr(l), arenas.expr(r)) else {
+            return;
+        };
         let left = self.infer_expr(l, locals);
         let right = self.infer_expr(r, locals);
         let converts_to_string_ok = if compound {
@@ -466,6 +508,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_strict_array_filter(
         &mut self,
+        arenas: &NodeArenas,
         sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
@@ -480,7 +523,10 @@ impl<'a> Checker<'a> {
         let Some(callback) = arg_for_param(args, sig, 1) else {
             let mode_given = arg_for_param(args, sig, 2).is_some();
             if !mode_given {
-                let array_ty = self.infer_expr(&array.value, locals);
+                let Some(array) = arenas.expr(array.value) else {
+                    return;
+                };
+                let array_ty = self.infer_expr(array, locals);
                 if !self.filters_unambiguously(&array_ty) {
                     self.report("Call to function array_filter() requires parameter #2 to be passed to avoid loose comparison semantics.".to_string(),
                         span,
@@ -497,7 +543,10 @@ impl<'a> Checker<'a> {
             );
             return;
         };
-        let callback_ty = self.infer_expr(&callback.value, locals);
+        let Some(callback) = arenas.expr(callback.value) else {
+            return;
+        };
+        let callback_ty = self.infer_expr(callback, locals);
         let is_null = callback_ty.is_null();
         let level = if is_null.yes() {
             0
@@ -558,9 +607,13 @@ impl<'a> Checker<'a> {
 
     /// Replaces the current function's assignment sites with `body`'s,
     /// returning the previous ones to restore.
-    pub(crate) fn enter_assigned_variables(&mut self, body: &[StmtNode]) -> Vec<AssignedVariable> {
+    pub(crate) fn enter_assigned_variables(
+        &mut self,
+        arenas: &NodeArenas,
+        body: &[StmtId],
+    ) -> Vec<AssignedVariable> {
         let entered = if self.settings.strict_rules.check_implicit_array_creation {
-            assigned_variables(body)
+            assigned_variables(arenas, body)
         } else {
             Vec::new()
         };
@@ -586,6 +639,7 @@ impl<'a> Checker<'a> {
     /// `function.strict`, for one of the functions it covers.
     pub(crate) fn check_strict_function_call(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         sig: &FunctionReflection,
         args: &[Arg],
@@ -610,7 +664,10 @@ impl<'a> Checker<'a> {
                 position + 1
             ),
             Some(arg) if must_be_true => {
-                if self.infer_expr(&arg.value, locals).is_true().yes() {
+                if arenas
+                    .expr(arg.value)
+                    .is_some_and(|value| self.infer_expr(value, locals).is_true().yes())
+                {
                     return;
                 }
                 format!(
@@ -625,30 +682,37 @@ impl<'a> Checker<'a> {
 
     /// The statement-level ports, before `stmt` itself is checked.
     pub(crate) fn check_strict_rules_statement(&mut self, stmt: &StmtNode, locals: &Locals) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         if self.settings.strict_rules.check_loop_variable_overwrite {
             let mut overwritten: Vec<(syntax::span::Span, &str, String)> = Vec::new();
             match &stmt.kind {
                 StmtKind::Foreach { key, value, .. } => {
                     if let Some(key) = key
+                        && let Some(key) = arenas.expr(*key)
                         && let ExprKind::Variable(name) = &key.kind
                         && locals.contains_var(name)
                     {
                         overwritten.push((
-                            key.span,
+                            self.expr_span(key.id),
                             "foreach.keyOverwrite",
                             format!("Foreach overwrites ${name} with its key variable."),
                         ));
                     }
-                    for (name, span) in defined_targets(value, locals) {
+                    for (name, span) in defined_targets(arenas, *value, locals) {
                         let message =
                             format!("Foreach overwrites ${name} with its value variable.");
                         overwritten.push((span, "foreach.valueOverwrite", message));
                     }
                 }
                 StmtKind::For { init, .. } => {
-                    for expr in init {
-                        if let ExprKind::Assign(target, _) = &expr.kind {
-                            for (name, span) in defined_targets(target, locals) {
+                    for expr in arenas.expr_ids(init) {
+                        if let Some(expr) = arenas.expr(*expr)
+                            && let ExprKind::Assign(target, _) = &expr.kind
+                        {
+                            for (name, span) in defined_targets(arenas, *target, locals) {
                                 let message = format!(
                                     "For loop initial assignment overwrites variable ${name}."
                                 );
@@ -666,18 +730,25 @@ impl<'a> Checker<'a> {
         if self.settings.strict_rules.check_switch_case_types
             && let StmtKind::Switch { subject, cases } = &stmt.kind
         {
+            let cases = arenas.switch_cases(cases.clone());
+            let Some(subject) = arenas.expr(*subject) else {
+                return;
+            };
             let subject_ty = self.infer_expr(subject, locals);
             for case in cases {
-                let Some(test) = &case.test else {
+                let Some(test) = case.test else {
                     continue;
                 };
-                let case_ty = self.infer_expr(test, locals);
+                let Some(test_expr) = arenas.expr(test) else {
+                    continue;
+                };
+                let case_ty = self.infer_expr(test_expr, locals);
                 if self.registry.is_super_type_of(&subject_ty, &case_ty) != TrinaryLogic::No {
                     continue;
                 }
                 self.report(format!(
                         "Switch condition type ({subject_ty}) does not match case condition {} ({}).",
-                        syntax::printer::print_expr(test),
+                        syntax::printer::print_expr(arenas, test),
                         case_ty.describe_type_only()
                     ),
                     case.span,
@@ -815,15 +886,26 @@ impl<'a> Checker<'a> {
 
 /// The plain variables `target` binds (recursing into `[...]`/`list()`
 /// destructuring) that `locals` already defines.
-fn defined_targets(target: &ExprNode, locals: &Locals) -> Vec<(String, syntax::span::Span)> {
+fn defined_targets(
+    arenas: &NodeArenas,
+    id: ExprId,
+    locals: &Locals,
+) -> Vec<(String, syntax::span::Span)> {
+    let Some(target) = arenas.expr(id) else {
+        return Vec::new();
+    };
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) if locals.contains_var(name) => {
-            vec![(name.to_string(), target.span)]
+            vec![(
+                name.to_string(),
+                arenas.expr_span(target.id).expect("expression span"),
+            )]
         }
-        ExprKind::Destructure(items, _) => items
+        ExprKind::Destructure(items, _) => arenas
+            .destructure_items(items)
             .iter()
-            .filter_map(|item| item.target.as_ref())
-            .flat_map(|target| defined_targets(target, locals))
+            .filter_map(|item| item.target)
+            .flat_map(|target| defined_targets(arenas, target, locals))
             .collect(),
         _ => Vec::new(),
     })
@@ -870,12 +952,12 @@ pub(crate) struct AssignedVariable {
 
 /// Every site in `body` that binds a variable, outside nested functions,
 /// closures and classes.
-pub(crate) fn assigned_variables(body: &[StmtNode]) -> Vec<AssignedVariable> {
+pub(crate) fn assigned_variables(arenas: &NodeArenas, body: &[StmtId]) -> Vec<AssignedVariable> {
     let mut assigned = Assigned {
         loops: Vec::new(),
         out: Vec::new(),
     };
-    syntax::visit::walk_stmts(&mut assigned, body);
+    syntax::visit::arena::walk_stmts(&mut assigned, arenas, body);
     assigned.out
 }
 
@@ -884,23 +966,30 @@ struct Assigned {
     out: Vec<AssignedVariable>,
 }
 
-impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl syntax::visit::arena::Visitor for Assigned {
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
+
+    fn visit_class_decl(&mut self, _: &NodeArenas, _: &ClassDecl) {}
+
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
+
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         let loops = &mut self.loops;
         let out = &mut self.out;
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
             StmtKind::Foreach { key, value, .. } => {
-                loops.push(stmt.span);
+                loops.push(arenas.stmt_span(id).expect("loop statement span"));
                 for target in key.iter().chain(std::iter::once(value)) {
-                    bind_targets(target, loops, out);
+                    bind_targets(arenas, *target, loops, out);
                 }
             }
             StmtKind::For { .. } | StmtKind::While { .. } | StmtKind::DoWhile { .. } => {
-                loops.push(stmt.span);
+                loops.push(arenas.stmt_span(id).expect("loop statement span"));
             }
             StmtKind::Try { catches, .. } => {
-                for catch in catches {
+                for catch in arenas.catch_clauses(catches.clone()) {
                     if let Some(var) = &catch.var {
                         out.push(AssignedVariable {
                             name: var.name.clone(),
@@ -911,17 +1000,17 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (name, _) in vars {
+                for variable in arenas.static_vars(vars.clone()) {
                     out.push(AssignedVariable {
-                        name: name.name.clone(),
-                        span: name.span,
+                        name: variable.name.name.clone(),
+                        span: variable.name.span,
                         loops: loops.clone(),
                     });
                 }
             }
             _ => {}
         }
-        syntax::visit::walk_stmt(self, stmt);
+        syntax::visit::arena::walk_stmt(self, arenas, id);
         if matches!(
             stmt.kind,
             StmtKind::Foreach { .. }
@@ -933,35 +1022,48 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
         match &e.kind {
-            ExprKind::Closure { .. }
-            | ExprKind::ArrowFn { .. }
-            | ExprKind::NewAnonymousClass(..) => return,
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::NewAnonymousClass(..) => {
+                return;
+            }
             ExprKind::Assign(target, _)
             | ExprKind::AssignRef(target, _)
             | ExprKind::CompoundAssign(_, target, _) => {
-                bind_targets(target, &self.loops, &mut self.out);
+                bind_targets(arenas, *target, &self.loops, &mut self.out);
             }
             _ => {}
         }
-        syntax::visit::walk_expr(self, e);
+        syntax::visit::arena::walk_expr(self, arenas, id);
     }
 }
 
 /// The variables an assignment target binds: a plain variable, the root
 /// of an offset chain, or each element of a destructuring.
-fn bind_targets(target: &ExprNode, loops: &[syntax::span::Span], out: &mut Vec<AssignedVariable>) {
+fn bind_targets(
+    arenas: &NodeArenas,
+    id: ExprId,
+    loops: &[syntax::span::Span],
+    out: &mut Vec<AssignedVariable>,
+) {
+    let Some(target) = arenas.expr(id) else {
+        return;
+    };
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => out.push(AssignedVariable {
             name: name.clone(),
-            span: target.span,
+            span: arenas.expr_span(target.id).expect("expression span"),
             loops: loops.to_vec(),
         }),
-        ExprKind::Index(base, _) => bind_targets(base, loops, out),
+        ExprKind::Index(base, _) => bind_targets(arenas, *base, loops, out),
         ExprKind::Destructure(items, _) => {
-            for target in items.iter().filter_map(|item| item.target.as_ref()) {
-                bind_targets(target, loops, out);
+            for target in arenas
+                .destructure_items(items)
+                .iter()
+                .filter_map(|item| item.target)
+            {
+                bind_targets(arenas, target, loops, out);
             }
         }
         _ => {}

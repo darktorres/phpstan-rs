@@ -5,7 +5,7 @@
 //! math is right just because it compiles.
 
 use super::super::*;
-use super::helpers::*;
+use super::helpers::{parse, text_at};
 
 #[test]
 fn function_decl_name_span_points_at_the_name_only() {
@@ -13,6 +13,7 @@ fn function_decl_name_span_points_at_the_name_only() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
+    let f = program.function(*f);
     assert_eq!(
         text_at("<?php function greet(): void {}", f.name.span),
         "greet"
@@ -26,6 +27,7 @@ fn function_decl_return_type_span_covers_the_whole_compound_hint() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
+    let f = program.function(*f);
     assert_eq!(
         text_at(
             src,
@@ -45,10 +47,11 @@ fn param_type_hint_span_points_at_the_hint_not_the_variable() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
+    let f = program.function(*f);
     assert_eq!(
         text_at(
             src,
-            f.params[0]
+            program.arenas.params(f.params.clone())[0]
                 .type_hint
                 .as_ref()
                 .map(|h| h.span)
@@ -65,12 +68,34 @@ fn class_decl_name_extends_and_implements_spans_are_each_precise() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
+    let c = program.arenas.class_decl(c.clone());
     assert_eq!(text_at(src, c.name.span), "Widget");
-    assert_eq!(c.def.extends.len(), 1);
-    assert_eq!(text_at(src, c.def.extends[0].span), "Base");
-    assert_eq!(c.def.implements.len(), 2);
-    assert_eq!(text_at(src, c.def.implements[0].span), "Iface1");
-    assert_eq!(text_at(src, c.def.implements[1].span), "Iface2");
+    assert_eq!(program.class_def(c.def).extends(&program.arenas).len(), 1);
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(c.def).extends(&program.arenas)[0].span
+        ),
+        "Base"
+    );
+    assert_eq!(
+        program.class_def(c.def).implements(&program.arenas).len(),
+        2
+    );
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(c.def).implements(&program.arenas)[0].span
+        ),
+        "Iface1"
+    );
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(c.def).implements(&program.arenas)[1].span
+        ),
+        "Iface2"
+    );
 }
 
 #[test]
@@ -80,9 +105,27 @@ fn class_decl_uses_spans_point_at_each_trait_name() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.def.trait_uses[0].traits.len(), 2);
-    assert_eq!(text_at(src, c.def.trait_uses[0].traits[0].span), "TraitA");
-    assert_eq!(text_at(src, c.def.trait_uses[0].traits[1].span), "TraitB");
+    let c = program.arenas.class_decl(c.clone());
+    assert_eq!(
+        program.class_def(c.def).trait_uses(&program.arenas)[0]
+            .traits(&program.arenas)
+            .len(),
+        2
+    );
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(c.def).trait_uses(&program.arenas)[0].traits(&program.arenas)[0].span
+        ),
+        "TraitA"
+    );
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(c.def).trait_uses(&program.arenas)[0].traits(&program.arenas)[1].span
+        ),
+        "TraitB"
+    );
 }
 
 #[test]
@@ -92,7 +135,8 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let prop = &c.def.properties[0];
+    let c = program.arenas.class_decl(c.clone());
+    let prop = &program.class_def(c.def).properties(&program.arenas)[0];
     assert_eq!(text_at(src, prop.name.span), "$count");
     assert_eq!(
         text_at(
@@ -104,7 +148,7 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
         ),
         "?int"
     );
-    let cst = &c.def.consts[0];
+    let cst = &program.class_def(c.def).consts(&program.arenas)[0];
     assert_eq!(text_at(src, cst.name.span), "LIMIT");
     assert_eq!(
         text_at(
@@ -125,11 +169,29 @@ fn enum_decl_name_implements_and_case_name_spans_are_precise() {
     let StmtKind::ClassDecl(e) = &program[0].kind else {
         panic!("expected an enum");
     };
-    assert_eq!(e.def.kind, ClassKind::Enum);
+    let e = program.arenas.class_decl(e.clone());
+    assert_eq!(program.class_def(e.def).kind, ClassKind::Enum);
     assert_eq!(text_at(src, e.name.span), "Suit");
-    assert_eq!(e.def.implements.len(), 1);
-    assert_eq!(text_at(src, e.def.implements[0].span), "HasColor");
-    assert_eq!(text_at(src, e.def.enum_cases[0].name.span), "Hearts");
+    assert_eq!(
+        program.class_def(e.def).implements(&program.arenas).len(),
+        1
+    );
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(e.def).implements(&program.arenas)[0].span
+        ),
+        "HasColor"
+    );
+    assert_eq!(
+        text_at(
+            src,
+            program.class_def(e.def).enum_cases(&program.arenas)[0]
+                .name
+                .span
+        ),
+        "Hearts"
+    );
 }
 
 #[test]
@@ -139,9 +201,13 @@ fn catch_clause_types_spans_point_at_each_exception_type() {
     let StmtKind::Try { catches, .. } = &program[0].kind else {
         panic!("expected Try");
     };
-    assert_eq!(catches[0].types.len(), 2);
-    assert_eq!(text_at(src, catches[0].types[0].span), "TypeErrorA");
-    assert_eq!(text_at(src, catches[0].types[1].span), "TypeErrorB");
+    let [catch] = program.arenas.catch_clauses(catches.clone()) else {
+        panic!("expected one catch clause");
+    };
+    let types = program.arenas.qualified_names(&catch.types);
+    assert_eq!(types.len(), 2);
+    assert_eq!(text_at(src, types[0].span), "TypeErrorA");
+    assert_eq!(text_at(src, types[1].span), "TypeErrorB");
 }
 
 #[test]
@@ -151,10 +217,15 @@ fn instanceof_target_name_span_points_at_the_class_name() {
     let StmtKind::Expression(e) = &program[0].kind else {
         panic!("expected Expression");
     };
+    let e = program.expr(*e);
     let ExprKind::Instanceof(_, InstanceofTarget::Name(name)) = &e.kind else {
         panic!("expected Instanceof with a Name target");
     };
-    assert_eq!(name, "Foo");
+    let name = program
+        .arenas
+        .qualified_name(name)
+        .expect("instanceof name belongs to the parsed file");
+    assert_eq!(name.written, "Foo");
     assert_eq!(text_at(src, name.span), "Foo");
 }
 
@@ -165,7 +236,7 @@ fn member_names_and_static_targets_have_their_own_spans() {
     let exprs: Vec<&ExprNode> = program
         .iter()
         .map(|s| match &s.kind {
-            StmtKind::Expression(e) => e,
+            StmtKind::Expression(e) => program.expr(*e),
             other => panic!("expected an expression statement, got {other:?}"),
         })
         .collect();
@@ -200,12 +271,16 @@ fn an_interpolated_property_name_has_its_own_span() {
     let StmtKind::Echo(exprs) = &program[0].kind else {
         panic!("expected echo");
     };
-    let ExprKind::Interpolated(parts) = &exprs[0].kind else {
+    let exprs = program.arenas.expr_ids(exprs);
+    let expression = program.expr(exprs[0]);
+    let ExprKind::Interpolated(parts) = &expression.kind else {
         panic!("expected an interpolated string");
     };
-    let access = parts
+    let access = program
+        .arenas
+        .expr_ids(parts)
         .iter()
-        .find_map(|p| match &p.kind {
+        .find_map(|p| match &program.expr(*p).kind {
             ExprKind::PropertyAccess(_, name, _) => Some(name),
             _ => None,
         })
@@ -218,15 +293,18 @@ fn spans_inside_an_interpolated_expression_are_real_even_in_a_closure() {
     let src = "<?php\necho \"x {$f(function () { return $inner; })} y\";";
     let program = parse(src);
     struct Find(Option<Span>);
-    impl<'ast> crate::visit::Visitor<'ast> for Find {
-        fn visit_expr(&mut self, e: &'ast ExprNode) {
+    impl crate::visit::arena::Visitor for Find {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            let Some(e) = arenas.expr(id) else {
+                return;
+            };
             if matches!(&e.kind, ExprKind::Variable(v) if &**v == "inner") {
-                self.0 = Some(e.span);
+                self.0 = arenas.expr_span(id);
             }
-            crate::visit::walk_expr(self, e);
+            crate::visit::arena::walk_expr(self, arenas, id);
         }
     }
     let mut find = Find(None);
-    crate::visit::walk_stmts(&mut find, &program);
+    crate::visit::arena::walk_stmts(&mut find, &program.arenas, program.statements());
     assert_eq!(text_at(src, find.0.expect("found $inner")), "$inner");
 }

@@ -1,29 +1,34 @@
-use crate::ast::{Attribute, Ident, QualifiedName};
-use crate::lexer::{DocGroup, Tok};
+use crate::ast::{Attribute, AttributeRange, Ident, QualifiedName};
+use crate::lexer::DocGroup;
 use crate::name::Name;
 use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenKind, TokenPayload, TokenRef as Token};
 
 impl Parser<'_> {
     pub(crate) fn name_id(&self, name: &Name) -> Option<crate::name::NameId> {
-        match &*self.supply.borrow() {
-            crate::parser::Supply::Lexer(lexer) => lexer.name_id(name),
-            crate::parser::Supply::List(_) => None,
-        }
+        self.last_name_id
+            .filter(|id| self.token_stream.name(*id) == Some(name))
+            .or_else(|| {
+                self.token_stream
+                    .names
+                    .iter()
+                    .position(|candidate| candidate == name)
+                    .map(crate::name::name_id)
+            })
     }
 
     // ---- token stream helpers ----
 
     #[inline]
-    pub(crate) fn peek(&self) -> &Token {
-        self.ahead.front().map_or(&Token::Eof, |tok| &tok.token)
+    pub(crate) fn peek(&self) -> Token<'_> {
+        self.token_ref(0)
     }
 
     /// The token `offset` places past the current one, for an `offset` of
     /// at most `LOOKAHEAD`: `Token::Eof` past the end of the file.
-    pub(crate) fn peek_at(&self, offset: usize) -> &Token {
-        self.ahead.get(offset).map_or(&Token::Eof, |tok| &tok.token)
+    pub(crate) fn peek_at(&self, offset: usize) -> Token<'_> {
+        self.token_ref(offset)
     }
 
     /// Scans forward (without consuming) through any of `abstract`/
@@ -93,7 +98,6 @@ impl Parser<'_> {
         let mut depth = 0i32;
         let mut offset = 0usize;
         loop {
-            self.fill(offset);
             match self.peek_at(offset) {
                 Token::LParen => depth += 1,
                 Token::RParen => {
@@ -111,29 +115,78 @@ impl Parser<'_> {
     }
 
     pub fn at_eof(&self) -> bool {
-        matches!(self.peek(), Token::Eof)
+        self.peek().kind() == TokenKind::Eof
     }
 
-    /// Advances past the current token without materializing it; a
-    /// caller that needs the token moves it out with `take_token()`.
+    /// Advances past the current token without materializing it; callers
+    /// move payloads out through the typed helpers below.
     pub(crate) fn skip(&mut self) {
         self.pop();
     }
 
-    /// Moves the current token out, falling back to EOF past the end.
-    pub(crate) fn take_token(&mut self) -> Token {
-        self.pop().map_or(Token::Eof, |tok| tok.token)
+    fn take_payload_of(&mut self, kind: TokenKind) -> Option<TokenPayload> {
+        if self.peek().kind() != kind {
+            return None;
+        }
+        let payload = self.take_payload()?;
+        self.skip();
+        Some(payload)
+    }
+
+    pub(crate) fn take_variable(&mut self) -> Option<Name> {
+        let TokenPayload::Name(id) = self.take_payload_of(TokenKind::Variable)? else {
+            return None;
+        };
+        self.remember_name_id(Some(id));
+        self.token_stream.name(id).cloned()
+    }
+
+    pub(crate) fn take_string_payload(&mut self) -> Option<crate::ast::StringPayload> {
+        let TokenPayload::String(payload) = self.take_payload_of(TokenKind::StringLit)? else {
+            return None;
+        };
+        Some(payload)
+    }
+
+    pub(crate) fn take_interpolation(&mut self) -> Option<Vec<crate::token::StringPart>> {
+        let TokenPayload::Interpolation(parts) = self.take_payload_of(TokenKind::InterpString)? else {
+            return None;
+        };
+        Some(parts)
+    }
+
+    pub(crate) fn take_shell(&mut self) -> Option<Vec<crate::token::StringPart>> {
+        let TokenPayload::Shell(parts) = self.take_payload_of(TokenKind::ShellExec)? else {
+            return None;
+        };
+        Some(parts)
+    }
+
+    pub(crate) fn take_inline_html(&mut self) -> Option<Span> {
+        if self.peek().kind() != TokenKind::InlineHtml {
+            return None;
+        }
+        let span = self.current_span();
+        self.skip();
+        Some(span)
+    }
+
+    pub(crate) fn take_keyword(&mut self) -> Option<Keyword> {
+        let Token::Keyword(keyword) = self.peek() else {
+            return None;
+        };
+        self.skip();
+        Some(keyword)
     }
 
     /// Whether the next token is `t`. Most checks find another kind of
     /// token, which the kinds alone settle.
     #[inline]
-    pub(crate) fn check(&self, t: &Token) -> bool {
-        let next = self.peek();
-        std::mem::discriminant(next) == std::mem::discriminant(t) && next == t
+    pub(crate) fn check(&self, t: &Token<'_>) -> bool {
+        self.peek().kind() == t.kind()
     }
 
-    pub(crate) fn eat(&mut self, t: &Token) -> bool {
+    pub(crate) fn eat(&mut self, t: &Token<'_>) -> bool {
         if self.check(t) {
             self.skip();
             true
@@ -142,7 +195,7 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn expect(&mut self, t: &Token) -> Result<(), ParseError> {
+    pub(crate) fn expect(&mut self, t: &Token<'_>) -> Result<(), ParseError> {
         if !self.eat(t) {
             return Err(ParseError::new(
                 format!(
@@ -216,13 +269,12 @@ impl Parser<'_> {
 
     pub(crate) fn expect_variable(&mut self) -> Result<Name, ParseError> {
         let span = self.current_span();
-        match self.take_token() {
-            Token::Variable(s) => Ok(s),
-            other => Err(ParseError::new(
-                format!("parse error: expected variable, found {:?}", other),
+        self.take_variable().ok_or_else(|| {
+            ParseError::new(
+                format!("parse error: expected variable, found {:?}", self.peek()),
                 span,
-            )),
-        }
+            )
+        })
     }
 
     /// `take_name_segment`, with the name's span.
@@ -247,27 +299,30 @@ impl Parser<'_> {
     pub(crate) fn take_name_segment(&mut self) -> Option<Name> {
         match self.peek() {
             Token::Identifier(_) => {
-                let Token::Identifier(part) = self.take_token() else {
-                    unreachable!()
+                let Some(TokenPayload::Name(id)) = self.take_payload() else {
+                    return None;
                 };
+                let part = self.token_stream.name(id)?.clone();
+                self.skip();
+                self.remember_name_id(Some(id));
                 Some(part)
             }
-            Token::Keyword(_) => {
-                let Some(Tok {
-                    token: Token::Keyword(kw),
-                    raw_keyword,
-                    ..
-                }) = self.pop()
-                else {
-                    unreachable!()
-                };
-                // A real vendored class can be literally named the same
-                // as a PHP keyword - use the original source spelling
-                // when we have it, falling back to the keyword's own
-                // canonical (always-lowercase) form only if it's somehow
-                // missing (shouldn't happen for a real lexer-produced
-                // token stream).
-                Some(self.intern(raw_keyword.as_deref().unwrap_or_else(|| kw.as_str())))
+            Token::Keyword(keyword) => {
+                let spelling = self
+                    .token_stream
+                    .raw_keyword_at(self.pos)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| keyword.as_str().to_owned());
+                let name = self.intern(&spelling);
+                let id = self
+                    .token_stream
+                    .names
+                    .iter()
+                    .position(|candidate| candidate == &name)
+                    .map(crate::name::name_id);
+                self.skip();
+                self.remember_name_id(id);
+                Some(name)
             }
             _ => None,
         }
@@ -419,23 +474,22 @@ impl Parser<'_> {
         }
         let doc = self.take_doc_comment_with_range();
         let attrs = self.parse_attributes()?;
-        if let Some((doc, doc_ranges)) = doc
-            && let Some(front) = self.ahead.front_mut()
-        {
-            let group = front
-                .docs
-                .get_or_insert_with(|| {
-                    Box::new(DocGroup {
-                        last: None,
-                        last_range: None,
-                        folded: None,
-                        folded_ranges: None,
-                        first_start: None,
-                    })
+        if let Some((doc, doc_ranges)) = doc {
+            let group = self.current_docs.get_or_insert_with(|| {
+                Box::new(DocGroup {
+                    last: None,
+                    last_range: None,
+                    folded: None,
+                    folded_ranges: None,
+                    first_start: None,
                 })
-                .as_mut();
-            group.last = Some(doc);
+            });
+            group.last = Some(doc.clone());
             group.last_range = doc_ranges.spans().last().copied();
+            if doc_ranges.spans().len() > 1 {
+                group.folded = Some(doc);
+                group.folded_ranges = Some(doc_ranges);
+            }
         }
         Ok(attrs)
     }

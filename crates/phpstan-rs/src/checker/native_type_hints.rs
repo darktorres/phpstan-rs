@@ -47,7 +47,12 @@ impl<'a> Checker<'a> {
                 .lookup_ancestor_method_with_owner(class, &f.name)
                 .map(|(_, sig)| sig.clone())
         });
-        for (i, param) in f.params.iter().enumerate() {
+        let syntax_owner = self.syntax_tree_owner();
+        let params = syntax_owner
+            .as_ref()
+            .map(|owner| owner.arenas().params(f.params.clone()))
+            .unwrap_or_default();
+        for (i, param) in params.iter().enumerate() {
             let Some(param_sig) = sig.params().get(i) else {
                 break;
             };

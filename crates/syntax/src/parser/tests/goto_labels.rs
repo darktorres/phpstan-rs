@@ -4,34 +4,53 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
-use crate::visit::{Visitor, any_stmt_in_body, walk_expr, walk_function_decl, walk_stmt};
+use crate::visit::arena::{self, Visitor};
 
 /// What a walk of `stmts` in source order says: every label a `goto` names,
 /// and whether some `goto` after the label names it.
-fn expected(stmts: &[StmtNode]) -> Vec<(String, bool)> {
-    let mut seen: FxHashSet<String> = FxHashSet::default();
-    let mut targets: Vec<(String, bool)> = Vec::new();
-    for stmt in stmts {
-        any_stmt_in_body(stmt, |s| {
-            match &s.kind {
+fn expected(arenas: &NodeArenas, stmts: &[StmtId]) -> Vec<(String, bool)> {
+    struct Gotos {
+        seen: FxHashSet<String>,
+        targets: Vec<(String, bool)>,
+    }
+    impl Visitor for Gotos {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            match &stmt.kind {
                 StmtKind::Label(name) => {
-                    seen.insert(name.name.to_string());
+                    self.seen.insert(name.name.to_string());
                 }
                 StmtKind::Goto(name) => {
                     let name = name.name.to_string();
-                    let backward = seen.contains(&name);
-                    match targets.iter_mut().find(|t| t.0 == name) {
-                        Some(t) => t.1 |= backward,
-                        None => targets.push((name, backward)),
+                    let backward = self.seen.contains(&name);
+                    match self.targets.iter_mut().find(|target| target.0 == name) {
+                        Some(target) => target.1 |= backward,
+                        None => self.targets.push((name, backward)),
                     }
                 }
                 _ => {}
             }
-            false
-        });
+            arena::walk_stmt(self, arenas, id);
+        }
+
+        // Expression bodies, nested functions, and classes have their own
+        // goto scopes. The parser records those separately.
+        fn visit_expr(&mut self, _arenas: &NodeArenas, _id: ExprId) {}
+
+        fn visit_function_decl(&mut self, _arenas: &NodeArenas, _function: &FunctionDecl) {}
+
+        fn visit_class_def(&mut self, _arenas: &NodeArenas, _class: &ClassDef) {}
     }
-    targets.sort();
-    targets
+
+    let mut gotos = Gotos {
+        seen: FxHashSet::default(),
+        targets: Vec::new(),
+    };
+    arena::walk_stmts(&mut gotos, arenas, stmts);
+    gotos.targets.sort();
+    gotos.targets
 }
 
 fn recorded(labels: &[GotoLabel]) -> Vec<(String, bool)> {
@@ -51,9 +70,9 @@ struct Check {
 }
 
 impl Check {
-    fn compare(&mut self, what: &str, stmts: &[StmtNode], labels: &[GotoLabel]) {
+    fn compare(&mut self, arenas: &NodeArenas, what: &str, stmts: &[StmtId], labels: &[GotoLabel]) {
         self.bodies += 1;
-        let (want, got) = (expected(stmts), recorded(labels));
+        let (want, got) = (expected(arenas, stmts), recorded(labels));
         if !want.is_empty() {
             self.with_labels += 1;
         }
@@ -64,32 +83,47 @@ impl Check {
     }
 }
 
-impl<'ast> Visitor<'ast> for Check {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
-        walk_stmt(self, stmt);
+impl Visitor for Check {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+    fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
         if let Some(body) = &function.body {
-            self.compare(&function.name.name, &body.stmts, &body.goto_labels);
+            self.compare(
+                arenas,
+                &function.name.name,
+                arenas.stmt_ids(&body.stmts),
+                &body.goto_labels,
+            );
         }
-        walk_function_decl(self, function);
+        arena::walk_function_decl(self, arenas, function);
     }
 
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else {
+            return;
+        };
         if let ExprKind::Closure(closure) = &expr.kind {
-            self.compare("closure", &closure.body, &closure.goto_labels);
-        }
-        walk_expr(self, expr);
-    }
-
-    fn visit_property_hooks(&mut self, hooks: &'ast PropertyHooks) {
-        for hook in hooks.iter() {
-            if let PropertyHookBody::Block(stmts) = &hook.body {
-                self.compare("hook", stmts, &hook.goto_labels);
+            if let Some(crate::ast::ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
+                self.compare(
+                    arenas,
+                    "closure",
+                    arenas.stmt_ids(&closure.body),
+                    &closure.goto_labels,
+                );
             }
         }
-        crate::visit::walk_property_hooks(self, hooks);
+        arena::walk_expr(self, arenas, id);
+    }
+
+    fn visit_property_hooks(&mut self, arenas: &NodeArenas, hooks: &PropertyHooks) {
+        for hook in hooks.iter() {
+            if let PropertyHookBody::Block(stmts) = &hook.body {
+                self.compare(arenas, "hook", arenas.stmt_ids(stmts), &hook.goto_labels);
+            }
+        }
+        arena::walk_property_hooks(self, arenas, hooks);
     }
 }
 
@@ -98,13 +132,12 @@ fn check_source(source: &[u8], check: &mut Check, what: &Path) {
         return;
     };
     check.compare(
+        &parsed.arenas,
         &format!("{} (file)", what.display()),
-        &parsed.stmts,
+        parsed.statements(),
         &parsed.goto_labels,
     );
-    for stmt in &parsed.stmts {
-        check.visit_stmt(stmt);
-    }
+    arena::walk_stmts(&mut *check, &parsed.arenas, parsed.statements());
 }
 
 fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {

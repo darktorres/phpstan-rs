@@ -25,8 +25,18 @@ impl<'a> Checker<'a> {
         let ExprKind::Index(base, idx) = &lhs.kind else {
             return;
         };
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("offset assignment belongs to its retained file owner");
+        let arenas = syntax_owner.arenas();
+        let base = arenas
+            .expr(*base)
+            .expect("offset assignment base belongs to its retained file owner");
         let container = self.infer_expr(base, locals);
-        let dim = idx.as_deref().map(|i| self.infer_expr(i, locals));
+        let dim = idx
+            .as_ref()
+            .and_then(|id| arenas.expr(*id))
+            .map(|i| self.infer_expr(i, locals));
         if container.is_mixed() || (container.is_never() || container.is_null().yes()) {
             return;
         }
@@ -64,7 +74,7 @@ impl<'a> Checker<'a> {
                 Some(d) => format!("Cannot assign offset {d} to {container}."),
             }
         };
-        self.report(message, lhs.span, level, identifier);
+        self.report(message, self.expr_span(lhs.id), level, identifier);
     }
 
     /// A write to a string offset PHP rejects or cuts short
@@ -102,7 +112,7 @@ impl<'a> Checker<'a> {
             None
         };
         if let Some(message) = message {
-            self.report(message, lhs.span, 3, "offsetAssign.valueType");
+            self.report(message, self.expr_span(lhs.id), 3, "offsetAssign.valueType");
         }
     }
 

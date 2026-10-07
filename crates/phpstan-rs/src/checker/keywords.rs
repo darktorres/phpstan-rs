@@ -14,7 +14,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FrameKind {
@@ -56,12 +56,16 @@ impl Scope {
 
 /// Walks one function-like body: expressions and nested declarations are
 /// not entered.
-impl<'ast> Visitor<'ast> for Scope {
-    fn visit_expr(&mut self, _: &'ast ExprNode) {}
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+impl Visitor for Scope {
+    fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
 
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
+        let span = arenas
+            .stmt_span(id)
+            .expect("keyword statement has an arena span");
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::While { body, .. }
@@ -70,14 +74,14 @@ impl<'ast> Visitor<'ast> for Scope {
             | StmtKind::Foreach { body, .. } => {
                 let id = self.fresh_id();
                 self.frames.push((FrameKind::Loop, id));
-                self.visit_stmt(body);
+                self.visit_stmt(arenas, *body);
                 self.frames.pop();
             }
             StmtKind::Switch { cases, .. } => {
                 let id = self.fresh_id();
                 self.frames.push((FrameKind::Switch, id));
-                for case in cases {
-                    walk_stmts(self, &case.body);
+                for case in arenas.switch_cases(cases.clone()) {
+                    arena::walk_stmts(self, arenas, arenas.stmt_ids(&case.body));
                 }
                 self.frames.pop();
             }
@@ -86,14 +90,14 @@ impl<'ast> Visitor<'ast> for Scope {
                 catches,
                 finally,
             } => {
-                walk_stmts(self, body);
-                for catch in catches {
-                    walk_stmts(self, &catch.body);
+                arena::walk_stmts(self, arenas, arenas.stmt_ids(body));
+                for catch in arenas.catch_clauses(catches.clone()) {
+                    arena::walk_stmts(self, arenas, arenas.stmt_ids(&catch.body));
                 }
                 if let Some(finally) = finally {
                     let id = self.fresh_id();
                     self.finallies.push(id);
-                    walk_stmts(self, finally);
+                    arena::walk_stmts(self, arenas, arenas.stmt_ids(finally));
                     self.finallies.pop();
                 }
             }
@@ -107,13 +111,13 @@ impl<'ast> Visitor<'ast> for Scope {
                 if level < 1 {
                     self.jumps.push((
                         "invalidLevel",
-                        stmt.span,
+                        span,
                         format!("Keyword {keyword} accepts only positive integers."),
                     ));
                 } else if level as usize > self.frames.len() {
                     self.jumps.push((
                         "outOfLoop",
-                        stmt.span,
+                        span,
                         format!("Keyword {keyword} used outside of a loop or a switch statement."),
                     ));
                 } else if keyword == "continue"
@@ -121,24 +125,24 @@ impl<'ast> Visitor<'ast> for Scope {
                 {
                     self.jumps.push((
                         "switch",
-                        stmt.span,
+                        span,
                         "Keyword continue targeting switch is equivalent to break.".to_string(),
                     ));
                 }
             }
             StmtKind::Label(name) => {
                 if self.labels.contains_key(&name.name) {
-                    self.duplicate_labels.push((name.name.clone(), stmt.span));
+                    self.duplicate_labels.push((name.name.clone(), span));
                 } else {
-                    let placement = self.placement(stmt.span);
+                    let placement = self.placement(span);
                     self.labels.insert(name.name.clone(), placement);
                 }
             }
             StmtKind::Goto(name) => {
-                let placement = self.placement(stmt.span);
+                let placement = self.placement(span);
                 self.gotos.push((name.name.clone(), placement));
             }
-            _ => walk_stmt(self, stmt),
+            _ => arena::walk_stmt(self, arenas, id),
         }
     }
 }
@@ -149,9 +153,12 @@ fn is_prefix(prefix: &[usize], of: &[usize]) -> bool {
 
 impl<'a> Checker<'a> {
     /// One function-like body, or the file's top-level statements.
-    pub(crate) fn check_statement_keywords(&mut self, body: &[StmtNode]) {
+    pub(crate) fn check_statement_keywords(&mut self, body: &[StmtId]) {
+        let arenas = self
+            .syntax_arenas()
+            .expect("statement-keyword checks require their parsed file owner");
         let mut scope = Scope::default();
-        walk_stmts(&mut scope, body);
+        arena::walk_stmts(&mut scope, arenas, body);
         for (kind, span, message) in std::mem::take(&mut scope.jumps) {
             let keyword = if message.contains("continue") {
                 "continue"
@@ -222,13 +229,21 @@ impl<'a> Checker<'a> {
     /// must be `0`/`1`, the file's first statement, and never block
     /// mode; `ticks` needs an int and `encoding` a string; any other
     /// directive is unsupported.
-    pub(crate) fn check_declare_directives(&mut self, program: &[StmtNode]) {
-        for (stmt, is_first) in collect_declares(program) {
+    pub(crate) fn check_declare_directives(&mut self, arenas: &NodeArenas, program: &[StmtId]) {
+        for (id, is_first) in collect_declares(arenas, program) {
+            let Some(stmt) = arenas.stmt(id) else {
+                continue;
+            };
             let StmtKind::Declare { directives, body } = &stmt.kind else {
                 continue;
             };
-            for (name, value) in directives {
-                let literal_int = match &value.kind {
+            for directive in arenas.declare_directives(directives.clone()) {
+                let name = &directive.name;
+                let value = directive.value;
+                let Some(value_node) = arenas.expr(value) else {
+                    continue;
+                };
+                let literal_int = match &value_node.kind {
                     ExprKind::Literal(Literal::Int(n)) => Some(*n),
                     _ => None,
                 };
@@ -238,22 +253,24 @@ impl<'a> Checker<'a> {
                             self.report_keyword(
                                 format!(
                                     "Declare strict_types must have 0 or 1 as its value, {} given.",
-                                    describe_literal(value)
+                                    describe_literal(arenas, value)
                                 ),
-                                value.span,
+                                arenas
+                                    .expr_span(value_node.id)
+                                    .expect("declare value has a parallel span"),
                                 "declareStrictTypes.value",
                             );
                         } else if body.is_some() {
                             self.report_keyword(
                                 "Declare strict_types must not use block mode.".to_string(),
-                                stmt.span,
+                                self.stmt_span(stmt.id),
                                 "declareStrictTypes.blockMode",
                             );
                         } else if !is_first {
                             self.report_keyword(
                                 "Declare strict_types must be the very first statement."
                                     .to_string(),
-                                stmt.span,
+                                self.stmt_span(stmt.id),
                                 "declareStrictTypes.notFirst",
                             );
                         }
@@ -261,18 +278,24 @@ impl<'a> Checker<'a> {
                     "ticks" if literal_int.is_none() => self.report_keyword(
                         format!(
                             "Declare ticks must have an integer value, {} given.",
-                            describe_literal(value)
+                            describe_literal(arenas, value)
                         ),
-                        value.span,
+                        arenas
+                            .expr_span(value_node.id)
+                            .expect("declare value has a parallel span"),
                         "declare.ticksValue",
                     ),
-                    "encoding" if !matches!(value.kind, ExprKind::Literal(Literal::String(_))) => {
+                    "encoding"
+                        if !matches!(value_node.kind, ExprKind::Literal(Literal::String(_))) =>
+                    {
                         self.report_keyword(
                             format!(
                                 "Declare encoding must have a string value, {} given.",
-                                describe_literal(value)
+                                describe_literal(arenas, value)
                             ),
-                            value.span,
+                            arenas
+                                .expr_span(value_node.id)
+                                .expect("declare value has a parallel span"),
                             "declare.encodingValue",
                         )
                     }
@@ -294,35 +317,43 @@ impl<'a> Checker<'a> {
 
 /// Every `declare` statement, with whether it's the file's first
 /// statement.
-fn collect_declares(program: &[StmtNode]) -> Vec<(&StmtNode, bool)> {
-    struct Declares<'s> {
-        out: Vec<(&'s StmtNode, bool)>,
+fn collect_declares(arenas: &NodeArenas, program: &[StmtId]) -> Vec<(StmtId, bool)> {
+    struct Declares {
+        out: Vec<(StmtId, bool)>,
         // The next statement visited is the file's first, looking through
         // leading blocks.
         next_is_first: bool,
     }
-    impl<'s> Visitor<'s> for Declares<'s> {
-        fn visit_expr(&mut self, _: &'s ExprNode) {}
-        fn visit_stmt(&mut self, stmt: &'s StmtNode) {
+    impl Visitor for Declares {
+        fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else { return };
             let is_first = std::mem::replace(&mut self.next_is_first, false);
             match &stmt.kind {
                 StmtKind::Declare { body, .. } => {
-                    self.out.push((stmt, is_first));
+                    self.out.push((id, is_first));
                     if let Some(body) = body {
-                        walk_stmts(self, body);
+                        arena::walk_stmts(self, arenas, arenas.stmt_ids(body));
                     }
                 }
                 StmtKind::Block(body) => {
                     self.next_is_first = is_first;
-                    walk_stmts(self, body);
+                    arena::walk_stmts(self, arenas, arenas.stmt_ids(body));
                 }
-                StmtKind::FunctionDecl(f) => walk_stmts(self, f.body_stmts()),
-                StmtKind::ClassDecl(c) => {
-                    for m in &c.def.methods {
-                        walk_stmts(self, m.function.body_stmts());
+                StmtKind::FunctionDecl(id) => {
+                    if let Some(function) = arenas.function(*id) {
+                        arena::walk_stmts(self, arenas, function.body_stmts(arenas));
                     }
                 }
-                _ => walk_stmt(self, stmt),
+                StmtKind::ClassDecl(c) => {
+                    let c = arenas.class_decl(c.clone());
+                    if let Some(def) = arenas.class(c.def) {
+                        for m in arenas.methods(def.methods.clone()) {
+                            arena::walk_stmts(self, arenas, m.function.body_stmts(arenas));
+                        }
+                    }
+                }
+                _ => arena::walk_stmt(self, arenas, id),
             }
         }
     }
@@ -330,18 +361,27 @@ fn collect_declares(program: &[StmtNode]) -> Vec<(&StmtNode, bool)> {
         out: Vec::new(),
         next_is_first: true,
     };
-    walk_stmts(&mut declares, program);
+    arena::walk_stmts(&mut declares, arenas, program);
     declares.out
 }
 
-fn describe_literal(value: &ExprNode) -> String {
+fn describe_literal(arenas: &NodeArenas, id: ExprId) -> String {
+    let Some(value) = arenas.expr(id) else {
+        return "an expression".to_string();
+    };
     match &value.kind {
         ExprKind::Literal(Literal::Int(n)) => n.to_string(),
-        ExprKind::Literal(Literal::String(s)) => format!("'{s}'"),
+        ExprKind::Literal(Literal::String(s)) => arenas
+            .string_bytes(s)
+            .map(|bytes| format!("'{}'", String::from_utf8_lossy(bytes)))
+            .unwrap_or_else(|| "a string literal".to_string()),
         ExprKind::Literal(Literal::Bool(b)) => b.to_string(),
         ExprKind::Literal(Literal::Null) => "null".to_string(),
         ExprKind::Literal(Literal::Float(f)) => f.to_string(),
-        ExprKind::Name(n) => n.to_string(),
+        ExprKind::Name(n) => arenas
+            .qualified_name(n)
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| "an expression".to_string()),
         _ => "an expression".to_string(),
     }
 }

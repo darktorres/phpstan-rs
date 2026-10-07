@@ -21,10 +21,15 @@ use syntax::ast::*;
 impl<'a> Checker<'a> {
     /// `DuplicateDeclarationHelper::checkClassLike`'s equivalent.
     pub(crate) fn check_duplicate_class_members(&mut self, fqn: &str, c: &ClassDef) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let methods = arenas.methods(c.methods.clone());
         let kind = class_kind_identifier(&c.kind);
-        self.check_duplicate_consts(fqn, kind, &c.enum_cases, &c.consts);
-        self.check_duplicate_properties(fqn, kind, &c.properties, &c.methods);
-        self.check_duplicate_methods(fqn, kind, &c.methods);
+        self.check_duplicate_consts(fqn, kind, c.enum_cases(arenas), c.consts(arenas));
+        self.check_duplicate_properties(fqn, kind, c.properties(arenas), methods);
+        self.check_duplicate_methods(fqn, kind, methods);
     }
 
     /// A class constant and an enum case share one real namespace (both
@@ -91,38 +96,30 @@ impl<'a> Checker<'a> {
         // A promoted constructor parameter is a property declaration in
         // disguise - PHPStan's own helper checks it against the same
         // `$declaredProperties` set for exactly this reason.
-        let mut seen_promoted: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
-        for m in methods {
-            if !m.function.is_constructor() {
-                continue;
-            }
-            for param in &m.function.params {
-                if param.promotion.is_none() {
-                    continue;
-                }
-                if seen.contains_key(param.name.as_ref()) {
-                    self.report_builder(
-                        DiagnosticBuilder::new(
-                            format!("Cannot redeclare property {fqn}::${}.", param.name),
-                            param.span,
-                            0,
-                            format!("{kind}.duplicateProperty"),
-                        )
-                        .non_ignorable(),
-                    );
-                    continue;
-                }
-                if !seen_promoted.insert(param.name.as_ref()) {
-                    self.report_builder(
-                        DiagnosticBuilder::new(
-                            format!("Cannot redeclare property {fqn}::${}.", param.name),
-                            param.span,
-                            0,
-                            format!("{kind}.duplicateProperty"),
-                        )
-                        .non_ignorable(),
-                    );
-                }
+        let mut seen_promoted: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        let promotions: Vec<_> = self
+            .syntax_arenas()
+            .map(|arenas| {
+                methods
+                    .iter()
+                    .filter(|m| m.function.is_constructor())
+                    .flat_map(|m| arenas.params(m.function.params.clone()))
+                    .filter(|param| param.promotion.is_some())
+                    .map(|param| (param.name.to_string(), param.span))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (name, span) in promotions {
+            if seen.contains_key(name.as_str()) || !seen_promoted.insert(name.clone()) {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        format!("Cannot redeclare property {fqn}::${name}."),
+                        span,
+                        0,
+                        format!("{kind}.duplicateProperty"),
+                    )
+                    .non_ignorable(),
+                );
             }
         }
     }

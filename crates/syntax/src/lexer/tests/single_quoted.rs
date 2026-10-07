@@ -1,5 +1,15 @@
 use super::super::*;
 
+fn string_bytes(payload: &StringPayload, source: &[u8], decoded: &[u8]) -> Vec<u8> {
+    match payload {
+        StringPayload::Source(span) => source[span.start as usize..span.end as usize].to_vec(),
+        StringPayload::Decoded(range) => {
+            decoded[range.start() as usize..range.end() as usize].to_vec()
+        }
+        StringPayload::Owned(value) => value.as_bytes().to_vec(),
+    }
+}
+
 /// What lexing a single-quoted string gave before the closing quote was
 /// searched for: the bytes after unescaping, and where the lexer stood.
 fn byte_by_byte(src: &[u8]) -> (Vec<u8>, usize) {
@@ -40,7 +50,7 @@ fn a_single_quoted_string_is_what_the_byte_by_byte_scan_made_of_it() {
             panic!("not a string literal: {src:?}");
         };
         let (bytes, end) = byte_by_byte(&src);
-        assert_eq!(string.as_bytes(), bytes, "{src:?}");
+        assert_eq!(string_bytes(&string, &src, &lexer.decoded_bytes), bytes, "{src:?}");
         assert_eq!(lexer.pos, end, "{src:?}");
     }
 }
@@ -59,6 +69,11 @@ fn the_usual_single_quoted_strings() {
         let Token::StringLit(string) = lexer.lex_single_quoted() else {
             panic!("{source}");
         };
-        assert_eq!(string.as_bytes(), value, "{source}");
+        assert_eq!(
+            string_bytes(&string, source.as_bytes(), &lexer.decoded_bytes),
+            value,
+            "{source}"
+        );
     }
 }
+use crate::ast::StringPayload;

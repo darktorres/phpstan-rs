@@ -22,6 +22,41 @@ fn tokens_on_a_later_line_get_real_line_and_column_positions() {
 }
 
 #[test]
+fn grouped_doc_tokens_keep_each_source_span() {
+    let src = "<?php /** first */ /** second */ function f() {}";
+    let (tokens, _) = Lexer::new(src).lex().lexed.into_toks();
+    let function = tokens
+        .iter()
+        .find(|tok| tok.token == Token::Keyword(crate::token::Keyword::Function))
+        .unwrap();
+    let docs = function.docs.as_deref().unwrap();
+    let spans = docs.folded_ranges.as_ref().unwrap().spans();
+
+    assert_eq!(spans.len(), 2);
+    assert_eq!(
+        &src[spans[0].start as usize..spans[0].end as usize],
+        "/** first */"
+    );
+    assert_eq!(
+        &src[spans[1].start as usize..spans[1].end as usize],
+        "/** second */"
+    );
+    assert_eq!(
+        docs.last_range,
+        Some(*spans.last().unwrap()),
+        "the declaration doc range is the last adjacent comment"
+    );
+    assert_eq!(
+        docs.folded_ranges
+            .as_ref()
+            .unwrap()
+            .text(src.as_bytes())
+            .unwrap(),
+        "/** first \n second \n*/"
+    );
+}
+
+#[test]
 fn a_token_spanning_multiple_lines_does_not_throw_off_the_next_token_s_position() {
     let src = "<?php\n$x = <<<EOT\nhello\nworld\nEOT;\n$y = 1;\n";
     let toks = Lexer::new(src).tokenize_with_spans();
@@ -203,20 +238,30 @@ fn many_double_quoted_strings_on_one_long_line_stay_linear_and_exact() {
 #[test]
 fn a_short_echo_tag_after_inline_html_still_echoes() {
     let src = "<title><?= $t ?></title><?= $u ?>";
-    let toks: Vec<Token> = Lexer::new(src)
+    let toks: Vec<(Token, Span)> = Lexer::new(src)
         .tokenize_with_spans()
         .into_iter()
-        .map(|(t, _, _)| t)
+        .map(|(t, span, _)| (t, span))
         .collect();
     let echoes = toks
         .iter()
-        .filter(|t| matches!(t, Token::Keyword(Keyword::Echo)))
+        .filter(|(t, _)| matches!(t, Token::Keyword(Keyword::Echo)))
         .count();
     assert_eq!(echoes, 2, "{toks:?}");
     assert!(
-        matches!(&toks[0], Token::InlineHtml(h) if &**h == "<title>"),
+        matches!(&toks[0].0, Token::InlineHtml(span) if span.slice(src.as_bytes()) == Some(b"<title>")),
         "{toks:?}"
     );
+}
+
+#[test]
+fn inline_html_keeps_non_utf8_source_bytes_in_its_range() {
+    let source = b"<x>\xff<?php";
+    let tokens = Lexer::from_bytes(source).tokenize_with_spans();
+    let Some((Token::InlineHtml(span), _, _)) = tokens.first() else {
+        panic!("expected inline HTML token: {tokens:?}");
+    };
+    assert_eq!(span.slice(source), Some(&b"<x>\xff"[..]));
 }
 
 #[test]

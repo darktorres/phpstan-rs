@@ -49,7 +49,8 @@ pub(crate) fn name_anonymous_classes(
     line_index: &LineIndex,
 ) {
     let mut lines = Lines(Vec::new(), line_index);
-    arena::walk_stmts(&mut lines, arenas, arenas.stmt_ids(stmts));
+    let stmts = arenas.stmt_ids(stmts).to_vec();
+    arena::walk_stmts(&mut lines, arenas, &stmts);
     if lines.0.is_empty() {
         return;
     }
@@ -142,7 +143,15 @@ impl ArenaVisitor for Lines<'_> {
         if let Some(expr) = arenas.expr(id)
             && let ExprKind::NewAnonymousClass(class_id) = &expr.kind
         {
-            self.0.push((*class_id, self.1.line(expr.span.start)));
+            self.0.push((
+                *class_id,
+                self.1.line(
+                    arenas
+                        .expr_span(expr.id)
+                        .expect("anonymous-class expression has a parallel span")
+                        .start,
+                ),
+            ));
         }
         arena::walk_expr(self, arenas, id);
     }

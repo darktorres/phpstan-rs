@@ -153,7 +153,7 @@ mod tests {
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let mut registry = Registry::build(&program);
+        let mut registry = Registry::build(&program.arenas, program.statements());
         let entry = |function, class, method| AssertionEntry {
             function,
             class,

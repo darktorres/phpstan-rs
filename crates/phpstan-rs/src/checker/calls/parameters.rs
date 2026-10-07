@@ -122,8 +122,8 @@ fn upper_first(text: &str) -> String {
 
 /// One argument as the check sees it: a written argument, or one
 /// element of a constant array unpacked into the call.
-struct Argument<'e> {
-    value: &'e ExprNode,
+struct Argument {
+    value: ExprId,
     /// Known up front for an unpacked element; inferred otherwise.
     ty: Option<Type>,
     unpack: bool,
@@ -154,6 +154,7 @@ fn describe_parameter(param: &ParameterReflection, position: Position) -> String
 }
 
 pub(crate) struct ParametersCheck<'a> {
+    pub arenas: &'a NodeArenas,
     pub callee: Callee<'a>,
     pub sig: &'a FunctionReflection,
     pub args: &'a [Arg],
@@ -170,6 +171,7 @@ impl<'a> Checker<'a> {
     /// `FunctionCallParametersCheck::check`.
     pub(crate) fn check_parameters(&mut self, check: ParametersCheck) {
         let ParametersCheck {
+            arenas,
             callee,
             sig,
             args,
@@ -194,13 +196,16 @@ impl<'a> Checker<'a> {
         let mut has_named = false;
         let mut has_unpacked = false;
         for arg in args {
+            let arg_expr = arenas
+                .expr(arg.value)
+                .expect("parameter-check argument belongs to its retained file owner");
             if arg.name.is_some() {
                 has_named = true;
             }
             if has_named && arg.spread {
                 self.report_non_ignorable(
                     "Named argument cannot be followed by an unpacked (...) argument.".to_string(),
-                    arg.value.span,
+                    self.expr_span(arg_expr.id),
                     "argument.unpackAfterNamed",
                 );
             }
@@ -208,21 +213,21 @@ impl<'a> Checker<'a> {
                 self.report_non_ignorable(
                     "Unpacked argument (...) cannot be followed by a non-unpacked argument."
                         .to_string(),
-                    arg.value.span,
+                    self.expr_span(arg_expr.id),
                     "argument.nonUnpackAfterUnpacked",
                 );
             }
             if arg.spread {
                 has_unpacked = true;
-                let ty = self.infer_expr(&arg.value, locals);
+                let ty = self.infer_expr(arg_expr, locals);
                 let unpacked = Argument {
-                    value: &arg.value,
+                    value: arg.value,
                     ty: Some(ty.array_value_type().unwrap_or(Type::mixed())),
                     unpack: true,
                     name: None,
-                    span: arg.value.span,
+                    span: self.expr_span(arg_expr.id),
                 };
-                match self.unpacked_constant_array_arguments(arg, &ty, &mut has_named) {
+                match self.unpacked_constant_array_arguments(arenas, arg, &ty, &mut has_named) {
                     Some(items) => {
                         arguments.extend(items);
                         // Only when no argument at all precedes it, as in
@@ -236,11 +241,11 @@ impl<'a> Checker<'a> {
                 continue;
             }
             arguments.push(Argument {
-                value: &arg.value,
+                value: arg.value,
                 ty: None,
                 unpack: false,
                 name: arg.name.as_ref().map(|n| n.to_string()),
-                span: arg.value.span,
+                span: self.expr_span(arg_expr.id),
             });
         }
 
@@ -291,11 +296,14 @@ impl<'a> Checker<'a> {
 
         for (i, (argument, param)) in arguments.iter().zip(bound).enumerate() {
             let Some(param) = param else { continue };
+            let value = arenas
+                .expr(argument.value)
+                .expect("checked argument belongs to its retained file owner");
             let arg_ty = match &argument.ty {
                 Some(ty) => ty.clone(),
                 None => self
-                    .infer_closure_literal_in_context(argument.value, param.ty(), locals)
-                    .unwrap_or_else(|| self.infer_expr(argument.value, locals)),
+                    .infer_closure_literal_in_context(value, param.ty(), locals)
+                    .unwrap_or_else(|| self.infer_expr(value, locals)),
             };
             let param_ty = match defining_class {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
@@ -325,8 +333,8 @@ impl<'a> Checker<'a> {
                 Some(_) => Position::Unnamed,
                 None => Position::Index(i + 1),
             };
-            if contains_nullsafe_access(argument.value)
-                || (!argument.unpack && !is_valid_byref_argument_expr(argument.value))
+            if contains_nullsafe_access(arenas, argument.value)
+                || (!argument.unpack && !is_valid_byref_argument_expr(arenas, argument.value))
             {
                 self.report(
                     callee.by_ref_message(&describe_parameter(param, position)),
@@ -345,10 +353,12 @@ impl<'a> Checker<'a> {
     /// the type is not constant arrays.
     fn unpacked_constant_array_arguments<'e>(
         &self,
-        arg: &'e Arg,
+        arenas: &NodeArenas,
+        arg: &Arg,
         ty: &Type,
         has_named: &mut bool,
-    ) -> Option<Vec<Argument<'e>>> {
+    ) -> Option<Vec<Argument>> {
+        let value = arenas.expr(arg.value)?;
         let shapes: Vec<&Shape> = ty
             .union_members()
             .iter()
@@ -393,11 +403,11 @@ impl<'a> Checker<'a> {
                 continue;
             }
             out.push(Argument {
-                value: &arg.value,
+                value: arg.value,
                 ty: value_ty,
                 unpack: false,
                 name,
-                span: arg.value.span,
+                span: self.expr_span(value.id),
             });
         }
         Some(out)

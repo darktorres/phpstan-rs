@@ -30,21 +30,32 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("builtin call arguments retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
+        let arg_expr = |arg: &Arg| {
+            arenas
+                .expr(arg.value)
+                .expect("builtin argument belongs to its retained file owner")
+        };
         // Every special case below is a builtin's. A global function by a
         // builtin's name that isn't its stub is a polyfill, declared only
         // where the builtin is missing, so it behaves as the builtin does.
         if !sig.is_stub() && crate::registry::stubs::builtin_function_extension(name).is_none() {
-            let resolved = resolve_call_args(args, sig.params());
+            let resolved = resolve_call_args(arenas, args, sig.params());
             return self.infer_call_return_type(sig, &resolved, locals);
         }
-        if let Some(outcome) = self.type_check_call_outcome(name, args, locals) {
+        if let Some(outcome) = self.type_check_call_outcome(arenas, name, args, locals) {
             return Type::bool_literal(outcome);
         }
         match name {
             // Mirrors real PHPStan's `AbsFunctionDynamicReturnTypeExtension` -
             // delegates entirely to `Type::toAbsoluteNumber()`.
             "abs" if args.len() == 1 => {
-                return self.infer_expr(&args[0].value, locals).to_absolute_number();
+                return self
+                    .infer_expr(arg_expr(&args[0]), locals)
+                    .to_absolute_number();
             }
             // Narrowed to the one part that's always true regardless of
             // the argument: `strlen()` can never be negative. Real
@@ -54,16 +65,25 @@ impl<'a> Checker<'a> {
             // falsy, a string as an array key. `binary: true` gives raw
             // bytes instead, which may all be digits.
             "md5" | "sha1" | "hash" | "hash_hmac" | "spl_object_hash" => {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 let arg = |i: usize| resolved.get(i).copied().flatten();
                 let (algorithm_long, binary) = match name {
                     "md5" | "sha1" => (true, arg(1)),
-                    "hash" => (arg(0).is_some_and(long_hex_algorithm), arg(2)),
-                    "hash_hmac" => (arg(0).is_some_and(long_hex_algorithm), arg(3)),
+                    "hash" => (
+                        arg(0).is_some_and(|e| long_hex_algorithm(arenas, e)),
+                        arg(2),
+                    ),
+                    "hash_hmac" => (
+                        arg(0).is_some_and(|e| long_hex_algorithm(arenas, e)),
+                        arg(3),
+                    ),
                     _ => (true, None),
                 };
                 let hex = binary.is_none_or(|b| {
-                    matches!(&b.peeled().kind, ExprKind::Literal(Literal::Bool(false)))
+                    arenas
+                        .peeled(b.id)
+                        .and_then(|id| arenas.expr(id))
+                        .is_some_and(|b| matches!(&b.kind, ExprKind::Literal(Literal::Bool(false))))
                 });
                 if algorithm_long && hex {
                     return Type::intersection_of(vec![
@@ -77,7 +97,7 @@ impl<'a> Checker<'a> {
             // Glue with a byte that is neither a digit nor a `-`, joining at
             // least two pieces, is in the result where no decimal int has it.
             "implode" | "join" if !args.is_empty() => {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 let (glue, pieces) = match (
                     resolved.first().copied().flatten(),
                     resolved.get(1).copied().flatten(),
@@ -87,7 +107,7 @@ impl<'a> Checker<'a> {
                     _ => (None, None),
                 };
                 if let (Some(glue), Some(pieces)) = (glue, pieces)
-                    && let Some(glue) = literal_string_value(glue)
+                    && let Some(glue) = literal_string_value(arenas, glue.id)
                     && glue.bytes().any(|b| !b.is_ascii_digit() && b != b'-')
                     && self
                         .infer_expr(pieces, locals)
@@ -120,7 +140,7 @@ impl<'a> Checker<'a> {
             // A byte no decimal int has where it stands keeps the result a
             // string as an array key.
             "sprintf" | "vsprintf" if !args.is_empty() => {
-                if let Some(fmt) = literal_string_value(&args[0].value)
+                if let Some(fmt) = literal_string_value(arenas, args[0].value)
                     && let Some(pieces) = sprintf_pieces(&fmt)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
                 {
@@ -138,7 +158,7 @@ impl<'a> Checker<'a> {
                             && args.get(arg + 1).is_some_and(|a| {
                                 !a.spread
                                     && self
-                                        .infer_expr(&a.value, locals)
+                                        .infer_expr(arg_expr(a), locals)
                                         .to_string_type(self.registry)
                                         .is_some_and(|t| {
                                             t.is_refined_string(AccessoryKind::NonEmptyString).yes()
@@ -170,7 +190,7 @@ impl<'a> Checker<'a> {
             // `'-90 days'`) is exactly this shape. Anything else keeps
             // today's `int|false`.
             "strtotime" if !args.is_empty() => {
-                if let Some(literal) = literal_string_value(&args[0].value)
+                if let Some(literal) = literal_string_value(arenas, args[0].value)
                     && crate::php_date_parser::validate_relative_delta(&literal) == Some(true)
                 {
                     return Type::int();
@@ -182,7 +202,7 @@ impl<'a> Checker<'a> {
             // argument means it always returns the representation string
             // instead. Scoped to that exact 2-argument, literal-`true`
             // form - anything else keeps the stub's nullable return type.
-            "var_export" if args.len() == 2 && is_true_literal(&args[1].value) => {
+            "var_export" if args.len() == 2 && is_true_literal(arg_expr(&args[1])) => {
                 return Type::string();
             }
             // The count an array's type allows (`Type::count_range`), or a
@@ -190,10 +210,11 @@ impl<'a> Checker<'a> {
             // one); `COUNT_RECURSIVE` counts at least as many, and a mode
             // that isn't a literal anything from 0.
             "count" | "sizeof" if !args.is_empty() => {
-                let counted = self.infer_expr(&args[0].value, locals);
+                let counted = self.infer_expr(arg_expr(&args[0]), locals);
                 let recursive = match args.get(1) {
                     None => false,
-                    Some(mode) => match self.infer_expr(&mode.value, locals).int_literal_value() {
+                    Some(mode) => match self.infer_expr(arg_expr(mode), locals).int_literal_value()
+                    {
                         Some(0) => false,
                         Some(1) => true,
                         _ => return Type::int_range(Some(0), None),
@@ -227,11 +248,11 @@ impl<'a> Checker<'a> {
             // `int`.
             "random_int" | "rand" | "mt_rand" if args.len() == 2 => {
                 let min = self
-                    .infer_expr(&args[0].value, locals)
+                    .infer_expr(arg_expr(&args[0]), locals)
                     .int_bounds()
                     .and_then(|(min, _)| min);
                 let max = self
-                    .infer_expr(&args[1].value, locals)
+                    .infer_expr(arg_expr(&args[1]), locals)
                     .int_bounds()
                     .and_then(|(_, max)| max);
                 return Type::int_range(min, max);
@@ -245,7 +266,10 @@ impl<'a> Checker<'a> {
                 return hrtime_array_shape();
             }
             "hrtime" if args.len() == 1 => {
-                return match self.infer_expr(&args[0].value, locals).bool_literal_value() {
+                return match self
+                    .infer_expr(arg_expr(&args[0]), locals)
+                    .bool_literal_value()
+                {
                     Some(true) => hrtime_number_type(),
                     Some(false) => hrtime_array_shape(),
                     None => self
@@ -279,8 +303,8 @@ impl<'a> Checker<'a> {
             // anything else falls through to the generic path below.
             "range" if args.len() == 2 => {
                 let (from, to) = (
-                    self.infer_expr(&args[0].value, locals),
-                    self.infer_expr(&args[1].value, locals),
+                    self.infer_expr(arg_expr(&args[0]), locals),
+                    self.infer_expr(arg_expr(&args[1]), locals),
                 );
                 let one_char = |t: &Type| t.string_literal_value().is_some_and(|s| s.len() == 1);
                 let elem = if from.is_int().yes() && to.is_int().yes() {
@@ -309,9 +333,9 @@ impl<'a> Checker<'a> {
             // an unrecognized flag doesn't change list-ness/non-emptiness
             // here).
             "preg_split" if (2..=4).contains(&args.len()) => {
-                let no_empty = args
-                    .get(3)
-                    .is_some_and(|a| contains_flag_name(&a.value, "PREG_SPLIT_NO_EMPTY"));
+                let no_empty = args.get(3).is_some_and(|a| {
+                    contains_flag_name(arenas, arg_expr(a).id, "PREG_SPLIT_NO_EMPTY")
+                });
                 let elem = if no_empty {
                     Type::intersection_of(vec![
                         Type::string(),
@@ -332,21 +356,24 @@ impl<'a> Checker<'a> {
             // modeled and what's deliberately not (a computed filter
             // value, sanitize filters, `FILTER_DEFAULT`).
             "filter_var" if (2..=3).contains(&args.len()) => {
-                let flags_arg = args.get(2).map(|a| &a.value);
+                let flags_arg = args.get(2).map(|a| arg_expr(a));
                 let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
-                if let ExprKind::Name(filter_name) = &args[1].value.kind
+                if let ExprKind::Name(filter_name) = &arg_expr(&args[1]).kind
+                    && let Some(filter_name) = arenas.qualified_name(filter_name)
                     && let Some((element_ty, fallback, throw_on_failure)) = filter_validate_result(
                         filter_name.trim_start_matches('\\'),
+                        arenas,
                         flags_arg,
                         flags_ty.as_ref(),
                     )
                 {
                     let require_array = flags_arg.is_some_and(|e| {
-                        contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
+                        contains_flag_name_with_options(arenas, e.id, "FILTER_REQUIRE_ARRAY")
                     });
-                    let force_array = flags_arg
-                        .is_some_and(|e| contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY"));
-                    let value_ty = self.infer_expr(&args[0].value, locals);
+                    let force_array = flags_arg.is_some_and(|e| {
+                        contains_flag_name_with_options(arenas, e.id, "FILTER_FORCE_ARRAY")
+                    });
+                    let value_ty = self.infer_expr(arg_expr(&args[0]), locals);
                     // `FILTER_REQUIRE_ARRAY` wins when both are literally
                     // present, matching real PHPStan's precedence. Only
                     // the two provable shapes are modeled (favor false
@@ -396,7 +423,7 @@ impl<'a> Checker<'a> {
             // project has no "internal function throws TypeError"
             // tracking to model an invalid one with.
             "filter_input" if (2..=4).contains(&args.len()) => {
-                let flags_arg = args.get(3).map(|a| &a.value);
+                let flags_arg = args.get(3).map(|a| arg_expr(a));
                 let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
                 // `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` aren't
                 // modeled for `filter_input`: its subject is always the
@@ -405,15 +432,17 @@ impl<'a> Checker<'a> {
                 // corpus evidence - falls through to the generic stub
                 // instead of silently ignoring the flag.
                 if flags_arg.is_some_and(|e| {
-                    contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
-                        || contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY")
+                    contains_flag_name_with_options(arenas, e.id, "FILTER_REQUIRE_ARRAY")
+                        || contains_flag_name_with_options(arenas, e.id, "FILTER_FORCE_ARRAY")
                 }) {
                     return Type::mixed();
                 }
                 if let Some(filter) = args.get(2)
-                    && let ExprKind::Name(filter_name) = &filter.value.kind
+                    && let ExprKind::Name(filter_name) = &arg_expr(filter).kind
+                    && let Some(filter_name) = arenas.qualified_name(filter_name)
                     && let Some((element_ty, fallback, throw_on_failure)) = filter_validate_result(
                         filter_name.trim_start_matches('\\'),
+                        arenas,
                         flags_arg,
                         flags_ty.as_ref(),
                     )
@@ -441,7 +470,7 @@ impl<'a> Checker<'a> {
             "min" | "max" if args.len() >= 2 && !args.iter().any(|a| a.spread) => {
                 let arg_types: Vec<Type> = args
                     .iter()
-                    .map(|a| self.infer_expr(&a.value, locals))
+                    .map(|a| self.infer_expr(arg_expr(a), locals))
                     .collect();
                 if !arg_types.iter().any(|t| t.is_array().yes()) {
                     return arg_types
@@ -455,13 +484,13 @@ impl<'a> Checker<'a> {
             // resolves to the array's value/key type unioned with `null`,
             // since a "not found" outcome is always real.
             "array_find" if args.len() == 2 => {
-                let input_ty = self.infer_expr(&args[0].value, locals);
+                let input_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
                     return self.relation().union(elem_ty, Type::null());
                 }
             }
             "array_find_key" if args.len() == 2 => {
-                let input_ty = self.infer_expr(&args[0].value, locals);
+                let input_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some(key_ty) = input_ty.array_key_type() {
                     return self.relation().union(key_ty, Type::null());
                 }
@@ -470,10 +499,10 @@ impl<'a> Checker<'a> {
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
             "array_map" if args.len() == 2 => {
-                let input_ty = self.infer_expr(&args[1].value, locals);
+                let input_ty = self.infer_expr(arg_expr(&args[1]), locals);
                 if let Some(elem_ty) = input_ty.array_value_type()
                     && let Some(mapped) = self.infer_closure_return_with_param_overrides(
-                        &args[0].value,
+                        arg_expr(&args[0]),
                         &[elem_ty],
                         locals,
                     )
@@ -492,14 +521,20 @@ impl<'a> Checker<'a> {
             // project verifies against) still parses fine and must not be
             // indexed into blindly.
             "array_filter" if !args.is_empty() => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if arr_ty.is_array().yes() {
                     // Filtering can both leave gaps in a list's sequential
                     // keys and empty out a non-empty array, so neither
                     // marker survives.
                     let stripped = arr_ty.without_accessories();
                     if args.len() >= 2 {
-                        if is_null_filter_callback(&args[1].value) {
+                        let syntax_owner = self.syntax_tree_owner();
+                        let arenas = syntax_owner
+                            .as_ref()
+                            .map(crate::checker::SyntaxTreeOwner::arenas);
+                        if arenas.is_some_and(|arenas| {
+                            is_null_filter_callback(arenas, arg_expr(&args[1]))
+                        }) {
                             return strip_null_from_array_element(stripped);
                         }
                         // An `instanceof`-shaped filter callback (`fn ($v):
@@ -508,7 +543,9 @@ impl<'a> Checker<'a> {
                         // not just strips `Null`: an `A|B|null` element
                         // type filtered by `instanceof B` keeps only `B`,
                         // not `A` too.
-                        if let Some(class_name) = is_instanceof_filter_callback(&args[1].value) {
+                        if let Some(class_name) = arenas.and_then(|arenas| {
+                            is_instanceof_filter_callback(arenas, arg_expr(&args[1]))
+                        }) {
                             let target = self.resolve_name_expr(class_name);
                             return narrow_array_element_type_to(
                                 &self.relation(),
@@ -519,7 +556,9 @@ impl<'a> Checker<'a> {
                         // A native `is_string`/`is_int`/`is_float`/
                         // `is_bool`/`is_null` type-check predicate narrows
                         // the same way.
-                        if let Some(target) = is_type_check_filter_callback(&args[1].value) {
+                        if let Some(target) = arenas.and_then(|arenas| {
+                            is_type_check_filter_callback(arenas, arg_expr(&args[1]))
+                        }) {
                             return narrow_array_element_type_to(
                                 &self.relation(),
                                 stripped,
@@ -538,7 +577,7 @@ impl<'a> Checker<'a> {
                 }
             }
             "array_reduce" => {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 if let [Some(array), Some(callback), initial, ..] = resolved[..] {
                     return self.reduced_array_type(array, callback, initial, locals);
                 }
@@ -548,7 +587,7 @@ impl<'a> Checker<'a> {
             // else the stub returns for the configured versions (`false`
             // on PHP 7 for different sizes) stays.
             "array_combine" => {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 if let (Some(keys), Some(values)) = (
                     resolved.first().copied().flatten(),
                     resolved.get(1).copied().flatten(),
@@ -575,17 +614,17 @@ impl<'a> Checker<'a> {
             // deliberately not handled here.
             "array_slice"
                 if matches!(args.len(), 2..=3)
-                    || (args.len() == 4 && is_false_literal(&args[3].value)) =>
+                    || (args.len() == 4 && is_false_literal(arg_expr(&args[3]))) =>
             {
-                let input_ty = self.infer_expr(&args[0].value, locals);
+                let input_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
                     return input_ty.with_array_value(elem_ty);
                 }
             }
             "array_reverse"
-                if args.len() == 1 || (args.len() == 2 && is_false_literal(&args[1].value)) =>
+                if args.len() == 1 || (args.len() == 2 && is_false_literal(arg_expr(&args[1]))) =>
             {
-                let input_ty = self.infer_expr(&args[0].value, locals);
+                let input_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
                     return input_ty.with_array_value(elem_ty);
                 }
@@ -594,7 +633,8 @@ impl<'a> Checker<'a> {
             // already list-shaped - re-sequencing every key from zero is
             // exactly what array_values does.
             "array_values" if args.len() == 1 => {
-                if let Some(elem_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type()
+                if let Some(elem_ty) =
+                    (self.infer_expr(arg_expr(&args[0]), locals)).array_value_type()
                 {
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), elem_ty),
@@ -614,7 +654,7 @@ impl<'a> Checker<'a> {
                 // unlike `array_diff`/`array_intersect`, which really
                 // can empty a non-empty input and correctly don't get
                 // this same treatment).
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if arr_ty.is_array().yes() {
                     let stripped = arr_ty.clone().without_accessories();
                     return if arr_ty.is_non_empty_array().yes() {
@@ -668,10 +708,10 @@ impl<'a> Checker<'a> {
                 let arr_ty = if let [a] = args
                     && a.spread
                 {
-                    let spread_ty = self.infer_expr(&a.value, locals);
+                    let spread_ty = self.infer_expr(arg_expr(a), locals);
                     spread_ty.array_value_type().unwrap_or(Type::mixed())
                 } else {
-                    self.infer_expr(&args[0].value, locals)
+                    self.infer_expr(arg_expr(&args[0]), locals)
                 };
                 if arr_ty.is_array().yes() {
                     return arr_ty.without_accessories();
@@ -683,7 +723,7 @@ impl<'a> Checker<'a> {
             // already `0, 1, 2, ...`), but non-emptiness does (flipping
             // can't change whether there's at least one element).
             "array_flip" if args.len() == 1 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 let keyable = self.relation().union(Type::int(), Type::string());
                 // A real array shape gets a precise, field-by-field
                 // flip: a field whose own value is an int/string literal
@@ -750,7 +790,7 @@ impl<'a> Checker<'a> {
                 let mut shape = Shape::sealed(Vec::new());
                 let mut resolvable = true;
                 for arg in args {
-                    match compact_argument_names(&arg.value) {
+                    match compact_argument_names(arenas, arg_expr(arg).id) {
                         Some(names) => {
                             for name in names {
                                 let key = ShapeKey::from_name(&name);
@@ -780,7 +820,7 @@ impl<'a> Checker<'a> {
             // keys, which share the same `Locals` map but were never a
             // real PHP variable `get_defined_vars()` could report.
             "mysqli_query" if args.len() >= 2 => {
-                return self.mysqli_query_type(Some(&args[1].value), locals);
+                return self.mysqli_query_type(Some(arg_expr(&args[1])), locals);
             }
             "mysqli_fetch_assoc"
             | "mysqli_fetch_row"
@@ -789,13 +829,13 @@ impl<'a> Checker<'a> {
             | "mysqli_fetch_column"
                 if !args.is_empty() =>
             {
-                let result_ty = self.infer_expr(&args[0].value, locals);
+                let result_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some((class, type_args)) = result_ty.as_object()
                     && class.eq_ignore_ascii_case("mysqli_result")
                     && let Some(ty) = self.mysqli_fetch_type(
                         name.trim_start_matches("mysqli_"),
                         type_args.first(),
-                        args.get(1).map(|a| &a.value),
+                        args.get(1).map(|a| arg_expr(a)),
                     )
                 {
                     return ty;
@@ -825,7 +865,7 @@ impl<'a> Checker<'a> {
             // `false`, and neither additionally unions with the marker
             // once non-emptiness is already provable (`force_union: false`).
             "array_pop" | "array_shift" if args.len() == 1 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some(elem_ty) = arr_ty.array_value_type() {
                     return Self::array_pointer_result(&arr_ty, elem_ty, Type::null(), false);
                 }
@@ -837,7 +877,7 @@ impl<'a> Checker<'a> {
             // (an explicit zero-length `$length` legitimately removes
             // nothing).
             "array_splice" if !args.is_empty() => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some(elem_ty) = arr_ty.array_value_type() {
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), elem_ty),
@@ -859,7 +899,7 @@ impl<'a> Checker<'a> {
                 let mut key_ty: Option<Type> = None;
                 let mut val_ty: Option<Type> = None;
                 for a in args {
-                    let arg_ty = self.infer_expr(&a.value, locals);
+                    let arg_ty = self.infer_expr(arg_expr(a), locals);
                     if let Some(k) = arg_ty.array_key_type() {
                         key_ty = Some(
                             key_ty.map_or(k.clone(), |existing| self.relation().union(existing, k)),
@@ -884,8 +924,8 @@ impl<'a> Checker<'a> {
             // aren't modeled precisely, since padding can truncate from
             // either end depending on `$size`'s sign, re-sequencing keys.
             "array_pad" if args.len() == 3 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
-                let pad_ty = self.infer_expr(&args[2].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
+                let pad_ty = self.infer_expr(arg_expr(&args[2]), locals);
                 if let Some(elem_ty) = arr_ty.array_value_type() {
                     return Type::array(
                         Type::unknown_array_key(),
@@ -900,7 +940,7 @@ impl<'a> Checker<'a> {
             // occurrence count - real PHP always returns a plain `int`
             // count, non-emptiness matching the input's.
             "array_count_values" if args.len() == 1 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if arr_ty.is_array().yes() {
                     // Only int and string values count; others are skipped.
                     let keyable = self.relation().union(Type::int(), Type::string());
@@ -926,7 +966,7 @@ impl<'a> Checker<'a> {
             // every other function in this match, the input's own type
             // survives completely unchanged.
             "array_change_key_case" if matches!(args.len(), 1..=2) => {
-                return self.infer_expr(&args[0].value, locals);
+                return self.infer_expr(arg_expr(&args[0]), locals);
             }
             // With `$num` omitted or exactly the literal `1`, `array_rand`
             // returns a single random key (never an array) - the input's
@@ -934,10 +974,10 @@ impl<'a> Checker<'a> {
             // stub signature gives with no way to know which. A literal
             // `$num` above `1` returns an array of that many keys instead.
             "array_rand" if matches!(args.len(), 1..=2) => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 let num_literal = args
                     .get(1)
-                    .map(|a| self.infer_expr(&a.value, locals))
+                    .map(|a| self.infer_expr(arg_expr(a), locals))
                     .and_then(|t| t.int_literal_value());
                 if let Some(key_ty) = arr_ty.array_key_type() {
                     match num_literal.unwrap_or(1) {
@@ -957,7 +997,7 @@ impl<'a> Checker<'a> {
             // even when the array is provably non-empty: moving the
             // pointer can run off either end regardless of element count.
             "reset" | "current" | "end" if args.len() == 1 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if arr_ty.is_array().yes() {
                     let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
                     return Self::array_pointer_result(
@@ -969,7 +1009,7 @@ impl<'a> Checker<'a> {
                 }
             }
             "next" | "prev" if args.len() == 1 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if arr_ty.is_array().yes() {
                     let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
                     return Self::array_pointer_result(
@@ -989,7 +1029,7 @@ impl<'a> Checker<'a> {
             // siblings) and `array_key_first`/`array_key_last`'s
             // identical `int|string|null` signature.
             "key" | "array_key_first" | "array_key_last" if args.len() == 1 => {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if name != "key"
                     && let Some(key) = shape_end_key(&arr_ty, name == "array_key_first")
                 {
@@ -1020,7 +1060,7 @@ impl<'a> Checker<'a> {
             "array_merge" if !args.is_empty() => {
                 let arg_types: Vec<Type> = args
                     .iter()
-                    .map(|a| self.infer_expr(&a.value, locals))
+                    .map(|a| self.infer_expr(arg_expr(a), locals))
                     .collect();
                 // When every argument's exact fields are known
                 // (`array{...}`), merge them field-by-field via the same
@@ -1290,12 +1330,14 @@ impl<'a> Checker<'a> {
             "array_fill" if args.len() == 3 => {
                 let base = Type::array(
                     Type::unknown_array_key(),
-                    self.infer_expr(&args[2].value, locals),
+                    self.infer_expr(arg_expr(&args[2]), locals),
                 );
-                let start_is_zero =
-                    self.infer_expr(&args[0].value, locals).int_literal_value() == Some(0);
+                let start_is_zero = self
+                    .infer_expr(arg_expr(&args[0]), locals)
+                    .int_literal_value()
+                    == Some(0);
                 let count_is_non_empty = self
-                    .infer_expr(&args[1].value, locals)
+                    .infer_expr(arg_expr(&args[1]), locals)
                     .int_bounds()
                     .is_some_and(|(min, _)| min.is_some_and(|m| m >= 1));
                 let mut members = vec![base];
@@ -1315,13 +1357,13 @@ impl<'a> Checker<'a> {
             // `array_fill_keys(['a', 'b'], 0)` really is `array<string,
             // int>`, not a bare `unknown_array_key()`.
             "array_fill_keys" if args.len() == 2 => {
-                let keys_ty = self.infer_expr(&args[0].value, locals);
+                let keys_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 let key_ty = keys_ty
                     .array_value_type()
                     .map_or_else(Type::unknown_array_key, |v| {
                         v.to_string_array_key(self.registry)
                     });
-                let filled = Type::array(key_ty, self.infer_expr(&args[1].value, locals));
+                let filled = Type::array(key_ty, self.infer_expr(arg_expr(&args[1]), locals));
                 return if keys_ty.is_non_empty_array().yes() {
                     filled.to_non_empty_array()
                 } else {
@@ -1332,7 +1374,8 @@ impl<'a> Checker<'a> {
             // result is an array *of* arrays, each holding the original
             // element type.
             "array_chunk" if args.len() == 2 || args.len() == 3 => {
-                if let Some(elem_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type()
+                if let Some(elem_ty) =
+                    (self.infer_expr(arg_expr(&args[0]), locals)).array_value_type()
                 {
                     return Type::array(
                         Type::unknown_array_key(),
@@ -1343,7 +1386,7 @@ impl<'a> Checker<'a> {
             // A list of the array's keys; the search arguments only choose
             // which.
             "array_keys" if (1..=3).contains(&args.len()) => {
-                let arg_ty = self.infer_expr(&args[0].value, locals);
+                let arg_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if arg_ty.is_array().yes()
                     && let Some(key_ty) = arg_ty.array_key_type()
                 {
@@ -1362,14 +1405,16 @@ impl<'a> Checker<'a> {
             // One named column of each row: a shaped row's field, an
             // unshaped row's value type.
             "array_column" if args.len() == 2 || args.len() == 3 => {
-                if let Some(row_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type() {
+                if let Some(row_ty) =
+                    (self.infer_expr(arg_expr(&args[0]), locals)).array_value_type()
+                {
                     // A shaped row looks up the one named field; an
                     // unshaped row (`array<string, mixed>`, the common
                     // shape for a raw DB-fetch row) has no per-key
                     // precision to offer, so every column read is simply
                     // the row's own uniform element type.
                     let field_ty = match row_ty.as_array_shape() {
-                        Some(shape) => literal_shape_key(&args[1].value)
+                        Some(shape) => literal_shape_key(arenas, arg_expr(&args[1]))
                             .and_then(|key| shape.field(&key))
                             .map(|f| f.ty.clone()),
                         None if row_ty.is_array().yes() => row_ty.array_value_type(),
@@ -1379,8 +1424,11 @@ impl<'a> Checker<'a> {
                         // With an index column, its values cast as keys; a
                         // row without it is appended under the next int.
                         let index_key = match args.get(2) {
-                            Some(index) if !is_null_literal(&index.value) => {
-                                match (row_ty.as_array_shape(), literal_shape_key(&index.value)) {
+                            Some(index) if !is_null_literal(arg_expr(index)) => {
+                                match (
+                                    row_ty.as_array_shape(),
+                                    literal_shape_key(arenas, arg_expr(index)),
+                                ) {
                                     (Some(shape), Some(key)) => match shape.field(&key) {
                                         Some(f) if f.optional => {
                                             self.relation().union(f.ty.to_array_key(), Type::int())
@@ -1410,7 +1458,7 @@ impl<'a> Checker<'a> {
                         // keeps a plain, unmarked `Array`.
                         return if args
                             .get(2)
-                            .is_none_or(|index| is_null_literal(&index.value))
+                            .is_none_or(|index| is_null_literal(arg_expr(index)))
                         {
                             Type::intersection_of(vec![
                                 arr_ty,
@@ -1432,15 +1480,15 @@ impl<'a> Checker<'a> {
             // one can only ever find an `int` key (or `false`), never
             // `string`.
             "array_search" if args.len() >= 2 => {
-                let haystack_ty = self.infer_expr(&args[1].value, locals);
+                let haystack_ty = self.infer_expr(arg_expr(&args[1]), locals);
                 // A shape's keys found by each value's comparison with the
                 // needle: loose without `strict`, identical with it.
                 if let Some(shape) = haystack_ty.as_array_shape()
                     && shape.is_sealed()
                 {
-                    let needle = self.infer_expr(&args[0].value, locals);
+                    let needle = self.infer_expr(arg_expr(&args[0]), locals);
                     let strict = args.get(2).is_some_and(|a| {
-                        matches!(&a.value.kind, ExprKind::Literal(Literal::Bool(true)))
+                        matches!(&arg_expr(a).kind, ExprKind::Literal(Literal::Bool(true)))
                     });
                     let version = self.comparison_php_version();
                     let equals = |value: &Type| {
@@ -1501,7 +1549,7 @@ impl<'a> Checker<'a> {
             // `Union` that happens to be all-`True` or all-`False` (e.g.
             // narrowed from a wider type) should narrow the same way a
             // bare `True`/`False` would.
-            "microtime" => match args.first().map(|a| self.infer_expr(&a.value, locals)) {
+            "microtime" => match args.first().map(|a| self.infer_expr(arg_expr(a), locals)) {
                 None => return Type::string(),
                 Some(ty)
                     if types::Relation::structural()
@@ -1529,7 +1577,10 @@ impl<'a> Checker<'a> {
             // silently fail to equal plain `string`.
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
-                    .is_super_type_of(&Type::string(), &self.infer_expr(&args[2].value, locals))
+                    .is_super_type_of(
+                        &Type::string(),
+                        &self.infer_expr(arg_expr(&args[2]), locals),
+                    )
                     .yes()
                 {
                     return Type::string();
@@ -1544,10 +1595,13 @@ impl<'a> Checker<'a> {
             "preg_replace" | "preg_replace_callback" | "preg_filter"
                 if args.len() >= 3
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::string(), &self.infer_expr(&args[2].value, locals))
+                        .is_super_type_of(
+                            &Type::string(),
+                            &self.infer_expr(arg_expr(&args[2]), locals),
+                        )
                         .yes() =>
             {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return generic.without(&Type::array(Type::mixed(), Type::mixed()));
             }
@@ -1558,7 +1612,10 @@ impl<'a> Checker<'a> {
             // Never returns `null`, so a plain early return suffices.
             "substr_replace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
-                    .is_super_type_of(&Type::string(), &self.infer_expr(&args[0].value, locals))
+                    .is_super_type_of(
+                        &Type::string(),
+                        &self.infer_expr(arg_expr(&args[0]), locals),
+                    )
                     .yes()
                 {
                     return Type::string();
@@ -1577,7 +1634,7 @@ impl<'a> Checker<'a> {
                 if args.is_empty() {
                     return Type::array(Type::unknown_array_key(), Type::string());
                 }
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 if let Some(name_ty) = resolved
                     .first()
                     .copied()
@@ -1612,8 +1669,8 @@ impl<'a> Checker<'a> {
             // lowercase/uppercase propagation), which rests on machinery
             // this project doesn't otherwise track for plain strings.
             "str_repeat" if args.len() == 2 => {
-                let input_ty = self.infer_expr(&args[0].value, locals);
-                let count_ty = self.infer_expr(&args[1].value, locals);
+                let input_ty = self.infer_expr(arg_expr(&args[0]), locals);
+                let count_ty = self.infer_expr(arg_expr(&args[1]), locals);
                 if count_ty.int_literal_value().is_some_and(|n| n <= 0) {
                     return Type::string_literal(PhpString::default());
                 }
@@ -1659,7 +1716,7 @@ impl<'a> Checker<'a> {
                     _ => CaseOp::UpperFirst,
                 };
                 return self.infer_case_function_call(
-                    &args[0].value,
+                    arg_expr(&args[0]),
                     locals,
                     &[op],
                     name.starts_with("mb_"),
@@ -1667,14 +1724,14 @@ impl<'a> Checker<'a> {
             }
             // A mode that isn't known literally could be any of them.
             "mb_convert_case" if args.len() >= 2 => {
-                let mode_ty = self.infer_expr(&args[1].value, locals);
+                let mode_ty = self.infer_expr(arg_expr(&args[1]), locals);
                 let ops: Vec<CaseOp> = mode_ty
                     .constant_ints()
                     .iter()
                     .map(|&m| CaseOp::from_mb_mode(m))
                     .collect::<Option<Vec<CaseOp>>>()
                     .unwrap_or_default();
-                return self.infer_case_function_call(&args[0].value, locals, &ops, true);
+                return self.infer_case_function_call(arg_expr(&args[0]), locals, &ops, true);
             }
             // The vendored stub's `@return string[]|false` reflects PHP
             // 7's behavior for an empty `$separator` - PHP 8+ throws a
@@ -1709,10 +1766,13 @@ impl<'a> Checker<'a> {
             "preg_replace_callback_array"
                 if args.len() >= 2
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::string(), &self.infer_expr(&args[1].value, locals))
+                        .is_super_type_of(
+                            &Type::string(),
+                            &self.infer_expr(arg_expr(&args[1]), locals),
+                        )
                         .yes() =>
             {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return generic.without(&Type::array(Type::mixed(), Type::mixed()));
             }
@@ -1723,10 +1783,13 @@ impl<'a> Checker<'a> {
             "mb_convert_encoding"
                 if args.len() >= 2
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::string(), &self.infer_expr(&args[0].value, locals))
+                        .is_super_type_of(
+                            &Type::string(),
+                            &self.infer_expr(arg_expr(&args[0]), locals),
+                        )
                         .yes() =>
             {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return generic.without(&Type::array(Type::mixed(), Type::mixed()));
             }
@@ -1738,12 +1801,12 @@ impl<'a> Checker<'a> {
             // An array, or an object that can't serialize itself as
             // something else, encodes to text starting with `[` or `{`.
             "json_encode" if !args.is_empty() => {
-                let resolved = resolve_call_args(args, sig.params());
+                let resolved = resolve_call_args(arenas, args, sig.params());
                 let throws = resolved
                     .get(1)
                     .copied()
                     .flatten()
-                    .is_some_and(contains_json_throw_on_error);
+                    .is_some_and(|value| contains_json_throw_on_error(arenas, value.id));
                 let structured = resolved.first().copied().flatten().is_some_and(|value| {
                     let ty = self.infer_expr(value, locals);
                     let serializable = Type::object("JsonSerializable".into(), Vec::new());
@@ -1776,7 +1839,8 @@ impl<'a> Checker<'a> {
             // components" array shape this project doesn't model, and
             // falls through to `mixed` unchanged.
             "curl_getinfo" if args.len() == 2 => {
-                if let ExprKind::Name(option_name) = &args[1].value.kind
+                if let ExprKind::Name(option_name) = &arg_expr(&args[1]).kind
+                    && let Some(option_name) = arenas.qualified_name(option_name)
                     && let Some(ty) =
                         curl_getinfo_component_type(option_name.trim_start_matches('\\'))
                 {
@@ -1790,7 +1854,7 @@ impl<'a> Checker<'a> {
             // argument whose type isn't a concrete `Object` falls through
             // to plain `string`, unchanged.
             "get_class" if args.len() == 1 => {
-                let object_ty = self.infer_expr(&args[0].value, locals);
+                let object_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some((class, _)) = object_ty.as_object() {
                     return Type::class_string(Type::object_ref(class, &[]));
                 }
@@ -1821,7 +1885,7 @@ impl<'a> Checker<'a> {
             // for anything `find_declared_parent_class` can't answer
             // confidently.
             "get_parent_class" if args.len() == 1 => {
-                let object_ty = self.infer_expr(&args[0].value, locals);
+                let object_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 if let Some((class, _)) = object_ty.as_object()
                     && let Some(ty) = self.find_declared_parent_class(class)
                 {
@@ -1834,7 +1898,7 @@ impl<'a> Checker<'a> {
             // for a genuinely unknown argument, leaving plain `string`
             // unchanged.
             "gettype" if args.len() == 1 => {
-                if let Some(ty) = gettype_result(&self.infer_expr(&args[0].value, locals)) {
+                if let Some(ty) = gettype_result(&self.infer_expr(arg_expr(&args[0]), locals)) {
                     return ty;
                 }
             }
@@ -1846,7 +1910,7 @@ impl<'a> Checker<'a> {
             // can't be pinned down tighter than `string`.
             "get_debug_type" if args.len() == 1 => {
                 if let Some(ty) =
-                    self.get_debug_type_result(&self.infer_expr(&args[0].value, locals))
+                    self.get_debug_type_result(&self.infer_expr(arg_expr(&args[0]), locals))
                 {
                     return ty;
                 }
@@ -1860,7 +1924,7 @@ impl<'a> Checker<'a> {
             // through to plain `string`, unchanged.
             "date" if !args.is_empty() => {
                 if let [format] = &self
-                    .infer_expr(&args[0].value, locals)
+                    .infer_expr(arg_expr(&args[0]), locals)
                     .constant_strings_text()[..]
                     && let Some(ty) = date_format_return_type(format)
                 {
@@ -1874,7 +1938,7 @@ impl<'a> Checker<'a> {
             // anything else falls through to plain `int|false`, unchanged.
             "idate" if !args.is_empty() => {
                 if let [format] = &self
-                    .infer_expr(&args[0].value, locals)
+                    .infer_expr(arg_expr(&args[0]), locals)
                     .constant_strings_text()[..]
                     && let Some(c) = single_char(format)
                     && let Some((min, max)) = idate_format_char_range(c)
@@ -1899,12 +1963,15 @@ impl<'a> Checker<'a> {
             // gets the same array shape as the 1-arg form). A non-literal
             // `$flags` keeps the `array|string` union, unchanged.
             "pathinfo" if args.len() == 1 => {
-                let path_ty = self.infer_expr(&args[0].value, locals);
+                let path_ty = self.infer_expr(arg_expr(&args[0]), locals);
                 return pathinfo_array_shape(&path_ty);
             }
             "pathinfo" if args.len() == 2 => {
-                if let ExprKind::Name(flag_name) = &args[1].value.kind {
-                    let path_ty = self.infer_expr(&args[0].value, locals);
+                if let ExprKind::Name(flag_name) = &arg_expr(&args[1]).kind {
+                    let Some(flag_name) = arenas.qualified_name(flag_name) else {
+                        return Type::mixed();
+                    };
+                    let path_ty = self.infer_expr(arg_expr(&args[0]), locals);
                     return match flag_name.trim_start_matches('\\') {
                         "PATHINFO_DIRNAME" | "PATHINFO_BASENAME" | "PATHINFO_EXTENSION"
                         | "PATHINFO_FILENAME" => Type::string(),
@@ -1931,7 +1998,8 @@ impl<'a> Checker<'a> {
                 ]);
             }
             "parse_url" if args.len() == 2 => {
-                if let ExprKind::Name(component_name) = &args[1].value.kind
+                if let ExprKind::Name(component_name) = &arg_expr(&args[1]).kind
+                    && let Some(component_name) = arenas.qualified_name(component_name)
                     && let Some(ty) =
                         parse_url_component_type(component_name.trim_start_matches('\\'))
                 {
@@ -1951,7 +2019,7 @@ impl<'a> Checker<'a> {
             // modeled here.
             "sscanf" if args.len() == 2 => {
                 if let [format] = &self
-                    .infer_expr(&args[1].value, locals)
+                    .infer_expr(arg_expr(&args[1]), locals)
                     .constant_strings_text()[..]
                     && let Some(fields) = sscanf_result_fields(format)
                 {
@@ -1994,7 +2062,7 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        let resolved = resolve_call_args(args, sig.params());
+        let resolved = resolve_call_args(arenas, args, sig.params());
         self.infer_call_return_type(sig, &resolved, locals)
     }
 
@@ -2131,11 +2199,20 @@ impl<'a> Checker<'a> {
     /// touches. Reuses `parse_sscanf_format` as a placeholder-count
     /// source, rather than reimplementing real PHPStan's live-`sscanf()`-
     /// shell-out counting, which this project has no PHP runtime for.
-    pub(crate) fn check_scanf_argument_count(&mut self, name: &str, args: &[Arg], span: Span) {
+    pub(crate) fn check_scanf_argument_count(
+        &mut self,
+        arenas: &NodeArenas,
+        name: &str,
+        args: &[Arg],
+        span: Span,
+    ) {
         if args.len() < 3 || args.iter().any(|a| a.spread) {
             return;
         }
-        let Some(fmt) = literal_string_value(&args[1].value) else {
+        let fmt = arenas
+            .expr(args[1].value)
+            .expect("scanf format argument belongs to its retained file owner");
+        let Some(fmt) = literal_string_value(arenas, fmt.id) else {
             return;
         };
         let Some(specs) = parse_sscanf_format(&fmt) else {
@@ -2162,7 +2239,12 @@ impl<'a> Checker<'a> {
     /// combination is nonsensical. Gated on a configured `php_version` -
     /// with none configured, this stays silent rather than assume PHP 8.5
     /// is intended.
-    pub(crate) fn check_filter_var_flag_conflict(&mut self, args: &[Arg], span: Span) {
+    pub(crate) fn check_filter_var_flag_conflict(
+        &mut self,
+        arenas: &NodeArenas,
+        args: &[Arg],
+        span: Span,
+    ) {
         if self
             .registry
             .php_supports_somewhere(types::php_version::PhpFeature::FilterThrowOnFailureConstant)
@@ -2173,8 +2255,8 @@ impl<'a> Checker<'a> {
         let Some(flags_arg) = args.get(2) else {
             return;
         };
-        if contains_flag_name_with_options(&flags_arg.value, "FILTER_NULL_ON_FAILURE")
-            && contains_flag_name_with_options(&flags_arg.value, "FILTER_THROW_ON_FAILURE")
+        if contains_flag_name_with_options(arenas, flags_arg.value, "FILTER_NULL_ON_FAILURE")
+            && contains_flag_name_with_options(arenas, flags_arg.value, "FILTER_THROW_ON_FAILURE")
         {
             self.report(
                 "Cannot use both FILTER_NULL_ON_FAILURE and FILTER_THROW_ON_FAILURE.".to_string(),
@@ -2472,18 +2554,19 @@ fn is_var_named(e: &ExprNode, name: &str) -> bool {
 /// array, ...) - the caller can't partially trust the rest of the list
 /// either, since real `compact()` combines every argument into one flat
 /// result.
-fn compact_argument_names(e: &ExprNode) -> Option<Vec<String>> {
+fn compact_argument_names(arenas: &NodeArenas, id: ExprId) -> Option<Vec<String>> {
+    let e = arenas.expr(id)?;
     syntax::stack::guard(|| {
-        if let Some(name) = literal_string_value(e) {
+        if let Some(name) = literal_string_value(arenas, e.id) {
             return Some(vec![name.into_owned()]);
         }
         if let ExprKind::ArrayLiteral(items) = &e.kind {
             let mut names = Vec::new();
-            for item in items {
+            for item in arenas.array_items(items.clone()) {
                 if item.spread {
                     return None;
                 }
-                names.extend(compact_argument_names(&item.value)?);
+                names.extend(compact_argument_names(arenas, item.value)?);
             }
             return Some(names);
         }
@@ -2522,24 +2605,52 @@ fn is_null_literal(e: &ExprNode) -> bool {
 /// (or `null !== $v`), as an arrow function or a closure whose only
 /// statement is the equivalent `return`. Deliberately narrow, not a
 /// general boolean-expression evaluator.
-fn is_null_filter_callback(e: &ExprNode) -> bool {
-    fn is_not_null_check(body: &ExprNode, param: &str) -> bool {
-        matches!(&body.kind, ExprKind::Binary(BinOp::NotIdentical, l, r)
-            if (is_var_named(l, param) && is_null_literal(r))
-                || (is_var_named(r, param) && is_null_literal(l)))
-    }
+fn filter_callback_parts<'a>(
+    arenas: &'a NodeArenas,
+    e: &ExprNode,
+) -> Option<(&'a str, &'a ExprNode)> {
     match &e.kind {
-        ExprKind::ArrowFn(arrow) => {
-            matches!(arrow.params.as_slice(), [p] if is_not_null_check(&arrow.body, &p.name))
+        ExprKind::ArrowFn(id) => {
+            let ClosurePayload::ArrowFn(arrow) = arenas.closure(*id)? else {
+                return None;
+            };
+            let [param] = arenas.params(arrow.params.clone()) else {
+                return None;
+            };
+            Some((param.name.as_ref(), arenas.expr(arrow.body)?))
         }
-        ExprKind::Closure(closure) => match (closure.params.as_slice(), closure.body.as_slice()) {
-            ([p], [stmt]) => {
-                matches!(&stmt.kind, StmtKind::Return(Some(ret_expr)) if is_not_null_check(ret_expr, &p.name))
-            }
-            _ => false,
-        },
-        _ => false,
+        ExprKind::Closure(id) => {
+            let ClosurePayload::Closure(closure) = arenas.closure(*id)? else {
+                return None;
+            };
+            let [param] = arenas.params(closure.params.clone()) else {
+                return None;
+            };
+            let [stmt] = arenas.stmt_ids(&closure.body) else {
+                return None;
+            };
+            let StmtKind::Return(Some(expr)) = &arenas.stmt(*stmt)?.kind else {
+                return None;
+            };
+            Some((param.name.as_ref(), arenas.expr(*expr)?))
+        }
+        _ => None,
     }
+}
+
+fn is_null_filter_callback(arenas: &NodeArenas, e: &ExprNode) -> bool {
+    fn is_not_null_check(arenas: &NodeArenas, body: &ExprNode, param: &str) -> bool {
+        let ExprKind::Binary(BinOp::NotIdentical, left, right) = &body.kind else {
+            return false;
+        };
+        let (Some(left), Some(right)) = (arenas.expr(*left), arenas.expr(*right)) else {
+            return false;
+        };
+        (is_var_named(left, param) && is_null_literal(right))
+            || (is_var_named(right, param) && is_null_literal(left))
+    }
+    filter_callback_parts(arenas, e)
+        .is_some_and(|(param, body)| is_not_null_check(arenas, body, param))
 }
 
 /// `array_filter`'s explicit-null-filter callback (recognized by
@@ -2554,31 +2665,28 @@ fn strip_null_from_array_element(ty: Type) -> Type {
 /// `fn ($v): bool => $v instanceof Target` (or the equivalent
 /// single-statement closure) - returns `Target`'s raw name string, for
 /// the caller to resolve.
-fn is_instanceof_filter_callback(e: &ExprNode) -> Option<&QualifiedName> {
-    fn as_instanceof_class<'a>(body: &'a ExprNode, param: &str) -> Option<&'a QualifiedName> {
+fn is_instanceof_filter_callback<'a>(
+    arenas: &'a NodeArenas,
+    e: &ExprNode,
+) -> Option<&'a QualifiedName> {
+    fn as_instanceof_class<'a>(
+        arenas: &'a NodeArenas,
+        body: &'a ExprNode,
+        param: &str,
+    ) -> Option<&'a QualifiedName> {
         match &body.kind {
             ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name))
-                if is_var_named(inner, param) =>
+                if arenas
+                    .expr(*inner)
+                    .is_some_and(|inner| is_var_named(inner, param)) =>
             {
-                Some(class_name)
+                arenas.qualified_name(class_name)
             }
             _ => None,
         }
     }
-    match &e.kind {
-        ExprKind::ArrowFn(arrow) => match arrow.params.as_slice() {
-            [p] => as_instanceof_class(&arrow.body, &p.name),
-            _ => None,
-        },
-        ExprKind::Closure(closure) => match (closure.params.as_slice(), closure.body.as_slice()) {
-            ([p], [stmt]) => match &stmt.kind {
-                StmtKind::Return(Some(ret_expr)) => as_instanceof_class(ret_expr, &p.name),
-                _ => None,
-            },
-            _ => None,
-        },
-        _ => None,
-    }
+    let (param, body) = filter_callback_parts(arenas, e)?;
+    as_instanceof_class(arenas, body, param)
 }
 
 /// A native `is_string`/`is_int`/`is_float`/`is_bool`/`is_null`
@@ -2593,7 +2701,7 @@ fn is_instanceof_filter_callback(e: &ExprNode) -> Option<&QualifiedName> {
 /// variant, not attempted here). Recognizes the first-class-callable form
 /// (`is_string(...)`) alongside the same arrow-fn/closure wrapping shapes
 /// `is_instanceof_filter_callback` handles, for consistency.
-fn is_type_check_filter_callback(e: &ExprNode) -> Option<Type> {
+fn is_type_check_filter_callback(arenas: &NodeArenas, e: &ExprNode) -> Option<Type> {
     fn type_for_predicate(name: &str) -> Option<Type> {
         let name = name.trim_start_matches('\\').to_ascii_lowercase();
         match name.as_str() {
@@ -2602,40 +2710,52 @@ fn is_type_check_filter_callback(e: &ExprNode) -> Option<Type> {
             _ => narrowing_type_for_predicate(&name),
         }
     }
-    fn as_predicate_call<'a>(body: &'a ExprNode, param: &str) -> Option<&'a str> {
+    fn as_predicate_call<'a>(
+        arenas: &'a NodeArenas,
+        body: &'a ExprNode,
+        param: &str,
+    ) -> Option<&'a str> {
         match &body.kind {
-            ExprKind::Call(callee, args) => match (&callee.kind, args.as_slice()) {
-                (ExprKind::Name(name), [single_arg]) if is_var_named(&single_arg.value, param) => {
-                    Some(name.written.as_ref())
+            ExprKind::Call(callee, args) => {
+                let callee = arenas.expr(*callee)?;
+                let [single_arg] = arenas.args(args.clone()) else {
+                    return None;
+                };
+                match &callee.kind {
+                    ExprKind::Name(name) if is_var_named(arenas.expr(single_arg.value)?, param) => {
+                        Some(arenas.qualified_name(name)?.written.as_ref())
+                    }
+                    _ => None,
                 }
-                _ => None,
-            },
+            }
             _ => None,
         }
     }
     match &e.kind {
         // `'is_int'` - a callable string naming the predicate.
-        ExprKind::Literal(Literal::String(name)) => type_for_predicate(name.as_str()?),
-        ExprKind::FirstClassCallable(inner) => match &inner.kind {
-            ExprKind::Call(callee, args) if args.is_empty() => match &callee.kind {
-                ExprKind::Name(name) => type_for_predicate(name),
-                _ => None,
-            },
-            _ => None,
-        },
-        ExprKind::ArrowFn(arrow) => match arrow.params.as_slice() {
-            [p] => as_predicate_call(&arrow.body, &p.name).and_then(type_for_predicate),
-            _ => None,
-        },
-        ExprKind::Closure(closure) => match (closure.params.as_slice(), closure.body.as_slice()) {
-            ([p], [stmt]) => match &stmt.kind {
-                StmtKind::Return(Some(ret_expr)) => {
-                    as_predicate_call(ret_expr, &p.name).and_then(type_for_predicate)
+        ExprKind::Literal(Literal::String(name)) => {
+            type_for_predicate(std::str::from_utf8(arenas.string_bytes(name)?).ok()?)
+        }
+        ExprKind::FirstClassCallable(inner) => {
+            let inner = arenas.expr(*inner)?;
+            let ExprKind::Call(callee, args) = &inner.kind else {
+                return None;
+            };
+            if !arenas.args(args.clone()).is_empty() {
+                return None;
+            }
+            let callee = arenas.expr(*callee)?;
+            match &callee.kind {
+                ExprKind::Name(name) => {
+                    type_for_predicate(arenas.qualified_name(name)?.written.as_ref())
                 }
                 _ => None,
-            },
-            _ => None,
-        },
+            }
+        }
+        ExprKind::ArrowFn(_) | ExprKind::Closure(_) => {
+            let (param, body) = filter_callback_parts(arenas, e)?;
+            as_predicate_call(arenas, body, param).and_then(type_for_predicate)
+        }
         _ => None,
     }
 }
@@ -2663,14 +2783,15 @@ fn is_type_check_filter_callback(e: &ExprNode) -> Option<Type> {
 /// instead of unioning it in.
 fn filter_validate_result(
     filter_name: &str,
+    arenas: &NodeArenas,
     flags_expr: Option<&ExprNode>,
     flags_ty: Option<&Type>,
 ) -> Option<(Type, Type, bool)> {
     let base_ty = filter_validate_type_for_constant(filter_name)?;
-    let null_on_failure =
-        flags_expr.is_some_and(|e| contains_flag_name_with_options(e, "FILTER_NULL_ON_FAILURE"));
-    let throw_on_failure =
-        flags_expr.is_some_and(|e| contains_flag_name_with_options(e, "FILTER_THROW_ON_FAILURE"));
+    let null_on_failure = flags_expr
+        .is_some_and(|e| contains_flag_name_with_options(arenas, e.id, "FILTER_NULL_ON_FAILURE"));
+    let throw_on_failure = flags_expr
+        .is_some_and(|e| contains_flag_name_with_options(arenas, e.id, "FILTER_THROW_ON_FAILURE"));
     let implicit_fallback = if null_on_failure {
         Type::null()
     } else {
@@ -2761,12 +2882,19 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
 /// requirement: an unrecognized flag alongside `target` doesn't change
 /// what this is used for, so it just answers "is `target` definitely one
 /// of them" for whatever it does recognize.
-pub(crate) fn contains_flag_name(e: &ExprNode, target: &str) -> bool {
-    let e = e.peeled();
+pub(crate) fn contains_flag_name(arenas: &NodeArenas, id: ExprId, target: &str) -> bool {
+    let id = arenas
+        .peeled(id)
+        .expect("flag expression belongs to its retained file owner");
+    let e = arenas
+        .expr(id)
+        .expect("peeled flag expression belongs to its retained file owner");
     syntax::stack::guard(|| match &e.kind {
-        ExprKind::Name(name) => name.trim_start_matches('\\') == target,
+        ExprKind::Name(name) => arenas
+            .qualified_name(name)
+            .is_some_and(|name| name.trim_start_matches('\\') == target),
         ExprKind::Binary(BinOp::BitOr, l, r) => {
-            contains_flag_name(l, target) || contains_flag_name(r, target)
+            contains_flag_name(arenas, *l, target) || contains_flag_name(arenas, *r, target)
         }
         _ => false,
     })
@@ -2778,19 +2906,20 @@ pub(crate) fn contains_flag_name(e: &ExprNode, target: &str) -> bool {
 /// fixture uses for `FILTER_THROW_ON_FAILURE`. Not folded into
 /// `contains_flag_name` itself, which stays a narrow bitwise-or-chain
 /// scan for its unrelated call sites.
-fn contains_flag_name_with_options(e: &ExprNode, target: &str) -> bool {
+fn contains_flag_name_with_options(arenas: &NodeArenas, id: ExprId, target: &str) -> bool {
+    let Some(e) = arenas.expr(id) else {
+        return false;
+    };
     syntax::stack::guard(|| {
-        if contains_flag_name(e, target) {
+        if contains_flag_name(arenas, id, target) {
             return true;
         }
         if let ExprKind::ArrayLiteral(items) = &e.kind {
-            for item in items {
-                if item
-                    .key
-                    .as_ref()
-                    .is_some_and(|k| literal_string_value(k).as_deref() == Some("flags"))
-                    && contains_flag_name_with_options(&item.value, target)
-                {
+            for item in arenas.array_items(items.clone()) {
+                let is_flags_key = item.key.is_some_and(|key| {
+                    literal_string_value(arenas, key).is_some_and(|value| value.as_ref() == "flags")
+                });
+                if is_flags_key && contains_flag_name_with_options(arenas, item.value, target) {
                     return true;
                 }
             }
@@ -2817,12 +2946,19 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
 /// a bare `JSON_THROW_ON_ERROR` or a multi-flag chain
 /// (`JSON_HEX_TAG | JSON_HEX_AMP | ... | JSON_THROW_ON_ERROR`). Tolerates
 /// a leading-backslash global name (`\JSON_THROW_ON_ERROR`) too.
-fn contains_json_throw_on_error(e: &ExprNode) -> bool {
-    let e = e.peeled();
+fn contains_json_throw_on_error(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(id) = arenas.peeled(id) else {
+        return false;
+    };
+    let Some(e) = arenas.expr(id) else {
+        return false;
+    };
     syntax::stack::guard(|| match &e.kind {
-        ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
+        ExprKind::Name(name) => arenas
+            .qualified_name(name)
+            .is_some_and(|name| name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR"),
         ExprKind::Binary(BinOp::BitOr, l, r) => {
-            contains_json_throw_on_error(l) || contains_json_throw_on_error(r)
+            contains_json_throw_on_error(arenas, *l) || contains_json_throw_on_error(arenas, *r)
         }
         _ => false,
     })
@@ -3623,7 +3759,7 @@ fn shape_end_key(arr_ty: &Type, from_start: bool) -> Option<Type> {
 
 /// Whether `e` names a hash algorithm whose hex digest is longer than any
 /// decimal int.
-fn long_hex_algorithm(e: &ExprNode) -> bool {
+fn long_hex_algorithm(arenas: &NodeArenas, e: &ExprNode) -> bool {
     const LONG: [&str; 47] = [
         "md2",
         "md4",
@@ -3673,7 +3809,8 @@ fn long_hex_algorithm(e: &ExprNode) -> bool {
         "haval224,5",
         "haval256,5",
     ];
-    literal_string_value(e).is_some_and(|name| LONG.contains(&name.to_ascii_lowercase().as_str()))
+    literal_string_value(arenas, e.id)
+        .is_some_and(|name| LONG.contains(&name.to_ascii_lowercase().as_str()))
 }
 
 impl Checker<'_> {

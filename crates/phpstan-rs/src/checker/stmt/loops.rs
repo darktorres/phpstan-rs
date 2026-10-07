@@ -11,7 +11,6 @@ use crate::checker::{
     propagate_container_field_facts,
 };
 use syntax::ast::*;
-use syntax::visit::body_contains_yield;
 use types::Type;
 
 /// `Checker::in_range_index_writes`'s own trigger - whether `cond` is
@@ -24,8 +23,12 @@ use types::Type;
 /// confirmed via `dumpType()` against real PHPStan that list-ness
 /// genuinely isn't preserved for that shape, only for a fresh `count()`
 /// re-evaluated in the condition itself.
-fn in_range_index_write_loop_vars(cond: &ExprNode) -> Option<(String, String)> {
-    let ExprKind::Binary(op, l, r) = &cond.peeled().kind else {
+fn in_range_index_write_loop_vars(
+    arenas: &NodeArenas,
+    cond: &ExprNode,
+) -> Option<(String, String)> {
+    let condition = arenas.expr(arenas.peeled(cond.id)?)?;
+    let ExprKind::Binary(op, l, r) = &condition.kind else {
         return None;
     };
     if !matches!(op, BinOp::Lt | BinOp::Gt) {
@@ -36,16 +39,19 @@ fn in_range_index_write_loop_vars(cond: &ExprNode) -> Option<(String, String)> {
     // (`count_on_left = false`), matching `Lt`'s own natural left-to-
     // right reading; `count($x) > $i` has it in `l` (`true`), the `Gt`
     // mirror.
-    let (count_arg, count_on_left) = count_call_operand(l, r)?;
+    let (left, right) = (arenas.expr(*l)?, arenas.expr(*r)?);
+    let (count_arg, count_on_left) = count_call_operand(arenas, left, right)?;
     let idx_expr = match (op, count_on_left) {
-        (BinOp::Lt, false) => l,
-        (BinOp::Gt, true) => r,
+        (BinOp::Lt, false) => left,
+        (BinOp::Gt, true) => right,
         _ => return None,
     };
-    let ExprKind::Variable(idx_name) = &idx_expr.peeled().kind else {
+    let idx_expr = arenas.expr(arenas.peeled(idx_expr.id)?)?;
+    let ExprKind::Variable(idx_name) = &idx_expr.kind else {
         return None;
     };
-    let ExprKind::Variable(container_name) = &count_arg.peeled().kind else {
+    let count_arg = arenas.expr(arenas.peeled(count_arg)?)?;
+    let ExprKind::Variable(container_name) = &count_arg.kind else {
         return None;
     };
     Some((container_name.to_string(), idx_name.to_string()))
@@ -76,8 +82,9 @@ impl<'a> Checker<'a> {
         // reproduces that for free, since every pass but the kept one
         // already has its diagnostics discarded via
         // `converge_loop_body`'s own `diagnostics.truncate`.
-        let skip_always_true = body_contains_yield(std::slice::from_ref(body))
-            || declared_return.is_some_and(Type::is_never);
+        let skip_always_true = self.syntax_arenas().is_some_and(|arenas| {
+            syntax::visit::arena::body_contains_yield(arenas, std::slice::from_ref(&body.id))
+        }) || declared_return.is_some_and(Type::is_never);
         let exits_from = self.current_function_exit_points.len();
         // Whether the kept pass found the condition always true; what the
         // body lets the loop end by is known once it has been checked.
@@ -146,7 +153,7 @@ impl<'a> Checker<'a> {
                 if constant == Some(false) {
                     this.report(
                         "While loop condition is always false.".to_string(),
-                        cond.span,
+                        this.expr_span(cond.id),
                         4,
                         "while.alwaysFalse",
                     );
@@ -164,7 +171,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 "While loop condition is always true.".to_string(),
-                cond.span,
+                self.expr_span(cond.id),
                 4,
                 "while.alwaysTrue",
             );
@@ -310,7 +317,7 @@ impl<'a> Checker<'a> {
             if !breaks {
                 self.report(
                     "Do-while loop condition is always false.".to_string(),
-                    cond.span,
+                    self.expr_span(cond.id),
                     4,
                     "doWhile.alwaysFalse",
                 );
@@ -319,11 +326,13 @@ impl<'a> Checker<'a> {
             && !self.current_function_exit_points[exits_from..]
                 .iter()
                 .any(ExitPoint::lets_a_loop_end)
-            && !body_contains_yield(std::slice::from_ref(body))
+            && !self.syntax_arenas().is_some_and(|arenas| {
+                syntax::visit::arena::body_contains_yield(arenas, std::slice::from_ref(&body.id))
+            })
         {
             self.report(
                 "Do-while loop condition is always true.".to_string(),
-                cond.span,
+                self.expr_span(cond.id),
                 4,
                 "doWhile.alwaysTrue",
             );
@@ -343,16 +352,25 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_for(
         &mut self,
-        init: &[ExprNode],
-        cond: &[ExprNode],
-        step: &[ExprNode],
-        body: &StmtNode,
+        init: &[ExprId],
+        cond: &[ExprId],
+        step: &[ExprId],
+        body: StmtId,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        for e in init.iter() {
-            self.check_expr(e, locals, label);
+        let owner = self
+            .syntax_tree_owner()
+            .expect("for-loop expressions retain their parsed file owner");
+        let arenas = owner.arenas();
+        let body = arenas
+            .stmt(body)
+            .expect("for body belongs to its file owner");
+        for &id in init {
+            if let Some(e) = arenas.expr(id) {
+                self.check_expr(e, locals, label);
+            }
         }
         // A real `for`'s condition slot can hold several
         // comma-separated expressions, *all* of which real PHP
@@ -364,8 +382,11 @@ impl<'a> Checker<'a> {
         // pre-loop entry, would bypass the body's fixed-point
         // convergence entirely, e.g. `for ($stop = false; !$stop && ...;
         // $qi++)`, where `$stop` is reassigned inside the body.
-        match cond.last() {
-            Some(c) => {
+        match cond.last().copied() {
+            Some(c_id) => {
+                let c = arenas
+                    .expr(c_id)
+                    .expect("for condition belongs to its file owner");
                 // Same reasoning as `While`'s arm above: a variable
                 // *any* condition expression assigns
                 // (`for (;; ($x = f()) !== null; )`, unusual but real)
@@ -378,13 +399,15 @@ impl<'a> Checker<'a> {
                 // diagnostic-bearing walk runs against per-pass
                 // copies.
                 let mark = self.pass_mark();
-                for e in cond.iter() {
-                    self.check_expr(e, locals, label);
+                for &id in cond {
+                    if let Some(e) = arenas.expr(id) {
+                        self.check_expr(e, locals, label);
+                    }
                 }
                 self.rewind_to(mark);
                 let entry = locals.clone();
                 self.loop_depth += 1;
-                let in_range_pair = in_range_index_write_loop_vars(c);
+                let in_range_pair = in_range_index_write_loop_vars(arenas, c);
                 if let Some(pair) = in_range_pair.clone() {
                     self.in_range_index_writes.push(pair);
                 }
@@ -397,8 +420,10 @@ impl<'a> Checker<'a> {
                         subject_key: None,
                     },
                     |this, pass_locals, declared_return, label, _pass| {
-                        for e in &cond[..cond.len() - 1] {
-                            this.check_expr(e, pass_locals, label);
+                        for &id in &cond[..cond.len() - 1] {
+                            if let Some(e) = arenas.expr(id) {
+                                this.check_expr(e, pass_locals, label);
+                            }
                         }
                         this.check_expr(c, pass_locals, label);
                         this.apply_narrowing(c, pass_locals, true);
@@ -409,8 +434,10 @@ impl<'a> Checker<'a> {
                         // every convergence pass too, since a
                         // variable `step` mutates could itself need
                         // more than one pass to converge.
-                        for e in step {
-                            this.check_expr(e, pass_locals, label);
+                        for &id in step {
+                            if let Some(e) = arenas.expr(id) {
+                                this.check_expr(e, pass_locals, label);
+                            }
                         }
                     },
                 );
@@ -457,8 +484,10 @@ impl<'a> Checker<'a> {
                     LoopZeroIterations::Impossible,
                     |this, pass_locals, declared_return, label, _pass| {
                         this.check_loop_body(body, pass_locals, declared_return, label);
-                        for e in step {
-                            this.check_expr(e, pass_locals, label);
+                        for &id in step {
+                            if let Some(e) = arenas.expr(id) {
+                                this.check_expr(e, pass_locals, label);
+                            }
                         }
                     },
                 );
@@ -582,7 +611,7 @@ impl<'a> Checker<'a> {
         if self.loop_depth == 0 && subject_ty.is_empty_array().yes() {
             self.report(
                 "Empty array passed to foreach.".to_string(),
-                subject.span,
+                self.expr_span(subject.id),
                 4,
                 "foreach.emptyArray",
             );
@@ -636,7 +665,7 @@ impl<'a> Checker<'a> {
                         self.report(format!(
                                 "Argument of an invalid type {subject_ty} supplied for foreach, only arrays and objects are supported."
                             ),
-                            subject.span,
+                            self.expr_span(subject.id),
                             level,
                             "foreach.nonIterable",
                         );
@@ -706,7 +735,7 @@ impl<'a> Checker<'a> {
         let iterate = Operation::Iterate {
             keys: key.is_some(),
         };
-        let subject_is_this = is_this(subject);
+        let subject_is_this = is_this(self, subject);
         self.forget_what_an_operation_may_change(
             &subject_ty,
             subject_is_this,
@@ -797,7 +826,10 @@ impl<'a> Checker<'a> {
                 // as a read where appropriate" for whatever isn't
                 // a pure definition site, so no separate
                 // `check_expr` call is needed on top of it.
-                this.check_assignment_target(value, pass_locals, label);
+                let syntax_owner = this
+                    .syntax_tree_owner()
+                    .expect("foreach assignment target retains its parsed file owner");
+                this.check_assignment_target(syntax_owner.arenas(), value, pass_locals, label);
                 // Same by-ref-parameter check a plain assignment already
                 // gets (`ExprKind::Assign`'s own call site, `checker/
                 // expr.rs`) - a `foreach` value binding is just as real a
@@ -806,17 +838,37 @@ impl<'a> Checker<'a> {
                 // function's own by-ref parameters (or destructures one
                 // out) is checked against its declared type here too.
                 this.check_param_out_assignment(value, &element_ty);
-                this.check_by_ref_destructuring(value, &element_ty);
-                this.bind_assignment_target(value, element_ty.clone(), pass_locals);
+                this.check_by_ref_destructuring(syntax_owner.arenas(), value, &element_ty);
+                this.bind_assignment_target(
+                    syntax_owner.arenas(),
+                    value,
+                    element_ty.clone(),
+                    pass_locals,
+                );
                 if let Some(k) = key {
-                    this.implicit_array_access_write(k, k.span, pass_locals);
+                    this.implicit_array_access_write(k, this.expr_span(k.id), pass_locals);
                 }
                 match &value.kind {
                     ExprKind::Destructure(items, _) => {
-                        this.implicit_destructure(items, &element_ty, value.span, pass_locals);
+                        let syntax_owner = this
+                            .syntax_tree_owner()
+                            .expect("foreach destructuring retains its parsed file owner");
+                        this.implicit_destructure(
+                            syntax_owner.arenas(),
+                            items,
+                            &element_ty,
+                            this.expr_span(value.id),
+                            pass_locals,
+                        );
                     }
-                    _ if by_ref => this.implicit_reference(value, value.span, pass_locals),
-                    _ => this.implicit_array_access_write(value, value.span, pass_locals),
+                    _ if by_ref => {
+                        this.implicit_reference(value, this.expr_span(value.id), pass_locals)
+                    }
+                    _ => this.implicit_array_access_write(
+                        value,
+                        this.expr_span(value.id),
+                        pass_locals,
+                    ),
                 }
                 // Eager propagation: `value` was just bound from
                 // `subject`'s own (dynamic-keyed) element - if `subject`

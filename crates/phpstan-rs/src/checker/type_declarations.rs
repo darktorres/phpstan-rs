@@ -29,10 +29,10 @@ enum Atom<'h> {
 }
 
 impl<'h> Atom<'h> {
-    fn of(hint: &'h TypeHint) -> Option<Atom<'h>> {
+    fn of(arenas: &'h syntax::ast::NodeArenas, hint: &'h TypeHint) -> Option<Atom<'h>> {
         match &hint.kind {
             TypeHintKind::Keyword(keyword, written) => Some(Atom::Keyword(*keyword, written)),
-            TypeHintKind::Name(name) => Some(Atom::Class(name)),
+            TypeHintKind::Name(name) => Some(Atom::Class(arenas.qualified_name(name)?)),
             _ => None,
         }
     }
@@ -75,29 +75,32 @@ enum Shape<'h> {
     Intersection(Vec<Atom<'h>>),
 }
 
-fn atoms(members: &[TypeHint]) -> Vec<Atom<'_>> {
-    members.iter().filter_map(Atom::of).collect()
+fn atoms<'h>(arenas: &'h syntax::ast::NodeArenas, members: &'h [TypeHint]) -> Vec<Atom<'h>> {
+    members
+        .iter()
+        .filter_map(|hint| Atom::of(arenas, hint))
+        .collect()
 }
 
 /// `hint`'s shape; `None` for a nesting PHP's grammar doesn't produce.
 fn shape<'h>(hint: &'h TypeHint, arenas: &'h syntax::ast::NodeArenas) -> Option<Shape<'h>> {
     Some(match &hint.kind {
-        TypeHintKind::Keyword(..) | TypeHintKind::Name(_) => Shape::Single(Atom::of(hint)?),
-        TypeHintKind::Nullable(inner) => Shape::Nullable(Atom::of(inner)?),
+        TypeHintKind::Keyword(..) | TypeHintKind::Name(_) => Shape::Single(Atom::of(arenas, hint)?),
+        TypeHintKind::Nullable(inner) => Shape::Nullable(Atom::of(arenas, inner)?),
         TypeHintKind::Union(members) => Shape::Union(
             arenas
                 .type_hints(members)
                 .iter()
                 .map(|m| match &m.kind {
                     TypeHintKind::Intersection(group) => {
-                        Some(Member::Group(atoms(arenas.type_hints(group))))
+                        Some(Member::Group(atoms(arenas, arenas.type_hints(group))))
                     }
-                    _ => Atom::of(m).map(Member::Name),
+                    _ => Atom::of(arenas, m).map(Member::Name),
                 })
                 .collect::<Option<_>>()?,
         ),
         TypeHintKind::Intersection(members) => {
-            Shape::Intersection(atoms(arenas.type_hints(members)))
+            Shape::Intersection(atoms(arenas, arenas.type_hints(members)))
         }
     })
 }
@@ -169,7 +172,7 @@ impl<'a> Checker<'a> {
                     );
                     return;
                 }
-                self.check_union_redundancy(hint, &members, span);
+                self.check_union_redundancy(hint, arenas, &members, span);
                 for member in &members {
                     match member {
                         Member::Name(atom) => self.check_type_position(*atom, position, span),
@@ -285,14 +288,20 @@ impl<'a> Checker<'a> {
                 "null"
             };
             self.report_type_declaration(
-                format!("Type {hint} uses {which} as a standalone type, which is supported only on PHP 8.2 and later."),
+                format!("Standalone {which} types are supported only on PHP 8.2 and later."),
                 span,
                 format!("{which}Type.standaloneNotSupported"),
             );
         }
     }
 
-    fn check_union_redundancy(&mut self, hint: &TypeHint, members: &[Member], span: Span) {
+    fn check_union_redundancy(
+        &mut self,
+        hint: &TypeHint,
+        arenas: &syntax::ast::NodeArenas,
+        members: &[Member],
+        span: Span,
+    ) {
         let mut seen: Vec<String> = Vec::new();
         let mut has_class = false;
         for member in members {
@@ -332,17 +341,26 @@ impl<'a> Checker<'a> {
             ))
         } else if has("object") && has_class {
             Some((
-                format!("Type {hint} contains both object and a class type, which is redundant."),
+                format!(
+                    "Type {} contains both object and a class type, which is redundant.",
+                    hint.to_string_with(arenas)
+                ),
                 "unionType.objectAndClass",
             ))
         } else if has("iterable") && has("array") {
             Some((
-                format!("Type {hint} contains both iterable and array, which is redundant."),
+                format!(
+                    "Type {} contains both iterable and array, which is redundant.",
+                    hint.to_string_with(arenas)
+                ),
                 "unionType.iterableAndArray",
             ))
         } else if has("iterable") && has("traversable") {
             Some((
-                format!("Type {hint} contains both iterable and Traversable, which is redundant."),
+                format!(
+                    "Type {} contains both iterable and Traversable, which is redundant.",
+                    hint.to_string_with(arenas)
+                ),
                 "unionType.iterableAndTraversable",
             ))
         } else {

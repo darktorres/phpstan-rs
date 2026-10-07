@@ -168,14 +168,19 @@ impl<'a> Checker<'a> {
     /// generic bound violation can be written
     /// (`class Bad extends Collection<NotAShape> {}`) without ever
     /// showing up in a method signature.
-    pub(crate) fn check_class_generic_bounds(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_class_generic_bounds(&mut self, fqn: &str, c: &ClassDecl, def: &ClassDef) {
+        let source = self.syntax_source_owner();
         let Some(info) = self.class_info(fqn) else {
             return;
         };
         // Each property gets its own real span (declaration order, not a
         // sorted HashMap walk - the AST's `Vec<PropertyDecl>` is already
         // deterministic, unlike the registry's `HashMap`-backed lookup).
-        for p in &c.def.properties {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        for p in def.properties(arenas) {
             if let Some(prop_sig) = self.registry.lookup_property(fqn, p.name.as_ref()) {
                 self.check_generic_bounds(
                     prop_sig.ty(),
@@ -209,10 +214,15 @@ impl<'a> Checker<'a> {
                     "property.trait",
                 );
                 // `class.nameCase` for this PHPDoc-typed property position.
-                let property_doc = p.doc_comment.as_deref().map(docblock::parse_shared);
+                let property_doc_text = p
+                    .doc_comment
+                    .as_ref()
+                    .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+                let property_doc = property_doc_text.as_deref().map(docblock::parse_shared);
                 let case_refs = registry::declared_type(
                     property_doc.as_ref().and_then(|doc| doc.var_type.as_ref()),
                     p.type_hint.as_ref(),
+                    arenas,
                     &self.current_class_template_params(),
                     &self.name_ctx,
                 )
@@ -221,10 +231,10 @@ impl<'a> Checker<'a> {
                 self.check_type_internal_usage(&case_refs, p.span);
             }
         }
-        self.check_property_tag_types(fqn, &c.def);
-        self.check_property_phpdoc_types(fqn, &c.def);
-        self.check_class_ancestors(fqn, &c.def);
-        self.check_ancestor_generic_bounds(fqn, c.def.span);
+        self.check_property_tag_types(fqn, def);
+        self.check_property_phpdoc_types(fqn, def);
+        self.check_class_ancestors(fqn, def);
+        self.check_ancestor_generic_bounds(fqn, def.span);
         // `TemplateTypeCheck`'s own declaration-validity family,
         // class-level (real PHPStan's per-kind rule split -
         // `ClassTemplateTypeRule`/`InterfaceTemplateTypeRule`/
@@ -234,7 +244,7 @@ impl<'a> Checker<'a> {
         // counterpart, since real PHPStan excludes enums from
         // `ClassTemplateTypeRule` entirely.
         if !info.templates().is_empty() {
-            let display_name = format!("{} {fqn}", class_kind_identifier(&c.def.kind));
+            let display_name = format!("{} {fqn}", class_kind_identifier(&def.kind));
             let templates = info.templates().clone();
             let bounds = self.registry.effective_template_bounds_by_name(fqn);
             let defaults = info.template_defaults().clone();
@@ -247,7 +257,7 @@ impl<'a> Checker<'a> {
                 TemplateSubject::Declared {
                     display_name: &display_name,
                 },
-                c.def.span,
+                def.span,
             );
         }
     }
@@ -273,13 +283,18 @@ impl<'a> Checker<'a> {
     /// same name checks the *real* property's type instead of the tag's
     /// own.
     fn check_property_tag_types(&mut self, fqn: &str, c: &ClassDef) {
-        let Some(raw) = &c.doc_comment else {
+        let source = self.syntax_source_owner();
+        let Some(raw) = c
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)))
+        else {
             return;
         };
         if self.registry.lookup_class(fqn).is_none() {
             return;
         }
-        let block = docblock::parse_shared(raw);
+        let block = docblock::parse_shared(raw.as_ref());
         for tag in &block.properties {
             let Some(prop_sig) = self.registry.lookup_property(fqn, tag.name.as_str()) else {
                 continue;

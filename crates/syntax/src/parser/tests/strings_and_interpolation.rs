@@ -6,19 +6,48 @@ use crate::span::LineCol;
 use crate::token::StringPart;
 
 #[test]
+fn unescaped_single_quoted_literal_is_a_source_range() {
+    let parsed = crate::parse::parse("<?php $value = 'plain bytes';").unwrap();
+    let payload = parsed
+        .arenas
+        .exprs
+        .iter()
+        .find_map(|(_, expr)| match &expr.kind {
+            ExprKind::Literal(Literal::String(payload)) => Some(payload),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(payload, StringPayload::Source(_)));
+    assert_eq!(parsed.string_bytes(payload), Some(&b"plain bytes"[..]));
+}
+
+fn assignment_rhs(program: &TestParsedFile, index: usize) -> ExprId {
+    let StmtKind::Expression(expr) = &program[index].kind else {
+        panic!(
+            "expected an expression statement, got {:?}",
+            program[index].kind
+        );
+    };
+    let ExprKind::Assign(_, rhs) = &program.expr(*expr).kind else {
+        panic!("expected an assignment, got {:?}", program.expr(*expr).kind);
+    };
+    *rhs
+}
+
+#[test]
 fn shell_exec_backtick_string_parses() {
     let program = parse(r#"<?php $x = `echo -n ""`;"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
-        panic!("expected assignment");
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::ShellExec(cmd) = &program.expr(rhs).kind else {
+        panic!("expected a ShellExec, got {:?}", program.expr(rhs).kind);
     };
-    let ExprKind::ShellExec(cmd) = &rhs.kind else {
-        panic!("expected a ShellExec, got {:?}", rhs.kind);
+    let ExprKind::Literal(Literal::String(payload)) = &program.expr(*cmd).kind else {
+        panic!("expected a literal shell body");
     };
-    assert!(matches!(&cmd.kind, ExprKind::Literal(Literal::String(s)) if s == "echo -n \"\""));
+    assert_eq!(
+        program.string_text(payload).as_deref(),
+        Some("echo -n \"\"")
+    );
 }
 
 // A diagnostic inside a {$...} string-interpolation expression must
@@ -32,24 +61,32 @@ fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a function declaration, got {:?}", program[0].kind);
     };
-    let StmtKind::Return(Some(ret_expr)) = &f.body_stmts()[0].kind else {
+    let f = program.function(*f);
+    let body_stmt = f.body_stmts(&program.arenas)[0];
+    let StmtKind::Return(Some(ret_expr)) = &program.stmt(body_stmt).kind else {
         panic!(
             "expected a return statement, got {:?}",
-            f.body_stmts()[0].kind
+            program.stmt(body_stmt).kind
         );
     };
-    let ExprKind::Interpolated(parts) = &ret_expr.kind else {
-        panic!("expected an interpolated string, got {:?}", ret_expr.kind);
+    let ExprKind::Interpolated(parts) = &program.expr(*ret_expr).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(*ret_expr).kind
+        );
     };
-    let var_part = parts
+    let var_part = program
+        .arenas
+        .expr_ids(parts)
         .iter()
-        .find(|p| matches!(&p.kind, ExprKind::Variable(_)))
+        .find(|p| matches!(&program.expr(**p).kind, ExprKind::Variable(_)))
         .expect("expected a Variable part for $undefinedThing");
     // Line 3, where the real interpolation is - not line 1 col 1,
     // the throwaway re-lex's own fresh coordinates.
-    let at = position(src, var_part.span.start);
-    assert_eq!(at.line, 3, "got: {:?}", var_part.span);
-    assert!(at.col > 1, "got: {:?}", var_part.span);
+    let span = program.expr_span(*var_part);
+    let at = position(src, span.start);
+    assert_eq!(at.line, 3, "got: {span:?}");
+    assert!(at.col > 1, "got: {span:?}");
 }
 
 /// `"$arr[key]"` - a bareword between the brackets is a *string* key in
@@ -57,45 +94,47 @@ fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
 #[test]
 fn bareword_index_interpolation_parses_as_an_index_with_a_string_literal_key() {
     let program = parse(r#"<?php $x = "$arr[key]";"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(rhs).kind
+        );
+    };
+    let ExprKind::Index(base, Some(key)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
     else {
-        panic!("expected assignment, got {:?}", program[0].kind);
+        panic!(
+            "expected an Index part, got {:?}",
+            program.expr(program.arenas.expr_ids(parts)[0]).kind
+        );
     };
-    let ExprKind::Interpolated(parts) = &rhs.kind else {
-        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    assert!(matches!(&program.expr(*base).kind, ExprKind::Variable(v) if **v == *"arr"));
+    let ExprKind::Literal(Literal::String(payload)) = &program.expr(*key).kind else {
+        panic!("expected a string index key");
     };
-    let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
-        panic!("expected an Index part, got {:?}", parts[0].kind);
-    };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
-    assert!(matches!(
-        &key.kind,
-        ExprKind::Literal(Literal::String(s)) if *s == "key"
-    ));
+    assert_eq!(program.string_text(payload).as_deref(), Some("key"));
 }
 
 /// `"$arr[$idx]"` - a `$`-prefixed key is a variable reference.
 #[test]
 fn variable_index_interpolation_parses_as_an_index_with_a_variable_key() {
     let program = parse(r#"<?php $x = "$arr[$idx]";"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(rhs).kind
+        );
+    };
+    let ExprKind::Index(base, Some(key)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
     else {
-        panic!("expected assignment, got {:?}", program[0].kind);
+        panic!(
+            "expected an Index part, got {:?}",
+            program.expr(program.arenas.expr_ids(parts)[0]).kind
+        );
     };
-    let ExprKind::Interpolated(parts) = &rhs.kind else {
-        panic!("expected an interpolated string, got {:?}", rhs.kind);
-    };
-    let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
-        panic!("expected an Index part, got {:?}", parts[0].kind);
-    };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
-    assert!(matches!(&key.kind, ExprKind::Variable(v) if **v == *"idx"));
+    assert!(matches!(&program.expr(*base).kind, ExprKind::Variable(v) if **v == *"arr"));
+    assert!(matches!(&program.expr(*key).kind, ExprKind::Variable(v) if **v == *"idx"));
 }
 
 /// `"$arr[0]"`/`"$arr[-1]"` - a plain (optionally negative) integer key.
@@ -110,23 +149,24 @@ fn int_index_interpolation_including_negative_parses_as_an_index_with_an_int_lit
         (r#"<?php $x = "$arr[-1]";"#, -1),
     ] {
         let program = parse(src);
-        let StmtKind::Expression(ExprNode {
-            kind: ExprKind::Assign(_, rhs),
-            ..
-        }) = &program[0].kind
+        let rhs = assignment_rhs(&program, 0);
+        let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+            panic!(
+                "expected an interpolated string, got {:?}",
+                program.expr(rhs).kind
+            );
+        };
+        let ExprKind::Index(_, Some(key)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
         else {
-            panic!("expected assignment, got {:?}", program[0].kind);
-        };
-        let ExprKind::Interpolated(parts) = &rhs.kind else {
-            panic!("expected an interpolated string, got {:?}", rhs.kind);
-        };
-        let ExprKind::Index(_, Some(key)) = &parts[0].kind else {
-            panic!("expected an Index part, got {:?}", parts[0].kind);
+            panic!(
+                "expected an Index part, got {:?}",
+                program.expr(program.arenas.expr_ids(parts)[0]).kind
+            );
         };
         assert!(
-            matches!(&key.kind, ExprKind::Literal(Literal::Int(n)) if *n == expected),
+            matches!(&program.expr(*key).kind, ExprKind::Literal(Literal::Int(n)) if *n == expected),
             "src {src:?}: got {:?}",
-            key.kind
+            program.expr(*key).kind
         );
     }
 }
@@ -138,24 +178,27 @@ fn a_non_canonical_number_index_in_interpolation_is_a_string_key() {
     for key in ["01", "-0", "0x1A", "1_000", "9223372036854775808"] {
         let src = format!(r#"<?php $x = "$arr[{key}]";"#);
         let program = parse(&src);
-        let StmtKind::Expression(ExprNode {
-            kind: ExprKind::Assign(_, rhs),
-            ..
-        }) = &program[0].kind
+        let rhs = assignment_rhs(&program, 0);
+        let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+            panic!(
+                "expected an interpolated string, got {:?}",
+                program.expr(rhs).kind
+            );
+        };
+        let ExprKind::Index(_, Some(index)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
         else {
-            panic!("expected assignment, got {:?}", program[0].kind);
+            panic!(
+                "expected an Index part for {key}, got {:?}",
+                program.expr(program.arenas.expr_ids(parts)[0]).kind
+            );
         };
-        let ExprKind::Interpolated(parts) = &rhs.kind else {
-            panic!("expected an interpolated string, got {:?}", rhs.kind);
+        let ExprKind::Literal(Literal::String(payload)) = &program.expr(*index).kind else {
+            panic!(
+                "{key}: expected a string index key, got {:?}",
+                program.expr(*index).kind
+            );
         };
-        let ExprKind::Index(_, Some(index)) = &parts[0].kind else {
-            panic!("expected an Index part for {key}, got {:?}", parts[0].kind);
-        };
-        assert!(
-            matches!(&index.kind, ExprKind::Literal(Literal::String(s)) if *s == key),
-            "{key}: got {:?}",
-            index.kind
-        );
+        assert_eq!(program.string_text(payload).as_deref(), Some(key));
     }
 }
 
@@ -168,19 +211,26 @@ fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a function declaration, got {:?}", program[0].kind);
     };
-    let StmtKind::Return(Some(ret_expr)) = &f.body_stmts()[0].kind else {
+    let f = program.function(*f);
+    let body_stmt = f.body_stmts(&program.arenas)[0];
+    let StmtKind::Return(Some(ret_expr)) = &program.stmt(body_stmt).kind else {
         panic!(
             "expected a return statement, got {:?}",
-            f.body_stmts()[0].kind
+            program.stmt(body_stmt).kind
         );
     };
-    let ExprKind::Interpolated(parts) = &ret_expr.kind else {
-        panic!("expected an interpolated string, got {:?}", ret_expr.kind);
+    let ExprKind::Interpolated(parts) = &program.expr(*ret_expr).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(*ret_expr).kind
+        );
     };
-    let var_spans: Vec<(String, Span)> = parts
+    let var_spans: Vec<(String, Span)> = program
+        .arenas
+        .expr_ids(parts)
         .iter()
-        .filter_map(|p| match &p.kind {
-            ExprKind::Variable(name) => Some((name.to_string(), p.span)),
+        .filter_map(|p| match &program.expr(*p).kind {
+            ExprKind::Variable(name) => Some((name.to_string(), program.expr_span(*p))),
             _ => None,
         })
         .collect();
@@ -213,20 +263,22 @@ fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
 #[test]
 fn braced_property_access_interpolation_parses_as_a_property_access() {
     let program = parse(r#"<?php $x = "{$obj->prop}";"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(rhs).kind
+        );
+    };
+    let ExprKind::PropertyAccess(base, prop, nullsafe) =
+        &program.expr(program.arenas.expr_ids(parts)[0]).kind
     else {
-        panic!("expected assignment, got {:?}", program[0].kind);
+        panic!(
+            "expected a PropertyAccess part, got {:?}",
+            program.expr(program.arenas.expr_ids(parts)[0]).kind
+        );
     };
-    let ExprKind::Interpolated(parts) = &rhs.kind else {
-        panic!("expected an interpolated string, got {:?}", rhs.kind);
-    };
-    let ExprKind::PropertyAccess(base, prop, nullsafe) = &parts[0].kind else {
-        panic!("expected a PropertyAccess part, got {:?}", parts[0].kind);
-    };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"obj"));
+    assert!(matches!(&program.expr(*base).kind, ExprKind::Variable(v) if **v == *"obj"));
     assert_eq!(&*prop.name, "prop");
     assert!(!nullsafe.is_nullsafe());
 }
@@ -234,24 +286,25 @@ fn braced_property_access_interpolation_parses_as_a_property_access() {
 #[test]
 fn braced_index_interpolation_parses_as_an_index() {
     let program = parse(r#"<?php $x = "{$arr[key]}";"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(rhs).kind
+        );
+    };
+    let ExprKind::Index(base, Some(key)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
     else {
-        panic!("expected assignment, got {:?}", program[0].kind);
+        panic!(
+            "expected an Index part, got {:?}",
+            program.expr(program.arenas.expr_ids(parts)[0]).kind
+        );
     };
-    let ExprKind::Interpolated(parts) = &rhs.kind else {
-        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    assert!(matches!(&program.expr(*base).kind, ExprKind::Variable(v) if **v == *"arr"));
+    let ExprKind::Literal(Literal::String(payload)) = &program.expr(*key).kind else {
+        panic!("expected a string index key");
     };
-    let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
-        panic!("expected an Index part, got {:?}", parts[0].kind);
-    };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
-    assert!(matches!(
-        &key.kind,
-        ExprKind::Literal(Literal::String(s)) if *s == "key"
-    ));
+    assert_eq!(program.string_text(payload).as_deref(), Some("key"));
 }
 
 /// A braced block that's genuinely complex (here: a method call, not just
@@ -261,20 +314,17 @@ fn braced_index_interpolation_parses_as_an_index() {
 #[test]
 fn a_braced_method_call_is_not_mistaken_for_a_simple_property_access() {
     let program = parse(r#"<?php $x = "{$obj->method()}";"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
-        panic!("expected assignment, got {:?}", program[0].kind);
-    };
-    let ExprKind::Interpolated(parts) = &rhs.kind else {
-        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(rhs).kind
+        );
     };
     assert!(
-        matches!(&parts[0].kind, ExprKind::MethodCall(_, name, _, _) if **name == *"method"),
+        matches!(&program.expr(program.arenas.expr_ids(parts)[0]).kind, ExprKind::MethodCall(_, name, _, _) if **name == *"method"),
         "got {:?}",
-        parts[0].kind
+        program.expr(program.arenas.expr_ids(parts)[0]).kind
     );
 }
 
@@ -284,28 +334,37 @@ fn a_braced_method_call_is_not_mistaken_for_a_simple_property_access() {
 #[test]
 fn a_malformed_index_key_falls_back_to_complex_expr_re_lexing() {
     let program = parse(r#"<?php $x = "$arr[1a]";"#);
-    let StmtKind::Expression(ExprNode {
-        kind: ExprKind::Assign(_, rhs),
-        ..
-    }) = &program[0].kind
-    else {
-        panic!("expected assignment, got {:?}", program[0].kind);
-    };
-    let ExprKind::Interpolated(parts) = &rhs.kind else {
-        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    let rhs = assignment_rhs(&program, 0);
+    let ExprKind::Interpolated(parts) = &program.expr(rhs).kind else {
+        panic!(
+            "expected an interpolated string, got {:?}",
+            program.expr(rhs).kind
+        );
     };
     // Falls back to the re-lexed ComplexExpr path, which still produces a
     // real Index expression (`'1a'` re-lexes as a plain string literal) -
     // same observable shape as the fast path, just built via the slower
     // route, confirming the fallback stays behavior-preserving.
-    let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
-        panic!("expected an Index part, got {:?}", parts[0].kind);
+    let ExprKind::Index(base, Some(key)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
+    else {
+        panic!(
+            "expected an Index part, got {:?}",
+            program.expr(program.arenas.expr_ids(parts)[0]).kind
+        );
     };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
+    assert!(matches!(&program.expr(*base).kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
-        &key.kind,
-        ExprKind::Literal(Literal::String(s)) if *s == "1a"
+        &program.expr(*key).kind,
+        ExprKind::Literal(Literal::String(_))
     ));
+    let ExprKind::Index(_, Some(key)) = &program.expr(program.arenas.expr_ids(parts)[0]).kind
+    else {
+        unreachable!()
+    };
+    let ExprKind::Literal(Literal::String(payload)) = &program.expr(*key).kind else {
+        unreachable!()
+    };
+    assert_eq!(program.string_text(payload).as_deref(), Some("1a"));
 }
 
 #[test]
@@ -313,10 +372,7 @@ fn quote_inside_complex_interpolation_does_not_end_the_string() {
     let program = parse(r#"<?php $x = "before {$data["key"]} after";"#);
     assert!(matches!(
         &program[0].kind,
-        StmtKind::Expression(ExprNode {
-            kind: ExprKind::Assign(_, _),
-            ..
-        })
+        StmtKind::Expression(expr) if matches!(program.expr(*expr).kind, ExprKind::Assign(_, _))
     ));
 }
 
@@ -342,10 +398,13 @@ fn a_complex_interpolation_fragment_with_an_extreme_base_position_does_not_panic
 /// backtick one; elsewhere, a heredoc included, each stays two bytes.
 #[test]
 fn quote_escapes_decode_only_for_their_own_delimiter() {
-    fn literal_bytes(e: &ExprNode) -> Vec<u8> {
-        match &e.kind {
-            ExprKind::Literal(Literal::String(s)) => s.as_bytes().to_vec(),
-            ExprKind::ShellExec(inner) => literal_bytes(inner),
+    fn literal_bytes(program: &TestParsedFile, id: ExprId) -> Vec<u8> {
+        match &program.expr(id).kind {
+            ExprKind::Literal(Literal::String(payload)) => program
+                .string_bytes(payload)
+                .expect("literal belongs to parsed program")
+                .to_vec(),
+            ExprKind::ShellExec(inner) => literal_bytes(program, *inner),
             other => panic!("expected a string, got {other:?}"),
         }
     }
@@ -355,21 +414,15 @@ fn quote_escapes_decode_only_for_their_own_delimiter() {
         ("<?php $x = <<<EOT\na\\\"b\\`c\nEOT;\n", &b"a\\\"b\\`c"[..]),
     ] {
         let program = parse(src);
-        let StmtKind::Expression(ExprNode {
-            kind: ExprKind::Assign(_, rhs),
-            ..
-        }) = &program[0].kind
-        else {
-            panic!("expected assignment, got {:?}", program[0].kind);
-        };
-        assert_eq!(literal_bytes(rhs), expected, "{src}");
+        let rhs = assignment_rhs(&program, 0);
+        assert_eq!(literal_bytes(&program, rhs), expected, "{src}");
     }
 }
 
 #[test]
 fn a_braced_interpolation_holds_a_variable_chain_not_any_expression() {
     let parses = |src: &str| {
-        Parser::new(crate::lexer::Lexer::new(src).tokenize_with_spans())
+        Parser::from_token_stream(crate::lexer::Lexer::new(src).lex_token_stream())
             .parse_program()
             .is_ok()
     };

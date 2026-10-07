@@ -10,7 +10,7 @@ use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
     ClassId, ClassReflection, FnId, FunctionReflection, folded_key, function_key, infer_const_type,
 };
-use syntax::ast::{ExprNode, StmtNode, Visibility};
+use syntax::ast::{ExprId, ExprNode, NodeArenas, StmtId, StmtNode, Visibility};
 use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
 use syntax::name_resolution::NameContext;
 use syntax::php_string::PhpString;
@@ -121,8 +121,14 @@ impl Registry {
     /// this way - rather than writing a second, independent tree-walker
     /// for the parallel path - matters here specifically.
     #[hotpath::measure]
-    pub(crate) fn index(&mut self, stmts: &[StmtNode], origin: &Origin, analyzed: bool) {
-        for decl in build_declarations(stmts, origin) {
+    pub(crate) fn index(
+        &mut self,
+        arenas: &NodeArenas,
+        stmts: &[StmtId],
+        origin: &Origin,
+        analyzed: bool,
+    ) {
+        for decl in build_declarations(arenas, stmts, origin) {
             self.insert_built_decl(decl, analyzed);
         }
     }
@@ -1180,12 +1186,18 @@ impl Registry {
 /// Each declaration's PHPDoc resolves in the name context in effect where
 /// it sits (`for_each_declaration`).
 #[hotpath::measure]
-pub(crate) fn build_declarations(stmts: &[StmtNode], origin: &Origin) -> Vec<BuiltDecl> {
+pub(crate) fn build_declarations(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    origin: &Origin,
+) -> Vec<BuiltDecl> {
     let mut out = Vec::new();
-    for_each_declaration(stmts, |declaration, ctx, guards| {
-        built_declaration(declaration, ctx, guards, origin, &mut out);
+    for_each_declaration(arenas, stmts, |declaration, ctx, guards| {
+        built_declaration(arenas, declaration, ctx, guards, origin, &mut out);
     });
-    out.extend(crate::registry::anonymous_class_decls(stmts, origin));
+    out.extend(crate::registry::anonymous_class_decls(
+        arenas, stmts, origin,
+    ));
     out
 }
 
@@ -1202,23 +1214,32 @@ pub(crate) enum DeclKind {
 /// the name context in effect where it sits and `guards` the terms that
 /// guard it.
 pub(crate) fn built_declaration(
+    arenas: &NodeArenas,
     declaration: Declaration<'_>,
     ctx: &NameContext,
-    guards: &[GuardTerm<'_>],
+    guards: &[GuardTerm],
     origin: &Origin,
     out: &mut Vec<BuiltDecl>,
 ) {
     let conditional = declaration.conditional;
     let guard = if conditional {
-        GuardExpr::of_terms(guards)
+        GuardExpr::of_terms(arenas, guards)
     } else {
         None
     };
     match declaration.declared {
         Declared::Class(c) => {
             let name = Name::from(&declaration.name());
-            let mut info = ClassReflection::from_decl(c, ctx);
-            info.record_provenance(origin, &name, c.name.span, &MemberSpans::of_class(&c.def));
+            let mut info = ClassReflection::from_decl(arenas, c, ctx);
+            let def = arenas
+                .class(c.def)
+                .expect("declared class ID belongs to its retained file owner");
+            info.record_provenance(
+                origin,
+                &name,
+                c.name.span,
+                &MemberSpans::of_class(arenas, def),
+            );
             out.push(BuiltDecl::Class {
                 name,
                 conditional,
@@ -1230,6 +1251,7 @@ pub(crate) fn built_declaration(
         Declared::Function(f) => {
             let mut sig = FunctionReflection::from_decl(
                 f,
+                arenas,
                 ctx,
                 &FxHashMap::default(),
                 &NameMap::default(),
@@ -1247,10 +1269,10 @@ pub(crate) fn built_declaration(
         Declared::Constant(c) => out.push(BuiltDecl::GlobalConst {
             name: Name::from(&declaration.name()),
             guard,
-            ty: infer_const_type(&c.value),
+            ty: infer_const_type(arenas, c.value),
         }),
         Declared::Define { name, value } => {
-            if let Some((name, ty)) = define_constant(name, value) {
+            if let Some((name, ty)) = define_constant(arenas, &name, value) {
                 out.push(BuiltDecl::GlobalConst { name, guard, ty });
             }
         }
@@ -1272,7 +1294,11 @@ pub(crate) fn built_declaration(
 /// `\null` reference for every file in the corpus - every `!== \false`-
 /// style narrowing idiom would silently stop narrowing away `false` at
 /// all once such a stub was indexed.
-fn define_constant(const_name: &PhpString, value: &ExprNode) -> Option<(Name, Type)> {
+fn define_constant(
+    arenas: &NodeArenas,
+    const_name: &PhpString,
+    value: ExprId,
+) -> Option<(Name, Type)> {
     let const_name = const_name.as_str()?;
     if ["true", "false", "null"]
         .iter()
@@ -1338,7 +1364,7 @@ fn define_constant(const_name: &PhpString, value: &ExprNode) -> Option<(Name, Ty
     if const_name == "PHP_INT_MIN" {
         return Some((Name::from(const_name), Type::int()));
     }
-    Some((Name::from(const_name), infer_const_type(value)))
+    Some((Name::from(const_name), infer_const_type(arenas, value)))
 }
 
 /// Records one `const`/`define()` declaration site for `name`,

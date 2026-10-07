@@ -45,7 +45,7 @@ pub(crate) struct UsageSemanticToken {
 impl<'a> Checker<'a> {
     /// Single choke point: drops (does not truncate) any span crossing a
     /// line boundary - LSP's semantic-tokens wire format requires every
-    /// token to sit on one line, but a member access's own `e.span`
+    /// token to sit on one line, but a member access's own expression span
     /// covers the whole access/call expression, which can span a
     /// multi-line argument list or fluent receiver.
     fn record_usage_semantic_token(

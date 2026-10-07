@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use types::Name;
 
 use checker::Checker;
@@ -60,14 +61,14 @@ pub(crate) fn run_demo(file: Option<&Path>) {
 
     let parsed = syntax::parse(&source).unwrap();
     println!("-- {} ignore marks --", parsed.ignore_marks.len());
-    let program = parsed.stmts;
+    let program = parsed.statements().to_vec();
 
     println!("-- {} top-level statements --", program.len());
     for stmt in &program {
-        println!("{:#?}", stmt);
+        println!("{:#?}", parsed.stmt(*stmt));
     }
 
-    let mut registry = Registry::build(&program);
+    let mut registry = Registry::build(&parsed.arenas, &program);
     // Generated (real php-src source) takes priority over the hand-curated
     // approximations - merge_stubs only fills in names not already present.
     registry.merge_stubs(stubs::generated_stubs());
@@ -123,7 +124,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
         println!("{}", format_signature("strlen", sig));
     }
 
-    let mut checker = Checker::new(&registry);
+    let mut checker = Checker::new(&registry).with_owned_parsed_file(Arc::new(parsed));
     checker.check_program(&program);
     let diagnostics = checker.into_diagnostics();
 

@@ -26,7 +26,7 @@ use crate::checker::expr::contains_flag_name;
 use crate::checker::xml_name::is_valid_xml_name;
 use crate::checker::xml_wellformedness::is_well_formed_xml;
 use crate::checker::{Checker, Locals};
-use syntax::ast::{Arg, ExprKind, Literal, UnaryOp};
+use syntax::ast::{Arg, ExprKind, Literal, NodeArenas, UnaryOp};
 use types::Type;
 
 fn throwable(class: &str) -> Type {
@@ -35,16 +35,20 @@ fn throwable(class: &str) -> Type {
 
 /// A literal integer argument's value, or `None` for anything else (a
 /// variable, a computed expression, ...).
-fn literal_int_value(a: &Arg) -> Option<i64> {
+fn literal_int_value(arenas: &NodeArenas, a: &Arg) -> Option<i64> {
     if a.name.is_some() || a.spread {
         return None;
     }
-    match &a.value.peeled().kind {
+    let value = arenas.peeled(a.value).and_then(|id| arenas.expr(id))?;
+    match &value.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
-        ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.peeled().kind {
-            ExprKind::Literal(Literal::Int(n)) => Some(-*n),
-            _ => None,
-        },
+        ExprKind::Unary(UnaryOp::Neg, inner) => arenas
+            .peeled(*inner)
+            .and_then(|id| arenas.expr(id))
+            .and_then(|inner| match &inner.kind {
+                ExprKind::Literal(Literal::Int(n)) => Some(-*n),
+                _ => None,
+            }),
         _ => None,
     }
 }
@@ -55,6 +59,7 @@ impl<'a> Checker<'a> {
     /// last namespace segment, lowercased.
     pub(crate) fn dynamic_function_throw_type(
         &self,
+        arenas: &NodeArenas,
         bare_name: &str,
         args: &[Arg],
         locals: &Locals,
@@ -66,7 +71,7 @@ impl<'a> Checker<'a> {
             // arguments' provable ranges, not just the divisor's.
             "intdiv" => {
                 let divisor = args.get(1)?;
-                match literal_int_value(divisor) {
+                match literal_int_value(arenas, divisor) {
                     Some(0) => Some(throwable("DivisionByZeroError")),
                     // `void` is `record_call_throw_point`'s
                     // "recognized, but definitely contributes nothing -
@@ -91,7 +96,10 @@ impl<'a> Checker<'a> {
                     && custom.name.is_none()
                     && !custom.spread
                 {
-                    let custom_ty = self.infer_expr(&custom.value, locals);
+                    let custom_ty = arenas
+                        .expr(custom.value)
+                        .map(|value| self.infer_expr(value, locals))
+                        .expect("assert argument belongs to its retained file owner");
                     if let Some((class, _)) = custom_ty.as_object()
                         && self.registry.is_subclass_of(class, "Throwable")
                     {
@@ -101,25 +109,25 @@ impl<'a> Checker<'a> {
                 Some(throwable("AssertionError"))
             }
             // `JSON_THROW_ON_ERROR` present in a bitwise-or flags argument.
-            "json_encode" => Self::json_throw_on_error(args, 1),
-            "json_decode" => Self::json_throw_on_error(args, 3),
+            "json_encode" => Self::json_throw_on_error(arenas, args, 1),
+            "json_decode" => Self::json_throw_on_error(arenas, args, 3),
             // `FILTER_THROW_ON_FAILURE` present in the third argument.
             "filter_var" => {
                 let flags = args.get(2)?;
                 (flags.name.is_none()
                     && !flags.spread
-                    && contains_flag_name(&flags.value, "FILTER_THROW_ON_FAILURE"))
+                    && contains_flag_name(arenas, flags.value, "FILTER_THROW_ON_FAILURE"))
                 .then(|| throwable("Filter\\FilterFailedException"))
             }
             _ => None,
         }
     }
 
-    fn json_throw_on_error(args: &[Arg], flags_index: usize) -> Option<Type> {
+    fn json_throw_on_error(arenas: &NodeArenas, args: &[Arg], flags_index: usize) -> Option<Type> {
         let flags = args.get(flags_index)?;
         (flags.name.is_none()
             && !flags.spread
-            && contains_flag_name(&flags.value, "JSON_THROW_ON_ERROR"))
+            && contains_flag_name(arenas, flags.value, "JSON_THROW_ON_ERROR"))
         .then(|| throwable("JsonException"))
     }
 
@@ -130,17 +138,32 @@ impl<'a> Checker<'a> {
     /// classes contribute `ReflectionException` unconditionally whenever
     /// constructed with at least one argument, without trying to prove
     /// the target class/method/property genuinely exists.
-    pub(crate) fn dynamic_new_throw_type(&self, class: &str, args: &[Arg]) -> Option<Type> {
+    pub(crate) fn dynamic_new_throw_type(
+        &self,
+        arenas: &NodeArenas,
+        class: &str,
+        args: &[Arg],
+    ) -> Option<Type> {
         match class {
             "DateInterval" => {
                 let [arg] = args else { return None };
                 if arg.name.is_some() || arg.spread {
                     return None;
                 }
-                match &arg.value.peeled().kind {
+                match arenas
+                    .peeled(arg.value)
+                    .and_then(|id| arenas.expr(id))
+                    .map(|value| &value.kind)
+                {
                     // Same `void` sentinel as `intdiv` above.
-                    ExprKind::Literal(Literal::String(spec)) => {
-                        if is_valid_date_interval_spec(&spec.to_str_lossy()) {
+                    Some(ExprKind::Literal(Literal::String(spec))) => {
+                        if arenas
+                            .string_bytes(spec)
+                            .map(|bytes| {
+                                is_valid_date_interval_spec(&String::from_utf8_lossy(bytes))
+                            })
+                            .unwrap_or(false)
+                        {
                             Some(Type::void())
                         } else {
                             Some(throwable("Exception"))
@@ -158,10 +181,15 @@ impl<'a> Checker<'a> {
                 if arg.name.is_some() || arg.spread {
                     return Some(throwable("Exception"));
                 }
-                match &arg.value.peeled().kind {
-                    ExprKind::Literal(Literal::String(xml)) => {
-                        if xml
-                            .as_str()
+                match arenas
+                    .peeled(arg.value)
+                    .and_then(|id| arenas.expr(id))
+                    .map(|value| &value.kind)
+                {
+                    Some(ExprKind::Literal(Literal::String(xml))) => {
+                        if arenas
+                            .string_bytes(xml)
+                            .and_then(|bytes| std::str::from_utf8(bytes).ok())
                             .is_some_and(|xml| is_well_formed_xml(xml).is_none())
                         {
                             Some(Type::void())
@@ -195,9 +223,18 @@ impl<'a> Checker<'a> {
             if arg.name.is_some() || arg.spread {
                 return Some(throwable("DOMException"));
             }
-            return match &arg.value.peeled().kind {
-                ExprKind::Literal(Literal::String(name)) => {
-                    if name.as_str().is_some_and(is_valid_xml_name) {
+            let Some(syntax_owner) = self.syntax_tree_owner() else {
+                return Some(throwable("DOMException"));
+            };
+            let arenas = syntax_owner.arenas();
+            let value = arenas.peeled(arg.value).and_then(|id| arenas.expr(id));
+            return match value.map(|value| &value.kind) {
+                Some(ExprKind::Literal(Literal::String(name))) => {
+                    if arenas
+                        .string_bytes(name)
+                        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                        .is_some_and(is_valid_xml_name)
+                    {
                         Some(Type::void())
                     } else {
                         Some(throwable("DOMException"))

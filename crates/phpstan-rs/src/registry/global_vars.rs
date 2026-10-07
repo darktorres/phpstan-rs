@@ -28,9 +28,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::registry::infer_const_type;
 use syntax::ast::{
-    BinOp, ExprKind, ExprNode, GlobalVar, Literal, QualifiedName, StaticTarget, StmtKind, StmtNode,
+    BinOp, ClosurePayload, ExprId, ExprKind, ExprNode, GlobalVar, Literal, NodeArenas,
+    QualifiedName, StaticTarget, StmtId, StmtKind,
 };
-use syntax::visit::{Visitor, any_stmt_in_body, walk_expr_in_scope, walk_stmt};
+use syntax::visit::arena::{self, Visitor};
 
 use types::{Name, Shape, Type};
 
@@ -223,9 +224,9 @@ pub struct GlobalFacts {
 
 impl GlobalFacts {
     /// The facts of the statements of one file.
-    pub fn of(stmts: &[StmtNode]) -> GlobalFacts {
+    pub fn of(arenas: &NodeArenas, stmts: &[StmtId]) -> GlobalFacts {
         let mut facts = GlobalFacts::default();
-        walk_top_level(stmts, &mut facts);
+        walk_top_level(arenas, stmts, &mut facts);
         facts
     }
 
@@ -465,13 +466,16 @@ fn text_ends_with_suffix(path: &str, suffix: &str) -> bool {
 /// string and doesn't invalidate resolution - only the trailing literal
 /// suffix needs to match a real file's path, never the constant's actual
 /// value.
-fn resolve_include_target_suffix(expr: &ExprNode) -> Option<String> {
-    syntax::stack::guard(|| match &expr.peeled().kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
+fn resolve_include_target_suffix(arenas: &NodeArenas, id: ExprId) -> Option<String> {
+    let expr = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    syntax::stack::guard(|| match &expr.kind {
+        ExprKind::Literal(Literal::String(s)) => {
+            Some(String::from_utf8_lossy(arenas.string_bytes(s)?).into_owned())
+        }
         ExprKind::Name(_) => Some(String::new()),
         ExprKind::Binary(BinOp::Concat, l, r) => {
-            let l = resolve_include_target_suffix(l)?;
-            let r = resolve_include_target_suffix(r)?;
+            let l = resolve_include_target_suffix(arenas, *l)?;
+            let r = resolve_include_target_suffix(arenas, *r)?;
             Some(l + &r)
         }
         _ => None,
@@ -482,9 +486,9 @@ fn resolve_include_target_suffix(expr: &ExprNode) -> Option<String> {
 /// is staged as a top-level site (gated by the include-graph result
 /// applied later), regardless of any `global $x;` (file top level is
 /// already, potentially, the real global scope).
-fn walk_top_level(stmts: &[StmtNode], out: &mut GlobalFacts) {
+fn walk_top_level(arenas: &NodeArenas, stmts: &[StmtId], out: &mut GlobalFacts) {
     let empty = NameSet::default();
-    walk_scope(stmts, true, &empty, out);
+    walk_scope(arenas, stmts, true, &empty, out);
 }
 
 /// Walks one function/method/closure body - `global_names` is the
@@ -495,37 +499,63 @@ fn walk_top_level(stmts: &[StmtNode], out: &mut GlobalFacts) {
 /// the walk with per-branch cloning). Every site found here is
 /// unconditional - a function body's own scope isn't subject to the
 /// include-graph check the way file top level is.
-fn walk_function_body(stmts: &[StmtNode], out: &mut GlobalFacts) {
-    let global_names = collect_global_names(stmts);
-    walk_scope(stmts, false, &global_names, out);
+fn walk_function_body(arenas: &NodeArenas, stmts: &[StmtId], out: &mut GlobalFacts) {
+    let global_names = collect_global_names(arenas, stmts);
+    walk_scope(arenas, stmts, false, &global_names, out);
 }
 
 /// Every name a `global` statement in this body imports. A nested
 /// function, class or closure needs its own `global`, so none is entered.
-fn collect_global_names(stmts: &[StmtNode]) -> NameSet {
-    let mut out = NameSet::default();
-    for stmt in stmts {
-        any_stmt_in_body(stmt, |s| {
-            if let StmtKind::Global(names) = &s.kind {
-                for name in names.iter().filter_map(GlobalVar::name) {
-                    out.insert(name.clone());
+fn collect_global_names(arenas: &NodeArenas, stmts: &[StmtId]) -> NameSet {
+    struct Globals(NameSet);
+    impl Visitor for Globals {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else { return };
+            if let StmtKind::Global(names) = &stmt.kind {
+                for name in arenas
+                    .global_vars(names.clone())
+                    .iter()
+                    .filter_map(GlobalVar::name)
+                {
+                    self.0.insert(name.clone());
                 }
             }
-            false
-        });
+            arena::walk_stmt(self, arenas, id);
+        }
+
+        fn visit_function_decl(&mut self, _: &NodeArenas, _: &syntax::ast::FunctionDecl) {}
+        fn visit_class_def(&mut self, _: &NodeArenas, _: &syntax::ast::ClassDef) {}
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            if arenas.expr(id).is_some_and(|expr| {
+                matches!(
+                    &expr.kind,
+                    ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::NewAnonymousClass(_)
+                )
+            }) {
+                return;
+            }
+            arena::walk_expr(self, arenas, id);
+        }
     }
-    out
+    let mut out = NameSet::default();
+    let mut globals = Globals(std::mem::take(&mut out));
+    arena::walk_stmts(&mut globals, arenas, stmts);
+    std::mem::take(&mut globals.0)
 }
 
-fn walk_scope(stmts: &[StmtNode], top_level: bool, global_names: &NameSet, out: &mut GlobalFacts) {
+fn walk_scope(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    top_level: bool,
+    global_names: &NameSet,
+    out: &mut GlobalFacts,
+) {
     let mut scope = Scope {
         top_level,
         global_names,
         out,
     };
-    for stmt in stmts {
-        scope.visit_stmt(stmt);
-    }
+    arena::walk_stmts(&mut scope, arenas, stmts);
 }
 
 /// One scope's walk: a nested function, method or closure body is walked
@@ -536,49 +566,62 @@ struct Scope<'r> {
     out: &'r mut GlobalFacts,
 }
 
-impl<'a> Visitor<'a> for Scope<'_> {
-    fn visit_stmt(&mut self, stmt: &'a StmtNode) {
+impl Visitor for Scope<'_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         match &stmt.kind {
-            StmtKind::FunctionDecl(f) => {
-                walk_function_body(f.body_stmts(), self.out);
+            StmtKind::FunctionDecl(id) => {
+                if let Some(function) = arenas.function(*id) {
+                    walk_function_body(arenas, function.body_stmts(arenas), self.out);
+                }
                 return;
             }
             StmtKind::ClassDecl(c) => {
-                for method in &c.def.methods {
-                    walk_function_body(method.function.body_stmts(), self.out);
+                let c = arenas.class_decl(c.clone());
+                if let Some(def) = arenas.class(c.def) {
+                    for method in arenas.methods(def.methods.clone()) {
+                        walk_function_body(arenas, method.function.body_stmts(arenas), self.out);
+                    }
                 }
                 return;
             }
             StmtKind::Expression(e) => {
-                handle_top_expr_statement(e, self.top_level, self.global_names, self.out);
+                handle_top_expr_statement(arenas, *e, self.top_level, self.global_names, self.out);
             }
             _ => {}
         }
-        walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_expr(&mut self, expr: &'a ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else { return };
         match &expr.kind {
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr { body, .. } = &**closure;
-                walk_function_body(body, self.out);
+            ExprKind::Closure(id) => {
+                if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) {
+                    walk_function_body(arenas, arenas.stmt_ids(&closure.body), self.out);
+                }
                 return;
             }
-            ExprKind::NewAnonymousClass(class) => {
-                for method in &class.def.methods {
-                    walk_function_body(method.function.body_stmts(), self.out);
+            ExprKind::NewAnonymousClass(id) => {
+                let Some(class) = arenas.anonymous_class(*id) else {
+                    return;
+                };
+                if let Some(def) = arenas.class(class.def) {
+                    for method in arenas.methods(def.methods.clone()) {
+                        walk_function_body(arenas, method.function.body_stmts(arenas), self.out);
+                    }
                 }
                 return;
             }
             ExprKind::Include(_, target) => {
                 self.out.include_sites.push(IncludeSite {
                     top_level: self.top_level,
-                    suffix: resolve_include_target_suffix(target),
+                    suffix: resolve_include_target_suffix(arenas, *target),
                 });
             }
             _ => {}
         }
-        walk_expr_in_scope(self, expr);
+        arena::walk_expr(self, arenas, id);
     }
 }
 
@@ -587,43 +630,50 @@ impl<'a> Visitor<'a> for Scope<'_> {
 /// site of that global, gated on the file being included when at top
 /// level. A compound assignment only widens the variable.
 fn handle_top_expr_statement(
-    e: &ExprNode,
+    arenas: &NodeArenas,
+    id: ExprId,
     top_level: bool,
     global_names: &NameSet,
     out: &mut GlobalFacts,
 ) {
     let is_site = |name: &str| top_level || global_names.contains(name);
+    let Some(e) = arenas.expr(id) else { return };
 
     match &e.kind {
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-            handle_assignment_target(lhs, rhs, &is_site, top_level, out, false);
+            handle_assignment_target(arenas, *lhs, *rhs, &is_site, top_level, out, false);
         }
         ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
-            handle_assignment_target(lhs, rhs, &is_site, top_level, out, false);
+            handle_assignment_target(arenas, *lhs, *rhs, &is_site, top_level, out, false);
         }
         ExprKind::CompoundAssign(_, lhs, rhs) => {
-            handle_assignment_target(lhs, rhs, &is_site, top_level, out, true);
+            handle_assignment_target(arenas, *lhs, *rhs, &is_site, top_level, out, true);
         }
         _ => {}
     }
 }
 
 fn handle_assignment_target(
-    lhs: &ExprNode,
-    rhs: &ExprNode,
+    arenas: &NodeArenas,
+    lhs: ExprId,
+    rhs: ExprId,
     is_site: &dyn Fn(&str) -> bool,
     top_level: bool,
     out: &mut GlobalFacts,
     force_mixed: bool,
 ) {
-    match &lhs.peeled().kind {
+    let Some(lhs) = arenas.peeled(lhs).and_then(|id| arenas.expr(id)) else {
+        return;
+    };
+    let Some(rhs) = arenas.expr(rhs) else { return };
+    match &lhs.kind {
         ExprKind::Variable(name) if is_site(name) => {
             let contribution = if force_mixed {
                 ContributionFact::Mixed
-            } else if let Some(merge) = array_merge_self(name, rhs) {
+            } else if let Some(merge) = array_merge_self(arenas, name, rhs.id) {
                 merge
             } else {
-                ContributionFact::Whole(static_value(rhs))
+                ContributionFact::Whole(static_value(arenas, rhs.id))
             };
             out.sites.push(SiteFact {
                 top_level,
@@ -633,23 +683,24 @@ fn handle_assignment_target(
         }
         ExprKind::Index(base, key_opt) => {
             if let Some(key) = key_opt
-                && let ExprKind::Variable(name) = &base.peeled().kind
+                && let Some(base) = arenas.peeled(*base).and_then(|id| arenas.expr(id))
+                && let ExprKind::Variable(name) = &base.kind
                 && is_site(name)
-                && let Some(key_str) = literal_string_key(key)
+                && let Some(key_str) = literal_string_key(arenas, *key)
             {
                 // `$name[<key>] = <rhs>;` - a direct, single-level write:
                 // the field's own value is `<rhs>`'s real resolved type.
                 let contribution = if force_mixed {
                     ContributionFact::FieldMixed(key_str)
                 } else {
-                    ContributionFact::Field(key_str, static_value(rhs))
+                    ContributionFact::Field(key_str, static_value(arenas, rhs.id))
                 };
                 out.sites.push(SiteFact {
                     top_level,
                     name: name.clone(),
                     contribution,
                 });
-            } else if let Some((name, key_str)) = root_variable_and_first_key(lhs)
+            } else if let Some((name, key_str)) = root_variable_and_first_key(arenas, lhs.id)
                 && is_site(name)
             {
                 // `$name[<key>][...]...= <rhs>;` - a deeper, multi-level
@@ -686,17 +737,19 @@ fn handle_assignment_target(
 /// isn't a literal (including a bare append directly on the variable
 /// itself, `$name[] = ...` - nothing to report there, not a special
 /// case, `key.as_ref()` on `None` already falls through to `None`).
-fn root_variable_and_first_key(expr: &ExprNode) -> Option<(&Name, String)> {
+fn root_variable_and_first_key(arenas: &NodeArenas, id: ExprId) -> Option<(&Name, String)> {
+    let expr = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
     syntax::stack::guard(|| {
-        let ExprKind::Index(base, key) = &expr.peeled().kind else {
+        let ExprKind::Index(base, key) = &expr.kind else {
             return None;
         };
-        match &base.peeled().kind {
+        let base = arenas.peeled(*base).and_then(|id| arenas.expr(id))?;
+        match &base.kind {
             ExprKind::Variable(name) => key
-                .as_deref()
-                .and_then(literal_string_key)
+                .map(|id| literal_string_key(arenas, id))
+                .flatten()
                 .map(|k| (name, k)),
-            ExprKind::Index(..) => root_variable_and_first_key(base),
+            ExprKind::Index(..) => root_variable_and_first_key(arenas, base.id),
             _ => None,
         }
     })
@@ -707,17 +760,24 @@ fn root_variable_and_first_key(expr: &ExprNode) -> Option<(&Name, String)> {
 /// merge its fields in rather than discarding them. `None` for anything
 /// else (not this exact self-referencing shape) - the caller falls back to
 /// its own ordinary whole-value handling in that case.
-fn array_merge_self(name: &Name, rhs: &ExprNode) -> Option<ContributionFact> {
-    let ExprKind::Call(callee, args) = &rhs.peeled().kind else {
+fn array_merge_self(arenas: &NodeArenas, name: &Name, rhs: ExprId) -> Option<ContributionFact> {
+    let rhs = arenas.peeled(rhs).and_then(|id| arenas.expr(id))?;
+    let ExprKind::Call(callee, args) = &rhs.kind else {
         return None;
     };
-    let ExprKind::Name(callee_name) = &callee.peeled().kind else {
+    let callee = arenas.peeled(*callee).and_then(|id| arenas.expr(id))?;
+    let ExprKind::Name(callee_name) = &callee.kind else {
         return None;
     };
+    let callee_name = arenas.qualified_name(callee_name)?;
+    let args = arenas.args(args.clone());
     if args.len() != 2 {
         return None;
     }
-    let ExprKind::Variable(first_name) = &args[0].value.peeled().kind else {
+    let first = arenas
+        .peeled(args[0].value)
+        .and_then(|id| arenas.expr(id))?;
+    let ExprKind::Variable(first_name) = &first.kind else {
         return None;
     };
     if first_name != name {
@@ -725,14 +785,17 @@ fn array_merge_self(name: &Name, rhs: &ExprNode) -> Option<ContributionFact> {
     }
     Some(ContributionFact::ArrayMerge {
         callee: callee_name.clone(),
-        second: static_value(&args[1].value),
-        whole: static_value(rhs),
+        second: static_value(arenas, args[1].value),
+        whole: static_value(arenas, rhs.id),
     })
 }
 
-fn literal_string_key(expr: &ExprNode) -> Option<String> {
-    match &expr.peeled().kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
+fn literal_string_key(arenas: &NodeArenas, id: ExprId) -> Option<String> {
+    let expr = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    match &expr.kind {
+        ExprKind::Literal(Literal::String(s)) => {
+            Some(String::from_utf8_lossy(arenas.string_bytes(s)?).into_owned())
+        }
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
     }
@@ -741,48 +804,62 @@ fn literal_string_key(expr: &ExprNode) -> Option<String> {
 /// An assigned expression as far as its type can be said without the
 /// registry: the types of calls, class constants and methods are looked up
 /// when the facts are resolved.
-fn static_value(expr: &ExprNode) -> StaticValue {
-    syntax::stack::guard(|| {
-        let expr = expr.peeled();
-        match &expr.kind {
-            ExprKind::New(callee, _args) => StaticValue::Known(match &callee.peeled().kind {
-                ExprKind::Name(name) => name
-                    .resolved_class()
+fn static_value(arenas: &NodeArenas, id: ExprId) -> StaticValue {
+    let Some(expr) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+        return StaticValue::Known(Type::mixed());
+    };
+    syntax::stack::guard(|| match &expr.kind {
+        ExprKind::New(callee, _args) => StaticValue::Known(
+            match arenas
+                .peeled(*callee)
+                .and_then(|id| arenas.expr(id))
+                .map(|callee| &callee.kind)
+            {
+                Some(ExprKind::Name(name)) => arenas
+                    .qualified_name(name)
+                    .and_then(QualifiedName::resolved_class)
                     .map_or(Type::mixed(), |class| Type::object(class.into(), vec![])),
                 _ => Type::mixed(),
-            }),
-            ExprKind::ArrayLiteral(items) => {
-                let mut fields = Vec::new();
-                for item in items {
-                    let Some(key_expr) = &item.key else {
-                        continue;
-                    };
-                    let Some(key) = literal_string_key(key_expr) else {
-                        continue;
-                    };
-                    fields.push((key, static_value(&item.value)));
-                }
-                StaticValue::Array(fields)
-            }
-            ExprKind::Call(callee, _args) => match &callee.peeled().kind {
-                ExprKind::Name(name) => StaticValue::Call(name.clone()),
-                _ => StaticValue::Known(Type::mixed()),
             },
-            ExprKind::StaticCall(target, method, _args) => match target.as_name() {
-                Some(name) => StaticValue::StaticCall(
-                    name.resolved_class().map(Name::from),
-                    method.name.clone(),
-                ),
-                None => StaticValue::Known(Type::mixed()),
-            },
-            ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
-                StaticValue::ClassConst(class.resolved_class().map(Name::from), name.name.clone())
+        ),
+        ExprKind::ArrayLiteral(items) => {
+            let mut fields = Vec::new();
+            for item in arenas.array_items(items.clone()) {
+                let Some(key_expr) = item.key else {
+                    continue;
+                };
+                let Some(key) = literal_string_key(arenas, key_expr) else {
+                    continue;
+                };
+                fields.push((key, static_value(arenas, item.value)));
             }
-            ExprKind::MethodCall(recv, method, _args, _) => {
-                StaticValue::MethodCall(Box::new(static_value(recv)), method.name.clone())
-            }
-            _ => StaticValue::Known(infer_const_type(expr)),
+            StaticValue::Array(fields)
         }
+        ExprKind::Call(callee, _args) => match arenas
+            .peeled(*callee)
+            .and_then(|id| arenas.expr(id))
+            .map(|callee| &callee.kind)
+        {
+            Some(ExprKind::Name(name)) => arenas
+                .qualified_name(name)
+                .cloned()
+                .map(StaticValue::Call)
+                .unwrap_or_else(|| StaticValue::Known(Type::mixed())),
+            _ => StaticValue::Known(Type::mixed()),
+        },
+        ExprKind::StaticCall(target, method, _args) => match target.as_name() {
+            Some(name) => {
+                StaticValue::StaticCall(name.resolved_class().map(Name::from), method.name.clone())
+            }
+            None => StaticValue::Known(Type::mixed()),
+        },
+        ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
+            StaticValue::ClassConst(class.resolved_class().map(Name::from), name.name.clone())
+        }
+        ExprKind::MethodCall(recv, method, _args, _) => {
+            StaticValue::MethodCall(Box::new(static_value(arenas, *recv)), method.name.clone())
+        }
+        _ => StaticValue::Known(infer_const_type(arenas, expr.id)),
     })
 }
 

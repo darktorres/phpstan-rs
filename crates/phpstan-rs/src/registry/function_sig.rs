@@ -7,7 +7,7 @@ use crate::registry::name_context::{class_ref, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
-use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
+use syntax::ast::{ExprId, ExprKind, FunctionDecl, NodeArenas, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 
 use types::{self, Shape, ShapeField, ShapeKey, TemplateParam, Type};
@@ -440,8 +440,8 @@ impl FunctionReflection {
 /// (an array, a concatenation, another constant) falls back to `Mixed` -
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
-pub(crate) fn infer_const_type(value: &syntax::ast::ExprNode) -> Type {
-    infer_const_type_with(value, &|_, _| None)
+pub(crate) fn infer_const_type(arenas: &NodeArenas, value: ExprId) -> Type {
+    infer_const_type_with(arenas, value, &|_, _| None)
 }
 
 /// `infer_const_type` for a *class* constant's own value, which may also
@@ -451,8 +451,8 @@ pub(crate) fn infer_const_type(value: &syntax::ast::ExprNode) -> Type {
 /// `Registry::resolve_deferred_value_of`'s constant pre-pass. Only class
 /// constants go through that pass, so only they get this; a global
 /// constant keeps plain `infer_const_type`.
-pub(crate) fn infer_class_const_type(value: &syntax::ast::ExprNode) -> Type {
-    infer_const_type_with(value, &|class, name| {
+pub(crate) fn infer_class_const_type(arenas: &NodeArenas, value: ExprId) -> Type {
+    infer_const_type_with(arenas, value, &|class, name| {
         Some(Type::class_constant(
             types::parse_type_string(&class_ref(class)),
             name.into(),
@@ -466,16 +466,26 @@ pub(crate) fn infer_class_const_type(value: &syntax::ast::ExprNode) -> Type {
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
 fn infer_const_type_with(
-    value: &syntax::ast::ExprNode,
+    arenas: &NodeArenas,
+    value: ExprId,
     class_const_ref: &dyn Fn(&syntax::ast::QualifiedName, &str) -> Option<Type>,
 ) -> Type {
     syntax::stack::guard(|| {
         use syntax::ast::Literal;
-        let value = value.peeled();
+        let Some(value) = arenas.peeled(value).and_then(|id| arenas.expr(id)) else {
+            return Type::mixed();
+        };
         match &value.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
             ExprKind::Literal(Literal::Float(_)) => Type::float(),
-            ExprKind::Literal(Literal::String(s)) => Type::string_literal_ref(s),
+            ExprKind::Literal(Literal::String(s)) => {
+                let Some(bytes) = arenas.string_bytes(s) else {
+                    return Type::mixed();
+                };
+                let value =
+                    syntax::php_string::PhpString::from_bytes(std::sync::Arc::<[u8]>::from(bytes));
+                Type::string_literal_ref(&value)
+            }
             ExprKind::Literal(Literal::Bool(true)) => Type::bool_literal(true),
             ExprKind::Literal(Literal::Bool(false)) => Type::bool_literal(false),
             ExprKind::Literal(Literal::Null) => Type::null(),
@@ -485,11 +495,13 @@ fn infer_const_type_with(
             // Logger::OFF`, the one negative severity level alongside seven
             // non-negative ones) would otherwise silently fall to `Mixed`
             // below.
-            ExprKind::Unary(syntax::ast::UnaryOp::Neg, inner) => match &inner.kind {
-                ExprKind::Literal(Literal::Int(n)) => Type::int_literal(-n),
-                ExprKind::Literal(Literal::Float(_)) => Type::float(),
-                _ => Type::mixed(),
-            },
+            ExprKind::Unary(syntax::ast::UnaryOp::Neg, inner) => {
+                match arenas.expr(*inner).map(|e| &e.kind) {
+                    Some(ExprKind::Literal(Literal::Int(n))) => Type::int_literal(-n),
+                    Some(ExprKind::Literal(Literal::Float(_))) => Type::float(),
+                    _ => Type::mixed(),
+                }
+            }
             // A real, common shape (`AppInfo::URL = 'https://' . self::DOMAIN;`)
             // - a const's own value referencing *another* const via `self::`
             // can't be resolved here at all (this function has no class
@@ -515,13 +527,13 @@ fn infer_const_type_with(
                 let mut values: Vec<Type> = Vec::new();
                 let mut next_index = types::NextArrayIndex::default();
                 let mut exact = true;
-                for item in items {
-                    let value_ty = infer_const_type_with(&item.value, class_const_ref);
+                for item in arenas.array_items(items.clone()) {
+                    let value_ty = infer_const_type_with(arenas, item.value, class_const_ref);
                     values.push(value_ty.clone());
                     let key = if item.spread {
                         None
                     } else {
-                        match item.key.as_ref().map(|k| &k.kind) {
+                        match item.key.and_then(|key| arenas.expr(key)).map(|k| &k.kind) {
                             // Appending past `PHP_INT_MAX` throws: the
                             // constant has no value.
                             None => match next_index.take() {
@@ -531,7 +543,7 @@ fn infer_const_type_with(
                             },
                             Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
                             Some(ExprKind::Literal(Literal::String(s))) => {
-                                Some(ShapeKey::from_bytes(s.as_bytes()))
+                                arenas.string_bytes(s).map(ShapeKey::from_bytes)
                             }
                             _ => None,
                         }
@@ -664,13 +676,19 @@ impl FunctionReflection {
     #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_decl(
         f: &FunctionDecl,
+        arenas: &NodeArenas,
         ctx: &NameContext,
         class_templates: &FxHashMap<String, TemplateParam>,
         class_type_aliases: &NameMap<Type>,
         visibility: Visibility,
     ) -> FunctionReflection {
-        let doc: Option<std::sync::Arc<DocBlock>> =
-            f.doc_comment.as_deref().map(docblock::parse_shared);
+        let decl_params = arenas.params(f.params.clone());
+        let doc: Option<std::sync::Arc<DocBlock>> = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.doc_comment_text(ranges))
+            .as_deref()
+            .map(docblock::parse_shared);
         let mut template_params: FxHashMap<String, TemplateParam> = doc
             .as_ref()
             .map(|d| build_template_params(d, &f.name, ctx))
@@ -694,22 +712,36 @@ impl FunctionReflection {
                 // `/** @var T */` doubles as its docblock - only
                 // consulted when the outer method-level `@param` tag is
                 // absent.
-                let doc_ty: Option<DocType> = doc
+                let param_site = arenas
+                    .doc_site(p.span.start)
+                    .map(|site| docblock::parse_shared(&site.text));
+                let doc_ty: Option<DocType> = param_site
                     .as_ref()
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
                     .or_else(|| {
-                        arenas
-                            .doc_site(p.span.start)
-                            .map(|site| site.text.as_ref())
-                            .map(docblock::parse_shared)
-                            .and_then(|d| d.var_type.clone())
-                    });
+                        doc.as_ref()
+                            .and_then(|d| d.params.get(p.name.as_ref()))
+                            .cloned()
+                    })
+                    .or_else(|| param_site.and_then(|d| d.var_type.clone()));
                 let DeclaredType {
                     ty,
                     native: ty_native,
                     ..
-                } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
+                } = declared_type(
+                    doc_ty.as_ref(),
+                    p.type_hint.as_ref(),
+                    arenas,
+                    &template_params,
+                    ctx,
+                );
+                let type_aware_override = p.type_aware_override.as_deref().map(|text| {
+                    let ty = mark_template_params(types::parse_type_string(text), &template_params);
+                    resolve_names_in_type(ty, ctx)
+                });
+                let ty = type_aware_override.clone().unwrap_or(ty);
+                let ty_native = type_aware_override.unwrap_or(ty_native);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, arenas, p.default);
                 // Mirrors `ty` with `doc_ty` forced to `None` - the
@@ -740,7 +772,10 @@ impl FunctionReflection {
                     .and_then(|d| d.param_out.get(p.name.as_ref()))
                     .map(&resolve_doc_type);
                 ParameterReflection {
-                    attributes: ReflectionAttribute::all(arenas, arenas.attributes(p.attrs)),
+                    attributes: ReflectionAttribute::all(
+                        arenas,
+                        arenas.attributes(p.attrs.clone()),
+                    ),
                     name: Name::from(&p.name),
                     ty,
                     ty_native,
@@ -765,10 +800,16 @@ impl FunctionReflection {
             ty: return_type,
             native: return_type_native,
             ..
-        } = declared_type(doc_return, f.return_type.as_ref(), &template_params, ctx);
+        } = declared_type(
+            doc_return,
+            f.return_type.as_ref(),
+            arenas,
+            &template_params,
+            ctx,
+        );
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
-        let function_attrs = arenas.attributes(f.attrs);
+        let function_attrs = arenas.attributes(f.attrs.clone());
         let no_discard = function_attrs
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));

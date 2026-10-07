@@ -1,3 +1,4 @@
+use crate::ast::StringPayload;
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
 use crate::name::Interner;
 use crate::php_string::PhpString;
@@ -178,22 +179,33 @@ impl<'a> Lexer<'a> {
         }
         let raw = &self.src[start..end];
         let string = if escaped {
-            // The length is known: the unescaped string is no longer.
-            let mut bytes = Vec::with_capacity(raw.len());
+            // Decode directly into the file's byte store so the AST keeps
+            // only the resulting range, not a per-literal string owner.
+            let decoded_start = self.decoded_bytes.len();
+            self.decoded_bytes.reserve(raw.len());
             let mut i = 0;
             while i < raw.len() {
                 if raw[i] == b'\\' && matches!(raw.get(i + 1), Some(b'\'' | b'\\')) {
-                    bytes.push(raw[i + 1]);
+                    self.decoded_bytes.push(raw[i + 1]);
                     i += 2;
                 } else {
-                    bytes.push(raw[i]);
+                    self.decoded_bytes.push(raw[i]);
                     i += 1;
                 }
             }
-            PhpString::from(bytes)
+            StringPayload::Decoded(
+                self.decoded_range(decoded_start, self.decoded_bytes.len() - decoded_start),
+            )
         } else {
-            // Most literals: the source's bytes, copied once.
-            PhpString::from_bytes(raw)
+            if self.source_backed_strings {
+                // Most literals are kept as a range into the parsed file.
+                StringPayload::Source(self.span(start, end))
+            } else {
+                // A transient tree has no source owner after parsing. Keep
+                // its bytes in the reusable decoded store so readers can
+                // still resolve the payload while file products are built.
+                self.decoded_payload(raw)
+            }
         };
         self.pos = end + 1; // closing '
         Token::StringLit(string)
@@ -362,7 +374,7 @@ impl<'a> Lexer<'a> {
         let (content, offsets) = strip_heredoc_indent(raw_body, closing_indent);
 
         if nowdoc {
-            Token::StringLit(PhpString::from(content))
+            Token::StringLit(self.decoded_payload(&content))
         } else {
             // `content` has its per-line indentation stripped (PHP 7.3+
             // flexible heredoc syntax); `offsets` maps each of its bytes
@@ -392,11 +404,9 @@ impl<'a> Lexer<'a> {
         offsets: Option<&[usize]>,
     ) -> Vec<StringPart> {
         let mut parts = Vec::new();
-        // Upper-bound capacity hint - avoids repeated reallocation while
-        // pushing long plain-text runs (SQL, translation strings, HTML in
-        // a heredoc, ...).
-        let mut literal: Vec<u8> = Vec::with_capacity(bytes.len());
-        // Where `literal`'s chunk starts in `bytes`.
+        let mut source_literal_nonempty = false;
+        let mut decoded_literal_start = None;
+        // Where the current literal chunk starts in `bytes`.
         let mut literal_start = 0;
         // A byte of `bytes` as an offset in the file: a heredoc's content
         // has its indentation stripped, so `offsets` maps it back.
@@ -405,12 +415,17 @@ impl<'a> Lexer<'a> {
 
         macro_rules! flush {
             () => {
-                if !literal.is_empty() {
+                if source_literal_nonempty || decoded_literal_start.is_some() {
                     let span = self.span(off(literal_start), off(i));
-                    parts.push(StringPart::Literal(
-                        PhpString::from(std::mem::take(&mut literal)),
-                        span,
-                    ));
+                    let payload = match decoded_literal_start {
+                        Some(start) => StringPayload::Decoded(
+                            self.decoded_range(start, self.decoded_bytes.len() - start),
+                        ),
+                        None => StringPayload::Source(span),
+                    };
+                    parts.push(StringPart::Literal(payload, span));
+                    source_literal_nonempty = false;
+                    decoded_literal_start = None;
                 }
             };
         }
@@ -419,51 +434,59 @@ impl<'a> Lexer<'a> {
             let b = bytes[i];
 
             if b == b'\\' && i + 1 < bytes.len() {
-                if literal.is_empty() {
+                if !source_literal_nonempty && decoded_literal_start.is_none() {
                     literal_start = i;
+                }
+                if decoded_literal_start.is_none() {
+                    decoded_literal_start = Some(self.decoded_bytes.len());
+                    if source_literal_nonempty {
+                        self.decoded_bytes
+                            .extend_from_slice(&bytes[literal_start..i]);
+                        source_literal_nonempty = false;
+                    }
                 }
                 match bytes[i + 1] {
                     b'n' => {
-                        literal.push(b'\n');
+                        self.decoded_bytes.push(b'\n');
                         i += 2;
                     }
                     b't' => {
-                        literal.push(b'\t');
+                        self.decoded_bytes.push(b'\t');
                         i += 2;
                     }
                     b'r' => {
-                        literal.push(b'\r');
+                        self.decoded_bytes.push(b'\r');
                         i += 2;
                     }
                     b'v' => {
-                        literal.push(0x0B);
+                        self.decoded_bytes.push(0x0B);
                         i += 2;
                     }
                     b'e' => {
-                        literal.push(0x1B);
+                        self.decoded_bytes.push(0x1B);
                         i += 2;
                     }
                     b'f' => {
-                        literal.push(0x0C);
+                        self.decoded_bytes.push(0x0C);
                         i += 2;
                     }
                     // `\"` escapes only in `"..."` and `` \` `` only in
                     // `` `...` ``; elsewhere (a heredoc included) both stay
                     // two bytes.
                     quote @ (b'"' | b'`') if delimiter == Some(quote) => {
-                        literal.push(quote);
+                        self.decoded_bytes.push(quote);
                         i += 2;
                     }
                     quote @ (b'"' | b'`') => {
-                        literal.extend_from_slice(&[b'\\', quote]);
+                        self.decoded_bytes.extend_from_slice(&[b'\\', quote]);
                         i += 2;
                     }
                     b'\\' => {
-                        literal.push(b'\\');
+                        self.decoded_bytes.push(b'\\');
                         i += 2;
                     }
                     b'$' => {
-                        literal.push(b'$');
+                        self.decoded_bytes.push(b'$');
                         i += 2;
                     }
                     // Octal (`\0`-`\777`, 1-3 digits in `0`-`7`) and hex
@@ -480,7 +503,7 @@ impl<'a> Lexer<'a> {
                             value = value * 8 + (bytes[j] - b'0') as u32;
                             j += 1;
                         }
-                        literal.push((value % 256) as u8);
+                        self.decoded_bytes.push((value % 256) as u8);
                         i = j;
                     }
                     b'x' if bytes.get(i + 2).is_some_and(|c| c.is_ascii_hexdigit()) => {
@@ -490,7 +513,7 @@ impl<'a> Lexer<'a> {
                             value = value * 16 + (bytes[j] as char).to_digit(16).unwrap();
                             j += 1;
                         }
-                        literal.push(value as u8);
+                        self.decoded_bytes.push(value as u8);
                         i = j;
                     }
                     // `\u{...}` decodes a full Unicode codepoint (not
@@ -515,7 +538,7 @@ impl<'a> Lexer<'a> {
                         .flatten();
                         match codepoint {
                             Some(c) if c <= 0x10FFFF => {
-                                literal.extend_from_slice(&encode_codepoint(c));
+                                encode_codepoint(c, &mut self.decoded_bytes);
                                 i = j + 1;
                             }
                             _ => {
@@ -531,14 +554,13 @@ impl<'a> Lexer<'a> {
                                     },
                                     is_error: true,
                                 });
-                                literal.extend_from_slice(b"\\u");
+                                self.decoded_bytes.extend_from_slice(b"\\u");
                                 i += 2;
                             }
                         }
                     }
                     other => {
-                        literal.push(b'\\');
-                        literal.push(other);
+                        self.decoded_bytes.extend_from_slice(&[b'\\', other]);
                         i += 2;
                     }
                 }
@@ -775,17 +797,24 @@ impl<'a> Lexer<'a> {
             {
                 i += 1;
             }
-            if literal.is_empty() {
+            if !source_literal_nonempty && decoded_literal_start.is_none() {
                 literal_start = run_start;
             }
-            literal.extend_from_slice(&bytes[run_start..i]);
+            if decoded_literal_start.is_some() || offsets.is_some() || !self.source_backed_strings {
+                if decoded_literal_start.is_none() {
+                    decoded_literal_start = Some(self.decoded_bytes.len());
+                }
+                self.decoded_bytes.extend_from_slice(&bytes[run_start..i]);
+            } else {
+                source_literal_nonempty = true;
+            }
         }
         flush!();
 
         if parts.is_empty() {
             let at = self.offset(off(0));
             parts.push(StringPart::Literal(
-                PhpString::default(),
+                StringPayload::from(PhpString::default()),
                 Span { start: at, end: at },
             ));
         }
@@ -822,20 +851,23 @@ fn strip_heredoc_indent(text: &[u8], indent: usize) -> (Vec<u8>, Vec<usize>) {
 
 /// A codepoint as PHP's `\u{...}` writes it: UTF-8, a surrogate included
 /// (as its three bytes).
-fn encode_codepoint(c: u32) -> Vec<u8> {
+fn encode_codepoint(c: u32, output: &mut Vec<u8>) {
     match c {
-        0..=0x7F => vec![c as u8],
-        0x80..=0x7FF => vec![0xC0 | (c >> 6) as u8, 0x80 | (c & 0x3F) as u8],
-        0x800..=0xFFFF => vec![
-            0xE0 | (c >> 12) as u8,
-            0x80 | ((c >> 6) & 0x3F) as u8,
-            0x80 | (c & 0x3F) as u8,
-        ],
-        _ => vec![
-            0xF0 | (c >> 18) as u8,
-            0x80 | ((c >> 12) & 0x3F) as u8,
-            0x80 | ((c >> 6) & 0x3F) as u8,
-            0x80 | (c & 0x3F) as u8,
-        ],
+        0..=0x7F => output.push(c as u8),
+        0x80..=0x7FF => {
+            output.push(0xC0 | (c >> 6) as u8);
+            output.push(0x80 | (c & 0x3F) as u8);
+        }
+        0x800..=0xFFFF => {
+            output.push(0xE0 | (c >> 12) as u8);
+            output.push(0x80 | ((c >> 6) & 0x3F) as u8);
+            output.push(0x80 | (c & 0x3F) as u8);
+        }
+        _ => {
+            output.push(0xF0 | (c >> 18) as u8);
+            output.push(0x80 | ((c >> 12) & 0x3F) as u8);
+            output.push(0x80 | ((c >> 6) & 0x3F) as u8);
+            output.push(0x80 | (c & 0x3F) as u8);
+        }
     }
 }

@@ -4,7 +4,7 @@ use crate::parser::Parser;
 use crate::visit::arena::{self, Visitor};
 
 fn parse(src: &str) -> crate::parser::ParsedProgram {
-    Parser::new(Lexer::new(src).tokenize_with_spans())
+    Parser::from_token_stream(Lexer::new(src).lex_token_stream())
         .parse_program()
         .expect("parses")
 }
@@ -24,10 +24,18 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
                 return;
             };
             match &e.kind {
-                ExprKind::Name(n) => self.push(n),
+                ExprKind::Name(n) => {
+                    if let Some(name) = arenas.qualified_name(n) {
+                        self.push(name);
+                    }
+                }
                 ExprKind::ClassConstFetch(StaticTarget::Name(n), _)
                 | ExprKind::StaticCall(StaticTarget::Name(n), _, _) => self.push(n),
-                ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => self.push(n),
+                ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => {
+                    if let Some(name) = arenas.qualified_name(n) {
+                        self.push(name);
+                    }
+                }
                 _ => {}
             }
             arena::walk_expr(self, arenas, id);
@@ -50,9 +58,11 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
             }
             arena::walk_catch_clause(self, arenas, c);
         }
-        fn visit_type_hint(&mut self, _arenas: &NodeArenas, h: &TypeHint) {
+        fn visit_type_hint(&mut self, arenas: &NodeArenas, h: &TypeHint) {
             if let TypeHintKind::Name(n) = &h.kind {
-                self.push(n);
+                if let Some(name) = arenas.qualified_name(n) {
+                    self.push(name);
+                }
             }
         }
     }
@@ -153,8 +163,10 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
     for_each_in_context_ids(
         &program.arenas,
         program.statements(),
-        |_, stmt, _| match &stmt.kind {
-            StmtKind::ClassDecl(c) => names.push(Some(c.namespaced_name.clone())),
+        |arenas, stmt, _| match &stmt.kind {
+            StmtKind::ClassDecl(c) => names.push(Some(
+                program.arenas.class_decl(c.clone()).namespaced_name.clone(),
+            )),
             StmtKind::GlobalConst(consts) => names.extend(
                 program
                     .arenas

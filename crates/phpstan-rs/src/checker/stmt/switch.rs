@@ -12,6 +12,10 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) -> Completion {
+        let owner = self
+            .syntax_tree_owner()
+            .expect("switch cases retain their parsed file owner");
+        let arenas = owner.arenas();
         let subject_ty = self.check_expr(subject, locals, label);
         if self.settings.extras.check_switch_missing_default
             && !cases.iter().any(|c| c.test.is_none())
@@ -86,7 +90,8 @@ impl<'a> Checker<'a> {
         self.loop_break_states.push(Vec::new());
         self.loop_continue_states.push(Vec::new());
         for (i, case) in cases.iter().enumerate() {
-            if let Some(t) = &case.test {
+            let test = case.test.and_then(|id| arenas.expr(id));
+            if let Some(t) = test {
                 let test_ty = self.check_expr(t, locals, label);
                 // Each case's test is compared loosely with the subject on
                 // the way past it.
@@ -101,7 +106,7 @@ impl<'a> Checker<'a> {
             }
             let mut direct = narrowed_locals.clone();
             // A `case` compares loosely (`case 0:` also runs for `'0'`).
-            if let Some(t) = &case.test {
+            if let Some(t) = test {
                 self.apply_loose_equality_narrowing(subject, t, &mut direct, true);
             }
             let mut case_locals = if previous_terminates {
@@ -109,10 +114,15 @@ impl<'a> Checker<'a> {
             } else {
                 merge_scopes(&self.relation(), &running, &direct)
             };
-            let block = self.check_block(&case.body, &mut case_locals, declared_return, label);
+            let block = self.check_block(
+                arenas.stmt_ids(&case.body),
+                &mut case_locals,
+                declared_return,
+                label,
+            );
             let case_terminates = block.completion.terminates;
             case_lasts.push(block.completion);
-            if let Some(t) = &case.test {
+            if let Some(t) = test {
                 self.apply_loose_equality_narrowing(subject, t, &mut narrowed_locals, false);
             }
             let is_last = i + 1 == case_count;
@@ -147,7 +157,7 @@ impl<'a> Checker<'a> {
         let case_completions: Vec<(Completion, bool)> = case_lasts
             .iter()
             .zip(cases)
-            .map(|(completion, case)| (*completion, case.body.is_empty()))
+            .map(|(completion, case)| (*completion, arenas.stmt_ids(&case.body).is_empty()))
             .collect();
         Completion::switch(cases.iter().any(|c| c.test.is_none()), &case_completions)
     }

@@ -497,6 +497,7 @@ impl<'a> Checker<'a> {
     /// naming a known class), intersected with the entry's extra types.
     pub(crate) fn class_argument_return(
         &self,
+        arenas: &NodeArenas,
         class: &str,
         method: &str,
         args: &[Arg],
@@ -508,7 +509,9 @@ impl<'a> Checker<'a> {
                     || self.registry.is_subclass_of(class, &entry.class))
         })?;
         let arg = args.get(entry.argument.checked_sub(1)?)?;
-        let arg_ty = self.infer_expr(&arg.value, locals);
+        let arg_ty = arenas
+            .expr(arg.value)
+            .map(|value| self.infer_expr(value, locals))?;
         let named = match arg_ty.class_string_class() {
             Some(name) => name.to_string(),
             None => arg_ty
@@ -534,6 +537,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn method_call_return_type(
         &self,
+        arenas: &NodeArenas,
         recv: &ExprNode,
         recv_ty: &Type,
         method: &str,
@@ -551,12 +555,13 @@ impl<'a> Checker<'a> {
         {
             return Type::error();
         }
-        self.declared_method_return_type(recv, recv_ty, method, args, locals)
+        self.declared_method_return_type(arenas, recv, recv_ty, method, args, locals)
     }
 
     /// `method_call_return_type` once the method may exist.
     fn declared_method_return_type(
         &self,
+        arenas: &NodeArenas,
         recv: &ExprNode,
         recv_ty: &Type,
         method: &str,
@@ -565,10 +570,10 @@ impl<'a> Checker<'a> {
     ) -> Type {
         syntax::stack::guard(|| {
             if let Some((class, type_args)) = recv_ty.as_object() {
-                return match self.class_argument_return(class, method, args, locals) {
+                return match self.class_argument_return(arenas, class, method, args, locals) {
                     Some(ty) => ty,
                     None => self.object_method_call_return_type(
-                        recv, class, type_args, method, args, locals,
+                        arenas, recv, class, type_args, method, args, locals,
                     ),
                 };
             }
@@ -606,7 +611,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .lookup_method_with_owner(fqn, method)
                     .map(|(owner, sig)| {
-                        let resolved_args = resolve_call_args(args, sig.params());
+                        let resolved_args = resolve_call_args(arenas, args, sig.params());
                         let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
                         self.resolve_pseudo(&resolved, &owner)
                     })
@@ -621,7 +626,8 @@ impl<'a> Checker<'a> {
                     .iter()
                     .rev()
                     .find_map(|m| {
-                        let ty = self.declared_method_return_type(recv, m, method, args, locals);
+                        let ty =
+                            self.declared_method_return_type(arenas, recv, m, method, args, locals);
                         (!ty.is_mixed()).then_some(ty)
                     })
                     .unwrap_or(Type::mixed());
@@ -630,7 +636,9 @@ impl<'a> Checker<'a> {
             if members.len() > 1 {
                 return members
                     .iter()
-                    .map(|m| self.declared_method_return_type(recv, m, method, args, locals))
+                    .map(|m| {
+                        self.declared_method_return_type(arenas, recv, m, method, args, locals)
+                    })
                     .filter(|ty| !ty.is_mixed())
                     .union_all_with(&self.relation())
                     .unwrap_or(Type::mixed());
@@ -643,6 +651,7 @@ impl<'a> Checker<'a> {
     /// the library-aware returns first, then the declared one.
     fn object_method_call_return_type(
         &self,
+        arenas: &NodeArenas,
         recv: &ExprNode,
         class: &types::Name,
         type_args: &[Type],
@@ -659,9 +668,11 @@ impl<'a> Checker<'a> {
             // `EntityManager::createQuery($dql)`: the same DQL row-shape
             // inference as `QueryBuilder::getQuery()` below, fed a literal
             // DQL string instead of a reconstructed builder chain.
-            let source = args
-                .first()
-                .and_then(|arg| self.doctrine_dql_source(&arg.value, locals));
+            let source = args.first().and_then(|arg| {
+                arenas
+                    .expr(arg.value)
+                    .and_then(|value| self.doctrine_dql_source(value, locals))
+            });
             self.doctrine_query_type(source)
         } else if method == "getQuery"
             && self.settings.doctrine
@@ -704,7 +715,7 @@ impl<'a> Checker<'a> {
             // literal, or contains a character the table doesn't
             // confidently classify.
             args.first()
-                .and_then(|a| literal_string_value(&a.value))
+                .and_then(|a| literal_string_value(arenas, a.value))
                 .and_then(|fmt| date_format_return_type(&fmt))
                 .unwrap_or(Type::string())
         } else if method == "format" && self.registry.is_subclass_of(class, "DateInterval") {
@@ -714,7 +725,7 @@ impl<'a> Checker<'a> {
             // substitution is genuinely sound (not just an
             // approximation) for the fixed-width specifiers.
             args.first()
-                .and_then(|a| literal_string_value(&a.value))
+                .and_then(|a| literal_string_value(arenas, a.value))
                 .and_then(|fmt| date_interval_format_return_type(&fmt))
                 .unwrap_or(Type::string())
         } else if method == "diff" && self.registry.is_subclass_of(class, "DateTimeInterface") {
@@ -766,10 +777,11 @@ impl<'a> Checker<'a> {
             let owner_ty = type_args.first().cloned().filter(|t| !t.is_mixed());
             let name = args
                 .first()
-                .and_then(|a| match literal_string_value(&a.value) {
+                .and_then(|a| arenas.expr(a.value))
+                .and_then(|value| match literal_string_value(arenas, value.id) {
                     Some(s) => Some(Name::from(s)),
                     None => self
-                        .infer_expr(&a.value, locals)
+                        .infer_expr(value, locals)
                         .string_literal_value()
                         .map(|s| Name::from(s.to_string())),
                 });
@@ -843,7 +855,7 @@ impl<'a> Checker<'a> {
             // `Connection`) - `resolve_dbal_sql_from_call` picks the
             // right SQL source per receiver kind.
             let row_type = self
-                .resolve_dbal_sql_from_call(recv, class, args, locals)
+                .resolve_dbal_sql_from_call(arenas, recv, class, args, locals)
                 .and_then(|sql| {
                     crate::checker::sql_reflection::resolve::resolve_sql_row_type(
                         self.doctrine_entities(),
@@ -878,7 +890,7 @@ impl<'a> Checker<'a> {
             // count, already correct via `generic_object_method_return_
             // type`'s own ordinary resolution) - not handled here.
             let row_type = self
-                .resolve_dbal_sql_from_call(recv, class, args, locals)
+                .resolve_dbal_sql_from_call(arenas, recv, class, args, locals)
                 .and_then(|sql| {
                     crate::checker::sql_reflection::resolve::resolve_sql_row_type(
                         self.doctrine_entities(),
@@ -894,10 +906,13 @@ impl<'a> Checker<'a> {
                 None => Type::object(("Doctrine\\DBAL\\Result".to_string()).into(), Vec::new()),
             }
         } else if method == "query" && self.registry.is_subclass_of(class, "mysqli") {
-            self.mysqli_query_type(args.first().map(|a| &a.value), locals)
+            self.mysqli_query_type(args.first().and_then(|a| arenas.expr(a.value)), locals)
         } else if class.eq_ignore_ascii_case("mysqli_result")
-            && let Some(ty) =
-                self.mysqli_fetch_type(method, type_args.first(), args.first().map(|a| &a.value))
+            && let Some(ty) = self.mysqli_fetch_type(
+                method,
+                type_args.first(),
+                args.first().and_then(|a| arenas.expr(a.value)),
+            )
         {
             ty
         } else {
@@ -921,11 +936,15 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("method-call arguments retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         self.registry
             .lookup_method_with_owner(class, method)
             .map(|(owner, sig)| {
                 let sig = self.substitute_class_templates(sig, class, type_args, &owner);
-                let resolved_args = resolve_call_args(args, sig.params());
+                let resolved_args = resolve_call_args(arenas, args, sig.params());
                 let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
                 self.resolve_pseudo_at(&resolved, &owner, class)
             })
@@ -958,6 +977,7 @@ impl<'a> Checker<'a> {
     /// a guess.
     fn resolve_dbal_sql_from_call(
         &self,
+        arenas: &NodeArenas,
         recv: &ExprNode,
         class: &str,
         args: &[Arg],
@@ -970,7 +990,8 @@ impl<'a> Checker<'a> {
             self.resolve_dbal_query_builder_sql(recv, locals)
         } else {
             args.first()
-                .and_then(|arg| self.foldable_sql_string(&arg.value, locals))
+                .and_then(|arg| arenas.expr(arg.value))
+                .and_then(|value| self.foldable_sql_string(value, locals))
         }
     }
 }
@@ -1083,7 +1104,7 @@ enum HydrationMode {
 /// The hydration mode argument at `index` - omitted or `null` is real
 /// Doctrine's default, `HYDRATE_OBJECT`. The constants' own values
 /// (`AbstractQuery`) are accepted as integer literals too.
-fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
+fn resolve_hydration_mode_arg(arenas: &NodeArenas, args: &[Arg], index: usize) -> HydrationMode {
     let Some(arg) = args.get(index) else {
         return HydrationMode::Object;
     };
@@ -1096,7 +1117,10 @@ fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
         "HYDRATE_SCALAR_COLUMN" => HydrationMode::ScalarColumn,
         _ => HydrationMode::Unknown,
     };
-    match &arg.value.kind {
+    let Some(value) = arenas.expr(arg.value) else {
+        return HydrationMode::Unknown;
+    };
+    match &value.kind {
         ExprKind::Literal(Literal::Null) => HydrationMode::Object,
         ExprKind::ClassConstFetch(_, member) => by_name(member),
         ExprKind::Literal(Literal::Int(n)) => match n {
@@ -1137,7 +1161,7 @@ impl<'a> Checker<'a> {
 
     /// A literal `createQuery($dql)` string's query, when resolvable.
     fn doctrine_dql_source(&self, dql: &ExprNode, locals: &Locals) -> Option<DoctrineQuerySource> {
-        let dql = match literal_string_value(dql) {
+        let dql = match literal_string_value(self.syntax_arenas()?, dql.id) {
             Some(s) => s.into_owned(),
             None => self
                 .infer_expr(dql, locals)
@@ -1151,17 +1175,20 @@ impl<'a> Checker<'a> {
     /// a direct `->getQuery()`/`createQuery(...)` call.
     fn doctrine_query_source_of(
         &self,
+        arenas: &NodeArenas,
         recv: &ExprNode,
         locals: &Locals,
     ) -> Option<DoctrineQuerySource> {
-        match &recv.peeled().kind {
+        let recv = arenas.peeled(recv.id).and_then(|id| arenas.expr(id))?;
+        match &recv.kind {
             ExprKind::MethodCall(qb, method, call_args, _)
-                if **method == *"getQuery" && call_args.is_empty() =>
+                if **method == *"getQuery" && arenas.args(call_args.clone()).is_empty() =>
             {
-                self.doctrine_query_builder_source(qb, locals)
+                self.doctrine_query_builder_source(arenas.expr(*qb)?, locals)
             }
             ExprKind::MethodCall(_, method, call_args, _) if **method == *"createQuery" => {
-                self.doctrine_dql_source(&call_args.first()?.value, locals)
+                let argument = arenas.args(call_args.clone()).first()?;
+                self.doctrine_dql_source(arenas.expr(argument.value)?, locals)
             }
             _ => None,
         }
@@ -1206,11 +1233,14 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         use crate::checker::doctrine::result_shape as shape;
+        let arenas = self
+            .syntax_arenas()
+            .expect("Doctrine result arguments retain their parsed file owner");
         let mode = match method {
             "getResult" | "getOneOrNullResult" | "getSingleResult" => {
-                resolve_hydration_mode_arg(args, 0)
+                resolve_hydration_mode_arg(arenas, args, 0)
             }
-            "execute" | "toIterable" => resolve_hydration_mode_arg(args, 1),
+            "execute" | "toIterable" => resolve_hydration_mode_arg(arenas, args, 1),
             "getArrayResult" => HydrationMode::Array,
             "getSingleColumnResult" => HydrationMode::ScalarColumn,
             "getSingleScalarResult" => HydrationMode::SingleScalar,
@@ -1224,7 +1254,7 @@ impl<'a> Checker<'a> {
         let source = if mode == HydrationMode::Object && object_row.is_some() {
             None
         } else {
-            self.doctrine_query_source_of(recv, locals)
+            self.doctrine_query_source_of(arenas, recv, locals)
         };
         let dml = object_row.as_ref().is_some_and(Type::is_never)
             || source.as_ref().is_some_and(|(chain, _)| chain.dml);

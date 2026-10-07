@@ -13,7 +13,10 @@ impl Checker<'_> {
         locals: &mut Locals,
         branch_true: bool,
     ) {
-        if let Some(call) = preg_call(cond) {
+        let Some(arenas) = self.syntax_arenas() else {
+            return;
+        };
+        if let Some(call) = preg_call(arenas, cond.id) {
             let result = preg_result_type(call.all);
             let result = if branch_true {
                 result.without_falsy()
@@ -36,21 +39,21 @@ impl Checker<'_> {
         locals: &mut Locals,
         holds: bool,
     ) {
+        let arenas = self
+            .syntax_arenas()
+            .expect("condition aliases require the syntax tree owner");
         for (side, other, on_left) in [(l, r, true), (r, l, false)] {
-            let alias;
-            let (call, result) = if let Some(call) = preg_call(side) {
+            let (call, result) = if let Some(call) = preg_call(arenas, side.id) {
                 let result = preg_result_type(call.all);
                 (call, result)
-            } else if let ExprKind::Variable(name) = &side.peeled().kind
-                && let Some((_, stored)) = locals
-                    .condition_aliases()
-                    .get(&locals.var_key(name))
-                    .cloned()
+            } else if let Some(ExprNode {
+                kind: ExprKind::Variable(name),
+                ..
+            }) = arenas.peeled(side.id).and_then(|id| arenas.expr(id))
+                && let Some((_, stored)) = locals.condition_aliases().get(&locals.var_key(name))
+                && let Some(stored) = arenas.expr(*stored)
+                && let Some(call) = preg_call(arenas, stored.id)
             {
-                alias = stored;
-                let Some(call) = preg_call(&alias) else {
-                    continue;
-                };
                 (call, self.infer_expr(side, locals))
             } else {
                 continue;
@@ -111,7 +114,7 @@ impl Checker<'_> {
             return;
         };
         if let Some(matches) = call.matches
-            && let Some(key) = locals.key_of(matches)
+            && let Some(key) = self.key_of_expr(locals, matches)
             && let Some(ty) = self.preg_matches_type(call, outcome, locals)
         {
             locals.insert(key, ty);
@@ -122,7 +125,7 @@ impl Checker<'_> {
         let Some(subject) = call.subject else {
             return;
         };
-        let Some(key) = locals.key_of(subject) else {
+        let Some(key) = self.key_of_expr(locals, subject) else {
             return;
         };
         let Some(parsed) = self

@@ -19,7 +19,7 @@
 use crate::checker::{Checker, PropertyAssignFacts};
 use crate::registry::{ClassId, PropertyRef};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
-use syntax::ast::{ClassDef, ExprKind, ExprNode, Literal, Visibility};
+use syntax::ast::{ClassDef, ExprId, ExprKind, Literal, NodeArenas, Visibility};
 use syntax::span::{LineIndex, Span};
 use types::UnionAll as _;
 use types::{Name, Relation, Type};
@@ -58,14 +58,10 @@ struct SiteProperty {
 /// instance starts there until a real write happens), but only an
 /// `ExprKind::Assign` node inside a method body ever records a fact, so a
 /// declaration-site default is otherwise invisible to this check.
-fn is_null_default(default: &Option<ExprNode>) -> bool {
-    matches!(
-        default,
-        Some(ExprNode {
-            kind: ExprKind::Literal(Literal::Null),
-            ..
-        })
-    )
+fn is_null_default(arenas: &NodeArenas, default: Option<ExprId>) -> bool {
+    default
+        .and_then(|id| arenas.expr(id))
+        .is_some_and(|expr| matches!(&expr.kind, ExprKind::Literal(Literal::Null)))
 }
 
 impl<'a> Checker<'a> {
@@ -75,6 +71,7 @@ impl<'a> Checker<'a> {
     /// in a loop body) is recorded once.
     pub(crate) fn record_property_type_site(
         &mut self,
+        arenas: &NodeArenas,
         fqn: &str,
         writers: Vec<Name>,
         c: &ClassDef,
@@ -87,7 +84,7 @@ impl<'a> Checker<'a> {
             .filter_map(|writer| self.registry.class(writer.as_ref()).map(|(id, _, _)| id))
             .collect();
         let properties: Vec<SiteProperty> = c
-            .properties
+            .properties(arenas)
             .iter()
             .filter_map(|p| {
                 let sig = self.registry.lookup_property(fqn, p.name.as_ref())?;
@@ -109,7 +106,7 @@ impl<'a> Checker<'a> {
                     properties_by_writer,
                     declared: sig.ty().clone(),
                     span: p.span,
-                    null_default: is_null_default(&p.default),
+                    null_default: is_null_default(arenas, p.default),
                     is_static: sig.is_static(),
                 })
             })

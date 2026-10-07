@@ -40,6 +40,7 @@ impl<'a> Checker<'a> {
     /// normally, since `isset()`/`??` don't evaluate quietly past one.
     pub(crate) fn check_expr_quiet_root(
         &mut self,
+        arenas: &NodeArenas,
         e: &ExprNode,
         locals: &mut Locals,
         label: &str,
@@ -58,14 +59,23 @@ impl<'a> Checker<'a> {
                     Type::mixed()
                 }
                 ExprKind::Index(base, idx) => {
-                    self.check_expr_quiet_root(base, locals, label);
+                    let base = arenas
+                        .expr(*base)
+                        .expect("quiet index receiver belongs to its retained file owner");
+                    self.check_expr_quiet_root(arenas, base, locals, label);
                     if let Some(i) = idx {
+                        let i = arenas
+                            .expr(*i)
+                            .expect("quiet index key belongs to its retained file owner");
                         self.check_expr(i, locals, label);
                     }
                     Type::mixed()
                 }
                 ExprKind::PropertyAccess(base, prop, _) => {
-                    self.check_expr_quiet_root(base, locals, label);
+                    let base = arenas
+                        .expr(*base)
+                        .expect("quiet property receiver belongs to its retained file owner");
+                    self.check_expr_quiet_root(arenas, base, locals, label);
                     // Opt-in `checkDynamicProperties` strict mode - real
                     // PHPStan's
                     // lenient default silently allows `isset($x->undefined)`
@@ -84,7 +94,7 @@ impl<'a> Checker<'a> {
                         }) {
                             self.report(
                                 format!("access to undefined property {base_ty}::${prop}"),
-                                e.span,
+                                self.expr_span(e.id),
                                 2,
                                 "property.notFound",
                             );
@@ -93,7 +103,13 @@ impl<'a> Checker<'a> {
                     Type::mixed()
                 }
                 ExprKind::DynamicPropertyAccess(base, name_expr, _) => {
-                    self.check_expr_quiet_root(base, locals, label);
+                    let base = arenas.expr(*base).expect(
+                        "quiet dynamic-property receiver belongs to its retained file owner",
+                    );
+                    let name_expr = arenas
+                        .expr(*name_expr)
+                        .expect("quiet dynamic-property name belongs to its retained file owner");
+                    self.check_expr_quiet_root(arenas, base, locals, label);
                     self.check_expr(name_expr, locals, label);
                     Type::mixed()
                 }
@@ -154,7 +170,7 @@ impl<'a> Checker<'a> {
         };
         self.report(
             format!("Variable ${name} {operator_description} always exists and {verdict}."),
-            e.span,
+            self.expr_span(e.id),
             0,
             format!("{identifier_prefix}.variable"),
         );
@@ -179,11 +195,13 @@ impl<'a> Checker<'a> {
     /// would be.
     fn resolve_always_exists(
         &mut self,
-        e: &ExprNode,
+        arenas: &NodeArenas,
+        id: ExprId,
         locals: &Locals,
         identifier_prefix: &str,
         operator_description: &str,
     ) -> Option<Type> {
+        let e = arenas.expr(id)?;
         syntax::stack::guard(|| {
             match &e.kind {
                 ExprKind::Variable(name) => {
@@ -196,10 +214,12 @@ impl<'a> Checker<'a> {
                     locals.get_var(name).cloned()
                 }
                 ExprKind::Index(base, Some(idx)) => {
-                    let key = literal_string_key(idx)?;
-                    let shape_key = crate::checker::literal_shape_key(idx)?;
+                    let idx = arenas.expr(*idx)?;
+                    let key = literal_string_key(arenas, idx)?;
+                    let shape_key = crate::checker::literal_shape_key(arenas, idx)?;
                     let base_ty = self.resolve_always_exists(
-                        base,
+                        arenas,
+                        *base,
                         locals,
                         identifier_prefix,
                         operator_description,
@@ -217,7 +237,7 @@ impl<'a> Checker<'a> {
                             format!(
                                 "Offset '{key}' on {base_ty} {operator_description} does not exist."
                             ),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             format!("{identifier_prefix}.offset"),
                         );
@@ -230,7 +250,8 @@ impl<'a> Checker<'a> {
                 }
                 ExprKind::PropertyAccess(base, prop, _) => {
                     let base_ty = self.resolve_always_exists(
-                        base,
+                        arenas,
+                        *base,
                         locals,
                         identifier_prefix,
                         operator_description,
@@ -266,6 +287,7 @@ impl<'a> Checker<'a> {
     /// just double-report.
     pub(crate) fn check_pointless_offset_or_property_probe(
         &mut self,
+        arenas: &NodeArenas,
         e: &ExprNode,
         locals: &Locals,
         identifier_prefix: &str,
@@ -275,9 +297,13 @@ impl<'a> Checker<'a> {
         if !matches!(&e.kind, ExprKind::Index(..) | ExprKind::PropertyAccess(..)) {
             return;
         }
-        let Some(leaf_ty) =
-            self.resolve_always_exists(e, locals, identifier_prefix, operator_description)
-        else {
+        let Some(leaf_ty) = self.resolve_always_exists(
+            arenas,
+            e.id,
+            locals,
+            identifier_prefix,
+            operator_description,
+        ) else {
             return;
         };
         let Some(verdict) = verdict_fn(&leaf_ty) else {
@@ -288,19 +314,28 @@ impl<'a> Checker<'a> {
                 // `resolve_always_exists` only ever returns `Some` here
                 // once `literal_string_key(idx)` already succeeded once -
                 // safe to redo, `idx` itself hasn't changed.
-                let Some(key) = literal_string_key(idx) else {
+                let Some(idx) = arenas.expr(*idx) else {
+                    return;
+                };
+                let Some(key) = literal_string_key(arenas, idx) else {
+                    return;
+                };
+                let Some(base) = arenas.expr(*base) else {
                     return;
                 };
                 let base_ty = self.infer_expr(base, locals);
                 self.report(format!(
                         "Offset '{key}' on {base_ty} {operator_description} always exists and {verdict}."
                     ),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     format!("{identifier_prefix}.offset"),
                 );
             }
             ExprKind::PropertyAccess(base, prop, _) => {
+                let Some(base) = arenas.expr(*base) else {
+                    return;
+                };
                 let base_ty = self.infer_expr(base, locals);
                 // Real PHPStan's own `PropertyDescriptor::describeProperty`
                 // also distinguishes "fetched on a narrower type than the
@@ -317,7 +352,7 @@ impl<'a> Checker<'a> {
                     format!(
                         "Property {owner}::${prop} ({leaf_ty}) {operator_description} {verdict}."
                     ),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     format!("{identifier_prefix}.property"),
                 );
@@ -345,6 +380,7 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_constant_loose_comparison(
         &mut self,
+        arenas: &NodeArenas,
         op: &BinOp,
         l: &ExprNode,
         r: &ExprNode,
@@ -355,8 +391,8 @@ impl<'a> Checker<'a> {
         // The operator first: the operand walks cost the whole subtree.
         if !matches!(op, BinOp::Eq | BinOp::NotEq)
             || self.loop_depth > 0
-            || expr_reads_a_property(l)
-            || expr_reads_a_property(r)
+            || expr_reads_a_property(arenas, l.id)
+            || expr_reads_a_property(arenas, r.id)
         {
             return;
         }
@@ -421,6 +457,7 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_strict_comparison_of_different_types(
         &mut self,
+        arenas: &syntax::ast::NodeArenas,
         op: &BinOp,
         l: &ExprNode,
         r: &ExprNode,
@@ -436,8 +473,8 @@ impl<'a> Checker<'a> {
             || l_ty.is_never()
             || r_ty.is_never()
             || self.loop_depth > 0
-            || expr_reads_a_mutable_property(l)
-            || expr_reads_a_mutable_property(r)
+            || expr_reads_a_mutable_property(arenas, l.id)
+            || expr_reads_a_mutable_property(arenas, r.id)
         {
             return;
         }
@@ -499,6 +536,7 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_constant_numeric_comparison(
         &mut self,
+        arenas: &NodeArenas,
         op: &BinOp,
         l: &ExprNode,
         r: &ExprNode,
@@ -509,7 +547,10 @@ impl<'a> Checker<'a> {
         let Some(ordering) = ordering_op(op) else {
             return;
         };
-        if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
+        if self.loop_depth > 0
+            || expr_reads_a_property(arenas, l.id)
+            || expr_reads_a_property(arenas, r.id)
+        {
             return;
         }
         let rule_name = match ordering {
@@ -574,6 +615,7 @@ impl<'a> Checker<'a> {
     /// decided.
     pub(crate) fn check_impossible_type_check_call(
         &mut self,
+        arenas: &syntax::ast::NodeArenas,
         callee: &ExprNode,
         args: &[Arg],
         locals: &Locals,
@@ -583,11 +625,22 @@ impl<'a> Checker<'a> {
         let ExprKind::Name(name) = &callee.kind else {
             return;
         };
-        let name = name.trim_start_matches('\\');
-        let Some(outcome) = self.type_check_call_outcome(name, args, locals) else {
+        let Some(name) = self
+            .syntax_arenas()
+            .and_then(|arenas| arenas.qualified_name(name))
+        else {
             return;
         };
-        let arg_ty = self.infer_expr(&args[0].value, locals);
+        let name = name.trim_start_matches('\\');
+        let Some(outcome) = self.type_check_call_outcome(arenas, name, args, locals) else {
+            return;
+        };
+        let arg_ty = self.infer_expr(
+            arenas
+                .expr(args[0].value)
+                .expect("type-check argument belongs to its retained file owner"),
+            locals,
+        );
         if !outcome {
             self.report(
                 format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
@@ -610,6 +663,7 @@ impl<'a> Checker<'a> {
     /// `false` when none does, `None` otherwise.
     pub(crate) fn type_check_call_outcome(
         &self,
+        arenas: &syntax::ast::NodeArenas,
         name: &str,
         args: &[Arg],
         locals: &Locals,
@@ -638,7 +692,12 @@ impl<'a> Checker<'a> {
         // two produced a real false `function.alreadyNarrowedType` on
         // exactly this shape during this check's own corpus-style
         // regression pass.
-        let arg_ty = self.infer_expr(&single_arg.value, locals);
+        let arg_ty = self.infer_expr(
+            arenas
+                .expr(single_arg.value)
+                .expect("type-check argument belongs to its retained file owner"),
+            locals,
+        );
         if arg_ty.is_mixed() || arg_ty.is_never() {
             return None;
         }
@@ -665,26 +724,37 @@ impl<'a> Checker<'a> {
 /// exists for (`$status === Status::A`) from ever firing at all -
 /// caught by this check's own manual verification pass, not a test
 /// written in advance of knowing this gap existed.
-fn expr_reads_a_mutable_property(e: &ExprNode) -> bool {
-    let e = e.peeled();
+fn expr_reads_a_mutable_property(arenas: &NodeArenas, id: ExprId) -> bool {
+    let id = arenas
+        .peeled(id)
+        .expect("mutable-property expression belongs to its retained file owner");
+    let e = arenas
+        .expr(id)
+        .expect("peeled mutable-property expression belongs to its retained file owner");
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::StaticPropertyFetch(..) => true,
         ExprKind::Call(callee, args) => {
-            expr_reads_a_mutable_property(callee)
-                || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
+            expr_reads_a_mutable_property(arenas, *callee)
+                || arenas
+                    .args(args.clone())
+                    .iter()
+                    .any(|a| expr_reads_a_mutable_property(arenas, a.value))
         }
         ExprKind::MethodCall(base, _, args, _) => {
-            expr_reads_a_mutable_property(base)
-                || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
+            expr_reads_a_mutable_property(arenas, *base)
+                || arenas
+                    .args(args.clone())
+                    .iter()
+                    .any(|a| expr_reads_a_mutable_property(arenas, a.value))
         }
         ExprKind::Binary(_, l, r) => {
-            expr_reads_a_mutable_property(l) || expr_reads_a_mutable_property(r)
+            expr_reads_a_mutable_property(arenas, *l) || expr_reads_a_mutable_property(arenas, *r)
         }
-        ExprKind::Unary(_, inner) => expr_reads_a_mutable_property(inner),
+        ExprKind::Unary(_, inner) => expr_reads_a_mutable_property(arenas, *inner),
         ExprKind::Index(base, idx) => {
-            expr_reads_a_mutable_property(base)
-                || idx.as_deref().is_some_and(expr_reads_a_mutable_property)
+            expr_reads_a_mutable_property(arenas, *base)
+                || idx.is_some_and(|idx| expr_reads_a_mutable_property(arenas, idx))
         }
         _ => false,
     })

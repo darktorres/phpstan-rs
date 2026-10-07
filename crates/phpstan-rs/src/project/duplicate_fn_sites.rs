@@ -54,8 +54,8 @@ impl DuplicateFunctionSites {
         self.sites.entry(fqn).or_default().push(FnDeclSite {
             path: path.to_path_buf(),
             span: f.name.span,
-            param_hints: f
-                .params
+            param_hints: arenas
+                .params(f.params.clone())
                 .iter()
                 .map(|p| p.type_hint.as_ref().map(|hint| hint.to_string_with(arenas)))
                 .collect(),

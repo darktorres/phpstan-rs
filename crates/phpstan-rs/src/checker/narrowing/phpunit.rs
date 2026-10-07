@@ -66,9 +66,13 @@ impl<'a> Checker<'a> {
         let Some((name, sig, args)) = self.phpunit_method(e, locals) else {
             return;
         };
-        let resolved = resolve_call_args(args, sig.params());
+        let arenas = self
+            .syntax_arenas()
+            .expect("PHPUnit assertion arguments retain their parsed file owner");
+        let resolved = resolve_call_args(arenas, args, sig.params());
         let arg = |i: usize| resolved.get(i).copied().flatten();
-        let Some((value, check, holds)) = self.assertion_check(&name, sig, &arg, locals) else {
+        let Some((value, check, holds)) = self.assertion_check(&name, sig, &resolved, locals)
+        else {
             return;
         };
         self.apply_check(value, &check, holds, locals);
@@ -84,33 +88,41 @@ impl<'a> Checker<'a> {
     /// A call's PHPUnit method or function: its lowercase name, signature
     /// and arguments.
     fn phpunit_method<'e>(
-        &self,
-        e: &'e ExprNode,
+        &'e self,
+        e: &ExprNode,
         locals: &Locals,
     ) -> Option<(String, &'a FunctionReflection, &'e [Arg])> {
-        match &e.peeled().kind {
+        let arenas = self.syntax_arenas()?;
+        let e = arenas.expr(arenas.peeled(e.id)?)?;
+        match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
+                let recv = arenas.expr(*recv)?;
                 let recv_ty = self.infer_expr(recv, locals);
                 let (owner, sig) = self.find_method_owner(&recv_ty, method)?;
+                let args = arenas.args(args.clone());
                 owner
                     .eq_ignore_ascii_case(ASSERT)
-                    .then(|| (method.to_ascii_lowercase(), sig, args.as_slice()))
+                    .then(|| (method.to_ascii_lowercase(), sig, args))
             }
             ExprKind::StaticCall(target, method, args) => {
                 let class = self.infer_static_target_class(target, locals)?;
                 let (owner, sig) = self.lookup_method_with_owner(&class, method)?;
+                let args = arenas.args(args.clone());
                 owner
                     .eq_ignore_ascii_case(ASSERT)
-                    .then(|| (method.to_ascii_lowercase(), sig, args.as_slice()))
+                    .then(|| (method.to_ascii_lowercase(), sig, args))
             }
             ExprKind::Call(callee, args) => {
+                let callee = arenas.expr(*callee)?;
                 let ExprKind::Name(name) = &callee.kind else {
                     return None;
                 };
+                let name = arenas.qualified_name(name)?;
                 let (resolved, sig) = self.registry.resolve_function(name)?;
                 let lower = resolved.to_ascii_lowercase();
                 let bare = lower.strip_prefix(FUNCTIONS)?;
-                (!bare.contains('\\')).then(|| (bare.to_string(), sig, args.as_slice()))
+                let args = arenas.args(args.clone());
+                (!bare.contains('\\')).then(|| (bare.to_string(), sig, args))
             }
             _ => None,
         }
@@ -118,12 +130,13 @@ impl<'a> Checker<'a> {
 
     /// The value an assertion checks, the check, and whether it holds.
     fn assertion_check<'e>(
-        &self,
+        &'e self,
         name: &str,
         sig: &FunctionReflection,
-        arg: &dyn Fn(usize) -> Option<&'e ExprNode>,
+        resolved: &[Option<&'e ExprNode>],
         locals: &Locals,
     ) -> Option<(&'e ExprNode, Check<'e>, bool)> {
+        let arg = |i: usize| resolved.get(i).copied().flatten();
         if let Some(kind) = name.strip_prefix("assertisnot") {
             return Some((arg(0)?, Check::Type(is_kind_type(kind)?), false));
         }
@@ -138,9 +151,11 @@ impl<'a> Checker<'a> {
         };
         let non_empty_needle =
             |e: Option<&ExprNode>| e.is_some_and(|e| self.is_non_empty_string(e, locals));
-        let equal = |exact| Check::Equal {
-            expected: arg(0).expect("checked by the caller"),
-            exact,
+        let equal = |exact| -> Check<'e> {
+            Check::Equal {
+                expected: arg(0).expect("checked by the caller"),
+                exact,
+            }
         };
         Some(match name {
             "assertnull" => (arg(0)?, Check::Type(Type::null()), true),
@@ -261,13 +276,21 @@ impl<'a> Checker<'a> {
 
     /// An `assertThat` constraint built directly by one of `Assert`'s
     /// factories; `None` for any other expression.
-    fn constraint<'e>(&self, e: &'e ExprNode, locals: &Locals) -> Option<Check<'e>> {
+    fn constraint<'e>(&'e self, e: &ExprNode, locals: &Locals) -> Option<Check<'e>> {
         let (name, sig, args) = self.phpunit_method(e, locals)?;
-        let resolved = resolve_call_args(args, sig.params());
+        let arenas = self.syntax_arenas()?;
+        let resolved = resolve_call_args(arenas, args, sig.params());
         let arg = |i: usize| resolved.get(i).copied().flatten();
         let parts = |locals: &Locals| -> Option<Vec<Check<'e>>> {
             args.iter()
-                .map(|a| (!a.spread).then(|| self.constraint(&a.value, locals))?)
+                .map(|a| {
+                    (!a.spread).then(|| {
+                        let value = arenas
+                            .expr(a.value)
+                            .expect("constraint argument belongs to its retained file owner");
+                        self.constraint(value, locals)
+                    })?
+                })
                 .collect()
         };
         Some(match name.as_str() {
@@ -275,7 +298,7 @@ impl<'a> Checker<'a> {
             "isfalse" => Check::Type(Type::bool_literal(false)),
             "isnull" => Check::Type(Type::null()),
             "istype" => {
-                let kind = literal_string_value(arg(0)?)?;
+                let kind = literal_string_value(arenas, arg(0)?.id)?;
                 Check::Type(native_type(&kind)?)
             }
             "isinstanceof" => {
@@ -378,7 +401,7 @@ impl<'a> Checker<'a> {
 
     /// Narrows `value` by `check` having held (`holds`) or failed.
     fn apply_check(&self, value: &ExprNode, check: &Check<'_>, holds: bool, locals: &mut Locals) {
-        let key = locals.key_of(value);
+        let key = self.key_of_expr(locals, value);
         let narrow_value = |locals: &mut Locals, f: &dyn Fn(&Type) -> Option<Type>| {
             if let Some(key) = key {
                 let current = self.current_narrowed_type(value, key, locals);
@@ -469,7 +492,9 @@ impl<'a> Checker<'a> {
                 }
             }
             Check::HasProperty(name) if holds => {
-                let property = literal_string_value(name);
+                let property = self
+                    .syntax_arenas()
+                    .and_then(|arenas| literal_string_value(arenas, name.id));
                 narrow_value(locals, &|current| {
                     let object = match &property {
                         Some(p) => Type::intersection_of(vec![

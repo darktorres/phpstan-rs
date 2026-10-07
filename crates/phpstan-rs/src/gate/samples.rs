@@ -465,27 +465,27 @@ pub fn runtime_calls(registry: &Registry, files: &[(&str, &str)]) -> String {
             continue;
         };
         let mut found = Declared::default();
-        syntax::visit::walk_stmts(&mut found, &parsed.stmts);
+        syntax::visit::arena::walk_stmts(&mut found, &parsed.arenas, parsed.statements());
         let asserts = |span: syntax::span::Span| {
             source
                 .get(span.start as usize..span.end as usize)
                 .is_some_and(|text| text.contains("assert"))
         };
-        for function in &found.functions {
-            if !asserts(function.span) {
+        for (name, span) in &found.functions {
+            if !asserts(*span) {
                 continue;
             }
-            let name = function.fq_name().trim_start_matches('\\');
+            let name = name.trim_start_matches('\\');
             let Some(sig) = registry.lookup_function(name) else {
                 continue;
             };
             php.push_str(&calls(&sampler, sig, &|args| format!("\\{name}({args})")));
         }
-        for (class, method) in &found.methods {
-            if method.is_abstract || !asserts(method.function.span) {
+        for method in &found.methods {
+            if method.is_abstract || !asserts(method.span) {
                 continue;
             }
-            let name = &method.function.name;
+            let (class, name) = (&method.class, &method.name);
             let Some(sig) = registry.lookup_method(class, name) else {
                 continue;
             };
@@ -570,31 +570,59 @@ fn calls(
 /// The functions and the methods of the classes a file declares, outside
 /// any function's body.
 #[derive(Default)]
-struct Declared<'ast> {
-    functions: Vec<&'ast syntax::ast::FunctionDecl>,
-    methods: Vec<(String, &'ast syntax::ast::MethodDecl)>,
+struct Declared {
+    functions: Vec<(String, syntax::span::Span)>,
+    methods: Vec<MethodSample>,
 }
 
-impl<'ast> syntax::visit::Visitor<'ast> for Declared<'ast> {
-    fn visit_stmt(&mut self, stmt: &'ast syntax::ast::StmtNode) {
+struct MethodSample {
+    class: String,
+    name: String,
+    span: syntax::span::Span,
+    is_abstract: bool,
+    is_static: bool,
+    visibility: syntax::ast::Visibility,
+}
+
+impl syntax::visit::arena::Visitor for Declared {
+    fn visit_stmt(&mut self, arenas: &syntax::ast::NodeArenas, id: syntax::ast::StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         match &stmt.kind {
-            syntax::ast::StmtKind::FunctionDecl(function) => self.functions.push(function),
+            syntax::ast::StmtKind::FunctionDecl(function_id) => {
+                if let Some(function) = arenas.function(function_id.clone()) {
+                    self.functions
+                        .push((function.fq_name().to_string(), function.span));
+                }
+            }
             syntax::ast::StmtKind::ClassDecl(class) => {
+                let class = arenas.class_decl(class.clone());
+                let Some(def) = arenas.class(class.def) else {
+                    return;
+                };
                 if !matches!(
-                    class.def.kind,
+                    def.kind,
                     syntax::ast::ClassKind::Interface | syntax::ast::ClassKind::Trait
                 ) {
                     let name = class.fq_name().trim_start_matches('\\').to_string();
-                    for method in &class.def.methods {
-                        self.methods.push((name.clone(), method));
+                    for method in arenas.methods(def.methods.clone()) {
+                        self.methods.push(MethodSample {
+                            class: name.clone(),
+                            name: method.function.name.to_string(),
+                            span: method.function.span,
+                            is_abstract: method.is_abstract,
+                            is_static: method.is_static,
+                            visibility: method.visibility,
+                        });
                     }
                 }
             }
-            _ => syntax::visit::walk_stmt(self, stmt),
+            _ => syntax::visit::arena::walk_stmt(self, arenas, id),
         }
     }
 
-    fn visit_expr(&mut self, _: &'ast syntax::ast::ExprNode) {}
+    fn visit_expr(&mut self, _: &syntax::ast::NodeArenas, _: syntax::ast::ExprId) {}
 }
 
 #[cfg(test)]

@@ -103,6 +103,7 @@ impl Visitor for Initializers {
                 }
             }
             StmtKind::ClassDecl(c) => {
+                let c = arenas.class_decl(c.clone());
                 if let Some(def) = arenas.class(c.def) {
                     for k in def.consts(arenas) {
                         self.add(class_constant_key(&c.name, &k.name), k.value);
@@ -121,7 +122,7 @@ impl Visitor for Initializers {
         }
         if let ExprKind::Call(callee, args) = &e.kind
             && callee_name(arenas, *callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
-            && let [name_arg, value, ..] = arenas.args(*args)
+            && let [name_arg, value, ..] = arenas.args(args.clone())
             && let Some(ExprNode {
                 kind: ExprKind::Literal(Literal::String(name)),
                 ..
@@ -153,6 +154,7 @@ pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static st
 fn callee_name(arenas: &NodeArenas, id: ExprId) -> Option<&str> {
     match &arenas.expr(id)?.kind {
         ExprKind::Name(n) => {
+            let n = arenas.qualified_name(n)?;
             let (primary, fallback) = n.candidates();
             Some(fallback.unwrap_or(primary))
         }
@@ -204,11 +206,15 @@ impl<'a> Checker<'a> {
     fn file_constant_initializer(&self, arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
         let e = arenas.expr(id)?;
         let key = match &e.kind {
-            ExprKind::Name(n) if !(n.starts_with("__") && n.ends_with("__")) => {
+            ExprKind::Name(n) => {
+                let n = arenas.qualified_name(n)?;
+                if n.starts_with("__") && n.ends_with("__") {
+                    return None;
+                }
                 short_name(n).to_string()
             }
             ExprKind::ClassConstFetch(target, constant) => {
-                let class = target.as_name()?;
+                let class = target.as_name()?.written.as_ref();
                 let class = if ["self", "static"]
                     .iter()
                     .any(|k| class.eq_ignore_ascii_case(k))
@@ -242,10 +248,18 @@ impl<'a> Checker<'a> {
             match &e.kind {
                 // The platform's own separators - the paths are checked
                 // against this machine's filesystem.
-                ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {
+                ExprKind::Name(n)
+                    if arenas
+                        .qualified_name(n)
+                        .is_some_and(|n| n.trim_start_matches('\\') == "PATH_SEPARATOR") =>
+                {
                     Some(vec![":".to_string()])
                 }
-                ExprKind::Name(n) if n.trim_start_matches('\\') == "DIRECTORY_SEPARATOR" => {
+                ExprKind::Name(n)
+                    if arenas
+                        .qualified_name(n)
+                        .is_some_and(|n| n.trim_start_matches('\\') == "DIRECTORY_SEPARATOR") =>
+                {
                     Some(vec![std::path::MAIN_SEPARATOR.to_string()])
                 }
                 ExprKind::Call(callee, args)
@@ -255,12 +269,24 @@ impl<'a> Checker<'a> {
                 {
                     Some(vec![DEFAULT_INCLUDE_PATH.to_string()])
                 }
-                ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => Some(vec![
-                    self.current_dir_of_file()?.to_string_lossy().into_owned(),
-                ]),
-                ExprKind::Name(n) if n.eq_ignore_ascii_case("__FILE__") => Some(vec![
-                    self.current_file_absolute()?.to_string_lossy().into_owned(),
-                ]),
+                ExprKind::Name(n)
+                    if arenas
+                        .qualified_name(n)
+                        .is_some_and(|n| n.eq_ignore_ascii_case("__DIR__")) =>
+                {
+                    Some(vec![
+                        self.current_dir_of_file()?.to_string_lossy().into_owned(),
+                    ])
+                }
+                ExprKind::Name(n)
+                    if arenas
+                        .qualified_name(n)
+                        .is_some_and(|n| n.eq_ignore_ascii_case("__FILE__")) =>
+                {
+                    Some(vec![
+                        self.current_file_absolute()?.to_string_lossy().into_owned(),
+                    ])
+                }
                 ExprKind::Binary(BinOp::Concat, l, r) => {
                     let lefts = self.resolve_paths_at(arenas, *l, locals, depth)?;
                     let rights = self.resolve_paths_at(arenas, *r, locals, depth)?;
@@ -276,7 +302,7 @@ impl<'a> Checker<'a> {
                     if callee_name(arenas, *callee)
                         .is_some_and(|n| n.eq_ignore_ascii_case("dirname")) =>
                 {
-                    let [path_arg, rest @ ..] = arenas.args(*args) else {
+                    let [path_arg, rest @ ..] = arenas.args(args.clone()) else {
                         return None;
                     };
                     let levels = match rest {
@@ -448,7 +474,7 @@ impl Visitor for GuardArgs<'_> {
                 && let Some(name) = callee_name(arenas, *callee)
             {
                 let is = |wanted: &str| name.eq_ignore_ascii_case(wanted);
-                match arenas.args(*args) {
+                match arenas.args(args.clone()) {
                     [arg, ..] if GUARD_FUNCTIONS.iter().any(|f| is(f)) => {
                         (self.0)(IncludeCall::Guard(arg.value))
                     }

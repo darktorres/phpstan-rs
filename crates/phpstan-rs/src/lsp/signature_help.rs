@@ -77,8 +77,10 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: u32) -> Option<Sig
     let ast = project.ast_of(path)?;
     let stmts = ast.statements();
     let arenas = ast.arenas();
+    let syntax_owner = ast.parsed_file_for_completion();
     let mut w = Walker {
         registry: project.registry(),
+        syntax_owner,
         pos,
         top_level_stmts: stmts.to_vec(),
         current_function: None,
@@ -109,6 +111,7 @@ fn active_parameter(arenas: &NodeArenas, args: &[Arg], pos: u32) -> usize {
 
 struct Walker<'a> {
     registry: &'a Registry,
+    syntax_owner: std::sync::Arc<syntax::ParsedFile>,
     pos: u32,
     top_level_stmts: Vec<StmtId>,
     current_function: Option<FunctionDecl>,
@@ -124,8 +127,14 @@ struct Walker<'a> {
 impl Walker<'_> {
     fn probe_scope(&self) -> ProbeScope {
         match &self.current_function {
-            Some(f) => ProbeScope::Function(Box::new(f.clone())),
-            None => ProbeScope::TopLevel(self.top_level_stmts.clone()),
+            Some(f) => ProbeScope::Function {
+                function: Box::new(f.clone()),
+                owner: Some(std::sync::Arc::clone(&self.syntax_owner)),
+            },
+            None => ProbeScope::TopLevel {
+                statements: self.top_level_stmts.clone(),
+                owner: Some(std::sync::Arc::clone(&self.syntax_owner)),
+            },
         }
     }
 
@@ -183,45 +192,76 @@ impl Visitor for Walker<'_> {
         let Some(expr) = arenas.expr(id) else {
             return;
         };
+        let expr_span = arenas
+            .expr_span(id)
+            .expect("signature-help expression has a parallel span");
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {
-                    let callee_node = arenas.expr(*callee);
+                    let callee_node = arenas.expr(callee.clone());
                     let target = match callee_node.map(|callee| &callee.kind) {
-                        Some(ExprKind::Name(n)) => self
-                            .registry
-                            .resolve_function(n)
+                        Some(ExprKind::Name(n)) => arenas
+                            .qualified_name(n)
+                            .and_then(|n| self.registry.resolve_function(n))
                             .map(|(fqn, _)| Target::Function(fqn.to_string())),
                         _ => None,
                     };
-                    let boundary = callee_node.map_or(expr.span.start, |callee| callee.span.end);
-                    self.offer(arenas, expr.span, boundary, arenas.args(*args), target);
+                    let boundary = callee_node.map_or(expr_span.start, |callee| {
+                        arenas
+                            .expr_span(callee.id)
+                            .expect("callee expression has a parallel span")
+                            .end
+                    });
+                    self.offer(
+                        arenas,
+                        expr_span,
+                        boundary,
+                        arenas.args(args.clone()),
+                        target,
+                    );
                 }
                 ExprKind::New(callee, args) => {
-                    let callee_node = arenas.expr(*callee);
+                    let callee_node = arenas.expr(callee.clone());
                     let target = match callee_node.map(|callee| &callee.kind) {
-                        Some(ExprKind::Name(n)) => {
-                            resolve_class_ref(n, self.current_class.as_deref(), self.registry)
-                                .filter(|fqn| {
-                                    self.registry
-                                        .lookup_method_with_owner(fqn, "__construct")
-                                        .is_some()
-                                })
-                                .map(Target::Constructor)
-                        }
+                        Some(ExprKind::Name(n)) => arenas
+                            .qualified_name(n)
+                            .and_then(|n| {
+                                resolve_class_ref(n, self.current_class.as_deref(), self.registry)
+                            })
+                            .filter(|fqn| {
+                                self.registry
+                                    .lookup_method_with_owner(fqn, "__construct")
+                                    .is_some()
+                            })
+                            .map(Target::Constructor),
                         _ => None,
                     };
-                    let boundary = callee_node.map_or(expr.span.start, |callee| callee.span.end);
-                    self.offer(arenas, expr.span, boundary, arenas.args(*args), target);
+                    let boundary = callee_node.map_or(expr_span.start, |callee| {
+                        arenas
+                            .expr_span(callee.id)
+                            .expect("callee expression has a parallel span")
+                            .end
+                    });
+                    self.offer(
+                        arenas,
+                        expr_span,
+                        boundary,
+                        arenas.args(args.clone()),
+                        target,
+                    );
                 }
                 ExprKind::MethodCall(recv, method, args, _) => {
-                    let recv_node = arenas.expr(*recv);
+                    let recv_node = arenas.expr(recv.clone());
                     let target = match &self.current_class {
                         Some(owner) if matches!(recv_node.map(|recv| &recv.kind), Some(ExprKind::Variable(v)) if *v == "this") => {
                             Target::Member(owner.clone(), method.to_string())
                         }
                         _ => Target::Instance {
-                            receiver_span: recv_node.map_or(expr.span, |recv| recv.span),
+                            receiver_span: recv_node.map_or(expr_span, |recv| {
+                                arenas
+                                    .expr_span(recv.id)
+                                    .expect("receiver expression has a parallel span")
+                            }),
                             member: method.to_string(),
                             scope: self.probe_scope(),
                             is_static: self.current_is_static,
@@ -230,24 +270,29 @@ impl Visitor for Walker<'_> {
                     };
                     self.offer(
                         arenas,
-                        expr.span,
+                        expr_span,
                         method.span.end,
-                        arenas.args(*args),
+                        arenas.args(args.clone()),
                         Some(target),
                     );
                 }
                 // A dynamic name has no signature to offer.
                 ExprKind::DynamicStaticCall(_, _, args)
                 | ExprKind::DynamicMethodCall(_, _, args, _) => {
-                    self.offer(arenas, expr.span, expr.span.start, arenas.args(*args), None);
+                    self.offer(
+                        arenas,
+                        expr_span,
+                        expr_span.start,
+                        arenas.args(args.clone()),
+                        None,
+                    );
                 }
                 ExprKind::NewAnonymousClass(class_id) => {
-                    let Some(class) = arenas.anonymous_class(*class_id) else {
+                    let Some(class) = arenas.anonymous_class(class_id.clone()) else {
                         return;
                     };
-                    let target = class
-                        .name
-                        .as_ref()
+                    let target = arenas
+                        .anonymous_class_name(*class_id)
                         .filter(|name| {
                             self.registry
                                 .lookup_method_with_owner(name, "__construct")
@@ -256,15 +301,17 @@ impl Visitor for Walker<'_> {
                         .map(|name| Target::Constructor(name.to_string()));
                     self.offer(
                         arenas,
-                        expr.span,
-                        expr.span.start,
-                        arenas.args(class.args),
+                        expr_span,
+                        expr_span.start,
+                        arenas.args(class.args.clone()),
                         target,
                     );
-                    walk_args(self, arenas, class.args);
+                    walk_args(self, arenas, class.args.clone());
                     let previous = std::mem::replace(
                         &mut self.current_class,
-                        class.name.as_ref().map(|name| name.to_string()),
+                        arenas
+                            .anonymous_class_name(*class_id)
+                            .map(ToString::to_string),
                     );
                     if let Some(def) = arenas.class(class.def) {
                         walk_class_def(self, arenas, def);
@@ -282,9 +329,9 @@ impl Visitor for Walker<'_> {
                     let target = resolved.map(|fqn| Target::Member(fqn, member.to_string()));
                     self.offer(
                         arenas,
-                        expr.span,
+                        expr_span,
                         member.span.end,
-                        arenas.args(*args),
+                        arenas.args(args.clone()),
                         target,
                     );
                 }

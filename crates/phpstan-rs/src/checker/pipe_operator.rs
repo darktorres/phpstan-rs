@@ -23,7 +23,7 @@ impl<'a> Checker<'a> {
         self.report_builder(DiagnosticBuilder::new(
             "Parameter #1 of callable on the right side of pipe operator is passed by reference."
                 .to_string(),
-            rhs.span,
+            self.expr_span(rhs.id),
             0,
             "pipe.byRef",
         ));

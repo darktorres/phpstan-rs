@@ -21,9 +21,17 @@ impl<'a> Checker<'a> {
     /// default on an untyped property is still checked normally, against
     /// whatever type `ty`/`set_ty` resolved to (its own `@var` tag, or
     /// `Mixed` with none).
-    pub(crate) fn check_default_property_types(&mut self, fqn: &str, c: &ClassDef) {
-        for p in &c.properties {
-            let Some(default) = &p.default else {
+    pub(crate) fn check_default_property_types(
+        &mut self,
+        arenas: &NodeArenas,
+        fqn: &str,
+        c: &ClassDef,
+    ) {
+        for p in c.properties(arenas) {
+            let Some(default_id) = p.default else {
+                continue;
+            };
+            let Some(default) = arenas.expr(default_id) else {
                 continue;
             };
             let Some(prop_sig) = self.registry.lookup_property(fqn, p.name.as_ref()) else {
@@ -59,7 +67,7 @@ impl<'a> Checker<'a> {
                     "{kind} {fqn}::${} ({property_ty}) does not accept default value of type {default_ty}.",
                     p.name,
                 ),
-                default.span,
+                self.expr_span(default.id),
                 3,
                 "property.defaultValue",
             );

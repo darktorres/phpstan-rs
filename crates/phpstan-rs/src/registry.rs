@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::{Name, OrderedNameMap};
 
-use syntax::ast::StmtNode;
+use syntax::ast::{NodeArenas, StmtId};
 use types::Type;
 
 pub mod access_attributes;
@@ -1109,9 +1109,9 @@ impl Registry {
         }
     }
 
-    pub fn build(program: &[StmtNode]) -> Registry {
-        let mut registry = Registry::index_and_flatten(program, &Origin::Unknown);
-        registry.resolve_transitive_purity(&FileBodies::of(program));
+    pub fn build(arenas: &NodeArenas, program: &[StmtId]) -> Registry {
+        let mut registry = Registry::index_and_flatten(arenas, program, &Origin::Unknown);
+        registry.resolve_transitive_purity(&FileBodies::of(arenas, program));
         registry
     }
 
@@ -1122,9 +1122,13 @@ impl Registry {
     /// would wrongly mark every PHP built-in (`header()`, `exit()`, ...)
     /// as provably pure, baked permanently into the `LazyLock`-cached
     /// stub signatures every real project's registry later merges in.
-    pub(crate) fn index_and_flatten(program: &[StmtNode], origin: &Origin) -> Registry {
+    pub(crate) fn index_and_flatten(
+        arenas: &NodeArenas,
+        program: &[StmtId],
+        origin: &Origin,
+    ) -> Registry {
         let mut registry = Registry::default();
-        registry.index(program, origin, false);
+        registry.index(arenas, program, origin, false);
         registry.canonicalize_class_name_case();
         registry.flatten_traits();
         registry.resolve_method_tags();
@@ -1152,7 +1156,7 @@ impl Registry {
         registry.infer_global_variables(&[(
             crate::file_id::FileId::new(0),
             std::path::Path::new("<flattened>"),
-            &GlobalFacts::of(program),
+            &GlobalFacts::of(arenas, program),
         )]);
         registry.advance_relation_generation();
         registry

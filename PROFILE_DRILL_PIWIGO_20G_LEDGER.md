@@ -1,6 +1,6 @@
 # 20 G plan ledger
 
-Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), with tests-only gates at each item's V row and the complete §11 validation once after item 19, plus O3. A compound task is expanded into a parent row and child rows for each independently verifiable subtask before work on its item begins; atomic tasks stay as one row. Parent status summarizes its children. This decomposition covers the implementation work and each tests-only gate in items 9-19, the final O3 results and the deferred-work validation, including deferred subtasks. Items 10-19 were audited against the plan on 2026-10-07: every parent subtask reference resolves, and every item gate has separate workspace and item-specific test rows. A second granularity audit split independently verifiable deliverables in items 13-19 that were still bundled. The design of each row is in the plan, at the step or bullet the row names; this file holds the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table). The plan optimizes (§9, "Only what optimizes"): rows that change what the analysis finds beyond what the optimization needs are DEFERRED until after O3, where they stay in their item's place, and are built then as a plan of their own, validated by row D.V.
+Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), with tests-only gates at each item's V row and the complete §11 validation once after item 19, plus O3. A compound task is expanded into a parent row and child rows for each independently verifiable subtask before work on its item begins; atomic tasks stay as one row. Parent status summarizes its children. This decomposition covers the implementation work and each tests-only gate in items 9-19, the final §11 validation and O3 results, and the deferred-work validation, including deferred subtasks. Items 10-19 were audited against the plan on 2026-10-07: every parent subtask reference resolves, and every item gate has separate workspace and item-specific test rows. A second granularity audit split independently verifiable deliverables in items 13-19 that were still bundled. A follow-up audit added focused test selections for items 10-14 and 17, plus explicit final-only PHP, platform, server-session, cache and dump-oracle cases. The design of each row is in the plan, at the step or bullet the row names; this file holds the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table). The plan optimizes (§9, "Only what optimizes"): rows that change what the analysis finds beyond what the optimization needs are DEFERRED until after O3, where they stay in their item's place, and are built then as a plan of their own, validated by row D.V.
 
 Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
@@ -211,7 +211,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.3.f.c.a | same step | Resolve bare-completion import context and use insertion spans through the retained file arenas | — | perf | DONE (production path and unit tests use `context_at_ids`, statement IDs and `NodeArenas`; unvalidated.) |
 | 9.3.f.c.b | same step | Move member-completion receiver parsing and synthetic probe statements to an owner-backed parsed tree | — | perf | SKIP (requires the per-file synthetic-node scratch and completion-owned `ParsedFile` from 9.5.c/d; implemented and covered there.) |
 | 9.3.f.c.c | same step | Audit other LSP parser/test builders and confirm they keep their `ParsedProgram`/`ParsedFile` owner | — | perf | DONE (remaining `Parser::new` tooling tests retain `ParsedProgram`; no `into_kind` consumers remain.) |
-| 9.3.g | step 3 | Add and run parser/reader coverage at 9.V after implementation rows; verify IDs resolve only through their owner | — | val | OPEN (item gate not yet permitted) |
+| 9.3.g | step 3 | Add and run parser/reader coverage at 9.V after implementation rows; verify IDs resolve only through their owner | — | val | DONE (covered by the passing 9.V workspace gate; `.cargo-test-9V.log`, 2,127 tests across 30 executables) |
 | 9.4 | step 4 | Payloads as byte ranges; escaped literals decoded once into the file's byte vector | 9.2 | perf | DONE (unvalidated; source and decoded payload ranges, readers and coverage are implemented. Doc-byte parsing and identifier byte semantics remain explicitly deferred to items 14 and 15.) |
 | 9.4.a | step 4 | Doc comments and inline HTML refer to ranges in the retained source bytes | — | perf | DONE (unvalidated; doc comments and inline HTML are source-backed, with reader and parser-recording coverage added.) |
 | 9.4.a.a | same step | Store declaration and statement doc comments as source ranges, preserving doc grouping and recorded references | — | perf | DONE (unvalidated; see child rows 9.4.a.a.a-9.4.a.a.d) |
@@ -303,16 +303,33 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7.d | step 7 | Move kept arenas out at exact size; retain scratch capacity only for transient trees | — | perf | DONE (unvalidated; see 9.7.d.a-9.7.d.b.) |
 | 9.7.d.a | same step | Move every retained arena out at exact size | — | perf | DONE (733451be; retained parses shrink each node arena and span table before returning the tree.) |
 | 9.7.d.b | same step | Retain and reuse cleared list scratch capacity only for transient trees | — | perf | DONE (733451be; worker transient parses take and return the reusable NodeArenas bundle, including list scratch capacity.) |
-| 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN; see subtask rows 9.8.a-9.8.e |
-| 9.8.a | step 8 | Common expression and statement nodes store IDs/ranges/flags, with large variants out of line | — | perf | OPEN; see 9.8.a.a-9.8.a.b |
-| 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | OPEN; see 9.8.a.a.a-9.8.a.a.b |
-| 9.8.a.a.a | same step | Move qualified-name expression payloads, including `instanceof` names, out of common expression variants | — | perf | OPEN |
-| 9.8.a.a.b | same step | Review remaining expression variants and move any oversized payloads out of common nodes | — | perf | OPEN |
-| 9.8.a.b | same step | Keep common statement nodes small and move large statement payloads out of line | — | perf | OPEN; see 9.8.a.b.a-9.8.a.b.c |
-| 9.8.a.b.a | same step | Move `if`, `switch` and `try` payloads and their branch/case/catch lists out of statement nodes | — | perf | OPEN |
-| 9.8.a.b.b | same step | Move `declare`, `global` and `static` statement collections into typed owner ranges | — | perf | OPEN |
-| 9.8.a.b.c | same step | Review remaining statement variants and move any oversized payloads out of common nodes | — | perf | OPEN |
-| 9.8.b | step 8 | Keep expression and statement spans in parallel vectors, not in each node | — | perf | PART (spans are already parallel to IDs; node structs still also carry spans) |
+| 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | DONE (unvalidated; all subtask rows 9.8.a-9.8.e are implemented.) |
+| 9.8.a | step 8 | Common expression and statement nodes store IDs/ranges/flags, with large variants out of line | — | perf | DONE (unvalidated; expression and statement variant migrations are complete; held for 9.V.) |
+| 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | DONE (unvalidated; all expression children 9.8.a.a.a-.c are complete.) |
+| 9.8.a.a.a | same step | Move literal `instanceof` target names into the qualified-name owner arena | — | perf | DONE (unvalidated; targets use one-element `QualifiedNameRange`s and syntax, checker, navigation, dependency and project readers resolve through `NodeArenas`.) |
+| 9.8.a.a.b | same step | Move ordinary `ExprKind::Name` payloads into the qualified-name owner arena | — | perf | DONE (unvalidated; children 9.8.a.a.b.a-.e complete.) |
+| 9.8.a.a.b.a | same step | Change `ExprKind::Name` to hold an owner-arena range and migrate parser, visitor, canonical-tree and printer handling | — | perf | DONE (unvalidated; ordinary expression names store `QualifiedNameRange`; parser creators, static-target conversion, syntax visitor, canonical rendering, printer, declaration extraction and syntax tests resolve through `NodeArenas`.) |
+| 9.8.a.a.b.b | same step | Migrate checker and rule readers of ordinary expression names to resolve through `NodeArenas` | — | perf | DONE (unvalidated; checker and rule readers now resolve expression-name ranges through the retained owner arenas, including calls, builtins, narrowing, statements, PHPStan API, project-specific predicates and diagnostics.) |
+| 9.8.a.a.b.c | same step | Migrate registry, dependency and declaration readers of ordinary expression names to resolve through `NodeArenas` | — | perf | DONE (unvalidated; child rows 9.8.a.a.b.c.a-.c complete.) |
+| 9.8.a.a.b.c.a | same step | Migrate dependency collection and declaration discovery for owner-backed expression names | — | perf | DONE (unvalidated; syntax declaration extraction and dependency collection resolve expression-name ranges through the owner arena.) |
+| 9.8.a.a.b.c.b | same step | Migrate registry summary and call-graph readers for owner-backed expression names | — | perf | DONE (unvalidated; function and constructor call summaries, returned origins, class creation summaries and computed-variable call recognition resolve through the owner arena.) |
+| 9.8.a.a.b.c.c | same step | Migrate registry guards, globals, purity and reflection readers for owner-backed expression names | — | perf | DONE (unvalidated; guard, global-variable, purity and reflection-attribute readers resolve expression-name ranges through `NodeArenas`.) |
+| 9.8.a.a.b.d | same step | Migrate project and Composer readers of ordinary expression names to resolve through `NodeArenas` | — | perf | DONE (unvalidated; banned-construct, Composer-hygiene, use-site and generated-autoloader path readers resolve through their owner arenas.) |
+| 9.8.a.a.b.e | same step | Migrate language-server readers and parser/name-resolution tests for owner-backed expression names | — | perf | DONE (unvalidated; navigation, completion and signature-help readers resolve expression-name ranges through their syntax owner; parser/name-resolution tests do likewise.) |
+| 9.8.a.a.c | same step | Review remaining expression variants and move any oversized payloads out of common nodes | — | perf | DONE (unvalidated; remaining variants carry typed IDs/ranges, small flags/operators and compact `Ident`s; closures, anonymous classes and match arms are owner-backed, and `StaticTarget::Name` is already boxed. No additional oversized expression payload remains.) |
+| 9.8.a.b | same step | Keep common statement nodes small and move large statement payloads out of line | — | perf | DONE (unvalidated; if/switch/try and declare/global/static lists use typed owner ranges, and the remaining variant review is complete; held for 9.V.) |
+| 9.8.a.b.a | same step | Move `if`, `switch` and `try` payloads and their branch/case/catch lists out of statement nodes | — | perf | DONE (unvalidated; children 9.8.a.b.a.a-.c are complete.) |
+| 9.8.a.b.a.a | same step | Store `if` chains as compact fields and move `elseif` lists into typed owner ranges | — | perf | DONE (unvalidated; `IfStmt` now stores an `ElseIfRange`; `NodeArenas` owns, appends, clears and compacts the typed list, and syntax/checker/registry/project/LSP readers resolve it through the owner. Parser and fragment-range coverage added; held for 9.V.) |
+| 9.8.a.b.a.b | same step | Store `switch` payloads compactly and move case lists into typed owner ranges | — | perf | DONE (unvalidated; `StmtKind::Switch` now holds a `SwitchCaseRange`; parser construction, fragment lifecycle, canonical output, syntax visitors and checker/registry readers resolve cases through `NodeArenas`. Parser and fragment-range coverage added; held for 9.V.) |
+| 9.8.a.b.a.c | same step | Store `try` payloads compactly and move catch lists into typed owner ranges | — | perf | DONE (unvalidated; `StmtKind::Try` now stores a `CatchClauseRange`; parser construction, fragment lifecycle, canonical output, visitors and checker/registry readers resolve catches through `NodeArenas`. Catch-span and fragment-range coverage added; held for 9.V.) |
+| 9.8.a.b.b | same step | Move `declare`, `global` and `static` statement collections into typed owner ranges | — | perf | DONE (unvalidated; children 9.8.a.b.b.a-.c are complete.) |
+| 9.8.a.b.b.a | same step | Move `declare` directive pairs into a typed owner range | — | perf | DONE (unvalidated; directive pairs now use `DeclareDirectiveRange`, collected in reusable parser scratch and stored in `NodeArenas`; visitor, canonical, checker and parser readers resolve through the owner. Parser and fragment-range coverage added; held for 9.V.) |
+| 9.8.a.b.b.b | same step | Move `global` variable collections into a typed owner range | — | perf | DONE (unvalidated; `StmtKind::Global` now stores a `GlobalVarRange`; reusable parser scratch commits through `NodeArenas`, and syntax, checker, registry, project, dependency and LSP readers resolve the list through its owner. Parser and fragment-range coverage added; held for 9.V.) |
+| 9.8.a.b.b.c | same step | Move `static` variable declaration pairs into a typed owner range | — | perf | DONE (unvalidated; static declarations now use `StaticVarRange` and `StaticVarDecl`, built from reusable parser scratch and read through `NodeArenas` by visitor, checker, registry and LSP paths. Parser and fragment-range coverage added; held for 9.V.) |
+| 9.8.a.b.c | same step | Review remaining statement variants and move any oversized payloads out of common nodes | — | perf | DONE (unvalidated; namespace payloads now store compact `Name`s and class declarations store `ClassDeclRange`s in `NodeArenas`; parser, visitor, canonical, checker, registry, dependency, project, Composer, LSP and parser-test readers resolve through the owner. No remaining oversized statement payload found; held for 9.V.) |
+| 9.8.b | step 8 | Keep expression and statement spans in parallel vectors, not in each node | — | perf | DONE (unvalidated; both node structs now hold only ID and kind; spans live in owner side tables and all readers use those tables.) |
+| 9.8.b.a | same step | Remove `ExprNode::span` and migrate expression-span readers to the parallel span table | — | perf | DONE (unvalidated; `ExprNode` now stores only ID and kind; parsed, checker-synthetic and LSP-completion expression spans resolve through their owner span tables across parser, canonical, checker, registry, project, dependency and LSP readers.) |
+| 9.8.b.b | same step | Remove `StmtNode::span` and migrate statement-span readers to the parallel span table | — | perf | DONE (unvalidated; `StmtNode` now stores only ID and kind; parser and completion allocations write the parallel table; canonical, syntax, checker/rule, registry, project, dependency, gate, replay and test readers resolve spans from the owner.) |
 | 9.8.c | step 8 | Remove statement doc fields and resolve inline doc use by recorded doc-site offset | — | perf | DONE (unvalidated; statement nodes no longer carry doc fields; file-owned sites preserve text and source line by statement offset.) |
 | 9.8.c.a | same step | Remove statement doc fields and record doc sites by statement start offset | — | perf | DONE (unvalidated; parser records statement sites, including declaration statements whose attributes shift the statement start.) |
 | 9.8.c.b | same step | Migrate inline-doc readers to resolve the recorded site by offset | — | perf | DONE (unvalidated; checker inline-`@var`, doc validation, canonical printing and dependency fallback resolve through the owner arena.) |
@@ -320,19 +337,19 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.8.d.a | same step | Remove parameter doc fields and record parameter doc sites by offset | — | perf | DONE (unvalidated; finalized parameter docs are recorded after parser-time stub rewriting and `Param` no longer stores them.) |
 | 9.8.d.b | same step | Migrate parameter-doc readers to resolve sites by offset while retaining attributes | — | perf | DONE (unvalidated; checker, registry, property-promotion and dependency readers use owner sites; attributes remain in compact parameter nodes.) |
 | 9.8.e | step 8 | Keep attributes available in their compact node representation | — | perf | DONE (attributes already use owner-backed `AttributeRange`s, including parameters; no change required.) |
-| 9.V | §11 | Tests-only item gate: workspace tests plus item-specific tests, including 3.4's scratch-store tests; full §11 validation waits until item 19 | 9.8 | val | OPEN; see subtask rows 9.V.a-9.V.c |
-| 9.V.a | §11 | Run `cargo test --workspace` after every item 9 implementation row is complete | — | val | OPEN (must not run before 9.2/3.4, 9.3-9.8 are complete) |
-| 9.V.b | §11 | Run item-specific syntax, parser, visitor, cache and reader tests | — | val | OPEN |
-| 9.V.c | §11 | Run scratch reuse/error-path tests for row 3.4 | — | val | OPEN |
-| **10** | **item 10** | **Tokens in flat arrays** | | | |
-| 10.1 | Design | Whole-file lexing into a `TokenStream`: three cursors; per-worker buffers; `Token`, `Tok`, `Supply`, the `VecDeque` and `LexEnd`'s second pass go | 9.2 | perf | OPEN; see 10.1.a-10.1.d |
-| 10.1.a | same step | TokenStream stores kinds, spans, payloads, docs and lexer errors in aligned flat arrays | — | perf | OPEN |
-| 10.1.b | same step | Lexer fills the complete stream in one pass while recording file facts and ignore marks | — | perf | OPEN |
-| 10.1.c | same step | Parser reads with token, payload and doc cursors; remove `Token`, `Tok`, `Supply`, `VecDeque` and refill layers | — | perf | OPEN |
+| 9.V | §11 | Tests-only item gate: workspace tests plus item-specific tests, including 3.4's scratch-store tests; full §11 validation waits until item 19 | 9.8 | val | DONE (all workspace and item-specific tests pass; final-only §11 validation remains deferred to item 19) |
+| 9.V.a | §11 | Run `cargo test --workspace` after every item 9 implementation row is complete | — | val | DONE (`.cargo-test-9V.log`; 2,127 tests pass across 30 test executables; stub-index consistency passes) |
+| 9.V.b | §11 | Run item-specific syntax, parser, visitor, cache and reader tests | — | val | DONE (covered by the passing workspace test run) |
+| 9.V.c | §11 | Run scratch reuse/error-path tests for row 3.4 | — | val | DONE (covered by the passing workspace test run) |
+| **10** | **item 10** | **Tokens in flat arrays** | | | PAUSED (user requested item 9 profiling first; resume at 10.1) |
+| 10.1 | Design | Whole-file lexing into a `TokenStream`: three cursors; per-worker buffers; `Token`, `Tok`, `Supply`, the `VecDeque` and `LexEnd`'s second pass go | 9.2 | perf | PAUSED (10.1.a and parser cursor work are implemented but unvalidated; direct stream emission, buffer reuse and remaining reader migration are unfinished) |
+| 10.1.a | same step | TokenStream stores kinds, spans, payloads, docs and lexer errors in aligned flat arrays | — | perf | DONE (fieldless `TokenKind`, aligned arrays, sparse payload/doc entries and lexer metadata added; parser integration remains in 10.1.c) |
+| 10.1.b | same step | Lexer fills the complete stream in one pass while recording file facts and ignore marks | — | perf | PAUSED (current `lex_token_stream` still adapts legacy output; direct flat emission remains) |
+| 10.1.c | same step | Parser reads with token, payload and doc cursors; remove `Token`, `Tok`, `Supply`, `VecDeque` and refill layers | — | perf | PAUSED (primary parse path uses indexed TokenStream cursors; unvalidated) |
 | 10.1.d | same step | Reuse per-worker token, name-table and parser buffers between files, then release them at load end | — | perf | OPEN |
 | 10.2 | Names, literals | The lexer's name table maps bytes to `NameId`; escaped literals go into the file's byte vector | 10.1 | perf | OPEN; see 10.2.a-10.2.b |
-| 10.2.a | same step | Map each distinct identifier byte spelling to the file-owned `NameId` through a reusable lexer table | — | perf | OPEN |
-| 10.2.b | same step | Decode escaped literals once into file bytes and represent strings/HTML by source or decoded-byte ranges | — | perf | OPEN |
+| 10.2.a | same step | Map each distinct identifier byte spelling to the file-owned `NameId` through a reusable lexer table | — | perf | OPEN (file-owned `NameId` mapping exists from item 9; reusable lexer table remains in 10.1.d) |
+| 10.2.b | same step | Decode escaped literals once into file bytes and represent strings/HTML by source or decoded-byte ranges | — | perf | DONE (implemented under 9.4.a/b/c; the 9.V workspace gate passes) |
 | 10.3 | halt | `__halt_compiler` ends the stream where the parse ends today, after its three tokens, with the offset recorded | 10.1 | perf | OPEN; see 10.3.a-10.3.b |
 | 10.3.a | same step | Stop lexing after `__halt_compiler` and its three following tokens where current parsing stops | — | perf | OPEN |
 | 10.3.b | same step | Record the binary-data start offset and keep current parser acceptance behavior | — | perf | OPEN |
@@ -362,10 +379,11 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 10.9.d | same step | Replace test token constructors with `Parser::new(TokenStream)` | — | perf | OPEN |
 | 10.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 10.9 | val | OPEN; see 10.V.a-10.V.b |
 | 10.V.a | same gate | Run `cargo test --workspace` after item 10 implementation rows are complete | — | val | OPEN |
-| 10.V.b | same gate | Run item-specific token-stream, lexer and parser tests | — | val | OPEN; see 10.V.b.a-10.V.b.c |
+| 10.V.b | same gate | Run item-specific token-stream, lexer and parser and Phar-stub tests | — | val | OPEN; see 10.V.b.a-10.V.b.d |
 | 10.V.b.a | same gate | Run TokenStream layout, cursor and buffer-reuse tests | — | val | OPEN |
 | 10.V.b.b | same gate | Run lexer token, payload, documentation and interpolation tests | — | val | OPEN |
 | 10.V.b.c | same gate | Run parser cursor, interpolation and current halt-position tests | — | val | OPEN |
+| 10.V.b.d | same gate | Run token-stream and payload tests against Phar stubs | — | val | OPEN |
 | **11** | **item 11** | **Line starts, columns, offsets** | | | |
 | 11.1 | step 1 | `LineStarts` for every file, `LineIndex` for analysed files and open documents; `enum Lines` in `FileState` | — | perf | OPEN; see 11.1.a-11.1.c |
 | 11.1.a | same step | Build exact-size `LineStarts` for every file using per-worker scratch | — | perf | OPEN |
@@ -393,11 +411,13 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 11.7.d | same step | Derive anonymous-class lines from `LineStarts` on the worker | — | perf | OPEN |
 | 11.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 11.7 | val | OPEN; see 11.V.a-11.V.b |
 | 11.V.a | same gate | Run `cargo test --workspace` after item 11 implementation rows are complete | — | val | OPEN |
-| 11.V.b | same gate | Run item-specific line-start, line-index, column and cache tests | — | val | OPEN; see 11.V.b.a-11.V.b.d |
+| 11.V.b | same gate | Run item-specific line-start, line-index, column, LSP and cache tests | — | val | OPEN; see 11.V.b.a-11.V.b.f |
 | 11.V.b.a | same gate | Run line-break and exact-size `LineStarts` tests | — | val | OPEN |
 | 11.V.b.b | same gate | Run `LineIndex` column and offset tests | — | val | OPEN |
 | 11.V.b.c | same gate | Run context-file and open-document line-data tests | — | val | OPEN |
 | 11.V.b.d | same gate | Run cache representation tests for `LineStarts` | — | val | OPEN |
+| 11.V.b.e | same gate | Run UTF-8 and UTF-16 column round-trip tests on multibyte and astral text | — | val | OPEN |
+| 11.V.b.f | same gate | Run language-server position tests for line starts, columns and offsets | — | val | OPEN |
 | **12** | **item 12** | **Lexer details** | | | |
 | 12.1 | step 1 | The identifier lookup inlined; watch bits cached with each name in the cross-file cache | 10.2 | perf | OPEN; see 12.1.a-12.1.b |
 | 12.1.a | same step | Inline identifier lookup in the identifier lexer arm with a length-first probe | — | perf | OPEN |
@@ -443,9 +463,13 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 12.13.c | same step | Report the short-open-tag result when the setting is unknown | — | check | DEFERRED (after O3, not optimization) |
 | 12.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 12.9 | val | OPEN; see 12.V.a-12.V.b |
 | 12.V.a | same gate | Run `cargo test --workspace` after item 12 implementation rows are complete | — | val | OPEN |
-| 12.V.b | same gate | Run item-specific lexer and token-classification tests for the implemented item 12 changes | — | val | OPEN; see 12.V.b.a-12.V.b.b |
+| 12.V.b | same gate | Run item-specific lexer, name-key, use-map and type-name tests for implemented item 12 changes | — | val | OPEN; see 12.V.b.a-12.V.b.f |
 | 12.V.b.a | same gate | Run identifier, keyword, blank-run and operator lexer tests | — | val | OPEN |
 | 12.V.b.b | same gate | Run qualified-name and numeric-literal tests | — | val | OPEN |
+| 12.V.b.c | same gate | Run cached name watch-bit and cross-file name-cache tests | — | val | OPEN |
+| 12.V.b.d | same gate | Run namespace/name constant-key hashing and equality tests | — | val | OPEN |
+| 12.V.b.e | same gate | Run `UseMap::get` tests for the validated-name UTF-8 invariant | — | val | OPEN |
+| 12.V.b.f | same gate | Run native type-name matching tests, including mixed-case names | — | val | OPEN |
 | **13** | **item 13** | **A file's products: the declaration list and one walk** | | | |
 | 13.1 | step 1 | The parser lists declarations, with today's guards. Entries are reserved in source order. Docs by today's rule, resolved in the entry's scope | 9.7, 10.1 | perf | OPEN; see 13.1.a-13.1.c |
 | 13.1.a | same step | Have the parser collect declarations in source order while reserving entries at discovery time | — | perf | OPEN; see 13.1.a.a-13.1.a.e |
@@ -486,10 +510,15 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 13.8.c | same step | Store declaration names as `Name` values | — | perf | OPEN |
 | 13.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 13.8 | val | OPEN; see 13.V.a-13.V.b |
 | 13.V.a | same gate | Run `cargo test --workspace` after item 13 implementation rows are complete | — | val | OPEN |
-| 13.V.b | same gate | Run item-specific declaration-list, shared-walk and file-product tests | — | val | OPEN; see 13.V.b.a-13.V.b.c |
+| 13.V.b | same gate | Run item-specific declaration-list, binding, shared-walk and file-product tests | — | val | OPEN; see 13.V.b.a-13.V.b.d |
 | 13.V.b.a | same gate | Run declaration-list construction and ordering tests | — | val | OPEN |
 | 13.V.b.b | same gate | Run shared traversal and builder-product tests | — | val | OPEN |
 | 13.V.b.c | same gate | Run body-slice, reference and per-file-product tests | — | val | OPEN |
+| 13.V.b.d | same gate | Run declaration binding and product tests for each declaration kind | — | val | OPEN; see 13.V.b.d.a-13.V.b.d.d |
+| 13.V.b.d.a | same gate | Run named class-like declaration binding tests | — | val | OPEN |
+| 13.V.b.d.b | same gate | Run function declaration binding tests | — | val | OPEN |
+| 13.V.b.d.c | same gate | Run constant and `define()` declaration product tests | — | val | OPEN |
+| 13.V.b.d.d | same gate | Run anonymous-class declaration and name-side-table tests | — | val | OPEN |
 | **14** | **item 14** | **PHPDoc finished** | | | |
 | 14.1 | step 8 | `syntax::memo::Memo` becomes the fingerprint-keyed memo: keyed SipHash-1-3-128 (`siphasher`, now direct) bounded by `quick_cache`'s weighted cache (new dependency); shard clearing goes | — | perf | OPEN; see 14.1.a-14.1.c |
 | 14.1.a | same step | Use keyed SipHash-1-3-128 fingerprints for memo keys | — | perf | OPEN |
@@ -547,11 +576,17 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 14.9.d | same step | Advance per-file and stub cache records and keys for serialized `DocType` subtrees and lowered types | 5.8 | perf | OPEN |
 | 14.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 14.9 | val | OPEN; see 14.V.a-14.V.b |
 | 14.V.a | same gate | Run `cargo test --workspace` after item 14 implementation rows are complete | — | val | OPEN |
-| 14.V.b | same gate | Run item-specific PHPDoc parsing, lowering, resolution and memo tests | — | val | OPEN; see 14.V.b.a-14.V.b.d |
+| 14.V.b | same gate | Run item-specific PHPDoc parsing, lowering, resolution, serialization and memo tests | — | val | OPEN; see 14.V.b.a-14.V.b.h |
 | 14.V.b.a | same gate | Run PHPDoc tokenization and single-parse tests | — | val | OPEN |
 | 14.V.b.b | same gate | Run eager type-lowering and serialized `DocType` tests | — | val | OPEN |
 | 14.V.b.c | same gate | Run context-sensitive resolution and tag-winner tests | — | val | OPEN |
-| 14.V.b.d | same gate | Run fingerprinted and weight-bounded memo tests | — | val | OPEN |
+| 14.V.b.d | same gate | Run fingerprinted and weight-bounded memo tests | — | val | OPEN; see 14.V.b.d.a-14.V.b.d.b |
+| 14.V.b.d.a | same gate | Run memo fingerprint equivalence tests, including equivalent wrapped-tag inputs | — | val | OPEN |
+| 14.V.b.d.b | same gate | Run memo weight-budget and eviction tests | — | val | OPEN |
+| 14.V.b.e | same gate | Run focused lowering equivalence tests comparing `lower(node)` with parsing its source rendering | — | val | OPEN |
+| 14.V.b.f | same gate | Run byte-class, byte-payload and logically wrapped-tag tests | — | val | OPEN |
+| 14.V.b.g | same gate | Run spelling-sensitive `TagEffect` and recorded-reference name tests | — | val | OPEN |
+| 14.V.b.h | same gate | Run per-file and stub-cache `DocType` serialization round-trip tests | — | val | OPEN |
 | **15** | **item 15** | **Names held as names, as bytes** | | | |
 | 15.1 | C3 step 7 | The checker's method memo and `class_memo` deleted | — | perf | OPEN; see subtask rows 15.1.a, 15.1.b |
 | 15.1.a | same step | Delete the checker’s string-keyed method memo | — | perf | OPEN |
@@ -693,18 +728,24 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.5.c.b.c | same step | Remove missing files through `remove_file` | — | perf | OPEN |
 | 17.5.c.b.d | same step | Reconcile file order and role changes | — | perf | OPEN |
 | 17.5.d | same step | Load the base in the language server | — | perf | OPEN |
-| 17.6 | Oracle | Tests written: the `stat` cases, the edit replay across two runs, the server loading from the base | 17.5 | infra | OPEN; see 17.6.a-17.6.d |
+| 17.6 | Oracle | Tests written: platform `stat` cases, each warm edit-replay case, and the server loading from the base | 17.5 | infra | OPEN; see 17.6.a-17.6.f |
 | 17.6.a | same step | Add fixtures for the `stat` cases | — | infra | OPEN |
-| 17.6.b | same step | Test an edit replay across two runs | — | infra | OPEN |
+| 17.6.b | same step | Test the edit replay across two runs | — | infra | OPEN; see 17.6.b.a-17.6.b.e |
+| 17.6.b.a | same step | Cover changed, added and deleted files in the warm replay | — | infra | OPEN |
+| 17.6.b.b | same step | Cover renamed files, file-order changes and role changes in the warm replay | — | infra | OPEN |
+| 17.6.b.c | same step | Cover tracked Composer and platform inputs in context-base invalidation | — | infra | OPEN |
+| 17.6.b.d | same step | Cover checker-only rule changes without rebuilding the context base | — | infra | OPEN |
+| 17.6.b.e | same step | Compare warm and cold semantic products after the replay | — | infra | OPEN |
 | 17.6.c | same step | Test server loading from the context base | — | infra | OPEN |
 | 17.6.d | same step | Verify an overlay that differs from disk never enters the persistent index or context base | — | infra | OPEN |
 | 17.V | §11 | Tests-only item gate: workspace and item-specific tests, including `stat` cases; full §11 validation waits until item 19 | 17.6 | val | OPEN; see 17.V.a-17.V.b |
 | 17.V.a | same gate | Run `cargo test --workspace` after item 17 implementation rows are complete | — | val | OPEN |
-| 17.V.b | same gate | Run item-specific stat, two-run edit-replay and context-base tests | — | val | OPEN; see 17.V.b.a-17.V.b.d |
+| 17.V.b | same gate | Run item-specific stat, edit-replay and context-base tests | — | val | OPEN; see 17.V.b.a-17.V.b.e |
 | 17.V.b.a | same gate | Run unit tests for stat fields and local-filesystem trust rules | — | val | OPEN |
-| 17.V.b.b | same gate | Run persistent-index tests across two runs and disk-backed edits | — | val | OPEN |
+| 17.V.b.b | same gate | Run persistent-index tests across two runs and changed, added and deleted disk-backed files | — | val | OPEN |
 | 17.V.b.c | same gate | Run context-base cold/warm path and serialization unit tests | — | val | OPEN |
 | 17.V.b.d | same gate | Run overlay-isolation tests proving disk-derived index and base entries exclude editor-only content | — | val | OPEN |
+| 17.V.b.e | same gate | Run warm-replay tests for rename/order/role changes, tracked inputs and checker-only rule changes | — | val | OPEN |
 | **18** | **item 18** | **The check phase's remainder** | | | |
 | 18.1 | step 1 | §12.10: observers and one inference per node; the PHPStan-API walker as a family; literal types once per node | 13.4 | sem | OPEN; see 18.1.a-18.1.d |
 | 18.1.a | same step | Register observers in the shared traversal | — | sem | OPEN |
@@ -857,12 +898,42 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation and O3 follow after this gate | 19.6 | val | OPEN; see 19.V.a-19.V.b |
 | 19.V.a | same gate | Run `cargo test --workspace` after item 19 implementation rows are complete | — | val | OPEN |
 | 19.V.b | same gate | Run item-specific tree-retention, cache-eviction, reparse and reader tests | — | val | OPEN; see 19.V.b.a-19.V.b.d |
-| 19.V.b.a | same gate | Run batch and server tree-retention tests | — | val | OPEN |
+| 19.V.b.a | same gate | Run batch and server tree-retention tests | — | val | OPEN; see 19.V.b.a.a-19.V.b.a.b |
+| 19.V.b.a.a | same gate | Run batch tests proving each analyzed tree is released when its file check ends | — | val | OPEN |
+| 19.V.b.a.b | same gate | Run server tests proving open-document trees stay resident and other trees obey the byte bound | — | val | OPEN |
 | 19.V.b.b | same gate | Run weighted cache-eviction and owner-key tests | — | val | OPEN |
-| 19.V.b.c | same gate | Run on-demand reparse and changed-hash edit tests | — | val | OPEN |
+| 19.V.b.c | same gate | Run on-demand reparse and changed-hash edit tests | — | val | OPEN; see 19.V.b.c.a-19.V.b.c.b |
+| 19.V.b.c.a | same gate | Run on-demand reparse tests for an evicted tree whose source hash still matches | — | val | OPEN |
+| 19.V.b.c.b | same gate | Run changed-hash tests proving a reread updates declarations and dependents before checking | — | val | OPEN |
 | 19.V.b.d | same gate | Run reader tests proving no empty tree is returned after eviction | — | val | OPEN |
-| **V** | **§11** | **O3, once** | | | |
-| V.1 | O3 | Complete the final O3 profiling set after the 19.V gate | 19.V | val | OPEN; see V.1.a-V.1.g |
+| **V** | **§11** | **Final validation and O3, once** | | | |
+| V.0 | §11 | Complete the single final validation after the 19.V gate | 19.V | val | OPEN; see V.0.a-V.0.g |
+| V.0.a | final gate | Run the final `gate` build | — | val | OPEN |
+| V.0.b | final gate | Run `cargo test --workspace` and the tests written by items 0-19 | — | val | OPEN |
+| V.0.c | final fixtures | Run PHP-backed lexer, declaration, PHPDoc and computed-name fixtures | — | val | OPEN; see V.0.c.a-V.0.c.e |
+| V.0.c.a | final fixtures | Compare item 10/12 tokenization with PHP `token_get_all` for every non-deferred lexer reading | — | val | OPEN |
+| V.0.c.b | final fixtures | Check item 13 declaration-binding fixtures against PHP 8.5 | — | val | OPEN |
+| V.0.c.c | final fixtures | Check item 14 PHPDoc behavior against PHP 8.5 | — | val | OPEN; see V.0.c.c.a-V.0.c.c.c |
+| V.0.c.c.a | final fixtures | Check PHPDoc byte classes and identifier handling against PHP 8.5 | — | val | OPEN |
+| V.0.c.c.b | final fixtures | Check PHPDoc literal parsing, including escaped quotes and `//` in a literal type | — | val | OPEN |
+| V.0.c.c.c | final fixtures | Check winner rules for `@phan-real-return` and `@phan-param-out` | — | val | OPEN |
+| V.0.c.d | final fixtures | Run the PHP 7.4 lexer readings for items 10 and 12 and computed-name readings for item 18 | — | val | OPEN |
+| V.0.c.e | final fixtures | Check each item 18 computed-name form against PHP | — | val | OPEN; see V.0.c.e.a-V.0.c.e.e |
+| V.0.c.e.a | final fixtures | Check variable variables and `${expr}` computed names | — | val | OPEN |
+| V.0.c.e.b | final fixtures | Check `include`, `require` and `eval` computed-name forms | — | val | OPEN |
+| V.0.c.e.c | final fixtures | Check exact accepted and rejected direct `call_user_func` and `call_user_func_array` forms | — | val | OPEN |
+| V.0.c.e.d | final fixtures | Check computed names through `$GLOBALS` | — | val | OPEN |
+| V.0.c.e.e | final fixtures | Check item 18 computed-name forms specific to PHP 7 | — | val | OPEN |
+| V.0.d | final fixtures | Run item 0's runtime oracle | — | val | OPEN |
+| V.0.e | final fixtures | Compare PHPDoc `lower(node)` with source-rendering parse results across fixture, vendor and corpus type nodes | — | val | OPEN |
+| V.0.f | final fixtures | Run platform and session cases: item 6 file replacement, item 11/17 `stat`, item 15 Latin-1, item 17 warm-cache byte equality, and item 19 closed-file recheck without a watcher event | — | val | OPEN; see V.0.f.a-V.0.f.e |
+| V.0.f.a | final fixtures | Run item 6 file-replacement tests on Linux, macOS and Windows | — | val | OPEN |
+| V.0.f.b | final fixtures | Run item 11/17 `stat` tests on Linux, macOS and Windows | — | val | OPEN |
+| V.0.f.c | final fixtures | Run the item 15 Latin-1 language-server session case | — | val | OPEN |
+| V.0.f.d | final fixtures | Compare item 17 warm-cache results byte for byte | — | val | OPEN |
+| V.0.f.e | final fixtures | Change a closed file on disk without a watcher event before a dependent recheck, then verify reload and dependent updates | — | val | OPEN |
+| V.0.g | final gate | Run the `oracle` build and require its assertions to pass for every dump | — | val | OPEN |
+| V.1 | O3 | Complete the final O3 profiling set after final §11 validation | V.0 | val | OPEN; see V.1.a-V.1.g |
 | V.1.a | same step | Build the frame-pointer `dhat` profile | — | val | OPEN |
 | V.1.b | same step | Collect callgrind with `--separate-threads=yes` | — | val | OPEN |
 | V.1.c | same step | Collect `perf` for a warm run | — | val | OPEN |

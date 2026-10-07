@@ -1557,6 +1557,7 @@ name = "phpstan-rs"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
+ "bumpalo",
  "clap",
  "crc32fast",
  "criterion",
@@ -1688,6 +1689,7 @@ dependencies = [
  "criterion",
  "hashbrown 0.17.1",
  "hotpath",
+ "la-arena",
  "memchr",
  "rustc-hash 2.1.3",
  "serde",

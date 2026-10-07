@@ -13,7 +13,12 @@ fn index(src: &str, versions: Option<PhpVersions>) -> Registry {
         php_versions: versions,
         ..Registry::default()
     };
-    registry.index(&program, &Origin::Unknown, false);
+    registry.index(
+        &program.arenas,
+        program.statements(),
+        &Origin::Unknown,
+        false,
+    );
     registry
 }
 
@@ -128,7 +133,12 @@ fn a_declaration_that_changes_nothing_is_not_a_change() {
     let tokens =
         Lexer::new("<?php if (!class_exists('Held')) { class Held {} }").tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, &Origin::Unknown, false);
+    r.index(
+        &program.arenas,
+        program.statements(),
+        &Origin::Unknown,
+        false,
+    );
     let changed = r.take_changed();
     assert!(changed.classes.is_empty());
     assert!(changed.functions.is_empty());

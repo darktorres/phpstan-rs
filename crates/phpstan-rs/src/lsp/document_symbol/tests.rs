@@ -4,16 +4,17 @@ use lsp_types::SymbolKind;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
-fn parse(src: &str) -> Vec<syntax::ast::StmtNode> {
-    let tokens = Lexer::new(src).tokenize_with_spans();
-    Parser::new(tokens).parse_program().unwrap()
+fn parse(src: &str) -> syntax::parser::ParsedProgram {
+    let stream = Lexer::new(src).lex_token_stream();
+    Parser::from_token_stream(stream).parse_program().unwrap()
 }
 
 #[test]
 fn a_top_level_function_becomes_a_function_symbol() {
     let stmts = parse("<?php function foo() {}");
     let symbols = document_symbols(
-        &stmts,
+        &stmts.arenas,
+        stmts.statements(),
         Positions::utf16(&syntax::span::LineIndex::default()),
     );
     assert_eq!(symbols.len(), 1);
@@ -34,7 +35,8 @@ fn a_class_nests_its_methods_properties_and_consts() {
         "#,
     );
     let symbols = document_symbols(
-        &stmts,
+        &stmts.arenas,
+        stmts.statements(),
         Positions::utf16(&syntax::span::LineIndex::default()),
     );
     assert_eq!(symbols.len(), 1);
@@ -52,7 +54,8 @@ fn a_class_nests_its_methods_properties_and_consts() {
 fn an_interface_reports_the_interface_kind() {
     let stmts = parse("<?php interface Foo { public function m(): void; }");
     let symbols = document_symbols(
-        &stmts,
+        &stmts.arenas,
+        stmts.statements(),
         Positions::utf16(&syntax::span::LineIndex::default()),
     );
     assert_eq!(symbols[0].kind, SymbolKind::INTERFACE);
@@ -69,7 +72,8 @@ fn an_enum_nests_its_cases() {
         "#,
     );
     let symbols = document_symbols(
-        &stmts,
+        &stmts.arenas,
+        stmts.statements(),
         Positions::utf16(&syntax::span::LineIndex::default()),
     );
     assert_eq!(symbols[0].kind, SymbolKind::ENUM);
@@ -89,7 +93,8 @@ fn a_declaration_inside_a_top_level_if_is_still_reported() {
         "#,
     );
     let symbols = document_symbols(
-        &stmts,
+        &stmts.arenas,
+        stmts.statements(),
         Positions::utf16(&syntax::span::LineIndex::default()),
     );
     assert_eq!(symbols.len(), 1);

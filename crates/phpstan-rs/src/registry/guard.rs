@@ -6,7 +6,7 @@
 //! the declaration, so a change of the configured versions evaluates it again
 //! without a parse.
 
-use syntax::ast::{BinOp, ExprKind, ExprNode, Literal, UnaryOp};
+use syntax::ast::{BinOp, ExprId, ExprKind, Literal, NodeArenas, UnaryOp};
 use syntax::declarations::GuardTerm;
 use types::PhpVersions;
 
@@ -96,7 +96,7 @@ impl Guard {
 
 impl GuardExpr {
     /// The guard `terms` make together, `None` for no terms.
-    pub(crate) fn of_terms(terms: &[GuardTerm<'_>]) -> Option<GuardExpr> {
+    pub(crate) fn of_terms(arenas: &NodeArenas, terms: &[GuardTerm]) -> Option<GuardExpr> {
         if terms.is_empty() {
             return None;
         }
@@ -105,7 +105,7 @@ impl GuardExpr {
             .map(|term| match *term {
                 GuardTerm::Opaque => GuardExpr::Opaque,
                 GuardTerm::Condition { expr, negated } => {
-                    let guard = GuardExpr::of_condition(expr);
+                    let guard = GuardExpr::of_condition(arenas, expr);
                     if negated {
                         GuardExpr::Not(Box::new(guard))
                     } else {
@@ -122,34 +122,42 @@ impl GuardExpr {
     }
 
     /// What `expr`, an `if` condition, says about the versions.
-    fn of_condition(expr: &ExprNode) -> GuardExpr {
+    fn of_condition(arenas: &NodeArenas, id: ExprId) -> GuardExpr {
+        let Some(expr) = arenas.expr(id) else {
+            return GuardExpr::Opaque;
+        };
         match &expr.kind {
             ExprKind::Unary(UnaryOp::Not, inner) => {
-                GuardExpr::Not(Box::new(GuardExpr::of_condition(inner)))
+                GuardExpr::Not(Box::new(GuardExpr::of_condition(arenas, *inner)))
             }
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, left, right) => GuardExpr::And(vec![
-                GuardExpr::of_condition(left),
-                GuardExpr::of_condition(right),
+                GuardExpr::of_condition(arenas, *left),
+                GuardExpr::of_condition(arenas, *right),
             ]),
             ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, left, right) => GuardExpr::Or(vec![
-                GuardExpr::of_condition(left),
-                GuardExpr::of_condition(right),
+                GuardExpr::of_condition(arenas, *left),
+                GuardExpr::of_condition(arenas, *right),
             ]),
             ExprKind::Binary(op, left, right) => Compare::of_binary(*op)
-                .and_then(
-                    |compare| match (is_constant(left, "PHP_VERSION_ID"), int(left)) {
-                        (true, _) => int(right).map(|n| (compare, n)),
-                        (_, Some(n)) if is_constant(right, "PHP_VERSION_ID") => {
+                .and_then(|compare| {
+                    match (
+                        is_constant(arenas, *left, "PHP_VERSION_ID"),
+                        int(arenas, *left),
+                    ) {
+                        (true, _) => int(arenas, *right).map(|n| (compare, n)),
+                        (_, Some(n)) if is_constant(arenas, *right, "PHP_VERSION_ID") => {
                             Some((compare.flipped(), n))
                         }
                         _ => None,
-                    },
-                )
+                    }
+                })
                 .and_then(|(compare, n)| u32::try_from(n).ok().map(|n| (compare, n)))
                 .map_or(GuardExpr::Opaque, |(compare, n)| {
                     GuardExpr::VersionId(compare, n)
                 }),
-            ExprKind::Call(callee, args) => version_compare(callee, args),
+            ExprKind::Call(callee, args) => {
+                version_compare(arenas, *callee, arenas.args(args.clone()))
+            }
             _ => GuardExpr::Opaque,
         }
     }
@@ -204,15 +212,22 @@ impl GuardExpr {
 }
 
 /// Whether `expr` is the global constant `name`.
-fn is_constant(expr: &ExprNode, name: &str) -> bool {
+fn is_constant(arenas: &NodeArenas, id: ExprId, name: &str) -> bool {
+    let Some(expr) = arenas.expr(id) else {
+        return false;
+    };
     let ExprKind::Name(written) = &expr.kind else {
+        return false;
+    };
+    let Some(written) = arenas.qualified_name(written) else {
         return false;
     };
     let (primary, fallback) = written.candidates();
     fallback.unwrap_or(primary) == name
 }
 
-fn int(expr: &ExprNode) -> Option<i64> {
+fn int(arenas: &NodeArenas, id: ExprId) -> Option<i64> {
+    let expr = arenas.expr(id)?;
     match &expr.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
         _ => None,
@@ -222,8 +237,14 @@ fn int(expr: &ExprNode) -> Option<i64> {
 /// `version_compare(PHP_VERSION, 'x.y.z', '<op>')`, as the comparison of
 /// `PHP_VERSION_ID` with the version's id. A call that has no operator
 /// returns a number, not a condition.
-fn version_compare(callee: &ExprNode, args: &[syntax::ast::Arg]) -> GuardExpr {
+fn version_compare(arenas: &NodeArenas, callee: ExprId, args: &[syntax::ast::Arg]) -> GuardExpr {
+    let Some(callee) = arenas.expr(callee) else {
+        return GuardExpr::Opaque;
+    };
     let ExprKind::Name(name) = &callee.kind else {
+        return GuardExpr::Opaque;
+    };
+    let Some(name) = arenas.qualified_name(name) else {
         return GuardExpr::Opaque;
     };
     let (primary, fallback) = name.candidates();
@@ -235,10 +256,11 @@ fn version_compare(callee: &ExprNode, args: &[syntax::ast::Arg]) -> GuardExpr {
     {
         return GuardExpr::Opaque;
     }
-    let (Some(version), Some(compare)) = (text(&args[1].value), text(&args[2].value)) else {
+    let (Some(version), Some(compare)) = (text(arenas, args[1].value), text(arenas, args[2].value))
+    else {
         return GuardExpr::Opaque;
     };
-    if !is_constant(&args[0].value, "PHP_VERSION") {
+    if !is_constant(arenas, args[0].value, "PHP_VERSION") {
         return GuardExpr::Opaque;
     }
     match (version_id(version), Compare::of_text(compare)) {
@@ -247,9 +269,10 @@ fn version_compare(callee: &ExprNode, args: &[syntax::ast::Arg]) -> GuardExpr {
     }
 }
 
-fn text(expr: &ExprNode) -> Option<&[u8]> {
+fn text(arenas: &NodeArenas, id: ExprId) -> Option<&[u8]> {
+    let expr = arenas.expr(id)?;
     match &expr.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.as_bytes()),
+        ExprKind::Literal(Literal::String(s)) => arenas.string_bytes(s),
         _ => None,
     }
 }

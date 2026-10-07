@@ -248,7 +248,7 @@ impl<'a> Checker<'a> {
                 .as_name()
                 .and_then(|n| self.resolve_static_class_name(n)),
             ExprKind::Literal(Literal::String(s)) => {
-                let s = s.as_str()?.trim_start_matches('\\');
+                let s = self.syntax_string_text(s)?.trim_start_matches('\\');
                 self.registry.has_class(s).then(|| s.to_string())
             }
             _ => None,

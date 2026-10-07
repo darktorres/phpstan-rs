@@ -11,7 +11,7 @@
 
 use crate::checker::Checker;
 use crate::pcre_validate::validate_pattern;
-use syntax::ast::{Arg, ExprKind, ExprNode, Literal};
+use syntax::ast::{Arg, ExprKind, ExprNode, Literal, NodeArenas};
 use syntax::span::Span;
 
 /// Which of the 8 real PCRE-pattern-taking builtins `name` is, and how
@@ -48,15 +48,20 @@ fn pattern_arg_shape(name: &str) -> Option<PatternArgShape> {
     }
 }
 
-fn as_string_literal(e: &ExprNode) -> Option<&str> {
+fn as_string_literal<'a>(arenas: &'a NodeArenas, e: &'a ExprNode) -> Option<&'a str> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => s.as_str(),
+        ExprKind::Literal(Literal::String(s)) => std::str::from_utf8(arenas.string_bytes(s)?).ok(),
         _ => None,
     }
 }
 
 impl<'a> Checker<'a> {
-    pub(crate) fn check_preg_pattern_validity(&mut self, name: &str, args: &[Arg]) {
+    pub(crate) fn check_preg_pattern_validity(
+        &mut self,
+        arenas: &NodeArenas,
+        name: &str,
+        args: &[Arg],
+    ) {
         let Some(shape) = pattern_arg_shape(name) else {
             return;
         };
@@ -68,28 +73,39 @@ impl<'a> Checker<'a> {
         }
         match shape {
             PatternArgShape::Plain => {
-                if let Some(s) = as_string_literal(&pattern_arg.value) {
-                    self.report_if_invalid_pattern(s, pattern_arg.value.span);
+                if let Some(pattern) = arenas.expr(pattern_arg.value)
+                    && let Some(s) = as_string_literal(arenas, pattern)
+                {
+                    self.report_if_invalid_pattern(s, self.expr_span(pattern.id));
                 }
             }
             PatternArgShape::PlainOrArrayValues => {
-                if let Some(s) = as_string_literal(&pattern_arg.value) {
-                    self.report_if_invalid_pattern(s, pattern_arg.value.span);
-                } else if let ExprKind::ArrayLiteral(items) = &pattern_arg.value.kind {
-                    for item in items {
-                        if let Some(s) = as_string_literal(&item.value) {
-                            self.report_if_invalid_pattern(s, item.value.span);
+                if let Some(pattern) = arenas.expr(pattern_arg.value)
+                    && let Some(s) = as_string_literal(arenas, pattern)
+                {
+                    self.report_if_invalid_pattern(s, self.expr_span(pattern.id));
+                } else if let Some(pattern) = arenas.expr(pattern_arg.value)
+                    && let ExprKind::ArrayLiteral(items) = &pattern.kind
+                {
+                    for item in arenas.array_items(items.clone()) {
+                        if let Some(value) = arenas.expr(item.value)
+                            && let Some(s) = as_string_literal(arenas, value)
+                        {
+                            self.report_if_invalid_pattern(s, self.expr_span(value.id));
                         }
                     }
                 }
             }
             PatternArgShape::ArrayKeys => {
-                if let ExprKind::ArrayLiteral(items) = &pattern_arg.value.kind {
-                    for item in items {
-                        if let Some(key) = &item.key
-                            && let Some(s) = as_string_literal(key)
+                if let Some(pattern) = arenas.expr(pattern_arg.value)
+                    && let ExprKind::ArrayLiteral(items) = &pattern.kind
+                {
+                    for item in arenas.array_items(items.clone()) {
+                        if let Some(key) = item.key
+                            && let Some(key) = arenas.expr(key)
+                            && let Some(s) = as_string_literal(arenas, key)
                         {
-                            self.report_if_invalid_pattern(s, key.span);
+                            self.report_if_invalid_pattern(s, self.expr_span(key.id));
                         }
                     }
                 }

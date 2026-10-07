@@ -11,7 +11,7 @@ fn a_method_asked_for_again_is_the_one_the_registry_gives() {
     )
     .tokenize_with_spans();
     let program = syntax::parser::Parser::new(tokens).parse_program().unwrap();
-    let registry = Registry::build(&program);
+    let registry = Registry::build(&program.arenas, program.statements());
     let checker = Checker::new(&registry);
     let asked = [
         ("A", "own"),

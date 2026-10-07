@@ -153,13 +153,15 @@ impl Locals {
 
     /// The key of the expression `e` narrows, made when it has not been
     /// (`KeyTable::key_of`).
-    pub(crate) fn key_of(&self, e: &ExprNode) -> Option<LocalKey> {
-        self.keys.borrow_mut().key_of(e, self.class.as_ref())
+    pub(crate) fn key_of(&self, arenas: &NodeArenas, e: &ExprNode) -> Option<LocalKey> {
+        self.keys
+            .borrow_mut()
+            .key_of(arenas, e, self.class.as_ref())
     }
 
     /// `key_of`, when the key has been made: a read never makes one.
-    pub(crate) fn find_key(&self, e: &ExprNode) -> Option<LocalKey> {
-        self.keys.borrow().find_key(e, self.class.as_ref())
+    pub(crate) fn find_key(&self, arenas: &NodeArenas, e: &ExprNode) -> Option<LocalKey> {
+        self.keys.borrow().find_key(arenas, e, self.class.as_ref())
     }
 
     /// The static property `prop` of the class `name` refers to, from this
@@ -370,7 +372,7 @@ impl Locals {
         &mut self,
         name: LocalKey,
         target_keys: Vec<LocalKey>,
-        condition: std::rc::Rc<ExprNode>,
+        condition: ExprId,
     ) {
         self.touch();
         self.condition_aliases
@@ -379,7 +381,7 @@ impl Locals {
 
     /// The store half of `QueryBuilderAliasMap`'s own mechanism - see its
     /// doc comment.
-    pub(crate) fn set_query_builder_alias(&mut self, name: LocalKey, rhs: std::rc::Rc<ExprNode>) {
+    pub(crate) fn set_query_builder_alias(&mut self, name: LocalKey, rhs: ExprId) {
         self.touch();
         self.query_builder_aliases.insert(name, rhs);
     }

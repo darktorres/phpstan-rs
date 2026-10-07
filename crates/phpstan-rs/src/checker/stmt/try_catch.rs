@@ -3,7 +3,7 @@ use crate::checker::{
 };
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -44,9 +44,10 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_try(
         &mut self,
-        body: &[StmtNode],
+        arenas: &NodeArenas,
+        body: StmtIdRange,
         catches: &[CatchClause],
-        finally: &Option<Vec<StmtNode>>,
+        finally: &Option<StmtIdRange>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
@@ -76,19 +77,19 @@ impl<'a> Checker<'a> {
         let catch_types_mark = self.current_catch_types.len();
         let new_catch_types: Vec<Type> = catches
             .iter()
-            .flat_map(|c| &c.types)
+            .flat_map(|c| arenas.qualified_names(&c.types))
             .map(|t| self.resolve_name_expr(t))
             .filter(|t| t.as_object().is_some())
             .collect();
         self.current_catch_types.extend(new_catch_types);
         self.try_throw_states.push(Vec::new());
         let body_exits_from = self.current_function_exit_points.len();
-        let body_block = self.check_block(body, locals, declared_return, label);
+        let body_block = self.check_block(arenas.stmt_ids(&body), locals, declared_return, label);
         let throw_states = self.try_throw_states.pop().unwrap_or_default();
         self.current_catch_types.truncate(catch_types_mark);
         let all_catch_types: Vec<Type> = catches
             .iter()
-            .flat_map(|c| &c.types)
+            .flat_map(|c| arenas.qualified_names(&c.types))
             .map(|t| self.resolve_name_expr(t))
             .collect();
         // What no catch is sure to catch reaches an enclosing `try`.
@@ -146,7 +147,7 @@ impl<'a> Checker<'a> {
             // below does with them - a real, unconditional PHP fatal
             // error at declaration time otherwise ("Cannot catch X
             // because it does not implement Throwable").
-            for t in &c.types {
+            for t in arenas.qualified_names(&c.types) {
                 let resolved = self.resolve_name_expr(t);
                 if let Some((class, _)) = resolved.as_object() {
                     // `CaughtExceptionExistenceRule`'s own existence
@@ -192,8 +193,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            let clause_types: Vec<Type> =
-                c.types.iter().map(|t| self.resolve_name_expr(t)).collect();
+            let clause_types: Vec<Type> = arenas
+                .qualified_names(&c.types)
+                .iter()
+                .map(|t| self.resolve_name_expr(t))
+                .collect();
             if !clause_types.is_empty()
                 && clause_types.iter().all(|ct| {
                     let Some((class, _)) = ct.as_object() else {
@@ -243,7 +247,7 @@ impl<'a> Checker<'a> {
                 // member access through the variable depend on
                 // catch-type order, which real PHP itself doesn't
                 // care about at all.
-                let ty = match c.types.as_slice() {
+                let ty = match arenas.qualified_names(&c.types) {
                     [] => Type::mixed(),
                     [single] => self.resolve_name_expr(single),
                     multiple => self
@@ -255,10 +259,15 @@ impl<'a> Checker<'a> {
                 catch_locals.declare_var(var, ty, var.span);
             }
             let catch_exits_from = self.current_function_exit_points.len();
-            let catch_block = self.check_block(&c.body, &mut catch_locals, declared_return, label);
+            let catch_block = self.check_block(
+                arenas.stmt_ids(&c.body),
+                &mut catch_locals,
+                declared_return,
+                label,
+            );
             try_catch_exit_points.extend(self.statement_exit_points(catch_exits_from));
             if self.settings.extras.check_exception_hygiene {
-                self.check_catch_hygiene(c);
+                self.check_catch_hygiene(arenas, c);
             }
             let catch_terminates = catch_block.completion.terminates;
             catch_completions.push(catch_block.completion);
@@ -292,7 +301,12 @@ impl<'a> Checker<'a> {
             let finally_entry = merge_scopes(&self.relation(), &pre_try_locals, locals);
             let mut finally_locals = finally_entry.clone();
             let finally_exits_from = self.current_function_exit_points.len();
-            let finally_block = self.check_block(f, &mut finally_locals, declared_return, label);
+            let finally_block = self.check_block(
+                arenas.stmt_ids(f),
+                &mut finally_locals,
+                declared_return,
+                label,
+            );
             finally_completion = Some(finally_block.completion);
             for (key, ty) in finally_locals.iter() {
                 if finally_entry.get(key) != Some(ty) {
@@ -359,7 +373,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 "Exception thrown with no message argument.".to_string(),
-                e.span,
+                self.expr_span(e.id),
                 5,
                 "throw.missingExceptionMessage",
             );
@@ -370,7 +384,7 @@ impl<'a> Checker<'a> {
             && (class.eq_ignore_ascii_case("Exception") || class.eq_ignore_ascii_case("Error"))
         {
             self.report(format!("Throwing the base {class} class is not recommended, use a specific subclass instead."),
-                e.span,
+                self.expr_span(e.id),
                 5,
                 "throw.baseClass",
             );
@@ -378,7 +392,7 @@ impl<'a> Checker<'a> {
         if let Some(class) = self.thrown_value_not_throwable(&thrown_ty) {
             self.report(
                 format!("cannot throw {class}: it does not implement Throwable"),
-                e.span,
+                self.expr_span(e.id),
                 0,
                 "throw.notThrowable",
             );
@@ -387,7 +401,7 @@ impl<'a> Checker<'a> {
         // not-provably-Throwable value, already flagged above in its
         // own right) rather than trying to guess "should this count."
         self.current_function_explicit_throw_points
-            .push((thrown_ty.clone(), e.span));
+            .push((thrown_ty.clone(), self.expr_span(e.id)));
         self.current_function_throw_points.push(thrown_ty);
     }
 }
@@ -395,54 +409,84 @@ impl<'a> Checker<'a> {
 /// Every `throw` in `stmts` with whether it's a direct statement of
 /// `stmts` itself, not reaching into nested functions, classes, or
 /// nested `catch` clauses (checked on their own).
-fn collect_throws(stmts: &[StmtNode]) -> Vec<(&ExprNode, Span, bool)> {
+fn collect_throws(arenas: &NodeArenas, stmts: &[StmtId]) -> Vec<(ExprId, Span, bool)> {
     let mut throws = Throws {
         out: Vec::new(),
         top: true,
     };
-    walk_stmts(&mut throws, stmts);
+    arena::walk_stmts(&mut throws, arenas, stmts);
     throws.out
 }
 
-struct Throws<'s> {
-    out: Vec<(&'s ExprNode, Span, bool)>,
+struct Throws {
+    out: Vec<(ExprId, Span, bool)>,
     // Whether the statement being visited is directly in the list.
     top: bool,
 }
 
-impl<'s> Visitor<'s> for Throws<'s> {
-    fn visit_stmt(&mut self, stmt: &'s StmtNode) {
+impl Visitor for Throws {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         let top = std::mem::replace(&mut self.top, false);
         match &stmt.kind {
             StmtKind::Throw(e) => {
-                self.out.push((e, stmt.span, top));
-                self.visit_expr(e);
+                self.out.push((
+                    *e,
+                    arenas
+                        .stmt_span(id)
+                        .expect("throw statement has an arena span"),
+                    top,
+                ));
+                self.visit_expr(arenas, *e);
             }
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::Try { body, finally, .. } => {
-                walk_stmts(self, body);
+                arena::walk_stmts(self, arenas, arenas.stmt_ids(body));
                 if let Some(finally) = finally {
-                    walk_stmts(self, finally);
+                    arena::walk_stmts(self, arenas, arenas.stmt_ids(finally));
                 }
             }
-            _ => walk_stmt(self, stmt),
+            _ => arena::walk_stmt(self, arenas, id),
         }
         self.top = top;
     }
 
-    fn visit_expr(&mut self, e: &'s ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else {
+            return;
+        };
         if let ExprKind::Throw(inner) = &e.kind {
-            self.out.push((inner, e.span, false));
+            let span = arenas
+                .expr_span(e.id)
+                .expect("throw expression has an arena span");
+            self.out.push((*inner, span, false));
         }
-        walk_expr_in_scope(self, e);
+        arena::walk_expr_in_scope(self, arenas, id);
     }
 }
 
-fn mentions_variable(e: &ExprNode, name: &str) -> bool {
-    any_expr_in_scope(
-        e,
-        |e| matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name),
-    )
+fn mentions_variable(arenas: &NodeArenas, id: ExprId, name: &str) -> bool {
+    struct Find<'a> {
+        name: &'a str,
+        found: bool,
+    }
+    impl Visitor for Find<'_> {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            let Some(expr) = arenas.expr(id) else {
+                return;
+            };
+            if matches!(&expr.kind, ExprKind::Variable(v) if v.as_ref() == self.name) {
+                self.found = true;
+                return;
+            }
+            arena::walk_expr_in_scope(self, arenas, id);
+        }
+    }
+    let mut find = Find { name, found: false };
+    find.visit_expr(arenas, id);
+    find.found
 }
 
 const BASE_EXCEPTIONS: [&str; 3] = ["Throwable", "Exception", "Error"];
@@ -451,17 +495,30 @@ impl<'a> Checker<'a> {
     /// A `throw new X(...)` inside the catch that doesn't pass the caught
     /// exception on as `X`'s previous exception, and a catch of a base
     /// exception type with no unconditional rethrow.
-    fn check_catch_hygiene(&mut self, c: &CatchClause) {
-        let throws = collect_throws(&c.body);
+    fn check_catch_hygiene(&mut self, arenas: &NodeArenas, c: &CatchClause) {
+        let throws = collect_throws(arenas, arenas.stmt_ids(&c.body));
         if let Some(var) = &c.var {
             for (thrown, span, _) in &throws {
+                let Some(thrown) = arenas.expr(*thrown) else {
+                    continue;
+                };
                 let ExprKind::New(class, args) = &thrown.kind else {
                     continue;
                 };
-                if args.iter().any(|a| mentions_variable(&a.value, var)) {
+                if arenas
+                    .args(args.clone())
+                    .iter()
+                    .any(|a| mentions_variable(arenas, a.value, var))
+                {
                     continue;
                 }
+                let Some(class) = arenas.expr(*class) else {
+                    continue;
+                };
                 let ExprKind::Name(raw) = &class.kind else {
+                    continue;
+                };
+                let Some(raw) = arenas.qualified_name(raw) else {
                     continue;
                 };
                 let resolved = self.resolve_name_expr(raw);
@@ -490,7 +547,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let base = c.types.iter().find_map(|t| {
+        let base = arenas.qualified_names(&c.types).iter().find_map(|t| {
             let resolved = self.resolve_name_expr(t);
             let (class, _) = resolved.as_object()?;
             BASE_EXCEPTIONS

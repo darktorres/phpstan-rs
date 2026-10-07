@@ -7,7 +7,7 @@
 use crate::checker::{Checker, class_kind_identifier};
 use crate::registry;
 use phpdoc::grammar::{self, PhpDocTagValue};
-use syntax::ast::{ClassDef, ClassKind, QualifiedName, TraitUse};
+use syntax::ast::{ClassDef, ClassKind, NodeArenas, QualifiedName, TraitUse};
 use syntax::span::Span;
 use types::{self, PositionVariance, Type};
 
@@ -191,17 +191,26 @@ fn call_site_projection(arg: &Type) -> Option<String> {
 impl<'a> Checker<'a> {
     /// The ancestor checks of a class, interface or trait declaration.
     pub(crate) fn check_class_ancestors(&mut self, fqn: &str, c: &ClassDef) {
-        let doc = c.doc_comment.as_deref();
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let source = self.syntax_source_owner();
+        let doc_text = c
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+        let doc = doc_text.as_deref();
         let templates = self.declared_templates(fqn, doc);
         match c.kind {
             ClassKind::Class => {
                 let extends: Vec<String> = c
-                    .extends
+                    .extends(arenas)
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
                 let implements: Vec<String> = c
-                    .implements
+                    .implements(arenas)
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
@@ -228,7 +237,7 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Interface => {
                 let extends: Vec<String> = c
-                    .extends
+                    .extends(arenas)
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
@@ -255,7 +264,7 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Enum => {
                 let implements: Vec<String> = c
-                    .implements
+                    .implements(arenas)
                     .iter()
                     .map(|n| self.resolve_class_ref(n))
                     .collect();
@@ -282,7 +291,7 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Trait => {}
         }
-        self.check_used_traits(fqn, &templates, c.kind, &c.trait_uses);
+        self.check_used_traits(arenas, fqn, &templates, c.kind, c.trait_uses(arenas));
     }
 
     /// This declaration's own `@template`s, from its own doc comment (not
@@ -307,11 +316,13 @@ impl<'a> Checker<'a> {
     /// `@use` tags on its own doc comment.
     fn check_used_traits(
         &mut self,
+        arenas: &NodeArenas,
         fqn: &str,
         templates: &Templates,
         kind: ClassKind,
         trait_uses: &[TraitUse],
     ) {
+        let source = self.syntax_source_owner();
         if trait_uses.is_empty() {
             return;
         }
@@ -322,14 +333,18 @@ impl<'a> Checker<'a> {
         let messages = AncestorMessages::new(Rule::Use(word), fqn);
         for trait_use in trait_uses {
             let names: Vec<String> = trait_use
-                .traits
+                .traits(arenas)
                 .iter()
                 .map(|n| self.resolve_class_ref(n))
                 .collect();
             self.check_ancestor_tags(
                 fqn,
                 templates,
-                trait_use.doc_comment.as_deref(),
+                trait_use
+                    .doc_comment
+                    .as_ref()
+                    .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)))
+                    .as_deref(),
                 AncestorTag::Use,
                 &names,
                 &messages,

@@ -28,18 +28,27 @@ impl<'a> Checker<'a> {
     /// parameter. A promoted property is never `static` (no such syntax
     /// exists), which `own_sig.is_static: false` encodes directly.
     pub(crate) fn check_property_overrides(&mut self, fqn: &str, c: &ClassDef) {
-        for p in &c.properties {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        for p in c.properties(arenas) {
             let Some(own_sig) = self.registry.lookup_property(fqn, p.name.as_ref()).cloned() else {
                 continue;
             };
-            self.check_property_override_attribute(fqn, &p.name, &p.attrs, p.span);
+            self.check_property_override_attribute(
+                fqn,
+                &p.name,
+                arenas.attributes(p.attrs.clone()),
+                p.span,
+            );
             self.check_one_property_override(fqn, &p.name, &own_sig, p.span);
         }
-        for m in &c.methods {
+        for m in arenas.methods(c.methods.clone()) {
             if !m.function.is_constructor() {
                 continue;
             }
-            for param in &m.function.params {
+            for param in arenas.params(m.function.params.clone()) {
                 if param.promotion.is_none() {
                     continue;
                 }
@@ -50,7 +59,12 @@ impl<'a> Checker<'a> {
                 else {
                     continue;
                 };
-                self.check_property_override_attribute(fqn, &param.name, &param.attrs, param.span);
+                self.check_property_override_attribute(
+                    fqn,
+                    &param.name,
+                    arenas.attributes(param.attrs.clone()),
+                    param.span,
+                );
                 self.check_one_property_override(fqn, &param.name, &own_sig, param.span);
             }
         }

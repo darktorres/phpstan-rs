@@ -11,7 +11,14 @@ impl<'a> Checker<'a> {
         rhs: &ExprNode,
         locals: &mut Locals,
     ) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
+            return;
+        };
+        let Some(base) = arenas.expr(*base) else {
             return;
         };
         // `base`'s type may be a `Union`/`Intersection` (e.g. a receiver
@@ -38,7 +45,7 @@ impl<'a> Checker<'a> {
         if not_writable {
             self.report(
                 format!("Property {owner}::${prop} is not writable."),
-                lhs.span,
+                self.expr_span(lhs.id),
                 0,
                 "assign.propertyReadOnly",
             );
@@ -52,22 +59,22 @@ impl<'a> Checker<'a> {
                 None
             };
             if let Some((message, identifier)) = fact {
-                self.report(message, lhs.span, 0, identifier);
+                self.report(message, self.expr_span(lhs.id), 0, identifier);
             }
         }
         // `@internal`/`@deprecated`: `check_assignment_target`'s own
         // `PropertyAccess` arm deliberately only checks the *base* (to
         // avoid misflagging dynamic-property creation), so these checks
         // must run here for the write side instead.
-        self.check_internal_property_access(&owner, prop, prop_sig, lhs.span);
-        self.check_restricted_property_access(&owner, prop, false, lhs.span);
-        self.check_deprecated_property_access(&owner, prop, prop_sig, lhs.span);
+        self.check_internal_property_access(&owner, prop, prop_sig, self.expr_span(lhs.id));
+        self.check_restricted_property_access(&owner, prop, false, self.expr_span(lhs.id));
+        self.check_deprecated_property_access(&owner, prop, prop_sig, self.expr_span(lhs.id));
         self.record_member_usage_token(
             UsageTokenKind::Property,
             &owner,
             prop_sig.deprecated().is_some(),
             prop_sig.is_internal(),
-            lhs.span,
+            self.expr_span(lhs.id),
         );
         // Checked against `write_visibility`, not `visibility` - PHP 8.4
         // asymmetric visibility (`public private(set) string $x;`) means a
@@ -85,7 +92,7 @@ impl<'a> Checker<'a> {
             };
             self.report(
                 format!("Assign to {word} property {class}::${prop}."),
-                lhs.span,
+                self.expr_span(lhs.id),
                 0,
                 identifier,
             );
@@ -97,7 +104,7 @@ impl<'a> Checker<'a> {
                     name: prop,
                 },
                 visibility: &write_visibility,
-                span: lhs.span,
+                span: self.expr_span(lhs.id),
             });
         }
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
@@ -141,7 +148,7 @@ impl<'a> Checker<'a> {
         };
         self.report_found_from(
             format!("{class}::${prop} expects {expected}, {actual} given"),
-            rhs.span,
+            self.expr_span(rhs.id),
             3,
             from,
             "assign.propertyType",
@@ -276,8 +283,15 @@ impl<'a> Checker<'a> {
     /// PHP 8.4+ asymmetric visibility), or to a readonly one
     /// (`property.readOnlyAssignByRef`/`property.readOnlyByPhpDocAssignByRef`).
     pub(crate) fn check_property_assign_by_ref(&mut self, rhs: &ExprNode, locals: &Locals) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         let (owner, prop, sig, is_static_fetch) = match &rhs.kind {
             ExprKind::PropertyAccess(base, prop, _) => {
+                let Some(base) = arenas.expr(*base) else {
+                    return;
+                };
                 let base_ty = self.infer_expr(base, locals);
                 let Some((_, _, owner, sig)) = self.find_property_receiver(&base_ty, prop) else {
                     return;
@@ -320,7 +334,7 @@ impl<'a> Checker<'a> {
                 self.report(format!(
                         "Property {owner}::${prop} with {description} visibility is assigned by reference."
                     ),
-                    rhs.span,
+                    self.expr_span(rhs.id),
                     0,
                     "property.assignByRef",
                 );
@@ -334,14 +348,14 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("Readonly property {owner}::${prop} is assigned by reference."),
-                rhs.span,
+                self.expr_span(rhs.id),
                 3,
                 "property.readOnlyAssignByRef",
             );
         } else if sig.readonly_by_phpdoc() {
             self.report(
                 format!("@readonly property {owner}::${prop} is assigned by reference."),
-                rhs.span,
+                self.expr_span(rhs.id),
                 3,
                 "property.readOnlyByPhpDocAssignByRef",
             );

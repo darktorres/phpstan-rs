@@ -4,9 +4,10 @@ mod helpers;
 use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
+use crate::visit::arena::{self, Visitor as ArenaVisitor};
 
-fn parse(src: &str) -> Vec<StmtNode> {
-    Parser::new(Lexer::new(src).tokenize_with_spans())
+fn parse(src: &str) -> crate::parser::ParsedProgram {
+    Parser::from_token_stream(Lexer::new(src).lex_token_stream())
         .parse_program()
         .expect("parses")
 }
@@ -14,12 +15,15 @@ fn parse(src: &str) -> Vec<StmtNode> {
 /// Every variable name the walk reaches.
 struct Variables(Vec<String>);
 
-impl<'ast> Visitor<'ast> for Variables {
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+impl ArenaVisitor for Variables {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else {
+            return;
+        };
         if let ExprKind::Variable(name) = &expr.kind {
             self.0.push(name.to_string());
         }
-        walk_expr(self, expr);
+        arena::walk_expr(self, arenas, id);
     }
 }
 
@@ -45,7 +49,7 @@ enum E: int { case A = 1; const C = $inEnumConst; }
 fn the_walk_reaches_every_nested_scope_and_initializer() {
     let program = parse(EVERYWHERE);
     let mut v = Variables(Vec::new());
-    walk_stmts(&mut v, &program);
+    arena::walk_stmts(&mut v, &program.arenas, program.statements());
     for expected in [
         "inAttr",
         "inDefault",
@@ -71,36 +75,42 @@ fn the_walk_reaches_every_nested_scope_and_initializer() {
     }
 }
 
-/// Renames every variable `$x` to `$x_`.
-struct Rename;
-
-impl VisitorMut for Rename {
-    fn visit_expr(&mut self, expr: &mut ExprNode) {
-        if let ExprKind::Variable(name) = &mut expr.kind {
-            *name = format!("{name}_").into();
-        }
-        walk_expr_mut(self, expr);
-    }
-}
-
 #[test]
-fn the_mutable_walk_reaches_the_same_nodes() {
-    let mut program = parse(EVERYWHERE);
-    walk_stmts_mut(&mut Rename, &mut program);
-    let mut v = Variables(Vec::new());
-    walk_stmts(&mut v, &program);
-    assert!(!v.0.is_empty());
-    assert!(v.0.iter().all(|n| n.ends_with('_')), "{:?}", v.0);
+fn a_function_body_search_stays_in_its_scope_but_visits_anonymous_class_args() {
+    let program = parse(
+        "<?php function f() { $outer; $c = function () { $inner; }; new class($arg) { public $p = $member; }; }",
+    );
+    let StmtKind::FunctionDecl(function) =
+        &program.arenas.stmt(program.statements()[0]).unwrap().kind
+    else {
+        panic!("expected a function declaration");
+    };
+    let function = program
+        .arenas
+        .function(*function)
+        .expect("function declaration payload");
+    let body = function.body_stmts(&program.arenas);
+    let has_variable = |wanted: &str| {
+        arena::any_expr_in_body(
+            &program.arenas,
+            body,
+            |expr| matches!(&expr.kind, ExprKind::Variable(name) if name.as_str() == wanted),
+        )
+    };
+    assert!(has_variable("outer"));
+    assert!(has_variable("arg"));
+    assert!(!has_variable("inner"));
+    assert!(!has_variable("member"));
 }
 
 #[test]
 fn every_name_and_closure_use_is_visited() {
     struct Names(Vec<String>);
-    impl<'ast> Visitor<'ast> for Names {
-        fn visit_name(&mut self, name: &'ast QualifiedName) {
+    impl ArenaVisitor for Names {
+        fn visit_name(&mut self, name: &QualifiedName) {
             self.0.push(name.written.to_string());
         }
-        fn visit_closure_use(&mut self, closure_use: &'ast ClosureUse) {
+        fn visit_closure_use(&mut self, closure_use: &ClosureUse) {
             self.0.push(format!("${}", closure_use.name));
         }
     }
@@ -110,7 +120,7 @@ fn every_name_and_closure_use_is_visited() {
          $g = function () use ($u) {};",
     );
     let mut names = Names(Vec::new());
-    walk_stmts(&mut names, &program);
+    arena::walk_stmts(&mut names, &program.arenas, program.statements());
     names.0.sort();
     assert_eq!(
         names.0,

@@ -33,7 +33,13 @@ impl<'a> Checker<'a> {
         // that mostly have none.
         match &e.kind {
             ExprKind::Call(callee, _) => {
-                let ExprKind::Name(name) = &callee.kind else {
+                let Some(name) = self.syntax_arenas().and_then(|arenas| {
+                    let callee = arenas.expr(*callee)?;
+                    let ExprKind::Name(name) = &callee.kind else {
+                        return None;
+                    };
+                    arenas.qualified_name(name)
+                }) else {
                     return;
                 };
                 let Some((resolved_name, sig)) = self.registry.resolve_function(name) else {
@@ -42,12 +48,15 @@ impl<'a> Checker<'a> {
                 if self.discards_result_flagged(sig) {
                     self.report_discarded(
                         format!("{resolved_name}()"),
-                        e.span,
+                        self.expr_span(e.id),
                         "function.resultDiscarded",
                     );
                 }
             }
             ExprKind::MethodCall(recv, method, _, _) => {
+                let Some(recv) = self.syntax_arenas().and_then(|arenas| arenas.expr(*recv)) else {
+                    return;
+                };
                 // The callee the call's own check resolved, when it did.
                 let resolved = self
                     .statement_method_call
@@ -67,7 +76,7 @@ impl<'a> Checker<'a> {
                 if self.discards_result_flagged(sig) {
                     self.report_discarded(
                         format!("{owner}::{method}()"),
-                        e.span,
+                        self.expr_span(e.id),
                         "method.resultDiscarded",
                     );
                 }
@@ -85,7 +94,7 @@ impl<'a> Checker<'a> {
                 if self.discards_result_flagged(sig) {
                     self.report_discarded(
                         format!("{class}::{method}()"),
-                        e.span,
+                        self.expr_span(e.id),
                         "staticMethod.resultDiscarded",
                     );
                 }
@@ -123,19 +132,29 @@ impl<'a> Checker<'a> {
     /// `random_int(10, 1)` throws an unconditional `ValueError` at call
     /// time whenever `$min` is greater than `$max` - `$min == $max` is
     /// fine (a degenerate but legal single-value range).
-    pub(crate) fn check_random_int_call(&mut self, args: &[Arg], locals: &Locals) {
+    pub(crate) fn check_random_int_call(
+        &mut self,
+        arenas: &NodeArenas,
+        args: &[Arg],
+        locals: &Locals,
+    ) {
         if args.len() < 2 {
             return;
         }
-        let min_ty = self.infer_expr(&args[0].value, locals);
-        let max_ty = self.infer_expr(&args[1].value, locals);
+        let (Some(min_expr), Some(max_expr)) =
+            (arenas.expr(args[0].value), arenas.expr(args[1].value))
+        else {
+            return;
+        };
+        let min_ty = self.infer_expr(min_expr, locals);
+        let max_ty = self.infer_expr(max_expr, locals);
         if let (Some(min), Some(max)) = (min_ty.int_literal_value(), max_ty.int_literal_value())
             && min > max
         {
             self.report(format!(
                     "random_int(): parameter #1 ($min = {min}) must be less than or equal to parameter #2 ($max = {max})"
                 ),
-                args[0].value.span,
+                self.expr_span(min_expr.id),
                 0,
                 "argument.type",
             );
@@ -147,14 +166,25 @@ impl<'a> Checker<'a> {
     /// `ValueError` on PHP 8, `false` before), and `array_flip` /
     /// `array_count_values` over values that aren't ints or strings, each
     /// skipped with a warning.
-    pub(crate) fn check_value_to_key_call(&mut self, name: &str, args: &[Arg], locals: &Locals) {
+    pub(crate) fn check_value_to_key_call(
+        &mut self,
+        arenas: &NodeArenas,
+        name: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) {
         if args.iter().any(|a| a.spread || a.name.is_some()) {
             return;
         }
         match (name, args) {
             ("array_combine", [keys, values, ..]) => {
-                let keys_ty = self.infer_expr(&keys.value, locals);
-                let values_ty = self.infer_expr(&values.value, locals);
+                let (Some(keys_expr), Some(values_expr)) =
+                    (arenas.expr(keys.value), arenas.expr(values.value))
+                else {
+                    return;
+                };
+                let keys_ty = self.infer_expr(keys_expr, locals);
+                let values_ty = self.infer_expr(values_expr, locals);
                 if let (Some((kl, kh)), Some((vl, vh))) =
                     (keys_ty.count_range(), values_ty.count_range())
                     && (kh.is_some_and(|h| h < vl) || vh.is_some_and(|h| h < kl))
@@ -163,14 +193,17 @@ impl<'a> Checker<'a> {
                         format!(
                             "array_combine() expects arrays of the same size, {keys_ty} and {values_ty} given."
                         ),
-                        values.value.span,
+                        self.expr_span(values_expr.id),
                         3,
                         "function.arraySizeMismatch",
                     );
                 }
             }
             ("array_flip" | "array_count_values", [array, ..]) => {
-                let Some(values) = self.infer_expr(&array.value, locals).array_value_type() else {
+                let Some(array_expr) = arenas.expr(array.value) else {
+                    return;
+                };
+                let Some(values) = self.infer_expr(array_expr, locals).array_value_type() else {
                     return;
                 };
                 let keyable = self.relation().union(Type::int(), Type::string());
@@ -186,7 +219,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "{name}() can only {verb} int and string values, {values} given; others are skipped."
                         ),
-                        array.value.span,
+                        self.expr_span(array_expr.id),
                         level,
                         "function.unkeyableValue",
                     );

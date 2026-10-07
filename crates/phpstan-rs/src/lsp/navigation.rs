@@ -117,8 +117,22 @@ pub(crate) enum Resolved {
 /// a function body, just through a different entry point.
 #[derive(Debug, Clone)]
 pub(crate) enum ProbeScope {
-    Function(Box<FunctionDecl>),
-    TopLevel(Vec<StmtId>),
+    Function {
+        function: Box<FunctionDecl>,
+        owner: Option<std::sync::Arc<syntax::ParsedFile>>,
+    },
+    TopLevel {
+        statements: Vec<StmtId>,
+        owner: Option<std::sync::Arc<syntax::ParsedFile>>,
+    },
+}
+
+impl ProbeScope {
+    pub(crate) fn owner(&self) -> Option<&std::sync::Arc<syntax::ParsedFile>> {
+        match self {
+            Self::Function { owner, .. } | Self::TopLevel { owner, .. } => owner.as_ref(),
+        }
+    }
 }
 
 /// What a candidate `Span` is checked against - a single cursor position
@@ -164,9 +178,11 @@ fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span
     let tree = project.ast_of(path)?;
     let arenas = tree.arenas();
     let stmts = tree.statements();
+    let syntax_owner = tree.parsed_file_for_completion();
     let registry = project.registry();
     let mut w = Walker {
         arenas,
+        syntax_owner,
         registry,
         anchor,
         top_level_stmts: stmts,
@@ -229,6 +245,7 @@ enum ScopeFrame {
 
 struct Walker<'a> {
     arenas: &'a NodeArenas,
+    syntax_owner: std::sync::Arc<syntax::ParsedFile>,
     registry: &'a Registry,
     anchor: Anchor,
     // The whole file's own top-level statement list - `ProbeScope::
@@ -320,8 +337,14 @@ impl<'a> Walker<'a> {
     /// function` - see `ProbeScope`'s own doc comment).
     fn probe_scope(&self) -> ProbeScope {
         match &self.current_function {
-            Some(f) => ProbeScope::Function(Box::new(f.clone())),
-            None => ProbeScope::TopLevel(self.top_level_stmts.to_vec()),
+            Some(f) => ProbeScope::Function {
+                function: Box::new(f.clone()),
+                owner: Some(std::sync::Arc::clone(&self.syntax_owner)),
+            },
+            None => ProbeScope::TopLevel {
+                statements: self.top_level_stmts.to_vec(),
+                owner: Some(std::sync::Arc::clone(&self.syntax_owner)),
+            },
         }
     }
 
@@ -407,7 +430,12 @@ impl<'a> Walker<'a> {
             return;
         };
         syntax::stack::guard(|| match &e.kind {
-            ExprKind::Variable(name) => self.record_var_self(e.span, name),
+            ExprKind::Variable(name) => self.record_var_self(
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
+                name,
+            ),
             ExprKind::Destructure(items, _) => {
                 for item in arenas.destructure_items(items) {
                     if let Some(key) = item.key {
@@ -443,12 +471,17 @@ impl Visitor for Walker<'_> {
                 self.bind_var(arenas, *value);
                 self.visit_stmt(arenas, *body);
             }
-            StmtKind::FunctionDecl(f) => {
-                self.record(f.name.span, Resolved::Function(f.fq_name().to_string()));
+            StmtKind::FunctionDecl(function_id) => {
+                if let Some(function) = arenas.function(function_id.clone()) {
+                    self.record(
+                        function.name.span,
+                        Resolved::Function(function.fq_name().to_string()),
+                    );
+                }
                 arena::walk_stmt(self, arenas, id);
             }
             StmtKind::Global(vars) => {
-                for var in vars {
+                for var in arenas.global_vars(vars.clone()) {
                     match var {
                         GlobalVar::Name(name) => self.record_var_self(name.span, &name.name),
                         GlobalVar::Dynamic(e) => self.visit_expr(arenas, *e),
@@ -456,11 +489,11 @@ impl Visitor for Walker<'_> {
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (name, default) in vars {
-                    if let Some(e) = default {
-                        self.visit_expr(arenas, *e);
+                for variable in arenas.static_vars(vars.clone()) {
+                    if let Some(e) = variable.default {
+                        self.visit_expr(arenas, e);
                     }
-                    self.record_var_self(name.span, &name.name);
+                    self.record_var_self(variable.name.span, &variable.name.name);
                 }
             }
             _ => arena::walk_stmt(self, arenas, id),
@@ -490,7 +523,7 @@ impl Visitor for Walker<'_> {
     }
 
     fn visit_param(&mut self, arenas: &NodeArenas, param: &Param) {
-        for attr in arenas.attributes(param.attrs) {
+        for attr in arenas.attributes(param.attrs.clone()) {
             self.visit_attribute(arenas, attr);
         }
         if let Some(hint) = &param.type_hint {
@@ -574,10 +607,10 @@ impl Visitor for Walker<'_> {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::NewAnonymousClass(class_id) => {
-                    let Some(class) = arenas.anonymous_class(*class_id) else {
+                    let Some(class) = arenas.anonymous_class(class_id.clone()) else {
                         return;
                     };
-                    arena::walk_args(self, arenas, class.args);
+                    arena::walk_args(self, arenas, class.args.clone());
                     let previous = std::mem::replace(
                         &mut self.current_class,
                         arenas
@@ -595,40 +628,48 @@ impl Visitor for Walker<'_> {
                 // some other way (see the plain `ExprKind::Name` arm below).
                 ExprKind::Call(callee, args)
                     if matches!(
-                        arenas.expr(*callee).map(|e| &e.kind),
+                        arenas.expr(callee.clone()).map(|e| &e.kind),
                         Some(ExprKind::Name(_))
                     ) =>
                 {
                     let Some(ExprNode {
                         kind: ExprKind::Name(n),
                         ..
-                    }) = arenas.expr(*callee)
+                    }) = arenas.expr(callee.clone())
                     else {
                         unreachable!()
                     };
+                    let Some(n) = arenas.qualified_name(n) else {
+                        return;
+                    };
                     let fqn = self.registry.called_function_name(n).to_string();
-                    let span = arenas.expr_span(*callee).unwrap_or(expr.span);
+                    let span = arenas
+                        .expr_span(*callee)
+                        .unwrap_or_else(|| arenas.expr_span(expr.id).expect("expression span"));
                     self.record(span, Resolved::Function(fqn));
-                    arena::walk_args(self, arenas, *args);
+                    arena::walk_args(self, arenas, args.clone());
                     return;
                 }
                 // `new Foo(...)`'s callee - always a class reference, the
                 // mirror image of `Call` just above.
                 ExprKind::New(callee, args)
                     if matches!(
-                        arenas.expr(*callee).map(|e| &e.kind),
+                        arenas.expr(callee.clone()).map(|e| &e.kind),
                         Some(ExprKind::Name(_))
                     ) =>
                 {
                     let Some(ExprNode {
                         kind: ExprKind::Name(n),
                         ..
-                    }) = arenas.expr(*callee)
+                    }) = arenas.expr(callee.clone())
                     else {
                         unreachable!()
                     };
+                    let Some(n) = arenas.qualified_name(n) else {
+                        return;
+                    };
                     self.record_class(n);
-                    arena::walk_args(self, arenas, *args);
+                    arena::walk_args(self, arenas, args.clone());
                     return;
                 }
                 // A bare `Name` reached any *other* way (a first-class
@@ -637,16 +678,26 @@ impl Visitor for Walker<'_> {
                 // actually exists, preferring a function (the far more
                 // common shape for a standalone name reference).
                 ExprKind::Name(n) => {
+                    let Some(n) = arenas.qualified_name(n) else {
+                        return;
+                    };
                     let resolved = match self.registry.resolve_function(n) {
                         Some((fqn, _)) => Some(Resolved::Function(fqn.to_string())),
                         None => self.class_ref(n).map(Resolved::Class),
                     };
                     if let Some(resolved) = resolved {
-                        self.record(expr.span, resolved);
+                        self.record(
+                            arenas.expr_span(expr.id).expect("expression span"),
+                            resolved,
+                        );
                     }
                 }
                 ExprKind::ClassConstFetch(StaticTarget::Name(class), member) => {
-                    self.record_static_member(expr.span, class, member);
+                    self.record_static_member(
+                        arenas.expr_span(expr.id).expect("expression span"),
+                        class,
+                        member,
+                    );
                 }
                 ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
                     self.record_class(class);
@@ -659,18 +710,26 @@ impl Visitor for Walker<'_> {
                 // below uses, `Resolved::Instance` being agnostic to `->`
                 // vs `::` call syntax.
                 ExprKind::StaticCall(StaticTarget::Name(class), member, _) => {
-                    self.record_static_member(expr.span, class, member);
+                    self.record_static_member(
+                        arenas.expr_span(expr.id).expect("expression span"),
+                        class,
+                        member,
+                    );
                 }
                 ExprKind::StaticCall(StaticTarget::Expr(receiver), member, args) => {
                     self.visit_expr(arenas, *receiver);
-                    let span = arenas.expr_span(*receiver).unwrap_or(expr.span);
+                    let span = arenas
+                        .expr_span(*receiver)
+                        .unwrap_or_else(|| arenas.expr_span(expr.id).expect("expression span"));
                     let instance = self.instance(span, member);
                     self.record(member.span, instance);
-                    arena::walk_args(self, arenas, *args);
+                    arena::walk_args(self, arenas, args.clone());
                     return;
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(name)) => {
-                    self.record_class(name);
+                    if let Some(name) = arenas.qualified_name(name) {
+                        self.record_class(name);
+                    }
                 }
                 // A plain variable read (`$this` excluded - it's never a
                 // locally-declared variable, and is resolved separately via
@@ -681,7 +740,7 @@ impl Visitor for Walker<'_> {
                 // `probe_scope` covers (a named function/method, or top-level
                 // script scope).
                 ExprKind::Variable(name) if **name != *"this" => {
-                    self.record_var_read(expr.span, name);
+                    self.record_var_read(arenas.expr_span(expr.id).expect("expression span"), name);
                 }
                 // `$this->method()`/`$this->prop` resolve directly (only
                 // `current_class` is needed); any *other* receiver needs a
@@ -694,7 +753,7 @@ impl Visitor for Walker<'_> {
                 ExprKind::MethodCall(recv, method, args, _) => {
                     self.visit_expr(arenas, *recv);
                     self.record_receiver_member(arenas, *recv, method);
-                    arena::walk_args(self, arenas, *args);
+                    arena::walk_args(self, arenas, args.clone());
                     return;
                 }
                 ExprKind::PropertyAccess(recv, property, _) => {
@@ -704,14 +763,14 @@ impl Visitor for Walker<'_> {
                 }
                 ExprKind::Closure(closure_id) => {
                     let Some(syntax::ast::ClosurePayload::Closure(closure)) =
-                        arenas.closure(*closure_id)
+                        arenas.closure(closure_id.clone())
                     else {
                         return;
                     };
                     let syntax::ast::ClosureExpr {
                         params, uses, body, ..
                     } = closure;
-                    for p in arenas.params(*params) {
+                    for p in arenas.params(params.clone()) {
                         self.visit_param(arenas, p);
                     }
                     // A `use (&$x)`/`use ($x)` capture is itself a real,
@@ -724,6 +783,7 @@ impl Visitor for Walker<'_> {
                     // resolved before this closure's own frame is pushed
                     // below, since a `use` clause names an outer variable,
                     // not one of the closure's own locals.
+                    let uses = arenas.closure_uses(uses);
                     for u in uses {
                         self.record_var_read(u.name.span, &u.name.name);
                     }
@@ -738,19 +798,19 @@ impl Visitor for Walker<'_> {
                 }
                 ExprKind::ArrowFn(arrow_id) => {
                     let Some(syntax::ast::ClosurePayload::ArrowFn(arrow)) =
-                        arenas.closure(*arrow_id)
+                        arenas.closure(arrow_id.clone())
                     else {
                         return;
                     };
                     let syntax::ast::ArrowFnExpr { params, body, .. } = arrow;
-                    for p in arenas.params(*params) {
+                    for p in arenas.params(params.clone()) {
                         self.visit_param(arenas, p);
                     }
                     let id = self.next_id();
                     self.scope_frames.push(ScopeFrame::ArrowFn {
                         id,
                         owns: arenas
-                            .params(*params)
+                            .params(params.clone())
                             .iter()
                             .map(|p| p.name.name.clone())
                             .collect(),
@@ -784,7 +844,12 @@ impl Walker<'_> {
             Some(owner) if matches!(&recv_node.kind, ExprKind::Variable(v) if *v == "this") => {
                 Resolved::Member(owner.clone(), member.to_string())
             }
-            _ => self.instance(recv_node.span, member),
+            _ => self.instance(
+                arenas
+                    .expr_span(recv_node.id)
+                    .expect("receiver expression has a parallel span"),
+                member,
+            ),
         };
         self.record(member.span, value);
     }

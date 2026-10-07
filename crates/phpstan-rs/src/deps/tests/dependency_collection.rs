@@ -425,8 +425,13 @@ fn a_class_a_see_tag_names_is_referenced_but_shapes_no_declaration() {
             public function m() {}
         }
     "#;
-    let walked = crate::deps::both_referenced_names(&syntax::parse(src).unwrap().stmts);
-    let recorded = crate::deps::recorded_references(syntax::parse(src).unwrap().references);
+    let parsed = syntax::parse(src).unwrap();
+    let walked = crate::deps::both_referenced_names(&parsed.arenas, parsed.statements());
+    let recorded = crate::deps::recorded_references(
+        parsed
+            .references
+            .expect("unchanged parse keeps parser-recorded references"),
+    );
     for (names, outside) in [walked, recorded] {
         for class in [
             "Lib\\Imported",

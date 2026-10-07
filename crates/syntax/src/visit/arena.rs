@@ -108,7 +108,7 @@ pub fn walk_stmt<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: StmtId
         StmtKind::If(stmt) => {
             v.visit_expr(arenas, stmt.cond);
             v.visit_stmt(arenas, stmt.then_branch);
-            for elseif in &stmt.elseifs {
+            for elseif in arenas.elseifs(stmt.elseifs.clone()) {
                 v.visit_elseif(arenas, elseif);
             }
             if let Some(branch) = stmt.else_branch {
@@ -149,8 +149,8 @@ pub fn walk_stmt<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: StmtId
             v.visit_stmt(arenas, *body);
         }
         StmtKind::Declare { directives, body } => {
-            for (_, value) in directives {
-                v.visit_expr(arenas, *value);
+            for directive in arenas.declare_directives(directives.clone()) {
+                v.visit_expr(arenas, directive.value);
             }
             if let Some(body) = body {
                 walk_stmts(v, arenas, arenas.stmt_ids(body));
@@ -158,7 +158,7 @@ pub fn walk_stmt<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: StmtId
         }
         StmtKind::Unset(targets) => walk_exprs(v, arenas, arenas.expr_ids(targets)),
         StmtKind::Global(vars) => {
-            for var in vars {
+            for var in arenas.global_vars(vars.clone()) {
                 if let GlobalVar::Dynamic(expr) = var {
                     v.visit_expr(arenas, *expr);
                 }
@@ -169,22 +169,24 @@ pub fn walk_stmt<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: StmtId
                 v.visit_function_decl(arenas, function);
             }
         }
-        StmtKind::ClassDecl(class) => v.visit_class_decl(arenas, class),
+        StmtKind::ClassDecl(class) => {
+            v.visit_class_decl(arenas, arenas.class_decl(class.clone()));
+        }
         StmtKind::GlobalConst(constants) => {
             for constant in arenas.class_consts(constants) {
                 v.visit_class_const(arenas, constant);
             }
         }
         StmtKind::StaticVar(vars) => {
-            for (_, default) in vars {
-                if let Some(default) = default {
-                    v.visit_expr(arenas, *default);
+            for variable in arenas.static_vars(vars.clone()) {
+                if let Some(default) = variable.default {
+                    v.visit_expr(arenas, default);
                 }
             }
         }
         StmtKind::Switch { subject, cases } => {
             v.visit_expr(arenas, *subject);
-            for case in cases {
+            for case in arenas.switch_cases(cases.clone()) {
                 v.visit_switch_case(arenas, case);
             }
         }
@@ -194,7 +196,7 @@ pub fn walk_stmt<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: StmtId
             finally,
         } => {
             walk_stmts(v, arenas, arenas.stmt_ids(body));
-            for clause in catches {
+            for clause in arenas.catch_clauses(catches.clone()) {
                 v.visit_catch_clause(arenas, clause);
             }
             if let Some(finally) = finally {
@@ -211,13 +213,13 @@ fn walk_exprs<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, exprs: &[Expr
 }
 
 pub fn walk_args<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, args: ArgRange) {
-    for arg in arenas.args(args) {
+    for arg in arenas.args(args.clone()) {
         v.visit_arg(arenas, arg);
     }
 }
 
 fn walk_attributes<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, attrs: AttributeRange) {
-    for attr in arenas.attributes(attrs) {
+    for attr in arenas.attributes(attrs.clone()) {
         v.visit_attribute(arenas, attr);
     }
 }
@@ -235,12 +237,16 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
     };
     crate::stack::guard(|| match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) => {}
-        ExprKind::Name(name) => v.visit_name(name),
+        ExprKind::Name(name) => {
+            if let Some(name) = arenas.qualified_name(name) {
+                v.visit_name(name);
+            }
+        }
         ExprKind::Isset(items) => walk_exprs(v, arenas, arenas.expr_ids(items)),
         ExprKind::Interpolated(items) => walk_exprs(v, arenas, arenas.expr_ids(items)),
         ExprKind::Exit(_, args) => {
             if let Some(args) = args {
-                walk_args(v, arenas, *args);
+                walk_args(v, arenas, args.clone());
             }
         }
         ExprKind::DynamicVariable(inner)
@@ -258,7 +264,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, ..) => v.visit_expr(arenas, *inner),
         ExprKind::ArrayLiteral(items) => {
-            for item in arenas.array_items(*items) {
+            for item in arenas.array_items(items.clone()) {
                 if let Some(key) = item.key {
                     v.visit_expr(arenas, key);
                 }
@@ -292,16 +298,16 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         }
         ExprKind::Call(callee, args) | ExprKind::New(callee, args) => {
             v.visit_expr(arenas, *callee);
-            walk_args(v, arenas, *args);
+            walk_args(v, arenas, args.clone());
         }
         ExprKind::MethodCall(receiver, _, args, _) => {
             v.visit_expr(arenas, *receiver);
-            walk_args(v, arenas, *args);
+            walk_args(v, arenas, args.clone());
         }
         ExprKind::DynamicMethodCall(receiver, name, args, _) => {
             v.visit_expr(arenas, *receiver);
             v.visit_expr(arenas, *name);
-            walk_args(v, arenas, *args);
+            walk_args(v, arenas, args.clone());
         }
         ExprKind::ClassConstFetch(target, _)
         | ExprKind::ClassNameFetch(target)
@@ -313,12 +319,12 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         }
         ExprKind::StaticCall(target, _, args) => {
             walk_static_target(v, arenas, target);
-            walk_args(v, arenas, *args);
+            walk_args(v, arenas, args.clone());
         }
         ExprKind::DynamicStaticCall(target, name, args) => {
             walk_static_target(v, arenas, target);
             v.visit_expr(arenas, *name);
-            walk_args(v, arenas, *args);
+            walk_args(v, arenas, args.clone());
         }
         ExprKind::Index(base, index) => {
             v.visit_expr(arenas, *base);
@@ -329,7 +335,11 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         ExprKind::Instanceof(inner, target) => {
             v.visit_expr(arenas, *inner);
             match target {
-                InstanceofTarget::Name(name) => v.visit_name(name),
+                InstanceofTarget::Name(name) => {
+                    if let Some(name) = arenas.qualified_name(name) {
+                        v.visit_name(name);
+                    }
+                }
                 InstanceofTarget::Expr(expr) => v.visit_expr(arenas, *expr),
             }
         }
@@ -341,7 +351,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         }
         ExprKind::NewAnonymousClass(class) => {
             if let Some(class) = arenas.anonymous_class(*class) {
-                walk_args(v, arenas, class.args);
+                walk_args(v, arenas, class.args.clone());
                 if let Some(def) = arenas.class(class.def) {
                     v.visit_class_def(arenas, def);
                 }
@@ -357,8 +367,8 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         }
         ExprKind::Closure(closure) => {
             if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
-                walk_attributes(v, arenas, closure.attrs);
-                for param in arenas.params(closure.params) {
+                walk_attributes(v, arenas, closure.attrs.clone());
+                for param in arenas.params(closure.params.clone()) {
                     v.visit_param(arenas, param);
                 }
                 for closure_use in arenas.closure_uses(&closure.uses) {
@@ -372,8 +382,8 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         }
         ExprKind::ArrowFn(arrow) => {
             if let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*arrow) {
-                walk_attributes(v, arenas, arrow.attrs);
-                for param in arenas.params(arrow.params) {
+                walk_attributes(v, arenas, arrow.attrs.clone());
+                for param in arenas.params(arrow.params.clone()) {
                     v.visit_param(arenas, param);
                 }
                 if let Some(hint) = &arrow.return_type {
@@ -384,7 +394,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
         }
         ExprKind::Match { subject, arms } => {
             v.visit_expr(arenas, *subject);
-            for arm in arenas.match_arms(*arms) {
+            for arm in arenas.match_arms(arms.clone()) {
                 if let Some(conditions) = &arm.conditions {
                     walk_exprs(v, arenas, arenas.expr_ids(conditions));
                 }
@@ -395,8 +405,8 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: ExprId
 }
 
 pub fn walk_function_decl<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, f: &FunctionDecl) {
-    walk_attributes(v, arenas, f.attrs);
-    for param in arenas.params(f.params) {
+    walk_attributes(v, arenas, f.attrs.clone());
+    for param in arenas.params(f.params.clone()) {
         v.visit_param(arenas, param);
     }
     if let Some(hint) = &f.return_type {
@@ -412,7 +422,7 @@ pub fn walk_class_decl<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: &
 }
 
 pub fn walk_class_def<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: &ClassDef) {
-    walk_attributes(v, arenas, c.attrs);
+    walk_attributes(v, arenas, c.attrs.clone());
     for name in arenas
         .qualified_names(&c.extends)
         .iter()
@@ -448,7 +458,7 @@ pub fn walk_class_def<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: &C
     for property in arenas.properties(&c.properties) {
         v.visit_property_decl(arenas, property);
     }
-    for method in arenas.methods(c.methods) {
+    for method in arenas.methods(c.methods.clone()) {
         v.visit_method_decl(arenas, method);
     }
 }
@@ -458,7 +468,7 @@ pub fn walk_method_decl<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, m: 
 }
 
 pub fn walk_property_decl<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, p: &PropertyDecl) {
-    walk_attributes(v, arenas, p.attrs);
+    walk_attributes(v, arenas, p.attrs.clone());
     if let Some(hint) = &p.type_hint {
         v.visit_type_hint(arenas, hint);
     }
@@ -471,7 +481,7 @@ pub fn walk_property_decl<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, p
 }
 
 pub fn walk_class_const<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: &ClassConst) {
-    walk_attributes(v, arenas, c.attrs);
+    walk_attributes(v, arenas, c.attrs.clone());
     if let Some(hint) = &c.type_hint {
         v.visit_type_hint(arenas, hint);
     }
@@ -479,7 +489,7 @@ pub fn walk_class_const<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: 
 }
 
 pub fn walk_enum_case<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: &EnumCase) {
-    walk_attributes(v, arenas, c.attrs);
+    walk_attributes(v, arenas, c.attrs.clone());
     if let Some(value) = c.value {
         v.visit_expr(arenas, value);
     }
@@ -488,7 +498,11 @@ pub fn walk_enum_case<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, c: &E
 pub fn walk_type_hint<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, hint: &TypeHint) {
     crate::stack::guard(|| match &hint.kind {
         TypeHintKind::Keyword(..) => {}
-        TypeHintKind::Name(name) => v.visit_name(name),
+        TypeHintKind::Name(name) => {
+            if let Some(name) = arenas.qualified_name(name) {
+                v.visit_name(name);
+            }
+        }
         TypeHintKind::Nullable(inner) => v.visit_type_hint(arenas, inner),
         TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
             for member in arenas.type_hints(members) {
@@ -499,7 +513,7 @@ pub fn walk_type_hint<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, hint:
 }
 
 pub fn walk_param<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, p: &Param) {
-    walk_attributes(v, arenas, p.attrs);
+    walk_attributes(v, arenas, p.attrs.clone());
     if let Some(hint) = &p.type_hint {
         v.visit_type_hint(arenas, hint);
     }
@@ -513,7 +527,7 @@ pub fn walk_param<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, p: &Param
 
 pub fn walk_property_hooks<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, h: &PropertyHooks) {
     for hook in h.iter() {
-        walk_attributes(v, arenas, hook.attrs);
+        walk_attributes(v, arenas, hook.attrs.clone());
         if let Some(param) = &hook.param {
             v.visit_param(arenas, param);
         }
@@ -527,7 +541,7 @@ pub fn walk_property_hooks<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, 
 
 pub fn walk_attribute<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, a: &Attribute) {
     v.visit_name(&a.name);
-    walk_args(v, arenas, a.args);
+    walk_args(v, arenas, a.args.clone());
 }
 
 pub fn walk_arg<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, arg: &Arg) {
@@ -561,7 +575,7 @@ pub fn walk_expr_in_scope<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, i
         ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {}
         ExprKind::NewAnonymousClass(class) => {
             if let Some(class) = arenas.anonymous_class(*class) {
-                walk_args(v, arenas, class.args);
+                walk_args(v, arenas, class.args.clone());
             }
         }
         _ => walk_expr(v, arenas, id),

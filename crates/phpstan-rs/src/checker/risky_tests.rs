@@ -17,26 +17,31 @@
 use crate::checker::Checker;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 impl<'a> Checker<'a> {
     /// `fqn`'s own test methods, each checked independently - only fires
     /// for a real `PHPUnit\Framework\TestCase` subclass at all (a plain
     /// class with a `test*`-named method that happens not to extend it
     /// is just an ordinary, unrelated method, not a test).
-    pub(crate) fn check_risky_test_methods(&mut self, fqn: &str, c: &ClassDef) {
+    pub(crate) fn check_risky_test_methods(
+        &mut self,
+        arenas: &NodeArenas,
+        fqn: &str,
+        c: &ClassDef,
+    ) {
         if !self
             .registry
             .is_subclass_of(fqn, "PHPUnit\\Framework\\TestCase")
         {
             return;
         }
-        for m in &c.methods {
+        for m in arenas.methods(c.methods.clone()) {
             let f = &m.function;
             if m.is_abstract || !f.name.starts_with("test") {
                 continue;
             }
-            if body_has_assertion(f.body_stmts()) {
+            if body_has_assertion(arenas, f.body_stmts(arenas)) {
                 continue;
             }
             self.report(format!(
@@ -65,9 +70,22 @@ impl<'a> Checker<'a> {
         if name != "it" && name != "test" {
             return;
         }
+        let arenas = self
+            .syntax_arenas()
+            .expect("risky-test checks require the owner of arena-backed syntax IDs");
         let has_assertion = match &closure.kind {
-            ExprKind::Closure(closure) => body_has_assertion(&closure.body),
-            ExprKind::ArrowFn(arrow) => expr_has_assertion(&arrow.body),
+            ExprKind::Closure(id) => {
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) else {
+                    return;
+                };
+                body_has_assertion(arenas, arenas.stmt_ids(&closure.body))
+            }
+            ExprKind::ArrowFn(id) => {
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*id) else {
+                    return;
+                };
+                expr_has_assertion(arenas, arrow.body)
+            }
             _ => return,
         };
         if has_assertion {
@@ -90,7 +108,10 @@ fn is_assertion_method_name(name: &str) -> bool {
 }
 
 /// Whether `e` is itself an assertion call.
-fn is_assertion(e: &ExprNode) -> bool {
+fn is_assertion(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(e) = arenas.expr(id) else {
+        return false;
+    };
     match &e.kind {
         ExprKind::MethodCall(_, method, _, _) => is_assertion_method_name(method),
         ExprKind::StaticCall(_, method, _) => is_assertion_method_name(method),
@@ -99,10 +120,13 @@ fn is_assertion(e: &ExprNode) -> bool {
         // enough signal on its own (real Pest usage never calls it
         // without immediately chaining an expectation off the result),
         // without needing to also verify the chained `->to*()` call.
-        ExprKind::Call(callee, _) => matches!(&callee.kind, ExprKind::Name(n) if {
-            let (primary, fallback) = n.candidates();
-            fallback.unwrap_or(primary) == "expect"
-        }),
+        ExprKind::Call(callee, _) => {
+            matches!(arenas.expr(*callee).map(|callee| &callee.kind), Some(ExprKind::Name(n)) if {
+                let Some(n) = arenas.qualified_name(n) else { return false };
+                let (primary, fallback) = n.candidates();
+                fallback.unwrap_or(primary) == "expect"
+            })
+        }
         _ => false,
     }
 }
@@ -116,28 +140,28 @@ struct Assertions {
     found: bool,
 }
 
-impl<'ast> Visitor<'ast> for Assertions {
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+impl Visitor for Assertions {
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
-        if self.found || is_assertion(e) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        if self.found || is_assertion(arenas, id) {
             self.found = true;
             return;
         }
-        walk_expr(self, e);
+        arena::walk_expr(self, arenas, id);
     }
 }
 
-fn expr_has_assertion(e: &ExprNode) -> bool {
+fn expr_has_assertion(arenas: &NodeArenas, id: ExprId) -> bool {
     let mut search = Assertions::default();
-    search.visit_expr(e);
+    search.visit_expr(arenas, id);
     search.found
 }
 
-fn body_has_assertion(stmts: &[StmtNode]) -> bool {
+fn body_has_assertion(arenas: &NodeArenas, stmts: &[StmtId]) -> bool {
     let mut search = Assertions::default();
-    walk_stmts(&mut search, stmts);
+    arena::walk_stmts(&mut search, arenas, stmts);
     search.found
 }

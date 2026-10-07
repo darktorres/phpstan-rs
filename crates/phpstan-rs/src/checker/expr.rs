@@ -164,20 +164,20 @@ impl<'a> Checker<'a> {
             ClassKind::Class,
             false,
             def.properties(arenas),
-            arenas.methods(def.methods),
+            arenas.methods(def.methods.clone()),
         );
         self.check_readonly_class_version(def.is_readonly, true, span);
-        for m in arenas.methods(def.methods) {
+        for m in arenas.methods(def.methods.clone()) {
             self.check_function(&m.function, Some(name), m.is_static, true);
         }
         self.record_property_type_site(arenas, name, vec![Name::from(name)], def);
         for p in def.properties(arenas) {
-            let attrs = arenas.attributes(p.attrs);
+            let attrs = arenas.attributes(p.attrs.clone());
             self.check_attributes(attrs, name);
             self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
         }
         for cc in def.consts(arenas) {
-            let attrs = arenas.attributes(cc.attrs);
+            let attrs = arenas.attributes(cc.attrs.clone());
             self.check_attributes(attrs, name);
             self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_CLASS_CONSTANT, "class constant");
         }
@@ -233,7 +233,7 @@ impl<'a> Checker<'a> {
                 self.check_expr_impl(e, locals, label)
             });
             if let Some(native) = native {
-                self.record_expr_type(e.span, ty.clone(), native);
+                self.record_expr_type(self.expr_span(e.id), ty.clone(), native);
             }
             self.forget_what_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
@@ -279,7 +279,9 @@ impl<'a> Checker<'a> {
         ) {
             None
         } else {
-            self.call_throw_types.remove(&e.span).flatten()
+            self.call_throw_types
+                .remove(&self.expr_span(e.id))
+                .flatten()
         };
         let own = self.thrown_by_itself(e, locals, anything);
         match (implicit, own) {
@@ -304,7 +306,7 @@ impl<'a> Checker<'a> {
             | ExprKind::StaticCall(..)
             | ExprKind::DynamicStaticCall(..) => self
                 .call_throw_types
-                .remove(&e.span)
+                .remove(&self.expr_span(e.id))
                 .unwrap_or_else(|| Some(anything())),
             ExprKind::Throw(inner) => {
                 let syntax_owner = self
@@ -332,10 +334,13 @@ impl<'a> Checker<'a> {
     fn dispatch_expr_rules(&mut self, e: &ExprNode, locals: &Locals, ty: &Type) {
         let rules = self.external_rules;
         let mut found = Vec::new();
+        let arenas = self
+            .syntax_arenas()
+            .expect("external expression rules retain their parsed file owner");
         for rule in rules {
-            if rule.wants_expr(&e.kind) {
+            if rule.wants_expr(arenas, &e.kind) {
                 let scope = crate::rule::Scope::new(self, locals);
-                found.extend(rule.check_expr(&scope, e, ty));
+                found.extend(rule.check_expr(&scope, arenas, e, ty));
             }
         }
         self.diagnostics.extend(found);
@@ -384,7 +389,12 @@ impl<'a> Checker<'a> {
                 .syntax_tree_owner()
                 .expect("match expressions retain their parsed file owner");
             let arenas = syntax_owner.arenas();
-            self.check_void_match_usage(arenas, arenas.match_arms(*arms), locals, e.span);
+            self.check_void_match_usage(
+                arenas,
+                arenas.match_arms(arms.clone()),
+                locals,
+                self.expr_span(e.id),
+            );
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
@@ -395,7 +405,11 @@ impl<'a> Checker<'a> {
                 let callee = arenas
                     .expr(*callee)
                     .expect("call callee belongs to its retained file owner");
-                let args = arenas.args(*args);
+                let args = arenas.args(args.clone());
+                let callee_name = match &callee.kind {
+                    ExprKind::Name(range) => arenas.qualified_name(range),
+                    _ => None,
+                };
                 // `PHPStan\Testing\assertType('expected type string', $expr)`
                 // is PHPStan's own testing-DSL function, used to pin down
                 // an exact expected inferred type at a point of interest.
@@ -407,7 +421,7 @@ impl<'a> Checker<'a> {
                 // same way (a no-op stub function its own internal
                 // tooling specially recognizes), so it's additive, not a
                 // diagnostic anyone would trip on outside a fixture file.
-                if let ExprKind::Name(name) = &callee.kind
+                if let Some(name) = callee_name
                     && (name == "assertType" || name.ends_with("\\assertType"))
                     && let [expected_arg, actual_arg] = args
                     && let Some(expected_expr) = arenas.expr(expected_arg.value)
@@ -422,14 +436,14 @@ impl<'a> Checker<'a> {
                         if actual != expected {
                             self.report(format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
-                            ), actual_expr.span, 0, "phpstanRs.assertType");
+                            ), self.expr_span(actual_expr.id), 0, "phpstanRs.assertType");
                         }
                     }
                     self.check_expr(actual_expr, locals, label);
                     return Type::mixed();
                 }
                 // `count($o)` on a `Countable` object calls its `count()`.
-                if let ExprKind::Name(name) = &callee.kind
+                if let Some(name) = callee_name
                     && matches!(
                         name.trim_start_matches('\\').to_ascii_lowercase().as_str(),
                         "count" | "sizeof"
@@ -440,14 +454,20 @@ impl<'a> Checker<'a> {
                         .expr(counted.value)
                         .expect("call argument belongs to its retained file owner");
                     let counted_ty = self.infer_expr(counted, locals);
-                    self.implicit_method_call(&counted_ty, "Countable", "count", e.span, locals);
+                    self.implicit_method_call(
+                        &counted_ty,
+                        "Countable",
+                        "count",
+                        self.expr_span(e.id),
+                        locals,
+                    );
                 }
-                if let ExprKind::Name(name) = &callee.kind
+                if let Some(name) = callee_name
                     && name == "extract"
                 {
                     self.saw_dynamic_var_construct = true;
                 }
-                if let ExprKind::Name(name) = &callee.kind
+                if let Some(name) = callee_name
                     && name
                         .trim_start_matches('\\')
                         .eq_ignore_ascii_case("extract")
@@ -460,12 +480,12 @@ impl<'a> Checker<'a> {
                 // arg-checking path and the undefined-call diagnostic
                 // below see the same name(s) a real call would actually
                 // resolve to.
-                let (resolved_name, sig) = match &callee.kind {
-                    ExprKind::Name(name) => match self.registry.resolve_function(name) {
+                let (resolved_name, sig) = match callee_name {
+                    Some(name) => match self.registry.resolve_function(name) {
                         Some((resolved, sig)) => (Some(resolved), Some(sig)),
                         None => (Some(name.candidates().0), None),
                     },
-                    _ => (None, None),
+                    None => (None, None),
                 };
                 // `resolved_name` is already namespace-qualified the
                 // same way `check_class_name_case`'s own `resolved`
@@ -478,13 +498,13 @@ impl<'a> Checker<'a> {
                 {
                     let mut builder = DiagnosticBuilder::new(
                         format!("Function {canonical} used with incorrect case: {resolved}."),
-                        callee.span,
+                        self.expr_span(callee.id),
                         0,
                         "function.nameCase",
                     );
-                    if let ExprKind::Name(written) = &callee.kind
+                    if let Some(written) = callee_name
                         && let Some((span, replacement, description)) =
-                            Self::name_case_fix(written, canonical, callee.span)
+                            Self::name_case_fix(written, canonical, self.expr_span(callee.id))
                     {
                         builder = builder.fix(span, replacement, description);
                     }
@@ -550,11 +570,12 @@ impl<'a> Checker<'a> {
                 // `it('...', $variableHoldingAClosure)` falls through to
                 // plain check_expr, unrebound.
                 let is_this_binding_call = self.settings.pest
-                    && matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
-                let pest_call_name: Option<&str> = match &callee.kind {
-                    ExprKind::Name(name) if is_this_binding_call => Some(name.as_ref()),
-                    _ => None,
-                };
+                    && callee_name.is_some_and(|name| {
+                        pest_config::is_this_binding_call(name.written.as_ref())
+                    });
+                let pest_call_name: Option<&str> = is_this_binding_call
+                    .then(|| callee_name.map(|name| name.written.as_ref()))
+                    .flatten();
                 // `array_map($callback, $items)`'s contextual parameter-
                 // type injection - computed once, up front, from
                 // `$items`' element type (not per-argument inside the
@@ -653,7 +674,7 @@ impl<'a> Checker<'a> {
                         {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
-                                argument.span,
+                                self.expr_span(argument.id),
                                 level,
                                 "argument.unpackNonIterable",
                             );
@@ -683,7 +704,7 @@ impl<'a> Checker<'a> {
                         if self.settings.phpunit.check_risky_tests
                             && let Some(name) = pest_call_name
                         {
-                            self.check_pest_risky_test(name, peeled_argument, e.span);
+                            self.check_pest_risky_test(name, peeled_argument, self.expr_span(e.id));
                         }
                     } else if i == 0
                         && let Some(elem_ty) = &array_map_elem_override
@@ -773,7 +794,7 @@ impl<'a> Checker<'a> {
                     args,
                     locals,
                     is_exempt_last_condition,
-                    e.span,
+                    self.expr_span(e.id),
                 );
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
@@ -786,32 +807,53 @@ impl<'a> Checker<'a> {
                             .to_ascii_lowercase();
                         let dynamic_throw =
                             self.dynamic_function_throw_type(arenas, &bare, args, locals);
-                        self.record_call_throw_point(dynamic_throw, Some(sig), e.span);
-                        self.check_internal_function_call(name, sig, e.span);
-                        self.check_restricted_function_call(name, args, locals, e.span);
-                        self.check_deprecated_function_call(name, sig, e.span);
+                        self.record_call_throw_point(
+                            dynamic_throw,
+                            Some(sig),
+                            self.expr_span(e.id),
+                        );
+                        self.check_internal_function_call(name, sig, self.expr_span(e.id));
+                        self.check_restricted_function_call(
+                            name,
+                            args,
+                            locals,
+                            self.expr_span(e.id),
+                        );
+                        self.check_deprecated_function_call(name, sig, self.expr_span(e.id));
                         if self.settings.slam.check_current_time_dependence {
                             self.check_current_time_call(
                                 arenas,
                                 &name.to_ascii_lowercase(),
                                 args,
                                 locals,
-                                e.span,
+                                self.expr_span(e.id),
                             );
                         }
-                        self.record_function_usage_token(name, sig, callee.span);
+                        self.record_function_usage_token(name, sig, self.expr_span(callee.id));
                         match *name {
                             "array_filter" => {
-                                self.check_array_filter_no_op(arenas, args, locals, e.span);
+                                self.check_array_filter_no_op(
+                                    arenas,
+                                    args,
+                                    locals,
+                                    self.expr_span(e.id),
+                                );
                                 if self.settings.strict_rules.check_strict_array_filter {
                                     self.check_strict_array_filter(
-                                        arenas, sig, args, locals, e.span,
+                                        arenas,
+                                        sig,
+                                        args,
+                                        locals,
+                                        self.expr_span(e.id),
                                     );
                                 }
                             }
-                            "array_values" => {
-                                self.check_array_values_no_op(arenas, args, locals, e.span)
-                            }
+                            "array_values" => self.check_array_values_no_op(
+                                arenas,
+                                args,
+                                locals,
+                                self.expr_span(e.id),
+                            ),
                             "ini_get" | "ini_set" | "ini_alter" | "ini_restore" | "get_cfg_var" => {
                                 self.check_ini_directive_call(arenas, name, args, locals)
                             }
@@ -820,14 +862,24 @@ impl<'a> Checker<'a> {
                                 if self.settings.strict_rules.check_strict_function_calls =>
                             {
                                 self.check_strict_function_call(
-                                    arenas, name, sig, args, locals, e.span,
+                                    arenas,
+                                    name,
+                                    sig,
+                                    args,
+                                    locals,
+                                    self.expr_span(e.id),
                                 )
                             }
                             "in_array" | "array_search" | "array_keys"
                                 if self.settings.extras.check_loose_haystack_comparison =>
                             {
                                 self.check_loose_haystack_comparison(
-                                    arenas, name, sig, args, locals, e.span,
+                                    arenas,
+                                    name,
+                                    sig,
+                                    args,
+                                    locals,
+                                    self.expr_span(e.id),
                                 )
                             }
                             _ => {}
@@ -850,22 +902,28 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: None,
                             is_builtin: self.registry.is_builtin_function(name),
-                            span: e.span,
+                            span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
                         self.check_castable_array_arguments(
                             arenas, name, sig, args, &resolved, locals,
                         );
-                        self.check_impossible_haystack_values(arenas, name, args, locals, e.span);
+                        self.check_impossible_haystack_values(
+                            arenas,
+                            name,
+                            args,
+                            locals,
+                            self.expr_span(e.id),
+                        );
                         if name.eq_ignore_ascii_case("define") {
-                            self.check_define_value(arenas, args, locals, e.span);
+                            self.check_define_value(arenas, args, locals, self.expr_span(e.id));
                         }
                         self.check_format_string_call(
                             arenas,
                             &name.to_ascii_lowercase(),
                             args,
                             locals,
-                            e.span,
+                            self.expr_span(e.id),
                         );
                         // Real PHP resolves `define` case-insensitively
                         // like any other function call - matched against
@@ -877,7 +935,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("define")
                         {
-                            self.check_define_third_argument(args, e.span);
+                            self.check_define_third_argument(args, self.expr_span(e.id));
                         }
                         if name
                             .rsplit('\\')
@@ -905,7 +963,7 @@ impl<'a> Checker<'a> {
                             .eq_ignore_ascii_case("filter_var")
                             && args.len() >= 3
                         {
-                            self.check_filter_var_flag_conflict(arenas, args, e.span);
+                            self.check_filter_var_flag_conflict(arenas, args, self.expr_span(e.id));
                         }
                         if name
                             .rsplit('\\')
@@ -913,7 +971,11 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("simplexml_load_string")
                         {
-                            self.check_simplexml_load_string_call(arenas, args, e.span);
+                            self.check_simplexml_load_string_call(
+                                arenas,
+                                args,
+                                self.expr_span(e.id),
+                            );
                         }
                         self.check_preg_pattern_validity(arenas, name, args);
                         {
@@ -921,18 +983,33 @@ impl<'a> Checker<'a> {
                             if bare.eq_ignore_ascii_case("sscanf")
                                 || bare.eq_ignore_ascii_case("fscanf")
                             {
-                                self.check_scanf_argument_count(arenas, bare, args, e.span);
+                                self.check_scanf_argument_count(
+                                    arenas,
+                                    bare,
+                                    args,
+                                    self.expr_span(e.id),
+                                );
                             }
                             if bare.eq_ignore_ascii_case("call_user_func")
                                 || bare.eq_ignore_ascii_case("call_user_func_array")
                             {
-                                self.check_call_user_func(arenas, bare, args, locals, e.span);
+                                self.check_call_user_func(
+                                    arenas,
+                                    bare,
+                                    args,
+                                    locals,
+                                    self.expr_span(e.id),
+                                );
                             }
                             self.check_preg_quote_delimiter(arenas, bare, args);
                         }
                         if !is_bare_statement {
                             self.check_useless_return_value_call(
-                                arenas, name, args, locals, e.span,
+                                arenas,
+                                name,
+                                args,
+                                locals,
+                                self.expr_span(e.id),
                             );
                         }
                     } else if locals.guarded_functions().is_empty()
@@ -958,7 +1035,7 @@ impl<'a> Checker<'a> {
                         // unresolvable call.
                         self.report(
                             format!("call to undefined function {name}()"),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "function.notFound",
                         );
@@ -987,7 +1064,7 @@ impl<'a> Checker<'a> {
                         };
                         self.report(
                             format!("Trying to invoke {callee_ty} but {verdict}."),
-                            callee.span,
+                            self.expr_span(callee.id),
                             level,
                             "callable.nonCallable",
                         );
@@ -998,10 +1075,15 @@ impl<'a> Checker<'a> {
                             &callable_sig,
                             args,
                             locals,
-                            e.span,
+                            self.expr_span(e.id),
                         );
                     } else {
-                        self.check_named_callable_invocation(&callee_ty, args, locals, e.span);
+                        self.check_named_callable_invocation(
+                            &callee_ty,
+                            args,
+                            locals,
+                            self.expr_span(e.id),
+                        );
                     }
                     // A `Closure(...)`-shaped PHPDoc callable carries no
                     // `@throws` info of its own, and any other dynamic-
@@ -1026,7 +1108,7 @@ impl<'a> Checker<'a> {
                         if locals.contains_var(matches_name) {
                             locals.insert_var(matches_name, shape);
                         } else {
-                            locals.declare_var(matches_name, shape, matches_arg.span);
+                            locals.declare_var(matches_name, shape, self.expr_span(matches_arg.id));
                         }
                     } else if self.key_of_expr(locals, matches_arg).is_some() {
                         self.bind_assignment_target(arenas, matches_arg, shape, locals);
@@ -1052,7 +1134,7 @@ impl<'a> Checker<'a> {
                     if locals.contains_var(pipes_name) {
                         locals.insert_var(pipes_name, shape);
                     } else {
-                        locals.declare_var(pipes_name, shape, pipes_arg.span);
+                        locals.declare_var(pipes_name, shape, self.expr_span(pipes_arg.id));
                     }
                 }
                 // Reuses the `resolved_name`/`sig` already resolved above
@@ -1091,7 +1173,7 @@ impl<'a> Checker<'a> {
                     .peeled(recv.id)
                     .and_then(|id| arenas.expr(id))
                     .expect("method receiver belongs to its retained file owner");
-                let args = arenas.args(*args);
+                let args = arenas.args(args.clone());
                 // `(function () {...})->bindTo($newThis, $scope)` - same
                 // idea as `Closure::bind`, just on the receiver instead
                 // of the first argument.
@@ -1142,7 +1224,7 @@ impl<'a> Checker<'a> {
                     recv_ty
                 };
                 // See `probe_span`'s doc comment.
-                self.probe_hit_at(recv.span, &recv_ty);
+                self.probe_hit_at(self.expr_span(recv.id), &recv_ty);
                 // `$x?->method()` is pointless once `$x`'s type already
                 // proves it's never null - mirrors real PHPStan's
                 // `NullsafeMethodCallRule` exactly. Guarded by
@@ -1159,7 +1241,7 @@ impl<'a> Checker<'a> {
                     self.report(format!(
                             "Using nullsafe method call on non-nullable type {recv_ty}. Use -> instead."
                         ),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         "nullsafe.neverNull",
                     );
@@ -1200,7 +1282,7 @@ impl<'a> Checker<'a> {
                             "call to method {method}() on {} {recv_ty}",
                             non_object_kind(level)
                         ),
-                        e.span,
+                        self.expr_span(e.id),
                         level,
                         "method.nonObject",
                     );
@@ -1219,7 +1301,7 @@ impl<'a> Checker<'a> {
                 if let Some(from) = types::strict_mixed_receiver_from(&nonobject_ty) {
                     self.report_found_from(
                         format!("Cannot call method {method}() on mixed."),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         from,
                         "method.nonObject",
@@ -1262,15 +1344,21 @@ impl<'a> Checker<'a> {
                 if let Some((_, _, owner, _)) = &receiver
                     && let Some(s) = sig
                 {
-                    self.check_phpstan_api_method_call(owner, method, s, e.span);
+                    self.check_phpstan_api_method_call(owner, method, s, self.expr_span(e.id));
                 }
                 if let Some(class) = &recv_class {
-                    self.check_node_connecting_attribute(arenas, class, method, args, e.span);
+                    self.check_node_connecting_attribute(
+                        arenas,
+                        class,
+                        method,
+                        args,
+                        self.expr_span(e.id),
+                    );
                 }
                 // This method call's own throw contribution.
                 if let Some((class, _, _, _)) = &receiver {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
-                    self.record_call_throw_point(dynamic_throw, sig, e.span);
+                    self.record_call_throw_point(dynamic_throw, sig, self.expr_span(e.id));
                 } else {
                     // No resolved receiver class at all - genuinely
                     // unbounded, same reasoning as a dynamic callee.
@@ -1298,7 +1386,7 @@ impl<'a> Checker<'a> {
                         {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
-                                argument.span,
+                                self.expr_span(argument.id),
                                 level,
                                 "argument.unpackNonIterable",
                             );
@@ -1368,7 +1456,7 @@ impl<'a> Checker<'a> {
                     {
                         let mut builder = DiagnosticBuilder::new(
                             format!("call to undefined method {recv_ty}::{method}()"),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "method.notFound",
                         );
@@ -1393,38 +1481,67 @@ impl<'a> Checker<'a> {
                                 name: method,
                             },
                             visibility: &sig.visibility(),
-                            span: e.span,
+                            span: self.expr_span(e.id),
                         });
-                        self.check_internal_method_call(owner, method, sig, false, e.span);
-                        self.check_restricted_method_call(
-                            owner, method, false, args, locals, e.span,
+                        self.check_internal_method_call(
+                            owner,
+                            method,
+                            sig,
+                            false,
+                            self.expr_span(e.id),
                         );
-                        self.check_deprecated_method_call(owner, method, sig, false, e.span);
+                        self.check_restricted_method_call(
+                            owner,
+                            method,
+                            false,
+                            args,
+                            locals,
+                            self.expr_span(e.id),
+                        );
+                        self.check_deprecated_method_call(
+                            owner,
+                            method,
+                            sig,
+                            false,
+                            self.expr_span(e.id),
+                        );
                         self.record_member_usage_token(
                             UsageTokenKind::Method,
                             owner,
                             sig.deprecated().is_some(),
                             sig.is_internal(),
-                            e.span,
+                            self.expr_span(e.id),
                         );
-                        self.record_method_ref(e.span, owner, method);
+                        self.record_method_ref(self.expr_span(e.id), owner, method);
                         self.check_call_site_method_name_case(
                             class,
                             method,
-                            e.span,
+                            self.expr_span(e.id),
                             Span {
-                                start: recv.span.end,
-                                end: e.span.end,
+                                start: self.expr_span(recv.id).end,
+                                end: self.expr_span(e.id).end,
                             },
                         );
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
                         // deprecated checks above.
-                        self.check_dom_create_element(arenas, class, method, args, e.span);
+                        self.check_dom_create_element(
+                            arenas,
+                            class,
+                            method,
+                            args,
+                            self.expr_span(e.id),
+                        );
                         // SQL parameter binding validation - independent of
                         // the internal/deprecated checks above too.
                         self.check_dbal_parameter_binding(
-                            arenas, class, method, recv, args, locals, e.span,
+                            arenas,
+                            class,
+                            method,
+                            recv,
+                            args,
+                            locals,
+                            self.expr_span(e.id),
                         );
                         // Renamed named arguments - see `checker::named_argument_renames`'s own
                         // module doc comment.
@@ -1432,7 +1549,7 @@ impl<'a> Checker<'a> {
                             owner,
                             method,
                             &sig.visibility(),
-                            e.span,
+                            self.expr_span(e.id),
                             args,
                         );
                         // See the identical comment on the plain-function
@@ -1450,7 +1567,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(owner),
-                            span: e.span,
+                            span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
                     }
@@ -1634,7 +1751,12 @@ impl<'a> Checker<'a> {
                     "on left side of ??",
                     null_probe_verdict,
                 );
-                self.implicit_array_access_probe(l, &[Access::Isset, Access::Read], e.span, locals);
+                self.implicit_array_access_probe(
+                    l,
+                    &[Access::Isset, Access::Read],
+                    self.expr_span(e.id),
+                    locals,
+                );
                 let r_ty = self.check_expr(r, locals, label);
                 self.widen_coalesce_result(l, r_ty, locals)
             }
@@ -1652,12 +1774,34 @@ impl<'a> Checker<'a> {
                 let l_ty = self.check_expr(l, locals, label);
                 let r_ty = self.check_expr(r, locals, label);
                 self.binary_string_conversions(op, (l, &l_ty), (r, &r_ty), locals);
-                let invalid = self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
-                self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
+                let invalid = self.check_binary_operand_validity(
+                    op,
+                    &l_ty,
+                    &r_ty,
+                    false,
+                    self.expr_span(l.id),
+                );
+                self.check_comparison_validity(op, &l_ty, &r_ty, self.expr_span(l.id));
                 self.check_duplicate_operands(op, l, r);
-                self.check_division_by_zero(op, &r_ty, r.span);
-                self.check_constant_loose_comparison(arenas, op, l, r, &l_ty, &r_ty, e.span);
-                self.check_constant_numeric_comparison(arenas, op, l, r, &l_ty, &r_ty, e.span);
+                self.check_division_by_zero(op, &r_ty, self.expr_span(r.id));
+                self.check_constant_loose_comparison(
+                    arenas,
+                    op,
+                    l,
+                    r,
+                    &l_ty,
+                    &r_ty,
+                    self.expr_span(e.id),
+                );
+                self.check_constant_numeric_comparison(
+                    arenas,
+                    op,
+                    l,
+                    r,
+                    &l_ty,
+                    &r_ty,
+                    self.expr_span(e.id),
+                );
                 self.check_strict_comparison_of_different_types(
                     arenas,
                     op,
@@ -1665,7 +1809,7 @@ impl<'a> Checker<'a> {
                     r,
                     &l_ty,
                     &r_ty,
-                    e.span,
+                    self.expr_span(e.id),
                     is_exempt_last_condition,
                 );
                 // Mirrors real PHPStan's `LogicalXorConstantConditionRule` -
@@ -1691,7 +1835,7 @@ impl<'a> Checker<'a> {
                 if !locals.contains_var(name) && !is_superglobal(name) {
                     self.report(
                         format!("undefined variable ${name}"),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         "variable.undefined",
                     );
@@ -1699,7 +1843,7 @@ impl<'a> Checker<'a> {
                 // See `Checker::probe_var_provenance`'s doc comment - the
                 // same "stash it when the span matches" pattern
                 // `probe_hit` uses.
-                if self.probe_span.get() == Some(e.span) {
+                if self.probe_span.get() == Some(self.expr_span(e.id)) {
                     *self.probe_var_provenance.borrow_mut() = locals
                         .get_provenance_var(name)
                         .map(|p| p.iter().copied().collect());
@@ -1710,7 +1854,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or_else(|| unassigned_variable_type(name));
                 // A read's inferred type, for hover - see
                 // `Checker::probe_hit_at`'s doc comment.
-                self.probe_hit_at(e.span, &ty);
+                self.probe_hit_at(self.expr_span(e.id), &ty);
                 ty
             }
             ExprKind::Unary(
@@ -1725,7 +1869,7 @@ impl<'a> Checker<'a> {
                     .expr(*inner)
                     .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_incdec_validity(op, inner, &inner_ty, e.span);
+                self.check_incdec_validity(op, inner, &inner_ty, self.expr_span(e.id));
                 // A literal or range steps by one, so a counter widened to
                 // `null|int` across a loop's passes still advances.
                 //
@@ -1752,7 +1896,7 @@ impl<'a> Checker<'a> {
                 };
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
-                self.implicit_array_access_write(inner, e.span, locals);
+                self.implicit_array_access_write(inner, self.expr_span(e.id), locals);
                 self.bind_assignment_target(arenas, inner, updated.clone(), locals);
                 // `++$x` is the value after the step, `$x++` the one before.
                 if matches!(op, UnaryOp::PreInc | UnaryOp::PreDec) {
@@ -1796,7 +1940,7 @@ impl<'a> Checker<'a> {
                                 "Negated boolean expression is always {}.",
                                 if result_value { "true" } else { "false" }
                             ),
-                            inner.span,
+                            self.expr_span(inner.id),
                             4,
                             if result_value {
                                 "booleanNot.alwaysTrue"
@@ -1821,7 +1965,7 @@ impl<'a> Checker<'a> {
                     .expr(*inner)
                     .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_unary_operand_validity(op, &inner_ty, inner.span);
+                self.check_unary_operand_validity(op, &inner_ty, self.expr_span(inner.id));
                 if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
@@ -1839,7 +1983,7 @@ impl<'a> Checker<'a> {
                     .expr(*inner)
                     .expect("unary operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_unary_operand_validity(op, &inner_ty, inner.span);
+                self.check_unary_operand_validity(op, &inner_ty, self.expr_span(inner.id));
                 self.bitwise_not_type(&inner_ty)
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
@@ -1861,22 +2005,22 @@ impl<'a> Checker<'a> {
                     .expr(*inner)
                     .expect("cast operand belongs to its retained file owner");
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_cast_validity(cast.kind(), &inner_ty, inner.span);
+                self.check_cast_validity(cast.kind(), &inner_ty, self.expr_span(inner.id));
                 if cast.kind() == CastKind::Unset {
-                    self.check_unset_cast_supported(e.span);
+                    self.check_unset_cast_supported(self.expr_span(e.id));
                 }
                 if *cast == CastSpelling::Real {
-                    self.check_real_cast_supported(e.span);
+                    self.check_real_cast_supported(self.expr_span(e.id));
                 }
                 if cast.kind() == CastKind::Void {
-                    self.check_void_cast(e.span, is_bare_statement);
+                    self.check_void_cast(self.expr_span(e.id), is_bare_statement);
                 }
-                self.check_deprecated_cast_spelling(*cast, e.span);
+                self.check_deprecated_cast_spelling(*cast, self.expr_span(e.id));
                 // An implicit `(string)` cast of an object triggers a
                 // real `__toString()` call - see
                 // `check_implicit_tostring_usage`'s doc comment.
                 if cast.kind() == CastKind::String {
-                    self.check_implicit_tostring_usage(&inner_ty, e.span);
+                    self.check_implicit_tostring_usage(&inner_ty, self.expr_span(e.id));
                     self.forget_what_an_operation_may_change(
                         &inner_ty,
                         is_this(self, inner),
@@ -1885,25 +2029,47 @@ impl<'a> Checker<'a> {
                     );
                 }
                 if self.settings.strict_rules.check_useless_casts && cast.kind() != CastKind::Void {
-                    self.check_useless_cast(&cast_result_type(cast.kind()), &inner_ty, e.span);
+                    self.check_useless_cast(
+                        &cast_result_type(cast.kind()),
+                        &inner_ty,
+                        self.expr_span(e.id),
+                    );
                 }
                 self.cast_type(cast.kind(), &inner_ty)
             }
             // `null_probe_verdict` (nullability) for `isset`,
             // `empty_probe_verdict` (falsiness) for `empty`.
             ExprKind::Isset(operands) => {
-                for operand in arenas.expr_ids(operands) {
+                let Some(syntax_owner) = self.syntax_tree_owner() else {
+                    return Type::bool();
+                };
+                let arenas = syntax_owner.arenas();
+                for operand_id in arenas.expr_ids(operands).iter().copied() {
+                    let Some(operand) = arenas.expr(operand_id) else {
+                        continue;
+                    };
                     self.check_existence_probe(
                         operand,
                         locals,
                         label,
                         ("isset", "in isset()", null_probe_verdict),
                     );
-                    self.implicit_array_access_probe(operand, &[Access::Isset], e.span, locals);
+                    self.implicit_array_access_probe(
+                        operand,
+                        &[Access::Isset],
+                        self.expr_span(e.id),
+                        locals,
+                    );
                 }
                 Type::bool()
             }
             ExprKind::Empty(operand) => {
+                let Some(syntax_owner) = self.syntax_tree_owner() else {
+                    return Type::bool();
+                };
+                let Some(operand) = syntax_owner.arenas().expr(*operand) else {
+                    return Type::bool();
+                };
                 self.check_existence_probe(
                     operand,
                     locals,
@@ -1913,7 +2079,7 @@ impl<'a> Checker<'a> {
                 self.implicit_array_access_probe(
                     operand,
                     &[Access::Isset, Access::Read],
-                    e.span,
+                    self.expr_span(e.id),
                     locals,
                 );
                 Type::bool()
@@ -1921,9 +2087,16 @@ impl<'a> Checker<'a> {
             // The operand must be string-coercible (`print.nonString`) and
             // triggers the implicit `__toString()` call `echo` does.
             ExprKind::Print(inner) => {
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("print operand retains its file owner");
+                let inner = owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("print operand belongs to its retained file owner");
                 let ty = self.check_expr(inner, locals, label);
-                self.check_print_validity(&ty, inner.span);
-                self.check_implicit_tostring_usage(&ty, inner.span);
+                self.check_print_validity(&ty, self.expr_span(inner.id));
+                self.check_implicit_tostring_usage(&ty, self.expr_span(inner.id));
                 self.forget_what_an_operation_may_change(
                     &ty,
                     is_this(self, inner),
@@ -1940,7 +2113,7 @@ impl<'a> Checker<'a> {
                         .syntax_tree_owner()
                         .expect("exit arguments retain their parsed file owner");
                     let arenas = syntax_owner.arenas();
-                    let args = arenas.args(*args);
+                    let args = arenas.args(args.clone());
                     for (i, arg) in args.iter().enumerate() {
                         let Some(value) = arenas.expr(arg.value) else {
                             continue;
@@ -1966,7 +2139,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: None,
                             is_builtin: true,
-                            span: e.span,
+                            span: self.expr_span(e.id),
                         });
                     }
                 }
@@ -1974,6 +2147,13 @@ impl<'a> Checker<'a> {
             }
             // The evaluated code can define any variable.
             ExprKind::Eval(code) => {
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("eval operand retains its file owner");
+                let code = owner
+                    .arenas()
+                    .expr(*code)
+                    .expect("eval operand belongs to its retained file owner");
                 self.check_expr(code, locals, label);
                 self.saw_dynamic_var_construct = true;
                 locals.set_any_variable_may_exist(true);
@@ -1981,18 +2161,32 @@ impl<'a> Checker<'a> {
             }
             // The included file can define any variable.
             ExprKind::Include(kind, path) => {
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("include path retains its file owner");
+                let path = owner
+                    .arenas()
+                    .expr(*path)
+                    .expect("include path belongs to its retained file owner");
                 self.check_expr(path, locals, label);
                 self.check_include_path(
                     crate::checker::includes::include_construct(*kind),
-                    path,
+                    path.id,
                     locals,
-                    e.span,
+                    self.expr_span(e.id),
                 );
                 locals.set_any_variable_may_exist(true);
                 Type::mixed()
             }
             ExprKind::ShellExec(cmd) => {
-                self.check_backtick_deprecation(e.span);
+                self.check_backtick_deprecation(self.expr_span(e.id));
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("shell command retains its file owner");
+                let cmd = owner
+                    .arenas()
+                    .expr(*cmd)
+                    .expect("shell command belongs to its retained file owner");
                 self.check_expr(cmd, locals, label);
                 self.shell_exec_type()
             }
@@ -2017,7 +2211,7 @@ impl<'a> Checker<'a> {
                 if let Some(class) = self.thrown_value_not_throwable(&inner_ty) {
                     self.report(
                         format!("cannot throw {class}: it does not implement Throwable"),
-                        inner.span,
+                        self.expr_span(inner.id),
                         0,
                         "throw.notThrowable",
                     );
@@ -2025,9 +2219,9 @@ impl<'a> Checker<'a> {
                 // Mirrors `check_throw`'s identical recording for the
                 // statement form.
                 self.current_function_explicit_throw_points
-                    .push((inner_ty.clone(), inner.span));
+                    .push((inner_ty.clone(), self.expr_span(inner.id)));
                 self.current_function_throw_points.push(inner_ty);
-                self.push_exit_point(ExitKind::ThrowExpr, e.span);
+                self.push_exit_point(ExitKind::ThrowExpr, self.expr_span(e.id));
                 Type::never()
             }
             ExprKind::YieldFrom(inner) => {
@@ -2049,7 +2243,7 @@ impl<'a> Checker<'a> {
                 self.check_yield_from_compatibility(
                     &inner_ty,
                     &result_ty,
-                    e.span,
+                    self.expr_span(e.id),
                     is_bare_statement,
                 );
                 result_ty
@@ -2082,7 +2276,7 @@ impl<'a> Checker<'a> {
                 }) {
                     self.report(
                         format!("Cannot clone non-object variable of type {inner_ty}."),
-                        inner.span,
+                        self.expr_span(inner.id),
                         level,
                         "clone.nonObject",
                     );
@@ -2146,7 +2340,10 @@ impl<'a> Checker<'a> {
                     // `static` (never flagged - see its doc comment), so
                     // anything that comes back as an `Object` here is a
                     // genuine bare class-name reference.
-                    InstanceofTarget::Name(name) => {
+                    InstanceofTarget::Name(name_range) => {
+                        let name = arenas
+                            .qualified_name(name_range)
+                            .expect("instanceof name belongs to its retained file owner");
                         let resolved = self.resolve_name_expr(name);
                         if let Some(class) = resolved.single_object_class()
                             && !resolved.is_enum_case()
@@ -2155,7 +2352,7 @@ impl<'a> Checker<'a> {
                             {
                                 self.report(
                                     format!("instanceof check target class {class} not found"),
-                                    e.span,
+                                    self.expr_span(e.id),
                                     0,
                                     "class.notFound",
                                 );
@@ -2164,11 +2361,11 @@ impl<'a> Checker<'a> {
                                 // as-written text, still a bare string
                                 // right here in the AST.
                                 self.check_class_name_case(name);
-                                self.check_internal_instanceof(class, e.span);
+                                self.check_internal_instanceof(class, self.expr_span(e.id));
                                 self.check_restricted_class_name_usage(
                                     class,
                                     "Instanceof references",
-                                    e.span,
+                                    self.expr_span(e.id),
                                     crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                                 );
                             }
@@ -2179,7 +2376,7 @@ impl<'a> Checker<'a> {
                     arenas,
                     inner,
                     target,
-                    e.span,
+                    self.expr_span(e.id),
                     locals,
                     is_exempt_last_condition,
                 );
@@ -2213,7 +2410,7 @@ impl<'a> Checker<'a> {
                             &base_ty,
                             is_this(self, base),
                             Access::Read,
-                            e.span,
+                            self.expr_span(e.id),
                             locals,
                         );
                         Type::mixed()
@@ -2235,7 +2432,7 @@ impl<'a> Checker<'a> {
                 {
                     self.report(
                         format!("Cannot use array destructuring on {rhs_ty}."),
-                        rhs.span,
+                        self.expr_span(rhs.id),
                         level,
                         "offsetAccess.nonArray",
                     );
@@ -2246,7 +2443,7 @@ impl<'a> Checker<'a> {
                 if matches!(&lhs.kind, ExprKind::Variable(v) if **v == *"this") {
                     self.report(
                         "cannot re-assign $this".to_string(),
-                        lhs.span,
+                        self.expr_span(lhs.id),
                         0,
                         "assign.this",
                     );
@@ -2261,14 +2458,20 @@ impl<'a> Checker<'a> {
                 self.check_assignment_target(arenas, lhs, locals, label);
                 match &lhs.kind {
                     _ if matches!(&e.kind, ExprKind::AssignRef(..)) => {
-                        self.implicit_reference(lhs, e.span, locals);
+                        self.implicit_reference(lhs, self.expr_span(e.id), locals);
                     }
                     // Destructuring an `ArrayAccess` object reads each
                     // key through `offsetGet`.
                     ExprKind::Destructure(items, _) => {
-                        self.implicit_destructure(arenas, items, &rhs_ty, e.span, locals);
+                        self.implicit_destructure(
+                            arenas,
+                            items,
+                            &rhs_ty,
+                            self.expr_span(e.id),
+                            locals,
+                        );
                     }
-                    _ => self.implicit_array_access_write(lhs, e.span, locals),
+                    _ => self.implicit_array_access_write(lhs, self.expr_span(e.id), locals),
                 }
                 self.check_self_assignment(lhs, rhs);
                 self.check_property_assignment(lhs, rhs, locals);
@@ -2279,13 +2482,14 @@ impl<'a> Checker<'a> {
                 self.check_param_out_assignment(lhs, &rhs_ty);
                 self.check_by_ref_destructuring(arenas, lhs, &rhs_ty);
                 let native = match (&e.kind, &lhs.kind) {
-                    (ExprKind::Assign(..), ExprKind::Variable(name)) => {
-                        Some((name.clone(), self.native_expr_type_id(arenas, *rhs, locals)))
-                    }
+                    (ExprKind::Assign(..), ExprKind::Variable(name)) => Some((
+                        name.clone(),
+                        self.native_expr_type_id(arenas, rhs.id, locals),
+                    )),
                     _ => None,
                 };
                 self.assigned_values.insert(
-                    e.span,
+                    self.expr_span(e.id),
                     (rhs_ty.clone(), native.as_ref().map(|(_, n)| n.clone())),
                 );
                 self.bind_assignment_target(arenas, lhs, rhs_ty.clone(), locals);
@@ -2343,7 +2547,7 @@ impl<'a> Checker<'a> {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot use [] for reading.".to_string(),
-                                lhs.span,
+                                self.expr_span(lhs.id),
                                 0,
                                 "offsetAccess.noDim",
                             )
@@ -2369,7 +2573,7 @@ impl<'a> Checker<'a> {
                     self.implicit_array_access_probe(
                         lhs,
                         &[Access::Isset, Access::Read],
-                        e.span,
+                        self.expr_span(e.id),
                         locals,
                     );
                     ty
@@ -2378,12 +2582,17 @@ impl<'a> Checker<'a> {
                 };
                 let rhs_ty = self.check_expr(rhs, locals, label);
                 self.binary_string_conversions(op, (lhs, &lhs_ty), (rhs, &rhs_ty), locals);
-                self.implicit_array_access_write(lhs, e.span, locals);
+                self.implicit_array_access_write(lhs, self.expr_span(e.id), locals);
                 self.check_offset_assignment(lhs, &rhs_ty, true, locals);
                 if *op != BinOp::Coalesce {
-                    let _ =
-                        self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span);
-                    self.check_division_by_zero(op, &rhs_ty, rhs.span);
+                    let _ = self.check_binary_operand_validity(
+                        op,
+                        &lhs_ty,
+                        &rhs_ty,
+                        true,
+                        self.expr_span(lhs.id),
+                    );
+                    self.check_division_by_zero(op, &rhs_ty, self.expr_span(rhs.id));
                 }
                 // `$x += 1`/`$x ??= ...` is a real rebind of `$x` -
                 // routes through the same `bind_assignment_target` every
@@ -2448,7 +2657,7 @@ impl<'a> Checker<'a> {
                             "Ternary operator condition is always {}.",
                             if value { "true" } else { "false" }
                         ),
-                        cond.span,
+                        self.expr_span(cond.id),
                         4,
                         if value {
                             "ternary.alwaysTrue"
@@ -2503,7 +2712,7 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("array literals retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let items = arenas.array_items(*items);
+                let items = arenas.array_items(items.clone());
                 for item in items {
                     if let Some(k) = item.key.map(|id| {
                         arenas
@@ -2522,7 +2731,7 @@ impl<'a> Checker<'a> {
                         && let ExprKind::Variable(name) = &value.kind
                         && !locals.contains_var(name)
                     {
-                        locals.declare_var(name, Type::null(), value.span);
+                        locals.declare_var(name, Type::null(), self.expr_span(value.id));
                     }
                     let value_ty = self.check_expr(value, locals, label);
                     // `arrayUnpacking.nonIterable` - `[...$x]` where
@@ -2534,13 +2743,13 @@ impl<'a> Checker<'a> {
                     {
                         self.report(
                             format!("Only iterables can be unpacked, {value_ty} given."),
-                            value.span,
+                            self.expr_span(value.id),
                             level,
                             "arrayUnpacking.nonIterable",
                         );
                     }
                     if item.spread {
-                        self.check_unpacked_string_keys(&value_ty, value.span);
+                        self.check_unpacked_string_keys(&value_ty, self.expr_span(value.id));
                         self.forget_what_an_operation_may_change(
                             &value_ty,
                             is_this(self, value),
@@ -2586,12 +2795,17 @@ impl<'a> Checker<'a> {
                             Some(key) => key.to_type(),
                             None => self.infer_expr(i, locals),
                         };
-                        self.check_array_access_offset(&base_ty, "offsetGet", &key_ty, i.span);
+                        self.check_array_access_offset(
+                            &base_ty,
+                            "offsetGet",
+                            &key_ty,
+                            self.expr_span(i.id),
+                        );
                         self.implicit_array_access_call(
                             &base_ty,
                             is_this(self, base),
                             Access::Read,
-                            e.span,
+                            self.expr_span(e.id),
                             locals,
                         );
                         // The `Index` counterpart of `PropertyAccess`'s
@@ -2617,13 +2831,17 @@ impl<'a> Checker<'a> {
                     // write target routes around this arm, and a
                     // by-reference argument slot is recorded ahead of it.
                     None => {
-                        if self.by_ref_empty_dim_args.borrow().contains(&e.span) {
+                        if self
+                            .by_ref_empty_dim_args
+                            .borrow()
+                            .contains(&self.expr_span(e.id))
+                        {
                             return Type::mixed();
                         }
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot use [] for reading.".to_string(),
-                                e.span,
+                                self.expr_span(e.id),
                                 0,
                                 "offsetAccess.noDim",
                             )
@@ -2641,7 +2859,7 @@ impl<'a> Checker<'a> {
                 let class_expr = arenas
                     .expr(*class_expr)
                     .expect("instantiation target belongs to its retained file owner");
-                let args = arenas.args(*args);
+                let args = arenas.args(args.clone());
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
                 // `new Foo<Bar>()` at all - but `infer_expr`'s `New` arm
@@ -2695,7 +2913,7 @@ impl<'a> Checker<'a> {
                         {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
-                                argument.span,
+                                self.expr_span(argument.id),
                                 level,
                                 "argument.unpackNonIterable",
                             );
@@ -2736,37 +2954,59 @@ impl<'a> Checker<'a> {
                     // `None` for it). `new`'s class name is still a bare
                     // source string right here in the AST, exactly like
                     // `instanceof`/`catch` below.
-                    if let ExprKind::Name(raw) = &class_expr.kind {
+                    if let ExprKind::Name(raw) = &class_expr.kind
+                        && let Some(raw) = arenas.qualified_name(raw)
+                    {
                         self.check_class_name_case(raw);
                     }
                     // Called before the borrow just below (this check
                     // does its own, separate registry lookup) since it
                     // needs `&mut self`.
-                    self.check_internal_instantiation(class, e.span);
+                    self.check_internal_instantiation(class, self.expr_span(e.id));
                     self.check_restricted_class_name_usage(
                         class,
                         "Instantiation of",
-                        e.span,
+                        self.expr_span(e.id),
                         crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                     );
-                    self.check_deprecated_instantiation(class, e.span);
-                    self.record_instantiation_usage_token(class, class_expr.span);
+                    self.check_deprecated_instantiation(class, self.expr_span(e.id));
+                    self.record_instantiation_usage_token(class, self.expr_span(class_expr.id));
                     // `DateInterval`'s duration-string constructor
                     // validation - independent of whether the class is
                     // otherwise instantiable, so this runs unconditionally
                     // before that dispatch.
-                    self.check_date_interval_constructor(arenas, class, args, e.span, locals);
+                    self.check_date_interval_constructor(
+                        arenas,
+                        class,
+                        args,
+                        self.expr_span(e.id),
+                        locals,
+                    );
                     // `DateTime`/`DateTimeImmutable`'s own constructor-
                     // string validation - same shape.
-                    self.check_date_time_constructor(arenas, class, args, e.span, locals);
+                    self.check_date_time_constructor(
+                        arenas,
+                        class,
+                        args,
+                        self.expr_span(e.id),
+                        locals,
+                    );
                     // `SimpleXMLElement`'s construction well-formedness
                     // validation - same shape.
-                    self.check_simplexml_element_constructor(arenas, class, args, e.span);
+                    self.check_simplexml_element_constructor(
+                        arenas,
+                        class,
+                        args,
+                        self.expr_span(e.id),
+                    );
                     // This constructor's own throw contribution.
                     let dynamic_throw = self.dynamic_new_throw_type(arenas, class, args);
-                    self.record_call_throw_point(dynamic_throw, ctor_sig, e.span);
+                    self.record_call_throw_point(dynamic_throw, ctor_sig, self.expr_span(e.id));
                     let (is_name, is_static) = match &class_expr.kind {
-                        ExprKind::Name(raw) => (true, raw.eq_ignore_ascii_case("static")),
+                        ExprKind::Name(raw) => arenas
+                            .qualified_name(raw)
+                            .map(|raw| (true, raw.eq_ignore_ascii_case("static")))
+                            .unwrap_or((false, false)),
                         _ => (false, false),
                     };
                     if self.registry.lookup_class(class).is_some() {
@@ -2775,7 +3015,7 @@ impl<'a> Checker<'a> {
                             is_name,
                             is_static,
                             !args.is_empty(),
-                            e.span,
+                            self.expr_span(e.id),
                         ) && let Some(sig) = ctor_sig
                         {
                             // See the identical comment on the plain-
@@ -2789,14 +3029,14 @@ impl<'a> Checker<'a> {
                                 locals,
                                 defining_class: Some(class),
                                 is_builtin: self.registry.is_builtin_class(class),
-                                span: e.span,
+                                span: self.expr_span(e.id),
                             });
                             self.apply_param_out_types(sig, args, locals);
                         }
                     } else if !Self::class_guarded(class, locals) {
                         self.report(
                             format!("instantiated class {class} not found"),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "class.notFound",
                         );
@@ -2804,11 +3044,16 @@ impl<'a> Checker<'a> {
                 } else {
                     match &class_expr.kind {
                         ExprKind::Name(raw) => {
-                            self.check_new_pseudo_target(raw, class_expr.span);
+                            if let Some(raw) = arenas.qualified_name(raw) {
+                                self.check_new_pseudo_target(raw, self.expr_span(class_expr.id));
+                            }
                         }
                         _ => {
                             let target_ty = self.infer_expr(class_expr, locals);
-                            self.check_new_on_non_class_name(&target_ty, class_expr.span);
+                            self.check_new_on_non_class_name(
+                                &target_ty,
+                                self.expr_span(class_expr.id),
+                            );
                         }
                     }
                 }
@@ -2828,12 +3073,12 @@ impl<'a> Checker<'a> {
                 self.check_enum_cases_outside_enum(def.enum_cases(arenas));
                 let ctor_params: Vec<_> = def
                     .constructor(arenas)
-                    .map(|m| arenas.params(m.function.params))
+                    .map(|m| arenas.params(m.function.params.clone()))
                     .into_iter()
                     .flatten()
                     .map(|param| (param.name.to_string(), param.by_ref, param.variadic))
                     .collect();
-                for (i, a) in arenas.args(class.args).iter().enumerate() {
+                for (i, a) in arenas.args(class.args.clone()).iter().enumerate() {
                     let Some(value) = arenas.expr(a.value) else {
                         continue;
                     };
@@ -2845,13 +3090,15 @@ impl<'a> Checker<'a> {
                     };
                     if matches!(value.kind, ExprKind::Index(_, None)) && param.is_some_and(|p| p.1)
                     {
-                        self.by_ref_empty_dim_args.borrow_mut().insert(value.span);
+                        self.by_ref_empty_dim_args
+                            .borrow_mut()
+                            .insert(self.expr_span(value.id));
                     }
                     self.check_expr(value, locals, label);
                 }
                 let name = arenas.anonymous_class_name(*class_id);
                 if let Some(name) = name {
-                    self.check_anonymous_class(name, def, e.span);
+                    self.check_anonymous_class(name, def, self.expr_span(e.id));
                 }
                 anonymous_class_type(name)
             }
@@ -2860,8 +3107,8 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("static-call arguments retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let args = arenas.args(*args);
-                if let Some(property) = target.parent_hook_property() {
+                let args = arenas.args(args.clone());
+                if let Some(property) = target.parent_hook_property(arenas) {
                     for a in args {
                         if let Some(value) = arenas.expr(a.value) {
                             self.check_expr(value, locals, label);
@@ -2902,7 +3149,7 @@ impl<'a> Checker<'a> {
                 // This static call's own throw contribution.
                 if let Some(class) = &resolved_class {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
-                    self.record_call_throw_point(dynamic_throw, sig, e.span);
+                    self.record_call_throw_point(dynamic_throw, sig, self.expr_span(e.id));
                 } else {
                     self.current_function_has_unannotated_call = true;
                 }
@@ -2968,7 +3215,7 @@ impl<'a> Checker<'a> {
                             }) {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
-                                    value.span,
+                                    self.expr_span(value.id),
                                     level,
                                     "argument.unpackNonIterable",
                                 );
@@ -2989,7 +3236,7 @@ impl<'a> Checker<'a> {
                             }) {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
-                                    value.span,
+                                    self.expr_span(value.id),
                                     level,
                                     "argument.unpackNonIterable",
                                 );
@@ -3036,22 +3283,45 @@ impl<'a> Checker<'a> {
                                     name: method,
                                 },
                                 visibility: &sig.visibility(),
-                                span: e.span,
+                                span: self.expr_span(e.id),
                             });
-                            self.check_internal_method_call(owner, method, sig, true, e.span);
-                            self.check_restricted_method_call(
-                                owner, method, true, args, locals, e.span,
+                            self.check_internal_method_call(
+                                owner,
+                                method,
+                                sig,
+                                true,
+                                self.expr_span(e.id),
                             );
-                            self.check_deprecated_method_call(owner, method, sig, true, e.span);
+                            self.check_restricted_method_call(
+                                owner,
+                                method,
+                                true,
+                                args,
+                                locals,
+                                self.expr_span(e.id),
+                            );
+                            self.check_deprecated_method_call(
+                                owner,
+                                method,
+                                sig,
+                                true,
+                                self.expr_span(e.id),
+                            );
                             self.record_member_usage_token(
                                 UsageTokenKind::Method,
                                 owner,
                                 sig.deprecated().is_some(),
                                 sig.is_internal(),
-                                e.span,
+                                self.expr_span(e.id),
                             );
-                            self.record_method_ref(e.span, owner, method);
-                            self.check_static_call_context(target, class, owner, method, e.span);
+                            self.record_method_ref(self.expr_span(e.id), owner, method);
+                            self.check_static_call_context(
+                                target,
+                                class,
+                                owner,
+                                method,
+                                self.expr_span(e.id),
+                            );
                             // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
                             // late-static-binding unsafety as the
@@ -3060,16 +3330,20 @@ impl<'a> Checker<'a> {
                             if target.as_name().is_some_and(|n| n.is_keyword("static"))
                                 && sig.visibility() == Visibility::Private
                             {
-                                self.check_static_private_method_access(owner, method, e.span);
+                                self.check_static_private_method_access(
+                                    owner,
+                                    method,
+                                    self.expr_span(e.id),
+                                );
                             }
                         }
                         self.check_call_site_method_name_case(
                             class,
                             method,
-                            e.span,
+                            self.expr_span(e.id),
                             Span {
                                 start: self.static_target_end(target),
-                                end: e.span.end,
+                                end: self.expr_span(e.id).end,
                             },
                         );
                         // See the identical comment on the plain-
@@ -3094,7 +3368,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(&owner),
-                            span: e.span,
+                            span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
                     } else if self.registry.has_class(class.as_str())
@@ -3107,7 +3381,7 @@ impl<'a> Checker<'a> {
                         // entirely, matching real PHPStan.
                         self.report(
                             format!("call to undefined static method {class}::{method}()"),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "staticMethod.notFound",
                         );
@@ -3122,13 +3396,18 @@ impl<'a> Checker<'a> {
                         // branch correctly excludes it too).
                         self.report(
                             format!("static method call target class {class} not found"),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "class.notFound",
                         );
                     }
                 } else {
-                    self.check_unresolved_static_call_target(target, method, locals, e.span);
+                    self.check_unresolved_static_call_target(
+                        target,
+                        method,
+                        locals,
+                        self.expr_span(e.id),
+                    );
                 }
                 match (&resolved_class, sig) {
                     (Some(class), Some(s)) => {
@@ -3148,7 +3427,7 @@ impl<'a> Checker<'a> {
                         // rather than threading a new span parameter
                         // through it.
                         if let Some((case_class, case)) = resolved_ty.as_enum_case() {
-                            self.record_member_ref(e.span, case_class, case);
+                            self.record_member_ref(self.expr_span(e.id), case_class, case);
                         }
                         match self.class_argument_return(arenas, class, method, args, locals) {
                             Some(ty) => ty,
@@ -3174,8 +3453,15 @@ impl<'a> Checker<'a> {
                         Some(receiver_class(self.check_expr(receiver, locals, label)))
                     }
                 };
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("dynamic constant name retains its file owner");
+                let name = owner
+                    .arenas()
+                    .expr(*name)
+                    .expect("dynamic constant name belongs to its retained file owner");
                 let name_ty = self.check_expr(name, locals, label);
-                self.check_dynamic_class_constant_fetch(&name_ty, e.span);
+                self.check_dynamic_class_constant_fetch(&name_ty, self.expr_span(e.id));
                 let literal_names: Option<Vec<String>> = {
                     let names = name_ty.constant_strings_text();
                     (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
@@ -3186,7 +3472,8 @@ impl<'a> Checker<'a> {
                             .into_iter()
                             .map(|n| {
                                 let arena = self.synthetic_expr_arena();
-                                let fetch = self.constant_fetch(&arena, target, n, e.span);
+                                let fetch =
+                                    self.constant_fetch(&arena, target, n, self.expr_span(e.id));
                                 self.check_expr(fetch, locals, label)
                             })
                             .collect();
@@ -3229,6 +3516,13 @@ impl<'a> Checker<'a> {
                 // A computed static property name (`Foo::${$e}`/
                 // `Foo::$$e`) has no statically known name to check.
                 let class = self.resolve_static_target_class(target, locals, label);
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("dynamic property name retains its file owner");
+                let name = owner
+                    .arenas()
+                    .expr(*name)
+                    .expect("dynamic property name belongs to its retained file owner");
                 let name_ty = self.check_expr(name, locals, label);
                 self.forget_what_an_operation_may_change(
                     &name_ty,
@@ -3242,7 +3536,7 @@ impl<'a> Checker<'a> {
                 {
                     self.record_member_class_escape(&class);
                 }
-                self.record_call_throw_point(None, None, e.span);
+                self.record_call_throw_point(None, None, self.expr_span(e.id));
                 Type::mixed()
             }
             ExprKind::ClassConstFetch(target, name) => {
@@ -3290,7 +3584,7 @@ impl<'a> Checker<'a> {
                 // not skip this check entirely.
                 let base_ty = self.check_expr(base, locals, label);
                 // See `probe_span`'s doc comment.
-                self.probe_hit_at(base.span, &base_ty);
+                self.probe_hit_at(self.expr_span(base.id), &base_ty);
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this one.
                 let base_ty = if self
@@ -3314,7 +3608,7 @@ impl<'a> Checker<'a> {
                     self.report(format!(
                             "Using nullsafe property access on non-nullable type {base_ty}. Use -> instead."
                         ),
-                        e.span,
+                        self.expr_span(e.id),
                         0,
                         "nullsafe.neverNull",
                     );
@@ -3367,7 +3661,7 @@ impl<'a> Checker<'a> {
                             "access to property ${prop} on {} {base_ty}",
                             non_object_kind(level)
                         ),
-                        e.span,
+                        self.expr_span(e.id),
                         level,
                         "property.nonObject",
                     );
@@ -3376,7 +3670,7 @@ impl<'a> Checker<'a> {
                     if let Some(from) = types::strict_mixed_receiver_from(&nonobject_ty) {
                         self.report_found_from(
                             format!("Cannot access property ${prop} on mixed."),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             from,
                             "property.nonObject",
@@ -3391,7 +3685,7 @@ impl<'a> Checker<'a> {
                     {
                         self.report(
                             format!("access to undefined property {base_ty}::${prop}"),
-                            e.span,
+                            self.expr_span(e.id),
                             2,
                             "property.notFound",
                         );
@@ -3419,29 +3713,34 @@ impl<'a> Checker<'a> {
                             name: prop,
                         },
                         visibility: &p.visibility(),
-                        span: e.span,
+                        span: self.expr_span(e.id),
                     });
                     if !p.is_readable()
                         && self.is_member_access_visible(&owner, &p.visibility(), prop, "property")
                     {
                         self.report(
                             format!("Property {owner}::${prop} is not readable."),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "property.writeOnly",
                         );
                     }
-                    self.check_internal_property_access(&owner, prop, p, e.span);
-                    self.check_restricted_property_access(&owner, prop, false, e.span);
-                    self.check_deprecated_property_access(&owner, prop, p, e.span);
+                    self.check_internal_property_access(&owner, prop, p, self.expr_span(e.id));
+                    self.check_restricted_property_access(
+                        &owner,
+                        prop,
+                        false,
+                        self.expr_span(e.id),
+                    );
+                    self.check_deprecated_property_access(&owner, prop, p, self.expr_span(e.id));
                     self.record_member_usage_token(
                         UsageTokenKind::Property,
                         &owner,
                         p.deprecated().is_some(),
                         p.is_internal(),
-                        e.span,
+                        self.expr_span(e.id),
                     );
-                    self.record_member_ref(e.span, &owner, prop);
+                    self.record_member_ref(self.expr_span(e.id), &owner, prop);
                 }
                 self.forget_what_an_operation_may_change(
                     &base_ty,
@@ -3522,12 +3821,17 @@ impl<'a> Checker<'a> {
                 );
                 // Whatever the name, a value that can't have properties
                 // can't have this one.
-                self.check_dynamic_member_receiver(&base_ty, *operator, false, e.span);
+                self.check_dynamic_member_receiver(
+                    &base_ty,
+                    *operator,
+                    false,
+                    self.expr_span(e.id),
+                );
                 if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind
                     && let Some(name) = self.syntax_string_text(name)
                 {
                     if let Some((owner, _)) = self.find_property_owner(&base_ty, name) {
-                        self.record_member_ref(e.span, &owner, name);
+                        self.record_member_ref(self.expr_span(e.id), &owner, name);
                     }
                 } else if self.collect_member_refs {
                     // `escape_targets_for_receiver_type` can do a real,
@@ -3549,6 +3853,12 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("dynamic method-call arguments retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
+                let recv = arenas
+                    .expr(*recv)
+                    .expect("dynamic method receiver belongs to its retained file owner");
+                let name_expr = arenas
+                    .expr(*name_expr)
+                    .expect("dynamic method name belongs to its retained file owner");
                 let recv_ty = self.check_expr(recv, locals, label);
                 // A nullsafe access earlier in the chain that met `null`
                 // skipped this one.
@@ -3561,8 +3871,8 @@ impl<'a> Checker<'a> {
                     recv_ty
                 };
                 self.check_expr(name_expr, locals, label);
-                self.check_dynamic_member_receiver(&recv_ty, *operator, true, e.span);
-                for a in arenas.args(*args) {
+                self.check_dynamic_member_receiver(&recv_ty, *operator, true, self.expr_span(e.id));
+                for a in arenas.args(args.clone()) {
                     if let Some(value) = arenas.expr(a.value) {
                         self.check_expr(value, locals, label);
                     }
@@ -3572,7 +3882,7 @@ impl<'a> Checker<'a> {
                     && let Some(name) = self.syntax_string_text(name)
                 {
                     if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
-                        self.record_method_ref(e.span, &owner, name);
+                        self.record_method_ref(self.expr_span(e.id), &owner, name);
                         callee = self.registry.lookup_method(&owner, name);
                     }
                 } else if self.collect_member_refs {
@@ -3580,7 +3890,7 @@ impl<'a> Checker<'a> {
                         self.record_member_class_escape(&class);
                     }
                 }
-                self.record_call_throw_point(None, callee, e.span);
+                self.record_call_throw_point(None, callee, self.expr_span(e.id));
                 Type::mixed()
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
@@ -3588,15 +3898,24 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("dynamic static-call arguments retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let args = arenas.args(*args);
+                let name = arenas
+                    .expr(*name)
+                    .expect("dynamic static method name belongs to its retained file owner");
+                let args_range = args.clone();
+                let args = arenas.args(args_range.clone());
                 let name_ty = self.check_expr(name, locals, label);
                 // `Foo::{'bar'}()`, or a name variable holding one known
                 // string: a call to that method.
                 if let [method] = &name_ty.constant_strings_text()[..] {
                     let arena = self.synthetic_expr_arena();
-                    let call =
-                        self.static_call(&arena, target, method.to_string(), args.clone(), e.span);
-                    return self.check_expr(call, locals, label);
+                    let call = self.static_call(
+                        &arena,
+                        target,
+                        method.to_string(),
+                        args_range,
+                        self.expr_span(e.id),
+                    );
+                    return self.check_expr(&call, locals, label);
                 }
                 let class = self.resolve_static_target_class(target, locals, label);
                 for a in args {
@@ -3610,7 +3929,7 @@ impl<'a> Checker<'a> {
                 {
                     self.record_member_class_escape(&class);
                 }
-                self.record_call_throw_point(None, None, e.span);
+                self.record_call_throw_point(None, None, self.expr_span(e.id));
                 Type::mixed()
             }
             ExprKind::Interpolated(parts) => {
@@ -3650,7 +3969,7 @@ impl<'a> Checker<'a> {
                     if matches!(&p.kind, ExprKind::Literal(Literal::String(_))) {
                         continue;
                     }
-                    self.check_implicit_tostring_usage(&part_ty, p.span);
+                    self.check_implicit_tostring_usage(&part_ty, self.expr_span(p.id));
                     self.forget_what_an_operation_may_change(
                         &part_ty,
                         is_this(self, p),
@@ -3662,7 +3981,7 @@ impl<'a> Checker<'a> {
                             format!(
                                 "Part of encapsed string ({part_ty}) cannot be cast to string."
                             ),
-                            p.span,
+                            self.expr_span(p.id),
                             2,
                             "encapsedStringPart.nonString",
                         );
@@ -3675,7 +3994,7 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("match expressions retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let arms = arenas.match_arms(*arms);
+                let arms = arenas.match_arms(arms.clone());
                 let subject = arenas
                     .expr(*subject)
                     .expect("match subject belongs to its retained file owner");
@@ -3774,7 +4093,7 @@ impl<'a> Checker<'a> {
                 for (i, (conds, result)) in
                     arms.iter().filter_map(MatchArm::conditioned).enumerate()
                 {
-                    for c in conds.iter().map(|id| {
+                    for c in arenas.expr_ids(&conds).iter().map(|id| {
                         arenas
                             .expr(*id)
                             .expect("match condition belongs to its retained file owner")
@@ -3782,7 +4101,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(c, locals, label);
                     }
                     if self.loop_depth == 0 && !next_arm_is_dead {
-                        for c in conds.iter().map(|id| {
+                        for c in arenas.expr_ids(&conds).iter().map(|id| {
                             arenas
                                 .expr(*id)
                                 .expect("match condition belongs to its retained file owner")
@@ -3798,7 +4117,7 @@ impl<'a> Checker<'a> {
                                 self.report(format!(
                                         "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always false."
                                     ),
-                                    c.span,
+                                    self.expr_span(c.id),
                                     4,
                                     "match.alwaysFalse",
                                 );
@@ -3820,7 +4139,7 @@ impl<'a> Checker<'a> {
                                 self.report(format!(
                                         "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always true."
                                     ),
-                                    c.span,
+                                    self.expr_span(c.id),
                                     4,
                                     "match.alwaysTrue",
                                 );
@@ -3830,7 +4149,7 @@ impl<'a> Checker<'a> {
                     let mut arm_locals = self.narrow_match_arm_conditions(
                         arenas,
                         subject,
-                        conds,
+                        arenas.expr_ids(&conds),
                         &accumulated,
                         match_true,
                     );
@@ -3847,7 +4166,7 @@ impl<'a> Checker<'a> {
                     }
                     if match_true {
                         // A skipped arm had every condition false.
-                        for c in conds.iter().map(|id| {
+                        for c in arenas.expr_ids(&conds).iter().map(|id| {
                             arenas
                                 .expr(*id)
                                 .expect("match condition belongs to its retained file owner")
@@ -3855,7 +4174,7 @@ impl<'a> Checker<'a> {
                             self.apply_narrowing(c, &mut accumulated, false);
                         }
                     } else {
-                        for c in conds.iter().map(|id| {
+                        for c in arenas.expr_ids(&conds).iter().map(|id| {
                             arenas
                                 .expr(*id)
                                 .expect("match condition belongs to its retained file owner")
@@ -3903,7 +4222,7 @@ impl<'a> Checker<'a> {
                             .filter_map(MatchArm::conditioned)
                             .next_back()
                         .is_some_and(|(conds, _)| {
-                            matches!(conds.as_slice(), [only_cond]
+                            matches!(arenas.expr_ids(&conds), [only_cond]
                                 if self.condition_is_provably_true(
                                     arenas.expr(*only_cond).expect("match condition belongs to its retained file owner"),
                                     &accumulated_before_last_arm
@@ -3923,7 +4242,7 @@ impl<'a> Checker<'a> {
                             self.report(
                                 "Match expression does not handle remaining value: true"
                                     .to_string(),
-                                e.span,
+                                self.expr_span(e.id),
                                 4,
                                 "match.unhandled",
                             );
@@ -3954,7 +4273,7 @@ impl<'a> Checker<'a> {
                         let subject_ty = self.infer_expr(subject, locals);
                         let mut remaining = self.expand_enum_cases(&subject_ty);
                         for (conds, _) in arms.iter().filter_map(MatchArm::conditioned) {
-                            for c in conds.iter().map(|id| {
+                            for c in arenas.expr_ids(&conds).iter().map(|id| {
                                 arenas
                                     .expr(*id)
                                     .expect("match condition belongs to its retained file owner")
@@ -3975,7 +4294,7 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "Match expression does not handle remaining value: {remaining}"
                                 ),
-                                e.span,
+                                self.expr_span(e.id),
                                 4,
                                 "match.unhandled",
                             );
@@ -4018,14 +4337,14 @@ impl<'a> Checker<'a> {
                 let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
                     return Type::mixed();
                 };
-                let params = arenas.params(closure.params);
+                let params = arenas.params(closure.params.clone());
                 let uses = arenas.closure_uses(&closure.uses);
                 let body = arenas.stmt_ids(&closure.body);
                 let goto_labels = &closure.goto_labels;
                 let is_generator = closure.is_generator;
                 let is_static = closure.is_static;
                 let return_type = closure.return_type.as_deref();
-                let attrs = arenas.attributes(closure.attrs);
+                let attrs = arenas.attributes(closure.attrs.clone());
                 // Mirrors real PHPStan's `ClosureAttributesRule` -
                 // existence plus target-validity for a closure
                 // expression's own `#[Attr]` group.
@@ -4119,7 +4438,7 @@ impl<'a> Checker<'a> {
                     // keys from anything else holding the reference before
                     // the closure runs.
                     let ty = if u.by_ref {
-                        let ty = self.capture_entry(e.span, &u.name.name, ty);
+                        let ty = self.capture_entry(self.expr_span(e.id), &u.name.name, ty);
                         by_ref_entries.push((u.name.name.clone(), ty.clone()));
                         ty.unsealed_shapes()
                     } else {
@@ -4201,15 +4520,15 @@ impl<'a> Checker<'a> {
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
-                    e.span,
+                    self.expr_span(e.id),
                 );
                 self.check_type_trait_refs(
                     declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
-                    e.span,
+                    self.expr_span(e.id),
                     "return.trait",
                 );
-                self.check_type_class_name_case(&declared_return_case_refs, e.span);
+                self.check_type_class_name_case(&declared_return_case_refs, self.expr_span(e.id));
                 // `return.noParent` - `declared_return` above never went
                 // through `resolve_pseudo` (unlike `current_declared_
                 // return_type` further down), so a fresh, one-off resolve
@@ -4223,7 +4542,7 @@ impl<'a> Checker<'a> {
                     self.check_no_parent_ref(
                         &resolved_return,
                         "return type of anonymous function",
-                        e.span,
+                        self.expr_span(e.id),
                         "return.noParent",
                     );
                 }
@@ -4233,7 +4552,7 @@ impl<'a> Checker<'a> {
                 self.check_internal_param_and_return_types_raw(
                     params,
                     return_type,
-                    e.span,
+                    self.expr_span(e.id),
                     false,
                     current_class_for_internal_check.as_deref(),
                     &closure_label,
@@ -4241,7 +4560,7 @@ impl<'a> Checker<'a> {
                 self.check_restricted_param_and_return_types_raw(
                     params,
                     return_type,
-                    e.span,
+                    self.expr_span(e.id),
                     current_class_for_internal_check.as_deref(),
                 );
                 // A generator-returning closure needs the same
@@ -4268,17 +4587,12 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     GotoState::new(goto_labels.clone()),
                 );
-                let previous_assigned_variables = self.enter_assigned_variables(
-                    self.syntax_arenas()
-                        .expect("closure checks require the syntax tree owner"),
-                    body,
-                );
+                let previous_assigned_variables = self.enter_assigned_variables(arenas, body);
                 let enclosing_scope =
                     self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
                         closure: true,
                         ..crate::checker::shared_scope::SharedScope::of(
-                            self.syntax_arenas()
-                                .expect("closure checks require the syntax tree owner"),
+                            arenas,
                             body,
                             uses,
                             Some((
@@ -4343,7 +4657,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_return_points);
                 let previous_saw_explicit_return =
                     std::mem::take(&mut self.current_function_saw_explicit_return);
-                self.check_generator_return_type(declared_return.as_ref(), e.span);
+                self.check_generator_return_type(declared_return.as_ref(), self.expr_span(e.id));
                 // A closure literal may run zero-to-many times (any
                 // callback-accepting builtin, or simply being called more
                 // than once through an ordinary variable) - a single
@@ -4418,7 +4732,7 @@ impl<'a> Checker<'a> {
                     body_terminates,
                     return_type.is_some(),
                     declared_return.as_ref(),
-                    e.span,
+                    self.expr_span(e.id),
                 );
                 // Captured before the restore below overwrites the live
                 // field back to the *outer* scope's own snapshots - the
@@ -4448,7 +4762,7 @@ impl<'a> Checker<'a> {
                 // own (see its doc comment), so every finding here
                 // anchors to the whole closure expression's span instead
                 // of the specific `$x` token.
-                self.check_unused_closure_uses(uses, body, e.span);
+                self.check_unused_closure_uses(uses, body, self.expr_span(e.id));
                 // A `use (&$x)` capture is a real reference - any
                 // mutation the closure body makes to `$x` is visible in
                 // the declaring scope too, from the closure literal's
@@ -4468,7 +4782,7 @@ impl<'a> Checker<'a> {
                 // project's own "don't guess wrong" precedent prefers a
                 // graceful degrade here over an `unwrap()`).
                 self.write_back_captures(
-                    e.span,
+                    self.expr_span(e.id),
                     uses,
                     &by_ref_entries,
                     &closure_byref_exit_snapshots,
@@ -4493,13 +4807,13 @@ impl<'a> Checker<'a> {
                 let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*closure_id) else {
                     return Type::mixed();
                 };
-                let params = arenas.params(arrow.params);
+                let params = arenas.params(arrow.params.clone());
                 let Some(body) = arenas.expr(arrow.body) else {
                     return Type::mixed();
                 };
                 let is_generator = arrow.is_generator;
                 let return_type = arrow.return_type.as_deref();
-                let attrs = arenas.attributes(arrow.attrs);
+                let attrs = arenas.attributes(arrow.attrs.clone());
                 // Mirrors real PHPStan's `ArrowFunctionAttributesRule` -
                 // see the `Closure` arm's identical comment above.
                 self.check_attributes(attrs, label);
@@ -4571,14 +4885,14 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
-                self.check_generator_return_type(declared_return.as_ref(), e.span);
+                self.check_generator_return_type(declared_return.as_ref(), self.expr_span(e.id));
                 let enclosing_scope =
                     self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
                         closure: true,
                         ..crate::checker::shared_scope::SharedScope::of_arrow_function(
                             self.syntax_arenas()
                                 .expect("arrow checks require the syntax tree owner"),
-                            body,
+                            body.id,
                         )
                     });
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
@@ -4604,13 +4918,13 @@ impl<'a> Checker<'a> {
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
-                        e.span,
+                        self.expr_span(e.id),
                     );
-                    self.check_type_class_name_case(&expected_case_refs, e.span);
+                    self.check_type_class_name_case(&expected_case_refs, self.expr_span(e.id));
                     self.check_type_trait_refs(
                         &expected,
                         "return type of arrow function",
-                        e.span,
+                        self.expr_span(e.id),
                         "return.trait",
                     );
                     if let Some(c) = self.current_class.clone() {
@@ -4618,7 +4932,7 @@ impl<'a> Checker<'a> {
                         self.check_no_parent_ref(
                             &resolved_return,
                             "return type of arrow function",
-                            e.span,
+                            self.expr_span(e.id),
                             "return.noParent",
                         );
                     }
@@ -4628,7 +4942,7 @@ impl<'a> Checker<'a> {
                     if let Some(from) = self.rejected_from(&expected, &body_ty) {
                         self.report_found_from(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
-                            body.span,
+                            self.expr_span(body.id),
                             3,
                             from,
                             "return.type",
@@ -4640,7 +4954,7 @@ impl<'a> Checker<'a> {
                 self.check_internal_param_and_return_types_raw(
                     params,
                     return_type,
-                    e.span,
+                    self.expr_span(e.id),
                     false,
                     current_class_for_internal_check.as_deref(),
                     label,
@@ -4648,7 +4962,7 @@ impl<'a> Checker<'a> {
                 self.check_restricted_param_and_return_types_raw(
                     params,
                     return_type,
-                    e.span,
+                    self.expr_span(e.id),
                     current_class_for_internal_check.as_deref(),
                 );
                 self.closure_literal_type(
@@ -4678,6 +4992,13 @@ impl<'a> Checker<'a> {
             // real, callable `Closure` bound to that exact method the
             // same as an ordinary call would.
             ExprKind::FirstClassCallable(inner) => {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("first-class callables retain their parsed file owner");
+                let arenas = syntax_owner.arenas();
+                let inner = arenas
+                    .expr(*inner)
+                    .expect("first-class callable target belongs to its retained file owner");
                 if !matches!(inner.kind, ExprKind::New(..))
                     && self.registry.php_supports_everywhere(
                         types::php_version::PhpFeature::FirstClassCallables,
@@ -4687,7 +5008,7 @@ impl<'a> Checker<'a> {
                         DiagnosticBuilder::new(
                             "First-class callables are supported only on PHP 8.1 and later."
                                 .to_string(),
-                            e.span,
+                            self.expr_span(e.id),
                             0,
                             "callable.notSupported",
                         )
@@ -4696,10 +5017,19 @@ impl<'a> Checker<'a> {
                 }
                 match &inner.kind {
                     ExprKind::Call(callee, _) => {
-                        if let ExprKind::Name(name) = &callee.kind {
+                        let Some(callee) = arenas.expr(*callee) else {
+                            return Type::mixed();
+                        };
+                        if let ExprKind::Name(range) = &callee.kind
+                            && let Some(name) = arenas.qualified_name(range)
+                        {
                             match self.registry.resolve_function(name) {
                                 Some((resolved_name, sig)) => {
-                                    self.check_internal_function_call(resolved_name, sig, e.span);
+                                    self.check_internal_function_call(
+                                        resolved_name,
+                                        sig,
+                                        self.expr_span(e.id),
+                                    );
                                     // Closes a real, live bypass: a
                                     // banned function's own
                                     // first-class-callable syntax
@@ -4711,13 +5041,17 @@ impl<'a> Checker<'a> {
                                         resolved_name,
                                         &[],
                                         locals,
-                                        e.span,
+                                        self.expr_span(e.id),
                                     );
-                                    self.check_deprecated_function_call(resolved_name, sig, e.span);
+                                    self.check_deprecated_function_call(
+                                        resolved_name,
+                                        sig,
+                                        self.expr_span(e.id),
+                                    );
                                     self.record_function_usage_token(
                                         resolved_name,
                                         sig,
-                                        callee.span,
+                                        self.expr_span(callee.id),
                                     );
                                 }
                                 None => {
@@ -4737,7 +5071,7 @@ impl<'a> Checker<'a> {
                                     if !guarded {
                                         self.report(
                                             format!("call to undefined function {primary}()"),
-                                            e.span,
+                                            self.expr_span(e.id),
                                             0,
                                             "function.notFound",
                                         );
@@ -4749,6 +5083,9 @@ impl<'a> Checker<'a> {
                         }
                     }
                     ExprKind::MethodCall(recv, method, _, _) => {
+                        let Some(recv) = arenas.expr(*recv) else {
+                            return Type::mixed();
+                        };
                         let recv_ty = self.check_expr(recv, locals, label);
                         let recv_class = recv_ty.first_object_class().cloned();
                         if let Some(class) = &recv_class
@@ -4760,7 +5097,7 @@ impl<'a> Checker<'a> {
                             }) {
                                 let mut builder = DiagnosticBuilder::new(
                                     format!("call to undefined method {recv_ty}::{method}()"),
-                                    e.span,
+                                    self.expr_span(e.id),
                                     0,
                                     "method.notFound",
                                 );
@@ -4781,34 +5118,44 @@ impl<'a> Checker<'a> {
                                         name: method,
                                     },
                                     visibility: &sig.visibility(),
-                                    span: e.span,
+                                    span: self.expr_span(e.id),
                                 });
-                                self.check_internal_method_call(&owner, method, sig, false, e.span);
+                                self.check_internal_method_call(
+                                    &owner,
+                                    method,
+                                    sig,
+                                    false,
+                                    self.expr_span(e.id),
+                                );
                                 self.check_restricted_method_call(
                                     &owner,
                                     method,
                                     false,
                                     &[],
                                     locals,
-                                    e.span,
+                                    self.expr_span(e.id),
                                 );
                                 self.check_deprecated_method_call(
-                                    &owner, method, sig, false, e.span,
+                                    &owner,
+                                    method,
+                                    sig,
+                                    false,
+                                    self.expr_span(e.id),
                                 );
                                 self.record_member_usage_token(
                                     UsageTokenKind::Method,
                                     &owner,
                                     sig.deprecated().is_some(),
                                     sig.is_internal(),
-                                    e.span,
+                                    self.expr_span(e.id),
                                 );
                                 self.check_call_site_method_name_case(
                                     class,
                                     method,
-                                    e.span,
+                                    self.expr_span(e.id),
                                     Span {
-                                        start: recv.span.end,
-                                        end: e.span.end,
+                                        start: self.expr_span(recv.id).end,
+                                        end: self.expr_span(e.id).end,
                                     },
                                 );
                             }
@@ -4821,10 +5168,10 @@ impl<'a> Checker<'a> {
                             self.check_call_site_method_name_case(
                                 &class,
                                 method,
-                                e.span,
+                                self.expr_span(e.id),
                                 Span {
                                     start: self.static_target_end(target),
-                                    end: e.span.end,
+                                    end: self.expr_span(e.id).end,
                                 },
                             );
                             if self.registry.lookup_method(&class, method).is_none()
@@ -4835,7 +5182,7 @@ impl<'a> Checker<'a> {
                             {
                                 self.report(
                                     format!("call to undefined static method {class}::{method}()"),
-                                    e.span,
+                                    self.expr_span(e.id),
                                     0,
                                     "staticMethod.notFound",
                                 );
@@ -4849,40 +5196,63 @@ impl<'a> Checker<'a> {
                                         name: method,
                                     },
                                     visibility: &sig.visibility(),
-                                    span: e.span,
+                                    span: self.expr_span(e.id),
                                 });
-                                self.check_internal_method_call(&owner, method, sig, true, e.span);
+                                self.check_internal_method_call(
+                                    &owner,
+                                    method,
+                                    sig,
+                                    true,
+                                    self.expr_span(e.id),
+                                );
                                 self.check_restricted_method_call(
                                     &owner,
                                     method,
                                     true,
                                     &[],
                                     locals,
-                                    e.span,
+                                    self.expr_span(e.id),
                                 );
                                 self.check_deprecated_method_call(
-                                    &owner, method, sig, true, e.span,
+                                    &owner,
+                                    method,
+                                    sig,
+                                    true,
+                                    self.expr_span(e.id),
                                 );
                                 self.record_member_usage_token(
                                     UsageTokenKind::Method,
                                     &owner,
                                     sig.deprecated().is_some(),
                                     sig.is_internal(),
-                                    e.span,
+                                    self.expr_span(e.id),
                                 );
                                 if target.as_name().is_some_and(|n| n.is_keyword("static"))
                                     && sig.visibility() == Visibility::Private
                                 {
-                                    self.check_static_private_method_access(&owner, method, e.span);
+                                    self.check_static_private_method_access(
+                                        &owner,
+                                        method,
+                                        self.expr_span(e.id),
+                                    );
                                 }
                             }
                         }
                     }
                     ExprKind::DynamicMethodCall(recv, name_expr, _, _) => {
+                        let Some(recv) = arenas.expr(*recv) else {
+                            return Type::mixed();
+                        };
+                        let Some(name_expr) = arenas.expr(*name_expr) else {
+                            return Type::mixed();
+                        };
                         self.check_expr(recv, locals, label);
                         self.check_expr(name_expr, locals, label);
                     }
                     ExprKind::DynamicStaticCall(target, name_expr, _) => {
+                        let Some(name_expr) = arenas.expr(*name_expr) else {
+                            return Type::mixed();
+                        };
                         self.resolve_static_target_class(target, locals, label);
                         self.check_expr(name_expr, locals, label);
                     }
@@ -4890,7 +5260,7 @@ impl<'a> Checker<'a> {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 "Cannot create callable from the new operator.".to_string(),
-                                e.span,
+                                self.expr_span(e.id),
                                 0,
                                 "callable.notSupported",
                             )
@@ -4916,11 +5286,18 @@ impl<'a> Checker<'a> {
                 Literal::Null => Type::null(),
             },
             ExprKind::Name(name) => {
-                self.check_magic_constant_context(name, e.span);
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("name expressions retain their parsed file owner");
+                let name = syntax_owner
+                    .arenas()
+                    .qualified_name(name)
+                    .expect("name range belongs to its retained file owner");
+                self.check_magic_constant_context(name, self.expr_span(e.id));
                 match self.global_constant_type(name) {
                     Some(ty) => ty,
                     None => {
-                        self.check_unknown_global_constant(name, locals, e.span);
+                        self.check_unknown_global_constant(name, locals, self.expr_span(e.id));
                         bare_name_literal_type(name)
                     }
                 }
@@ -4950,15 +5327,32 @@ impl<'a> Checker<'a> {
     fn chain_link_type_uncached(&self, e: &ExprNode, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
+                let Some(owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let arenas = owner.arenas();
+                let Some(recv) = arenas.expr(*recv) else {
+                    return Type::mixed();
+                };
                 // What the method is looked up on is the receiver's object
                 // part; a `null` one is reported where it's checked.
                 let recv_ty = self.chain_link_type(recv, locals).without(&Type::null());
-                let arenas = self
-                    .syntax_arenas()
-                    .expect("method-call chain links retain their parsed file owner");
-                self.method_call_return_type(arenas, recv, &recv_ty, method, args, locals)
+                self.method_call_return_type(
+                    arenas,
+                    recv,
+                    &recv_ty,
+                    method,
+                    arenas.args(args.clone()),
+                    locals,
+                )
             }
             ExprKind::PropertyAccess(base, prop, _) => {
+                let Some(owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let Some(base) = owner.arenas().expr(*base) else {
+                    return Type::mixed();
+                };
                 if locals.may_have_member_narrowing()
                     && let Some(base_key) = self.find_expr_key(locals, base)
                     && let Some(narrowed) = locals
@@ -4978,6 +5372,16 @@ impl<'a> Checker<'a> {
             // A general array's element is taken as present; a key the
             // type says may be missing reads `V|null` (`offset_read_type`).
             ExprKind::Index(base, Some(idx)) => {
+                let Some(owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let arenas = owner.arenas();
+                let Some(base_expr) = arenas.expr(*base) else {
+                    return Type::mixed();
+                };
+                let Some(idx_expr) = arenas.expr(*idx) else {
+                    return Type::mixed();
+                };
                 // The narrowed key first: `apply_narrowing` writes a
                 // narrowed type under `key_of`'s `"base[key]"`
                 // (e.g. after `is_string($info['code'])`).
@@ -4987,17 +5391,22 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                let key_ty = match self
-                    .syntax_arenas()
-                    .and_then(|arenas| crate::checker::literal_shape_key(arenas, idx))
-                {
+                let key_ty = match crate::checker::literal_shape_key(arenas, idx_expr) {
                     Some(key) => key.to_type(),
-                    None => self.infer_expr(idx, locals),
+                    None => self.infer_expr(idx_expr, locals),
                 };
-                self.offset_read_type(&self.chain_link_type(base, locals), &key_ty)
+                self.offset_read_type(&self.chain_link_type(base_expr, locals), &key_ty)
             }
             // Parentheses don't end a chain.
-            ExprKind::Grouping(inner) => self.chain_link_type(inner, locals),
+            ExprKind::Grouping(inner) => {
+                let Some(owner) = self.syntax_tree_owner() else {
+                    return Type::mixed();
+                };
+                let Some(inner) = owner.arenas().expr(*inner) else {
+                    return Type::mixed();
+                };
+                self.chain_link_type(inner, locals)
+            }
             _ => self.infer_expr(e, locals),
         }
     }
@@ -5127,7 +5536,7 @@ impl<'a> Checker<'a> {
                 let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
                     return Type::mixed();
                 };
-                let params = arenas.params(closure.params);
+                let params = arenas.params(closure.params.clone());
                 let inferred = self.closure_syntactic_return_type(arenas, closure, locals, None);
                 self.closure_literal_type(params, closure.return_type.as_deref(), inferred, None)
             }
@@ -5138,7 +5547,7 @@ impl<'a> Checker<'a> {
                 let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*closure_id) else {
                     return Type::mixed();
                 };
-                let params = arenas.params(arrow.params);
+                let params = arenas.params(arrow.params.clone());
                 let body = arenas.expr(arrow.body);
                 let inferred = body.and_then(|body| {
                     self.arrow_fn_inferred_return(params, body, arrow.is_generator, locals, None)
@@ -5150,7 +5559,7 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("match expressions retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let arms = arenas.match_arms(*arms);
+                let arms = arenas.match_arms(arms.clone());
                 let subject = arenas
                     .expr(*subject)
                     .expect("match subject belongs to its retained file owner");
@@ -5173,7 +5582,7 @@ impl<'a> Checker<'a> {
                     let arm_locals = self.narrow_match_arm_conditions(
                         arenas,
                         subject,
-                        conds,
+                        arenas.expr_ids(&conds),
                         &accumulated,
                         match_true,
                     );
@@ -5181,7 +5590,7 @@ impl<'a> Checker<'a> {
                         .expr(result)
                         .expect("match arm body belongs to its retained file owner");
                     result_types.push(self.infer_expr(result, &arm_locals));
-                    if let [only_cond] = conds.as_slice() {
+                    if let [only_cond] = arenas.expr_ids(&conds) {
                         let only_cond = arenas
                             .expr(*only_cond)
                             .expect("match condition belongs to its retained file owner");
@@ -5197,7 +5606,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                if let Some(d) = default_expr {
+                if let Some(d) = default {
                     result_types.push(self.infer_expr(d, &accumulated));
                 }
                 // See `check_expr`'s identical arm's doc comment for
@@ -5345,112 +5754,117 @@ impl<'a> Checker<'a> {
                 let class_expr = arenas
                     .expr(*class_expr)
                     .expect("instantiation target belongs to its retained file owner");
-                let args = arenas.args(*args);
+                let args = arenas.args(args.clone());
                 match &class_expr.kind {
-                    ExprKind::Name(name) => match name.written.as_ref() {
-                        "self" | "parent" | "static" => {
-                            let raw = match name.written.as_ref() {
-                                "self" => Type::self_ref(Vec::new()),
-                                "parent" => Type::parent_ref(),
-                                _ => Type::static_ref(Vec::new()),
-                            };
-                            match &self.current_class {
-                                Some(c) => self.resolve_pseudo(&raw, c),
-                                None => raw,
-                            }
-                        }
-                        // `new ReflectionClass($view)`-shaped constructor-
-                        // argument-driven class-level generic inference - the
-                        // same `Relation::infer_template_bindings`/`TemplateBindings`
-                        // primitive `infer_call_return_type` uses for
-                        // ordinary call-site inference, just binding against
-                        // a constructor's params instead of a function's.
-                        // Rebind to the registry's canonical-case spelling
-                        // first (mirroring `check_expr`'s identical fix)
-                        // since `lookup_method`'s ancestor walk needs exact
-                        // case.
-                        _ => {
-                            let canonical = self.resolve_class_name(name);
-                            let templates = self
-                                .registry
-                                .class_by_name(canonical.as_str())
-                                .map(|info| info.templates().as_slice())
-                                .unwrap_or(&[]);
-                            if templates.is_empty() {
-                                Type::object(canonical.into(), Vec::new())
-                            } else {
-                                let mut bindings: TemplateBindings = TemplateBindings::default();
-                                if let Some(sig) =
-                                    self.registry.lookup_method(&canonical, "__construct")
-                                {
-                                    let resolved_args =
-                                        resolve_call_args(arenas, args, sig.params());
-                                    for (param, slot) in
-                                        sig.params().iter().zip(resolved_args.iter())
-                                    {
-                                        let Some(arg) = slot else { continue };
-                                        let arg_ty = self.infer_expr(arg, locals);
-                                        // A bare string literal naming a
-                                        // real, registered class binds a
-                                        // `class-string<T>` slot exactly like
-                                        // an explicit `Foo::class` would,
-                                        // mirroring real PHPStan's
-                                        // `ConstantStringType::isClassString()`.
-                                        let promoted = param.ty().promote_class_string_literals(
-                                            &arg_ty,
-                                            &|s| {
-                                                self.registry
-                                                    .lookup_class(s)
-                                                    .map(|(c, _)| c.to_string())
-                                            },
-                                        );
-                                        self.relation().infer_template_bindings(
-                                            param.ty(),
-                                            &promoted,
-                                            &mut bindings,
-                                        );
-                                    }
+                    ExprKind::Name(name) => {
+                        let Some(name) = arenas.qualified_name(name) else {
+                            return Type::mixed();
+                        };
+                        match name.written.as_ref() {
+                            "self" | "parent" | "static" => {
+                                let raw = match name.written.as_ref() {
+                                    "self" => Type::self_ref(Vec::new()),
+                                    "parent" => Type::parent_ref(),
+                                    _ => Type::static_ref(Vec::new()),
+                                };
+                                match &self.current_class {
+                                    Some(c) => self.resolve_pseudo(&raw, c),
+                                    None => raw,
                                 }
-                                // A template the constructor's arguments
-                                // never bound is left erased (trimmed off the
-                                // trailing end, same as a real bare `new Box()`
-                                // reference with fewer type arguments than
-                                // declared) rather than eagerly filled with
-                                // `Mixed`: `substitute_scoped`'s `@template
-                                // T = Default` fallback only triggers for a
-                                // name genuinely absent from the zip against
-                                // `templates`, not one explicitly bound to
-                                // `Mixed`. A template bound in the middle
-                                // with a later one still unbound has no such
-                                // "erase the tail" option (PHP's type-argument
-                                // syntax can't skip a middle position
-                                // either), so it does still fall back to
-                                // `Mixed` there.
-                                let last_bound = templates
-                                    .iter()
-                                    .rposition(|t| bindings.contains_key(t.as_ref()))
-                                    .map(|i| i + 1)
-                                    .unwrap_or(0);
-                                let info = self.registry.class_by_name(canonical.as_str());
-                                let bounds = self
+                            }
+                            // `new ReflectionClass($view)`-shaped constructor-
+                            // argument-driven class-level generic inference - the
+                            // same `Relation::infer_template_bindings`/`TemplateBindings`
+                            // primitive `infer_call_return_type` uses for
+                            // ordinary call-site inference, just binding against
+                            // a constructor's params instead of a function's.
+                            // Rebind to the registry's canonical-case spelling
+                            // first (mirroring `check_expr`'s identical fix)
+                            // since `lookup_method`'s ancestor walk needs exact
+                            // case.
+                            _ => {
+                                let canonical = self.resolve_class_name(name);
+                                let templates = self
                                     .registry
-                                    .effective_template_bounds_by_name(canonical.as_str());
-                                let bound_args = templates[..last_bound]
-                                    .iter()
-                                    .map(|t| match bindings.get(t.as_ref()) {
-                                        Some(ty) => match info {
-                                            Some(info) => generalize_inferred_class_template(
-                                                info, &bounds, t, ty,
-                                            ),
-                                            None => ty.clone(),
-                                        },
-                                        None => Type::mixed(),
-                                    })
-                                    .collect();
-                                Type::object(canonical.into(), bound_args)
+                                    .class_by_name(canonical.as_str())
+                                    .map(|info| info.templates().as_slice())
+                                    .unwrap_or(&[]);
+                                if templates.is_empty() {
+                                    Type::object(canonical.into(), Vec::new())
+                                } else {
+                                    let mut bindings: TemplateBindings =
+                                        TemplateBindings::default();
+                                    if let Some(sig) =
+                                        self.registry.lookup_method(&canonical, "__construct")
+                                    {
+                                        let resolved_args =
+                                            resolve_call_args(arenas, args, sig.params());
+                                        for (param, slot) in
+                                            sig.params().iter().zip(resolved_args.iter())
+                                        {
+                                            let Some(arg) = slot else { continue };
+                                            let arg_ty = self.infer_expr(arg, locals);
+                                            // A bare string literal naming a
+                                            // real, registered class binds a
+                                            // `class-string<T>` slot exactly like
+                                            // an explicit `Foo::class` would,
+                                            // mirroring real PHPStan's
+                                            // `ConstantStringType::isClassString()`.
+                                            let promoted = param
+                                                .ty()
+                                                .promote_class_string_literals(&arg_ty, &|s| {
+                                                    self.registry
+                                                        .lookup_class(s)
+                                                        .map(|(c, _)| c.to_string())
+                                                });
+                                            self.relation().infer_template_bindings(
+                                                param.ty(),
+                                                &promoted,
+                                                &mut bindings,
+                                            );
+                                        }
+                                    }
+                                    // A template the constructor's arguments
+                                    // never bound is left erased (trimmed off the
+                                    // trailing end, same as a real bare `new Box()`
+                                    // reference with fewer type arguments than
+                                    // declared) rather than eagerly filled with
+                                    // `Mixed`: `substitute_scoped`'s `@template
+                                    // T = Default` fallback only triggers for a
+                                    // name genuinely absent from the zip against
+                                    // `templates`, not one explicitly bound to
+                                    // `Mixed`. A template bound in the middle
+                                    // with a later one still unbound has no such
+                                    // "erase the tail" option (PHP's type-argument
+                                    // syntax can't skip a middle position
+                                    // either), so it does still fall back to
+                                    // `Mixed` there.
+                                    let last_bound = templates
+                                        .iter()
+                                        .rposition(|t| bindings.contains_key(t.as_ref()))
+                                        .map(|i| i + 1)
+                                        .unwrap_or(0);
+                                    let info = self.registry.class_by_name(canonical.as_str());
+                                    let bounds = self
+                                        .registry
+                                        .effective_template_bounds_by_name(canonical.as_str());
+                                    let bound_args = templates[..last_bound]
+                                        .iter()
+                                        .map(|t| match bindings.get(t.as_ref()) {
+                                            Some(ty) => match info {
+                                                Some(info) => generalize_inferred_class_template(
+                                                    info, &bounds, t, ty,
+                                                ),
+                                                None => ty.clone(),
+                                            },
+                                            None => Type::mixed(),
+                                        })
+                                        .collect();
+                                    Type::object(canonical.into(), bound_args)
+                                }
                             }
                         }
-                    },
+                    }
                     _ => Type::mixed(),
                 }
             }
@@ -5462,17 +5876,25 @@ impl<'a> Checker<'a> {
                 let callee = arenas
                     .expr(*callee)
                     .expect("call callee belongs to its retained file owner");
-                let args = arenas.args(*args);
+                let args = arenas.args(args.clone());
                 match &callee.kind {
-                    ExprKind::Name(name) => self
-                        .registry
-                        .resolve_function(name)
-                        .map(|(resolved_name, sig)| {
-                            self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
-                        })
-                        .unwrap_or_else(|| {
-                            self.call_fallback_return_type(arenas, callee, args, locals)
-                        }),
+                    ExprKind::Name(name) => match arenas.qualified_name(name) {
+                        Some(name) => self
+                            .registry
+                            .resolve_function(name)
+                            .map(|(resolved_name, sig)| {
+                                self.infer_builtin_call_return_type(
+                                    resolved_name,
+                                    sig,
+                                    args,
+                                    locals,
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                self.call_fallback_return_type(arenas, callee, args, locals)
+                            }),
+                        None => Type::mixed(),
+                    },
                     _ => self.call_fallback_return_type(arenas, callee, args, locals),
                 }
             }
@@ -5497,15 +5919,15 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("static calls retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let args = arenas.args(*args);
-                if let Some(property) = target.parent_hook_property() {
+                let args = arenas.args(args.clone());
+                if let Some(property) = target.parent_hook_property(arenas) {
                     return self.parent_hook_call_type(property, method);
                 }
                 if self.collect_member_refs
                     && let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
                 {
-                    self.record_method_ref(e.span, &owner, method);
+                    self.record_method_ref(self.expr_span(e.id), &owner, method);
                     // The `::cases()` escape hatch - see
                     // `Checker::escaped_enums`'s own doc comment. `owner`
                     // is already the registry's own canonically-declared
@@ -5539,7 +5961,7 @@ impl<'a> Checker<'a> {
                                 // threading a new span parameter through
                                 // `narrow_enum_from_call`.
                                 if let Some((case_class, case)) = resolved.as_enum_case() {
-                                    self.record_member_ref(e.span, case_class, case);
+                                    self.record_member_ref(self.expr_span(e.id), case_class, case);
                                 }
                                 if let Some(ty) =
                                     self.class_argument_return(arenas, &class, method, args, locals)
@@ -5552,6 +5974,9 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::mixed())
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
+                let Some(name) = self.syntax_arenas().and_then(|arenas| arenas.expr(*name)) else {
+                    return Type::mixed();
+                };
                 match &self.infer_expr(name, locals).constant_strings_text()[..] {
                     [method] => {
                         let arena = self.synthetic_expr_arena();
@@ -5560,15 +5985,19 @@ impl<'a> Checker<'a> {
                             target,
                             method.to_string(),
                             args.clone(),
-                            e.span,
+                            self.expr_span(e.id),
                         );
-                        self.infer_expr(call, locals)
+                        self.infer_expr(&call, locals)
                     }
                     _ => Type::mixed(),
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
                 let names: Option<Vec<String>> = {
+                    let Some(name) = self.syntax_arenas().and_then(|arenas| arenas.expr(*name))
+                    else {
+                        return Type::mixed();
+                    };
                     let names = self.infer_expr(name, locals);
                     let names = names.constant_strings_text();
                     (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
@@ -5578,7 +6007,8 @@ impl<'a> Checker<'a> {
                     .into_iter()
                     .flatten()
                     .map(|member| {
-                        let fetch = self.constant_fetch(&arena, target, member, e.span);
+                        let fetch =
+                            self.constant_fetch(&arena, target, member, self.expr_span(e.id));
                         self.infer_expr(fetch, locals)
                     })
                     .union_all_with(&self.relation())
@@ -5616,7 +6046,7 @@ impl<'a> Checker<'a> {
                     && let Some((owner, _)) =
                         self.registry.lookup_property_with_owner(&class, prop_name)
                 {
-                    self.record_member_ref(e.span, &owner, prop_name);
+                    self.record_member_ref(self.expr_span(e.id), &owner, prop_name);
                 }
                 self.registry
                     .lookup_property(&class, prop_name)
@@ -5630,7 +6060,7 @@ impl<'a> Checker<'a> {
                 if self.collect_member_refs
                     && let Some((owner, _)) = self.registry.lookup_const_with_owner(&class, member)
                 {
-                    self.record_member_ref(e.span, &owner, member);
+                    self.record_member_ref(self.expr_span(e.id), &owner, member);
                 }
                 self.registry
                     .lookup_const_type_with_owner(&class, member)
@@ -5681,7 +6111,7 @@ impl<'a> Checker<'a> {
                     .syntax_tree_owner()
                     .expect("array literals retain their parsed file owner");
                 let arenas = syntax_owner.arenas();
-                let items = arenas.array_items(*items);
+                let items = arenas.array_items(items.clone());
                 self.infer_array_literal_type(arenas, items, locals)
             }
             // Routed through the identical `resolve_concat_type` engine
@@ -5723,8 +6153,13 @@ impl<'a> Checker<'a> {
             // general preference for fewer false positives over catching
             // every possible runtime-undefined access.
             ExprKind::Name(name) => self
-                .global_constant_type(name)
-                .unwrap_or_else(|| bare_name_literal_type(name)),
+                .syntax_arenas()
+                .and_then(|arenas| arenas.qualified_name(name))
+                .map(|name| {
+                    self.global_constant_type(name)
+                        .unwrap_or_else(|| bare_name_literal_type(name))
+                })
+                .unwrap_or(Type::mixed()),
             // Mirrors `check_expr`'s `ExprKind::Yield`/`YieldFrom` arms -
             // needed here too, since `assertType()`'s testing-DSL
             // recognition computes its "actual" type via `infer_expr`,
@@ -5735,6 +6170,10 @@ impl<'a> Checker<'a> {
                 .map(|t| generator_template_param(t, self.registry, "TSend"))
                 .unwrap_or(Type::mixed()),
             ExprKind::YieldFrom(inner) => {
+                let Some(inner) = self.syntax_arenas().and_then(|arenas| arenas.expr(*inner))
+                else {
+                    return Type::mixed();
+                };
                 generator_template_param(&self.infer_expr(inner, locals), self.registry, "TReturn")
             }
             _ => Type::mixed(),
@@ -5803,7 +6242,7 @@ impl<'a> Checker<'a> {
                 let ClosurePayload::ArrowFn(arrow) = arenas.closure(*closure_id)? else {
                     return None;
                 };
-                let params = arenas.params(arrow.params);
+                let params = arenas.params(arrow.params.clone());
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -5825,7 +6264,7 @@ impl<'a> Checker<'a> {
                 let ClosurePayload::Closure(closure) = arenas.closure(*closure_id)? else {
                     return None;
                 };
-                let params = arenas.params(closure.params);
+                let params = arenas.params(closure.params.clone());
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -5885,6 +6324,13 @@ impl<'a> Checker<'a> {
             // `infer_call_return_type` does for an ordinary call, just
             // without real argument expressions to read types from.
             ExprKind::FirstClassCallable(inner) => {
+                let owner = self
+                    .syntax_tree_owner()
+                    .expect("first-class callable retains its file owner");
+                let inner = owner
+                    .arenas()
+                    .expr(*inner)
+                    .expect("first-class callable target belongs to its retained file owner");
                 let target = self.first_class_callable_target(&inner.kind, locals);
                 if self.collect_member_refs
                     && let Some(FirstClassTarget {
@@ -5894,7 +6340,7 @@ impl<'a> Checker<'a> {
                     }) = &target
                     && let Some((owner, _)) = self.lookup_method_with_owner(class, name)
                 {
-                    self.record_method_ref(callback.span, &owner, name);
+                    self.record_method_ref(self.expr_span(callback.id), &owner, name);
                 }
                 let (sig, class) = match target {
                     Some(t) => (Some(t.sig), t.class),
@@ -5977,7 +6423,7 @@ impl<'a> Checker<'a> {
         arenas: &syntax::ast::NodeArenas,
         f: &FunctionDecl,
     ) {
-        self.collect_member_ref_defaults_params(arenas, arenas.params(f.params));
+        self.collect_member_ref_defaults_params(arenas, arenas.params(f.params.clone()));
         for &s in f.body_stmts(arenas) {
             self.collect_member_ref_defaults_stmt(arenas, s);
         }
@@ -6003,6 +6449,7 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::ClassDecl(c) => {
+                let c = arenas.class_decl(c.clone());
                 let Some(def) = arenas.class(c.def) else {
                     return;
                 };
@@ -6016,7 +6463,7 @@ impl<'a> Checker<'a> {
                         self.infer_expr(value, &self.new_locals());
                     }
                 }
-                for m in arenas.methods(def.methods) {
+                for m in arenas.methods(def.methods.clone()) {
                     self.collect_member_ref_defaults_function(arenas, &m.function);
                 }
             }
@@ -6400,7 +6847,7 @@ impl<'a> Checker<'a> {
     /// side.
     fn call_fallback_return_type(
         &self,
-        arenas: &crate::syntax::NodeArenas,
+        arenas: &syntax::ast::NodeArenas,
         callee: &ExprNode,
         args: &[Arg],
         locals: &Locals,
@@ -6512,9 +6959,12 @@ impl<'a> Checker<'a> {
     ) -> Option<FirstClassTarget<'a>> {
         match inner {
             ExprKind::Call(callee, _) => {
+                let arenas = self.syntax_arenas()?;
+                let callee = arenas.expr(*callee)?;
                 let ExprKind::Name(name) = &callee.kind else {
                     return None;
                 };
+                let name = arenas.qualified_name(name)?;
                 let (resolved, sig) = self.registry.resolve_function(name)?;
                 let bare = resolved.rsplit('\\').next().unwrap_or(resolved);
                 Some(FirstClassTarget {
@@ -6533,6 +6983,7 @@ impl<'a> Checker<'a> {
                 })
             }
             ExprKind::MethodCall(recv, method, _, _) => {
+                let recv = self.syntax_arenas()?.expr(*recv)?;
                 let recv_ty = self.infer_expr(recv, locals);
                 let (sig, class) = self.find_method_receiver_class(&recv_ty, method);
                 Some(FirstClassTarget {
@@ -6650,6 +7101,8 @@ impl<'a> Checker<'a> {
             ..
         } = closure;
         let uses = arenas.closure_uses(uses);
+        let params = arenas.params(params.clone());
+        let body = arenas.stmt_ids(body);
         if *is_generator {
             return None;
         }
@@ -6689,7 +7142,7 @@ impl<'a> Checker<'a> {
             }
         }
         let mut returns = Returns(Vec::new());
-        syntax::visit::arena::walk_stmts(&mut returns, arenas, arenas.stmt_ids(body));
+        syntax::visit::arena::walk_stmts(&mut returns, arenas, body);
         let mut points = Vec::new();
         let mut saw_explicit_return = false;
         for id in returns.0.into_iter().rev() {
@@ -6779,7 +7232,7 @@ impl<'a> Checker<'a> {
                 let ClosurePayload::ArrowFn(arrow) = arenas.closure(*closure_id)? else {
                     return None;
                 };
-                let params = arenas.params(arrow.params);
+                let params = arenas.params(arrow.params.clone());
                 let inferred =
                     self.infer_closure_return_with_param_overrides(arg, &overrides, locals);
                 Some(self.closure_literal_type(
@@ -6793,7 +7246,7 @@ impl<'a> Checker<'a> {
                 let ClosurePayload::Closure(closure) = arenas.closure(*closure_id)? else {
                     return None;
                 };
-                let params = arenas.params(closure.params);
+                let params = arenas.params(closure.params.clone());
                 let inferred =
                     self.infer_closure_return_with_param_overrides(arg, &overrides, locals);
                 Some(self.closure_literal_type(
@@ -6846,7 +7299,7 @@ impl Checker<'_> {
         method: String,
         args: ArgRange,
         span: Span,
-    ) -> &'s ExprNode {
+    ) -> &'s crate::checker::synthetic::SyntheticExpr {
         self.synthetic_expr_in(
             arena,
             ExprKind::StaticCall(
@@ -6870,7 +7323,7 @@ impl Checker<'_> {
         target: &StaticTarget,
         name: String,
         span: Span,
-    ) -> &'s ExprNode {
+    ) -> &'s crate::checker::synthetic::SyntheticExpr {
         let kind = if name == "class" {
             ExprKind::ClassNameFetch(target.clone())
         } else {
@@ -7012,7 +7465,7 @@ impl<'a> Checker<'a> {
             };
             self.report(
                 format!("{subject} target class {class} not found"),
-                e.span,
+                self.expr_span(e.id),
                 0,
                 "class.notFound",
             );
@@ -7040,22 +7493,22 @@ impl<'a> Checker<'a> {
             if !is_valid_static {
                 self.report(
                     format!("access to undefined static property {class}::${prop_name}"),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     "staticProperty.notFound",
                 );
             } else if let Some((owner, sig)) = &prop_with_owner {
-                self.check_internal_property_access(owner, prop_name, sig, e.span);
-                self.check_restricted_property_access(owner, prop_name, true, e.span);
-                self.check_deprecated_property_access(owner, prop_name, sig, e.span);
+                self.check_internal_property_access(owner, prop_name, sig, self.expr_span(e.id));
+                self.check_restricted_property_access(owner, prop_name, true, self.expr_span(e.id));
+                self.check_deprecated_property_access(owner, prop_name, sig, self.expr_span(e.id));
                 self.record_member_usage_token(
                     UsageTokenKind::Property,
                     owner,
                     sig.deprecated().is_some(),
                     sig.is_internal(),
-                    e.span,
+                    self.expr_span(e.id),
                 );
-                self.record_member_ref(e.span, owner, prop_name);
+                self.record_member_ref(self.expr_span(e.id), owner, prop_name);
                 // A static property shares the exact same
                 // visibility rules as an instance one ("Cannot
                 // access private property" is a real fatal error
@@ -7067,7 +7520,7 @@ impl<'a> Checker<'a> {
                         name: prop_name,
                     },
                     visibility: &sig.visibility(),
-                    span: e.span,
+                    span: self.expr_span(e.id),
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivatePropertyThroughStaticRule` - same
@@ -7076,7 +7529,11 @@ impl<'a> Checker<'a> {
                 if written.is_some_and(|n| n.is_keyword("static"))
                     && sig.visibility() == Visibility::Private
                 {
-                    self.check_static_private_property_access(owner, prop_name, e.span);
+                    self.check_static_private_property_access(
+                        owner,
+                        prop_name,
+                        self.expr_span(e.id),
+                    );
                 }
             }
             prop_with_owner
@@ -7095,22 +7552,27 @@ impl<'a> Checker<'a> {
             if const_ty.is_none() {
                 self.report(
                     format!("access to undefined constant {class}::{member}"),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     "classConstant.notFound",
                 );
             } else if let Some((owner, cs)) = &const_with_owner {
-                self.check_internal_class_constant_access(owner, member, cs, e.span);
-                self.check_restricted_class_constant_access(owner, member, e.span);
-                self.check_deprecated_class_constant_access(owner, member, cs, e.span);
+                self.check_internal_class_constant_access(owner, member, cs, self.expr_span(e.id));
+                self.check_restricted_class_constant_access(owner, member, self.expr_span(e.id));
+                self.check_deprecated_class_constant_access(
+                    owner,
+                    member,
+                    cs,
+                    self.expr_span(e.id),
+                );
                 self.record_member_usage_token(
                     UsageTokenKind::ClassConstant,
                     owner,
                     cs.deprecated().is_some(),
                     cs.is_internal(),
-                    e.span,
+                    self.expr_span(e.id),
                 );
-                self.record_member_ref(e.span, owner, member);
+                self.record_member_ref(self.expr_span(e.id), owner, member);
                 self.check_member_visibility(MemberVisibilityCheck {
                     member: MemberLabel {
                         kind: MemberKind::Constant,
@@ -7118,14 +7580,14 @@ impl<'a> Checker<'a> {
                         name: member,
                     },
                     visibility: &cs.visibility(),
-                    span: e.span,
+                    span: self.expr_span(e.id),
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivateConstantThroughStaticRule`.
                 if written.is_some_and(|n| n.is_keyword("static"))
                     && cs.visibility() == Visibility::Private
                 {
-                    self.check_static_private_constant_access(owner, member, e.span);
+                    self.check_static_private_constant_access(owner, member, self.expr_span(e.id));
                 }
             }
             const_ty
@@ -7239,6 +7701,12 @@ impl<'a> Checker<'a> {
         let ExprKind::Binary(op @ (BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq), l, r) =
             &e.kind
         else {
+            return false;
+        };
+        let Some(arenas) = self.syntax_arenas() else {
+            return false;
+        };
+        let (Some(l), Some(r)) = (arenas.expr(*l), arenas.expr(*r)) else {
             return false;
         };
         let l_ty = self.infer_expr(l, locals);

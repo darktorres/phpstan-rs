@@ -32,6 +32,7 @@ struct TypedCall<'c, 'a> {
     /// What a function call calls, when not a name.
     callee: Option<&'c ExprNode>,
     receiver: Option<&'c ExprNode>,
+    arenas: Option<&'c NodeArenas>,
     args: &'c [Arg],
     /// What the closures the scope wrote that the call runs may write.
     written: RefCell<Effect>,
@@ -45,19 +46,15 @@ struct TypedCall<'c, 'a> {
 impl TypedCall<'_, '_> {
     /// The argument passed `at`.
     fn arg(&self, at: &ArgAt) -> Option<&ExprNode> {
-        match at {
-            ArgAt::Position(at) => self.args.get(*at as usize).map(|arg| &arg.value),
+        let arg = match at {
+            ArgAt::Position(at) => self.args.get(*at as usize),
             ArgAt::Named(name) => self
                 .args
                 .iter()
-                .find(|arg| arg.name.as_ref().is_some_and(|n| n.name == *name))
-                .map(|arg| &arg.value),
-            ArgAt::Spread => self
-                .args
-                .iter()
-                .find(|arg| arg.spread)
-                .map(|arg| &arg.value),
-        }
+                .find(|arg| arg.name.as_ref().is_some_and(|n| n.name == *name)),
+            ArgAt::Spread => self.args.iter().find(|arg| arg.spread),
+        }?;
+        self.arenas?.expr(arg.value)
     }
 
     fn inferred(&self, e: &ExprNode) -> Holder {
@@ -67,16 +64,20 @@ impl TypedCall<'_, '_> {
     /// What running `e` may write, when it is a closure, an arrow function
     /// or a first-class callable, there or assigned there.
     fn closure_effect(&self, e: &ExprNode) -> Option<Effect> {
-        let mut e = e.peeled();
-        while let ExprKind::Assign(_, rhs) = &e.kind {
-            e = rhs.peeled();
+        let arenas = self.checker.syntax_arenas()?;
+        let mut id = arenas.peeled(e.id)?;
+        loop {
+            match &arenas.expr(id)?.kind {
+                ExprKind::Assign(_, rhs) => id = arenas.peeled(*rhs)?,
+                _ => break,
+            }
         }
         matches!(
-            e.kind,
+            &arenas.expr(id)?.kind,
             ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_)
         )
         .then(|| {
-            let summary = BodySummary::of_closure(e);
+            let summary = BodySummary::of_closure(arenas, id);
             self.checker.registry.closure_effect(&summary, self.class())
         })
     }
@@ -187,8 +188,11 @@ impl CallContext for TypedCall<'_, '_> {
 }
 
 /// Whether `e` is the scope's own `$this`.
-pub(crate) fn is_this(e: &ExprNode) -> bool {
-    matches!(&e.peeled().kind, ExprKind::Variable(name) if **name == *"this")
+pub(crate) fn is_this(checker: &Checker<'_>, e: &ExprNode) -> bool {
+    checker
+        .syntax_arenas()
+        .and_then(|arenas| arenas.peeled(e.id).and_then(|id| arenas.expr(id)))
+        .is_some_and(|e| matches!(&e.kind, ExprKind::Variable(name) if **name == *"this"))
 }
 
 /// How a shared variable is reset.
@@ -208,28 +212,41 @@ impl Checker<'_> {
     /// doc comment. So is what iterating an argument spread into it may
     /// have written.
     pub(crate) fn forget_what_a_call_may_change(&mut self, e: &ExprNode, locals: &mut Locals) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         let (callee, receiver, args) = match &e.kind {
             ExprKind::MethodCall(recv, _, args, _)
-            | ExprKind::DynamicMethodCall(recv, _, args, _) => (None, Some(&**recv), &args[..]),
-            ExprKind::Call(callee, args) => (Some(&**callee), None, &args[..]),
+            | ExprKind::DynamicMethodCall(recv, _, args, _) => {
+                (None, arenas.expr(*recv), arenas.args(args.clone()))
+            }
+            ExprKind::Call(callee, args) => (arenas.expr(*callee), None, arenas.args(args.clone())),
             ExprKind::New(_, args)
             | ExprKind::StaticCall(_, _, args)
-            | ExprKind::DynamicStaticCall(_, _, args) => (None, None, &args[..]),
-            ExprKind::NewAnonymousClass(class) => (None, None, &class.args[..]),
+            | ExprKind::DynamicStaticCall(_, _, args) => (None, None, arenas.args(args.clone())),
+            ExprKind::NewAnonymousClass(class_id) => {
+                let Some(class) = arenas.anonymous_class(*class_id) else {
+                    return;
+                };
+                (None, None, arenas.args(class.args.clone()))
+            }
             _ => return,
         };
         for arg in args.iter().filter(|arg| arg.spread) {
-            self.forget_what_an_operation_on_may_change(
-                &arg.value,
-                Operation::Iterate { keys: true },
-                locals,
-            );
+            if let Some(value) = arenas.expr(arg.value) {
+                self.forget_what_an_operation_on_may_change(
+                    value,
+                    Operation::Iterate { keys: true },
+                    locals,
+                );
+            }
         }
         let scope = Rc::clone(&self.shared_scope);
         if !locals.has_state_to_forget() && scope.binds_nothing() {
             return;
         }
-        let Some(mut call) = call_of(e) else {
+        let Some(mut call) = call_of(arenas, e.id) else {
             return;
         };
         // An array callable on a value the context cannot name is not
@@ -254,6 +271,7 @@ impl Checker<'_> {
                 locals,
                 callee,
                 receiver,
+                arenas: Some(arenas),
                 args,
                 written: Default::default(),
                 runs_written: Cell::new(false),
@@ -300,6 +318,7 @@ impl Checker<'_> {
                 locals,
                 callee: None,
                 receiver: None,
+                arenas: self.syntax_arenas(),
                 args: &[],
                 written: Default::default(),
                 runs_written: Cell::new(false),
@@ -336,7 +355,7 @@ impl Checker<'_> {
             if converted {
                 self.forget_what_an_operation_may_change(
                     ty,
-                    is_this(operand),
+                    is_this(self, operand),
                     Operation::String,
                     locals,
                 );
@@ -356,7 +375,7 @@ impl Checker<'_> {
             return;
         }
         let ty = self.infer_expr(operand, locals);
-        self.forget_what_an_operation_may_change(&ty, is_this(operand), operation, locals);
+        self.forget_what_an_operation_may_change(&ty, is_this(self, operand), operation, locals);
     }
 
     /// Forgets what `effect` may have written, and the variables captured by

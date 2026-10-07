@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     pub(crate) fn parse_block(&mut self) -> Result<StmtId, ParseError> {
@@ -61,13 +61,13 @@ impl Parser<'_> {
             return self.parse_if_alt(cond, start);
         }
         let then_branch = self.parse_braced_or_single()?;
-        let mut elseifs = Vec::new();
+        let elseifs_start = self.begin_elseifs();
         while self.check(&Token::Keyword(Keyword::ElseIf)) {
             let elseif_start = self.current_pos();
             self.skip();
             let cond = self.parse_paren_condition()?;
             let body = self.parse_braced_or_single()?;
-            elseifs.push(ElseIf {
+            self.elseif_scratch.push(ElseIf {
                 cond,
                 body,
                 span: Span {
@@ -81,6 +81,7 @@ impl Parser<'_> {
         } else {
             None
         };
+        let elseifs = self.finish_elseifs(elseifs_start);
         Ok(self.stmt(
             StmtKind::If(IfStmt {
                 cond,
@@ -104,13 +105,13 @@ impl Parser<'_> {
     /// condition already read.
     pub(crate) fn parse_if_alt(&mut self, cond: ExprId, start: u32) -> Result<StmtId, ParseError> {
         let then_branch = self.parse_alt_branch()?;
-        let mut elseifs = Vec::new();
+        let elseifs_start = self.begin_elseifs();
         while self.check(&Token::Keyword(Keyword::ElseIf)) {
             let elseif_start = self.current_pos();
             self.skip();
             let cond = self.parse_paren_condition()?;
             let body = self.parse_alt_branch()?;
-            elseifs.push(ElseIf {
+            self.elseif_scratch.push(ElseIf {
                 cond,
                 body,
                 span: Span {
@@ -126,6 +127,7 @@ impl Parser<'_> {
         };
         self.expect(&Token::Keyword(Keyword::EndIf))?;
         self.expect_semicolon()?;
+        let elseifs = self.finish_elseifs(elseifs_start);
         Ok(self.stmt(
             StmtKind::If(IfStmt {
                 cond,
@@ -247,7 +249,7 @@ impl Parser<'_> {
             ) {
                 return Err(ParseError::new(
                     "Cannot use list as key element".to_string(),
-                    self.expr_node(first).span,
+                    self.expr_span(first),
                 ));
             }
             self.skip();
@@ -289,16 +291,16 @@ impl Parser<'_> {
         self.skip(); // try
         let body = self.parse_stmt_list_block_range()?;
 
-        let mut catches = Vec::new();
+        let catches_start = self.begin_catch_clauses();
         while self.eat(&Token::Keyword(Keyword::Catch)) {
             let catch_start = self.previous_end();
             self.expect(&Token::LParen)?;
             let types_start = self.qualified_name_scratch.len();
-            self.qualified_name_scratch
-                .push(self.parse_name_reference());
+            let name = self.parse_name_reference();
+            self.qualified_name_scratch.push(name);
             while self.eat(&Token::Pipe) {
-                self.qualified_name_scratch
-                    .push(self.parse_name_reference());
+                let name = self.parse_name_reference();
+                self.qualified_name_scratch.push(name);
             }
             let var = if matches!(self.peek(), Token::Variable(_)) {
                 let var_start = self.current_pos();
@@ -316,10 +318,11 @@ impl Parser<'_> {
             self.expect(&Token::RParen)?;
             let body = self.parse_stmt_list_block_range()?;
             let types = self
-                .node_arenas
-                .borrow_mut()
-                .alloc_qualified_names(self.qualified_name_scratch.drain(types_start..));
-            catches.push(CatchClause {
+                .qualified_name_scratch
+                .drain(types_start..)
+                .collect::<Vec<_>>();
+            let types = self.node_arenas.borrow_mut().alloc_qualified_names(types);
+            self.catch_clause_scratch.push(CatchClause {
                 types,
                 var,
                 body,
@@ -335,6 +338,7 @@ impl Parser<'_> {
         } else {
             None
         };
+        let catches = self.finish_catch_clauses(catches_start);
 
         Ok(self.stmt(
             StmtKind::Try {
@@ -381,13 +385,14 @@ impl Parser<'_> {
             self.expect(&Token::LBrace)?;
         }
 
-        let mut cases: Vec<SwitchCase> = Vec::new();
+        let cases_start = self.begin_switch_cases();
         let mut case_list_start = None;
         let closer = Token::Keyword(Keyword::EndSwitch);
         while !self.at_eof() && !self.check(if alt { &closer } else { &Token::RBrace }) {
             if self.eat(&Token::Keyword(Keyword::Case)) {
                 if let Some(list_start) = case_list_start.take() {
-                    cases.last_mut().unwrap().body = self.finish_stmt_list(list_start);
+                    let body = self.finish_stmt_list(list_start);
+                    self.switch_case_scratch.last_mut().unwrap().body = body;
                 }
                 let case_start = self.previous_end();
                 let test = self.parse_expression()?;
@@ -395,7 +400,7 @@ impl Parser<'_> {
                     self.eat(&Token::Semicolon);
                 }
                 case_list_start = Some(self.begin_stmt_list());
-                cases.push(SwitchCase {
+                self.switch_case_scratch.push(SwitchCase {
                     test: Some(test),
                     body: self.node_arenas.borrow_mut().alloc_stmt_ids([]),
                     span: Span {
@@ -405,14 +410,15 @@ impl Parser<'_> {
                 });
             } else if self.eat(&Token::Keyword(Keyword::Default)) {
                 if let Some(list_start) = case_list_start.take() {
-                    cases.last_mut().unwrap().body = self.finish_stmt_list(list_start);
+                    let body = self.finish_stmt_list(list_start);
+                    self.switch_case_scratch.last_mut().unwrap().body = body;
                 }
                 let case_start = self.previous_end();
                 if !self.eat(&Token::Colon) {
                     self.eat(&Token::Semicolon);
                 }
                 case_list_start = Some(self.begin_stmt_list());
-                cases.push(SwitchCase {
+                self.switch_case_scratch.push(SwitchCase {
                     test: None,
                     body: self.node_arenas.borrow_mut().alloc_stmt_ids([]),
                     span: Span {
@@ -424,15 +430,17 @@ impl Parser<'_> {
                 let stmt = self.parse_statement(true)?;
                 // A statement before any `case`/`default` label is malformed
                 // PHP; dropping it here just keeps the parser in sync.
-                if let (Some(case), Some(stmt)) = (cases.last_mut(), stmt) {
-                    case.span.end = self.previous_end();
+                let end = self.previous_end();
+                if let (Some(case), Some(stmt)) = (self.switch_case_scratch.last_mut(), stmt) {
+                    case.span.end = end;
                     self.push_stmt_list_item(stmt);
                 }
             }
         }
 
         if let Some(list_start) = case_list_start {
-            cases.last_mut().unwrap().body = self.finish_stmt_list(list_start);
+            let body = self.finish_stmt_list(list_start);
+            self.switch_case_scratch.last_mut().unwrap().body = body;
         }
 
         if alt {
@@ -442,6 +450,7 @@ impl Parser<'_> {
             self.expect(&Token::RBrace)?;
         }
 
+        let cases = self.finish_switch_cases(cases_start);
         Ok(self.stmt(StmtKind::Switch { subject, cases }, start))
     }
 }

@@ -5,7 +5,7 @@
 //! gets PHP's one exception message, `Unknown or bad format (<spec>)`.
 
 use crate::checker::{Checker, Locals};
-use syntax::ast::Arg;
+use syntax::ast::{Arg, NodeArenas};
 use syntax::span::Span;
 
 impl<'a> Checker<'a> {
@@ -18,6 +18,7 @@ impl<'a> Checker<'a> {
     /// argument is left alone.
     pub(crate) fn check_date_interval_constructor(
         &mut self,
+        arenas: &NodeArenas,
         class: &str,
         args: &[Arg],
         span: Span,
@@ -27,7 +28,10 @@ impl<'a> Checker<'a> {
             return;
         }
         let Some(arg) = args.first() else { return };
-        let ty = self.infer_expr(&arg.value, locals);
+        let Some(value) = arenas.expr(arg.value) else {
+            return;
+        };
+        let ty = self.infer_expr(value, locals);
         for spec in ty.constant_strings_text() {
             if is_valid_date_interval_spec(&spec) {
                 continue;

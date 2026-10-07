@@ -35,7 +35,9 @@ use std::path::{Path, PathBuf};
 
 use crate::registry::Registry;
 use syntax::ast::literal_string_value;
-use syntax::ast::{Arg, ExprKind, ExprNode, StaticTarget, StmtKind, StmtNode};
+use syntax::ast::{
+    Arg, ArgRange, ClosurePayload, ExprId, ExprKind, NodeArenas, StaticTarget, StmtId, StmtKind,
+};
 use types::Type;
 
 /// The seven Pest functions whose closure argument gets `$this` rebound.
@@ -52,13 +54,14 @@ pub(crate) fn is_this_binding_call(name: &str) -> bool {
 /// `use`-import short-name resolution the way a bare `Name`/`ClassConstFetch`/`StaticPropertyFetch`
 /// token is. Trait arguments aren't distinguished from classes - see the
 /// module doc comment.
-pub(crate) fn class_names_from_uses_call(args: &[Arg]) -> Vec<String> {
+pub(crate) fn class_names_from_uses_call(arenas: &NodeArenas, args: &[Arg]) -> Vec<String> {
     args.iter()
-        .filter_map(|a| match &a.value.kind {
-            ExprKind::ClassNameFetch(StaticTarget::Name(class_name)) => {
+        .filter_map(|a| match arenas.expr(a.value).map(|e| &e.kind) {
+            Some(ExprKind::ClassNameFetch(StaticTarget::Name(class_name))) => {
                 class_name.resolved_class().map(str::to_string)
             }
-            _ => literal_string_value(&a.value).map(|s| s.trim_start_matches('\\').to_string()),
+            _ => literal_string_value(arenas, a.value)
+                .map(|s| s.trim_start_matches('\\').to_string()),
         })
         .collect()
 }
@@ -83,21 +86,27 @@ fn this_type_from_class_names(names: Vec<String>) -> Option<Type> {
 /// A bare `uses(X::class);` written directly inside the file being
 /// checked (no chained `->in(...)`) - real Pest's own file-local binding,
 /// checked first, ahead of any directory-scoped `Pest.php` config.
-pub(crate) fn file_local_this_type(program: &[StmtNode]) -> Option<Type> {
-    program.iter().find_map(|stmt| {
+pub(crate) fn file_local_this_type(arenas: &NodeArenas, program: &[StmtId]) -> Option<Type> {
+    program.iter().find_map(|id| {
+        let stmt = arenas.stmt(id.clone())?;
         let StmtKind::Expression(e) = &stmt.kind else {
             return None;
         };
-        let ExprKind::Call(callee, args) = &e.peeled().kind else {
+        let e = arenas.expr(arenas.peeled(e.clone())?)?;
+        let ExprKind::Call(callee, args) = &e.kind else {
             return None;
         };
-        let ExprKind::Name(name) = &callee.kind else {
+        let ExprKind::Name(name) = &arenas.expr(callee.clone())?.kind else {
             return None;
         };
+        let name = arenas.qualified_name(name)?;
         if name != "uses" {
             return None;
         }
-        this_type_from_class_names(class_names_from_uses_call(args))
+        this_type_from_class_names(class_names_from_uses_call(
+            arenas,
+            arenas.args(args.clone()),
+        ))
     })
 }
 
@@ -126,23 +135,38 @@ pub(crate) fn file_local_this_type(program: &[StmtNode]) -> Option<Type> {
 /// as undefined, matching this project's own established "safe default"
 /// pattern for a definition whose real type isn't worth modeling
 /// precisely (see `predefine_byref_or_unknown_args`).
-pub(crate) fn file_local_hook_properties(program: &[StmtNode]) -> FxHashSet<String> {
+pub(crate) fn file_local_hook_properties(
+    arenas: &NodeArenas,
+    program: &[StmtId],
+) -> FxHashSet<String> {
     let mut props = FxHashSet::default();
-    for stmt in program {
+    for &id in program {
+        let Some(stmt) = arenas.stmt(id) else {
+            continue;
+        };
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let ExprKind::Call(callee, args) = &e.peeled().kind else {
+        let Some(e) = arenas.peeled(e.clone()).and_then(|id| arenas.expr(id)) else {
+            continue;
+        };
+        let ExprKind::Call(callee, args) = &e.kind else {
+            continue;
+        };
+        let Some(callee) = arenas.expr(callee.clone()) else {
             continue;
         };
         let ExprKind::Name(name) = &callee.kind else {
             continue;
         };
+        let Some(name) = arenas.qualified_name(name) else {
+            continue;
+        };
         if name != "beforeEach" {
             continue;
         }
-        for arg in args {
-            collect_hook_closure_properties(&arg.value, &mut props);
+        for arg in arenas.args(args.clone()) {
+            collect_hook_closure_properties(arenas, arg.value, &mut props);
         }
     }
     props
@@ -154,21 +178,41 @@ pub(crate) fn file_local_hook_properties(program: &[StmtNode]) -> FxHashSet<Stri
 /// literal `$this` expression only (unlike the real reader, which
 /// resolves by the property base's *type* via PHPStan's own `Scope` -
 /// an aliased `$self = $this; $self->prop` isn't covered here).
-fn collect_hook_closure_properties(expr: &ExprNode, props: &mut FxHashSet<String>) {
-    let ExprKind::Closure(closure) = &expr.kind else {
+fn collect_hook_closure_properties(
+    arenas: &NodeArenas,
+    expr: ExprId,
+    props: &mut FxHashSet<String>,
+) {
+    let Some(expr) = arenas.peeled(expr).and_then(|id| arenas.expr(id)) else {
         return;
     };
-    for stmt in &closure.body {
+    let ExprKind::Closure(closure_id) = &expr.kind else {
+        return;
+    };
+    let Some(ClosurePayload::Closure(closure)) = arenas.closure(closure_id.clone()) else {
+        return;
+    };
+    for &id in arenas.stmt_ids(&closure.body) {
+        let Some(stmt) = arenas.stmt(id) else {
+            continue;
+        };
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let (ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _)) = &e.peeled().kind else {
+        let Some(e) = arenas.peeled(e.clone()).and_then(|id| arenas.expr(id)) else {
+            continue;
+        };
+        let (ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _)) = &e.kind else {
+            continue;
+        };
+        let Some(lhs) = arenas.expr(lhs.clone()) else {
             continue;
         };
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             continue;
         };
-        if matches!(&base.kind, ExprKind::Variable(name) if **name == *"this") {
+        if matches!(arenas.expr(base.clone()).map(|e| &e.kind), Some(ExprKind::Variable(name)) if **name == *"this")
+        {
             props.insert(prop.to_string());
         }
     }
@@ -183,26 +227,31 @@ fn collect_hook_closure_properties(expr: &ExprNode, props: &mut FxHashSet<String
 /// call's own receiver is - returns the base `uses(...)` call's own
 /// arguments, or `None` if the chain doesn't bottom out in a real
 /// `uses(...)` call.
-fn walk_uses_chain<'e>(
-    expr: &'e ExprNode,
+fn walk_uses_chain(
+    arenas: &NodeArenas,
+    expr: ExprId,
     hook_props: &mut FxHashSet<String>,
-) -> Option<&'e [Arg]> {
-    syntax::stack::guard(|| match &expr.peeled().kind {
-        ExprKind::Call(callee, args) => {
-            let ExprKind::Name(name) = &callee.kind else {
-                return None;
-            };
-            (name == "uses").then_some(args.as_slice())
-        }
-        ExprKind::MethodCall(inner, method, call_args, _) => {
-            if **method == *"beforeEach" {
-                for arg in call_args {
-                    collect_hook_closure_properties(&arg.value, hook_props);
-                }
+) -> Option<ArgRange> {
+    syntax::stack::guard(|| {
+        let expr = arenas.expr(arenas.peeled(expr)?)?;
+        match &expr.kind {
+            ExprKind::Call(callee, args) => {
+                let ExprKind::Name(name) = &arenas.expr(callee.clone())?.kind else {
+                    return None;
+                };
+                let name = arenas.qualified_name(name)?;
+                (name == "uses").then(|| args.clone())
             }
-            walk_uses_chain(inner, hook_props)
+            ExprKind::MethodCall(inner, method, call_args, _) => {
+                if **method == *"beforeEach" {
+                    for arg in arenas.args(call_args.clone()) {
+                        collect_hook_closure_properties(arenas, arg.value, hook_props);
+                    }
+                }
+                walk_uses_chain(arenas, *inner, hook_props)
+            }
+            _ => None,
         }
-        _ => None,
     })
 }
 
@@ -229,28 +278,30 @@ pub struct PestFacts {
 impl PestFacts {
     /// The bindings of the file `path` with the tree `ast`; `None` for a
     /// file not named `Pest.php`.
-    pub fn of(path: &Path, ast: &[StmtNode]) -> Option<PestFacts> {
+    pub fn of(path: &Path, arenas: &NodeArenas, ast: &[StmtId]) -> Option<PestFacts> {
         if path.file_name().and_then(|n| n.to_str()) != Some("Pest.php") {
             return None;
         }
         let dir = path.parent()?;
         let mut bindings = Vec::new();
         let mut hook_properties = Vec::new();
-        for stmt in ast {
+        for &id in ast {
+            let stmt = arenas.stmt(id)?;
             let StmtKind::Expression(e) = &stmt.kind else {
                 continue;
             };
-            let ExprKind::MethodCall(inner, method, in_args, _) = &e.peeled().kind else {
+            let e = arenas.expr(arenas.peeled(e.clone())?)?;
+            let ExprKind::MethodCall(inner, method, in_args, _) = &e.kind else {
                 continue;
             };
             if **method != *"in" {
                 continue;
             }
             let mut chain_props = FxHashSet::default();
-            let Some(uses_args) = walk_uses_chain(inner, &mut chain_props) else {
+            let Some(uses_args) = walk_uses_chain(arenas, *inner, &mut chain_props) else {
                 continue;
             };
-            let class_names = class_names_from_uses_call(uses_args);
+            let class_names = class_names_from_uses_call(arenas, arenas.args(uses_args));
             // A bare `uses()->beforeEach(...)->in(...)` (no class
             // argument to `uses()` at all - confirmed real, not
             // hypothetical: `tests/Pest.php`'s own `uses()->
@@ -262,8 +313,8 @@ impl PestFacts {
                 continue;
             }
             let chain_props: Vec<String> = chain_props.into_iter().collect();
-            for in_arg in in_args {
-                let Some(target) = literal_string_value(&in_arg.value) else {
+            for in_arg in arenas.args(in_args.clone()) {
+                let Some(target) = literal_string_value(arenas, in_arg.value) else {
                     continue;
                 };
                 let target_path = Path::new(target.as_ref());

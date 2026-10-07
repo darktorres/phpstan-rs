@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     /// An enum case after its `case` keyword: `Name [= value];`.
@@ -58,17 +58,21 @@ impl Parser<'_> {
 
         let implements_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            self.qualified_name_scratch
-                .push(self.parse_name_reference());
+            let name = self.parse_name_reference();
+            self.qualified_name_scratch.push(name);
             while self.eat(&Token::Comma) {
-                self.qualified_name_scratch
-                    .push(self.parse_name_reference());
+                let name = self.parse_name_reference();
+                self.qualified_name_scratch.push(name);
             }
         }
         let implements = self
+            .qualified_name_scratch
+            .drain(implements_start..)
+            .collect::<Vec<_>>();
+        let implements = self
             .node_arenas
             .borrow_mut()
-            .alloc_qualified_names(self.qualified_name_scratch.drain(implements_start..));
+            .alloc_qualified_names(implements);
 
         let crate::parser::classes::ClassBody {
             properties,

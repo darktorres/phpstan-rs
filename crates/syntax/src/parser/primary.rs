@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     pub(crate) fn parse_array_items(
@@ -94,6 +94,7 @@ impl Parser<'_> {
             }
             _ => {
                 let name = self.parse_name_reference();
+                let name = self.node_arenas.borrow_mut().alloc_qualified_name(name);
                 self.expr(ExprKind::Name(name), start)
             }
         };
@@ -158,14 +159,18 @@ impl Parser<'_> {
                 {
                     self.skip();
                     let target = match &self.expr_node(expr).kind {
-                        ExprKind::Name(n) => StaticTarget::Name(Box::new(n.clone())),
+                        ExprKind::Name(n) => StaticTarget::Name(Box::new(
+                            self.node_arenas
+                                .borrow()
+                                .qualified_name(n)
+                                .expect("name expression belongs to the parser's node arena")
+                                .clone(),
+                        )),
                         _ => StaticTarget::Expr(expr),
                     };
                     expr = if matches!(self.peek(), Token::Variable(_)) {
                         let var_start = self.current_pos();
-                        let Token::Variable(name) = self.take_token() else {
-                            unreachable!()
-                        };
+                        let name = self.take_variable().expect("current token is a variable");
                         let ident = self.ident(
                             self.intern(&name),
                             Span {
@@ -186,27 +191,22 @@ impl Parser<'_> {
 
     pub(crate) fn parse_primary(&mut self) -> Result<ExprId, ParseError> {
         let start = self.current_pos();
-        // Matches on `self.peek()` by reference rather than `self.peek()
-        // .clone()` - most arms below need no payload at all (delegating
-        // or just checking which variant), and the few that do
-        // (`StringLit`/`Variable`/`InterpString`/`ShellExec`, all
-        // heap-owning) use `take_token()` (a move) inside their own arm
-        // instead of a whole-`Token` clone up front.
+        // Match the borrowed flat-stream view so arms that do not use a
+        // payload avoid reconstructing an owned token. Payload-bearing
+        // variants move only their payload through the typed helpers.
         Ok(match self.peek() {
             Token::Integer(n) => {
-                let n = *n;
+                let n = n;
                 self.skip();
                 self.expr(ExprKind::Literal(Literal::Int(n)), start)
             }
             Token::Float(f) => {
-                let f = *f;
+                let f = f;
                 self.skip();
                 self.expr(ExprKind::Literal(Literal::Float(f)), start)
             }
             Token::StringLit(_) => {
-                let Token::StringLit(s) = self.take_token() else {
-                    unreachable!()
-                };
+                let s = self.take_string_payload().expect("current token is a string");
                 self.expr(ExprKind::Literal(Literal::String(s)), start)
             }
             Token::Keyword(Keyword::True) => {
@@ -222,9 +222,7 @@ impl Parser<'_> {
                 self.expr(ExprKind::Literal(Literal::Null), start)
             }
             Token::Variable(_) => {
-                let Token::Variable(name) = self.take_token() else {
-                    unreachable!()
-                };
+                let name = self.take_variable().expect("current token is a variable");
                 self.expr(ExprKind::Variable(name), start)
             }
             Token::DollarBrace => {
@@ -332,14 +330,15 @@ impl Parser<'_> {
                     self.skip();
                     self.skip();
                     self.skip();
-                    let name = self.expr(
-                        ExprKind::Name(self.qualified_name(
-                            self.interner.name("clone"),
-                            clone_span,
-                            NameKind::Constant,
-                        )),
-                        start,
-                    );
+                    let name =
+                        self.node_arenas
+                            .borrow_mut()
+                            .alloc_qualified_name(self.qualified_name(
+                                self.interner.name("clone"),
+                                clone_span,
+                                NameKind::Constant,
+                            ));
+                    let name = self.expr(ExprKind::Name(name), start);
                     return Ok(self.expr(ExprKind::FirstClassCallable(name), start));
                 }
                 // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
@@ -474,14 +473,15 @@ impl Parser<'_> {
             }
             Token::Keyword(Keyword::Static) => {
                 self.skip();
-                self.expr(
-                    ExprKind::Name(self.qualified_name(
+                let name = self
+                    .node_arenas
+                    .borrow_mut()
+                    .alloc_qualified_name(self.qualified_name(
                         self.interner.name("static"),
                         self.span_from(start),
                         self.name_kind_ahead(),
-                    )),
-                    start,
-                )
+                    ));
+                self.expr(ExprKind::Name(name), start)
             }
             Token::Keyword(Keyword::Function) => self.parse_closure_like(false)?,
             // `fn` is only reserved as the arrow-function keyword when
@@ -499,20 +499,17 @@ impl Parser<'_> {
             }
             Token::Keyword(Keyword::Fn) => {
                 let name = self.parse_name_reference();
+                let name = self.node_arenas.borrow_mut().alloc_qualified_name(name);
                 self.expr(ExprKind::Name(name), start)
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr()?,
             Token::InterpString(_) => {
-                let Token::InterpString(parts) = self.take_token() else {
-                    unreachable!()
-                };
+                let parts = self.take_interpolation().expect("current token is interpolated string");
                 self.build_interpolated(parts, start)?
             }
             // `` `cmd $interpolated` `` - shell-exec shorthand.
             Token::ShellExec(_) => {
-                let Token::ShellExec(parts) = self.take_token() else {
-                    unreachable!()
-                };
+                let parts = self.take_shell().expect("current token is shell execution");
                 let cmd = self.build_interpolated(parts, start)?;
                 self.expr(ExprKind::ShellExec(cmd), start)
             }
@@ -554,14 +551,10 @@ impl Parser<'_> {
                         let (args, is_first_class_callable) = self.parse_args()?;
                         let args = self.commit_args(args);
                         if is_first_class_callable {
-                            let callee = self.expr(
-                                ExprKind::Name(self.qualified_name(
-                                    name,
-                                    name_span,
-                                    NameKind::Function,
-                                )),
-                                start,
+                            let name = self.node_arenas.borrow_mut().alloc_qualified_name(
+                                self.qualified_name(name, name_span, NameKind::Function),
                             );
+                            let callee = self.expr(ExprKind::Name(name), start);
                             let call = self.expr(ExprKind::Call(callee, args), start);
                             self.expr(ExprKind::FirstClassCallable(call), start)
                         } else {
@@ -622,10 +615,11 @@ impl Parser<'_> {
                     self.expr(ExprKind::Eval(code), start)
                 } else {
                     let kind = self.name_kind_ahead();
-                    self.expr(
-                        ExprKind::Name(self.qualified_name(name, name_span, kind)),
-                        start,
-                    )
+                    let name = self
+                        .node_arenas
+                        .borrow_mut()
+                        .alloc_qualified_name(self.qualified_name(name, name_span, kind));
+                    self.expr(ExprKind::Name(name), start)
                 }
             }
             other => {

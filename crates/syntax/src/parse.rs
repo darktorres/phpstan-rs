@@ -1,9 +1,10 @@
 //! Parsing a whole file: lexing, parsing and name resolution, with what the
 //! lexer found besides the tree.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use crate::ast::{GotoLabel, NodeArenas, StmtNode};
+use crate::ast::{ExprId, GotoLabel, NodeArenas, StmtId};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
 use crate::name::{Name, NameCache, NameId};
@@ -11,17 +12,49 @@ use crate::parser::{ParseError, Parser};
 use crate::references::FileReferences;
 use crate::span::LineIndex;
 
+/// Parses a standalone expression into an existing file owner. Its nodes,
+/// payload ranges and decoded bytes are assigned IDs after the owner's
+/// current contents, so the returned ID is meaningful only with `arenas`.
+/// The supplied context is cloned into the parser before name references are
+/// built, matching how the expression resolves in its containing file.
+pub fn parse_expression_into_arenas(
+    source: &str,
+    context: &crate::name_resolution::NameContext,
+    arenas: &mut NodeArenas,
+) -> Option<ExprId> {
+    let mut lexer = Lexer::new_in_php(source)
+        .with_source_backed_strings(false)
+        .without_file_names();
+    let fragment = arenas.new_fragment();
+    let source = lexer.source_bytes();
+    lexer.set_decoded_bytes_base(fragment.decoded_bytes_base);
+    let stream = lexer.lex_token_stream();
+    let mut parser = Parser::from_token_stream_with_node_arenas(
+        stream,
+        fragment,
+        Some(source),
+        false,
+    );
+    *parser.ctx.borrow_mut() = context.clone();
+    let expression = parser.parse_expression().ok()?;
+    if !parser.at_eof() {
+        return None;
+    }
+    arenas.append_fragment(parser.take_node_arenas());
+    Some(expression)
+}
+
 /// A parsed file.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParsedFile {
     /// The bytes this tree was parsed from. Empty when the transient-scratch
     /// entry point is used. AST payloads will become ranges into this buffer
     /// as the tree moves to typed arenas.
-    pub source: Box<[u8]>,
+    pub source: Arc<[u8]>,
     /// The distinct names encountered in the file, in first-use order.
     /// Empty when the transient-scratch entry point is used.
     pub names: Box<[Name]>,
-    pub stmts: Vec<StmtNode>,
+    pub stmts: crate::ast::StmtIdRange,
     /// The file's typed node storage and their parallel span tables.
     pub arenas: NodeArenas,
     /// Every comment that holds `@phpstan-ignore`, doc comments included,
@@ -32,13 +65,25 @@ pub struct ParsedFile {
     /// What the lexer skipped over.
     pub warnings: Vec<LexWarning>,
     pub facts: FileFacts,
+    /// At least one PHPStan stub attribute changed a node while parsing.
+    /// Consumers must rebuild parser-recorded reference products from the
+    /// final tree because removed declarations were still parsed for syntax.
+    pub stub_attributes_changed: bool,
     /// The labels the file's own top-level `goto`s name.
     pub goto_labels: Box<[GotoLabel]>,
     /// What the file refers to.
-    pub references: FileReferences,
+    /// References the parser recorded while constructing the tree. A
+    /// parser-time stub transformation invalidates these products because
+    /// it can discard declarations and extend doc comments.
+    pub references: Option<FileReferences>,
 }
 
 impl ParsedFile {
+    /// Resolves the root statement range through this file's owning arena.
+    pub fn statements(&self) -> &[StmtId] {
+        self.arenas.stmt_ids(&self.stmts)
+    }
+
     /// Returns the file's arenas after its parsed products have been
     /// consumed, so a worker can reuse their capacities for another file.
     pub fn into_node_arenas(self) -> NodeArenas {
@@ -53,7 +98,27 @@ impl ParsedFile {
     /// Reads an in-file byte range, such as a source-backed AST payload.
     /// Returns `None` for a transient-scratch parse, which retains no source.
     pub fn source_slice(&self, span: crate::span::Span) -> Option<&[u8]> {
-        self.source.get(span.start as usize..span.end as usize)
+        self.arenas.source_slice(span)
+    }
+
+    /// Resolves source-backed doc-comment ranges to text at a reader boundary.
+    /// A grouped doc keeps the parser's established normalized representation.
+    pub fn doc_comment_text<'a>(
+        &'a self,
+        ranges: &'a crate::ast::DocCommentRanges,
+    ) -> Option<Cow<'a, str>> {
+        ranges.text(&self.source)
+    }
+
+    /// Resolves bytes decoded from an escaped literal in this file.
+    pub fn decoded_bytes(&self, range: crate::ast::DecodedBytesRange) -> Option<&[u8]> {
+        self.arenas.decoded_bytes(range)
+    }
+
+    /// Resolves a literal's bytes through the owner of its source or decoded
+    /// range. Callers copy only when retaining a value beyond this file.
+    pub fn string_bytes<'a>(&'a self, payload: &'a crate::ast::StringPayload) -> Option<&'a [u8]> {
+        self.arenas.string_bytes(payload)
     }
 
     /// Resolves a file-local name id to the shared interned name.
@@ -210,21 +275,22 @@ fn parse_watching_in_arenas<'a>(
     source: impl Into<Source<'a>>,
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
-    arenas: NodeArenas,
+    mut arenas: NodeArenas,
     compact_arenas: bool,
     retain_file_data: bool,
     mut scratch: Option<&mut NodeArenas>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
-    let source_bytes: Box<[u8]> = if retain_file_data {
+    let source_bytes: Arc<[u8]> = if retain_file_data {
         match source {
-            Source::Text(text) => text.as_bytes().into(),
-            Source::Bytes(bytes) => bytes.into(),
+            Source::Text(text) => Arc::from(text.as_bytes()),
+            Source::Bytes(bytes) => Arc::from(bytes),
         }
     } else {
-        Box::default()
+        Arc::from([])
     };
-    let lexer = Lexer::from_source(source);
+    arenas.decoded_bytes_base = 0;
+    let mut lexer = Lexer::from_source(source).with_source_backed_strings(retain_file_data);
     let lexer = match watch {
         Some(watch) => lexer.watching(watch),
         None => lexer,
@@ -238,15 +304,28 @@ fn parse_watching_in_arenas<'a>(
     } else {
         lexer.without_file_names()
     };
-    let mut parser = Parser::from_lexer_with_node_arenas(lexer, arenas);
-    let parsed = parser.parse_program();
+    let source = lexer.source_bytes();
+    let source_backed_strings = lexer.source_backed_strings();
+    lexer.set_decoded_bytes_base(arenas.decoded_bytes_base);
+    let token_stream = lexer.lex_token_stream();
+    let mut parser = Parser::from_token_stream_with_node_arenas(
+        token_stream,
+        arenas,
+        Some(source),
+        source_backed_strings,
+    );
+    let (parsed_stmts, parse_error, mut arenas) = match parser.parse_program() {
+        Ok(program) => (Some(program.stmts), None, program.arenas),
+        Err(error) => (None, Some(error), parser.take_node_arenas()),
+    };
     let has_anonymous_class = parser.saw_anonymous_class();
+    let stub_attributes_changed = parser.stub_attributes_changed();
     let has_nested_declaration = parser.saw_nested_declaration();
     let unsets_property = parser.saw_property_unset();
     let syntax_marks = parser.syntax_marks();
     let goto_labels = parser.file_goto_labels();
-    let references = parser.take_references();
-    let mut arenas = parser.take_node_arenas();
+    let recorded_references = parser.take_references();
+    let references = (!stub_attributes_changed).then_some(recorded_references);
     // The rest of the file is lexed even when the parse failed: a lexer
     // error anywhere in the file is the file's error, before a syntax
     // error found in the part the parse read.
@@ -256,6 +335,7 @@ fn parse_watching_in_arenas<'a>(
         mut facts,
         line_index,
         names,
+        decoded_bytes,
     } = parser
         .into_lex_end()
         .expect("a parser of a lexer ends with the lexer's record");
@@ -265,18 +345,21 @@ fn parse_watching_in_arenas<'a>(
         }
         return Err(ParseError::new(error.message.clone(), error.span));
     }
-    let stmts = match parsed {
-        Ok(stmts) => stmts,
-        Err(error) => {
+    let stmts = match (parsed_stmts, parse_error) {
+        (Some(stmts), None) => stmts,
+        (_, Some(error)) => {
             if let Some(scratch) = scratch.as_deref_mut() {
                 *scratch = arenas;
             }
             return Err(error);
         }
+        _ => unreachable!("parser result carries either a program or an error"),
     };
+    arenas.decoded_bytes.extend(decoded_bytes);
     if compact_arenas {
         arenas.shrink_to_fit();
     }
+    arenas.source = Arc::clone(&source_bytes);
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
     facts.unsets_property = unsets_property;
@@ -290,6 +373,7 @@ fn parse_watching_in_arenas<'a>(
         line_index,
         warnings,
         facts,
+        stub_attributes_changed,
         goto_labels,
         references,
     })
@@ -298,6 +382,64 @@ fn parse_watching_in_arenas<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expression_fragments_append_to_the_same_owner_with_live_name_context() {
+        let mut file = parse(b"<?php namespace App; $existing = 1;").unwrap();
+        let initial_exprs = file.arenas.expr_spans.len();
+        let initial_args = file.arenas.args.len();
+        let mut context = crate::name_resolution::NameContext::default();
+        context.set_namespace("App");
+
+        let class_expr =
+            parse_expression_into_arenas("new Service()", &context, &mut file.arenas).unwrap();
+        let new = file.arenas.expr(class_expr).unwrap();
+        let crate::ast::ExprKind::New(class_name, _) = &new.kind else {
+            panic!("fragment root should be a new expression");
+        };
+        let crate::ast::ExprKind::Name(class_name) = &file.arenas.expr(*class_name).unwrap().kind
+        else {
+            panic!("new expression class should be a name");
+        };
+        let class_name = file.arenas.qualified_name(class_name).unwrap();
+        assert_eq!(
+            class_name.resolved,
+            crate::ast::ResolvedName::Exact(crate::name::Name::from("App\\Service"))
+        );
+
+        let receiver = parse_expression_into_arenas(
+            "$service->run(\"decoded\\nbytes\")",
+            &context,
+            &mut file.arenas,
+        )
+        .unwrap();
+
+        assert!(u32::from(receiver.into_raw()) as usize >= initial_exprs);
+        assert!(file.arenas.expr_spans.len() > initial_exprs);
+        assert!(file.arenas.args.len() > initial_args);
+        let call = file.arenas.expr(receiver).unwrap();
+        let crate::ast::ExprKind::MethodCall(_, _, args, _) = &call.kind else {
+            panic!("fragment root should be a method call");
+        };
+        let string = file
+            .arenas
+            .args(args.clone())
+            .iter()
+            .find_map(|arg| {
+                let value = file.arenas.expr(arg.value)?;
+                match &value.kind {
+                    crate::ast::ExprKind::Literal(crate::ast::Literal::String(payload)) => {
+                        Some(payload)
+                    }
+                    _ => None,
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            file.arenas.string_bytes(string),
+            Some(&b"decoded\nbytes"[..])
+        );
+    }
 
     #[test]
     fn parser_errors_are_pointer_sized() {
@@ -381,6 +523,99 @@ mod tests {
     }
 
     #[test]
+    fn escaped_literals_resolve_through_the_file_decoded_byte_store() {
+        let parsed = parse(b"<?php $value = 'a\\'b'; $other = \"\\u{1f600}\";").unwrap();
+        let payloads: Vec<_> = parsed
+            .arenas
+            .exprs
+            .iter()
+            .filter_map(|(_, expr)| match &expr.kind {
+                crate::ast::ExprKind::Literal(crate::ast::Literal::String(payload)) => {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            payloads
+                .iter()
+                .all(|payload| matches!(payload, crate::ast::StringPayload::Decoded(_)))
+        );
+        assert!(
+            payloads
+                .iter()
+                .any(|payload| parsed.string_bytes(payload) == Some(&b"a'b"[..]))
+        );
+        assert!(
+            payloads
+                .iter()
+                .any(|payload| { parsed.string_bytes(payload) == Some("😀".as_bytes()) })
+        );
+    }
+
+    #[test]
+    fn unescaped_interpolated_chunks_refer_to_the_source_owner() {
+        let parsed = parse(b"<?php $value = \"plain bytes\";").unwrap();
+        let payload = parsed
+            .arenas
+            .exprs
+            .iter()
+            .find_map(|(_, expr)| match &expr.kind {
+                crate::ast::ExprKind::Literal(crate::ast::Literal::String(payload)) => {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(matches!(payload, crate::ast::StringPayload::Source(_)));
+        assert_eq!(parsed.string_bytes(payload), Some(&b"plain bytes"[..]));
+    }
+
+    #[test]
+    fn transient_unescaped_literals_use_decoded_ranges_without_retaining_source() {
+        let mut scratch = NodeArenas::default();
+        let parsed = parse_watching_transient_with_scratch(
+            b"<?php $value = 'plain bytes';",
+            None,
+            None,
+            &mut scratch,
+        )
+        .unwrap();
+        let payload = parsed
+            .arenas
+            .exprs
+            .iter()
+            .find_map(|(_, expr)| match &expr.kind {
+                crate::ast::ExprKind::Literal(crate::ast::Literal::String(payload)) => {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(matches!(payload, crate::ast::StringPayload::Decoded(_)));
+        assert!(parsed.source.is_empty());
+        assert_eq!(parsed.string_bytes(payload), Some(&b"plain bytes"[..]));
+    }
+
+    #[test]
+    fn decoded_ranges_from_interpolation_fragments_append_after_the_parent() {
+        let parsed = parse(b"<?php $value = \"\\n{$items['a\\'b']}\";").unwrap();
+        let values: Vec<_> = parsed
+            .arenas
+            .exprs
+            .iter()
+            .filter_map(|(_, expr)| match &expr.kind {
+                crate::ast::ExprKind::Literal(crate::ast::Literal::String(payload)) => {
+                    parsed.string_bytes(payload)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(values.iter().any(|value| *value == b"\n"));
+        assert!(values.iter().any(|value| *value == b"a'b"));
+    }
+
+    #[test]
     fn files_parsed_with_a_shared_name_cache_give_the_trees_and_names_they_give_without() {
         let first =
             "<?php namespace App; class Foo { public function bar($baz) { return $baz->qux(); } }";
@@ -389,15 +624,12 @@ mod tests {
         let shared: Vec<_> = [first, second]
             .iter()
             .map(|source| {
-                format!(
-                    "{:?}",
-                    parse_with_names(*source, Some(&mut cache)).unwrap().stmts
-                )
+                crate::canonical::print_line(&parse_with_names(*source, Some(&mut cache)).unwrap())
             })
             .collect();
         let alone: Vec<_> = [first, second]
             .iter()
-            .map(|source| format!("{:?}", parse(*source).unwrap().stmts))
+            .map(|source| crate::canonical::print_line(&parse(*source).unwrap()))
             .collect();
         assert_eq!(shared, alone);
         // What the cache holds is what the interner gives.
@@ -410,27 +642,99 @@ mod tests {
     }
 
     #[test]
-    fn parse_watching_with_scratch_reuses_node_span_capacity() {
-        let first = parse(b"<?php $first = 1;").unwrap();
+    fn parse_watching_with_scratch_reuses_payload_and_list_arenas() {
+        let first = parse(
+            br#"<?php
+                #[A(1)]
+                function f(#[B] int $x) {
+                    $callback = static fn($a) => f($a);
+                    $object = new class($x) {
+                        public function method(#[C] $y) {}
+                    };
+                    return [f(1), 2 => $x];
+                }
+                $result = match (1) { 1, 2 => f(2), default => null };
+            "#,
+        )
+        .unwrap();
         let mut scratch = first.into_node_arenas();
         let expr_capacity = scratch.expr_spans.capacity();
         let stmt_capacity = scratch.stmt_spans.capacity();
         assert!(expr_capacity > 0);
         assert!(stmt_capacity > 0);
+        let list_storage = [
+            scratch.args.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.array_items.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.params.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.match_arms.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.attributes.iter().next().unwrap().1 as *const _ as *const (),
+        ];
+        let payload_storage = [
+            scratch.functions.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.methods.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.classes.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.closures.iter().next().unwrap().1 as *const _ as *const (),
+            scratch.anonymous_classes.iter().next().unwrap().1 as *const _ as *const (),
+        ];
 
         assert!(
             parse_watching_with_scratch(b"<?php $broken = 08;", None, None, &mut scratch,).is_err()
         );
         assert!(scratch.expr_spans.capacity() >= expr_capacity);
         assert!(scratch.stmt_spans.capacity() >= stmt_capacity);
+        assert!(scratch.args.is_empty());
+        assert!(scratch.array_items.is_empty());
+        assert!(scratch.params.is_empty());
+        assert!(scratch.match_arms.is_empty());
+        assert!(scratch.attributes.is_empty());
+        assert!(scratch.functions.is_empty());
+        assert!(scratch.methods.is_empty());
+        assert!(scratch.classes.is_empty());
+        assert!(scratch.closures.is_empty());
+        assert!(scratch.anonymous_classes.is_empty());
 
-        let second =
-            parse_watching_with_scratch(b"<?php $second = 2;", None, None, &mut scratch).unwrap();
+        let second = parse_watching_with_scratch(
+            br#"<?php
+                #[A(1)]
+                function f(#[B] int $x) {
+                    $callback = static fn($a) => f($a);
+                    $object = new class($x) {
+                        public function method(#[C] $y) {}
+                    };
+                    return [f(1), 2 => $x];
+                }
+                $result = match (1) { 1, 2 => f(2), default => null };
+            "#,
+            None,
+            None,
+            &mut scratch,
+        )
+        .unwrap();
 
         assert!(second.expr_count() > 0);
         assert!(second.stmt_count() > 0);
         assert!(second.arenas.expr_spans.capacity() >= expr_capacity);
         assert!(second.arenas.stmt_spans.capacity() >= stmt_capacity);
+        assert_eq!(
+            list_storage,
+            [
+                second.arenas.args.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.array_items.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.params.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.match_arms.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.attributes.iter().next().unwrap().1 as *const _ as *const (),
+            ]
+        );
+        assert_eq!(
+            payload_storage,
+            [
+                second.arenas.functions.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.methods.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.classes.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.closures.iter().next().unwrap().1 as *const _ as *const (),
+                second.arenas.anonymous_classes.iter().next().unwrap().1 as *const _ as *const (),
+            ]
+        );
         for (index, span) in second.arenas.expr_spans.iter().enumerate() {
             let id = ExprId::from_raw(la_arena::RawIdx::from_u32(index as u32));
             assert_eq!(second.expr_span(id), Some(*span));
@@ -463,8 +767,9 @@ mod tests {
         assert!(parsed.stmt_count() > 0);
 
         struct NoNameIds;
-        impl<'ast> crate::visit::Visitor<'ast> for NoNameIds {
-            fn visit_expr(&mut self, expr: &'ast crate::ast::ExprNode) {
+        impl crate::visit::arena::Visitor for NoNameIds {
+            fn visit_expr(&mut self, arenas: &NodeArenas, id: crate::ast::ExprId) {
+                let expr = arenas.expr(id).expect("expression ID belongs to its file");
                 match &expr.kind {
                     crate::ast::ExprKind::PropertyAccess(_, ident, _) => {
                         assert!(ident.name_id.is_none());
@@ -474,9 +779,87 @@ mod tests {
                     }
                     _ => {}
                 }
-                crate::visit::walk_expr(self, expr);
+                crate::visit::arena::walk_expr(self, arenas, id);
             }
         }
-        crate::visit::walk_stmts(&mut NoNameIds, &parsed.stmts);
+        crate::visit::arena::walk_stmts(&mut NoNameIds, &parsed.arenas, parsed.statements());
+    }
+
+    #[test]
+    fn transient_parse_populates_and_reuses_payload_and_list_arenas() {
+        let mut scratch = NodeArenas::default();
+        let parsed = parse_watching_transient_with_scratch(
+            br#"<?php
+                #[A(1)]
+                function f(#[B] int $x) {
+                    $callback = static fn($a) => f($a);
+                    $object = new class($x) {
+                        public function method(#[C] $y) {}
+                    };
+                    return [f(1), 2 => $x];
+                }
+                $result = match (1) { 1, 2 => f(2), default => null };
+            "#,
+            None,
+            None,
+            &mut scratch,
+        )
+        .unwrap();
+
+        assert!(parsed.source.is_empty());
+        assert!(parsed.names.is_empty());
+        let list_storage = [
+            parsed.arenas.args.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.array_items.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.params.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.match_arms.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.attributes.iter().next().unwrap().1 as *const _ as *const (),
+        ];
+        let payload_storage = [
+            parsed.arenas.functions.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.methods.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.classes.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.closures.iter().next().unwrap().1 as *const _ as *const (),
+            parsed.arenas.anonymous_classes.iter().next().unwrap().1 as *const _ as *const (),
+        ];
+
+        scratch = parsed.into_node_arenas();
+        let reparsed = parse_watching_transient_with_scratch(
+            br#"<?php
+                #[A(1)]
+                function f(#[B] int $x) {
+                    $callback = static fn($a) => f($a);
+                    $object = new class($x) {
+                        public function method(#[C] $y) {}
+                    };
+                    return [f(1), 2 => $x];
+                }
+                $result = match (1) { 1, 2 => f(2), default => null };
+            "#,
+            None,
+            None,
+            &mut scratch,
+        )
+        .unwrap();
+        assert_eq!(
+            list_storage,
+            [
+                reparsed.arenas.args.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.array_items.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.params.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.match_arms.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.attributes.iter().next().unwrap().1 as *const _ as *const (),
+            ]
+        );
+        assert_eq!(
+            payload_storage,
+            [
+                reparsed.arenas.functions.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.methods.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.classes.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.closures.iter().next().unwrap().1 as *const _ as *const (),
+                reparsed.arenas.anonymous_classes.iter().next().unwrap().1 as *const _ as *const (),
+            ]
+        );
     }
 }

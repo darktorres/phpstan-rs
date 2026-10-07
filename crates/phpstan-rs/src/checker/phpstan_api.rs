@@ -68,9 +68,9 @@ use crate::checker::Checker;
 use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
-use syntax::name_resolution::for_each_in_context;
+use syntax::name_resolution::for_each_in_context_ids;
 use syntax::span::{LineIndex, Span};
-use syntax::visit::{Visitor, walk_args, walk_class_def, walk_expr, walk_stmt};
+use syntax::visit::arena::{self, Visitor};
 
 /// `file_package` is the checked file's composer package name: `None`
 /// when there's no file (`Walker::tests`' own `diagnostics_for`), and
@@ -79,13 +79,15 @@ use syntax::visit::{Visitor, walk_args, walk_class_def, walk_expr, walk_stmt};
 /// these rules that cares which package a file belongs to), and it never
 /// fires without a file, the same "no signal, stay quiet" leniency every
 /// other unresolvable case in this module already gets.
-pub(crate) fn check_phpstan_api_usage(
-    program: &[StmtNode],
+pub(crate) fn check_phpstan_api_usage<'a>(
+    arenas: &'a NodeArenas,
+    program: &[StmtId],
     line_index: &LineIndex,
     registry: &Registry,
     file_package: Option<Option<&str>>,
 ) -> Vec<Diagnostic> {
     let mut walker = Walker {
+        arenas,
         registry,
         line_index,
         diagnostics: Vec::new(),
@@ -94,9 +96,9 @@ pub(crate) fn check_phpstan_api_usage(
         current_class_fqn: None,
         file_package,
     };
-    for_each_in_context(program, |stmt, ctx| {
+    for_each_in_context_ids(arenas, program, |id, _, ctx| {
         walker.namespace = ctx.namespace().to_string();
-        walker.visit_stmt(stmt);
+        walker.visit_stmt(arenas, id);
     });
     walker.diagnostics
 }
@@ -399,6 +401,7 @@ impl<'a> Checker<'a> {
     /// would never fire here at all.
     pub(crate) fn check_node_connecting_attribute(
         &mut self,
+        arenas: &NodeArenas,
         recv_class: &str,
         method: &str,
         args: &[Arg],
@@ -421,7 +424,10 @@ impl<'a> Checker<'a> {
             return;
         }
         let Some(first) = args.first() else { return };
-        let Some(name) = literal_string_value(&first.value) else {
+        let Some(value) = arenas.expr(first.value) else {
+            return;
+        };
+        let Some(name) = literal_string_value(arenas, value.id) else {
             return;
         };
         if !matches!(name.as_ref(), "parent" | "previous" | "next") {
@@ -440,6 +446,7 @@ impl<'a> Checker<'a> {
 }
 
 struct Walker<'a> {
+    arenas: &'a NodeArenas,
     registry: &'a Registry,
     line_index: &'a LineIndex,
     diagnostics: Vec<Diagnostic>,
@@ -460,6 +467,18 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
+    fn expr_span(&self, id: ExprId) -> Span {
+        self.arenas
+            .expr_span(id)
+            .expect("expression has a parallel span")
+    }
+
+    fn stmt_span(&self, id: StmtId) -> Span {
+        self.arenas
+            .stmt_span(id)
+            .expect("statement has a parallel span")
+    }
+
     /// The class `name` names, when it's in a PHPStan namespace.
     fn resolve_if_phpstan(&self, name: &QualifiedName) -> Option<String> {
         self.resolve_class_name(name)
@@ -685,8 +704,8 @@ impl<'a> Walker<'a> {
 
     /// Checks class `fqn`'s definition `class` and walks its body in its
     /// context; `fqn` is `None` for an anonymous class not named yet.
-    fn visit_class(&mut self, fqn: Option<String>, class: &ClassDef) {
-        self.check_class_inheritance(class);
+    fn visit_class(&mut self, arenas: &NodeArenas, fqn: Option<String>, class: &ClassDef) {
+        self.check_class_inheritance(arenas, class);
         let implements_phpstan = fqn
             .as_deref()
             .is_some_and(|fqn| self.registry.class_has_phpstan_ancestry(fqn));
@@ -695,14 +714,14 @@ impl<'a> Walker<'a> {
             implements_phpstan,
         );
         let previous_class = std::mem::replace(&mut self.current_class_fqn, fqn);
-        walk_class_def(self, class);
+        arena::walk_class_def(self, arenas, class);
         self.current_class_implements_phpstan_interface = previous_implements;
         self.current_class_fqn = previous_class;
     }
 
     /// `c`'s own `extends`, `implements` and `use` of PHPStan's classes.
-    fn check_class_inheritance(&mut self, c: &ClassDef) {
-        for parent in &c.extends {
+    fn check_class_inheritance(&mut self, arenas: &NodeArenas, c: &ClassDef) {
+        for parent in c.extends(arenas) {
             if let Some(pfqn) = self.resolve_if_phpstan(parent) {
                 // Real `ApiClassExtendsRule`'s own narrow
                 // carve-out - extending `PHPStan\Analyser\MutatingScope`
@@ -737,13 +756,13 @@ impl<'a> Walker<'a> {
                 );
             }
         }
-        for iface in &c.implements {
+        for iface in c.implements(arenas) {
             if let Some(ifqn) = self.resolve_if_phpstan(iface) {
                 let action = format!("implementing {ifqn}");
                 self.report_inheritance(&ifqn, &action, c.span, "phpstanApi.interface", true);
             }
         }
-        for used in c.used_traits() {
+        for used in c.used_traits(arenas) {
             if let Some(ufqn) = self.resolve_if_phpstan(used)
                 && self.registry.has_class(&ufqn)
             {
@@ -855,38 +874,71 @@ impl<'a> Walker<'a> {
     }
 }
 
-impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Walker<'_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         syntax::stack::guard(|| {
             if let StmtKind::Namespace(ns) = &stmt.kind {
-                self.check_namespace_declaration(ns, stmt.span);
+                self.check_namespace_declaration(ns, self.stmt_span(stmt.id));
             }
-            walk_stmt(self, stmt);
+            arena::walk_stmt(self, arenas, id);
         })
     }
 
-    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        self.visit_class(Some(class.fq_name().to_string()), &class.def);
+    fn visit_class_decl(&mut self, arenas: &NodeArenas, class: &ClassDecl) {
+        let Some(def) = arenas.class(class.def) else {
+            return;
+        };
+        self.visit_class(arenas, Some(class.fq_name().to_string()), def);
     }
 
     /// Each name-bearing reference kind is checked directly against
     /// `self.registry`'s `@api`/`@api-do-not-implement` state.
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else {
+            return;
+        };
         syntax::stack::guard(|| {
             match &e.kind {
-                ExprKind::NewAnonymousClass(class) => {
-                    walk_args(self, &class.args);
-                    self.visit_class(class.name.as_ref().map(|name| name.to_string()), &class.def);
+                ExprKind::NewAnonymousClass(class_id) => {
+                    let Some(class) = arenas.anonymous_class(*class_id) else {
+                        return;
+                    };
+                    arena::walk_args(self, arenas, class.args.clone());
+                    let Some(def) = arenas.class(class.def) else {
+                        return;
+                    };
+                    self.visit_class(
+                        arenas,
+                        arenas
+                            .anonymous_class_name(*class_id)
+                            .map(ToString::to_string),
+                        def,
+                    );
                     return;
                 }
                 ExprKind::Call(callee, _) => {
-                    if let ExprKind::Name(n) = &callee.kind {
-                        self.check_runtime_reflection_function(n, e.span);
+                    if let Some(ExprNode {
+                        kind: ExprKind::Name(n),
+                        ..
+                    }) = arenas.expr(*callee)
+                    {
+                        if let Some(name) = arenas.qualified_name(n) {
+                            self.check_runtime_reflection_function(name, self.expr_span(e.id));
+                        }
                     }
                 }
                 ExprKind::New(callee, _) => {
-                    if let ExprKind::Name(n) = &callee.kind {
-                        self.check_new(n, e.span);
+                    if let Some(ExprNode {
+                        kind: ExprKind::Name(n),
+                        ..
+                    }) = arenas.expr(*callee)
+                    {
+                        if let Some(name) = arenas.qualified_name(n) {
+                            self.check_new(name, self.expr_span(e.id));
+                        }
                     }
                 }
                 ExprKind::StaticCall(target, method, _) => {
@@ -901,7 +953,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                         .as_name()
                         .and_then(|name| self.resolve_class_name(name))
                     {
-                        self.report_static_method_not_covered(&fqn, method, e.span);
+                        self.report_static_method_not_covered(&fqn, method, self.expr_span(e.id));
                     }
                 }
                 // `X::class` is deliberately exempt from the ordinary `@api`
@@ -909,7 +961,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                 // for why - but is still a real bare name reference, so
                 // `OldPhpParser4ClassRule` still applies to it.
                 ExprKind::ClassNameFetch(StaticTarget::Name(class_name)) => {
-                    self.check_old_php_parser4_class(class_name, e.span);
+                    self.check_old_php_parser4_class(class_name, self.expr_span(e.id));
                 }
                 ExprKind::ClassConstFetch(StaticTarget::Name(class_name), member)
                 | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name), member) => {
@@ -920,15 +972,22 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                     };
                     if let Some(fqn) = self.resolve_if_phpstan(class_name) {
                         let action = format!("accessing {fqn}::{sigil}{member}");
-                        self.report_not_covered(&fqn, &action, e.span, "phpstanApi.classConstant");
+                        self.report_not_covered(
+                            &fqn,
+                            &action,
+                            self.expr_span(e.id),
+                            "phpstanApi.classConstant",
+                        );
                     }
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => {
-                    self.check_instanceof(n, e.span);
+                    if let Some(name) = arenas.qualified_name(n) {
+                        self.check_instanceof(name, self.expr_span(e.id));
+                    }
                 }
                 _ => {}
             }
-            walk_expr(self, e);
+            arena::walk_expr(self, arenas, id);
         })
     }
 }

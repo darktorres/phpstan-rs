@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParamDraft, ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     // ---- functions / params ----
@@ -113,20 +113,23 @@ impl Parser<'_> {
             } else {
                 None
             };
+            let ident = self.ident(name, name_span);
+            let param_span = Span {
+                start: param_start,
+                end: self.previous_end(),
+            };
             self.param_list_scratch[params_depth].push(ParamDraft {
                 node: Param {
-                    name: self.ident(name, name_span),
+                    name: ident,
                     type_hint,
+                    type_aware_override: None,
                     default,
                     by_ref,
                     variadic,
                     promotion,
                     hooks,
                     attrs,
-                    span: Span {
-                        start: param_start,
-                        end: self.previous_end(),
-                    },
+                    span: param_span,
                 },
                 doc_comment,
             });

@@ -16,18 +16,20 @@ fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
     // canonical lowercase spelling would corrupt the source's real
     // capitalization.
     let program = parse("<?php function f(Enum ...$enums): void {}");
-    let StmtKind::FunctionDecl(f) = &program[0].kind else {
+    let StmtKind::FunctionDecl(function) = &program[0].kind else {
         panic!("expected a FunctionDecl, got {:?}", program[0].kind);
     };
+    let f = program.function(*function);
+    let params = program.arenas.params(f.params.clone());
     assert_eq!(
-        f.params[0]
+        params[0]
             .type_hint
             .as_ref()
             .map(|hint| hint.to_string_with(&program.arenas))
             .as_deref(),
         Some("Enum")
     );
-    assert!(f.params[0].variadic);
+    assert!(params[0].variadic);
 }
 
 #[test]
@@ -78,15 +80,15 @@ fn braced_namespace_declarations_splice_their_body_in() {
     let class_names: Vec<&str> = program
         .iter()
         .filter_map(|s| match &s.kind {
-            StmtKind::ClassDecl(c) => Some(&*c.name),
+            StmtKind::ClassDecl(c) => Some(&*program.arenas.class_decl(c.clone()).name),
             _ => None,
         })
         .collect();
     assert_eq!(class_names, vec!["A", "B"]);
     assert!(
-        program
-            .iter()
-            .any(|s| matches!(&s.kind, StmtKind::FunctionDecl(f) if f.name == "f"))
+        program.iter().any(
+            |s| matches!(&s.kind, StmtKind::FunctionDecl(f) if program.function(*f).name == "f")
+        )
     );
     assert!(matches!(&program[0].kind, StmtKind::Namespace(n) if n == "Foo\\Bar"));
 }
@@ -99,20 +101,26 @@ fn namespace_relative_name_parses_as_expression_and_as_type() {
             function g(namespace\integer $x) {}
         "#,
     );
-    let StmtKind::FunctionDecl(f) = &program[0].kind else {
+    let StmtKind::FunctionDecl(function) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    let default = f.params[0]
+    let f = program.function(*function);
+    let params = program.arenas.params(f.params.clone());
+    let default = params[0]
         .default
         .and_then(|id| program.arenas.expr(id))
         .expect("default expression");
-    assert!(matches!(&default.kind, ExprKind::Name(n) if n == "namespace\\unknown"));
+    assert!(
+        matches!(&default.kind, ExprKind::Name(n) if program.arenas.qualified_name(n).is_some_and(|n| n == "namespace\\unknown"))
+    );
 
-    let StmtKind::FunctionDecl(g) = &program[1].kind else {
+    let StmtKind::FunctionDecl(function) = &program[1].kind else {
         panic!("expected FunctionDecl");
     };
+    let g = program.function(*function);
+    let params = program.arenas.params(g.params.clone());
     assert_eq!(
-        g.params[0]
+        params[0]
             .type_hint
             .as_ref()
             .map(|hint| hint.to_string_with(&program.arenas))
@@ -176,7 +184,9 @@ fn readonly_abstract_final_usable_as_plain_names() {
             final();
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "readonly"));
+    assert!(
+        matches!(&program[0].kind, StmtKind::FunctionDecl(f) if program.function(*f).name == "readonly")
+    );
     for id in program.statements().iter().skip(1) {
         let stmt = program.arenas.stmt(*id).expect("statement");
         assert!(matches!(
@@ -197,9 +207,11 @@ fn enum_usable_as_plain_function_and_constant_name() {
             enum Suit { case Hearts; }
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum"));
     assert!(
-        matches!(&program[3].kind, StmtKind::ClassDecl(e) if program.class_def(e.def).kind == ClassKind::Enum && Some(&*e.name) == Some("Suit"))
+        matches!(&program[0].kind, StmtKind::FunctionDecl(f) if program.function(*f).name == "enum")
+    );
+    assert!(
+        matches!(&program[3].kind, StmtKind::ClassDecl(e) if program.class_def(program.arenas.class_decl(e.clone()).def).kind == ClassKind::Enum && Some(&*program.arenas.class_decl(e.clone()).name) == Some("Suit"))
     );
 }
 
@@ -214,7 +226,7 @@ fn fn_usable_as_namespace_segment_when_not_a_signature() {
         panic!("expected call");
     };
     assert!(
-        matches!(program.arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(n)) if n == "fn\\test")
+        matches!(program.arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(n)) if program.arenas.qualified_name(n).is_some_and(|n| n == "fn\\test"))
     );
 }
 
@@ -229,7 +241,7 @@ fn namespace_relative_call_statement_is_not_a_declaration() {
         panic!("expected call");
     };
     assert!(
-        matches!(program.arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(n)) if n == "namespace\\foo")
+        matches!(program.arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(n)) if program.arenas.qualified_name(n).is_some_and(|n| n == "namespace\\foo"))
     );
 }
 

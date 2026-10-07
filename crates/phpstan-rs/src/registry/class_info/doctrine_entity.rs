@@ -24,7 +24,8 @@ use syntax::name::Name;
 use syntax::name::NameMap;
 
 use syntax::ast::{
-    ArrayItem, Attribute, ClassDef, ExprKind, ExprNode, Literal, QualifiedName, StaticTarget,
+    ArrayItem, Attribute, ClassDef, ExprKind, ExprNode, Literal, NodeArenas, QualifiedName,
+    StaticTarget,
 };
 use types::Type;
 
@@ -113,12 +114,16 @@ fn find_orm_attribute<'a>(attrs: &'a [Attribute], short_name: &str) -> Option<&'
 /// guess - the same "don't guess" leniency this project applies
 /// everywhere else a statically-unresolvable value could otherwise be
 /// wrongly trusted.
-fn class_const_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a QualifiedName> {
-    attr.args.iter().find_map(|arg| {
+fn class_const_arg<'a>(
+    arenas: &'a NodeArenas,
+    attr: &Attribute,
+    name: &str,
+) -> Option<&'a QualifiedName> {
+    arenas.args(attr.args.clone()).iter().find_map(|arg| {
         if arg.name.as_deref() != Some(name) {
             return None;
         }
-        class_name_of_class_const(&arg.value)
+        class_name_of_class_const(arenas.expr(arg.value)?)
     })
 }
 
@@ -126,13 +131,16 @@ fn class_const_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a QualifiedN
 /// (`#[ORM\Table(name: 'categories')]`/`#[ORM\Column(name: '...')]`'s
 /// only real corpus shape); unlike `ast::literal_string_value`, a
 /// concatenation of literals is not folded.
-fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
-    attr.args.iter().find_map(|arg| {
+fn string_arg(arenas: &NodeArenas, attr: &Attribute, name: &str) -> Option<String> {
+    arenas.args(attr.args.clone()).iter().find_map(|arg| {
         if arg.name.as_deref() != Some(name) {
             return None;
         }
-        match &arg.value.kind {
-            ExprKind::Literal(Literal::String(s)) => s.as_str(),
+        let value = arenas.expr(arg.value)?;
+        match &value.kind {
+            ExprKind::Literal(Literal::String(s)) => {
+                Some(String::from_utf8(arenas.string_bytes(s)?.to_vec()).ok()?)
+            }
             _ => None,
         }
     })
@@ -153,27 +161,31 @@ fn class_name_of_class_const(e: &ExprNode) -> Option<&QualifiedName> {
 /// literal string, or a value that isn't a `SomeClass::class` reference,
 /// is simply skipped rather than guessed - the same "don't guess"
 /// leniency this module applies everywhere else.
-fn discriminator_map_arg(attr: &Attribute) -> FxHashMap<String, Name> {
-    let array = attr
-        .args
+fn discriminator_map_arg(arenas: &NodeArenas, attr: &Attribute) -> FxHashMap<String, Name> {
+    let args = arenas.args(attr.args.clone());
+    let array = args
         .iter()
         .find(|a| a.name.as_deref() == Some("value"))
-        .or_else(|| attr.args.iter().find(|a| a.name.is_none()))
-        .and_then(|a| match &a.value.kind {
-            ExprKind::ArrayLiteral(items) => Some(items),
+        .or_else(|| args.iter().find(|a| a.name.is_none()))
+        .and_then(|a| match &arenas.expr(a.value)?.kind {
+            ExprKind::ArrayLiteral(items) => Some(items.clone()),
             _ => None,
         });
     let Some(items) = array else {
         return FxHashMap::default();
     };
-    items
+    arenas
+        .array_items(items)
         .iter()
         .filter_map(|item: &ArrayItem| {
-            let ExprKind::Literal(Literal::String(value)) = &item.key.as_ref()?.kind else {
+            let ExprKind::Literal(Literal::String(value)) = &arenas.expr(item.key?)?.kind else {
                 return None;
             };
-            let class = class_name_of_class_const(&item.value)?;
-            Some((value.to_string(), class_ref(class)))
+            let class = class_name_of_class_const(arenas.expr(item.value)?)?;
+            Some((
+                String::from_utf8_lossy(arenas.string_bytes(value)?).into_owned(),
+                class_ref(class),
+            ))
         })
         .collect()
 }
@@ -198,16 +210,18 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 /// majority of classes in any real project, including this project's
 /// own.
 pub(crate) fn compute_doctrine_entity(
+    arenas: &NodeArenas,
     c: &ClassDef,
     properties: &NameMap<PropertyReflection>,
 ) -> Option<DoctrineEntity> {
-    let entity_attr = find_orm_attribute(&c.attrs, "Entity")?;
-    let repository_class = class_const_arg(entity_attr, "repositoryClass").map(class_ref);
-    let table_name = find_orm_attribute(&c.attrs, "Table")
-        .and_then(|attr| string_arg(attr, "name"))
+    let class_attrs = arenas.attributes(c.attrs.clone());
+    let entity_attr = find_orm_attribute(class_attrs, "Entity")?;
+    let repository_class = class_const_arg(arenas, entity_attr, "repositoryClass").map(class_ref);
+    let table_name = find_orm_attribute(class_attrs, "Table")
+        .and_then(|attr| string_arg(arenas, attr, "name"))
         .map(Name::from);
-    let discriminator_map = find_orm_attribute(&c.attrs, "DiscriminatorMap")
-        .map(discriminator_map_arg)
+    let discriminator_map = find_orm_attribute(class_attrs, "DiscriminatorMap")
+        .map(|attr| discriminator_map_arg(arenas, attr))
         .unwrap_or_default();
 
     // Every property's own raw attrs, from both a plain body declaration
@@ -216,13 +230,13 @@ pub(crate) fn compute_doctrine_entity(
     // into one (name -> attrs) map up front rather than duplicating the
     // attribute-matching logic below for each source.
     let mut attrs_by_property: FxHashMap<&str, &[Attribute]> = FxHashMap::default();
-    for p in &c.properties {
-        attrs_by_property.insert(&p.name, &p.attrs);
+    for p in c.properties(arenas) {
+        attrs_by_property.insert(&p.name, arenas.attributes(p.attrs.clone()));
     }
-    if let Some(ctor) = c.constructor() {
-        for p in &ctor.function.params {
+    if let Some(ctor) = c.constructor(arenas) {
+        for p in arenas.params(ctor.function.params.clone()) {
             if p.promotion.is_some() {
-                attrs_by_property.insert(&p.name, &p.attrs);
+                attrs_by_property.insert(&p.name, arenas.attributes(p.attrs.clone()));
             }
         }
     }
@@ -237,7 +251,8 @@ pub(crate) fn compute_doctrine_entity(
         };
         fields.insert(Name::from(*name), sig.ty_native.clone());
         if let Some(column_attr) = find_orm_attribute(attrs, "Column") {
-            let column_name = string_arg(column_attr, "name").unwrap_or(name);
+            let column_name =
+                string_arg(arenas, column_attr, "name").unwrap_or_else(|| (*name).to_string());
             column_names.insert(Name::from(*name), Name::from(column_name));
         }
         if find_orm_attribute(attrs, "Id").is_some() {
@@ -256,7 +271,7 @@ pub(crate) fn compute_doctrine_entity(
                         is_collection: false,
                     },
                 );
-            } else if let Some(target) = class_const_arg(assoc_attr, "targetEntity") {
+            } else if let Some(target) = class_const_arg(arenas, assoc_attr, "targetEntity") {
                 associations.insert(
                     Name::from(*name),
                     DoctrineAssociation {
@@ -271,7 +286,7 @@ pub(crate) fn compute_doctrine_entity(
             // of its own - unlike the to-one case above, the attribute's
             // own explicit `targetEntity: ...` argument is the only real
             // source here.
-            if let Some(target) = class_const_arg(assoc_attr, "targetEntity") {
+            if let Some(target) = class_const_arg(arenas, assoc_attr, "targetEntity") {
                 associations.insert(
                     Name::from(*name),
                     DoctrineAssociation {

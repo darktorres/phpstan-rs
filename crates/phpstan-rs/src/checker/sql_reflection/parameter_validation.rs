@@ -46,7 +46,7 @@ use crate::checker::sql_reflection::query_builder::{
     param_key_from_expr, value_is_confidently_not_an_integer,
 };
 use crate::checker::{Checker, Locals};
-use syntax::ast::{Arg, ExprKind, ExprNode};
+use syntax::ast::{Arg, ExprKind, ExprNode, NodeArenas};
 use syntax::span::Span;
 use types::Type;
 
@@ -102,36 +102,47 @@ fn sql_placeholder_keys(sql: &str) -> Option<Vec<ParamKey>> {
 /// `Some(vec![])`, not `None`.
 fn connection_params_from_args(
     checker: &Checker,
+    arenas: &NodeArenas,
     args: &[Arg],
     locals: &Locals,
 ) -> Option<Vec<ParamBinding>> {
-    let items = match args.get(1).map(|a| &a.value.kind) {
+    let items = match args
+        .get(1)
+        .and_then(|a| arenas.expr(a.value))
+        .map(|value| &value.kind)
+    {
         None => return Some(Vec::new()),
         Some(ExprKind::ArrayLiteral(items)) => items,
         Some(_) => return None,
     };
-    let types_by_key: Vec<(ParamKey, bool, bool)> = match args.get(2).map(|a| &a.value.kind) {
-        Some(ExprKind::ArrayLiteral(type_items)) => type_items
+    let types_by_key: Vec<(ParamKey, bool, bool)> = match args
+        .get(2)
+        .and_then(|a| arenas.expr(a.value))
+        .map(|value| &value.kind)
+    {
+        Some(ExprKind::ArrayLiteral(type_items)) => arenas
+            .array_items(type_items.clone())
             .iter()
             .enumerate()
             .filter_map(|(position, item)| {
                 let key = match &item.key {
-                    Some(k) => param_key_from_expr(checker, k, locals)?,
+                    Some(k) => param_key_from_expr(checker, arenas, *k, locals)?,
                     None => ParamKey::Positional(position as i64),
                 };
+                let value = arenas.expr(item.value)?;
                 Some((
                     key,
-                    is_array_parameter_type(checker, &item.value),
-                    is_integer_parameter_type(checker, &item.value),
+                    is_array_parameter_type(checker, value),
+                    is_integer_parameter_type(checker, value),
                 ))
             })
             .collect(),
         _ => Vec::new(),
     };
     let mut params = Vec::new();
-    for (position, item) in items.iter().enumerate() {
+    for (position, item) in arenas.array_items(items.clone()).iter().enumerate() {
         let Some(key) = (match &item.key {
-            Some(k) => param_key_from_expr(checker, k, locals),
+            Some(k) => param_key_from_expr(checker, arenas, *k, locals),
             None => Some(ParamKey::Positional(position as i64)),
         }) else {
             // An undecidable key makes only *that* binding unusable for
@@ -139,7 +150,7 @@ fn connection_params_from_args(
             // known information, not discarded wholesale.
             continue;
         };
-        let value_ty = checker.infer_expr(&item.value, locals);
+        let value_ty = checker.infer_expr(arenas.expr(item.value)?, locals);
         let expects_array = types_by_key
             .iter()
             .any(|(k, expects_array, _)| *k == key && *expects_array);
@@ -184,6 +195,7 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_dbal_parameter_binding(
         &mut self,
+        arenas: &NodeArenas,
         class: &str,
         method: &str,
         recv: &ExprNode,
@@ -221,10 +233,13 @@ impl<'a> Checker<'a> {
             };
             (sql, chain.params)
         } else {
-            let Some(sql) = self.foldable_sql_string(&args[0].value, locals) else {
+            let Some(sql_expr) = arenas.expr(args[0].value) else {
                 return;
             };
-            let Some(bindings) = connection_params_from_args(self, args, locals) else {
+            let Some(sql) = self.foldable_sql_string(sql_expr, locals) else {
+                return;
+            };
+            let Some(bindings) = connection_params_from_args(self, arenas, args, locals) else {
                 return;
             };
             (sql, bindings)

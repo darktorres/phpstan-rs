@@ -737,9 +737,8 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
         let Ok(parsed) = syntax::parse(source.as_bytes()) else {
             continue;
         };
-        let mut program = parsed.stmts;
-        crate::stub_attributes::apply_stub_attributes(&mut program);
-        let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
+        let registry =
+            Registry::index_and_flatten(&parsed.arenas, parsed.statements(), &Origin::Unknown);
         for (name, stub) in registry.iter_classes() {
             let Some((_, info)) = classes
                 .iter_mut()
@@ -1426,29 +1425,26 @@ pub(crate) fn embedded_stub_files() -> Vec<(String, &'static str, Origin)> {
 
 /// The tree of an embedded stub source as the stub build reads it: parsed,
 /// with the stub attributes applied.
-pub(crate) fn stub_program(
-    source: &str,
-) -> Result<Vec<syntax::ast::StmtNode>, syntax::parser::ParseError> {
-    let mut program = syntax::parse(source.as_bytes())?.stmts;
-    crate::stub_attributes::apply_stub_attributes(&mut program);
-    Ok(program)
+pub(crate) fn stub_program(source: &str) -> Result<syntax::ParsedFile, syntax::parser::ParseError> {
+    syntax::parse(source.as_bytes())
 }
 
 /// Parses and indexes one embedded stub file, from `origin`.
 fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
-    let program = stub_program(source).expect("vendored phpstorm-stubs source failed to parse");
-    index_stub_program(&program, origin)
+    let parsed = stub_program(source).expect("vendored phpstorm-stubs source failed to parse");
+    index_stub_program(&parsed.arenas, parsed.statements(), origin)
 }
 
 /// What the stub build takes of an embedded stub file's tree, `program`,
 /// from `origin`.
 pub(crate) fn index_stub_program(
-    program: &[syntax::ast::StmtNode],
+    arenas: &syntax::ast::NodeArenas,
+    program: &[syntax::ast::StmtId],
     origin: &Origin,
 ) -> StubFileDeclarations {
-    let registry = Registry::index_and_flatten(program, origin);
+    let registry = Registry::index_and_flatten(arenas, program, origin);
     StubFileDeclarations {
-        references: crate::deps::referenced_names(program)
+        references: crate::deps::referenced_names(arenas, program)
             .iter()
             .filter_map(crate::deps::RefKey::stub_key)
             .map(str::to_string)

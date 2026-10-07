@@ -19,14 +19,14 @@ impl Canonical for DocCommentRanges {
 
 impl Canonical for StmtNode {
     fn canonical(&self, p: &mut Printer) {
-        let StmtNode { id: _, kind, span } = self;
-        span.canonical(p);
-        p.atom(" ");
-        kind.canonical(p);
+        crate::stack::guard(|| self.kind.canonical(p));
     }
 
     fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
-        let StmtNode { id: _, kind, span } = self;
+        let span = arenas
+            .stmt_span(self.id)
+            .expect("canonical statement belongs to its owner arenas");
+        let kind = &self.kind;
         span.canonical(p);
         p.atom(" ");
         if let Some(site) = arenas.doc_site(span.start) {
@@ -39,17 +39,16 @@ impl Canonical for StmtNode {
 
 impl Canonical for ExprNode {
     fn canonical(&self, p: &mut Printer) {
-        let ExprNode { id: _, kind, span } = self;
-        span.canonical(p);
-        p.atom(" ");
-        crate::stack::guard(|| kind.canonical(p));
+        crate::stack::guard(|| self.kind.canonical(p));
     }
 
     fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
-        let ExprNode { id: _, kind, span } = self;
+        let span = arenas
+            .expr_span(self.id)
+            .expect("canonical expression belongs to its owner arenas");
         span.canonical(p);
         p.atom(" ");
-        crate::stack::guard(|| kind.canonical_with(p, arenas));
+        crate::stack::guard(|| self.kind.canonical_with(p, arenas));
     }
 }
 
@@ -115,14 +114,24 @@ macro_rules! canonical_arena_range {
             }
 
             fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
-                p.list_with(arenas.$get(*self).iter(), arenas);
+                p.list_with(arenas.$get(self.clone()).iter(), arenas);
             }
         }
     };
 }
 
 canonical_arena_range!(ArgRange, Arg, args, "argument");
-canonical_arena_range!(StmtIdRange, StmtId, stmt_ids, "statement");
+impl Canonical for StmtIdRange {
+    fn canonical(&self, p: &mut Printer) {
+        let start = u32::from(self.start().into_raw());
+        let end = u32::from(self.end().into_raw());
+        p.tuple("range", &[&start, &end]);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(arenas.stmt_ids(self).iter(), arenas);
+    }
+}
 impl Canonical for ExprIdRange {
     fn canonical(&self, p: &mut Printer) {
         let start = u32::from(self.start().into_raw());
@@ -161,22 +170,56 @@ macro_rules! canonical_list_arena_range {
             }
 
             fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+                p.list_with(arenas.$get(self.clone()).iter(), arenas);
+            }
+        }
+    };
+}
+
+macro_rules! canonical_list_arena_range_ref {
+    ($range:ty, $get:ident) => {
+        impl Canonical for $range {
+            fn canonical(&self, p: &mut Printer) {
+                let start = u32::from(self.start().into_raw());
+                let end = u32::from(self.end().into_raw());
+                p.tuple("range", &[&start, &end]);
+            }
+
+            fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
                 p.list_with(arenas.$get(self).iter(), arenas);
             }
         }
     };
 }
 
-canonical_list_arena_range!(QualifiedNameRange, qualified_names);
-canonical_list_arena_range!(PropertyRange, properties);
-canonical_list_arena_range!(ClassConstRange, class_consts);
-canonical_list_arena_range!(TraitUseRange, trait_uses);
-canonical_list_arena_range!(EnumCaseRange, enum_cases);
-canonical_list_arena_range!(TraitAliasRange, trait_aliases);
-canonical_list_arena_range!(TraitPrecedenceRange, trait_precedences);
-canonical_list_arena_range!(UseImportRange, use_imports);
-canonical_list_arena_range!(ClosureUseRange, closure_uses);
-canonical_list_arena_range!(TypeHintRange, type_hints);
+canonical_list_arena_range!(QualifiedNameRange, qualified_names_range);
+canonical_list_arena_range!(ElseIfRange, elseifs);
+canonical_list_arena_range!(SwitchCaseRange, switch_cases);
+canonical_list_arena_range!(CatchClauseRange, catch_clauses);
+canonical_list_arena_range!(DeclareDirectiveRange, declare_directives);
+canonical_list_arena_range!(GlobalVarRange, global_vars);
+canonical_list_arena_range!(StaticVarRange, static_vars);
+
+impl Canonical for ClassDeclRange {
+    fn canonical(&self, p: &mut Printer) {
+        let start = u32::from(self.start().into_raw());
+        let end = u32::from(self.end().into_raw());
+        p.tuple("range", &[&start, &end]);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        arenas.class_decl(self.clone()).canonical_with(p, arenas);
+    }
+}
+canonical_list_arena_range_ref!(PropertyRange, properties);
+canonical_list_arena_range_ref!(ClassConstRange, class_consts);
+canonical_list_arena_range_ref!(TraitUseRange, trait_uses);
+canonical_list_arena_range_ref!(EnumCaseRange, enum_cases);
+canonical_list_arena_range_ref!(TraitAliasRange, trait_aliases);
+canonical_list_arena_range_ref!(TraitPrecedenceRange, trait_precedences);
+canonical_list_arena_range_ref!(UseImportRange, use_imports);
+canonical_list_arena_range_ref!(ClosureUseRange, closure_uses);
+canonical_list_arena_range_ref!(TypeHintRange, type_hints);
 
 impl Canonical for crate::parse::ParsedFile {
     fn canonical(&self, p: &mut Printer) {
@@ -298,6 +341,8 @@ canonical_struct!(CatchClause {
     span,
 });
 
+canonical_struct!(DeclareDirective { name, value });
+
 canonical_struct!(Promotion {
     visibility,
     set_visibility,
@@ -312,6 +357,7 @@ impl Canonical for Param {
             &[
                 ("name", &self.name),
                 ("type_hint", &self.type_hint),
+                ("type_aware_override", &self.type_aware_override),
                 ("default", &self.default),
                 ("by_ref", &self.by_ref),
                 ("variadic", &self.variadic),
@@ -566,7 +612,11 @@ impl Canonical for StringPayload {
     fn canonical(&self, p: &mut Printer) {
         match self {
             StringPayload::Source(span) => p.tuple("source", &[span]),
-            StringPayload::Decoded(range) => p.tuple("decoded", &[range.start(), range.end()]),
+            StringPayload::Decoded(range) => {
+                let start = range.start();
+                let end = range.end();
+                p.tuple("decoded", &[&start, &end]);
+            }
             StringPayload::Owned(value) => p.tuple("owned", &[value]),
         }
     }
@@ -618,12 +668,12 @@ canonical_struct!(ClosureUse { name, by_ref });
 
 canonical_enum!(InstanceofTarget {
     Name(name),
-    ExprNode(expr),
+    Expr(expr),
 });
 
 canonical_enum!(StaticTarget {
     Name(name),
-    ExprNode(expr),
+    Expr(expr),
 });
 
 canonical_struct!(TypeHint { kind, span });
@@ -660,6 +710,8 @@ canonical_enum!(GlobalVar {
     Name(name),
     Dynamic(expr),
 });
+
+canonical_struct!(StaticVarDecl { name, default });
 
 canonical_enum!(ExitKind { Exit, Die });
 

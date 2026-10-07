@@ -1,26 +1,37 @@
 use super::super::*;
-use super::helpers::{parse, text_at};
+use super::helpers::text_at;
 
 /// `expr` as nested parentheses over its binary operators, variables as
 /// their names.
-fn grouped(expr: &ExprNode) -> String {
+fn grouped(arenas: &NodeArenas, id: ExprId) -> String {
+    let expr = arenas
+        .expr(id)
+        .expect("expression id belongs to parsed tree");
     match &expr.kind {
         ExprKind::Binary(op, left, right) => {
-            format!("({} {op:?} {})", grouped(left), grouped(right))
+            format!(
+                "({} {op:?} {})",
+                grouped(arenas, *left),
+                grouped(arenas, *right)
+            )
         }
         ExprKind::Variable(name) => name.to_string(),
         other => panic!("not a binary or variable: {other:?}"),
     }
 }
 
-fn statement_expr(src: &str) -> (Vec<StmtNode>, usize) {
-    (parse(src), 0)
+fn statement_expr(src: &str) -> crate::ParsedFile {
+    crate::parse(src.as_bytes()).expect("parses")
 }
 
 fn grouping_of(source: &str) -> String {
-    let (stmts, at) = statement_expr(&format!("<?php {source};"));
-    match &stmts[at].kind {
-        StmtKind::Expression(expr) => grouped(expr),
+    let parsed = statement_expr(&format!("<?php {source};"));
+    let stmt = parsed
+        .arenas
+        .stmt(parsed.statements()[0])
+        .expect("statement");
+    match &stmt.kind {
+        StmtKind::Expression(expr) => grouped(&parsed.arenas, *expr),
         other => panic!("not an expression statement: {other:?}"),
     }
 }
@@ -59,19 +70,34 @@ fn concat_is_looser_than_arithmetic() {
 #[test]
 fn a_binary_expressions_span_runs_from_its_first_operand_to_its_last() {
     let src = "<?php $a + $b * $c - $d;";
-    let stmts = parse(src);
-    let StmtKind::Expression(expr) = &stmts[0].kind else {
+    let parsed = statement_expr(src);
+    let stmt = parsed
+        .arenas
+        .stmt(parsed.statements()[0])
+        .expect("statement");
+    let StmtKind::Expression(expr) = &stmt.kind else {
         panic!("an expression statement");
     };
-    assert_eq!(text_at(src, expr.span), "$a + $b * $c - $d");
-    let ExprKind::Binary(_, left, _) = &expr.kind else {
+    assert_eq!(
+        text_at(src, parsed.arenas.expr_span(*expr).unwrap()),
+        "$a + $b * $c - $d"
+    );
+    let expression = parsed.arenas.expr(*expr).expect("expression");
+    let ExprKind::Binary(_, left, _) = &expression.kind else {
         panic!("a binary");
     };
-    assert_eq!(text_at(src, left.span), "$a + $b * $c");
-    let ExprKind::Binary(_, _, product) = &left.kind else {
+    assert_eq!(
+        text_at(src, parsed.arenas.expr_span(*left).unwrap()),
+        "$a + $b * $c"
+    );
+    let left_expr = parsed.arenas.expr(*left).expect("left expression");
+    let ExprKind::Binary(_, _, product) = &left_expr.kind else {
         panic!("a binary");
     };
-    assert_eq!(text_at(src, product.span), "$b * $c");
+    assert_eq!(
+        text_at(src, parsed.arenas.expr_span(*product).unwrap()),
+        "$b * $c"
+    );
 }
 
 #[test]

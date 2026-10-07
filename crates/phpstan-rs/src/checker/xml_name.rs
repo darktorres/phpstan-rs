@@ -10,7 +10,7 @@
 //! namespace-restricted `NCName` one.
 
 use crate::checker::Checker;
-use syntax::ast::{Arg, ExprKind, Literal};
+use syntax::ast::{Arg, ExprKind, Literal, NodeArenas};
 use syntax::span::Span;
 
 impl<'a> Checker<'a> {
@@ -21,6 +21,7 @@ impl<'a> Checker<'a> {
     /// than special-cased here.
     pub(crate) fn check_dom_create_element(
         &mut self,
+        arenas: &NodeArenas,
         class: &str,
         method: &str,
         args: &[Arg],
@@ -33,10 +34,20 @@ impl<'a> Checker<'a> {
         if arg.name.is_some() || arg.spread {
             return;
         }
-        let ExprKind::Literal(Literal::String(name)) = &arg.value.peeled().kind else {
+        let value = arenas
+            .peeled(arg.value)
+            .and_then(|id| arenas.expr(id))
+            .expect("call argument belongs to its retained file owner");
+        let ExprKind::Literal(Literal::String(name)) = &value.kind else {
             return;
         };
-        if name.as_str().is_none_or(is_valid_xml_name) {
+        let Some(name) = arenas
+            .string_bytes(name)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        else {
+            return;
+        };
+        if is_valid_xml_name(name) {
             return;
         }
         self.report(format!("DOMDocument::createElement() name '{name}' is not a valid XML element name and will throw at runtime"),

@@ -5,8 +5,6 @@
 use super::helpers::*;
 use crate::vendor::*;
 use syntax::ast::*;
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
 
 #[test]
 fn no_composer_json_means_no_context() {
@@ -169,12 +167,18 @@ fn dunder_dir_lexes_and_parses_as_a_bare_name() {
     // Sanity check this project's own parser treats `__DIR__` as an
     // ordinary bareword constant reference, same as any other bare
     // constant - the assumption `eval_concat` depends on entirely.
-    let tokens = Lexer::new("<?php return __DIR__;").tokenize_with_spans();
-    let program = Parser::new(tokens).parse_program().unwrap();
-    assert_eq!(program.len(), 1);
-    match &program[0].kind {
-        StmtKind::Return(Some(e)) => {
-            assert!(matches!(&e.kind, ExprKind::Name(n) if n == "__DIR__"));
+    let parsed = syntax::parse(b"<?php return __DIR__;").unwrap();
+    assert_eq!(parsed.statements().len(), 1);
+    match &parsed.stmt(parsed.statements()[0]).unwrap().kind {
+        StmtKind::Return(Some(expr)) => {
+            assert!(matches!(
+                &parsed.expr(*expr).unwrap().kind,
+                ExprKind::Name(n)
+                    if parsed
+                        .arenas
+                        .qualified_name(n)
+                        .is_some_and(|n| n == "__DIR__")
+            ));
         }
         other => panic!("expected a Return statement, got {other:?}"),
     }

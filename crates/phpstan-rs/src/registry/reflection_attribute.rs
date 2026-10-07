@@ -5,7 +5,9 @@
 use syntax::name::Name;
 
 use crate::registry::name_context::class_ref;
-use syntax::ast::{Arg, Attribute, BinOp, ExprKind, ExprNode, Literal, StaticTarget, UnaryOp};
+use syntax::ast::{
+    Arg, Attribute, BinOp, ExprId, ExprKind, Literal, NodeArenas, StaticTarget, UnaryOp,
+};
 
 /// One attribute on a declaration.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -48,18 +50,22 @@ pub enum AttributeValue {
 
 impl ReflectionAttribute {
     /// `attribute` as written, its names resolved.
-    pub(crate) fn from_ast(attribute: &Attribute) -> ReflectionAttribute {
+    pub(crate) fn from_ast(arenas: &NodeArenas, attribute: &Attribute) -> ReflectionAttribute {
         ReflectionAttribute {
             name: class_ref(&attribute.name),
-            arguments: attribute.args.iter().map(argument).collect(),
+            arguments: arenas
+                .args(attribute.args.clone())
+                .iter()
+                .map(|arg| argument(arenas, arg))
+                .collect(),
         }
     }
 
     /// Every attribute in `attributes`.
-    pub(crate) fn all(attributes: &[Attribute]) -> Vec<ReflectionAttribute> {
+    pub(crate) fn all(arenas: &NodeArenas, attributes: &[Attribute]) -> Vec<ReflectionAttribute> {
         attributes
             .iter()
-            .map(ReflectionAttribute::from_ast)
+            .map(|attribute| ReflectionAttribute::from_ast(arenas, attribute))
             .collect()
     }
 
@@ -96,38 +102,51 @@ impl ReflectionAttribute {
     }
 }
 
-fn argument(arg: &Arg) -> AttributeArgument {
+fn argument(arenas: &NodeArenas, arg: &Arg) -> AttributeArgument {
     AttributeArgument {
         name: arg.name.as_deref().map(Name::from),
         value: if arg.spread {
             AttributeValue::Unsupported
         } else {
-            value(&arg.value)
+            value(arenas, arg.value)
         },
     }
 }
 
-fn value(expr: &ExprNode) -> AttributeValue {
-    let expr = expr.peeled();
+fn value(arenas: &NodeArenas, id: ExprId) -> AttributeValue {
+    let Some(id) = arenas.peeled(id) else {
+        return AttributeValue::Unsupported;
+    };
+    let Some(expr) = arenas.expr(id) else {
+        return AttributeValue::Unsupported;
+    };
     syntax::stack::guard(|| match &expr.kind {
         ExprKind::Literal(Literal::Null) => AttributeValue::Null,
         ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
         ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),
         ExprKind::Literal(Literal::Float(f)) => AttributeValue::Float(*f),
         ExprKind::Literal(Literal::String(s)) => {
-            AttributeValue::String(Name::from(&*s.to_str_lossy()))
+            let Some(bytes) = arenas.string_bytes(s) else {
+                return AttributeValue::Unsupported;
+            };
+            AttributeValue::String(Name::from(String::from_utf8_lossy(bytes).into_owned()))
         }
-        ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner) {
+        ExprKind::Unary(UnaryOp::Neg, inner) => match value(arenas, *inner) {
             AttributeValue::Int(i) => AttributeValue::Int(i.wrapping_neg()),
             AttributeValue::Float(f) => AttributeValue::Float(-f),
             _ => AttributeValue::Unsupported,
         },
-        ExprKind::Name(name) => match name.to_ascii_lowercase().trim_start_matches('\\') {
-            "true" => AttributeValue::Bool(true),
-            "false" => AttributeValue::Bool(false),
-            "null" => AttributeValue::Null,
-            _ => AttributeValue::Constant(name.written.clone()),
-        },
+        ExprKind::Name(name) => {
+            let Some(name) = arenas.qualified_name(name) else {
+                return AttributeValue::Unsupported;
+            };
+            match name.written.to_ascii_lowercase().trim_start_matches('\\') {
+                "true" => AttributeValue::Bool(true),
+                "false" => AttributeValue::Bool(false),
+                "null" => AttributeValue::Null,
+                _ => AttributeValue::Constant(name.written.clone()),
+            }
+        }
         ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
             AttributeValue::ClassName(class_ref(class))
         }
@@ -138,20 +157,21 @@ fn value(expr: &ExprNode) -> AttributeValue {
             }
         }
         ExprKind::ArrayLiteral(items) => {
+            let items = arenas.array_items(items.clone());
             if items.iter().any(|i| i.spread) {
                 return AttributeValue::Unsupported;
             }
             AttributeValue::Array(
                 items
                     .iter()
-                    .map(|i| (i.key.as_ref().map(value), value(&i.value)))
+                    .map(|i| (i.key.map(|key| value(arenas, key)), value(arenas, i.value)))
                     .collect(),
             )
         }
         ExprKind::Binary(BinOp::BitOr, left, right) => {
             let mut operands = Vec::new();
             for side in [left, right] {
-                match value(side) {
+                match value(arenas, *side) {
                     AttributeValue::BitOr(inner) => operands.extend(inner),
                     other => operands.push(other),
                 }

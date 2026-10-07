@@ -16,7 +16,7 @@ use crate::checker::type_declarations::TypePosition;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, any_stmt_in_body, walk_args, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 use types::php_version::PhpFeature;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,8 +29,8 @@ enum PromotionSite {
 /// Where a function-like's `return` values come from, for
 /// `ReturnNullsafeByRefRule`.
 enum ReturnSource<'s> {
-    Body(&'s [StmtNode]),
-    Arrow(&'s ExprNode),
+    Body(&'s [StmtId]),
+    Arrow(ExprId),
 }
 
 const SUPERGLOBALS: [&str; 9] = [
@@ -39,15 +39,23 @@ const SUPERGLOBALS: [&str; 9] = [
 
 /// Every `return <expr>` directly in `body`, not inside a nested
 /// function-like or class declaration.
-fn collect_return_exprs<'s>(body: &'s [StmtNode], out: &mut Vec<&'s ExprNode>) {
-    for stmt in body {
-        any_stmt_in_body(stmt, |s| {
-            if let StmtKind::Return(Some(e)) = &s.kind {
-                out.push(e);
+fn collect_return_exprs(arenas: &NodeArenas, body: &[StmtId]) -> Vec<ExprId> {
+    struct Returns(Vec<ExprId>);
+    impl Visitor for Returns {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            match &stmt.kind {
+                StmtKind::Return(Some(expr)) => self.0.push(*expr),
+                StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
+                _ => arena::walk_stmt(self, arenas, id),
             }
-            false
-        });
+        }
     }
+    let mut returns = Returns(Vec::new());
+    arena::walk_stmts(&mut returns, arenas, body);
+    returns.0
 }
 
 /// The function-like declarations in one body - named functions,
@@ -57,91 +65,145 @@ struct Promotions<'c, 'a> {
     checker: &'c mut Checker<'a>,
 }
 
-impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Promotions<'_, '_> {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
         match &stmt.kind {
-            StmtKind::FunctionDecl(f) => {
+            StmtKind::FunctionDecl(function) => {
+                let Some(f) = arenas.function(*function) else {
+                    return;
+                };
+                let params = arenas.params(f.params.clone());
                 self.checker.check_function_like_declaration(
-                    &f.params,
+                    arenas,
+                    params,
                     (
                         f.return_type.as_ref(),
                         f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
                     ),
                     PromotionSite::NotConstructor,
                     f.by_ref,
-                    Some(ReturnSource::Body(f.body_stmts())),
+                    Some(ReturnSource::Body(f.body_stmts(arenas))),
                     None,
                 );
-                self.checker.walk_promoted_in_body(f.body_stmts());
+                self.checker
+                    .walk_promoted_in_body(arenas, f.body_stmts(arenas));
             }
             StmtKind::ClassDecl(c) => {
+                let c = arenas.class_decl(c.clone());
                 let fqn = c.fq_name().to_string();
+                let Some(def) = arenas.class(c.def) else {
+                    return;
+                };
                 let previous_class = self.checker.current_class.replace(fqn.clone());
+                self.checker.check_promoted_in_methods(
+                    arenas,
+                    &fqn,
+                    def.kind,
+                    arenas.methods(def.methods.clone()),
+                );
                 self.checker
-                    .check_promoted_in_methods(&fqn, c.def.kind, &c.def.methods);
-                self.checker
-                    .walk_promoted_in_property_hooks(&c.def.properties);
+                    .walk_promoted_in_property_hooks(arenas, def.properties(arenas));
                 self.checker.current_class = previous_class;
             }
-            _ => walk_stmt(self, stmt),
+            _ => arena::walk_stmt(self, arenas, id),
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else {
+            return;
+        };
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Closure(closure) => {
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) else {
+                    return;
+                };
                 let syntax::ast::ClosureExpr {
                     params,
                     body,
                     by_ref,
                     return_type,
                     ..
-                } = &**closure;
+                } = closure;
+                let params = arenas.params(params.clone());
                 self.checker.check_function_like_declaration(
+                    arenas,
                     params,
-                    (return_type.as_deref(), e.span),
+                    (
+                        return_type.as_deref(),
+                        arenas.expr_span(e.id).unwrap_or_default(),
+                    ),
                     PromotionSite::NotConstructor,
                     *by_ref,
-                    Some(ReturnSource::Body(body)),
+                    Some(ReturnSource::Body(arenas.stmt_ids(body))),
                     None,
                 );
-                self.checker
-                    .check_literal_default_parameter_types(params, "anonymous function");
-                walk_stmts(self, body);
+                self.checker.check_literal_default_parameter_types(
+                    arenas,
+                    params,
+                    "anonymous function",
+                );
+                arena::walk_stmts(self, arenas, arenas.stmt_ids(body));
             }
             ExprKind::ArrowFn(arrow) => {
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*arrow) else {
+                    return;
+                };
                 let syntax::ast::ArrowFnExpr {
                     params,
                     body,
                     by_ref,
                     return_type,
                     ..
-                } = &**arrow;
+                } = arrow;
+                let params = arenas.params(params.clone());
                 self.checker.check_function_like_declaration(
+                    arenas,
                     params,
-                    (return_type.as_deref(), e.span),
+                    (
+                        return_type.as_deref(),
+                        arenas.expr_span(e.id).unwrap_or_default(),
+                    ),
                     PromotionSite::NotConstructor,
                     *by_ref,
-                    Some(ReturnSource::Arrow(body)),
+                    Some(ReturnSource::Arrow(*body)),
                     None,
                 );
-                self.checker
-                    .check_literal_default_parameter_types(params, "arrow function");
-                self.visit_expr(body);
+                self.checker.check_literal_default_parameter_types(
+                    arenas,
+                    params,
+                    "arrow function",
+                );
+                self.visit_expr(arenas, *body);
             }
-            ExprKind::NewAnonymousClass(class) => {
-                walk_args(self, &class.args);
-                let Some(name) = &class.name else {
+            ExprKind::NewAnonymousClass(class_id) => {
+                let Some(class) = arenas.anonymous_class(*class_id) else {
+                    return;
+                };
+                for arg in arenas.args(class.args.clone()) {
+                    self.visit_expr(arenas, arg.value);
+                }
+                let Some(name) = arenas.anonymous_class_name(*class_id) else {
+                    return;
+                };
+                let Some(def) = arenas.class(class.def) else {
                     return;
                 };
                 let previous_class = self.checker.current_class.replace(name.to_string());
+                self.checker.check_promoted_in_methods(
+                    arenas,
+                    name,
+                    def.kind,
+                    arenas.methods(def.methods.clone()),
+                );
                 self.checker
-                    .check_promoted_in_methods(name, class.def.kind, &class.def.methods);
-                self.checker
-                    .walk_promoted_in_property_hooks(&class.def.properties);
+                    .walk_promoted_in_property_hooks(arenas, def.properties(arenas));
                 self.checker.current_class = previous_class;
             }
-            _ => walk_expr(self, e),
+            _ => arena::walk_expr(self, arenas, id),
         })
     }
 }
@@ -153,19 +215,29 @@ fn is_promoted(p: &Param) -> bool {
 impl<'a> Checker<'a> {
     /// Entry point for one top-level statement of `check_program`'s own
     /// loop, so class names resolve against the positional `name_ctx`.
-    pub(crate) fn check_function_like_declarations_in_stmt(&mut self, stmt: &StmtNode) {
-        Promotions { checker: self }.visit_stmt(stmt);
+    pub(crate) fn check_function_like_declarations_in_stmt(
+        &mut self,
+        arenas: &NodeArenas,
+        stmt: StmtId,
+    ) {
+        Promotions { checker: self }.visit_stmt(arenas, stmt);
     }
 
-    fn walk_promoted_in_body(&mut self, body: &[StmtNode]) {
-        walk_stmts(&mut Promotions { checker: self }, body);
+    fn walk_promoted_in_body(&mut self, arenas: &NodeArenas, body: &[StmtId]) {
+        arena::walk_stmts(&mut Promotions { checker: self }, arenas, body);
     }
 
-    fn walk_promoted_in_expr(&mut self, e: &ExprNode) {
-        Promotions { checker: self }.visit_expr(e);
+    fn walk_promoted_in_expr(&mut self, arenas: &NodeArenas, e: ExprId) {
+        Promotions { checker: self }.visit_expr(arenas, e);
     }
 
-    fn check_promoted_in_methods(&mut self, fqn: &str, kind: ClassKind, methods: &[MethodDecl]) {
+    fn check_promoted_in_methods(
+        &mut self,
+        arenas: &NodeArenas,
+        fqn: &str,
+        kind: ClassKind,
+        methods: &[MethodDecl],
+    ) {
         for m in methods {
             let is_constructor = m.function.is_constructor()
                 || (kind == ClassKind::Trait
@@ -181,9 +253,10 @@ impl<'a> Checker<'a> {
                 .function
                 .body
                 .is_some()
-                .then_some(ReturnSource::Body(m.function.body_stmts()));
+                .then_some(ReturnSource::Body(m.function.body_stmts(arenas)));
             self.check_function_like_declaration(
-                &m.function.params,
+                arenas,
+                arenas.params(m.function.params.clone()),
                 (
                     m.function.return_type.as_ref(),
                     m.function
@@ -197,11 +270,15 @@ impl<'a> Checker<'a> {
                 returns,
                 Some(fqn),
             );
-            self.walk_promoted_in_body(m.function.body_stmts());
+            self.walk_promoted_in_body(arenas, m.function.body_stmts(arenas));
         }
     }
 
-    fn walk_promoted_in_property_hooks(&mut self, properties: &[PropertyDecl]) {
+    fn walk_promoted_in_property_hooks(
+        &mut self,
+        arenas: &NodeArenas,
+        properties: &[PropertyDecl],
+    ) {
         for p in properties {
             let Some(hooks) = &p.hooks else {
                 continue;
@@ -211,8 +288,10 @@ impl<'a> Checker<'a> {
             }
             for hook in hooks.iter() {
                 match &hook.body {
-                    PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e),
-                    PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts),
+                    PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(arenas, *e),
+                    PropertyHookBody::Block(stmts) => {
+                        self.walk_promoted_in_body(arenas, arenas.stmt_ids(stmts))
+                    }
                     PropertyHookBody::Abstract => {}
                 }
             }
@@ -242,6 +321,7 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     fn check_function_like_declaration(
         &mut self,
+        arenas: &NodeArenas,
         params: &[Param],
         return_type: (Option<&TypeHint>, Span),
         site: PromotionSite,
@@ -285,17 +365,16 @@ impl<'a> Checker<'a> {
             }
         }
         if by_ref {
-            let mut return_exprs = Vec::new();
-            match returns {
-                Some(ReturnSource::Body(body)) => collect_return_exprs(body, &mut return_exprs),
-                Some(ReturnSource::Arrow(e)) => return_exprs.push(e),
-                None => {}
-            }
+            let return_exprs = match returns {
+                Some(ReturnSource::Body(body)) => collect_return_exprs(arenas, body),
+                Some(ReturnSource::Arrow(expr)) => vec![expr],
+                None => Vec::new(),
+            };
             for e in return_exprs {
-                if contains_nullsafe_access(e) {
+                if contains_nullsafe_access(arenas, e) {
                     self.report_declaration(
                         "Nullsafe cannot be returned by reference.",
-                        e.span,
+                        arenas.expr_span(e).unwrap_or_default(),
                         "nullsafe.byRef",
                     );
                 }
@@ -309,9 +388,14 @@ impl<'a> Checker<'a> {
     /// hint is resolved here. A `null` default makes a typed parameter
     /// implicitly nullable, and a default of unknown type is always
     /// accepted, so neither is a mismatch.
-    fn check_literal_default_parameter_types(&mut self, params: &[Param], kind: &str) {
+    fn check_literal_default_parameter_types(
+        &mut self,
+        arenas: &NodeArenas,
+        params: &[Param],
+        kind: &str,
+    ) {
         for (i, p) in params.iter().enumerate() {
-            let Some(default) = &p.default else {
+            let Some(default) = p.default.and_then(|id| arenas.expr(id)) else {
                 continue;
             };
             if p.variadic || p.type_hint.is_none() {
@@ -335,7 +419,7 @@ impl<'a> Checker<'a> {
                     i + 1,
                     p.name,
                 ),
-                default.span,
+                self.expr_span(default.id),
                 2,
                 "parameter.defaultValue",
             );

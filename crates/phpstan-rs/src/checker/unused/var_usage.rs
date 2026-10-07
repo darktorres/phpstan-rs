@@ -57,6 +57,7 @@ pub(crate) fn collect_var_usage(arenas: &NodeArenas, stmts: &[StmtId]) -> VarUsa
 /// call in a namespace falls back to.
 fn is_call_to(arenas: &NodeArenas, callee: ExprId, target: &str) -> bool {
     matches!(arenas.expr(callee).map(|node| &node.kind), Some(ExprKind::Name(n)) if {
+        let Some(n) = arenas.qualified_name(n) else { return false };
         let (primary, fallback) = n.candidates();
         fallback.unwrap_or(primary).eq_ignore_ascii_case(target)
     })
@@ -107,7 +108,7 @@ impl Visitor for Vars {
                     {
                         self.escaped = true;
                     } else if is_call_to(arenas, *callee, "compact") {
-                        for arg in arenas.args(*args) {
+                        for arg in arenas.args(args.clone()) {
                             collect_compact_names(
                                 arenas,
                                 arg.value,
@@ -164,7 +165,7 @@ fn collect_compact_names(arenas: &NodeArenas, id: ExprId, names: &mut NameSet, e
             }
         }
         ExprKind::ArrayLiteral(items) => {
-            for item in arenas.array_items(*items) {
+            for item in arenas.array_items(items.clone()) {
                 if item.spread {
                     *escaped = true;
                     continue;

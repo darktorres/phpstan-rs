@@ -272,7 +272,11 @@ impl Visitor for Collector {
                 }
             }
             StmtKind::Global(vars) => {
-                for name in vars.iter().filter_map(|v| v.name()) {
+                for name in arenas
+                    .global_vars(vars.clone())
+                    .iter()
+                    .filter_map(GlobalVar::name)
+                {
                     self.add(RefKey::global_variable(name));
                 }
             }
@@ -283,13 +287,18 @@ impl Visitor for Collector {
         // `visit_class_def`, to the same names: only a comment the
         // declaration does not have is read here.
         let declaration_doc = match &stmt.kind {
-            StmtKind::FunctionDecl(function) => function.doc_comment.as_ref(),
+            StmtKind::FunctionDecl(function) => arenas
+                .function(function.clone())
+                .and_then(|function| function.doc_comment.as_ref()),
             StmtKind::ClassDecl(class) => arenas
-                .class(class.def)
+                .class(arenas.class_decl(class.clone()).def)
                 .and_then(|def| def.doc_comment.as_ref()),
             _ => None,
         };
-        if let Some(site) = arenas.doc_site(stmt.span.start) {
+        if let Some(site) = arenas
+            .stmt_span(id)
+            .and_then(|span| arenas.doc_site(span.start))
+        {
             let declaration_doc =
                 declaration_doc.and_then(|ranges| arenas.doc_comment_text(ranges));
             if declaration_doc.as_deref() != Some(site.text.as_ref()) {
@@ -307,10 +316,10 @@ impl Visitor for Collector {
         ));
         if self.track_outside {
             // The parts that are not the body count as outside it.
-            for attr in arenas.attributes(function.attrs) {
+            for attr in arenas.attributes(function.attrs.clone()) {
                 self.visit_attribute(arenas, attr);
             }
-            for param in arenas.params(function.params) {
+            for param in arenas.params(function.params.clone()) {
                 self.visit_param(arenas, param);
             }
             if let Some(hint) = &function.return_type {
@@ -366,30 +375,40 @@ impl Visitor for Collector {
     fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(expr) = arenas.expr(id) else { return };
         match &expr.kind {
-            ExprKind::Name(name) => self.add_name(name, NameKind::Constant),
+            ExprKind::Name(name) => {
+                if let Some(name) = arenas.qualified_name(name) {
+                    self.add_name(name, NameKind::Constant);
+                }
+            }
             ExprKind::Call(callee, args)
                 if matches!(
-                    arenas.expr(*callee).map(|e| &e.kind),
+                    arenas.expr(callee.clone()).map(|e| &e.kind),
                     Some(ExprKind::Name(_))
                 ) =>
             {
                 if let Some(ExprNode {
                     kind: ExprKind::Name(name),
                     ..
-                }) = arenas.expr(*callee)
+                }) = arenas.expr(callee.clone())
                 {
-                    self.add_name(name, NameKind::Function);
+                    if let Some(name) = arenas.qualified_name(name) {
+                        self.add_name(name, NameKind::Function);
+                    }
                 }
-                for arg in args {
+                for arg in arenas.args(args.clone()) {
                     arena::walk_arg(self, arenas, arg);
                 }
             }
             ExprKind::New(class, args) => {
-                match arenas.expr(*class).map(|e| &e.kind) {
-                    Some(ExprKind::Name(name)) => self.add_name(name, NameKind::Class),
+                match arenas.expr(class.clone()).map(|e| &e.kind) {
+                    Some(ExprKind::Name(name)) => {
+                        if let Some(name) = arenas.qualified_name(name) {
+                            self.add_name(name, NameKind::Class);
+                        }
+                    }
                     _ => self.visit_expr(arenas, *class),
                 }
-                for arg in args {
+                for arg in arenas.args(args.clone()) {
                     arena::walk_arg(self, arenas, arg);
                 }
             }

@@ -19,6 +19,7 @@
 use std::io;
 use std::sync::Arc;
 
+use crate::ast::NodeArenas;
 use crate::name::Name;
 use crate::php_string::PhpString;
 use crate::references::{DocFrame, DocSite};
@@ -33,6 +34,14 @@ mod tree;
 /// unseen.
 pub trait Canonical {
     fn canonical(&self, p: &mut Printer);
+
+    /// Prints a value whose nested AST node ids belong to `arenas`.
+    /// Ordinary values use their representation-independent print, while
+    /// arena-aware AST values override this to follow ids through the owner.
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        let _ = arenas;
+        self.canonical(p);
+    }
 }
 
 /// `value`'s canonical print.
@@ -157,6 +166,31 @@ impl<'s> Printer<'s> {
         self.out.push('}');
     }
 
+    /// Writes a node while resolving arena-backed fields through `arenas`.
+    pub fn node_with(
+        &mut self,
+        kind: &str,
+        fields: &[(&str, &dyn Canonical)],
+        arenas: &NodeArenas,
+    ) {
+        self.out.push_str(kind);
+        if fields.is_empty() {
+            self.out.push_str(" {}");
+            return;
+        }
+        self.out.push_str(" {");
+        self.depth += 1;
+        for (name, value) in fields {
+            self.newline();
+            self.out.push_str(name);
+            self.out.push_str(": ");
+            value.canonical_with(self, arenas);
+        }
+        self.depth -= 1;
+        self.newline();
+        self.out.push('}');
+    }
+
     /// Writes a tuple of `kind` with `values`, `Kind(a, b)`, on the current
     /// line; without a kind, `(a, b)`.
     pub fn tuple(&mut self, kind: &str, values: &[&dyn Canonical]) {
@@ -167,6 +201,19 @@ impl<'s> Printer<'s> {
                 self.out.push_str(", ");
             }
             value.canonical(self);
+        }
+        self.out.push(')');
+    }
+
+    /// Writes a tuple while resolving arena-backed fields through `arenas`.
+    pub fn tuple_with(&mut self, kind: &str, values: &[&dyn Canonical], arenas: &NodeArenas) {
+        self.out.push_str(kind);
+        self.out.push('(');
+        for (i, value) in values.iter().enumerate() {
+            if i > 0 {
+                self.out.push_str(", ");
+            }
+            value.canonical_with(self, arenas);
         }
         self.out.push(')');
     }
@@ -183,6 +230,28 @@ impl<'s> Printer<'s> {
         for item in items {
             self.newline();
             item.canonical(self);
+        }
+        self.depth -= 1;
+        self.newline();
+        self.out.push(']');
+    }
+
+    /// Writes a list while resolving arena-backed items through `arenas`.
+    pub fn list_with<'a, T: Canonical + ?Sized + 'a>(
+        &mut self,
+        items: impl IntoIterator<Item = &'a T>,
+        arenas: &NodeArenas,
+    ) {
+        let mut items = items.into_iter().peekable();
+        if items.peek().is_none() {
+            self.out.push_str("[]");
+            return;
+        }
+        self.out.push('[');
+        self.depth += 1;
+        for item in items {
+            self.newline();
+            item.canonical_with(self, arenas);
         }
         self.depth -= 1;
         self.newline();
@@ -413,11 +482,19 @@ impl<T: Canonical + ?Sized> Canonical for &T {
     fn canonical(&self, p: &mut Printer) {
         (**self).canonical(p);
     }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        (**self).canonical_with(p, arenas);
+    }
 }
 
 impl<T: Canonical + ?Sized> Canonical for Box<T> {
     fn canonical(&self, p: &mut Printer) {
         (**self).canonical(p);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        (**self).canonical_with(p, arenas);
     }
 }
 
@@ -425,12 +502,20 @@ impl<T: Canonical + ?Sized> Canonical for Arc<T> {
     fn canonical(&self, p: &mut Printer) {
         (**self).canonical(p);
     }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        (**self).canonical_with(p, arenas);
+    }
 }
 
 /// What is stored: the value once set, `-` before.
 impl<T: Canonical> Canonical for std::sync::OnceLock<T> {
     fn canonical(&self, p: &mut Printer) {
         self.get().canonical(p);
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        self.get().canonical_with(p, arenas);
     }
 }
 
@@ -442,17 +527,32 @@ impl<T: Canonical> Canonical for Option<T> {
             None => p.atom("-"),
         }
     }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        match self {
+            Some(value) => value.canonical_with(p, arenas),
+            None => p.atom("-"),
+        }
+    }
 }
 
 impl<T: Canonical> Canonical for [T] {
     fn canonical(&self, p: &mut Printer) {
         p.list(self);
     }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(self, arenas);
+    }
 }
 
 impl<T: Canonical> Canonical for Vec<T> {
     fn canonical(&self, p: &mut Printer) {
         p.list(self.as_slice());
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        p.list_with(self.as_slice(), arenas);
     }
 }
 
@@ -568,6 +668,18 @@ macro_rules! canonical_struct {
                     &[$((stringify!($field), $field as &dyn $crate::canonical::Canonical)),*],
                 );
             }
+            fn canonical_with(
+                &self,
+                p: &mut $crate::canonical::Printer,
+                arenas: &$crate::ast::NodeArenas,
+            ) {
+                let $ty { $($field,)* $($($skipped: _,)* ..)? } = self;
+                p.node_with(
+                    stringify!($ty),
+                    &[$((stringify!($field), $field as &dyn $crate::canonical::Canonical)),*],
+                    arenas,
+                );
+            }
         }
     };
     ($ty:ident ( $($field:ident),* $(,)? )) => {
@@ -577,6 +689,18 @@ macro_rules! canonical_struct {
                 p.tuple(
                     stringify!($ty),
                     &[$($field as &dyn $crate::canonical::Canonical),*],
+                );
+            }
+            fn canonical_with(
+                &self,
+                p: &mut $crate::canonical::Printer,
+                arenas: &$crate::ast::NodeArenas,
+            ) {
+                let $ty($($field),*) = self;
+                p.tuple_with(
+                    stringify!($ty),
+                    &[$($field as &dyn $crate::canonical::Canonical),*],
+                    arenas,
                 );
             }
         }
@@ -602,6 +726,21 @@ macro_rules! canonical_enum {
                     )*
                 }
             }
+            fn canonical_with(
+                &self,
+                p: &mut $crate::canonical::Printer,
+                arenas: &$crate::ast::NodeArenas,
+            ) {
+                match self {
+                    $(
+                        $ty::$variant $(( $($pos),* ))? $({ $($named),* })? => {
+                            $crate::canonical_enum!(
+                                @print_with p, arenas, $variant $(( $($pos),* ))? $({ $($named),* })?
+                            )
+                        }
+                    )*
+                }
+            }
         }
     };
     (@print $p:ident, $variant:ident ( $($pos:ident),* )) => {
@@ -617,6 +756,23 @@ macro_rules! canonical_enum {
         )
     };
     (@print $p:ident, $variant:ident) => {
+        $p.atom(stringify!($variant))
+    };
+    (@print_with $p:ident, $arenas:ident, $variant:ident ( $($pos:ident),* )) => {
+        $p.tuple_with(
+            stringify!($variant),
+            &[$($pos as &dyn $crate::canonical::Canonical),*],
+            $arenas,
+        )
+    };
+    (@print_with $p:ident, $arenas:ident, $variant:ident { $($named:ident),* }) => {
+        $p.node_with(
+            stringify!($variant),
+            &[$((stringify!($named), $named as &dyn $crate::canonical::Canonical)),*],
+            $arenas,
+        )
+    };
+    (@print_with $p:ident, $arenas:ident, $variant:ident) => {
         $p.atom(stringify!($variant))
     };
 }

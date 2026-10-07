@@ -25,7 +25,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
     let tokens = syntax::lexer::Lexer::new("<?php function f(int $x, string ...$rest): bool {}")
         .tokenize_with_spans();
     let program = syntax::parser::Parser::new(tokens).parse_program().unwrap();
-    let registry = registry::Registry::build(&program);
+    let registry = registry::Registry::build(&program.arenas, program.statements());
     let sig = registry.function_by_name("f").unwrap();
     assert_eq!(
         format_signature("f", sig),

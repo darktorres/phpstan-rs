@@ -50,9 +50,10 @@ impl<'a> Checker<'a> {
         // function of `(c, ctx)`, and no later pass ever mutates a
         // trait's registry entry after indexing, so this is a no-op
         // reconstruction for the common non-duplicated-trait case.
-        let arenas = self
-            .syntax_arenas()
+        let syntax_owner = self
+            .syntax_tree_owner()
             .expect("checker retains syntax arenas for class declarations");
+        let arenas = syntax_owner.arenas();
         let def = arenas
             .class(c.def)
             .expect("class definition ID belongs to the checked file");
@@ -67,7 +68,7 @@ impl<'a> Checker<'a> {
         > = rustc_hash::FxHashMap::default();
         for (host_index, host) in contexts.into_iter().enumerate() {
             let host_start = self.diagnostics.len();
-            for m in arenas.methods(def.methods) {
+            for m in arenas.methods(def.methods.clone()) {
                 let site = m.function.name.span.start;
                 let own_sig = own_info
                     .redeclared_methods()
@@ -292,10 +293,10 @@ impl<'a> Checker<'a> {
             .as_ref()
             .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)));
         let params = arenas
-            .map(|arenas| arenas.params(f.params))
+            .map(|arenas| arenas.params(f.params.clone()))
             .unwrap_or_default();
         let function_attrs = arenas
-            .map(|arenas| arenas.attributes(f.attrs))
+            .map(|arenas| arenas.attributes(f.attrs.clone()))
             .unwrap_or_default();
         let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
         let label = match class_name {
@@ -554,6 +555,7 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .and_then(|doc| doc.params.get(ast_param.name.as_ref())),
                         ast_param.type_hint.as_ref(),
+                        arenas.expect("function declaration retains its syntax owner"),
                         &function_template_params,
                         &self.name_ctx,
                     )
@@ -625,6 +627,7 @@ impl<'a> Checker<'a> {
                     } = registry::declared_type(
                         doc_ty.as_ref(),
                         p.type_hint.as_ref(),
+                        arenas.expect("function declaration retains its syntax owner"),
                         &Default::default(),
                         &self.name_ctx,
                     );
@@ -703,6 +706,7 @@ impl<'a> Checker<'a> {
                 } = registry::declared_type(
                     doc_return.as_ref(),
                     f.return_type.as_ref(),
+                    arenas.expect("function declaration retains its syntax owner"),
                     &function_template_params,
                     &self.name_ctx,
                 );
@@ -726,7 +730,7 @@ impl<'a> Checker<'a> {
         // would produce false positives on every docblock-typed-as-array
         // generator.
         let native_return = sig.map(|s| s.return_type_native().clone()).or_else(|| {
-            let ty = f.return_type.as_ref().map(types::native_type)?;
+            let ty = types::native_type(f.return_type.as_ref()?, arenas?);
             Some(match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,
@@ -739,6 +743,7 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .and_then(|doc| doc.return_type.as_ref()),
             f.return_type.as_ref(),
+            arenas.expect("function declaration retains its syntax owner"),
             &function_template_params,
             &self.name_ctx,
         )
@@ -801,7 +806,7 @@ impl<'a> Checker<'a> {
         }
         for p in params {
             let param_attrs = arenas
-                .map(|arenas| arenas.attributes(p.attrs))
+                .map(|arenas| arenas.attributes(p.attrs.clone()))
                 .unwrap_or_default();
             self.check_attributes(param_attrs, &label);
             // `ParamAttributesRule`: a promoted param's own attributes
@@ -905,8 +910,7 @@ impl<'a> Checker<'a> {
             })
             .unwrap_or_default();
         let previous_method_attrs = std::mem::take(&mut self.current_method_attrs);
-        self.current_method_attrs = f
-            .attrs
+        self.current_method_attrs = function_attrs
             .iter()
             .map(|a| Name::from(&self.resolve_class_name(&a.name)))
             .collect();
@@ -946,21 +950,15 @@ impl<'a> Checker<'a> {
                 .map(|b| GotoState::new(b.goto_labels.clone()))
                 .unwrap_or_default(),
         );
-        let previous_assigned_variables = self.enter_assigned_variables(
-            self.syntax_arenas()
-                .expect("function checks require the syntax tree owner"),
-            f.body_stmts(
-                self.syntax_arenas()
-                    .expect("function checks require the syntax tree owner"),
-            ),
-        );
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("function checks require the syntax tree owner");
+        let arenas = syntax_owner.arenas();
+        let body_stmts = f.body_stmts(arenas);
+        let previous_assigned_variables = self.enter_assigned_variables(arenas, body_stmts);
         let scope = crate::checker::shared_scope::SharedScope::of(
-            self.syntax_arenas()
-                .expect("function checks require the syntax tree owner"),
-            f.body_stmts(
-                self.syntax_arenas()
-                    .expect("function checks require the syntax tree owner"),
-            ),
+            arenas,
+            body_stmts,
             &[],
             // By the name the registry declares it under: a function's
             // with its namespace, a method's as written.
@@ -1026,17 +1024,9 @@ impl<'a> Checker<'a> {
         // through the one place that check lives.
         let previous_implicit_calls = std::mem::take(&mut self.implicit_calls);
         let body_terminates = self.check_capturing_scope(&mut locals, |this, locals| {
-            this.check_block(
-                f.body_stmts(
-                    this.syntax_arenas()
-                        .expect("function checks require the syntax tree owner"),
-                ),
-                locals,
-                declared_return.as_ref(),
-                &label,
-            )
-            .completion
-            .terminates
+            this.check_block(body_stmts, locals, declared_return.as_ref(), &label)
+                .completion
+                .terminates
         });
         let implicit_calls = std::mem::replace(&mut self.implicit_calls, previous_implicit_calls);
         // Judged after the body, which finds the offsets that are calls.
@@ -1511,9 +1501,10 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(format!(
-                    "Deprecated in PHP 8.4: Parameter #{} ${} ({hint}) is implicitly nullable via default value null.",
+                    "Deprecated in PHP 8.4: Parameter #{} ${} ({}) is implicitly nullable via default value null.",
                     i + 1,
                     p.name,
+                    hint.to_string_with(arenas),
                 ),
                 p.name.span,
                 0,
@@ -1622,7 +1613,7 @@ impl<'a> Checker<'a> {
                     i + 1,
                     p.name,
                 ),
-                default_expr.span,
+                self.expr_span(default_expr.id),
                 2,
                 "parameter.defaultValue",
             );

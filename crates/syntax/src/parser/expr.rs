@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 /// Binding powers, loosest first, following `zend_language_parser.y`.
 /// Left-associative operators bind their right operand one above their
@@ -112,7 +112,9 @@ impl Parser<'_> {
                     let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
                         InstanceofTarget::Expr(self.parse_unary()?)
                     } else {
-                        InstanceofTarget::Name(self.parse_name_reference())
+                        let name = self.parse_name_reference();
+                        let range = self.node_arenas.borrow_mut().alloc_qualified_name(name);
+                        InstanceofTarget::Name(range)
                     };
                     self.expr(ExprKind::Instanceof(lhs, target), start)
                 }
@@ -389,13 +391,10 @@ impl Parser<'_> {
     /// `target` is the whole target rather than an item of an enclosing
     /// pattern.
     pub(crate) fn as_pattern(&mut self, target: ExprId, top: bool) -> Result<ExprId, ParseError> {
-        let (kind, target_span) = {
+        let target_span = self.expr_span(target);
+        let kind = {
             let mut node = self.expr_node_mut(target);
-            let span = node.span;
-            (
-                std::mem::replace(&mut node.kind, ExprKind::Literal(Literal::Null)),
-                span,
-            )
+            std::mem::replace(&mut node.kind, ExprKind::Literal(Literal::Null))
         };
         match kind {
             ExprKind::ArrayLiteral(items) => {
@@ -463,7 +462,7 @@ impl Parser<'_> {
                         ExprKind::Destructure(_, syntax) => Some(*syntax),
                         _ => None,
                     },
-                    value.span,
+                    self.expr_span(item.value),
                 )
             };
             let skipped = is_null && self.take_pattern_only(item.value);
@@ -508,7 +507,7 @@ impl Parser<'_> {
             });
         }
         if self
-            .destructure_items(pattern_start)
+            .destructure_items_scratch(pattern_start)
             .iter()
             .all(|item| item.target.is_none())
         {

@@ -25,7 +25,12 @@ impl<'a> Checker<'a> {
     /// (`Param::hooks`), reusing `check_get_hook`/`check_set_hook` via
     /// scalar `name`/`span`/`type_hint` arguments.
     pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDef) {
-        for p in &c.properties {
+        let source = self.syntax_source_owner();
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        for p in c.properties(arenas) {
             let Some(hooks) = &p.hooks else {
                 continue;
             };
@@ -34,11 +39,15 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if let Some(hook) = &hooks.get {
+                let doc = hook
+                    .doc
+                    .as_ref()
+                    .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
                 self.check_hook_phpdoc_types(
                     fqn,
                     p.type_hint.as_ref(),
                     None,
-                    hook.doc.as_deref(),
+                    doc.as_deref(),
                     p.span,
                 );
                 self.check_get_hook(fqn, &p.name, p.span, hook, &prop_sig);
@@ -47,41 +56,38 @@ impl<'a> Checker<'a> {
                 self.check_set_hook(fqn, &p.name, p.span, p.type_hint.as_ref(), hook, &prop_sig);
             }
         }
-        if let Some(ctor) = c.constructor() {
-            for param in &ctor.function.params {
-                if param.promotion.is_none() {
-                    continue;
-                }
-                let Some(hooks) = param.hooks.as_deref() else {
-                    continue;
-                };
-                let Some(prop_sig) = self
-                    .registry
-                    .lookup_property(fqn, param.name.as_ref())
-                    .cloned()
-                else {
-                    continue;
-                };
-                if let Some(hook) = &hooks.get {
-                    self.check_hook_phpdoc_types(
-                        fqn,
-                        param.type_hint.as_ref(),
-                        None,
-                        hook.doc.as_deref(),
-                        param.span,
-                    );
-                    self.check_get_hook(fqn, &param.name, param.span, hook, &prop_sig);
-                }
-                if let Some(hook) = &hooks.set {
-                    self.check_set_hook(
-                        fqn,
-                        &param.name,
-                        param.span,
-                        param.type_hint.as_ref(),
-                        hook,
-                        &prop_sig,
-                    );
-                }
+        let promoted_hooks: Vec<_> = self
+            .syntax_arenas()
+            .and_then(|arenas| {
+                c.constructor(arenas)
+                    .map(|ctor| arenas.params(ctor.function.params.clone()))
+            })
+            .into_iter()
+            .flatten()
+            .filter(|param| param.promotion.is_some() && param.hooks.is_some())
+            .map(|param| {
+                (
+                    param.name.clone(),
+                    param.span,
+                    param.type_hint.clone(),
+                    param.hooks.clone().expect("filtered hook"),
+                )
+            })
+            .collect();
+        for (name, span, type_hint, hooks) in promoted_hooks {
+            let Some(prop_sig) = self.registry.lookup_property(fqn, name.as_ref()).cloned() else {
+                continue;
+            };
+            if let Some(hook) = &hooks.get {
+                let doc = hook
+                    .doc
+                    .as_ref()
+                    .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+                self.check_hook_phpdoc_types(fqn, type_hint.as_ref(), None, doc.as_deref(), span);
+                self.check_get_hook(fqn, &name, span, hook, &prop_sig);
+            }
+            if let Some(hook) = &hooks.set {
+                self.check_set_hook(fqn, &name, span, type_hint.as_ref(), hook, &prop_sig);
             }
         }
     }
@@ -163,8 +169,21 @@ impl<'a> Checker<'a> {
         hook: &PropertyHook,
         prop_sig: &PropertyReflection,
     ) {
-        let (body, attrs, doc, hook_final) =
-            (&hook.body, &hook.attrs, hook.doc.as_deref(), hook.is_final);
+        let source = self.syntax_source_owner();
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let doc = hook
+            .doc
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+        let (body, attrs, doc, hook_final) = (
+            &hook.body,
+            arenas.attributes(hook.attrs.clone()),
+            doc.as_deref(),
+            hook.is_final,
+        );
         let label = format!("{fqn}::${name} (get hook)");
         self.check_hook_attributes(attrs, &label);
         // `InvalidThrowsPhpDocValueRule`'s @throws-validity check runs
@@ -183,8 +202,8 @@ impl<'a> Checker<'a> {
         // that never reads its own backing storage almost certainly
         // forgot to.
         if !prop_sig.is_virtual()
-            && !registry::hook_body_references_property(body, name)
-            && !registry::hook_body_calls_parent_hook(body, name)
+            && !registry::hook_body_references_property(arenas, body, name)
+            && !registry::hook_body_calls_parent_hook(arenas, body, name)
         {
             self.report(
                 format!(
@@ -216,12 +235,15 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
-            _ => self.enter_assigned_variables(&[]),
+            PropertyHookBody::Block(stmts) => {
+                self.enter_assigned_variables(arenas, arenas.stmt_ids(stmts))
+            }
+            _ => self.enter_assigned_variables(arenas, &[]),
         };
         let hook_scope = match body {
             PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
-                stmts,
+                arenas,
+                arenas.stmt_ids(stmts),
                 &[],
                 Some((
                     self.current_class.as_deref().map(syntax::name::Name::from),
@@ -230,7 +252,7 @@ impl<'a> Checker<'a> {
                 false,
             ),
             PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(e)
+                crate::checker::shared_scope::SharedScope::of_arrow_function(arenas, *e)
             }
             PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
         };
@@ -255,7 +277,10 @@ impl<'a> Checker<'a> {
         };
         self.check_generator_return_type(declared_return.as_ref(), span);
         match body {
-            PropertyHookBody::Arrow(e) => {
+            PropertyHookBody::Arrow(id) => {
+                let e = arenas
+                    .expr(*id)
+                    .expect("property-hook arrow body belongs to its retained file owner");
                 let body_ty = self.check_expr(e, &mut locals, &label);
                 if !body_ty.is_mixed() && !self.accepts(prop_sig.ty(), &body_ty).yes() {
                     self.report(
@@ -263,7 +288,7 @@ impl<'a> Checker<'a> {
                             "return type mismatch: expected {}, got {body_ty}",
                             prop_sig.ty()
                         ),
-                        e.span,
+                        self.expr_span(e.id),
                         3,
                         "return.type",
                     );
@@ -271,9 +296,14 @@ impl<'a> Checker<'a> {
             }
             PropertyHookBody::Block(stmts) => {
                 let body_terminates = self.check_capturing_scope(&mut locals, |this, locals| {
-                    this.check_block(stmts, locals, declared_return.as_ref(), &label)
-                        .completion
-                        .terminates
+                    this.check_block(
+                        arenas.stmt_ids(stmts),
+                        locals,
+                        declared_return.as_ref(),
+                        &label,
+                    )
+                    .completion
+                    .terminates
                 });
                 // Same fall-off-the-end completeness check `check_function`
                 // performs - real PHPStan runs `MissingReturnRule` against
@@ -356,11 +386,20 @@ impl<'a> Checker<'a> {
         hook: &PropertyHook,
         prop_sig: &PropertyReflection,
     ) {
+        let source = self.syntax_source_owner();
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let doc = hook
+            .doc
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
         let (param, body, attrs, doc, hook_final) = (
             hook.param.as_ref(),
             &hook.body,
-            &hook.attrs,
-            hook.doc.as_deref(),
+            arenas.attributes(hook.attrs.clone()),
+            doc.as_deref(),
             hook.is_final,
         );
         let label = format!("{fqn}::${name} (set hook)");
@@ -376,8 +415,8 @@ impl<'a> Checker<'a> {
         // still apply.
         if !matches!(body, PropertyHookBody::Abstract)
             && !prop_sig.is_virtual()
-            && !registry::hook_body_references_property(body, name)
-            && !registry::hook_body_calls_parent_hook(body, name)
+            && !registry::hook_body_references_property(arenas, body, name)
+            && !registry::hook_body_calls_parent_hook(arenas, body, name)
         {
             self.report(
                 format!(
@@ -535,12 +574,15 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
-            _ => self.enter_assigned_variables(&[]),
+            PropertyHookBody::Block(stmts) => {
+                self.enter_assigned_variables(arenas, arenas.stmt_ids(stmts))
+            }
+            _ => self.enter_assigned_variables(arenas, &[]),
         };
         let hook_scope = match body {
             PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
-                stmts,
+                arenas,
+                arenas.stmt_ids(stmts),
                 &[],
                 Some((
                     self.current_class.as_deref().map(syntax::name::Name::from),
@@ -549,7 +591,7 @@ impl<'a> Checker<'a> {
                 false,
             ),
             PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(e)
+                crate::checker::shared_scope::SharedScope::of_arrow_function(arenas, *e)
             }
             PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
         };
@@ -573,12 +615,19 @@ impl<'a> Checker<'a> {
         };
         self.check_generator_return_type(declared_return.as_ref(), span);
         match body {
-            PropertyHookBody::Arrow(e) => {
-                self.check_expr(e, &mut locals, &label);
+            PropertyHookBody::Arrow(id) => {
+                if let Some(e) = arenas.expr(*id) {
+                    self.check_expr(e, &mut locals, &label);
+                }
             }
             PropertyHookBody::Block(stmts) => {
                 self.check_capturing_scope(&mut locals, |this, locals| {
-                    this.check_block(stmts, locals, declared_return.as_ref(), &label)
+                    this.check_block(
+                        arenas.stmt_ids(stmts),
+                        locals,
+                        declared_return.as_ref(),
+                        &label,
+                    )
                 });
             }
             PropertyHookBody::Abstract => {}

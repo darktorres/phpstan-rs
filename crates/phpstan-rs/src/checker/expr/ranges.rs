@@ -21,8 +21,13 @@ use types::{self, Type};
 /// `Binary`/`Unary`/`Grouping`/`Index`) - missing a rarer shape only
 /// means this guard occasionally under-protects, never over-flags,
 /// matching this project's own "favor false negatives" precedent.
-pub(crate) fn expr_reads_a_property(e: &ExprNode) -> bool {
-    let e = e.peeled();
+pub(crate) fn expr_reads_a_property(arenas: &NodeArenas, id: ExprId) -> bool {
+    let id = arenas
+        .peeled(id)
+        .expect("property-read probe belongs to its retained file owner");
+    let e = arenas
+        .expr(id)
+        .expect("peeled property-read probe belongs to its retained file owner");
     syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
@@ -31,15 +36,26 @@ pub(crate) fn expr_reads_a_property(e: &ExprNode) -> bool {
         | ExprKind::StaticPropertyFetch(..)
         | ExprKind::DynamicStaticPropertyFetch(..) => true,
         ExprKind::Call(callee, args) => {
-            expr_reads_a_property(callee) || args.iter().any(|a| expr_reads_a_property(&a.value))
+            expr_reads_a_property(arenas, *callee)
+                || arenas
+                    .args(args.clone())
+                    .iter()
+                    .any(|a| expr_reads_a_property(arenas, a.value))
         }
         ExprKind::MethodCall(base, _, args, _) => {
-            expr_reads_a_property(base) || args.iter().any(|a| expr_reads_a_property(&a.value))
+            expr_reads_a_property(arenas, *base)
+                || arenas
+                    .args(args.clone())
+                    .iter()
+                    .any(|a| expr_reads_a_property(arenas, a.value))
         }
-        ExprKind::Binary(_, l, r) => expr_reads_a_property(l) || expr_reads_a_property(r),
-        ExprKind::Unary(_, inner) => expr_reads_a_property(inner),
+        ExprKind::Binary(_, l, r) => {
+            expr_reads_a_property(arenas, *l) || expr_reads_a_property(arenas, *r)
+        }
+        ExprKind::Unary(_, inner) => expr_reads_a_property(arenas, *inner),
         ExprKind::Index(base, idx) => {
-            expr_reads_a_property(base) || idx.as_deref().is_some_and(expr_reads_a_property)
+            expr_reads_a_property(arenas, *base)
+                || idx.is_some_and(|idx| expr_reads_a_property(arenas, idx))
         }
         _ => false,
     })

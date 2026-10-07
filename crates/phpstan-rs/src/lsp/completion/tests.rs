@@ -10,9 +10,9 @@ use super::*;
 fn resolve_import_at_end(parsed: &syntax::ParsedFile, fqn: &str) -> (String, Option<TextEdit>) {
     resolve_import(
         &parsed.arenas,
-        &parsed.stmts,
+        parsed.statements(),
         Positions::utf16(&LineIndex::default()),
-        &context_at_ids(&parsed.arenas, &parsed.stmts, u32::MAX),
+        &context_at_ids(&parsed.arenas, parsed.statements(), u32::MAX),
         fqn,
     )
 }
@@ -180,20 +180,20 @@ fn find_enclosing_names_does_not_mistake_an_if_block_for_a_function() {
 #[test]
 fn find_use_insertion_point_lands_after_the_last_use() {
     let stmts = parse("<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\nclass C {}\n");
-    let point = find_use_insertion_point(&stmts.arenas, &stmts.stmts);
+    let point = find_use_insertion_point(&stmts.arenas, stmts.statements());
     assert!(point.is_some());
 }
 
 #[test]
 fn find_use_insertion_point_lands_after_a_bare_namespace_with_no_use() {
     let stmts = parse("<?php\nnamespace App;\nclass C {}\n");
-    assert!(find_use_insertion_point(&stmts.arenas, &stmts.stmts).is_some());
+    assert!(find_use_insertion_point(&stmts.arenas, stmts.statements()).is_some());
 }
 
 #[test]
 fn find_use_insertion_point_is_none_with_neither_namespace_nor_use() {
     let stmts = parse("<?php\nclass C {}\n");
-    assert!(find_use_insertion_point(&stmts.arenas, &stmts.stmts).is_none());
+    assert!(find_use_insertion_point(&stmts.arenas, stmts.statements()).is_none());
 }
 
 #[test]

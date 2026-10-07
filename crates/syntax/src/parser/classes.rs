@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::name::Name;
 use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 /// A class-like body's members, as `Parser::parse_class_body` reads them.
 pub(crate) struct ClassBody {
@@ -82,26 +82,20 @@ impl Parser<'_> {
         let extends_start = self.qualified_name_scratch.len();
         // A class extends one class.
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            self.qualified_name_scratch
-                .push(self.parse_name_reference());
+            let name = self.parse_name_reference();
+            self.qualified_name_scratch.push(name);
         }
-        let extends = self
-            .node_arenas
-            .borrow_mut()
-            .alloc_qualified_names(self.qualified_name_scratch.drain(extends_start..));
+        let extends = self.finish_qualified_names(extends_start);
         let implements_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            self.qualified_name_scratch
-                .push(self.parse_name_reference());
+            let name = self.parse_name_reference();
+            self.qualified_name_scratch.push(name);
             while self.eat(&Token::Comma) {
-                self.qualified_name_scratch
-                    .push(self.parse_name_reference());
+                let name = self.parse_name_reference();
+                self.qualified_name_scratch.push(name);
             }
         }
-        let implements = self
-            .node_arenas
-            .borrow_mut()
-            .alloc_qualified_names(self.qualified_name_scratch.drain(implements_start..));
+        let implements = self.finish_qualified_names(implements_start);
 
         self.nested_depth.set(self.nested_depth.get() + 1);
         let body = self.parse_class_body(class_is_readonly);
@@ -185,23 +179,20 @@ impl Parser<'_> {
             // outside an enum it is a compile error the checker reports.
             if self.eat(&Token::Keyword(Keyword::Case)) {
                 let mut case = self.parse_enum_case_rest(attrs, member_start)?;
-                case.attrs = self.strip_stub_attributes(case.attrs);
+                case.attrs = self.strip_stub_attributes(case.attrs.clone());
                 self.enum_case_scratch.push(case);
                 continue;
             }
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 let traits_start = self.qualified_name_scratch.len();
-                self.qualified_name_scratch
-                    .push(self.parse_name_reference());
+                let name = self.parse_name_reference();
+                self.qualified_name_scratch.push(name);
                 while self.eat(&Token::Comma) {
-                    self.qualified_name_scratch
-                        .push(self.parse_name_reference());
+                    let name = self.parse_name_reference();
+                    self.qualified_name_scratch.push(name);
                 }
-                let traits = self
-                    .node_arenas
-                    .borrow_mut()
-                    .alloc_qualified_names(self.qualified_name_scratch.drain(traits_start..));
+                let traits = self.finish_qualified_names(traits_start);
                 let adaptations = if self.check(&Token::LBrace) {
                     self.parse_trait_adaptations()?
                 } else {
@@ -373,7 +364,11 @@ impl Parser<'_> {
                 // functions with no such concept, has no way to know this
                 // on its own - only this call site does).
                 if class_is_readonly {
-                    for param in self.node_arenas.borrow_mut().params_mut(function.params) {
+                    for param in self
+                        .node_arenas
+                        .borrow_mut()
+                        .params_mut(function.params.clone())
+                    {
                         if let Some(promotion) = &mut param.promotion {
                             promotion.readonly = true;
                         }
@@ -512,20 +507,18 @@ impl Parser<'_> {
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
                 let instead_of_start = self.qualified_name_scratch.len();
-                self.qualified_name_scratch
-                    .push(self.parse_unrecorded_name_reference());
+                let name = self.parse_unrecorded_name_reference();
+                self.qualified_name_scratch.push(name);
                 while self.eat(&Token::Comma) {
-                    self.qualified_name_scratch
-                        .push(self.parse_unrecorded_name_reference());
+                    let name = self.parse_unrecorded_name_reference();
+                    self.qualified_name_scratch.push(name);
                 }
                 // The names stand only with a trait to take the method from.
                 if let Some(trait_name) = trait_name {
                     for name in &self.qualified_name_scratch[instead_of_start..] {
                         self.record_name(name, NameKind::Class);
                     }
-                    let instead_of = self.node_arenas.borrow_mut().alloc_qualified_names(
-                        self.qualified_name_scratch.drain(instead_of_start..),
-                    );
+                    let instead_of = self.finish_qualified_names(instead_of_start);
                     self.trait_precedence_scratch.push(TraitPrecedence {
                         trait_name,
                         method,
@@ -604,10 +597,10 @@ impl Parser<'_> {
                 _ => break,
             }
         }
-        let kind = match self.take_token() {
-            Token::Keyword(Keyword::Class) => ClassKind::Class,
-            Token::Keyword(Keyword::Interface) => ClassKind::Interface,
-            Token::Keyword(Keyword::Trait) => ClassKind::Trait,
+        let kind = match self.take_keyword() {
+            Some(Keyword::Class) => ClassKind::Class,
+            Some(Keyword::Interface) => ClassKind::Interface,
+            Some(Keyword::Trait) => ClassKind::Trait,
             other => {
                 return Err(ParseError::new(
                     format!(
@@ -626,31 +619,25 @@ impl Parser<'_> {
         // declaration kinds structurally.
         let extends_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            self.qualified_name_scratch
-                .push(self.parse_name_reference());
+            let name = self.parse_name_reference();
+            self.qualified_name_scratch.push(name);
             while self.eat(&Token::Comma) {
-                self.qualified_name_scratch
-                    .push(self.parse_name_reference());
+                let name = self.parse_name_reference();
+                self.qualified_name_scratch.push(name);
             }
         }
-        let extends = self
-            .node_arenas
-            .borrow_mut()
-            .alloc_qualified_names(self.qualified_name_scratch.drain(extends_start..));
+        let extends = self.finish_qualified_names(extends_start);
 
         let implements_start = self.qualified_name_scratch.len();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            self.qualified_name_scratch
-                .push(self.parse_name_reference());
+            let name = self.parse_name_reference();
+            self.qualified_name_scratch.push(name);
             while self.eat(&Token::Comma) {
-                self.qualified_name_scratch
-                    .push(self.parse_name_reference());
+                let name = self.parse_name_reference();
+                self.qualified_name_scratch.push(name);
             }
         }
-        let implements = self
-            .node_arenas
-            .borrow_mut()
-            .alloc_qualified_names(self.qualified_name_scratch.drain(implements_start..));
+        let implements = self.finish_qualified_names(implements_start);
 
         let ClassBody {
             properties,

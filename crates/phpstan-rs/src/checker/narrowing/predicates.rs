@@ -21,15 +21,20 @@ use types::Type;
 /// *real* left-hand type - inferring from the real target directly is
 /// what lets `is_int($x['k'] ?? null)` see `$x['k']`'s own true type
 /// (`int|null`), not the coalesce result's already-narrower one.
-pub(crate) fn narrowing_infer_target(e: &ExprNode) -> &ExprNode {
-    let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
-        ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-            if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
-        {
-            narrowing_infer_target(lhs)
+pub(crate) fn narrowing_infer_target(arenas: &NodeArenas, id: ExprId) -> Option<&ExprNode> {
+    let id = arenas.peeled(id)?;
+    syntax::stack::guard(|| {
+        let expr = arenas.expr(id)?;
+        match &expr.kind {
+            ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
+                if arenas
+                    .expr(*rhs)
+                    .is_some_and(|rhs| matches!(&rhs.kind, ExprKind::Literal(Literal::Null))) =>
+            {
+                narrowing_infer_target(arenas, *lhs)
+            }
+            _ => Some(expr),
         }
-        _ => e,
     })
 }
 
@@ -172,27 +177,32 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
 /// table entries, ...), the same conservative "give up" this project's
 /// narrowing already falls back to everywhere else.
 impl<'a> Checker<'a> {
-    pub(crate) fn or_chain_narrowing_target<'e>(
-        &self,
-        cond: &'e ExprNode,
+    pub(crate) fn or_chain_narrowing_target<'b>(
+        &'b self,
+        cond: &ExprNode,
         locals: &Locals,
-    ) -> Option<(LocalKey, Type, &'e ExprNode)> {
+    ) -> Option<(LocalKey, Type, &'b ExprNode)> {
         syntax::stack::guard(|| {
-            let cond = cond.peeled();
+            let arenas = self.syntax_arenas()?;
+            let cond = arenas.expr(arenas.peeled(cond.id)?)?;
             match &cond.kind {
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
-                    let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
-                    let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
+                    let (lk, lt, le) = self.or_chain_narrowing_target(arenas.expr(*l)?, locals)?;
+                    let (rk, rt, _) = self.or_chain_narrowing_target(arenas.expr(*r)?, locals)?;
                     (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
                 }
                 ExprKind::Call(callee, args) => {
-                    let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
+                    let callee = arenas.expr(*callee)?;
+                    let (ExprKind::Name(name), [single_arg]) =
+                        (&callee.kind, arenas.args(args.clone()))
                     else {
                         return None;
                     };
-                    let key = locals.key_of(&single_arg.value)?;
+                    let name = arenas.qualified_name(name)?;
+                    let value = arenas.expr(single_arg.value)?;
+                    let key = self.key_of_expr(locals, value)?;
                     let target_ty = narrowing_type_for_predicate(name.trim_start_matches('\\'))?;
-                    Some((key, target_ty, &single_arg.value))
+                    Some((key, target_ty, value))
                 }
                 // `$node instanceof A || $node instanceof B ? (string) $node
                 // : ...` needs a leaf for `instanceof` here too, despite
@@ -202,9 +212,11 @@ impl<'a> Checker<'a> {
                 // to, same as the single-condition `ExprKind::Instanceof` arm
                 // above already requires.
                 ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name)) => {
-                    let key = locals.key_of(inner)?;
+                    let inner = arenas.expr(*inner)?;
+                    let key = self.key_of_expr(locals, inner)?;
+                    let class_name = arenas.qualified_name(class_name)?;
                     let target_ty = self.resolve_name_expr(class_name);
-                    Some((key, target_ty, &**inner))
+                    Some((key, target_ty, inner))
                 }
                 // `$parentId === null || $parentId === 0` - an equality-
                 // comparison leaf, the same shape `apply_equality_narrowing`
@@ -215,16 +227,17 @@ impl<'a> Checker<'a> {
                 // it - an unresolvable value proves nothing about which
                 // member the union should include.
                 ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) => {
-                    let (key, narrowed_expr, target_ty) = match (locals.key_of(l), locals.key_of(r))
-                    {
-                        (Some(key), _) => (key, l, self.infer_expr(r, locals)),
-                        (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
-                        (None, None) => return None,
-                    };
+                    let (l, r) = (arenas.expr(*l)?, arenas.expr(*r)?);
+                    let (key, narrowed_expr, target_ty) =
+                        match (self.key_of_expr(locals, l), self.key_of_expr(locals, r)) {
+                            (Some(key), _) => (key, l, self.infer_expr(r, locals)),
+                            (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
+                            (None, None) => return None,
+                        };
                     if target_ty.is_mixed() {
                         return None;
                     }
-                    Some((key, target_ty, &**narrowed_expr))
+                    Some((key, target_ty, narrowed_expr))
                 }
                 _ => None,
             }
@@ -241,20 +254,25 @@ impl<'a> Checker<'a> {
 /// double-negation, reusing its identical per-leaf predicate-table
 /// lookup and same-key union logic rather than duplicating either.
 impl<'a> Checker<'a> {
-    pub(crate) fn and_chain_narrowing_target<'e>(
-        &self,
-        cond: &'e ExprNode,
+    pub(crate) fn and_chain_narrowing_target<'b>(
+        &'b self,
+        cond: &ExprNode,
         locals: &Locals,
-    ) -> Option<(LocalKey, Type, &'e ExprNode)> {
-        let cond = cond.peeled();
-        syntax::stack::guard(|| match &cond.kind {
-            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
-                let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
-                let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
-                (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
+    ) -> Option<(LocalKey, Type, &'b ExprNode)> {
+        syntax::stack::guard(|| {
+            let arenas = self.syntax_arenas()?;
+            let cond = arenas.expr(arenas.peeled(cond.id)?)?;
+            match &cond.kind {
+                ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
+                    let (lk, lt, le) = self.and_chain_narrowing_target(arenas.expr(*l)?, locals)?;
+                    let (rk, rt, _) = self.and_chain_narrowing_target(arenas.expr(*r)?, locals)?;
+                    (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
+                }
+                ExprKind::Unary(UnaryOp::Not, inner) => {
+                    self.or_chain_narrowing_target(arenas.expr(*inner)?, locals)
+                }
+                _ => None,
             }
-            ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
-            _ => None,
         })
     }
 }

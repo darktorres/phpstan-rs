@@ -10,28 +10,64 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-07, worktree based on `39f0b029`. Counts below were read
-from the files on 2026-10-06.
+State as of 2026-10-07, worktree based on `39f0b029`.
 
 ## Where to resume
 
 1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
-   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, resuming at item 9.8.a.a.a. Rows 9.2,
-   3.4, 9.3, 9.4, 9.5, 9.6 and 9.7 are implemented but await the tests-only
-   9.V gate. Item 9.7's parser scratch lists commit into owner-backed typed
+   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`. Item 9 is complete and its 9.V
+   tests-only gate passes; profile item 9 before resuming item 10, at 10.1.
+   Use the profiling procedure in `CLAUDE.md` and preserve the baseline/current
+   commands, binaries, profiles and logs for comparison. Item 9.7's parser
+   scratch lists commit into owner-backed typed
    ranges; node IDs are assigned on insertion, and retained arenas are compacted
    while transient parses reuse worker scratch. Its recorder review is complete
    (no AST element IDs are recorded there). For 9.8, attributes already use
-   compact `AttributeRange`s (9.8.e DONE); small-node payloads, duplicated spans,
-   and statement/parameter doc-site lookup remain.
-   The ledger now tracks implementation subtasks for every item after 9 as well;
-   those items remain OPEN pending level 8's ordered work. Item 9.8's
+   compact `AttributeRange`s (9.8.e DONE); statement and parameter doc fields
+   have been removed and their readers use owner doc sites. Literal `instanceof`
+   target names now use the qualified-name arena (9.8.a.a.a DONE, unvalidated).
+   Ordinary expression names now store owner-arena ranges in the AST and all
+   syntax, checker, registry, dependency, project, Composer and LSP readers
+   resolve them through the owner (9.8.a.a.b DONE, unvalidated). The expression
+   variant review found no other oversized payload (9.8.a.a.c DONE,
+   unvalidated). The `elseif` chain now lives in a typed owner range, with its
+   parser, fragment, visitor, canonical, checker, registry and LSP readers
+   migrated (9.8.a.b.a.a DONE, unvalidated). Switch case lists now use typed
+   owner ranges and all readers resolve through `NodeArenas`
+   (9.8.a.b.a.b DONE, unvalidated). `try` catches now use typed owner ranges,
+   with parser, fragment, visitor, canonical, checker and registry paths
+   migrated (9.8.a.b.a.c DONE, unvalidated). The if/switch/try payload group
+   is complete. `declare` directives now use owner-backed typed ranges and
+   reusable parser scratch (9.8.a.b.b.a DONE, unvalidated). `global` variable
+   lists now use owner-backed ranges and reusable parser scratch, with their
+   readers migrated (9.8.a.b.b.b DONE, unvalidated). Static-variable lists
+   now use the same owner-backed range pattern, including parser scratch and
+   reader migrations (9.8.a.b.b.c DONE, unvalidated). Statement review moved
+   namespace names to `Name` and class declarations to `ClassDeclRange`, with
+   all readers using `NodeArenas` (9.8.a.b.c DONE, unvalidated). Expression
+   spans have been removed from both `ExprNode` and `StmtNode`; syntax,
+   checker, registry, project and language-server readers resolve spans from
+   the owner side tables, including checker-synthetic expression spans
+   (9.8.b.a/b DONE, unvalidated). All item 9 implementation rows are now
+   complete; the tests-only 9.V gate has passed. Item 10 is paused at 10.1
+   while item 9 is profiled.
+   The 10–19 decomposition audit is complete: every referenced child row
+   resolves, and each item gate separates workspace tests from item-specific
+   tests. Follow-up review added focused test selections for uncovered item
+   oracles and explicit final-only rows for PHP, platform, server-session,
+   cache and dump checks. Those rows remain OPEN pending level 8's ordered work. Item 9.8's
    statement and parameter doc fields are now removed; parser-owned doc sites
    retain normalized text and comment line by node offset, with checker,
    registry, dependency, promoted-property and canonical readers migrated.
-   The remaining 9.8 work is moving large expression/statement payloads out of
-   common nodes and removing the duplicated per-node spans. No 9.V tests have
-   run yet.
+   The 9.V `cargo test --workspace` gate passes with output captured in
+   `.cargo-test-9V.log`; all 2,127 tests across 30 test executables pass,
+   including phpstan-rs and syntax/parser suites, and the generated stub-index
+   check is current.
+   Rows 9.V.a-9.V.c are DONE. Item 10.1 has aligned TokenStream storage and
+   parser-cursor changes in the worktree, not yet validated; direct stream
+   emission, worker buffer reuse, and remaining reader migration are unfinished.
+   Full §11
+   validation remains deferred until item 19.
    Each item's gate runs workspace and item-specific tests only (including their inherent compile).
    Full §11 validation and O3 run once, after item 19. Only
    the rows that optimize are built now; the rest are DEFERRED.
@@ -298,10 +334,14 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   separately tracked subtasks, with parent rows summarizing their children.
   The same breakdown is now present for compound implementation tasks in
   items 10-19, derived from the 20G plan before those items begin; deferred
-  work and item test gates keep their existing status/order. The item 18 gate
-  now separately tracks its fixpoint replay assertion, randomized type
-  differential test, and radix merge assertion alongside the other test
-  selections.
+  work and item test gates keep their existing status/order. Follow-up review
+  added focused test selections for the token, lexer, line-position,
+  declaration, PHPDoc and edit-replay cases, and final-only rows for PHP
+  oracles, platform checks, the Latin-1 server session, warm-cache comparison,
+  closed-file rechecks and oracle-build assertions. The final §11 validation
+  is now tracked separately before O3. The item 18 gate separately tracks its
+  fixpoint replay assertion, randomized type differential test and radix
+  merge assertion alongside the other test selections.
   The 9.2 parser now commits all five specified list families—arguments,
   array items, parameters, match arms and attributes—to typed arenas, and AST
   fields hold their `IdxRange`s. Interpolation subparsers receive file-global
@@ -907,8 +947,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   document-encoding test (15.9.e), separate hash inputs (17.2.a-d), and the
   remaining tree-reader sweep (19.6.b.a-d); item 19's cache-validation
   subtasks now follow execution order.
-  No tests or builds were run;
-  the 9.V gate stays closed until all item 9 implementation rows are complete.
+  `cargo fmt --all` ran; no tests or builds were run yet. Run only workspace and
+  item-specific tests at 9.V; full §11 validation stays deferred until after
+  item 19.
 - **Passes outside the item order,** also in §13: a dependency pass (six
   crates taken: `la-arena`, `wide`, `triomphe`, `quick_cache`, `siphasher`
   and `blake3`; ten considered and not taken; item 15's review added
@@ -919,8 +960,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
 - **Building it** started on 2026-10-03. Its tasks, in order, with their
   state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (items 0-19, each closed by its
   validation row, then O3). Compound implementation tasks and item-gate test
-  selections are split into child rows throughout items 9-19; an audit of
-  items 10-19 found each implementation task and gate has its subtask rows.
+  selections are split into child rows throughout items 9-19; the latest
+  audit covers implementation tasks, item gates and final §11 validation.
   Reading the
   starting state (0.1) found four false-report bugs, fixed in item 0
   before the baseline (rows 0.1a-0.1f), and added the implicit calls, now

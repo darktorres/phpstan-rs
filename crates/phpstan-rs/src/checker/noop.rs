@@ -18,8 +18,8 @@ use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionReflection, collect_impure_points};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
-use syntax::ast::{BinOp, CastKind, ExprKind, ExprNode, FunctionDecl, UnaryOp};
-use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope};
+use syntax::ast::{BinOp, CastKind, ExprKind, ExprNode, FunctionDecl, Param, UnaryOp};
+use syntax::visit::arena::{self, Visitor as ArenaVisitor};
 use types::Type;
 
 const PRECEDENCE_TIP: &str =
@@ -32,14 +32,17 @@ enum Effects {
     Some,
 }
 
-fn is_local_assign_target(target: &ExprNode) -> bool {
+fn is_local_assign_target(arenas: &syntax::ast::NodeArenas, target: &ExprNode) -> bool {
     syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
-        ExprKind::Destructure(items, _) => items.iter().all(|item| {
+        ExprKind::Destructure(items, _) => arenas.destructure_items(items).iter().all(|item| {
             item.key
-                .as_ref()
-                .is_none_or(|k| expr_side_effects(k) == Effects::None)
-                && item.target.as_ref().is_none_or(is_local_assign_target)
+                .is_none_or(|key| expr_side_effects(arenas, key) == Effects::None)
+                && item.target.as_ref().is_none_or(|target| {
+                    arenas
+                        .expr(*target)
+                        .is_some_and(|target| is_local_assign_target(arenas, target))
+                })
         }),
         _ => false,
     })
@@ -48,37 +51,51 @@ fn is_local_assign_target(target: &ExprNode) -> bool {
 /// The strongest effect anywhere in `e`'s subtree. A nested closure or
 /// anonymous class's body doesn't run by being constructed, so it
 /// doesn't count.
-fn expr_side_effects(e: &ExprNode) -> Effects {
+fn expr_side_effects(arenas: &syntax::ast::NodeArenas, id: syntax::ast::ExprId) -> Effects {
     struct Strongest(Effects);
-    impl<'ast> Visitor<'ast> for Strongest {
-        fn visit_expr(&mut self, e: &'ast ExprNode) {
+    impl ArenaVisitor for Strongest {
+        fn visit_expr(&mut self, arenas: &syntax::ast::NodeArenas, id: syntax::ast::ExprId) {
             if self.0 == Effects::Some {
                 return;
             }
-            self.0 = std::cmp::max(self.0, own_side_effects(e));
-            walk_expr_in_scope(self, e);
+            let Some(expr) = arenas.expr(id) else {
+                return;
+            };
+            self.0 = std::cmp::max(self.0, own_side_effects(arenas, expr));
+            arena::walk_expr_in_scope(self, arenas, id);
         }
     }
     let mut strongest = Strongest(Effects::None);
-    strongest.visit_expr(e);
+    strongest.visit_expr(arenas, id);
     strongest.0
 }
 
 /// `e`'s own effects, not its operands'.
-fn own_side_effects(e: &ExprNode) -> Effects {
+fn own_side_effects(arenas: &syntax::ast::NodeArenas, e: &ExprNode) -> Effects {
     match &e.kind {
         ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
-            if is_local_assign_target(target) =>
+            if arenas
+                .expr(*target)
+                .is_some_and(|target| is_local_assign_target(arenas, target)) =>
         {
             Effects::LocalAssignOnly
         }
-        ExprKind::CompoundAssign(_, target, _) if matches!(target.kind, ExprKind::Variable(_)) => {
+        ExprKind::CompoundAssign(_, target, _)
+            if arenas
+                .expr(*target)
+                .is_some_and(|target| matches!(target.kind, ExprKind::Variable(_))) =>
+        {
             Effects::LocalAssignOnly
         }
         ExprKind::Unary(
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
             target,
-        ) if matches!(target.kind, ExprKind::Variable(_)) => Effects::LocalAssignOnly,
+        ) if arenas
+            .expr(*target)
+            .is_some_and(|target| matches!(target.kind, ExprKind::Variable(_))) =>
+        {
+            Effects::LocalAssignOnly
+        }
         ExprKind::Call(..)
         | ExprKind::MethodCall(..)
         | ExprKind::StaticCall(..)
@@ -111,27 +128,47 @@ impl<'a> Checker<'a> {
     /// Effects that depend on the operands' types: `__get`/`get` hooks on
     /// a property read, `offsetGet` on an object offset read, and
     /// `__toString` on a stringified object.
-    fn expr_has_hidden_effects(&self, e: &ExprNode, locals: &Locals) -> bool {
-        any_expr_in_scope(e, |e| self.own_hidden_effects(e, locals))
+    fn expr_has_hidden_effects(
+        &self,
+        arenas: &syntax::ast::NodeArenas,
+        e: &ExprNode,
+        locals: &Locals,
+    ) -> bool {
+        arena::any_expr_in_scope(arenas, e.id, |e| self.own_hidden_effects(arenas, e, locals))
     }
 
     /// `expr_has_hidden_effects` for `e` itself, not its operands.
-    fn own_hidden_effects(&self, e: &ExprNode, locals: &Locals) -> bool {
+    fn own_hidden_effects(
+        &self,
+        arenas: &syntax::ast::NodeArenas,
+        e: &ExprNode,
+        locals: &Locals,
+    ) -> bool {
         match &e.kind {
             ExprKind::PropertyAccess(object, name, _) => {
-                !self.property_read_is_plain(&self.infer_expr(object, locals), name)
+                arenas.expr(*object).is_none_or(|object| {
+                    !self.property_read_is_plain(&self.infer_expr(object, locals), name)
+                })
             }
             ExprKind::DynamicPropertyAccess(..) => true,
-            ExprKind::Index(base, _) => !self.offset_read_is_plain(&self.infer_expr(base, locals)),
+            ExprKind::Index(base, _) => arenas
+                .expr(*base)
+                .is_none_or(|base| !self.offset_read_is_plain(&self.infer_expr(base, locals))),
             ExprKind::Cast(cast, operand) if cast.kind() == CastKind::String => {
-                self.may_be_stringable_object(&self.infer_expr(operand, locals))
+                arenas.expr(*operand).is_none_or(|operand| {
+                    self.may_be_stringable_object(&self.infer_expr(operand, locals))
+                })
             }
-            ExprKind::Binary(BinOp::Concat, l, r) => [l, r]
-                .iter()
-                .any(|side| self.may_be_stringable_object(&self.infer_expr(side, locals))),
-            ExprKind::Interpolated(parts) => parts
-                .iter()
-                .any(|part| self.may_be_stringable_object(&self.infer_expr(part, locals))),
+            ExprKind::Binary(BinOp::Concat, l, r) => [*l, *r].iter().any(|side| {
+                arenas.expr(*side).is_none_or(|side| {
+                    self.may_be_stringable_object(&self.infer_expr(side, locals))
+                })
+            }),
+            ExprKind::Interpolated(parts) => arenas.expr_ids(parts).iter().any(|part| {
+                arenas.expr(*part).is_none_or(|part| {
+                    self.may_be_stringable_object(&self.infer_expr(part, locals))
+                })
+            }),
             _ => false,
         }
     }
@@ -170,9 +207,14 @@ impl<'a> Checker<'a> {
 
     /// Called from `StmtKind::Expression` after `e` itself was checked.
     pub(crate) fn check_noop_statement(&mut self, e: &ExprNode, locals: &Locals) {
-        let e = e.peeled();
-        let effects = expr_side_effects(e);
-        if effects == Effects::Some || self.expr_has_hidden_effects(e, locals) {
+        let Some(arenas) = self.syntax_arenas() else {
+            return;
+        };
+        let Some(e) = arenas.peeled(e.id).and_then(|id| arenas.expr(id)) else {
+            return;
+        };
+        let effects = expr_side_effects(arenas, e.id);
+        if effects == Effects::Some || self.expr_has_hidden_effects(arenas, e, locals) {
             return;
         }
         let word_operator = match &e.kind {
@@ -185,7 +227,7 @@ impl<'a> Checker<'a> {
             self.report_builder(
                 DiagnosticBuilder::new(
                     format!("Unused result of \"{sigil}\" operator."),
-                    e.span,
+                    self.expr_span(e.id),
                     4,
                     format!("{identifier}.resultUnused"),
                 )
@@ -213,12 +255,16 @@ impl<'a> Checker<'a> {
             _ => (
                 format!(
                     "Expression \"{}\" on a separate line does not do anything.",
-                    syntax::printer::print_expr_first_line(e)
+                    syntax::printer::print_expr_first_line(
+                        self.syntax_arenas()
+                            .expect("no-op checks retain their parsed file owner"),
+                        e.id,
+                    )
                 ),
                 "expr.resultUnused",
             ),
         };
-        self.report(message, e.span, 4, identifier);
+        self.report(message, self.expr_span(e.id), 4, identifier);
     }
 
     /// The transitive-purity payoff: a bare, statement-level
@@ -240,7 +286,13 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_pure_call_without_effect(&mut self, e: &ExprNode, locals: &Locals) {
         let (message, identifier) = match &e.kind {
             ExprKind::Call(callee, _) => {
-                let ExprKind::Name(name) = &callee.kind else {
+                let Some(name) = self.syntax_arenas().and_then(|arenas| {
+                    let callee = arenas.expr(*callee)?;
+                    let ExprKind::Name(name) = &callee.kind else {
+                        return None;
+                    };
+                    arenas.qualified_name(name)
+                }) else {
                     return;
                 };
                 let Some((resolved, _sig)) = self.registry.resolve_function(name) else {
@@ -259,6 +311,9 @@ impl<'a> Checker<'a> {
                 )
             }
             ExprKind::MethodCall(recv, method, _, _) => {
+                let Some(recv) = self.syntax_arenas().and_then(|arenas| arenas.expr(*recv)) else {
+                    return;
+                };
                 // The callee and receiver the call's own check resolved,
                 // when it did.
                 let resolved = self
@@ -358,7 +413,7 @@ impl<'a> Checker<'a> {
             }
             _ => return,
         };
-        self.report(message, e.span, 4, identifier);
+        self.report(message, self.expr_span(e.id), 4, identifier);
     }
 
     /// `@phpstan-pure`/`@phpstan-impure` tag validation - real PHPStan's
@@ -400,13 +455,21 @@ impl<'a> Checker<'a> {
         if !is_pure {
             return;
         }
-        let Some(doc) = f.doc_comment.as_deref() else {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
+        let Some(doc) = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+        else {
             return;
         };
         if !doc.contains("@phpstan-impure") && !doc.contains("@impure") {
             return;
         }
-        let block = docblock::parse_shared(doc);
+        let block = docblock::parse_shared(&doc);
         if !block.impure {
             return;
         }
@@ -476,10 +539,15 @@ impl<'a> Checker<'a> {
         let Some(sig) = sig else {
             return;
         };
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
         let tagged_pure = f
             .doc_comment
-            .as_deref()
-            .is_some_and(|doc| doc.contains("pure") && docblock::parse_shared(doc).pure);
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+            .is_some_and(|doc| doc.contains("pure") && docblock::parse_shared(&doc).pure);
         if !tagged_pure {
             return;
         }
@@ -488,19 +556,28 @@ impl<'a> Checker<'a> {
         } else {
             ("Function", "pureFunction")
         };
-        for param in &f.params {
-            if param.by_ref {
-                self.report(
-                    format!(
-                        "Parameter ${} of pure {} {label}() is passed by reference.",
-                        param.name,
-                        kind_word.to_lowercase()
-                    ),
-                    param.name.span,
-                    0,
-                    format!("{identifier_prefix}.parameterByRef"),
-                );
-            }
+        let by_ref_params: Vec<_> = self
+            .syntax_arenas()
+            .map(|arenas| {
+                arenas
+                    .params(f.params.clone())
+                    .iter()
+                    .filter(|param| param.by_ref)
+                    .map(|param| (param.name.to_string(), param.name.span))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (name, span) in by_ref_params {
+            self.report(
+                format!(
+                    "Parameter ${} of pure {} {label}() is passed by reference.",
+                    name,
+                    kind_word.to_lowercase()
+                ),
+                span,
+                0,
+                format!("{identifier_prefix}.parameterByRef"),
+            );
         }
         if sig.return_type().is_void()
             && !f.is_constructor()
@@ -521,8 +598,17 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
-        for occ in collect_impure_points(f.body_stmts(), class_name, self.registry, implicit_calls)
-        {
+        let arenas = self
+            .syntax_arenas()
+            .expect("purity checks require the owner of arena-backed syntax IDs");
+        let points = collect_impure_points(
+            arenas,
+            f.body_stmts(arenas),
+            class_name,
+            self.registry,
+            implicit_calls,
+        );
+        for occ in points {
             let (verb, identifier) = if occ.certain {
                 ("Impure", format!("impure.{}", occ.identifier))
             } else {
@@ -557,8 +643,20 @@ impl<'a> Checker<'a> {
     /// former, `$this`-injection for the latter) are unrelated to this
     /// function - see `registry::function_sig::ParameterReflection::
     /// closure_this_type` for the latter's own runtime half.
-    pub(crate) fn check_declared_param_callable_tags(&mut self, f: &FunctionDecl) {
-        let Some(doc) = f.doc_comment.as_deref() else {
+    pub(crate) fn check_declared_param_callable_tags(
+        &mut self,
+        f: &FunctionDecl,
+        params: &[Param],
+    ) {
+        let syntax_owner = self.syntax_tree_owner();
+        let arenas = syntax_owner
+            .as_ref()
+            .map(crate::checker::SyntaxTreeOwner::arenas);
+        let Some(doc) = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
+        else {
             return;
         };
         if !doc.contains("param-immediately-invoked-callable")
@@ -567,10 +665,19 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let block = docblock::parse_shared(doc);
+        let block = docblock::parse_shared(&doc);
+        let native_types: rustc_hash::FxHashMap<_, _> = params
+            .iter()
+            .map(|param| {
+                (
+                    param.name.to_string(),
+                    self.resolve_type_hint(param.type_hint.as_ref()),
+                )
+            })
+            .collect();
         for (name, immediately) in &block.param_immediately_invoked_callable {
             let tag = if *immediately { "immediately" } else { "later" };
-            let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
+            let Some(native_ty) = native_types.get(name.as_str()) else {
                 self.report(format!(
                         "PHPDoc tag @param-{tag}-invoked-callable references unknown parameter: ${name}"
                     ),
@@ -580,7 +687,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let native_ty = self.resolve_type_hint(param.type_hint.as_ref());
+            let native_ty = native_ty.clone();
             if !self.param_type_could_satisfy(&native_ty, &Type::callable(None)) {
                 let identifier = if *immediately {
                     "paramImmediatelyInvokedCallable.nonCallable"
@@ -597,7 +704,7 @@ impl<'a> Checker<'a> {
             }
         }
         for name in block.param_closure_this.keys() {
-            let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
+            let Some(native_ty) = native_types.get(name.as_str()) else {
                 self.report(
                     format!("PHPDoc tag @param-closure-this references unknown parameter: ${name}"),
                     f.name.span,
@@ -606,7 +713,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let native_ty = self.resolve_type_hint(param.type_hint.as_ref());
+            let native_ty = native_ty.clone();
             let closure_ty = Type::object("Closure".into(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
                 self.report(format!(

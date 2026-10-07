@@ -80,7 +80,12 @@ pub(crate) fn dump_embedded_stub(source: &str, origin: &Origin) -> String {
         Ok(program) => {
             program.canonical(&mut p);
             p.line();
-            crate::registry::stubs::index_stub_program(&program, origin).canonical(&mut p);
+            crate::registry::stubs::index_stub_program(
+                &program.arenas,
+                program.statements(),
+                origin,
+            )
+            .canonical(&mut p);
         }
         Err(error) => error.canonical(&mut p),
     }

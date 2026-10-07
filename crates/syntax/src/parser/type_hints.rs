@@ -1,7 +1,7 @@
 use crate::ast::{NativeType, TypeHint, TypeHintKind};
 use crate::parser::{NameKind, ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     // ---- type hints ----
@@ -47,9 +47,11 @@ impl Parser<'_> {
             let start = self.current_pos();
             if self.eat(&Token::LParen) {
                 let members_start = self.begin_type_hint_list();
-                self.push_type_hint(self.parse_type_atom()?);
+                let atom = self.parse_type_atom()?;
+                self.push_type_hint(atom);
                 while self.eat(&Token::Amp) {
-                    self.push_type_hint(self.parse_type_atom()?);
+                    let atom = self.parse_type_atom()?;
+                    self.push_type_hint(atom);
                 }
                 self.expect(&Token::RParen)?;
                 let len = self.type_hint_scratch.len() - members_start;
@@ -86,11 +88,15 @@ impl Parser<'_> {
             // and `\int` included, names a class.
             let kind = match NativeType::from_name(&name) {
                 Some(keyword) => TypeHintKind::Keyword(keyword, name.as_str().into()),
-                None => TypeHintKind::Name(self.qualified_name(
-                    name,
-                    self.span_from(start),
-                    NameKind::Class,
-                )),
+                None => {
+                    let qualified =
+                        self.qualified_name(name, self.span_from(start), NameKind::Class);
+                    TypeHintKind::Name(
+                        self.node_arenas
+                            .borrow_mut()
+                            .alloc_qualified_name(qualified),
+                    )
+                }
             };
             Ok(self.type_hint(kind, start))
         })
@@ -117,7 +123,8 @@ impl Parser<'_> {
             if self.check(&Token::Amp) && self.is_type_start_at(1) {
                 while self.check(&Token::Amp) && self.is_type_start_at(1) {
                     self.skip();
-                    self.push_type_hint(self.parse_type_atom()?);
+                    let atom = self.parse_type_atom()?;
+                    self.push_type_hint(atom);
                 }
             }
             let member_count = self.type_hint_scratch.len() - members_start;

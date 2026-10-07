@@ -1,6 +1,6 @@
 use super::*;
-use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
+use syntax::ast::NodeArenas;
 
 /// Flags every bare-variable expression named `$flag_me`, regardless of
 /// its own inferred type - just enough to prove `wants_expr`/
@@ -10,15 +10,21 @@ use diagnostics::DiagnosticBuilder;
 struct FlagsVariableNamed(&'static str);
 
 impl Rule for FlagsVariableNamed {
-    fn wants_expr(&self, kind: &ExprKind) -> bool {
+    fn wants_expr(&self, _arenas: &NodeArenas, kind: &ExprKind) -> bool {
         matches!(kind, ExprKind::Variable(name) if name.as_ref() == self.0)
     }
 
-    fn check_expr(&self, _scope: &Scope, expr: &ExprNode, ty: &Type) -> Vec<Diagnostic> {
+    fn check_expr(
+        &self,
+        _scope: &Scope,
+        _arenas: &NodeArenas,
+        expr: &ExprNode,
+        ty: &Type,
+    ) -> Vec<Diagnostic> {
         vec![
             DiagnosticBuilder::new(
                 format!("flagged ${} (inferred {ty})", self.0),
-                expr.span,
+                _arenas.expr_span(expr.id).expect("expression span"),
                 6,
                 "test.flagged"
             )
@@ -36,11 +42,11 @@ impl Rule for FlagsEchoStatements {
         matches!(kind, StmtKind::Echo(_))
     }
 
-    fn check_stmt(&self, _scope: &Scope, stmt: &StmtNode) -> Vec<Diagnostic> {
+    fn check_stmt(&self, scope: &Scope, stmt: &StmtNode) -> Vec<Diagnostic> {
         vec![
             DiagnosticBuilder::new(
                 "flagged an echo".to_string(),
-                stmt.span,
+                scope.stmt_span(stmt),
                 6,
                 "test.echoFlagged",
             )
@@ -54,8 +60,7 @@ fn diagnostics_with(src: &str, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
     let project = crate::project::test_support::Files::new()
         .analysed(path, src)
         .load();
-    let program = project.ast_of(path).unwrap();
-    let mut checker = Checker::new(project.registry());
+    let (mut checker, program) = project.checker_for(path).unwrap();
     checker.set_external_rules(rules);
     checker.check_program(program.statements());
     checker.into_diagnostics()
@@ -118,11 +123,17 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
     struct RecordsScopeAsDiagnostic;
 
     impl Rule for RecordsScopeAsDiagnostic {
-        fn wants_expr(&self, kind: &ExprKind) -> bool {
+        fn wants_expr(&self, _arenas: &NodeArenas, kind: &ExprKind) -> bool {
             matches!(kind, ExprKind::Variable(name) if name.as_ref() == "x")
         }
 
-        fn check_expr(&self, scope: &Scope, expr: &ExprNode, _ty: &Type) -> Vec<Diagnostic> {
+        fn check_expr(
+            &self,
+            scope: &Scope,
+            _arenas: &NodeArenas,
+            expr: &ExprNode,
+            _ty: &Type,
+        ) -> Vec<Diagnostic> {
             vec![
                 DiagnosticBuilder::new(
                     format!(
@@ -131,7 +142,7 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
                         scope.current_method(),
                         scope.local_type("x")
                     ),
-                    expr.span,
+                    _arenas.expr_span(expr.id).expect("expression span"),
                     6,
                     "test.scope",
                 )
@@ -164,16 +175,23 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
     struct ChecksGuard;
 
     impl Rule for ChecksGuard {
-        fn wants_expr(&self, kind: &ExprKind) -> bool {
+        fn wants_expr(&self, arenas: &NodeArenas, kind: &ExprKind) -> bool {
             matches!(kind, ExprKind::Call(callee, _)
-                if matches!(&callee.kind, ExprKind::Name(n) if n == "maybe_missing"))
+                if matches!(arenas.expr(callee.clone()).map(|callee| &callee.kind), Some(ExprKind::Name(n))
+                    if arenas.qualified_name(n).is_some_and(|n| n == "maybe_missing")))
         }
 
-        fn check_expr(&self, scope: &Scope, expr: &ExprNode, _ty: &Type) -> Vec<Diagnostic> {
+        fn check_expr(
+            &self,
+            scope: &Scope,
+            _arenas: &NodeArenas,
+            expr: &ExprNode,
+            _ty: &Type,
+        ) -> Vec<Diagnostic> {
             vec![
                 DiagnosticBuilder::new(
                     format!("guarded={}", scope.is_function_guarded("maybe_missing")),
-                    expr.span,
+                    _arenas.expr_span(expr.id).expect("expression span"),
                     6,
                     "test.guard",
                 )

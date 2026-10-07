@@ -11,6 +11,7 @@ publish = false
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+bumpalo = "=3.20.3"
 syntax = { package = "phpstan-rs-syntax", path = "crates/syntax" }
 types = { package = "phpstan-rs-types", path = "crates/types" }
 phpdoc = { package = "phpstan-rs-phpdoc", path = "crates/phpdoc" }

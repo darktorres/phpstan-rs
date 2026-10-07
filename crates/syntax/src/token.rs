@@ -1,7 +1,457 @@
 use std::sync::Arc;
 
+use crate::ast::{StringPart, StringPayload};
+use crate::lexer::{FileFacts, IgnoreMark, LexWarning};
+use crate::name::{Name, NameId, name_id};
 use crate::php_string::PhpString;
-use crate::span::Span;
+use crate::span::{LineIndex, Span};
+
+/// A fieldless, byte-sized token tag. Payloads and locations live in parallel
+/// tables on [`TokenStream`].
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TokenKind {
+    InlineHtml, DocComment, Variable, Integer, Float, StringLit, InterpString,
+    ShellExec, Identifier,
+    KwFunction, KwClass, KwInterface, KwTrait, KwEnum, KwExtends, KwImplements,
+    KwPublic, KwPrivate, KwProtected, KwStatic, KwConst, KwFinal, KwAbstract,
+    KwReadonly, KwIf, KwElseIf, KwElse, KwWhile, KwDo, KwFor, KwForeach, KwAs,
+    KwSwitch, KwCase, KwDefault, KwBreak, KwContinue, KwReturn, KwEcho, KwPrint,
+    KwNew, KwClone, KwInstanceof, KwTrue, KwFalse, KwNull, KwNamespace, KwUse,
+    KwGlobal, KwTry, KwCatch, KwFinally, KwThrow, KwArray, KwList, KwFn, KwMatch,
+    KwAnd, KwOr, KwXor, KwInclude, KwIncludeOnce, KwRequire, KwRequireOnce,
+    KwYield, KwGoto, KwEndIf, KwEndWhile, KwEndFor, KwEndForeach, KwEndSwitch,
+    LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semicolon, Comma, Colon,
+    DoubleColon, Arrow, NullsafeArrow, FatArrow, Question, QuestionQuestion,
+    QuestionQuestionEquals, Dot, DotEquals, Plus, Minus, Star, StarStar, Slash,
+    Percent, PlusEquals, MinusEquals, StarEquals, StarStarEquals, SlashEquals,
+    PercentEquals, AmpEquals, PipeEquals, CaretEquals, LtLtEquals, GtGtEquals,
+    Equals, EqualsEquals, EqualsEqualsEquals, BangEquals, BangEqualsEquals, Lt,
+    Gt, LtEquals, GtEquals, Spaceship, AmpAmp, PipePipe, Bang, Amp, Pipe, Caret,
+    Tilde, LtLt, GtGt, Increment, Decrement, At, Backslash, Ellipsis, PipeGt,
+    DollarBrace, AttributeStart, Dollar, Eof,
+}
+
+impl TokenKind {
+    /// The keyword represented by this kind, if it is a keyword.
+    #[inline]
+    pub fn keyword(self) -> Option<Keyword> {
+        let kind = self as u8;
+        let first = TokenKind::KwFunction as u8;
+        let last = TokenKind::KwEndSwitch as u8;
+        (first..=last)
+            .contains(&kind)
+            .then(|| KEYWORDS[usize::from(kind - first)].1.clone())
+    }
+}
+
+/// A payload attached to one token position in [`TokenStream::payloads`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenPayload {
+    /// Payload has been moved into a parsed node.
+    Empty,
+    Name(NameId),
+    Integer(i64),
+    Float(f64),
+    String(StringPayload),
+    Interpolation(Vec<StringPart>),
+    Shell(Vec<StringPart>),
+    DocComment(Arc<str>),
+}
+
+/// A borrowed view of one flat-stream token. Payload-bearing variants borrow
+/// the sparse payload entry so parser peeks never rebuild an owned `Token`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenRef<'a> {
+    InlineHtml(Span), DocComment(&'a str), Variable(&'a Name), Integer(i64),
+    Float(f64), StringLit(&'a StringPayload), InterpString(&'a [StringPart]),
+    ShellExec(&'a [StringPart]), Identifier(&'a Name), Keyword(Keyword),
+    LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semicolon, Comma, Colon,
+    DoubleColon, Arrow, NullsafeArrow, FatArrow, Question, QuestionQuestion,
+    QuestionQuestionEquals, Dot, DotEquals, Plus, Minus, Star, StarStar, Slash,
+    Percent, PlusEquals, MinusEquals, StarEquals, StarStarEquals, SlashEquals,
+    PercentEquals, AmpEquals, PipeEquals, CaretEquals, LtLtEquals, GtGtEquals,
+    Equals, EqualsEquals, EqualsEqualsEquals, BangEquals, BangEqualsEquals, Lt,
+    Gt, LtEquals, GtEquals, Spaceship, AmpAmp, PipePipe, Bang, Amp, Pipe, Caret,
+    Tilde, LtLt, GtGt, Increment, Decrement, At, Backslash, Ellipsis, PipeGt,
+    DollarBrace, AttributeStart, Dollar, Eof,
+}
+
+impl TokenRef<'_> {
+    pub fn kind(self) -> TokenKind {
+        use TokenRef::*;
+        match self {
+            InlineHtml(_) => TokenKind::InlineHtml, DocComment(_) => TokenKind::DocComment,
+            Variable(_) => TokenKind::Variable, Integer(_) => TokenKind::Integer,
+            Float(_) => TokenKind::Float, StringLit(_) => TokenKind::StringLit,
+            InterpString(_) => TokenKind::InterpString, ShellExec(_) => TokenKind::ShellExec,
+            Identifier(_) => TokenKind::Identifier, Keyword(keyword) => keyword.kind(),
+            LParen => TokenKind::LParen, RParen => TokenKind::RParen,
+            LBrace => TokenKind::LBrace, RBrace => TokenKind::RBrace,
+            LBracket => TokenKind::LBracket, RBracket => TokenKind::RBracket,
+            Semicolon => TokenKind::Semicolon, Comma => TokenKind::Comma, Colon => TokenKind::Colon,
+            DoubleColon => TokenKind::DoubleColon, Arrow => TokenKind::Arrow,
+            NullsafeArrow => TokenKind::NullsafeArrow, FatArrow => TokenKind::FatArrow,
+            Question => TokenKind::Question, QuestionQuestion => TokenKind::QuestionQuestion,
+            QuestionQuestionEquals => TokenKind::QuestionQuestionEquals,
+            Dot => TokenKind::Dot, DotEquals => TokenKind::DotEquals, Plus => TokenKind::Plus,
+            Minus => TokenKind::Minus, Star => TokenKind::Star, StarStar => TokenKind::StarStar,
+            Slash => TokenKind::Slash, Percent => TokenKind::Percent,
+            PlusEquals => TokenKind::PlusEquals, MinusEquals => TokenKind::MinusEquals,
+            StarEquals => TokenKind::StarEquals, StarStarEquals => TokenKind::StarStarEquals,
+            SlashEquals => TokenKind::SlashEquals, PercentEquals => TokenKind::PercentEquals,
+            AmpEquals => TokenKind::AmpEquals, PipeEquals => TokenKind::PipeEquals,
+            CaretEquals => TokenKind::CaretEquals, LtLtEquals => TokenKind::LtLtEquals,
+            GtGtEquals => TokenKind::GtGtEquals, Equals => TokenKind::Equals,
+            EqualsEquals => TokenKind::EqualsEquals, EqualsEqualsEquals => TokenKind::EqualsEqualsEquals,
+            BangEquals => TokenKind::BangEquals, BangEqualsEquals => TokenKind::BangEqualsEquals,
+            Lt => TokenKind::Lt, Gt => TokenKind::Gt, LtEquals => TokenKind::LtEquals,
+            GtEquals => TokenKind::GtEquals, Spaceship => TokenKind::Spaceship,
+            AmpAmp => TokenKind::AmpAmp, PipePipe => TokenKind::PipePipe, Bang => TokenKind::Bang,
+            Amp => TokenKind::Amp, Pipe => TokenKind::Pipe, Caret => TokenKind::Caret,
+            Tilde => TokenKind::Tilde, LtLt => TokenKind::LtLt, GtGt => TokenKind::GtGt,
+            Increment => TokenKind::Increment, Decrement => TokenKind::Decrement, At => TokenKind::At,
+            Backslash => TokenKind::Backslash, Ellipsis => TokenKind::Ellipsis, PipeGt => TokenKind::PipeGt,
+            DollarBrace => TokenKind::DollarBrace, AttributeStart => TokenKind::AttributeStart,
+            Dollar => TokenKind::Dollar, Eof => TokenKind::Eof,
+        }
+    }
+}
+
+/// A sparse token payload, addressed by its index in `TokenStream::kinds`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenPayloadEntry {
+    pub token: u32,
+    pub payload: TokenPayload,
+}
+
+/// A doc comment immediately preceding the token at `before`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocEntry {
+    pub before: u32,
+    pub span: Span,
+    pub text: Arc<str>,
+}
+
+/// Flat lexer output. `kinds[i]` and `spans[i]` describe the same token;
+/// payloads and metadata that would otherwise be stored inline are sparse.
+#[derive(Clone)]
+pub struct TokenStream {
+    pub kinds: Vec<TokenKind>,
+    pub spans: Vec<Span>,
+    pub payloads: Vec<TokenPayloadEntry>,
+    pub docs: Vec<DocEntry>,
+    pub keyword_raw: Vec<(u32, String)>,
+    pub line_index: Arc<LineIndex>,
+    pub names: Box<[Name]>,
+    pub decoded_bytes: Vec<u8>,
+    pub comments: Vec<(Span, String)>,
+    pub ignore_marks: Vec<IgnoreMark>,
+    pub warnings: Vec<LexWarning>,
+    pub facts: FileFacts,
+}
+
+impl TokenStream {
+    /// The kind at `index`, or the EOF sentinel past the stream.
+    #[inline]
+    pub fn kind_at(&self, index: usize) -> TokenKind {
+        self.kinds.get(index).copied().unwrap_or(TokenKind::Eof)
+    }
+
+    /// The source span at `index`, or the final span past the stream.
+    #[inline]
+    pub fn span_at(&self, index: usize) -> Span {
+        self.spans
+            .get(index)
+            .copied()
+            .or_else(|| self.spans.last().copied())
+            .unwrap_or_default()
+    }
+
+    /// A payload is sparse and keyed by token index. The binary search also
+    /// supports parser lookahead without advancing the payload cursor.
+    #[inline]
+    pub fn payload_at(&self, token: usize) -> Option<&TokenPayload> {
+        let token = u32::try_from(token).ok()?;
+        self.payloads
+            .binary_search_by_key(&token, |entry| entry.token)
+            .ok()
+            .map(|index| &self.payloads[index].payload)
+    }
+
+    /// Moves a consumed payload out while leaving its sparse slot in place.
+    /// The parser advances its payload cursor when it advances this token.
+    #[inline]
+    pub fn take_payload_at(&mut self, token: usize) -> Option<TokenPayload> {
+        let token = u32::try_from(token).ok()?;
+        let index = self
+            .payloads
+            .binary_search_by_key(&token, |entry| entry.token)
+            .ok()?;
+        Some(std::mem::replace(
+            &mut self.payloads[index].payload,
+            TokenPayload::Empty,
+        ))
+    }
+
+    /// Returns a borrowed token view at `index`, with an EOF view past the
+    /// stream. This is the parser's non-allocating lookahead surface.
+    pub fn token_at(&self, index: usize) -> TokenRef<'_> {
+        use TokenKind as K;
+        use TokenPayload as P;
+        use TokenRef as R;
+        let kind = self.kind_at(index);
+        match kind {
+            K::InlineHtml => R::InlineHtml(self.span_at(index)),
+            K::DocComment => match self.payload_at(index) { Some(P::DocComment(text)) => R::DocComment(text), _ => R::DocComment("") },
+            K::Variable => match self.payload_at(index) { Some(P::Name(id)) => self.name(*id).map_or(R::Eof, R::Variable), _ => R::Eof },
+            K::Integer => match self.payload_at(index) { Some(P::Integer(value)) => R::Integer(*value), _ => R::Eof },
+            K::Float => match self.payload_at(index) { Some(P::Float(value)) => R::Float(*value), _ => R::Eof },
+            K::StringLit => match self.payload_at(index) { Some(P::String(value)) => R::StringLit(value), _ => R::Eof },
+            K::InterpString => match self.payload_at(index) { Some(P::Interpolation(parts)) => R::InterpString(parts), _ => R::Eof },
+            K::ShellExec => match self.payload_at(index) { Some(P::Shell(parts)) => R::ShellExec(parts), _ => R::Eof },
+            K::Identifier => match self.payload_at(index) { Some(P::Name(id)) => self.name(*id).map_or(R::Eof, R::Identifier), _ => R::Eof },
+            _ if kind.keyword().is_some() => R::Keyword(kind.keyword().expect("checked keyword kind")),
+            K::LParen => R::LParen, K::RParen => R::RParen, K::LBrace => R::LBrace, K::RBrace => R::RBrace,
+            K::LBracket => R::LBracket, K::RBracket => R::RBracket, K::Semicolon => R::Semicolon,
+            K::Comma => R::Comma, K::Colon => R::Colon, K::DoubleColon => R::DoubleColon,
+            K::Arrow => R::Arrow, K::NullsafeArrow => R::NullsafeArrow, K::FatArrow => R::FatArrow,
+            K::Question => R::Question, K::QuestionQuestion => R::QuestionQuestion,
+            K::QuestionQuestionEquals => R::QuestionQuestionEquals, K::Dot => R::Dot, K::DotEquals => R::DotEquals,
+            K::Plus => R::Plus, K::Minus => R::Minus, K::Star => R::Star, K::StarStar => R::StarStar,
+            K::Slash => R::Slash, K::Percent => R::Percent, K::PlusEquals => R::PlusEquals,
+            K::MinusEquals => R::MinusEquals, K::StarEquals => R::StarEquals, K::StarStarEquals => R::StarStarEquals,
+            K::SlashEquals => R::SlashEquals, K::PercentEquals => R::PercentEquals, K::AmpEquals => R::AmpEquals,
+            K::PipeEquals => R::PipeEquals, K::CaretEquals => R::CaretEquals, K::LtLtEquals => R::LtLtEquals,
+            K::GtGtEquals => R::GtGtEquals, K::Equals => R::Equals, K::EqualsEquals => R::EqualsEquals,
+            K::EqualsEqualsEquals => R::EqualsEqualsEquals, K::BangEquals => R::BangEquals,
+            K::BangEqualsEquals => R::BangEqualsEquals, K::Lt => R::Lt, K::Gt => R::Gt,
+            K::LtEquals => R::LtEquals, K::GtEquals => R::GtEquals, K::Spaceship => R::Spaceship,
+            K::AmpAmp => R::AmpAmp, K::PipePipe => R::PipePipe, K::Bang => R::Bang, K::Amp => R::Amp,
+            K::Pipe => R::Pipe, K::Caret => R::Caret, K::Tilde => R::Tilde, K::LtLt => R::LtLt,
+            K::GtGt => R::GtGt, K::Increment => R::Increment, K::Decrement => R::Decrement, K::At => R::At,
+            K::Backslash => R::Backslash, K::Ellipsis => R::Ellipsis, K::PipeGt => R::PipeGt,
+            K::DollarBrace => R::DollarBrace, K::AttributeStart => R::AttributeStart, K::Dollar => R::Dollar,
+            K::Eof => R::Eof,
+        }
+    }
+
+    /// The original keyword spelling, when the lexer recorded one.
+    #[inline]
+    pub fn raw_keyword_at(&self, token: usize) -> Option<&str> {
+        let token = u32::try_from(token).ok()?;
+        self.keyword_raw
+            .binary_search_by_key(&token, |(index, _)| *index)
+            .ok()
+            .map(|index| self.keyword_raw[index].1.as_str())
+    }
+
+    /// Resolves a file-local name ID through the stream's name table.
+    #[inline]
+    pub fn name(&self, id: NameId) -> Option<&Name> {
+        self.names.get(u32::from(id.into_raw()) as usize)
+    }
+
+    /// Builds a stream from flat tables emitted during lexing.
+    pub fn from_parts(
+        kinds: Vec<TokenKind>,
+        spans: Vec<Span>,
+        payloads: Vec<TokenPayloadEntry>,
+        docs: Vec<DocEntry>,
+        keyword_raw: Vec<(u32, String)>,
+        line_index: Arc<LineIndex>,
+        names: Box<[Name]>,
+        decoded_bytes: Vec<u8>,
+        comments: Vec<(Span, String)>,
+        ignore_marks: Vec<IgnoreMark>,
+        warnings: Vec<LexWarning>,
+        facts: FileFacts,
+    ) -> Self {
+        assert_eq!(kinds.len(), spans.len(), "token kinds and spans are aligned");
+        Self {
+            kinds,
+            spans,
+            payloads,
+            docs,
+            keyword_raw,
+            line_index,
+            names,
+            decoded_bytes,
+            comments,
+            ignore_marks,
+            warnings,
+            facts,
+        }
+    }
+
+    pub fn from_lexed_parts(
+        tokens: Vec<Token>,
+        spans: Vec<Span>,
+        keyword_raw: Vec<(usize, String)>,
+        docs: Vec<DocEntry>,
+        line_index: Arc<LineIndex>,
+        names: Box<[Name]>,
+        decoded_bytes: Vec<u8>,
+        comments: Vec<(Span, String)>,
+        ignore_marks: Vec<IgnoreMark>,
+        warnings: Vec<LexWarning>,
+        facts: FileFacts,
+    ) -> Self {
+        assert_eq!(tokens.len(), spans.len(), "token kinds and spans are aligned");
+        let names = if names.is_empty() {
+            let mut collected = Vec::new();
+            let mut seen = rustc_hash::FxHashSet::default();
+            let raw_by_token: std::collections::HashMap<usize, &str> = keyword_raw
+                .iter()
+                .map(|(index, spelling)| (*index, spelling.as_str()))
+                .collect();
+            for (index, token) in tokens.iter().enumerate() {
+                let name = match token {
+                    Token::Variable(name) | Token::Identifier(name) => Some(name.clone()),
+                    Token::Keyword(keyword) => Some(
+                        crate::name::Interner::global().name(
+                            raw_by_token
+                                .get(&index)
+                                .copied()
+                                .unwrap_or_else(|| keyword.as_str()),
+                        ),
+                    ),
+                    _ => None,
+                };
+                if let Some(name) = name && seen.insert(name.clone()) {
+                    collected.push(name);
+                }
+            }
+            collected.into_boxed_slice()
+        } else {
+            names
+        };
+        let by_name: std::collections::HashMap<Name, NameId> = names
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, name)| (name, name_id(index)))
+            .collect();
+        let mut kinds = Vec::with_capacity(tokens.len());
+        let mut payloads = Vec::new();
+        for (index, token) in tokens.into_iter().enumerate() {
+            let (kind, payload) = token.into_kind_payload(|name| {
+                *by_name.get(name).expect("token name is in the file name table")
+            });
+            kinds.push(kind);
+            if let Some(payload) = payload {
+                payloads.push(TokenPayloadEntry {
+                    token: u32::try_from(index).expect("token stream exceeds u32 indexes"),
+                    payload,
+                });
+            }
+        }
+        Self::from_parts(
+            kinds,
+            spans,
+            payloads,
+            docs,
+            keyword_raw.into_iter().map(|(i, raw)|
+                (u32::try_from(i).expect("token stream exceeds u32 indexes"), raw)
+            ).collect(),
+            line_index,
+            names,
+            decoded_bytes,
+            comments,
+            ignore_marks,
+            warnings,
+            facts,
+        )
+    }
+}
+
+impl Token {
+    pub(crate) fn into_kind_payload(
+        self,
+        mut name_id: impl FnMut(&Name) -> NameId,
+    ) -> (TokenKind, Option<TokenPayload>) {
+        use Token::*;
+        let plain = |kind| (kind, None);
+        let mut named = |kind, name: Name| {
+            let id = name_id(&name);
+            (kind, Some(TokenPayload::Name(id)))
+        };
+        match self {
+            InlineHtml(_) => plain(TokenKind::InlineHtml),
+            DocComment(text) => (TokenKind::DocComment, Some(TokenPayload::DocComment(text))),
+            Variable(name) => named(TokenKind::Variable, name),
+            Integer(n) => (TokenKind::Integer, Some(TokenPayload::Integer(n))),
+            Float(n) => (TokenKind::Float, Some(TokenPayload::Float(n))),
+            StringLit(s) => (TokenKind::StringLit, Some(TokenPayload::String(s))),
+            InterpString(parts) => (TokenKind::InterpString, Some(TokenPayload::Interpolation(parts))),
+            ShellExec(parts) => (TokenKind::ShellExec, Some(TokenPayload::Shell(parts))),
+            Identifier(name) => named(TokenKind::Identifier, name),
+            Keyword(keyword) => (keyword.kind(), None),
+            LParen => plain(TokenKind::LParen), RParen => plain(TokenKind::RParen),
+            LBrace => plain(TokenKind::LBrace), RBrace => plain(TokenKind::RBrace),
+            LBracket => plain(TokenKind::LBracket), RBracket => plain(TokenKind::RBracket),
+            Semicolon => plain(TokenKind::Semicolon), Comma => plain(TokenKind::Comma),
+            Colon => plain(TokenKind::Colon), DoubleColon => plain(TokenKind::DoubleColon),
+            Arrow => plain(TokenKind::Arrow), NullsafeArrow => plain(TokenKind::NullsafeArrow),
+            FatArrow => plain(TokenKind::FatArrow), Question => plain(TokenKind::Question),
+            QuestionQuestion => plain(TokenKind::QuestionQuestion),
+            QuestionQuestionEquals => plain(TokenKind::QuestionQuestionEquals),
+            Dot => plain(TokenKind::Dot), DotEquals => plain(TokenKind::DotEquals),
+            Plus => plain(TokenKind::Plus), Minus => plain(TokenKind::Minus),
+            Star => plain(TokenKind::Star), StarStar => plain(TokenKind::StarStar),
+            Slash => plain(TokenKind::Slash), Percent => plain(TokenKind::Percent),
+            PlusEquals => plain(TokenKind::PlusEquals), MinusEquals => plain(TokenKind::MinusEquals),
+            StarEquals => plain(TokenKind::StarEquals), StarStarEquals => plain(TokenKind::StarStarEquals),
+            SlashEquals => plain(TokenKind::SlashEquals), PercentEquals => plain(TokenKind::PercentEquals),
+            AmpEquals => plain(TokenKind::AmpEquals), PipeEquals => plain(TokenKind::PipeEquals),
+            CaretEquals => plain(TokenKind::CaretEquals), LtLtEquals => plain(TokenKind::LtLtEquals),
+            GtGtEquals => plain(TokenKind::GtGtEquals), Equals => plain(TokenKind::Equals),
+            EqualsEquals => plain(TokenKind::EqualsEquals), EqualsEqualsEquals => plain(TokenKind::EqualsEqualsEquals),
+            BangEquals => plain(TokenKind::BangEquals), BangEqualsEquals => plain(TokenKind::BangEqualsEquals),
+            Lt => plain(TokenKind::Lt), Gt => plain(TokenKind::Gt), LtEquals => plain(TokenKind::LtEquals),
+            GtEquals => plain(TokenKind::GtEquals), Spaceship => plain(TokenKind::Spaceship),
+            AmpAmp => plain(TokenKind::AmpAmp), PipePipe => plain(TokenKind::PipePipe),
+            Bang => plain(TokenKind::Bang), Amp => plain(TokenKind::Amp), Pipe => plain(TokenKind::Pipe),
+            Caret => plain(TokenKind::Caret), Tilde => plain(TokenKind::Tilde),
+            LtLt => plain(TokenKind::LtLt), GtGt => plain(TokenKind::GtGt),
+            Increment => plain(TokenKind::Increment), Decrement => plain(TokenKind::Decrement),
+            At => plain(TokenKind::At), Backslash => plain(TokenKind::Backslash),
+            Ellipsis => plain(TokenKind::Ellipsis), PipeGt => plain(TokenKind::PipeGt),
+            DollarBrace => plain(TokenKind::DollarBrace), AttributeStart => plain(TokenKind::AttributeStart),
+            Dollar => plain(TokenKind::Dollar), Eof => plain(TokenKind::Eof),
+        }
+    }
+}
+
+impl Keyword {
+    fn kind(&self) -> TokenKind {
+        use Keyword::*;
+        match self {
+            Function => TokenKind::KwFunction, Class => TokenKind::KwClass,
+            Interface => TokenKind::KwInterface, Trait => TokenKind::KwTrait, Enum => TokenKind::KwEnum,
+            Extends => TokenKind::KwExtends, Implements => TokenKind::KwImplements,
+            Public => TokenKind::KwPublic, Private => TokenKind::KwPrivate, Protected => TokenKind::KwProtected,
+            Static => TokenKind::KwStatic, Const => TokenKind::KwConst, Final => TokenKind::KwFinal,
+            Abstract => TokenKind::KwAbstract, Readonly => TokenKind::KwReadonly, If => TokenKind::KwIf,
+            ElseIf => TokenKind::KwElseIf, Else => TokenKind::KwElse, While => TokenKind::KwWhile,
+            Do => TokenKind::KwDo, For => TokenKind::KwFor, Foreach => TokenKind::KwForeach,
+            As => TokenKind::KwAs, Switch => TokenKind::KwSwitch, Case => TokenKind::KwCase,
+            Default => TokenKind::KwDefault, Break => TokenKind::KwBreak, Continue => TokenKind::KwContinue,
+            Return => TokenKind::KwReturn, Echo => TokenKind::KwEcho, Print => TokenKind::KwPrint,
+            New => TokenKind::KwNew, Clone => TokenKind::KwClone, Instanceof => TokenKind::KwInstanceof,
+            True => TokenKind::KwTrue, False => TokenKind::KwFalse, Null => TokenKind::KwNull,
+            Namespace => TokenKind::KwNamespace, Use => TokenKind::KwUse, Global => TokenKind::KwGlobal,
+            Try => TokenKind::KwTry, Catch => TokenKind::KwCatch, Finally => TokenKind::KwFinally,
+            Throw => TokenKind::KwThrow, Array => TokenKind::KwArray, List => TokenKind::KwList,
+            Fn => TokenKind::KwFn, Match => TokenKind::KwMatch, And => TokenKind::KwAnd,
+            Or => TokenKind::KwOr, Xor => TokenKind::KwXor, Include => TokenKind::KwInclude,
+            IncludeOnce => TokenKind::KwIncludeOnce, Require => TokenKind::KwRequire,
+            RequireOnce => TokenKind::KwRequireOnce, Yield => TokenKind::KwYield, Goto => TokenKind::KwGoto,
+            EndIf => TokenKind::KwEndIf, EndWhile => TokenKind::KwEndWhile, EndFor => TokenKind::KwEndFor,
+            EndForeach => TokenKind::KwEndForeach, EndSwitch => TokenKind::KwEndSwitch,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
@@ -288,7 +738,7 @@ impl Keyword {
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum StringPart {
     // A literal chunk and the span of its source text.
-    Literal(PhpString, Span),
+    Literal(StringPayload, Span),
     // `$var`, spanning the `$` and the name.
     SimpleVar(crate::name::Name, Span),
     // The fragment's own source text, plus the real file position it
@@ -347,7 +797,8 @@ pub enum SimpleIndexKey {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum Token {
-    InlineHtml(Arc<str>),
+    /// Inline text as a source range; its bytes live in the parsed file.
+    InlineHtml(crate::span::Span),
     // Raw `/** ... */` text, including the delimiters. Regular `/* */` and
     // `//` comments are still discarded as whitespace - only doc comments
     // are worth carrying through, so the parser can pair one with the
@@ -362,7 +813,7 @@ pub enum Token {
     // (real, distinct message/SQL/template text almost every time), so
     // interning it would pay a real lookup/lock cost for little to no
     // dedup benefit.
-    StringLit(PhpString),
+    StringLit(StringPayload),
     InterpString(Vec<StringPart>),
     // `` `shell command $with $interpolation` `` - same interpolation
     // rules as a double-quoted string, different delimiter and runtime

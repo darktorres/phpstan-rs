@@ -5,7 +5,7 @@
 //! directives are deprecated only to change, so reading them is fine.
 
 use crate::checker::{Checker, Locals};
-use syntax::ast::Arg;
+use syntax::ast::{Arg, NodeArenas};
 use types::PhpVersion;
 
 /// Directives removed from PHP, with the version that removed them.
@@ -142,6 +142,7 @@ impl<'a> Checker<'a> {
     /// `function` is the lowercase name of an ini-accessing builtin.
     pub(crate) fn check_ini_directive_call(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         args: &[Arg],
         locals: &Locals,
@@ -163,7 +164,10 @@ impl<'a> Checker<'a> {
             return;
         };
         let changes = matches!(function, "ini_set" | "ini_alter");
-        let ty = self.infer_expr(&arg.value, locals);
+        let Some(value) = arenas.expr(arg.value) else {
+            return;
+        };
+        let ty = self.infer_expr(value, locals);
         for directive in ty.constant_strings_text() {
             if let Some((_, removed)) = REMOVED
                 .iter()
@@ -177,7 +181,7 @@ impl<'a> Checker<'a> {
                 self.report(format!(
                         "Call to {function}() with ini directive {directive}, removed in PHP {removed}; {outcome}."
                     ),
-                    arg.value.span,
+                    self.expr_span(value.id),
                     0,
                     "ini.removed",
                 );
@@ -200,7 +204,7 @@ impl<'a> Checker<'a> {
                     format!(
                         "Call to {function}(): {what} {directive} is deprecated since PHP {since}."
                     ),
-                    arg.value.span,
+                    self.expr_span(value.id),
                     0,
                     "ini.deprecated",
                 );

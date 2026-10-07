@@ -80,11 +80,12 @@ impl<'a> Walker<'a> {
 
     fn signature_types(
         &mut self,
+        arenas: &NodeArenas,
         sig: &crate::registry::FunctionReflection,
         decl: &FunctionDecl,
         what: &str,
     ) {
-        for (param, p) in sig.params().iter().zip(&decl.params) {
+        for (param, p) in sig.params().iter().zip(arenas.params(decl.params.clone())) {
             self.ban_type(
                 p.span,
                 format!("Parameter ${} of {what}", p.name),
@@ -106,11 +107,11 @@ impl<'a> Walker<'a> {
     fn hint_types(
         &mut self,
         arenas: &NodeArenas,
-        params: &[Param],
+        params: ParamRange,
         return_type: Option<&TypeHint>,
         what: &str,
     ) {
-        for p in params {
+        for p in arenas.params(params) {
             if let Some(hint) = &p.type_hint {
                 self.ban_hint(
                     arenas,
@@ -172,8 +173,11 @@ impl<'a> Walker<'a> {
                 if let Some(ExprNode {
                     kind: ExprKind::Name(name),
                     ..
-                }) = arenas.expr(*callee)
+                }) = arenas.expr(callee.clone())
                 {
+                    let name = arenas
+                        .qualified_name(name)
+                        .expect("call name range belongs to its retained file owner");
                     let lower = name.trim_start_matches('\\').to_ascii_lowercase();
                     let construct = match lower.as_str() {
                         "compact" => Some(BannedConstruct::Compact),
@@ -181,17 +185,42 @@ impl<'a> Walker<'a> {
                         _ => None,
                     };
                     if let Some(construct) = construct {
-                        self.ban(construct, e.span, format!("{lower}()"));
+                        self.ban(
+                            construct,
+                            arenas
+                                .expr_span(e.id)
+                                .expect("expression has a parallel span"),
+                            format!("{lower}()"),
+                        );
                     }
                 }
-                self.arguments(arenas, *args, e.span);
+                self.arguments(
+                    arenas,
+                    args.clone(),
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                );
             }
-            ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
+            ExprKind::Eval(_) => self.ban(
+                BannedConstruct::Eval,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
+                "eval()".to_string(),
+            ),
             // Reported at the `@` itself.
             ExprKind::ErrorSuppress(_) => {
                 let at = Span {
-                    start: e.span.start,
-                    end: e.span.start + 1,
+                    start: arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span")
+                        .start,
+                    end: arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span")
+                        .start
+                        + 1,
                 };
                 self.ban(
                     BannedConstruct::ErrorSuppression,
@@ -199,8 +228,20 @@ impl<'a> Walker<'a> {
                     "The @ error-suppression operator".to_string(),
                 );
             }
-            ExprKind::Isset(_) => self.ban(BannedConstruct::Isset, e.span, "isset()".to_string()),
-            ExprKind::Empty(_) => self.ban(BannedConstruct::Empty, e.span, "empty()".to_string()),
+            ExprKind::Isset(_) => self.ban(
+                BannedConstruct::Isset,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
+                "isset()".to_string(),
+            ),
+            ExprKind::Empty(_) => self.ban(
+                BannedConstruct::Empty,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
+                "empty()".to_string(),
+            ),
             ExprKind::Exit(kind, args) => {
                 // Reported as written: bare `exit` or `exit()`.
                 let keyword = kind.as_str();
@@ -209,82 +250,122 @@ impl<'a> Walker<'a> {
                 } else {
                     format!("{keyword}()")
                 };
-                self.ban(BannedConstruct::Exit, e.span, shown);
+                self.ban(
+                    BannedConstruct::Exit,
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    shown,
+                );
             }
             ExprKind::New(_, args)
             | ExprKind::MethodCall(_, _, args, _)
             | ExprKind::StaticCall(_, _, args)
             | ExprKind::DynamicMethodCall(_, _, args, _)
             | ExprKind::DynamicStaticCall(_, _, args) => {
-                self.arguments(arenas, *args, e.span);
+                self.arguments(
+                    arenas,
+                    args.clone(),
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                );
             }
             ExprKind::AssignRef(target, _) => {
                 self.ban(
                     BannedConstruct::AssignByReference,
-                    e.span,
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
                     "Assignment by reference".to_string(),
                 );
                 if matches!(
-                    arenas.expr(*target).map(|e| &e.kind),
+                    arenas.expr(target.clone()).map(|e| &e.kind),
                     Some(ExprKind::Index(_, None))
                 ) {
                     self.ban(
                         BannedConstruct::ArrayAppend,
-                        arenas.expr_span(*target).unwrap_or(e.span),
+                        arenas.expr_span(target.clone()).unwrap_or(
+                            arenas
+                                .expr_span(e.id)
+                                .expect("expression has a parallel span"),
+                        ),
                         "Appending with []".to_string(),
                     );
                 }
             }
             ExprKind::Assign(target, _) | ExprKind::CompoundAssign(_, target, _)
                 if matches!(
-                    arenas.expr(*target).map(|e| &e.kind),
+                    arenas.expr(target.clone()).map(|e| &e.kind),
                     Some(ExprKind::Index(_, None))
                 ) =>
             {
                 self.ban(
                     BannedConstruct::ArrayAppend,
-                    arenas.expr_span(*target).unwrap_or(e.span),
+                    arenas.expr_span(target.clone()).unwrap_or(
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                    ),
                     "Appending with []".to_string(),
                 );
             }
             ExprKind::Ternary(_, None, _) => self.ban(
                 BannedConstruct::ShortTernary,
-                e.span,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
                 "The short ternary ?:".to_string(),
             ),
             ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), _, _) => {
                 let symbol = if matches!(op, BinOp::Eq) { "==" } else { "!=" };
                 self.ban(
                     BannedConstruct::LooseComparison,
-                    e.span,
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
                     format!("Loose comparison {symbol}"),
                 );
             }
             ExprKind::ShellExec(_) => self.ban(
                 BannedConstruct::Backticks,
-                e.span,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
                 "A backtick shell command".to_string(),
             ),
             ExprKind::Variable(name) if SUPERGLOBALS.contains(&name.as_ref()) => {
-                self.ban(BannedConstruct::Superglobals, e.span, format!("${name}"));
+                self.ban(
+                    BannedConstruct::Superglobals,
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    format!("${name}"),
+                );
             }
             ExprKind::DynamicVariable(_) => self.ban(
                 BannedConstruct::VariableVariables,
-                e.span,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
                 "A variable variable".to_string(),
             ),
             ExprKind::DynamicPropertyAccess(..)
             | ExprKind::DynamicClassConstFetch(..)
             | ExprKind::DynamicStaticPropertyFetch(..) => self.ban(
                 BannedConstruct::DynamicMemberAccess,
-                e.span,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
                 "A dynamic member name".to_string(),
             ),
             ExprKind::Literal(Literal::Float(f)) if self.float_banned() => {
                 self.out.push(
                     DiagnosticBuilder::new(
                         format!("Float literal {f} uses banned type float."),
-                        e.span,
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
                         0,
                         "banned.type",
                     )
@@ -295,40 +376,63 @@ impl<'a> Walker<'a> {
                 self.out.push(
                     DiagnosticBuilder::new(
                         "A (float) cast uses banned type float.".to_string(),
-                        e.span,
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
                         0,
                         "banned.type",
                     )
                     .build(self.line_index),
                 );
             }
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    by_ref,
-                    return_type,
-                    ..
-                } = &**closure;
-                if *by_ref {
-                    self.by_ref_return(e.span, "a closure");
+            ExprKind::Closure(closure_id) => {
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(closure_id.clone())
+                else {
+                    return;
+                };
+                if closure.by_ref {
+                    self.by_ref_return(
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                        "a closure",
+                    );
                 }
-                self.hint_types(arenas, params, return_type.as_deref(), "a closure");
+                self.hint_types(
+                    arenas,
+                    closure.params.clone(),
+                    closure.return_type.as_deref(),
+                    "a closure",
+                );
             }
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    by_ref,
-                    return_type,
-                    ..
-                } = &**arrow;
-                if *by_ref {
-                    self.by_ref_return(e.span, "an arrow function");
+            ExprKind::ArrowFn(arrow_id) => {
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(arrow_id.clone()) else {
+                    return;
+                };
+                if arrow.by_ref {
+                    self.by_ref_return(
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                        "an arrow function",
+                    );
                 }
-                self.hint_types(arenas, params, return_type.as_deref(), "an arrow function");
+                self.hint_types(
+                    arenas,
+                    arrow.params.clone(),
+                    arrow.return_type.as_deref(),
+                    "an arrow function",
+                );
             }
             ExprKind::NewAnonymousClass(class_id) => {
-                if let Some(class) = arenas.anonymous_class(*class_id) {
-                    self.arguments(arenas, class.args, e.span);
+                if let Some(class) = arenas.anonymous_class(class_id.clone()) {
+                    self.arguments(
+                        arenas,
+                        class.args.clone(),
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                    );
                 }
             }
             _ => {}
@@ -336,7 +440,9 @@ impl<'a> Walker<'a> {
         if let ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) = &e.kind {
             self.ban(
                 BannedConstruct::DynamicMemberAccess,
-                e.span,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
                 "A dynamic member name".to_string(),
             );
         }
@@ -348,7 +454,12 @@ impl<'a> Walker<'a> {
 fn hint_mentions(arenas: &NodeArenas, hint: &TypeHint, name: &str) -> bool {
     match &hint.kind {
         TypeHintKind::Keyword(keyword, _) => keyword.as_str() == name,
-        TypeHintKind::Name(written) => written.trim_start_matches('\\').eq_ignore_ascii_case(name),
+        TypeHintKind::Name(range) => arenas.qualified_name(range).is_some_and(|written| {
+            written
+                .written
+                .trim_start_matches('\\')
+                .eq_ignore_ascii_case(name)
+        }),
         TypeHintKind::Nullable(inner) => hint_mentions(arenas, inner, name),
         TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => arenas
             .type_hints(members)
@@ -362,19 +473,23 @@ impl Visitor for Walker<'_> {
         let Some(stmt) = arenas.stmt(id) else {
             return;
         };
+        let stmt_span = arenas
+            .stmt_span(id)
+            .expect("banned-construct statement has an arena span");
         match &stmt.kind {
             StmtKind::Switch { .. } => {
-                self.ban(BannedConstruct::Switch, stmt.span, "switch".to_string())
+                self.ban(BannedConstruct::Switch, stmt_span, "switch".to_string())
             }
             StmtKind::Goto(label) => {
-                self.ban(BannedConstruct::Goto, stmt.span, format!("goto {label}"))
+                self.ban(BannedConstruct::Goto, stmt_span, format!("goto {label}"))
             }
             StmtKind::Global(names) => self.ban(
                 BannedConstruct::Global,
-                stmt.span,
+                stmt_span,
                 format!(
                     "global {}",
-                    names
+                    self.arenas
+                        .global_vars(names.clone())
                         .iter()
                         .map(|v| match v {
                             GlobalVar::Name(n) => format!("${n}"),
@@ -386,17 +501,21 @@ impl Visitor for Walker<'_> {
                         .join(", ")
                 ),
             ),
-            StmtKind::FunctionDecl(f) => {
+            StmtKind::FunctionDecl(function_id) => {
+                let Some(f) = arenas.function(function_id.clone()) else {
+                    return;
+                };
                 let fqn = f.fq_name().to_string();
                 let what = format!("{fqn}()");
                 if f.by_ref {
                     self.by_ref_return(f.name.span, &what);
                 }
                 if let Some(sig) = self.registry.lookup_function(&fqn) {
-                    self.signature_types(sig, f, &what);
+                    self.signature_types(arenas, sig, f, &what);
                 }
             }
             StmtKind::ClassDecl(c) => {
+                let c = arenas.class_decl(c.clone());
                 let fqn = c.fq_name().to_string();
                 self.classes.push(Some(fqn));
                 arena::walk_stmt(self, arenas, id);
@@ -414,8 +533,11 @@ impl Visitor for Walker<'_> {
             return;
         };
         if let ExprKind::NewAnonymousClass(class) = &e.kind {
-            self.classes
-                .push(arenas.anonymous_class_name(*class).map(ToString::to_string));
+            self.classes.push(
+                arenas
+                    .anonymous_class_name(class.clone())
+                    .map(ToString::to_string),
+            );
             arena::walk_expr(self, arenas, id);
             self.classes.pop();
         } else {
@@ -431,7 +553,7 @@ impl Visitor for Walker<'_> {
                 self.by_ref_return(f.name.span, &what);
             }
             if let Some(sig) = self.registry.lookup_method(&fqn, &f.name) {
-                self.signature_types(sig, f, &what);
+                self.signature_types(arenas, sig, f, &what);
             }
         }
         arena::walk_method_decl(self, arenas, m);
@@ -479,7 +601,7 @@ impl Visitor for Walker<'_> {
     }
 
     fn visit_attribute(&mut self, arenas: &NodeArenas, a: &Attribute) {
-        self.arguments(arenas, a.args, a.span);
+        self.arguments(arenas, a.args.clone(), a.span);
         arena::walk_attribute(self, arenas, a);
     }
 }

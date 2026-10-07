@@ -5,7 +5,7 @@ use super::generics::mark_template_params;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
-use syntax::ast::{ExprKind, ExprNode, Literal, NativeType, TypeHint, TypeHintKind};
+use syntax::ast::{ExprId, ExprKind, Literal, NativeType, NodeArenas, TypeHint, TypeHintKind};
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
@@ -23,11 +23,14 @@ use types::{self, TemplateParam, Type};
 /// behavior itself is unchanged.
 // Declared types are joined while the class hierarchy is being built.
 #[allow(clippy::disallowed_methods)]
-pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&ExprNode>) -> Type {
-    let is_bare_null_default = matches!(
-        default.map(|e| &e.kind),
-        Some(ExprKind::Literal(Literal::Null))
-    );
+pub(crate) fn apply_implicit_nullable_default(
+    ty: Type,
+    arenas: &NodeArenas,
+    default: Option<ExprId>,
+) -> Type {
+    let is_bare_null_default = default
+        .and_then(|id| arenas.expr(id))
+        .is_some_and(|expr| matches!(&expr.kind, ExprKind::Literal(Literal::Null)));
     if !is_bare_null_default {
         return ty;
     }
@@ -56,13 +59,14 @@ pub(crate) struct DeclaredType {
 pub(crate) fn declared_type(
     doc: Option<&DocType>,
     native: Option<&TypeHint>,
+    arenas: &NodeArenas,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> DeclaredType {
-    let native_ty = native.map(types::native_type);
+    let native_ty = native.map(|hint| types::native_type(hint, arenas));
     let mut case_refs: Vec<(Name, Name)> = native
         .into_iter()
-        .flat_map(TypeHint::class_names)
+        .flat_map(|hint| hint.class_names(arenas))
         .filter_map(|name| {
             Some((
                 Name::from(&name.written),

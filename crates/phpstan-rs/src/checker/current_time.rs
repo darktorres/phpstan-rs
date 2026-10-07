@@ -27,11 +27,16 @@ const CLOCK_TIP: &str = "rely on an injected clock (PSR-20 ClockInterface) inste
 impl<'a> Checker<'a> {
     /// Whether the date argument `arg` resolves against the current time:
     /// absent, `null`, or a string literal relative to now.
-    fn date_argument_is_relative(&self, arg: Option<&Arg>, locals: &Locals) -> Option<String> {
+    fn date_argument_is_relative(
+        &self,
+        arenas: &NodeArenas,
+        arg: Option<&Arg>,
+        locals: &Locals,
+    ) -> Option<String> {
         let Some(arg) = arg else {
             return Some("no date".to_string());
         };
-        let ty = self.infer_expr(&arg.value, locals);
+        let ty = self.infer_expr(arenas.expr(arg.value)?, locals);
         if ty.is_null().yes() {
             return Some("null".to_string());
         }
@@ -46,6 +51,7 @@ impl<'a> Checker<'a> {
     /// `function` is the resolved, lowercase function name.
     pub(crate) fn check_current_time_call(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         args: &[Arg],
         locals: &Locals,
@@ -77,7 +83,8 @@ impl<'a> Checker<'a> {
             }
             "strtotime" => {
                 if args.len() == 1
-                    && let Some(relative) = self.date_argument_is_relative(args.first(), locals)
+                    && let Some(relative) =
+                        self.date_argument_is_relative(arenas, args.first(), locals)
                 {
                     self.report_current_time(
                         format!("Calling strtotime() with {relative} and no base timestamp reads the current time; {CLOCK_TIP}."),
@@ -88,7 +95,8 @@ impl<'a> Checker<'a> {
                 return;
             }
             "date_create" | "date_create_immutable" => {
-                if let Some(relative) = self.date_argument_is_relative(args.first(), locals) {
+                if let Some(relative) = self.date_argument_is_relative(arenas, args.first(), locals)
+                {
                     self.report_current_time(
                         format!("Calling {function}() with {relative} reads the current time; {CLOCK_TIP}."),
                         span,
@@ -98,14 +106,16 @@ impl<'a> Checker<'a> {
                 return;
             }
             "date_create_from_format" | "date_create_immutable_from_format" => {
-                self.check_create_from_format(args.first(), locals, span);
+                self.check_create_from_format(arenas, args.first(), locals, span);
                 return;
             }
             _ => return,
         };
         let omitted = match args.get(timestamp_at) {
             None => true,
-            Some(arg) => self.infer_expr(&arg.value, locals).is_null().yes(),
+            Some(arg) => arenas
+                .expr(arg.value)
+                .is_some_and(|value| self.infer_expr(value, locals).is_null().yes()),
         };
         if omitted {
             self.report_current_time(
@@ -118,11 +128,20 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_create_from_format(&mut self, format: Option<&Arg>, locals: &Locals, span: Span) {
+    fn check_create_from_format(
+        &mut self,
+        arenas: &NodeArenas,
+        format: Option<&Arg>,
+        locals: &Locals,
+        span: Span,
+    ) {
         let Some(format) = format else {
             return;
         };
-        let format_ty = self.infer_expr(&format.value, locals);
+        let Some(format) = arenas.expr(format.value) else {
+            return;
+        };
+        let format_ty = self.infer_expr(format, locals);
         let Some(text) = format_ty.string_literal_value() else {
             return;
         };
@@ -152,23 +171,35 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_current_time_expression(&mut self, e: &ExprNode, locals: &Locals) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         match &e.kind {
             ExprKind::New(class, args) => {
+                let Some(class) = arenas.expr(*class) else {
+                    return;
+                };
                 let ExprKind::Name(name) = &class.kind else {
+                    return;
+                };
+                let Some(name) = arenas.qualified_name(name) else {
                     return;
                 };
                 let Some(class) = self.resolve_static_class_name(name) else {
                     return;
                 };
+                let args = arenas.args(args.clone());
                 if !self.registry.is_subclass_of(&class, "DateTimeInterface")
                     || args.iter().any(|a| a.spread || a.name.is_some())
                 {
                     return;
                 }
-                if let Some(relative) = self.date_argument_is_relative(args.first(), locals) {
+                if let Some(relative) = self.date_argument_is_relative(arenas, args.first(), locals)
+                {
                     self.report_current_time(
                         format!("Instantiating {class} with {relative} reads the current time; {CLOCK_TIP}."),
-                        e.span,
+                        self.expr_span(e.id),
                         "currentTime.relative",
                     );
                 }
@@ -180,17 +211,26 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 if self.registry.is_subclass_of(&class, "DateTimeInterface") {
-                    self.check_create_from_format(args.first(), locals, e.span);
+                    self.check_create_from_format(
+                        arenas,
+                        arenas.args(args.clone()).first(),
+                        locals,
+                        self.expr_span(e.id),
+                    );
                 }
             }
             ExprKind::Index(base, Some(key)) => {
-                if matches!(&base.kind, ExprKind::Variable(name) if name.as_ref() == "_SERVER")
-                    && let ExprKind::Literal(Literal::String(key)) = &key.kind
-                    && matches!(key.as_str(), Some("REQUEST_TIME" | "REQUEST_TIME_FLOAT"))
+                if matches!(arenas.expr(*base).map(|base| &base.kind), Some(ExprKind::Variable(name)) if name.as_ref() == "_SERVER")
+                    && let Some(ExprNode {
+                        kind: ExprKind::Literal(Literal::String(key)),
+                        ..
+                    }) = arenas.expr(*key)
+                    && let Some(key) = arenas.string_bytes(key)
+                    && (key == b"REQUEST_TIME" || key == b"REQUEST_TIME_FLOAT")
                 {
                     self.report_current_time(
-                        format!("Reading $_SERVER['{key}'] depends on the current request's time; {CLOCK_TIP}."),
-                        e.span,
+                        format!("Reading $_SERVER['{}'] depends on the current request's time; {CLOCK_TIP}.", String::from_utf8_lossy(key)),
+                        self.expr_span(e.id),
                         "currentTime.requestTime",
                     );
                 }

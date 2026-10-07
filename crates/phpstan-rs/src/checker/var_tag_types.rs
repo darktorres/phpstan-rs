@@ -6,7 +6,7 @@
 use super::assignment::destructured_key;
 use super::*;
 use crate::registry;
-use syntax::ast::literal_string_value;
+use syntax::ast::{ExprId, NodeArenas, literal_string_value};
 use types::TrinaryLogic;
 
 /// How the described value was written, for the literal leniency of
@@ -22,12 +22,17 @@ enum ValueShape {
     Other,
 }
 
-fn value_shape(e: &ExprNode) -> ValueShape {
-    let e = e.peeled();
+fn value_shape(arenas: &NodeArenas, id: ExprId) -> ValueShape {
+    let Some(id) = arenas.peeled(id) else {
+        return ValueShape::Other;
+    };
+    let Some(e) = arenas.expr(id) else {
+        return ValueShape::Other;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::Literal(_) | ExprKind::Interpolated(_) | ExprKind::Name(_) => ValueShape::Literal,
         ExprKind::ArrayLiteral(items) => ValueShape::ArrayLiteral {
-            empty: items.is_empty(),
+            empty: arenas.array_items(items.clone()).is_empty(),
         },
         _ => ValueShape::Other,
     })
@@ -64,7 +69,7 @@ impl<'a> Checker<'a> {
     /// `e`'s value when it is a known string: literal syntax, or a
     /// constant (`self::PATTERN`) whose inferred type is one string.
     pub(crate) fn constant_string_value(&self, e: &ExprNode, locals: &Locals) -> Option<String> {
-        if let Some(s) = literal_string_value(e) {
+        if let Some(s) = literal_string_value(self.syntax_arenas()?, e.id) {
             return Some(s.into_owned());
         }
         self.infer_expr(e, locals)
@@ -74,7 +79,7 @@ impl<'a> Checker<'a> {
 
     /// A closure/arrow-fn parameter's native type: its hint alone, with
     /// a `= null` default's implicit nullability.
-    pub(crate) fn closure_param_native(&self, p: &Param) -> Type {
+    pub(crate) fn closure_param_native(&self, arenas: &NodeArenas, p: &Param) -> Type {
         if p.type_hint.is_none() {
             return Type::mixed();
         }
@@ -83,7 +88,7 @@ impl<'a> Checker<'a> {
             Some(c) => self.resolve_pseudo(&ty, c),
             None => ty,
         };
-        let ty = registry::apply_implicit_nullable_default(ty, p.default.as_ref());
+        let ty = registry::apply_implicit_nullable_default(ty, arenas, p.default);
         if p.variadic {
             Type::array(Type::unknown_array_key(), ty)
         } else {
@@ -95,163 +100,192 @@ impl<'a> Checker<'a> {
     /// PHPDoc - or `mixed` when it isn't known. Never narrower than the
     /// real native type, so a check against it can only miss.
     pub(crate) fn native_expr_type(&self, e: &ExprNode, locals: &Locals) -> Type {
-        syntax::stack::guard(|| {
-            match &e.kind {
-                ExprKind::Literal(_) => self.infer_expr(e, locals),
-                ExprKind::Interpolated(_) => Type::string(),
-                ExprKind::Grouping(inner)
-                | ExprKind::ErrorSuppress(inner)
-                | ExprKind::Clone(inner, _) => self.native_expr_type(inner, locals),
-                ExprKind::Assign(_, rhs) => self.native_expr_type(rhs, locals),
-                ExprKind::CompoundAssign(BinOp::Concat, ..) => Type::string(),
-                ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
-                    let l = self.native_expr_type(lhs, locals);
-                    let r = self.native_expr_type(rhs, locals);
+        if self.is_synthetic_expr_id(e.id)
+            && let ExprKind::Variable(name) = &e.kind
+        {
+            return match (locals.native_var(name), locals.get_var(name)) {
+                (Some(native), Some(current))
+                    if self.registry.is_super_type_of(native, current) != TrinaryLogic::No =>
+                {
+                    native.clone()
+                }
+                _ => Type::mixed(),
+            };
+        }
+        let Some(arenas) = self.syntax_arenas() else {
+            return Type::mixed();
+        };
+        self.native_expr_type_id(arenas, e.id, locals)
+    }
+
+    pub(crate) fn native_expr_type_id(
+        &self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        locals: &Locals,
+    ) -> Type {
+        let Some(e) = arenas.expr(id) else {
+            return Type::mixed();
+        };
+        let child = |id| self.native_expr_type_id(arenas, id, locals);
+        syntax::stack::guard(|| match &e.kind {
+            ExprKind::Literal(_) => self.infer_expr(e, locals),
+            ExprKind::Interpolated(_) => Type::string(),
+            ExprKind::Grouping(inner)
+            | ExprKind::ErrorSuppress(inner)
+            | ExprKind::Clone(inner, _) => child(*inner),
+            ExprKind::Assign(_, rhs) => child(*rhs),
+            ExprKind::CompoundAssign(BinOp::Concat, ..) => Type::string(),
+            ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
+                let l = child(*lhs);
+                let r = child(*rhs);
+                if l.is_mixed() || r.is_mixed() {
+                    Type::mixed()
+                } else {
+                    self.relation().union(l, r)
+                }
+            }
+            ExprKind::ArrayLiteral(items) => {
+                let items = arenas.array_items(items.clone());
+                if items.is_empty() {
+                    return self.infer_expr(e, locals);
+                }
+                let mut value: Option<Type> = None;
+                for item in items {
+                    let item_ty = if item.spread {
+                        Type::mixed()
+                    } else {
+                        child(item.value)
+                    };
+                    value = Some(match value {
+                        None => item_ty,
+                        Some(prev) => self.relation().union(prev, item_ty),
+                    });
+                }
+                Type::array(Type::unknown_array_key(), value.unwrap_or(Type::mixed()))
+            }
+            ExprKind::Variable(name) if &**name == "this" => self.infer_expr(e, locals),
+            ExprKind::Variable(name) => match (locals.native_var(name), locals.get_var(name)) {
+                (Some(native), Some(current))
+                    if self.registry.is_super_type_of(native, current) != TrinaryLogic::No =>
+                {
+                    native.clone()
+                }
+                _ => Type::mixed(),
+            },
+            ExprKind::Cast(cast, _) => match cast.kind() {
+                CastKind::Int => Type::int(),
+                CastKind::Float => Type::float(),
+                CastKind::String => Type::string(),
+                CastKind::Bool => Type::bool(),
+                CastKind::Array => Type::array(Type::unknown_array_key(), Type::mixed()),
+                CastKind::Unset => Type::null(),
+                CastKind::Object | CastKind::Void => Type::mixed(),
+            },
+            ExprKind::New(..) => match self.infer_expr(e, locals).as_object() {
+                Some((class, _)) => Type::object_ref(class, &[]),
+                None => Type::mixed(),
+            },
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {
+                Type::object("Closure".into(), Vec::new())
+            }
+            ExprKind::Instanceof(..) | ExprKind::Unary(UnaryOp::Not, _) => Type::bool(),
+            ExprKind::Binary(op, lhs, rhs) => match op {
+                BinOp::Concat => Type::string(),
+                BinOp::Eq
+                | BinOp::Identical
+                | BinOp::NotEq
+                | BinOp::NotIdentical
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::LtEq
+                | BinOp::GtEq
+                | BinOp::And
+                | BinOp::Or
+                | BinOp::LogicalAnd
+                | BinOp::LogicalOr
+                | BinOp::LogicalXor => Type::bool(),
+                BinOp::Spaceship => Type::int(),
+                BinOp::Coalesce => {
+                    let l = child(*lhs);
+                    let r = child(*rhs);
                     if l.is_mixed() || r.is_mixed() {
                         Type::mixed()
                     } else {
                         self.relation().union(l, r)
                     }
                 }
-                ExprKind::ArrayLiteral(items) => {
-                    if items.is_empty() {
-                        return self.infer_expr(e, locals);
-                    }
-                    let mut value: Option<Type> = None;
-                    for item in items {
-                        let item_ty = if item.spread {
-                            Type::mixed()
-                        } else {
-                            self.native_expr_type(&item.value, locals)
-                        };
-                        value = Some(match value {
-                            None => item_ty,
-                            Some(prev) => self.relation().union(prev, item_ty),
-                        });
-                    }
-                    Type::array(Type::unknown_array_key(), value.unwrap_or(Type::mixed()))
-                }
-                ExprKind::Variable(name) if &**name == "this" => self.infer_expr(e, locals),
-                ExprKind::Variable(name) => match (locals.native_var(name), locals.get_var(name)) {
-                    // A by-reference write can leave a value the recorded
-                    // native type no longer describes.
-                    (Some(native), Some(current))
-                        if self.registry.is_super_type_of(native, current) != TrinaryLogic::No =>
-                    {
-                        native.clone()
-                    }
-                    _ => Type::mixed(),
-                },
-                ExprKind::Cast(cast, _) => match cast.kind() {
-                    CastKind::Int => Type::int(),
-                    CastKind::Float => Type::float(),
-                    CastKind::String => Type::string(),
-                    CastKind::Bool => Type::bool(),
-                    CastKind::Array => Type::array(Type::unknown_array_key(), Type::mixed()),
-                    CastKind::Unset => Type::null(),
-                    CastKind::Object | CastKind::Void => Type::mixed(),
-                },
-                ExprKind::New(..) => match self.infer_expr(e, locals).as_object() {
-                    Some((class, _)) => Type::object_ref(class, &[]),
-                    None => Type::mixed(),
-                },
-                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {
-                    Type::object("Closure".into(), Vec::new())
-                }
-                ExprKind::Instanceof(..) | ExprKind::Unary(UnaryOp::Not, _) => Type::bool(),
-                ExprKind::Binary(op, lhs, rhs) => match op {
-                    BinOp::Concat => Type::string(),
-                    BinOp::Eq
-                    | BinOp::Identical
-                    | BinOp::NotEq
-                    | BinOp::NotIdentical
-                    | BinOp::Lt
-                    | BinOp::Gt
-                    | BinOp::LtEq
-                    | BinOp::GtEq
-                    | BinOp::And
-                    | BinOp::Or
-                    | BinOp::LogicalAnd
-                    | BinOp::LogicalOr
-                    | BinOp::LogicalXor => Type::bool(),
-                    BinOp::Spaceship => Type::int(),
-                    BinOp::Coalesce => {
-                        let l = self.native_expr_type(lhs, locals);
-                        let r = self.native_expr_type(rhs, locals);
-                        if l.is_mixed() || r.is_mixed() {
-                            Type::mixed()
-                        } else {
-                            self.relation().union(l, r)
-                        }
-                    }
-                    _ => Type::mixed(),
-                },
-                ExprKind::Ternary(cond, then, otherwise) => {
-                    let t = self.native_expr_type(then.as_deref().unwrap_or(cond), locals);
-                    let o = self.native_expr_type(otherwise, locals);
-                    if t.is_mixed() || o.is_mixed() {
-                        Type::mixed()
-                    } else {
-                        self.relation().union(t, o)
-                    }
-                }
-                ExprKind::Call(callee, _) => {
-                    let ExprKind::Name(name) = &callee.kind else {
-                        return Type::mixed();
-                    };
-                    match self.registry.resolve_function(name) {
-                        Some((_, sig)) if !sig.is_magic() => sig.return_type_native().clone(),
-                        _ => Type::mixed(),
-                    }
-                }
-                ExprKind::MethodCall(receiver, method, _, nullsafe) => {
-                    let receiver = self.native_expr_type(receiver, locals);
-                    let Some((class, _)) = receiver.as_object() else {
-                        return Type::mixed();
-                    };
-                    let ty = self.native_method_return(class, method);
-                    if nullsafe.is_nullsafe() && !ty.is_mixed() {
-                        self.relation().union(ty, Type::null())
-                    } else {
-                        ty
-                    }
-                }
-                ExprKind::StaticCall(target, method, _) => {
-                    let class = match target {
-                        StaticTarget::Name(name) => self.resolve_static_class_name(name),
-                        StaticTarget::Expr(receiver) => self
-                            .native_expr_type(receiver, locals)
-                            .as_object()
-                            .map(|(class, _)| class.to_string()),
-                    };
-                    match class {
-                        Some(class) => self.native_method_return(&class, method),
-                        None => Type::mixed(),
-                    }
-                }
-                ExprKind::PropertyAccess(receiver, prop, nullsafe) => {
-                    let receiver = self.native_expr_type(receiver, locals);
-                    let Some((class, _)) = receiver.as_object() else {
-                        return Type::mixed();
-                    };
-                    let ty = self.native_property_type(class, prop, false);
-                    if nullsafe.is_nullsafe() && !ty.is_mixed() {
-                        self.relation().union(ty, Type::null())
-                    } else {
-                        ty
-                    }
-                }
-                ExprKind::StaticPropertyFetch(target, prop) => {
-                    match target
-                        .as_name()
-                        .and_then(|n| self.resolve_static_class_name(n))
-                    {
-                        Some(class) => self.native_property_type(&class, prop, true),
-                        None => Type::mixed(),
-                    }
-                }
                 _ => Type::mixed(),
+            },
+            ExprKind::Ternary(cond, then, otherwise) => {
+                let t = child(then.unwrap_or(*cond));
+                let o = child(*otherwise);
+                if t.is_mixed() || o.is_mixed() {
+                    Type::mixed()
+                } else {
+                    self.relation().union(t, o)
+                }
             }
+            ExprKind::Call(callee, _) => {
+                let Some(ExprNode {
+                    kind: ExprKind::Name(name),
+                    ..
+                }) = arenas.expr(*callee)
+                else {
+                    return Type::mixed();
+                };
+                let Some(name) = arenas.qualified_name(name) else {
+                    return Type::mixed();
+                };
+                match self.registry.resolve_function(name) {
+                    Some((_, sig)) if !sig.is_magic() => sig.return_type_native().clone(),
+                    _ => Type::mixed(),
+                }
+            }
+            ExprKind::MethodCall(receiver, method, _, nullsafe) => {
+                let receiver = child(*receiver);
+                let Some((class, _)) = receiver.as_object() else {
+                    return Type::mixed();
+                };
+                let ty = self.native_method_return(class, method);
+                if nullsafe.is_nullsafe() && !ty.is_mixed() {
+                    self.relation().union(ty, Type::null())
+                } else {
+                    ty
+                }
+            }
+            ExprKind::StaticCall(target, method, _) => {
+                let class = match target {
+                    StaticTarget::Name(name) => self.resolve_static_class_name(name),
+                    StaticTarget::Expr(receiver) => child(*receiver)
+                        .as_object()
+                        .map(|(class, _)| class.to_string()),
+                };
+                match class {
+                    Some(class) => self.native_method_return(&class, method),
+                    None => Type::mixed(),
+                }
+            }
+            ExprKind::PropertyAccess(receiver, prop, nullsafe) => {
+                let receiver = child(*receiver);
+                let Some((class, _)) = receiver.as_object() else {
+                    return Type::mixed();
+                };
+                let ty = self.native_property_type(class, prop, false);
+                if nullsafe.is_nullsafe() && !ty.is_mixed() {
+                    self.relation().union(ty, Type::null())
+                } else {
+                    ty
+                }
+            }
+            ExprKind::StaticPropertyFetch(target, prop) => match target
+                .as_name()
+                .and_then(|n| self.resolve_static_class_name(n))
+            {
+                Some(class) => self.native_property_type(&class, prop, true),
+                None => Type::mixed(),
+            },
+            _ => Type::mixed(),
         })
     }
 
@@ -357,18 +391,18 @@ impl<'a> Checker<'a> {
                 if seen.insert(class.clone()) {
                     self.report(
                         format!("{subject} has invalid type {class}."),
-                        stmt.span,
+                        self.stmt_span(stmt.id),
                         2,
                         "varTag.trait",
                     );
                 }
             }
-            self.check_type_prefixed_class_names(ty, stmt.span);
+            self.check_type_prefixed_class_names(ty, self.stmt_span(stmt.id));
             for class in unknown {
                 if seen.insert(class.clone()) {
                     self.report(
                         format!("{subject} contains unknown class {class}."),
-                        stmt.span,
+                        self.stmt_span(stmt.id),
                         0,
                         "class.notFound",
                     );
@@ -389,6 +423,10 @@ impl<'a> Checker<'a> {
         names_ok: bool,
         locals: &Locals,
     ) {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("statement variable tags retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         let unnamed: Vec<&Type> = tags
             .iter()
             .filter(|(n, _)| n.is_none())
@@ -409,12 +447,16 @@ impl<'a> Checker<'a> {
         // their current ones.
         let mut own: Vec<String> = Vec::new();
         match &stmt.kind {
-            StmtKind::Expression(e) => {
+            StmtKind::Expression(e_id) => {
+                let Some(e) = arenas.expr(*e_id) else { return };
                 if let ExprKind::Assign(lhs, rhs)
                 | ExprKind::AssignRef(lhs, rhs)
                 | ExprKind::CompoundAssign(_, lhs, rhs) = &e.kind
                 {
-                    own = super::stmt::assigned_variable_names(lhs);
+                    let Some(lhs_expr) = arenas.expr(*lhs) else {
+                        return;
+                    };
+                    own = super::stmt::assigned_variable_names(arenas, *lhs);
                     if names_ok {
                         let described = if matches!(e.kind, ExprKind::CompoundAssign(..)) {
                             Described {
@@ -424,14 +466,17 @@ impl<'a> Checker<'a> {
                             }
                         } else {
                             Described {
-                                native: self.native_expr_type(rhs, locals),
-                                doc: self.infer_expr(rhs, locals),
-                                shape: value_shape(rhs),
+                                native: self.native_expr_type_id(arenas, *rhs, locals),
+                                doc: arenas
+                                    .expr(*rhs)
+                                    .map_or_else(Type::mixed, |e| self.infer_expr(e, locals)),
+                                shape: value_shape(arenas, *rhs),
                             }
                         };
                         let candidates = own.len();
                         self.collect_target_checks(
-                            lhs,
+                            arenas,
+                            lhs_expr,
                             described,
                             &tag_for,
                             candidates,
@@ -446,20 +491,26 @@ impl<'a> Checker<'a> {
                 value,
                 ..
             } => {
+                let Some(subject_expr) = arenas.expr(*subject) else {
+                    return;
+                };
                 let mut names = Vec::new();
-                if let ExprKind::Variable(v) = &subject.kind {
+                if let ExprKind::Variable(v) = &subject_expr.kind {
                     names.push(v.to_string());
                 }
-                if let Some(k) = key
+                if let Some(k) = key.and_then(|id| arenas.expr(id))
                     && let ExprKind::Variable(v) = &k.kind
                 {
                     names.push(v.to_string());
                 }
-                names.extend(super::stmt::assigned_variable_names(value));
+                let Some(value_expr) = arenas.expr(*value) else {
+                    return;
+                };
+                names.extend(super::stmt::assigned_variable_names(arenas, *value));
                 let candidates = names.len();
-                let native = self.native_expr_type(subject, locals);
-                let doc = self.infer_expr(subject, locals);
-                if let ExprKind::Variable(v) = &subject.kind
+                let native = self.native_expr_type_id(arenas, *subject, locals);
+                let doc = self.infer_expr(subject_expr, locals);
+                if let ExprKind::Variable(v) = &subject_expr.kind
                     && let Some(tag) = tag_for(v, candidates)
                 {
                     checks.push((
@@ -477,48 +528,73 @@ impl<'a> Checker<'a> {
                         doc: self.iterable_key_of(&doc),
                         shape: ValueShape::Other,
                     };
-                    self.collect_target_checks(k, described, &tag_for, candidates, &mut checks);
+                    self.collect_target_checks(
+                        arenas,
+                        arenas
+                            .expr(*k)
+                            .expect("foreach key belongs to its retained file owner"),
+                        described,
+                        &tag_for,
+                        candidates,
+                        &mut checks,
+                    );
                 }
                 let described = Described {
                     native: native_iterable_value(&native),
                     doc: self.iterable_value_of(&doc),
                     shape: ValueShape::Other,
                 };
-                self.collect_target_checks(value, described, &tag_for, candidates, &mut checks);
+                self.collect_target_checks(
+                    arenas,
+                    value_expr,
+                    described,
+                    &tag_for,
+                    candidates,
+                    &mut checks,
+                );
                 // Not re-typed by a tag's own annotation pass.
                 own = names;
             }
             StmtKind::StaticVar(vars) => {
-                for (name, default) in vars {
-                    if let Some(default) = default
-                        && let Some(tag) = tag_for(name, vars.len())
+                let vars = arenas.static_vars(vars.clone());
+                for variable in vars {
+                    if let Some(default_id) = variable.default
+                        && let Some(tag) = tag_for(&variable.name, vars.len())
                     {
+                        let Some(default) = arenas.expr(default_id) else {
+                            continue;
+                        };
                         checks.push((
                             tag.clone(),
                             Described {
-                                native: self.native_expr_type(default, locals),
+                                native: self.native_expr_type_id(arenas, default_id, locals),
                                 doc: self.infer_expr(default, locals),
-                                shape: value_shape(default),
+                                shape: value_shape(arenas, default_id),
                             },
                         ));
                     }
                 }
-                own = vars.iter().map(|(n, _)| n.to_string()).collect();
+                own = vars
+                    .iter()
+                    .map(|variable| variable.name.to_string())
+                    .collect();
             }
             StmtKind::Global(vars) => {
-                own = vars
+                own = arenas
+                    .global_vars(vars.clone())
                     .iter()
                     .filter_map(|v| v.name().map(Name::to_string))
                     .collect();
             }
-            StmtKind::Return(Some(e)) | StmtKind::Throw(e) => {
+            StmtKind::Return(Some(e_id)) | StmtKind::Throw(e_id) => {
                 if let [tag] = unnamed.as_slice() {
+                    let Some(e) = arenas.expr(*e_id) else { return };
                     checks.push((
                         (*tag).clone(),
                         Described {
-                            native: self.native_expr_type(e, locals),
+                            native: self.native_expr_type_id(arenas, *e_id, locals),
                             doc: self.infer_expr(e, locals),
-                            shape: value_shape(e),
+                            shape: value_shape(arenas, *e_id),
                         },
                     ));
                 }
@@ -537,11 +613,10 @@ impl<'a> Checker<'a> {
             if current == tag {
                 continue;
             }
-            let variable = ExprNode {
-                id: syntax::ast::SYNTHETIC_EXPR_ID,
-                kind: ExprKind::Variable(name.as_str().into()),
-                span: stmt.span,
-            };
+            let variable = self.synthetic_expr_node(
+                ExprKind::Variable(name.as_str().into()),
+                self.stmt_span(stmt.id),
+            );
             checks.push((
                 tag.clone(),
                 Described {
@@ -552,7 +627,7 @@ impl<'a> Checker<'a> {
             ));
         }
         for (tag, described) in checks {
-            self.check_var_tag_against(&tag, &described, stmt.span);
+            self.check_var_tag_against(&tag, &described, self.stmt_span(stmt.id));
         }
     }
 
@@ -561,6 +636,7 @@ impl<'a> Checker<'a> {
     /// descends into each item's offset.
     fn collect_target_checks<'t>(
         &self,
+        arenas: &syntax::ast::NodeArenas,
         target: &ExprNode,
         described: Described,
         tag_for: &dyn Fn(&str, usize) -> Option<&'t Type>,
@@ -574,11 +650,15 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Destructure(items, _) => {
-                for (i, item) in items.iter().enumerate() {
-                    let Some(item_target) = &item.target else {
+                for (i, item) in arenas.destructure_items(items).iter().enumerate() {
+                    let Some(item_target) = item.target.map(|id| {
+                        arenas
+                            .expr(id)
+                            .expect("destructuring target belongs to its retained file owner")
+                    }) else {
                         continue;
                     };
-                    let key = destructured_key(item, i);
+                    let key = destructured_key(arenas, item, i);
                     let item_described = Described {
                         native: described
                             .native
@@ -591,6 +671,7 @@ impl<'a> Checker<'a> {
                         shape: ValueShape::Other,
                     };
                     self.collect_target_checks(
+                        arenas,
                         item_target,
                         item_described,
                         tag_for,

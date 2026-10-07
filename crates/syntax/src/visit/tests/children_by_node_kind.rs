@@ -3,19 +3,20 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::visit::arena;
 
-fn child_expr_count(e: &ExprNode) -> usize {
+fn child_expr_count(e: &ParsedExpr) -> usize {
     let mut count = 0;
-    any_child_expr(e, |_| {
+    arena::any_child_expr(&e.program.arenas, e.id, |_, _| {
         count += 1;
         false
     });
     count
 }
 
-fn child_stmt_count(s: &StmtNode) -> usize {
+fn child_stmt_count(s: &ParsedStmt) -> usize {
     let mut count = 0;
-    any_child_stmt(s, |_| {
+    arena::any_child_stmt(&s.program.arenas, s.id, |_, _| {
         count += 1;
         false
     });

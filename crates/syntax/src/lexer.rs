@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::name::{Interner, Name, NameCache, NameId};
 use crate::span::{LineIndex, Span};
-use crate::token::{Keyword, Token};
+use crate::token::{DocEntry, Keyword, Token, TokenPayloadEntry, TokenStream};
 use std::sync::Arc;
 
 mod strings;
@@ -42,6 +42,12 @@ pub struct Lexer<'a> {
     // whole file; a string interpolation fragment's own offset when one is
     // lexed on its own, so its tokens get their real spans.
     base: u32,
+    // The file-owned destination offset for decoded string bytes. A whole
+    // file starts at zero; interpolation fragments inherit the parent's
+    // current decoded-byte end.
+    decoded_base: u32,
+    decoded_bytes: Vec<u8>,
+    source_backed_strings: bool,
     // The just-lexed keyword's own original source-text spelling, stashed
     // out of band - `Token::Keyword` itself carries only the
     // keyword's canonical (always-lowercase) spelling, never the raw
@@ -192,8 +198,14 @@ pub struct Tok {
 pub struct DocGroup {
     /// The last doc comment, until the declaration it belongs to takes it.
     pub last: Option<Arc<str>>,
+    /// The source range of the last comment, kept alongside the temporary
+    /// text projection while parser readers move to owner-backed ranges.
+    pub last_range: Option<Span>,
     /// All of them as one, when there are more than one.
     pub folded: Option<Arc<str>>,
+    /// The source ranges used to reconstruct `folded` without retaining a
+    /// second copy in the parsed tree.
+    pub folded_ranges: Option<crate::ast::DocCommentRanges>,
     /// Where the first starts; none for a group made of a doc comment
     /// moved from before attributes.
     pub first_start: Option<u32>,
@@ -216,6 +228,8 @@ pub struct LexEnd {
     pub line_index: Arc<LineIndex>,
     /// The distinct names encountered in this file, in first-use order.
     pub names: Box<[Name]>,
+    /// Escaped or transient-only literal bytes collected while lexing.
+    pub decoded_bytes: Vec<u8>,
 }
 
 /// What is true of a file as a whole, found as it is lexed and parsed, so
@@ -349,21 +363,27 @@ impl Lexed {
         let mut docs = docs.into_iter().peekable();
         let mut raws = keyword_raw.into_iter().peekable();
         for (index, (token, span)) in tokens.into_iter().zip(spans).enumerate() {
-            let mut group: Vec<(Arc<str>, u32)> = Vec::new();
+            let mut group: Vec<(Arc<str>, Span)> = Vec::new();
             while let Some(doc) = docs.next_if(|doc| doc.before == index) {
-                group.push((doc.text, doc.span.start));
+                group.push((doc.text, doc.span));
             }
             let docs = match group.as_slice() {
                 [] => None,
-                [(text, start)] => Some(Box::new(DocGroup {
+                [(text, span)] => Some(Box::new(DocGroup {
                     last: Some(Arc::clone(text)),
+                    last_range: Some(*span),
                     folded: None,
-                    first_start: Some(*start),
+                    folded_ranges: None,
+                    first_start: Some(span.start),
                 })),
                 several => Some(Box::new(DocGroup {
                     last: Some(Arc::clone(&several[several.len() - 1].0)),
                     folded: Some(fold_doc_comments(several.iter().map(|(text, _)| text))),
-                    first_start: Some(several[0].1),
+                    last_range: Some(several[several.len() - 1].1),
+                    folded_ranges: Some(crate::ast::DocCommentRanges::group(
+                        several.iter().map(|(_, span)| *span).collect::<Vec<_>>(),
+                    )),
+                    first_start: Some(several[0].1.start),
                 })),
             };
             let raw_keyword = raws
@@ -413,6 +433,30 @@ pub struct LexOutput {
     /// The comments that hold `@phpstan-ignore`.
     pub ignore_marks: Vec<IgnoreMark>,
     pub warnings: Vec<LexWarning>,
+    /// File-wide facts gathered during lexing.
+    pub facts: FileFacts,
+    /// Distinct names in first-use order, the indexes used by `TokenStream`.
+    pub names: Box<[Name]>,
+    /// Decoded or transient-only string bytes referenced by token payloads.
+    pub decoded_bytes: Vec<u8>,
+}
+
+impl LexOutput {
+    /// Converts the legacy owned-token result to the flat token stream.
+    /// This is an adapter only; parser input continues to use `Lexed`.
+    pub fn into_token_stream(self) -> TokenStream {
+        let Self { lexed, comments, ignore_marks, warnings, facts, names, decoded_bytes } = self;
+        let Lexed { tokens, spans, keyword_raw, docs, line_index } = lexed;
+        let docs = docs.into_iter().map(|doc| DocEntry {
+            before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
+            span: doc.span,
+            text: doc.text,
+        }).collect();
+        TokenStream::from_lexed_parts(
+            tokens, spans, keyword_raw, docs, line_index, names, decoded_bytes,
+            comments, ignore_marks, warnings, facts,
+        )
+    }
 }
 
 impl<'a> Lexer<'a> {
@@ -448,6 +492,9 @@ impl<'a> Lexer<'a> {
             }),
             last_token_start: 0,
             base: 0,
+            decoded_base: 0,
+            decoded_bytes: Vec::new(),
+            source_backed_strings: true,
             pending_keyword_raw: None,
             keep_comments: false,
             comments: Vec::new(),
@@ -589,7 +636,14 @@ impl<'a> Lexer<'a> {
     /// want to compare bare tokens without spans getting in the way.
     #[hotpath::measure]
     pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span, Option<String>)> {
-        self.run()
+        let mut tokens = self.run();
+        // This detached token-list API has no source owner to accompany a
+        // `Source` payload. Preserve its self-contained token contract;
+        // the lexer-backed parser path keeps source ranges directly.
+        for (token, _, _) in &mut tokens {
+            self.own_source_string_tokens(std::slice::from_mut(token));
+        }
+        tokens
     }
 
     /// `tokenize_with_spans`, plus every non-doc comment as its start
@@ -611,7 +665,8 @@ impl<'a> Lexer<'a> {
     /// its start position and source text, and the warnings for what was
     /// skipped.
     pub fn lex(mut self) -> LexOutput {
-        let lexed = self.run_lexed();
+        let mut lexed = self.run_lexed();
+        self.own_source_string_tokens(&mut lexed.tokens);
         let comments = std::mem::take(&mut self.comments)
             .into_iter()
             .map(|(start, end)| {
@@ -624,6 +679,126 @@ impl<'a> Lexer<'a> {
             comments,
             ignore_marks: std::mem::take(&mut self.ignore_marks),
             warnings: self.warnings,
+            facts: self.facts,
+            names: self.file_names.into_boxed_slice(),
+            decoded_bytes: self.decoded_bytes,
+        }
+    }
+
+    /// Lex a complete file directly into the flat token representation.
+    ///
+    /// This shares the same lexer pass and metadata collection as [`Self::lex`]
+    /// but preserves source and decoded-byte ranges for the owning parser.
+    pub fn lex_token_stream(mut self) -> TokenStream {
+        let estimate = self.src.len() / 4;
+        let mut kinds = Vec::with_capacity(estimate);
+        let mut spans = Vec::with_capacity(estimate);
+        let mut payloads = Vec::new();
+        let mut docs = Vec::new();
+        let mut keyword_raw = Vec::new();
+        loop {
+            let (token, span, raw_keyword) = self.next_raw();
+            if let Token::DocComment(text) = token {
+                docs.push(DocEntry {
+                    before: u32::try_from(kinds.len()).expect("token stream exceeds u32 indexes"),
+                    span,
+                    text,
+                });
+                continue;
+            }
+            let index = kinds.len();
+            if let Some(raw) = raw_keyword {
+                keyword_raw.push((
+                    u32::try_from(index).expect("token stream exceeds u32 indexes"),
+                    raw,
+                ));
+            }
+            let done = matches!(token, Token::Eof);
+            let (kind, payload) = token.into_kind_payload(|name| {
+                self.name_id(name)
+                    .expect("token name is in the file name table")
+            });
+            kinds.push(kind);
+            spans.push(span);
+            if let Some(payload) = payload {
+                payloads.push(TokenPayloadEntry {
+                    token: u32::try_from(index).expect("token stream exceeds u32 indexes"),
+                    payload,
+                });
+            }
+            if done {
+                break;
+            }
+        }
+        let comments = std::mem::take(&mut self.comments)
+            .into_iter()
+            .map(|(start, end)| (self.span(start, end), self.slice(start..end).into_owned()))
+            .collect();
+        TokenStream::from_parts(
+            kinds,
+            spans,
+            payloads,
+            docs,
+            keyword_raw,
+            Arc::clone(&self.line_index),
+            std::mem::take(&mut self.file_names).into_boxed_slice(),
+            std::mem::take(&mut self.decoded_bytes),
+            comments,
+            std::mem::take(&mut self.ignore_marks),
+            std::mem::take(&mut self.warnings),
+            self.facts,
+        )
+    }
+
+    fn own_source_string_tokens(&self, tokens: &mut [Token]) {
+        for token in tokens {
+            match token {
+                Token::StringLit(payload) => self.own_string_payload(payload),
+                Token::InterpString(parts) | Token::ShellExec(parts) => {
+                    for part in parts {
+                        if let crate::token::StringPart::Literal(payload, _) = part {
+                            self.own_string_payload(payload);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn own_string_payload(&self, payload: &mut crate::ast::StringPayload) {
+        let bytes = match payload {
+            crate::ast::StringPayload::Source(span) => {
+                let start = span
+                    .start
+                    .checked_sub(self.base)
+                    .expect("literal span belongs to lexer source")
+                    as usize;
+                let end = span
+                    .end
+                    .checked_sub(self.base)
+                    .expect("literal span belongs to lexer source")
+                    as usize;
+                Some(&self.src[start..end])
+            }
+            crate::ast::StringPayload::Decoded(range) => {
+                let start = range
+                    .start()
+                    .checked_sub(self.decoded_base)
+                    .expect("literal range belongs to lexer byte store")
+                    as usize;
+                let end = range
+                    .end()
+                    .checked_sub(self.decoded_base)
+                    .expect("literal range belongs to lexer byte store")
+                    as usize;
+                Some(&self.decoded_bytes[start..end])
+            }
+            crate::ast::StringPayload::Owned(_) => None,
+        };
+        if let Some(bytes) = bytes {
+            *payload =
+                crate::ast::StringPayload::from(crate::php_string::PhpString::from(bytes.to_vec()));
         }
     }
 
@@ -692,24 +867,30 @@ impl<'a> Lexer<'a> {
     /// right before it, which a declaration or a statement reads. Past
     /// the end it is `Token::Eof` again.
     pub fn next_tok(&mut self) -> Tok {
-        let mut docs: Vec<(Arc<str>, u32)> = Vec::new();
+        let mut docs: Vec<(Arc<str>, Span)> = Vec::new();
         loop {
             let (token, span, raw_keyword) = self.next_raw();
             if let Token::DocComment(text) = token {
-                docs.push((text, span.start));
+                docs.push((text, span));
                 continue;
             }
             let docs = match docs.as_slice() {
                 [] => None,
-                [(text, start)] => Some(Box::new(DocGroup {
+                [(text, span)] => Some(Box::new(DocGroup {
                     last: Some(Arc::clone(text)),
+                    last_range: Some(*span),
                     folded: None,
-                    first_start: Some(*start),
+                    folded_ranges: None,
+                    first_start: Some(span.start),
                 })),
                 several => Some(Box::new(DocGroup {
                     last: Some(Arc::clone(&several[several.len() - 1].0)),
                     folded: Some(fold_doc_comments(several.iter().map(|(text, _)| text))),
-                    first_start: Some(several[0].1),
+                    last_range: Some(several[several.len() - 1].1),
+                    folded_ranges: Some(crate::ast::DocCommentRanges::group(
+                        several.iter().map(|(_, span)| *span).collect::<Vec<_>>(),
+                    )),
+                    first_start: Some(several[0].1.start),
                 })),
             };
             return Tok {
@@ -724,6 +905,11 @@ impl<'a> Lexer<'a> {
     /// The lines of the file being lexed.
     pub fn line_index(&self) -> Arc<LineIndex> {
         Arc::clone(&self.line_index)
+    }
+
+    /// The source bytes whose spans the lexer emits.
+    pub(crate) fn source_bytes(&self) -> &'a [u8] {
+        self.src
     }
 
     /// Moves to the end of the source without lexing the rest, and
@@ -743,7 +929,61 @@ impl<'a> Lexer<'a> {
             facts: self.facts,
             line_index: Arc::clone(&self.line_index),
             names: self.file_names.into_boxed_slice(),
+            decoded_bytes: self.decoded_bytes,
         }
+    }
+
+    pub(crate) fn with_decoded_bytes_base(mut self, base: u32) -> Self {
+        self.decoded_base = base;
+        self
+    }
+
+    pub(crate) fn set_decoded_bytes_base(&mut self, base: u32) {
+        debug_assert!(self.decoded_bytes.is_empty());
+        self.decoded_base = base;
+    }
+
+    pub(crate) fn has_decoded_bytes(&self) -> bool {
+        !self.decoded_bytes.is_empty()
+    }
+
+    pub(crate) fn drain_decoded_bytes_to(&mut self, destination: &mut Vec<u8>) {
+        let len = self.decoded_bytes.len();
+        destination.extend(self.decoded_bytes.drain(..));
+        self.decoded_base = self
+            .decoded_base
+            .checked_add(u32::try_from(len).expect("decoded byte vector exhausted"))
+            .expect("decoded byte vector exhausted");
+    }
+
+    pub(crate) fn with_source_backed_strings(mut self, enabled: bool) -> Self {
+        self.source_backed_strings = enabled;
+        self
+    }
+
+    pub(crate) fn source_backed_strings(&self) -> bool {
+        self.source_backed_strings
+    }
+
+    pub(crate) fn decoded_payload(&mut self, bytes: &[u8]) -> crate::ast::StringPayload {
+        let range = self.decoded_range(self.decoded_bytes.len(), bytes.len());
+        self.decoded_bytes.extend_from_slice(bytes);
+        crate::ast::StringPayload::Decoded(range)
+    }
+
+    pub(crate) fn decoded_range(
+        &self,
+        local_start: usize,
+        len: usize,
+    ) -> crate::ast::DecodedBytesRange {
+        let start = self
+            .decoded_base
+            .checked_add(u32::try_from(local_start).expect("decoded byte vector exhausted"))
+            .expect("decoded byte vector exhausted");
+        let end = start
+            .checked_add(u32::try_from(len).expect("decoded payload too large"))
+            .expect("decoded byte vector exhausted");
+        crate::ast::DecodedBytesRange::new(start, end)
     }
 
     fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
@@ -993,7 +1233,8 @@ impl<'a> Lexer<'a> {
         {
             self.pos += 1;
         }
-        let html = lossy(&self.src[start..self.pos]);
+        let html_end = self.pos;
+        let html = self.span(start, html_end);
 
         if self.starts_with_ignore_case("<?php") {
             self.pos += 5;
@@ -1002,7 +1243,7 @@ impl<'a> Lexer<'a> {
             // The HTML before it is its own token; `<?=` is left for the
             // next call, which surfaces it as `echo`.
             if !html.is_empty() {
-                return Token::InlineHtml(self.interner.str(&html));
+                return Token::InlineHtml(html);
             }
             self.pos += 3;
             self.in_php = true;
@@ -1017,7 +1258,7 @@ impl<'a> Lexer<'a> {
             }
             return self.next_token();
         }
-        Token::InlineHtml(self.interner.str(&html))
+        Token::InlineHtml(html)
     }
 
     /// Advances past a single- or double-quoted string literal starting

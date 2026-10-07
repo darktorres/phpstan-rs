@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
                     None => {
                         self.report(
                             format!("used function {fqn} not found"),
-                            stmt.span,
+                            self.stmt_span(stmt.id),
                             0,
                             "function.notFound",
                         );
@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
                     {
                         let mut builder = DiagnosticBuilder::new(
                             format!("Function {real_name} used with incorrect case: {fqn}."),
-                            stmt.span,
+                            self.stmt_span(stmt.id),
                             0,
                             "function.nameCase",
                         );
@@ -132,7 +132,7 @@ impl<'a> Checker<'a> {
                 if !self.registry.global_constants().contains_key(fqn) {
                     self.report(
                         format!("used constant {fqn} not found"),
-                        stmt.span,
+                        self.stmt_span(stmt.id),
                         0,
                         "constant.notFound",
                     );
@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 format!("Referencing prefixed {project} class: {path}."),
-                                stmt.span,
+                                self.stmt_span(stmt.id),
                                 0,
                                 "class.prefixed".to_string(),
                             )
@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
                         break;
                     }
                 }
-                self.check_restricted_class_use_import(path, stmt.span);
+                self.check_restricted_class_use_import(path, self.stmt_span(stmt.id));
             }
         }
     }
@@ -230,7 +230,7 @@ impl<'a> Checker<'a> {
             };
             match &stmt.kind {
                 StmtKind::Namespace(name) => {
-                    current_namespace = name.clone();
+                    current_namespace = name.to_string();
                     current_namespace_lower = name.to_ascii_lowercase();
                 }
                 StmtKind::Use(imports) => {
@@ -250,7 +250,7 @@ impl<'a> Checker<'a> {
                                 DiagnosticBuilder::new(format!(
                                         "Cannot use {path} as {alias} because the name is already in use."
                                     ),
-                                    stmt.span,
+                                    self.stmt_span(stmt.id),
                                     0,
                                     "use.nameInUse".to_string(),
                                 )
@@ -260,6 +260,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 StmtKind::ClassDecl(c) => {
+                    let c = arenas.class_decl(c.clone());
                     let Some(def) = arenas.class(c.def) else {
                         continue;
                     };

@@ -23,7 +23,7 @@ use composer::dir_table::{DirTable, EntryKind};
 use declared_classes::DeclaredClass;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
-use syntax::ast::{StmtKind, StmtNode};
+use syntax::ast::{StmtId, StmtKind, StmtNode};
 use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
 use syntax::parser::ParseError;
@@ -172,17 +172,22 @@ pub(crate) struct FileState {
 /// migration.
 #[cfg_attr(test, derive(Clone))]
 pub(crate) struct SyntaxTree {
-    stmts: Vec<StmtNode>,
-    #[allow(dead_code)] // Read by source-backed payloads in rows 9.3-9.4.
-    source: Box<[u8]>,
-    #[allow(dead_code)] // Read by `NameId`-based readers in row 9.3.
+    stmts: syntax::ast::StmtIdRange,
+    #[allow(dead_code)] // Read by source-backed payloads and completion owners.
+    source: std::sync::Arc<[u8]>,
+    #[allow(dead_code)] // Read by `NameId`-based readers and completion owners.
     names: Box<[Name]>,
     arenas: syntax::ast::NodeArenas,
+    line_index: Arc<LineIndex>,
 }
 
 impl SyntaxTree {
-    pub(crate) fn statements(&self) -> &[StmtNode] {
-        &self.stmts
+    pub(crate) fn statements(&self) -> &[syntax::ast::StmtId] {
+        self.arenas.stmt_ids(&self.stmts)
+    }
+
+    pub(crate) fn arenas(&self) -> &syntax::ast::NodeArenas {
+        &self.arenas
     }
 
     #[allow(dead_code)] // Used as checker readers move to file-local IDs in row 9.3.
@@ -195,9 +200,15 @@ impl SyntaxTree {
         self.arenas.stmt(id)
     }
 
-    #[allow(dead_code)] // Used as payloads become source ranges in row 9.4.
     pub(crate) fn source_slice(&self, span: Span) -> Option<&[u8]> {
         self.source.get(span.start as usize..span.end as usize)
+    }
+
+    pub(crate) fn doc_comment_text<'a>(
+        &'a self,
+        ranges: &'a syntax::ast::DocCommentRanges,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        ranges.text(&self.source)
     }
 
     #[allow(dead_code)] // Used by file-scoped NameId readers in row 9.3.
@@ -217,11 +228,32 @@ impl SyntaxTree {
     pub(crate) fn stmt_span(&self, id: syntax::ast::StmtId) -> Option<Span> {
         self.arenas.stmt_span(id)
     }
+
+    /// Makes a cloneable syntax owner for completion probes that append
+    /// synthetic nodes to the current file's ID space. Completion needs the
+    /// original source, name table, tree and line map; parse products that
+    /// describe the whole file are intentionally empty on this temporary
+    /// owner.
+    fn parsed_file_for_completion(&self) -> Arc<syntax::ParsedFile> {
+        Arc::new(syntax::ParsedFile {
+            source: Arc::clone(&self.source),
+            names: self.names.clone(),
+            stmts: self.stmts.clone(),
+            arenas: self.arenas.clone(),
+            ignore_marks: Vec::new(),
+            line_index: Arc::clone(&self.line_index),
+            warnings: Vec::new(),
+            facts: FileFacts::default(),
+            stub_attributes_changed: false,
+            goto_labels: Box::default(),
+            references: None,
+        })
+    }
 }
 
 impl syntax::canonical::Canonical for SyntaxTree {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
-        syntax::canonical::Canonical::canonical(&self.stmts, p);
+        p.list_with(self.statements().iter(), &self.arenas);
     }
 }
 
@@ -241,10 +273,24 @@ pub(crate) enum AstRef<'a> {
 }
 
 impl AstRef<'_> {
-    pub(crate) fn statements(&self) -> &[StmtNode] {
+    pub(crate) fn statements(&self) -> &[syntax::ast::StmtId] {
         match self {
             AstRef::Kept(tree) => tree.statements(),
             AstRef::Parsed(tree) => tree.statements(),
+        }
+    }
+
+    pub(crate) fn arenas(&self) -> &syntax::ast::NodeArenas {
+        match self {
+            AstRef::Kept(tree) => tree.arenas(),
+            AstRef::Parsed(tree) => tree.arenas(),
+        }
+    }
+
+    pub(crate) fn parsed_file_for_completion(&self) -> Arc<syntax::ParsedFile> {
+        match self {
+            AstRef::Kept(tree) => tree.parsed_file_for_completion(),
+            AstRef::Parsed(tree) => tree.parsed_file_for_completion(),
         }
     }
 }
@@ -278,7 +324,7 @@ impl FileState {
     /// The file's tree, for a reader of a file whose tree is kept: an
     /// analysed file's. A test build asserts that no reader asks for the
     /// tree of a file that has none.
-    fn ast(&self) -> &[StmtNode] {
+    fn ast(&self) -> &[StmtId] {
         debug_assert!(
             self.kept_tree.is_some(),
             "a reader asked for the tree of a context file that dropped it"
@@ -1045,7 +1091,10 @@ impl Project {
             if !report_unmatched {
                 continue;
             }
-            let trait_lines = trait_line_ranges(file.ast(), &file.line_index);
+            let tree = file
+                .tree()
+                .expect("analyzed file retains its syntax tree for trait scopes");
+            let trait_lines = trait_line_ranges(tree.arenas(), file.ast(), &file.line_index);
             let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
             let mut unmatched: Vec<Diagnostic> = Vec::new();
             let mut unmatched_line = |line: u32, message: String, identifier: &'static str| {
@@ -1422,9 +1471,8 @@ impl Project {
             "a file whose tree is needed was read back from the cache"
         );
         let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
-            tree.as_ref().map_or_else(Vec::new, |tree| {
-                self.class_fn_refs_of(tree.statements(), &source)
-            })
+            tree.as_ref()
+                .map_or_else(Vec::new, |tree| self.class_fn_refs_of(tree, &source))
         });
         if self.defer_reference_index {
             self.pending_use_sites
@@ -1676,11 +1724,11 @@ impl Project {
     /// (`use_sites::index_class_fn_refs`).
     fn class_fn_refs_of(
         &self,
-        ast: &[StmtNode],
+        tree: &SyntaxTree,
         source: &str,
     ) -> Vec<(Span, use_sites::RefTarget)> {
         if self.indexes_use_sites() {
-            use_sites::index_class_fn_refs(ast, source)
+            use_sites::index_class_fn_refs(tree.arenas(), tree.statements(), source)
         } else {
             Vec::new()
         }
@@ -1690,7 +1738,7 @@ impl Project {
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
         if let Some(tree) = &parsed.tree {
-            parsed.class_fn_refs = Some(self.class_fn_refs_of(tree.statements(), source));
+            parsed.class_fn_refs = Some(self.class_fn_refs_of(tree, source));
         }
     }
 
@@ -3099,7 +3147,7 @@ impl Project {
         checker.set_records(records);
         checker.check_program(ast.statements());
         if collect_member_refs {
-            checker.collect_default_and_const_value_member_refs(ast.statements());
+            checker.collect_default_and_const_value_member_refs(ast.arenas(), ast.statements());
         }
         FileCheck {
             member_refs: checker.take_member_ref_sites(),
@@ -3157,7 +3205,11 @@ impl Project {
         }
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         if self.settings.phpstan_api {
+            let tree = file
+                .tree()
+                .expect("analyzed file retains its syntax tree for the PHPStan API pass");
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
+                tree.arenas(),
                 file.ast(),
                 &file.line_index,
                 &self.registry,
@@ -3692,18 +3744,40 @@ fn line_start_range(line: u32) -> syntax::span::Range {
 }
 
 /// First and last line of every trait declared in `ast`.
-fn trait_line_ranges(ast: &[StmtNode], line_index: &LineIndex) -> Vec<(u32, u32)> {
-    let mut ranges = Vec::new();
-    for stmt in ast {
-        syntax::visit::any_stmt_in_body(stmt, |s| {
-            if let StmtKind::ClassDecl(c) = &s.kind
-                && c.def.kind == syntax::ast::ClassKind::Trait
-            {
-                ranges.push((line_index.line(s.span.start), line_index.line(s.span.end)));
-            }
-            false
-        });
+fn trait_line_ranges(
+    arenas: &syntax::ast::NodeArenas,
+    ast: &[StmtId],
+    line_index: &LineIndex,
+) -> Vec<(u32, u32)> {
+    struct Traits<'a> {
+        line_index: &'a LineIndex,
+        ranges: Vec<(u32, u32)>,
     }
+    impl syntax::visit::arena::Visitor for Traits<'_> {
+        fn visit_stmt(&mut self, arenas: &syntax::ast::NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            let Some(span) = arenas.stmt_span(id) else {
+                return;
+            };
+            if let StmtKind::ClassDecl(class) = &stmt.kind
+                && arenas
+                    .class(arenas.class_decl(class.clone()).def)
+                    .is_some_and(|def| def.kind == syntax::ast::ClassKind::Trait)
+            {
+                self.ranges.push((
+                    self.line_index.line(span.start),
+                    self.line_index.line(span.end),
+                ));
+            }
+            syntax::visit::arena::walk_stmt(self, arenas, id);
+        }
+    }
+    let mut ranges = Vec::new();
+    let mut traits = Traits { line_index, ranges };
+    syntax::visit::arena::walk_stmts(&mut traits, arenas, ast);
+    ranges = traits.ranges;
     ranges
 }
 
@@ -3728,14 +3802,16 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
     checker::includes::WATCH,
 ]);
 
-/// What the tree `ast` refers to, and what its declarations do: from what
-/// the parse recorded, or by walking the tree when a pass changed it after.
+/// What the tree `ast` refers to, and what its declarations do: from the
+/// parser's records, or by walking the final tree when parse-time rules
+/// invalidate those records.
 fn file_references(
-    ast: &[StmtNode],
+    arenas: &syntax::ast::NodeArenas,
+    ast: &[StmtId],
     recorded: Option<syntax::references::FileReferences>,
 ) -> (FxHashSet<deps::RefKey>, FxHashSet<deps::RefKey>) {
     let Some(recorded) = recorded else {
-        return deps::both_referenced_names(ast);
+        return deps::both_referenced_names(arenas, ast);
     };
     deps::recorded_references(recorded)
 }
@@ -3743,8 +3819,8 @@ fn file_references(
 /// A file parsed, with its inline ignore comments.
 struct Parsed {
     tree: SyntaxTree,
-    // What the tree refers to, as the parse recorded it; none when a pass
-    // changed the tree after.
+    // What the tree refers to, as recorded by the parser; none when a
+    // parse-time transformation made those records stale.
     references: Option<syntax::references::FileReferences>,
     ignores: ignore_comments::IgnoreComments,
     warnings: Vec<LexWarning>,
@@ -3766,8 +3842,8 @@ fn parse_with_ignores<'a>(
 pub(crate) struct ParseRecord {
     pub(crate) ignore_marks: Vec<syntax::lexer::IgnoreMark>,
     pub(crate) goto_labels: Box<[syntax::ast::GotoLabel]>,
-    // What the parse recorded of the file's references; none when a pass
-    // changed the tree after it.
+    // What the parse recorded of the file's references; none when a
+    // parse-time transformation made those records stale.
     pub(crate) references: Option<syntax::references::FileReferences>,
 }
 
@@ -3779,26 +3855,31 @@ fn parse_recording<'a>(
     record: Option<&mut ParseRecord>,
     scratch: Option<&mut syntax::ast::NodeArenas>,
 ) -> Result<Parsed, ParseError> {
-    let parsed = match scratch {
+    let mut parsed = match scratch {
         Some(scratch) => {
-            syntax::parse_watching_transient_with_scratch(source, names, Some(&WATCHED), scratch)?
+            // Registry declarations are built from the parsed tree before
+            // it may be dropped. `DocCommentRanges` now refer into the
+            // owning file's source, so even a scratch parse must retain
+            // those bytes until `file_declarations::collect` has copied
+            // their resolved types and tags into registry-owned values.
+            syntax::parse_watching_with_scratch(source, names, Some(&WATCHED), scratch)?
         }
         None => syntax::parse_watching(source, names, Some(&WATCHED))?,
     };
     let ignores = ignore_comments::scan_parsed(&parsed);
-    let mut ast = parsed.stmts;
-    // What the file does not name, or hold, there is nothing to find of by
-    // walking it.
-    let changed = parsed.facts.mentions & crate::stub_attributes::MENTIONS != 0
-        && crate::stub_attributes::apply_stub_attributes(&mut ast);
+    let ast = parsed.stmts;
+    // The parser applies these rules while declarations are constructed.
+    // Its reference result is already invalidated when a transformation
+    // changes the tree, so products below are rebuilt from the final AST.
     if parsed.facts.has_anonymous_class {
         crate::registry::name_anonymous_classes(
-            &mut ast,
+            &mut parsed.arenas,
+            &ast,
             &path.display().to_string(),
             &parsed.line_index,
         );
     }
-    let references = (!changed).then_some(parsed.references);
+    let references = parsed.references;
     if let Some(record) = record {
         *record = ParseRecord {
             ignore_marks: parsed.ignore_marks,
@@ -3812,6 +3893,7 @@ fn parse_recording<'a>(
             source: parsed.source,
             names: parsed.names,
             arenas: parsed.arenas,
+            line_index: Arc::clone(&parsed.line_index),
         },
         references,
         ignores,
@@ -3994,7 +4076,7 @@ fn parse_file_recording_with_origin<'a>(
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
     origin: Origin,
-    scratch: Option<syntax::ast::NodeArenas>,
+    scratch: Option<&mut syntax::ast::NodeArenas>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let content_hash = source::ContentHash::of_source(source);
@@ -4016,8 +4098,8 @@ fn parse_file_recording_with_origin<'a>(
         duplicate_fn_sites,
         duplicate_class_sites,
         declared_classes,
-    } = file_declarations::collect(ast, path, is_stub, &origin, &facts);
-    let (references, declaration_references) = file_references(ast, references);
+    } = file_declarations::collect(tree.arenas(), ast, path, is_stub, &origin, &facts);
+    let (references, declaration_references) = file_references(tree.arenas(), ast, references);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
     let anonymous_classes = built_decls
@@ -4027,9 +4109,9 @@ fn parse_file_recording_with_origin<'a>(
             _ => None,
         })
         .collect();
-    let bodies = FileBodies::of_file(ast, &facts);
-    let global_facts = Arc::new(GlobalFacts::of(ast));
-    let pest_facts = PestFacts::of(path, ast);
+    let bodies = FileBodies::of_file(tree.arenas(), ast, &facts);
+    let global_facts = Arc::new(GlobalFacts::of(tree.arenas(), ast));
+    let pest_facts = PestFacts::of(path, tree.arenas(), ast);
     Ok(ParsedFile {
         tree: Some(tree),
         lex_warnings,
@@ -4392,16 +4474,21 @@ struct DeclaredNames {
 /// Walks the declarations `registry::build_declarations` builds entries
 /// from, so an incremental update's removal step finds every key the
 /// registry holds.
-pub(crate) fn declared_names(stmts: &[StmtNode]) -> (Vec<Name>, Vec<Name>) {
+pub(crate) fn declared_names(
+    arenas: &syntax::ast::NodeArenas,
+    stmts: &[syntax::ast::StmtId],
+) -> (Vec<Name>, Vec<Name>) {
     let mut functions = Vec::new();
     let mut classes = Vec::new();
-    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-        match declaration.declared {
+    syntax::declarations::for_each_declaration(
+        arenas,
+        stmts,
+        |declaration, _, _| match declaration.declared {
             Declared::Function(_) => functions.push(Name::from(declaration.name())),
             Declared::Class(_) => classes.push(Name::from(declaration.name())),
             Declared::Constant(_) | Declared::Define { .. } => {}
-        }
-    });
+        },
+    );
     (functions, classes)
 }
 

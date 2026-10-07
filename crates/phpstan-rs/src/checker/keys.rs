@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use rustc_hash::FxHasher;
-use syntax::ast::{BinOp, ExprKind, ExprNode, Literal, StaticTarget};
+use syntax::ast::{BinOp, ExprId, ExprKind, ExprNode, Literal, NodeArenas, StaticTarget};
 use syntax::name::{Name, text_hash};
 
 /// What a scope's facts are filed under; see the module documentation.
@@ -306,22 +306,38 @@ impl KeyTable {
     /// a variable, a property chain rooted in one, an array-index chain by
     /// literals or variables, a static property; looking through
     /// parentheses, an assignment (the key of its target) and `?? null`.
-    pub(crate) fn key_of(&mut self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
-        self.resolve(e, class)
+    pub(crate) fn key_of(
+        &mut self,
+        arenas: &NodeArenas,
+        e: &ExprNode,
+        class: Option<&Name>,
+    ) -> Option<LocalKey> {
+        self.resolve(arenas, e.id, class)
     }
 
     /// `key_of`, when the key has been made: a read never makes one.
-    pub(crate) fn find_key(&self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
-        self.find_expr(e, class)
+    pub(crate) fn find_key(
+        &self,
+        arenas: &NodeArenas,
+        e: &ExprNode,
+        class: Option<&Name>,
+    ) -> Option<LocalKey> {
+        self.find_expr(arenas, e.id, class)
     }
 
-    fn resolve(&mut self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
+    fn resolve(
+        &mut self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        class: Option<&Name>,
+    ) -> Option<LocalKey> {
         syntax::stack::guard(|| {
-            let e = e.peeled();
+            let id = arenas.peeled(id)?;
+            let e = arenas.expr(id)?;
             match &e.kind {
                 ExprKind::Variable(name) => Some(self.var(name)),
                 ExprKind::PropertyAccess(base, prop, _) => {
-                    let base = self.resolve(base, class)?;
+                    let base = self.resolve(arenas, *base, class)?;
                     Some(self.intern(KeyData::Prop {
                         base,
                         prop: prop.name.clone(),
@@ -334,8 +350,9 @@ impl KeyTable {
                     }))
                 }
                 ExprKind::Index(base, Some(index)) => {
-                    let base = self.resolve(base, class)?;
-                    match crate::checker::literal_string_key(index) {
+                    let base = self.resolve(arenas, *base, class)?;
+                    let index = arenas.expr(*index)?;
+                    match crate::checker::literal_string_key(arenas, index) {
                         Some(text) => Some(self.intern(KeyData::Index {
                             base,
                             key: Name::from(text),
@@ -350,25 +367,28 @@ impl KeyTable {
                     }
                 }
                 ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _) => {
-                    self.resolve(target, class)
+                    self.resolve(arenas, *target, class)
                 }
                 ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-                    if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+                    if arenas.expr(*rhs).is_some_and(|rhs| {
+                        matches!(&rhs.kind, ExprKind::Literal(Literal::Null))
+                    }) =>
                 {
-                    self.resolve(lhs, class)
+                    self.resolve(arenas, *lhs, class)
                 }
                 _ => None,
             }
         })
     }
 
-    fn find_expr(&self, e: &ExprNode, class: Option<&Name>) -> Option<LocalKey> {
+    fn find_expr(&self, arenas: &NodeArenas, id: ExprId, class: Option<&Name>) -> Option<LocalKey> {
         syntax::stack::guard(|| {
-            let e = e.peeled();
+            let id = arenas.peeled(id)?;
+            let e = arenas.expr(id)?;
             match &e.kind {
                 ExprKind::Variable(name) => self.find_var(name),
                 ExprKind::PropertyAccess(base, prop, _) => {
-                    let base = self.find_expr(base, class)?;
+                    let base = self.find_expr(arenas, *base, class)?;
                     self.find(&KeyData::Prop {
                         base,
                         prop: prop.name.clone(),
@@ -381,8 +401,9 @@ impl KeyTable {
                     })
                 }
                 ExprKind::Index(base, Some(index)) => {
-                    let base = self.find_expr(base, class)?;
-                    match crate::checker::literal_string_key(index) {
+                    let base = self.find_expr(arenas, *base, class)?;
+                    let index = arenas.expr(*index)?;
+                    match crate::checker::literal_string_key(arenas, index) {
                         Some(text) => self.find(&KeyData::Index {
                             base,
                             key: Name::from(text),
@@ -397,12 +418,14 @@ impl KeyTable {
                     }
                 }
                 ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _) => {
-                    self.find_expr(target, class)
+                    self.find_expr(arenas, *target, class)
                 }
                 ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-                    if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+                    if arenas.expr(*rhs).is_some_and(|rhs| {
+                        matches!(&rhs.kind, ExprKind::Literal(Literal::Null))
+                    }) =>
                 {
-                    self.find_expr(lhs, class)
+                    self.find_expr(arenas, *lhs, class)
                 }
                 _ => None,
             }
@@ -429,15 +452,16 @@ pub(super) fn static_class(name: &syntax::ast::QualifiedName, scope: Option<&Nam
 #[cfg(test)]
 mod tests {
     use super::*;
+    use syntax::ast::{ExprId, NodeArenas};
 
     /// The keys as they were formatted before they were made by structure:
     /// what `KeyTable::render` of `key_of` has to equal.
-    fn formatted(e: &ExprNode) -> Option<String> {
-        let e = e.peeled();
+    fn formatted(arenas: &NodeArenas, id: ExprId) -> Option<String> {
+        let e = arenas.expr(arenas.peeled(id)?)?;
         match &e.kind {
             ExprKind::Variable(name) => Some(name.to_string()),
             ExprKind::PropertyAccess(base, prop, _) => {
-                formatted(base).map(|base_key| format!("{base_key}->{prop}"))
+                formatted(arenas, *base).map(|base_key| format!("{base_key}->{prop}"))
             }
             ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name), name) => {
                 let class = match class_name.resolved_class() {
@@ -447,8 +471,9 @@ mod tests {
                 Some(format!("{class}::${name}"))
             }
             ExprKind::Index(base, Some(idx)) => {
-                let base_key = formatted(base)?;
-                match crate::checker::literal_string_key(idx) {
+                let base_key = formatted(arenas, *base)?;
+                let idx = arenas.expr(*idx)?;
+                match crate::checker::literal_string_key(arenas, idx) {
                     Some(key) => Some(format!("{base_key}[{key}]")),
                     None => match &idx.kind {
                         ExprKind::Variable(subscript) => Some(format!("{base_key}[${subscript}]")),
@@ -456,11 +481,13 @@ mod tests {
                     },
                 }
             }
-            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => formatted(lhs),
+            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => formatted(arenas, *lhs),
             ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-                if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+                if arenas
+                    .expr(*rhs)
+                    .is_some_and(|rhs| matches!(&rhs.kind, ExprKind::Literal(Literal::Null))) =>
             {
-                formatted(lhs)
+                formatted(arenas, *lhs)
             }
             _ => None,
         }
@@ -484,17 +511,29 @@ mod tests {
     #[test]
     fn a_key_made_by_structure_renders_as_the_key_formatted_by_text() {
         let parsed = syntax::parse(SOURCE.as_bytes()).expect("parses");
-        let mut table = KeyTable::default();
-        let mut seen = 0;
-        syntax::visit::any_expr_in_body(&parsed.stmts, |e| {
-            let by_text = formatted(e);
-            let made = table.key_of(e, None);
-            assert_eq!(made.map(|k| table.render(k)), by_text);
-            assert_eq!(table.find_key(e, None), made, "{by_text:?}");
-            seen += usize::from(made.is_some());
-            false
-        });
-        assert!(seen > 20, "{seen}");
+        struct Check {
+            table: KeyTable,
+            seen: usize,
+        }
+        impl syntax::visit::arena::Visitor for Check {
+            fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+                let Some(e) = arenas.expr(id) else {
+                    return;
+                };
+                let by_text = formatted(arenas, id);
+                let made = self.table.key_of(arenas, e, None);
+                assert_eq!(made.map(|k| self.table.render(k)), by_text);
+                assert_eq!(self.table.find_key(arenas, e, None), made, "{by_text:?}");
+                self.seen += usize::from(made.is_some());
+                syntax::visit::arena::walk_expr(self, arenas, id);
+            }
+        }
+        let mut check = Check {
+            table: KeyTable::default(),
+            seen: 0,
+        };
+        syntax::visit::arena::walk_stmts(&mut check, &parsed.arenas, parsed.statements());
+        assert!(check.seen > 20, "{}", check.seen);
     }
 
     #[test]

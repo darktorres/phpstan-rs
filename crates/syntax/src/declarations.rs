@@ -58,6 +58,7 @@ pub fn for_each_declaration_in<'a>(
     mut f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm]),
 ) {
     let mut walk = Declarations {
+        arenas,
         in_expressions,
         ctx: NameContext::default(),
         conditional: false,
@@ -71,7 +72,7 @@ pub fn for_each_declaration_in<'a>(
             kind: StmtKind::If(if_stmt),
             ..
         }) = arenas.stmt(stmt_id)
-            && if_stmt.elseifs.is_empty()
+            && arenas.elseifs(if_stmt.elseifs.clone()).is_empty()
             && if_stmt.else_branch.is_none()
             && ends_in_return(arenas, if_stmt.then_branch)
         {
@@ -98,6 +99,7 @@ fn ends_in_return(arenas: &NodeArenas, id: StmtId) -> bool {
 }
 
 struct Declarations<'a, 'f, F> {
+    arenas: &'a NodeArenas,
     in_expressions: bool,
     ctx: NameContext,
     conditional: bool,
@@ -137,8 +139,8 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Declarations<'a,
         let was = std::mem::replace(&mut self.conditional, true);
         let mark = self.guards.len();
         let branches = std::iter::once((if_stmt.cond, if_stmt.then_branch)).chain(
-            if_stmt
-                .elseifs
+            arenas
+                .elseifs(if_stmt.elseifs.clone())
                 .iter()
                 .map(|elseif| (elseif.cond, elseif.body)),
         );
@@ -166,7 +168,8 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Declarations<'a,
 impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Visitor
     for Declarations<'a, '_, F>
 {
-    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+    fn visit_stmt(&mut self, _arenas: &NodeArenas, id: StmtId) {
+        let arenas = self.arenas;
         let Some(stmt) = arenas.stmt(id) else {
             return;
         };
@@ -174,18 +177,34 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Visitor
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(arenas.use_imports(imports)),
             StmtKind::ClassDecl(class) => {
-                self.found(Declared::Class(class), stmt.span);
+                let class = arenas.class_decl(class.clone());
+                self.found(
+                    Declared::Class(class),
+                    arenas
+                        .stmt_span(id)
+                        .expect("class declaration statement span"),
+                );
                 self.conditionally(|v| arena::walk_class_decl(v, arenas, class));
             }
             StmtKind::FunctionDecl(function_id) => {
                 if let Some(function) = arenas.function(*function_id) {
-                    self.found(Declared::Function(function), stmt.span);
+                    self.found(
+                        Declared::Function(function),
+                        arenas
+                            .stmt_span(id)
+                            .expect("function declaration statement span"),
+                    );
                     self.conditionally(|v| arena::walk_function_decl(v, arenas, function));
                 }
             }
             StmtKind::GlobalConst(constants) => {
                 for constant in arenas.class_consts(constants) {
-                    self.found(Declared::Constant(constant), stmt.span);
+                    self.found(
+                        Declared::Constant(constant),
+                        arenas
+                            .stmt_span(id)
+                            .expect("constant declaration statement span"),
+                    );
                 }
                 arena::walk_stmt(self, arenas, id);
             }
@@ -202,7 +221,8 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Visitor
         });
     }
 
-    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+    fn visit_expr(&mut self, _arenas: &NodeArenas, id: ExprId) {
+        let arenas = self.arenas;
         if !self.in_expressions {
             return;
         }
@@ -210,7 +230,10 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Visitor
             return;
         };
         if let Some((name, value)) = define_call(arenas, id) {
-            self.found(Declared::Define { name, value }, expr.span);
+            let span = arenas
+                .expr_span(id)
+                .expect("declaration walk expression has a parallel span");
+            self.found(Declared::Define { name, value }, span);
         }
         self.conditionally(|v| arena::walk_expr(v, arenas, id));
     }
@@ -220,10 +243,11 @@ fn define_call(arenas: &NodeArenas, id: ExprId) -> Option<(PhpString, ExprId)> {
     let ExprKind::Call(callee, args) = &arenas.expr(id)?.kind else {
         return None;
     };
-    let args = arenas.args(*args);
+    let args = arenas.args(args.clone());
     let ExprKind::Name(name) = &arenas.expr(*callee)?.kind else {
         return None;
     };
+    let name = arenas.qualified_name(name)?;
     let (primary, fallback) = name.candidates();
     if !fallback.unwrap_or(primary).eq_ignore_ascii_case("define")
         || args.len() < 2

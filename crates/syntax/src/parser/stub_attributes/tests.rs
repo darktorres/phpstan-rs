@@ -27,7 +27,7 @@ fn function<'a>(file: &'a ParsedFile, name: &str) -> &'a FunctionDecl {
 
 fn param_types(file: &ParsedFile, function: &FunctionDecl) -> Vec<Option<String>> {
     file.arenas
-        .params(function.params)
+        .params(function.params.clone())
         .iter()
         .map(|param| {
             param
@@ -56,10 +56,10 @@ fn drops_closed_range_functions_and_methods_during_parse() {
         let StmtKind::ClassDecl(class) = &stmt.kind else {
             return None;
         };
-        file.arenas.class(class.def)
+        file.arenas.class(file.arenas.class_decl(class.clone()).def)
     });
     let class = class.expect("class remains");
-    assert!(file.arenas.methods(class.methods).is_empty());
+    assert!(file.arenas.methods(class.methods.clone()).is_empty());
     assert!(file.stub_attributes_changed);
     assert!(file.references.is_none());
 }
@@ -83,7 +83,7 @@ fn keeps_a_superseded_function_used_as_a_single_statement_body() {
         panic!("single-statement declarations keep their historical presence")
     };
     let function = file.arenas.function(*function_id).expect("nested function");
-    assert!(file.arenas.attributes(function.attrs).is_empty());
+    assert!(file.arenas.attributes(function.attrs.clone()).is_empty());
     assert!(file.stub_attributes_changed);
 }
 
@@ -93,7 +93,7 @@ fn keeps_open_availability_ranges_and_removes_only_stub_attributes() {
         "<?php #[Ordinary] #[PhpStormStubsElementAvailable(from: '8.0')] function current() {}",
     );
     let function = function(&file, "current");
-    let attrs = file.arenas.attributes(function.attrs);
+    let attrs = file.arenas.attributes(function.attrs.clone());
     assert_eq!(attrs.len(), 1);
     assert_eq!(attrs[0].name.written.as_str(), "Ordinary");
     assert!(file.stub_attributes_changed);
@@ -106,7 +106,7 @@ fn filters_superseded_parameters_and_injects_the_newest_native_type() {
         "<?php function f(#[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $old, #[LanguageLevelTypeAware(['8.1' => 'int', '8.10' => 'string'], default: 'bool')] $value) {}",
     );
     let function = function(&file, "f");
-    let params = file.arenas.params(function.params);
+    let params = file.arenas.params(function.params.clone());
     assert_eq!(params.len(), 1);
     assert_eq!(params[0].name.name.as_str(), "value");
     assert_eq!(param_types(&file, function), [Some("string".to_owned())]);
@@ -118,7 +118,7 @@ fn type_aware_parameter_names_resolve_in_the_live_import_context() {
         "<?php namespace App; use Vendor\\TypeName as Alias; function f(#[LanguageLevelTypeAware(['8.1' => 'Alias'], default: 'int')] $value) {}",
     );
     let function = function(&file, "f");
-    let params = file.arenas.params(function.params);
+    let params = file.arenas.params(function.params.clone());
     let Some(TypeHint {
         kind: TypeHintKind::Name(name),
         ..
@@ -126,7 +126,13 @@ fn type_aware_parameter_names_resolve_in_the_live_import_context() {
     else {
         panic!("injected hint is a class name")
     };
-    assert_eq!(name.resolved_class(), Some("Vendor\\TypeName"));
+    assert_eq!(
+        file.arenas
+            .qualified_name(name)
+            .expect("injected type name belongs to the file arena")
+            .resolved_class(),
+        Some("Vendor\\TypeName")
+    );
     assert!(file.stub_attributes_changed);
 }
 
@@ -139,9 +145,12 @@ fn return_and_parameter_overrides_are_visible_in_final_doc_text() {
     let f = function(&file, "f");
     let f_doc = doc_text(&file, &f.doc_comment).expect("function doc remains");
     assert!(!f_doc.contains("@param bool $value"), "{f_doc}");
-    let params = file.arenas.params(f.params);
-    let before_doc = doc_text(&file, &params[0].doc_comment).expect("param doc remains");
-    assert!(before_doc.contains("@param bool $value"), "{before_doc}");
+    assert!(
+        file.arenas
+            .doc_sites
+            .iter()
+            .any(|site| site.text.contains("@param bool $value"))
+    );
 
     let g = function(&file, "g");
     let g_doc = doc_text(&file, &g.doc_comment).expect("return doc remains");
@@ -172,14 +181,14 @@ fn type_aware_attributes_transform_class_methods_properties_and_constants() {
         let StmtKind::ClassDecl(class) = &stmt.kind else {
             return None;
         };
-        file.arenas.class(class.def)
+        file.arenas.class(file.arenas.class_decl(class.clone()).def)
     });
     let class = class.expect("class remains");
-    assert!(file.arenas.attributes(class.attrs).is_empty());
+    assert!(file.arenas.attributes(class.attrs.clone()).is_empty());
     let class_doc = doc_text(&file, &class.doc_comment).expect("class doc remains");
     assert!(class_doc.contains("@return string"), "{class_doc}");
 
-    let method = &file.arenas.methods(class.methods)[0].function;
+    let method = &file.arenas.methods(class.methods.clone())[0].function;
     let method_doc = doc_text(&file, &method.doc_comment).expect("method doc remains");
     assert!(method_doc.contains("@return bool"), "{method_doc}");
     let property = &class.properties(&file.arenas)[0];
@@ -199,8 +208,11 @@ fn resolves_attribute_aliases_and_does_not_match_a_short_name_without_an_import(
 
     let unrelated = parsed("<?php function f(#[Gone(to: '7.4')] $value) {} ");
     let function = function(&unrelated, "f");
-    let params = unrelated.arenas.params(function.params);
-    assert_eq!(unrelated.arenas.attributes(params[0].attrs).len(), 1);
+    let params = unrelated.arenas.params(function.params.clone());
+    assert_eq!(
+        unrelated.arenas.attributes(params[0].attrs.clone()).len(),
+        1
+    );
     assert!(!unrelated.stub_attributes_changed);
     assert!(unrelated.references.is_some());
 }
@@ -211,7 +223,7 @@ fn bracket_shorthand_stays_phpdoc_only_and_type_aware_attributes_are_removed() {
         "<?php function f(#[LanguageLevelTypeAware(['8.1' => 'string[]'], default: 'string')] $value = null) {}",
     );
     let function = function(&file, "f");
-    let params = file.arenas.params(function.params);
+    let params = file.arenas.params(function.params.clone());
     assert!(params[0].type_hint.is_none());
-    assert!(file.arenas.attributes(params[0].attrs).is_empty());
+    assert!(file.arenas.attributes(params[0].attrs.clone()).is_empty());
 }

@@ -16,26 +16,46 @@ impl Parser<'_> {
         &mut self,
         parts: Vec<StringPart>,
         base: u32,
-    ) -> Result<ExprNode, ParseError> {
-        let mut exprs = Vec::new();
+    ) -> Result<ExprId, ParseError> {
+        let exprs_start = self.begin_expr_id_list();
         for part in parts {
             match part {
                 StringPart::Literal(s, span) => {
-                    exprs.push(self.expr_at(ExprKind::Literal(Literal::String(s)), span))
+                    let id = self.expr_at(ExprKind::Literal(Literal::String(s)), span);
+                    self.push_expr_id_list_item(id);
                 }
                 StringPart::SimpleVar(name, span) => {
-                    exprs.push(self.expr_at(ExprKind::Variable(name), span))
+                    let id = self.expr_at(ExprKind::Variable(name), span);
+                    self.push_expr_id_list_item(id);
                 }
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
-                    let lexer = Lexer::fragment(&src, frag_base);
+                    let decoded_bytes_base = {
+                        let arenas = self.node_arenas.borrow();
+                        arenas
+                            .decoded_bytes_base
+                            .checked_add(
+                                u32::try_from(arenas.decoded_bytes.len())
+                                    .expect("decoded byte vector exhausted"),
+                            )
+                            .expect("decoded byte vector exhausted")
+                    };
+                    let lexer = Lexer::fragment(&src, frag_base)
+                        .with_decoded_bytes_base(decoded_bytes_base)
+                        // `src` is reconstructed PHP text, while its token
+                        // spans are biased to the original file. Keep string
+                        // bytes in the fragment's decoded store so a quoted
+                        // literal cannot resolve against unrelated original
+                        // source bytes at the same span.
+                        .with_source_backed_strings(false);
                     let lexer = if self.tracks_name_ids {
                         lexer
                     } else {
                         lexer.without_file_names()
                     };
-                    let mut sub = Parser::from_lexer(lexer);
+                    let fragment_arenas = self.node_arenas.borrow().new_fragment();
+                    let mut sub = Parser::from_lexer_with_node_arenas(lexer, fragment_arenas);
                     sub.line_index = Arc::clone(&self.line_index);
                     // The fragment's names are read in the namespace and
                     // imports where it sits.
@@ -49,11 +69,11 @@ impl Parser<'_> {
                     sub.check_pattern_only()?;
                     // `{$x = 1}`: PHP's grammar takes a variable there, not
                     // any expression.
-                    if !is_variable_chain(&parsed) {
+                    if !is_variable_chain(&sub.node_arenas.borrow(), parsed) {
                         return Err(ParseError::new(
                             "syntax error, a string's {$...} holds a variable, not an expression"
                                 .to_string(),
-                            parsed.span,
+                            sub.expr_span(parsed),
                         ));
                     }
                     // `{$a b}`: the braces hold one expression.
@@ -68,12 +88,13 @@ impl Parser<'_> {
                     }
                     self.next_expr_id.set(sub.next_expr_id.get());
                     self.next_stmt_id.set(sub.next_stmt_id.get());
-                    let (expr_spans, stmt_spans) = sub.take_node_spans();
-                    let mut arenas = self.node_arenas.borrow_mut();
-                    arenas.expr_spans.extend(expr_spans);
-                    arenas.stmt_spans.extend(stmt_spans);
+                    let fragment = sub.take_node_arenas();
+                    self.node_arenas.borrow_mut().append_fragment(fragment);
+                    // The parent file has already been lexed completely;
+                    // the fragment's decoded bytes are appended directly
+                    // to its owning arenas below.
                     self.recorder.borrow_mut().absorb(sub.take_references());
-                    exprs.push(parsed);
+                    self.push_expr_id_list_item(parsed);
                 }
                 // `$var->prop`/`$var[key]` simple syntax - built directly
                 // from the pieces the lexer already extracted, with real
@@ -96,9 +117,9 @@ impl Parser<'_> {
                         },
                     );
                     let arrow_len = if nullsafe { 3 } else { 2 };
-                    exprs.push(self.expr_at(
+                    let id = self.expr_at(
                         ExprKind::PropertyAccess(
-                            Box::new(var_expr),
+                            var_expr,
                             self.ident(
                                 self.intern(&prop),
                                 // Past the arrow.
@@ -113,7 +134,8 @@ impl Parser<'_> {
                             start: var_start,
                             end,
                         },
-                    ));
+                    );
+                    self.push_expr_id_list_item(id);
                 }
                 StringPart::Index {
                     var,
@@ -133,7 +155,7 @@ impl Parser<'_> {
                         SimpleIndexKey::Var(name) => ExprKind::Variable(name),
                         SimpleIndexKey::Int(n) => ExprKind::Literal(Literal::Int(n)),
                         SimpleIndexKey::Str(s) => {
-                            ExprKind::Literal(Literal::String(PhpString::from(s)))
+                            ExprKind::Literal(Literal::String(PhpString::from(s).into()))
                         }
                     };
                     let key_expr = self.expr_at(
@@ -143,28 +165,38 @@ impl Parser<'_> {
                             end,
                         },
                     );
-                    exprs.push(self.expr_at(
-                        ExprKind::Index(Box::new(var_expr), Some(Box::new(key_expr))),
+                    let id = self.expr_at(
+                        ExprKind::Index(var_expr, Some(key_expr)),
                         Span {
                             start: var_start,
                             end,
                         },
-                    ));
+                    );
+                    self.push_expr_id_list_item(id);
                 }
             }
         }
         // A string with no interpolation is one literal spanning the whole
         // string, quotes included.
-        if let [only] = exprs.as_mut_slice()
-            && let ExprKind::Literal(Literal::String(_)) = only.kind
+        let single_expr = match self.expr_id_list(exprs_start) {
+            [only] => Some(*only),
+            _ => None,
+        };
+        if let Some(only) = single_expr
+            && matches!(
+                self.node_arenas.borrow().expr(only).map(|node| &node.kind),
+                Some(ExprKind::Literal(Literal::String(_)))
+            )
         {
-            only.span = Span {
+            let span = Span {
                 start: base,
                 end: self.previous_end(),
             };
-            self.set_expr_span(only.id, only.span);
-            return Ok(exprs.pop().expect("one part"));
+            self.set_expr_span(only, span);
+            self.discard_expr_id_list(exprs_start);
+            return Ok(only);
         }
+        let exprs = self.finish_expr_id_list(exprs_start);
         Ok(self.expr(ExprKind::Interpolated(exprs), base))
     }
 }
@@ -172,7 +204,10 @@ impl Parser<'_> {
 /// Whether `e` is what PHP's `variable` production allows: a variable
 /// with property fetches, method or static calls, and offsets chained on
 /// it (`$a->b[0]->c()`, `$f()`, `$c::$p`).
-fn is_variable_chain(e: &ExprNode) -> bool {
+fn is_variable_chain(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(e) = arenas.expr(id) else {
+        return false;
+    };
     match &e.kind {
         ExprKind::Variable(_) | ExprKind::DynamicVariable(_) => true,
         ExprKind::PropertyAccess(base, ..)
@@ -180,11 +215,13 @@ fn is_variable_chain(e: &ExprNode) -> bool {
         | ExprKind::DynamicPropertyAccess(base, _, _)
         | ExprKind::DynamicMethodCall(base, ..)
         | ExprKind::Index(base, _)
-        | ExprKind::Call(base, _) => is_variable_chain(base),
+        | ExprKind::Call(base, _) => is_variable_chain(arenas, *base),
         ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
         | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _)
         | ExprKind::StaticCall(StaticTarget::Expr(base), ..)
-        | ExprKind::DynamicStaticCall(StaticTarget::Expr(base), ..) => is_variable_chain(base),
+        | ExprKind::DynamicStaticCall(StaticTarget::Expr(base), ..) => {
+            is_variable_chain(arenas, *base)
+        }
         _ => false,
     }
 }

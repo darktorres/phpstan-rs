@@ -3,7 +3,7 @@ use crate::name::Name;
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::Token;
+use crate::token::TokenRef as Token;
 
 impl Parser<'_> {
     pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<ExprId, ParseError> {
@@ -12,7 +12,7 @@ impl Parser<'_> {
     }
 
     pub(crate) fn parse_postfix(&mut self, mut expr: ExprId) -> Result<ExprId, ParseError> {
-        let start = self.expr_node(expr).span.start;
+        let start = self.expr_span(expr).start;
         loop {
             match self.peek() {
                 Token::Arrow | Token::NullsafeArrow => {
@@ -114,7 +114,13 @@ impl Parser<'_> {
                     self.skip();
                     let receiver_expr = expr;
                     let target = match &self.expr_node(receiver_expr).kind {
-                        ExprKind::Name(n) => StaticTarget::Name(Box::new(n.clone())),
+                        ExprKind::Name(n) => StaticTarget::Name(Box::new(
+                            self.node_arenas
+                                .borrow()
+                                .qualified_name(n)
+                                .expect("name expression belongs to the parser's node arena")
+                                .clone(),
+                        )),
                         _ => StaticTarget::Expr(receiver_expr),
                     };
                     // `class` (`Foo::class`) already worked as a special
@@ -126,9 +132,7 @@ impl Parser<'_> {
                         }
                         Token::Variable(_) => {
                             let var_start = self.current_pos();
-                            let Token::Variable(s) = self.take_token() else {
-                                unreachable!()
-                            };
+                            let s = self.take_variable().expect("current token is a variable");
                             let span = Span {
                                 start: var_start,
                                 end: self.previous_end(),
@@ -269,7 +273,7 @@ impl Parser<'_> {
             // so any keyword is valid here too (`create(namespace: 'x')`),
             // not just Identifier.
             let name = if matches!(self.peek(), Token::Identifier(_) | Token::Keyword(_))
-                && self.peek_at(1) == &Token::Colon
+                && self.peek_at(1) == Token::Colon
             {
                 let name = self.take_ident().unwrap();
                 self.skip();

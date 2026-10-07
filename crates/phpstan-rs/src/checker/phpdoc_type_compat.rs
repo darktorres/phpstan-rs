@@ -36,8 +36,8 @@ impl<'a> Checker<'a> {
         if !doc.contains("@") {
             return;
         }
-        let block = docblock::parse_shared(doc);
-        let nodes = super::phpdoc_unresolvable::tag_type_nodes(doc);
+        let block = docblock::parse_shared(doc.as_ref());
+        let nodes = super::phpdoc_unresolvable::tag_type_nodes(doc.as_ref());
         let resolve = |this: &Self, ty: &Type| match class_name {
             Some(c) => this.resolve_pseudo(ty, c),
             None => ty.clone(),
@@ -291,7 +291,7 @@ impl<'a> Checker<'a> {
                     Some(p) => {
                         let attributes = self
                             .syntax_arenas()
-                            .map(|owner| owner.attributes(p.attrs).to_vec())
+                            .map(|owner| owner.attributes(p.attrs.clone()).to_vec())
                             .unwrap_or_default();
                         let mut value = p.clone();
                         value.attrs = arenas.alloc_attributes(attributes);
@@ -306,6 +306,7 @@ impl<'a> Checker<'a> {
                                 name_id: None,
                             },
                             type_hint: property_type_hint.cloned(),
+                            type_aware_override: None,
                             default: None,
                             by_ref: false,
                             variadic: false,
@@ -333,15 +334,18 @@ impl<'a> Checker<'a> {
                 span,
                 name_id: None,
             },
-            params,
+            params: params.clone(),
             return_type,
             body: None,
             by_ref: false,
-            doc_comment: Some(doc.into()),
+            doc_comment: Some(syntax::ast::DocCommentRanges::Appended {
+                spans: std::sync::Arc::from([]),
+                text: std::sync::Arc::from(doc),
+            }),
             attrs,
             span,
         };
-        let params = arenas.params(params);
+        let params = arenas.params(params.clone());
         let previous_class = self.current_class.replace(fqn.to_string());
         let class_templates = self.current_class_template_params();
         self.current_class = previous_class;
@@ -370,7 +374,7 @@ impl<'a> Checker<'a> {
         // A promoted property's PHPDoc type is its constructor `@param`,
         // else its own inline `@var`.
         let ctor = arenas
-            .methods(c.methods)
+            .methods(c.methods.clone())
             .iter()
             .find(|m| m.function.is_constructor());
         let ctor_nodes = ctor
@@ -385,7 +389,7 @@ impl<'a> Checker<'a> {
             .unwrap_or_default();
         let promoted = ctor
             .into_iter()
-            .flat_map(|m| arenas.params(m.function.params).iter())
+            .flat_map(|m| arenas.params(m.function.params.clone()).iter())
             .filter(|p| p.promotion.is_some())
             .map(|p| {
                 let node = ctor_nodes.params.get(p.name.as_ref()).cloned().or_else(|| {
@@ -566,6 +570,8 @@ impl<'a> Checker<'a> {
         };
         let raw = f
             .doc_comment
+            .as_ref()
+            .and_then(|ranges| self.syntax_doc_comment_text(ranges))
             .as_deref()
             .and_then(|d| docblock::parse_shared(d).self_out.clone());
         let unresolvable = raw.is_some_and(|node| self.type_node_unresolvable(&node, Some(class)));
@@ -640,6 +646,8 @@ impl<'a> Checker<'a> {
     fn declared_template_names(&self, f: &FunctionDecl, class_name: Option<&str>) -> Vec<String> {
         let mut names: Vec<String> = f
             .doc_comment
+            .as_ref()
+            .and_then(|ranges| self.syntax_doc_comment_text(ranges))
             .as_deref()
             .map(|d| docblock::parse_shared(d).templates.clone())
             .unwrap_or_default();

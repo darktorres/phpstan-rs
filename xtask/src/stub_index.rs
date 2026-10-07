@@ -6,8 +6,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use syntax::ParsedFile;
 use syntax::ast::{
-    Arg, Attribute, ClassKind, Expr, ExprKind, Literal, ResolvedName, Stmt, StmtKind,
+    Attribute, ClassKind, ExprId, ExprKind, Literal, ResolvedName, StmtId, StmtKind,
 };
 
 /// One embedded corpus: its tag in the index, and each file's path, source
@@ -36,13 +37,14 @@ pub(crate) fn generate(corpora: &[Corpus]) -> String {
             let Ok(parsed) = syntax::parse(source.as_bytes()) else {
                 continue;
             };
-            let stmts = parsed.stmts;
             let file = format!("{}:{path}", corpus.tag);
             let mut walk = Walk {
                 file: &file,
                 extension: *extension,
+                parsed: &parsed,
                 entries: &mut entries,
             };
+            let stmts = parsed.statements().to_vec();
             walk.stmts(&stmts);
         }
     }
@@ -82,66 +84,83 @@ fn declared(namespaced_name: &Option<std::sync::Arc<str>>) -> String {
 struct Walk<'a, 'e> {
     file: &'a str,
     extension: Option<&'a str>,
+    parsed: &'a ParsedFile,
     entries: &'e mut BTreeMap<(&'static str, String), Entry>,
 }
 
 impl Walk<'_, '_> {
-    fn stmts(&mut self, stmts: &[Stmt]) {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => self.stmts(inner),
-                StmtKind::If(if_stmt) => {
-                    for body in if_stmt.bodies() {
-                        self.stmts(std::slice::from_ref(body));
-                    }
+    fn stmts(&mut self, stmts: &[StmtId]) {
+        for stmt_id in stmts {
+            let Some(stmt) = self.parsed.stmt(*stmt_id) else {
+                continue;
+            };
+            let kind = stmt.kind.clone();
+            match &kind {
+                StmtKind::Block(inner) => {
+                    let inner = self.parsed.arenas.stmt_ids(inner).to_vec();
+                    self.stmts(&inner);
                 }
-                StmtKind::ClassDecl(en) if en.def.kind == ClassKind::Enum => {
-                    let name = en.fq_name().to_string();
-                    let interfaces = en.def.implements.iter().map(resolved).collect();
-                    let e = self.entry("enum", name.to_ascii_lowercase(), &name, &[]);
-                    if e.declarations.len() == 1 {
-                        e.interfaces = interfaces;
+                StmtKind::Declare {
+                    body: Some(inner), ..
+                } => {
+                    let inner = self.parsed.arenas.stmt_ids(inner).to_vec();
+                    self.stmts(&inner);
+                }
+                StmtKind::If(if_stmt) => {
+                    let bodies = if_stmt.bodies(&self.parsed.arenas).collect::<Vec<_>>();
+                    for body in bodies {
+                        self.stmts(std::slice::from_ref(&body));
                     }
                 }
                 StmtKind::ClassDecl(c) => {
-                    let kind = match c.def.kind {
+                    let decl = self.parsed.arenas.class_decl(c.clone());
+                    let Some(def) = self.parsed.arenas.class(decl.def) else {
+                        continue;
+                    };
+                    let kind = match def.kind {
                         ClassKind::Interface => "interface",
                         ClassKind::Trait => "trait",
                         ClassKind::Enum => "enum",
                         ClassKind::Class => "class",
                     };
-                    let name = c.fq_name().to_string();
-                    let parent = (c.def.kind == ClassKind::Class)
-                        .then(|| c.def.extends.first().map(resolved))
+                    let name = decl.fq_name().to_string();
+                    let extends = self.parsed.arenas.qualified_names(&def.extends);
+                    let implements = self.parsed.arenas.qualified_names(&def.implements);
+                    let parent = (def.kind == ClassKind::Class)
+                        .then(|| extends.first().map(resolved))
                         .flatten();
-                    let interfaces = if c.def.kind == ClassKind::Interface {
-                        c.def.extends.iter().map(resolved).collect()
+                    let interfaces = if def.kind == ClassKind::Interface {
+                        extends.iter().map(resolved).collect()
                     } else {
-                        c.def.implements.iter().map(resolved).collect()
+                        implements.iter().map(resolved).collect()
                     };
-                    let e = self.entry(kind, name.to_ascii_lowercase(), &name, &c.def.attrs);
+                    let attrs = self.parsed.arenas.attributes(def.attrs.clone()).to_vec();
+                    let e = self.entry(kind, name.to_ascii_lowercase(), &name, &attrs);
                     if e.declarations.len() == 1 {
                         e.parent = parent;
                         e.interfaces = interfaces;
                     }
                 }
-                StmtKind::FunctionDecl(f) => {
+                StmtKind::FunctionDecl(id) => {
+                    let Some(f) = self.parsed.arenas.function(id.clone()) else {
+                        continue;
+                    };
                     let name = declared(&f.namespaced_name);
-                    self.entry("function", name.to_ascii_lowercase(), &name, &f.attrs);
+                    let attrs = self.parsed.arenas.attributes(f.attrs.clone()).to_vec();
+                    self.entry("function", name.to_ascii_lowercase(), &name, &attrs);
                 }
                 StmtKind::GlobalConst(consts) => {
-                    for c in consts {
+                    let consts = self.parsed.arenas.class_consts(consts).to_vec();
+                    for c in &consts {
                         let name = declared(&c.namespaced_name);
                         let key = constant_key(&name);
-                        let value = syntax::printer::print_expr(&c.value);
-                        let e = self.entry("constant", key, &name, &c.attrs);
+                        let value = syntax::printer::print_expr(&self.parsed.arenas, c.value);
+                        let attrs = self.parsed.arenas.attributes(c.attrs.clone()).to_vec();
+                        let e = self.entry("constant", key, &name, &attrs);
                         e.values.push(value);
                     }
                 }
-                StmtKind::Expression(e) => self.define(e),
+                StmtKind::Expression(e) => self.define(*e),
                 _ => {}
             }
         }
@@ -149,37 +168,59 @@ impl Walk<'_, '_> {
 
     /// A `define('NAME', value[, true])` call: a global constant, declared
     /// case-insensitive by a `true` third argument.
-    fn define(&mut self, e: &Expr) {
+    fn define(&mut self, expression: ExprId) {
+        let Some(e) = self.parsed.expr(expression) else {
+            return;
+        };
         let ExprKind::Call(callee, args) = &e.kind else {
+            return;
+        };
+        let Some(callee) = self.parsed.expr(callee.clone()) else {
             return;
         };
         let ExprKind::Name(function) = &callee.kind else {
             return;
         };
+        let Some(function) = self.parsed.arenas.qualified_name(function) else {
+            return;
+        };
         if !function
+            .written
             .trim_start_matches('\\')
             .eq_ignore_ascii_case("define")
         {
             return;
         }
-        let Some(name) = args.first().and_then(|a| string_literal(&a.value)) else {
+        let args = self.parsed.arenas.args(args.clone());
+        let Some(name) = args
+            .first()
+            .and_then(|a| string_literal(self.parsed, a.value))
+        else {
             return;
         };
         let Some(value) = args.get(1) else {
             return;
         };
         let name = name.trim_start_matches('\\').to_string();
-        let case_insensitive = args.get(2).is_some_and(|a| match &a.value.kind {
-            ExprKind::Literal(Literal::Bool(b)) => *b,
-            ExprKind::Name(n) => n.eq_ignore_ascii_case("true"),
-            _ => false,
+        let case_insensitive = args.get(2).is_some_and(|a| {
+            self.parsed
+                .expr(a.value)
+                .is_some_and(|expr| match &expr.kind {
+                    ExprKind::Literal(Literal::Bool(b)) => *b,
+                    ExprKind::Name(n) => self
+                        .parsed
+                        .arenas
+                        .qualified_name(n)
+                        .is_some_and(|n| n.written.eq_ignore_ascii_case("true")),
+                    _ => false,
+                })
         });
         let key = if case_insensitive {
             name.to_ascii_lowercase()
         } else {
             constant_key(&name)
         };
-        let value = syntax::printer::print_expr(&value.value);
+        let value = syntax::printer::print_expr(&self.parsed.arenas, value.value);
         let e = self.entry("constant", key, &name, &[]);
         e.case_insensitive |= case_insensitive;
         e.values.push(value);
@@ -192,7 +233,7 @@ impl Walk<'_, '_> {
         name: &str,
         attrs: &[Attribute],
     ) -> &mut Entry {
-        let declaration = match version_gate(attrs) {
+        let declaration = match version_gate(attrs, self.parsed) {
             Some(gate) => format!("{}@{gate}", self.file),
             None => self.file.to_string(),
         };
@@ -217,7 +258,7 @@ fn constant_key(name: &str) -> String {
 
 /// A declaration's `#[PhpStormStubsElementAvailable(from, to)]` range as
 /// `from-to`, either side empty when open.
-fn version_gate(attrs: &[Attribute]) -> Option<String> {
+fn version_gate(attrs: &[Attribute], parsed: &ParsedFile) -> Option<String> {
     let attr = attrs.iter().find(|a| {
         let name = match &a.name.resolved {
             ResolvedName::Exact(n) => n.as_ref(),
@@ -226,14 +267,12 @@ fn version_gate(attrs: &[Attribute]) -> Option<String> {
         name.rsplit('\\').next() == Some("PhpStormStubsElementAvailable")
     })?;
     let arg = |label: &str, position: usize| -> Option<String> {
-        let by_name = attr
-            .args
-            .iter()
-            .find(|a: &&Arg| a.name.as_deref() == Some(label));
-        let positional = attr.args.iter().filter(|a| a.name.is_none()).nth(position);
+        let args = parsed.arenas.args(attr.args.clone());
+        let by_name = args.iter().find(|a| a.name.as_deref() == Some(label));
+        let positional = args.iter().filter(|a| a.name.is_none()).nth(position);
         by_name
             .or(positional)
-            .and_then(|a| string_literal(&a.value))
+            .and_then(|a| string_literal(parsed, a.value))
     };
     Some(format!(
         "{}-{}",
@@ -242,11 +281,14 @@ fn version_gate(attrs: &[Attribute]) -> Option<String> {
     ))
 }
 
-fn string_literal(e: &Expr) -> Option<String> {
-    match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
-        _ => None,
-    }
+fn string_literal(parsed: &ParsedFile, id: ExprId) -> Option<String> {
+    let ExprKind::Literal(Literal::String(payload)) = &parsed.expr(id)?.kind else {
+        return None;
+    };
+    parsed
+        .arenas
+        .owned_php_string(payload)
+        .map(|value| value.to_str_lossy().into_owned())
 }
 
 fn resolved(name: &syntax::ast::QualifiedName) -> String {

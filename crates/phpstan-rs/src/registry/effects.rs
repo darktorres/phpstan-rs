@@ -3857,9 +3857,8 @@ mod effect_id_tests {
 
     fn registry(source: &str) -> Registry {
         let tokens = Lexer::new(source).tokenize_with_spans();
-        let mut program = Parser::new(tokens).parse_program().unwrap();
-        crate::stub_attributes::apply_stub_attributes(&mut program);
-        Registry::build(&program)
+        let program = Parser::new(tokens).parse_program().unwrap();
+        Registry::build(&program.arenas, program.statements())
     }
 
     fn cache_round_trip(registry: &Registry) -> Registry {

@@ -26,7 +26,7 @@ use phpdoc::DocType;
 use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
-use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
+use syntax::ast::{ClassConst, ClassKind, FunctionDecl, NodeArenas, PropertyDecl};
 use syntax::span::Span;
 use types::Type;
 
@@ -123,7 +123,11 @@ pub(crate) fn class_kind_word(kind: ClassKind) -> &'static str {
 /// the two at the type level (`types::parse_type_string` doesn't carry
 /// that bit through, see its own doc comments on why), so the distinction
 /// is recovered here instead, straight from the declaration.
-fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) -> bool {
+fn is_explicit_mixed_text(
+    arenas: &NodeArenas,
+    native_hint: Option<&TypeHint>,
+    doc_type: Option<&DocType>,
+) -> bool {
     let is_mixed_node = |node: &TypeNode| {
         let node = match node {
             TypeNode::Nullable(inner) => inner.as_ref(),
@@ -132,13 +136,17 @@ fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&DocT
         matches!(node, TypeNode::Identifier(name) if name.eq_ignore_ascii_case("mixed"))
     };
     doc_type.map(DocType::node).is_some_and(is_mixed_node)
-        || native_hint.is_some_and(TypeHint::is_mixed)
+        || native_hint.is_some_and(|hint| hint.is_mixed(arenas))
 }
 
 /// Whether the native hint or the PHPDoc type spells out `mixed` anywhere,
 /// nested included. A native type can only be `mixed` as a whole.
-fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) -> bool {
-    native_hint.is_some_and(TypeHint::is_mixed)
+fn mentions_mixed(
+    arenas: &NodeArenas,
+    native_hint: Option<&TypeHint>,
+    doc_type: Option<&DocType>,
+) -> bool {
+    native_hint.is_some_and(|hint| hint.is_mixed(arenas))
         || doc_type.is_some_and(crate::registry::mentions_mixed)
 }
 
@@ -169,11 +177,12 @@ mod resolved_explicit_mixed_tests {
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
 /// itself didn't actually spell out `mixed`.
 fn is_implicit_mixed(
+    arenas: &NodeArenas,
     ty: &Type,
     native_hint: Option<&TypeHint>,
     doc_type: Option<&DocType>,
 ) -> bool {
-    ty.is_implicit_mixed() && !is_explicit_mixed_text(native_hint, doc_type)
+    ty.is_implicit_mixed() && !is_explicit_mixed_text(arenas, native_hint, doc_type)
 }
 
 impl<'a> Checker<'a> {
@@ -295,6 +304,10 @@ impl<'a> Checker<'a> {
         fqn: &str,
         properties: &[PropertyDecl],
     ) {
+        if self.syntax_arenas().is_none() {
+            return;
+        }
+        let source = self.syntax_source_owner();
         for p in properties {
             let Some(ty) = self
                 .registry
@@ -303,12 +316,24 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            let doc_var_type = p
+            let doc_text = p
                 .doc_comment
+                .as_ref()
+                .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+            let doc_var_type = doc_text
                 .as_deref()
                 .map(docblock::parse_shared)
                 .and_then(|d| d.var_type.clone());
-            if is_implicit_mixed(&ty, p.type_hint.as_ref(), doc_var_type.as_ref()) {
+            let (implicit_mixed, explicit_mixed) = {
+                let Some(arenas) = self.syntax_arenas() else {
+                    return;
+                };
+                (
+                    is_implicit_mixed(arenas, &ty, p.type_hint.as_ref(), doc_var_type.as_ref()),
+                    mentions_mixed(arenas, p.type_hint.as_ref(), doc_var_type.as_ref()),
+                )
+            };
+            if implicit_mixed {
                 self.report(
                     format!("Property {fqn}::${} has no type specified.", p.name),
                     p.span,
@@ -328,7 +353,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                mentions_mixed(p.type_hint.as_ref(), doc_var_type.as_ref()),
+                explicit_mixed,
             );
         }
     }
@@ -351,9 +376,16 @@ impl<'a> Checker<'a> {
         fqn: &str,
         consts: &[ClassConst],
     ) {
+        if self.syntax_arenas().is_none() {
+            return;
+        }
+        let source = self.syntax_source_owner();
         for c in consts {
-            let doc_var_type = c
+            let doc_text = c
                 .doc_comment
+                .as_ref()
+                .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+            let doc_var_type = doc_text
                 .as_deref()
                 .map(docblock::parse_shared)
                 .and_then(|d| d.var_type.clone());
@@ -364,6 +396,12 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let name = c.name.clone();
+            let explicit_mixed = {
+                let Some(arenas) = self.syntax_arenas() else {
+                    return;
+                };
+                mentions_mixed(arenas, c.type_hint.as_ref(), doc_var_type.as_ref())
+            };
             self.report_missing_typehint_findings(
                 c.span,
                 |desc| format!("Constant {fqn}::{name} type has no value type specified in {desc}."),
@@ -374,7 +412,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                mentions_mixed(c.type_hint.as_ref(), doc_var_type.as_ref()),
+                explicit_mixed,
             );
         }
     }
@@ -402,7 +440,12 @@ impl<'a> Checker<'a> {
         resolved_params: &[(String, Type, Span)],
         declared_return: Option<&Type>,
     ) {
-        let doc = f.doc_comment.as_deref().map(docblock::parse_shared);
+        let source = self.syntax_source_owner();
+        let doc_text = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)));
+        let doc = doc_text.as_deref().map(docblock::parse_shared);
         let kind_word = if class_name.is_some() {
             "Method"
         } else {
@@ -410,8 +453,7 @@ impl<'a> Checker<'a> {
         };
         // A position whose PHPDoc type is unresolvable has a type written;
         // that it can't be resolved is reported instead.
-        let doc_nodes = f
-            .doc_comment
+        let doc_nodes = doc_text
             .as_deref()
             .filter(|doc| doc.contains('@'))
             .map(super::phpdoc_unresolvable::tag_type_nodes);

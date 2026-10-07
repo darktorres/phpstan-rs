@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::name::Name;
 use crate::parser::{ParseError, Parser};
 use crate::span::Span;
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, TokenRef as Token};
 
 impl Parser<'_> {
     // ---- statements ----
@@ -34,21 +34,10 @@ impl Parser<'_> {
         // that's also a declaration (e.g. a function) consuming its own
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
-        let mut leading_doc_comment = self
-            .ahead
-            .front()
-            .and_then(|tok| tok.docs.as_deref())
-            .and_then(|group| {
-                group
-                    .folded_ranges
-                    .clone()
-                    .or_else(|| group.last_range.map(DocCommentRanges::One))
-            });
+        let mut leading_doc_comment = self.current_doc_ranges();
         let stmt = match self.peek() {
             Token::InlineHtml(_) => {
-                let Token::InlineHtml(span) = self.take_token() else {
-                    unreachable!()
-                };
+                let span = self.take_inline_html().expect("current token is inline HTML");
                 self.stmt(StmtKind::InlineHtml(span), start)
             }
             Token::Semicolon => {
@@ -100,11 +89,15 @@ impl Parser<'_> {
             }
             Token::Keyword(Keyword::Global) => {
                 self.skip();
-                let mut names = vec![self.parse_global_target()?];
+                let names_start = self.begin_global_vars();
+                let target = self.parse_global_target()?;
+                self.global_var_scratch.push(target);
                 while self.eat(&Token::Comma) {
-                    names.push(self.parse_global_target()?);
+                    let name = self.parse_global_target()?;
+                    self.global_var_scratch.push(name);
                 }
                 self.expect_semicolon()?;
+                let names = self.finish_global_vars(names_start);
                 self.stmt(StmtKind::Global(names), start)
             }
             // `static $x = 1, $y;` - guarded on the next token being a
@@ -113,7 +106,7 @@ impl Parser<'_> {
             // and stay handled in parse_primary.
             Token::Keyword(Keyword::Static) if matches!(self.peek_at(1), Token::Variable(_)) => {
                 self.skip();
-                let mut vars = Vec::new();
+                let vars_start = self.begin_static_vars();
                 loop {
                     let name = self.expect_variable_spanned()?;
                     let default = if self.eat(&Token::Equals) {
@@ -121,12 +114,14 @@ impl Parser<'_> {
                     } else {
                         None
                     };
-                    vars.push((name, default));
+                    self.static_var_scratch
+                        .push(StaticVarDecl { name, default });
                     if !self.eat(&Token::Comma) {
                         break;
                     }
                 }
                 self.expect_semicolon()?;
+                let vars = self.finish_static_vars(vars_start);
                 self.stmt(StmtKind::StaticVar(vars), start)
             }
             // A named declaration (`function foo(...)`) is only one of
@@ -155,6 +150,7 @@ impl Parser<'_> {
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => {
                 let c = self.parse_class_decl(attrs.clone(), &mut leading_doc_comment)?;
+                let c = self.node_arenas.borrow_mut().alloc_class_decl(c);
                 self.stmt(StmtKind::ClassDecl(c), start)
             }
             // `abstract`/`final`/`readonly` are only reserved as class
@@ -169,6 +165,7 @@ impl Parser<'_> {
                 if self.looks_like_class_decl() =>
             {
                 let c = self.parse_class_decl(attrs.clone(), &mut leading_doc_comment)?;
+                let c = self.node_arenas.borrow_mut().alloc_class_decl(c);
                 self.stmt(StmtKind::ClassDecl(c), start)
             }
             // Like abstract/final/readonly above, `enum` is only reserved
@@ -179,6 +176,7 @@ impl Parser<'_> {
                 if matches!(self.peek_at(1), Token::Identifier(_) | Token::Keyword(_)) =>
             {
                 let e = self.parse_enum_decl(attrs, &mut leading_doc_comment)?;
+                let e = self.node_arenas.borrow_mut().alloc_class_decl(e);
                 self.stmt(StmtKind::ClassDecl(e), start)
             }
             // `namespace\foo();` - a relative-name expression statement,
@@ -192,7 +190,7 @@ impl Parser<'_> {
                 self.skip();
                 let name = self.parse_qualified_name();
                 self.expect_semicolon()?;
-                self.stmt(StmtKind::Namespace(name.to_string()), start)
+                self.stmt(StmtKind::Namespace(name), start)
             }
             Token::Keyword(Keyword::Use) => {
                 self.skip();
@@ -263,7 +261,7 @@ impl Parser<'_> {
                         .node_arenas
                         .borrow_mut()
                         .alloc_use_imports(self.use_import_scratch.drain(imports_start..));
-                    return Ok(self.stmt(StmtKind::Use(imports), start));
+                    return Ok(Some(self.stmt(StmtKind::Use(imports), start)));
                 }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
                     Some(self.expect_ident_spanned()?)
@@ -393,12 +391,13 @@ impl Parser<'_> {
             {
                 self.skip();
                 self.expect(&Token::LParen)?;
-                let mut directives = Vec::new();
+                let directives_start = self.begin_declare_directives();
                 while !self.check(&Token::RParen) {
                     let name = self.expect_ident_spanned()?;
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
-                    directives.push((name, value));
+                    self.declare_directive_scratch
+                        .push(DeclareDirective { name, value });
                     if !self.eat(&Token::Comma) {
                         break;
                     }
@@ -428,6 +427,7 @@ impl Parser<'_> {
                     self.expect_semicolon()?;
                     None
                 };
+                let directives = self.finish_declare_directives(directives_start);
                 self.stmt(StmtKind::Declare { directives, body }, start)
             }
             // `__halt_compiler();` - tells the *real* compiler to stop
@@ -473,7 +473,9 @@ impl Parser<'_> {
             let stmt = self.stmt_node(stmt);
             let declaration = match &stmt.kind {
                 StmtKind::FunctionDecl(function) => Some(Ok(*function)),
-                StmtKind::ClassDecl(class) => Some(Err(class.def)),
+                StmtKind::ClassDecl(class) => {
+                    Some(Err(self.node_arenas.borrow().class_decl(class.clone()).def))
+                }
                 _ => None,
             };
             let arenas = self.node_arenas.borrow();
@@ -481,7 +483,11 @@ impl Parser<'_> {
                 Ok(id) => arenas.function(id).map(|function| function.span.start),
                 Err(id) => arenas.class(id).map(|class| class.span.start),
             });
-            (declaration, declaration_start, stmt.span.start)
+            (
+                declaration,
+                declaration_start,
+                self.stmt_span(stmt.id).start,
+            )
         };
         let declaration_doc = declaration.and_then(|declaration| {
             let arenas = self.node_arenas.borrow();

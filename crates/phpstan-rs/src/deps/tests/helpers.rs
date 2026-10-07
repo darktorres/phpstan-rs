@@ -1,7 +1,4 @@
 use super::super::*;
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
-
 /// The keys a file references, asked by name: whether any kind of
 /// reference to the lowercase `name` is among them.
 pub(super) struct Refs(FxHashSet<RefKey>);
@@ -18,7 +15,6 @@ impl Refs {
 }
 
 pub(super) fn refs(src: &str) -> Refs {
-    let tokens = Lexer::new(src).tokenize_with_spans();
-    let ast = Parser::new(tokens).parse_program().unwrap();
-    Refs(referenced_names(&ast))
+    let parsed = syntax::parse(src).unwrap();
+    Refs(referenced_names(&parsed.arenas, parsed.statements()))
 }

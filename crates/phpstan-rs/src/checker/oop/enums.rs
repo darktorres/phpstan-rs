@@ -67,23 +67,35 @@ impl<'a> Checker<'a> {
     /// otherwise non-literal case value isn't evaluated, matching this
     /// project's usual "don't guess" leniency.
     pub(crate) fn check_enum_case_values(&mut self, fqn: &str, e: &ClassDef) {
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = owner.arenas();
         let mut seen: FxHashMap<(bool, String), &str> = FxHashMap::default();
-        for case in &e.enum_cases {
-            let Some(value) = &case.value else {
+        for case in e.enum_cases(arenas) {
+            let Some(value_id) = case.value else {
+                continue;
+            };
+            let Some(value) = arenas.expr(value_id) else {
                 continue;
             };
             let key = match &value.kind {
                 ExprKind::Literal(Literal::Int(n)) => (true, n.to_string()),
-                ExprKind::Literal(Literal::String(s)) => (false, s.to_string()),
+                ExprKind::Literal(Literal::String(s)) => {
+                    let Some(bytes) = arenas.string_bytes(s) else {
+                        continue;
+                    };
+                    (false, String::from_utf8_lossy(bytes).into_owned())
+                }
                 _ => continue,
             };
             if let Some(first_case) = seen.get(&key) {
                 self.report(format!(
                         "duplicate value in enum {fqn} for case {} (already used by case {first_case})",
-                        case.name
+                        case.name.as_ref()
                     ), case.span, 0, "enum.duplicateValue");
             } else {
-                seen.insert(key, &case.name);
+                seen.insert(key, case.name.as_ref());
             }
         }
     }
@@ -93,10 +105,15 @@ impl<'a> Checker<'a> {
     /// `@template` tag on one's own doc comment is always a mistake,
     /// never a real declaration the way it would be on a class.
     pub(crate) fn check_enum_template_tag(&mut self, fqn: &str, e: &ClassDef) {
-        let Some(raw) = &e.doc_comment else {
+        let source = self.syntax_source_owner();
+        let Some(raw) = e
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)))
+        else {
             return;
         };
-        let block = docblock::parse_shared(raw);
+        let block = docblock::parse_shared(raw.as_ref());
         if block.templates.is_empty() {
             return;
         }
@@ -124,7 +141,14 @@ impl<'a> Checker<'a> {
     /// flags it as a design-level error (an enum has no identity to
     /// serialize/unserialize into). A property is a compile error too.
     pub(crate) fn check_enum_sanity(&mut self, fqn: &str, e: &ClassDecl) {
-        if let Some(property) = e.def.properties.first() {
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = owner.arenas();
+        let Some(def) = arenas.class(e.def) else {
+            return;
+        };
+        if let Some(property) = def.properties(arenas).first() {
             self.report_builder(
                 DiagnosticBuilder::new(
                     format!("Enum {fqn} cannot include properties."),
@@ -135,8 +159,8 @@ impl<'a> Checker<'a> {
                 .non_ignorable(),
             );
         }
-        for m in &e.def.methods {
-            let lower = m.function.name.to_ascii_lowercase();
+        for m in arenas.methods(def.methods.clone()) {
+            let lower = m.function.name.as_ref().to_ascii_lowercase();
             if is_magic_method_name(&lower) {
                 if lower == "__construct" {
                     self.report_builder(
@@ -170,7 +194,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            if is_native_enum_method(&e.def, &m.function.name) {
+            if is_native_enum_method(def, m.function.name.as_ref()) {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!(
@@ -186,7 +210,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if let Some(backing) = &e.def.backing_type {
+        if let Some(backing) = &def.backing_type {
             let expects_int = matches!(backing.kind, TypeHintKind::Keyword(NativeType::Int, _));
             let expects_string =
                 matches!(backing.kind, TypeHintKind::Keyword(NativeType::String, _));
@@ -194,7 +218,7 @@ impl<'a> Checker<'a> {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!("Backed enum {fqn} can have only \"int\" or \"string\" type."),
-                        e.def.span,
+                        def.span,
                         0,
                         "enum.backingType",
                     )
@@ -207,7 +231,7 @@ impl<'a> Checker<'a> {
             self.report_builder(
                 DiagnosticBuilder::new(
                     format!("Enum {fqn} cannot implement the Serializable interface."),
-                    e.def.span,
+                    def.span,
                     0,
                     "enum.serializable",
                 )
@@ -215,17 +239,17 @@ impl<'a> Checker<'a> {
             );
         }
 
-        let backing_type_word = e.def.backing_type.as_ref().map(|b| {
+        let backing_type_word = def.backing_type.as_ref().map(|b| {
             if matches!(b.kind, TypeHintKind::Keyword(NativeType::Int, _)) {
                 "int"
             } else {
                 "string"
             }
         });
-        for case in &e.def.enum_cases {
-            match (&e.def.backing_type, &case.value) {
+        for case in def.enum_cases(arenas) {
+            match (&def.backing_type, &case.value) {
                 (None, Some(value)) => {
-                    let ty = registry::infer_const_type(value);
+                    let ty = registry::infer_const_type(arenas, *value);
                     self.report_builder(
                         DiagnosticBuilder::new(
                             format!(
@@ -254,7 +278,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 (Some(_), Some(value)) => {
-                    let ty = registry::infer_const_type(value);
+                    let ty = registry::infer_const_type(arenas, *value);
                     // `Mixed` means the value wasn't a literal this
                     // project's own const-value inference recognizes
                     // (e.g. `self::SOME_CONST`, a concatenation) -

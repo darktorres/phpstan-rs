@@ -4,7 +4,7 @@
 //! for a dynamic class-name operand that can't be a string or an object.
 
 use crate::checker::{Checker, Locals};
-use syntax::ast::{ClassKind, ExprNode, InstanceofTarget};
+use syntax::ast::{ClassKind, ExprNode, InstanceofTarget, NodeArenas};
 use syntax::span::Span;
 use types::Type;
 
@@ -14,6 +14,7 @@ impl<'a> Checker<'a> {
     /// and isn't reported.
     pub(crate) fn check_impossible_instanceof(
         &mut self,
+        arenas: &NodeArenas,
         inner: &ExprNode,
         target: &InstanceofTarget,
         span: Span,
@@ -22,6 +23,9 @@ impl<'a> Checker<'a> {
     ) {
         let expr_ty = self.infer_expr(inner, locals);
         if let InstanceofTarget::Expr(target_expr) = target {
+            let target_expr = arenas
+                .expr(*target_expr)
+                .expect("instanceof target belongs to its retained file owner");
             let target_ty = self.infer_expr(target_expr, locals);
             if self.relation().can_name_a_class(&target_ty).no() {
                 self.report(
@@ -33,7 +37,8 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        let Some((always, class)) = self.instanceof_outcome(&expr_ty, target, locals) else {
+        let Some((always, class)) = self.instanceof_outcome(arenas, &expr_ty, target, locals)
+        else {
             return;
         };
         if always && is_exempt_last_condition {
@@ -58,12 +63,16 @@ impl<'a> Checker<'a> {
     /// of it, so only "never" carries over, or "always" when `C` is final.
     pub(crate) fn instanceof_outcome(
         &self,
+        arenas: &NodeArenas,
         expr_ty: &Type,
         target: &InstanceofTarget,
         locals: &Locals,
     ) -> Option<(bool, String)> {
         let (class, only_subclass_known) = match target {
             InstanceofTarget::Expr(target_expr) => {
+                let target_expr = arenas
+                    .expr(*target_expr)
+                    .expect("instanceof target belongs to its retained file owner");
                 let target_ty = self.infer_expr(target_expr, locals);
                 if let Some(name) = target_ty.string_literal_value() {
                     (name.to_string(), false)
@@ -71,13 +80,15 @@ impl<'a> Checker<'a> {
                     (target_ty.class_string_class()?.to_string(), true)
                 }
             }
-            // `static` names the current class or any subclass of it.
-            InstanceofTarget::Name(name) if name.eq_ignore_ascii_case("static") => {
-                (self.current_class.clone()?, true)
-            }
-            InstanceofTarget::Name(name) => {
-                let resolved = self.resolve_name_expr(name);
-                (resolved.as_object()?.0.to_string(), false)
+            InstanceofTarget::Name(range) => {
+                let name = arenas.qualified_name(range)?;
+                // `static` names the current class or any subclass of it.
+                if name.eq_ignore_ascii_case("static") {
+                    (self.current_class.clone()?, true)
+                } else {
+                    let resolved = self.resolve_name_expr(name);
+                    (resolved.as_object()?.0.to_string(), false)
+                }
             }
         };
         let (class, class_info) = self.registry.lookup_class(class.trim_start_matches('\\'))?;

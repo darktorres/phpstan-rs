@@ -10,7 +10,7 @@
 
 use crate::checker::{Checker, Locals};
 use crate::php_date_parser::validate_date_time_string;
-use syntax::ast::Arg;
+use syntax::ast::{Arg, NodeArenas};
 use syntax::span::Span;
 
 impl<'a> Checker<'a> {
@@ -23,6 +23,7 @@ impl<'a> Checker<'a> {
     /// left alone.
     pub(crate) fn check_date_time_constructor(
         &mut self,
+        arenas: &NodeArenas,
         class: &str,
         args: &[Arg],
         span: Span,
@@ -34,7 +35,10 @@ impl<'a> Checker<'a> {
             _ => return,
         };
         let Some(arg) = args.first() else { return };
-        let ty = self.infer_expr(&arg.value, locals);
+        let Some(value) = arenas.expr(arg.value) else {
+            return;
+        };
+        let ty = self.infer_expr(value, locals);
         for spec in ty.constant_strings_text() {
             if validate_date_time_string(&spec) != Some(false) {
                 continue;

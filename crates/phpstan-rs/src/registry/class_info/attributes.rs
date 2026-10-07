@@ -1,4 +1,4 @@
-use syntax::ast::{Attribute, BinOp, ExprKind, ExprNode, Literal};
+use syntax::ast::{Attribute, BinOp, ExprId, ExprKind, Literal, NodeArenas};
 
 /// PHP's own `Attribute::TARGET_*`/`IS_REPEATABLE` class constant values.
 fn attribute_target_constant_value(name: &str) -> Option<u32> {
@@ -26,14 +26,17 @@ fn attribute_target_constant_value(name: &str) -> Option<u32> {
 /// project doesn't recognize) falls back to `Attribute::TARGET_ALL` -
 /// "don't know, don't guess wrong," so an unusual-but-legal flags
 /// expression can never manufacture a false `attribute.target` finding.
-fn eval_attribute_flags_expr(e: &ExprNode) -> u32 {
+fn eval_attribute_flags_expr(arenas: &NodeArenas, id: ExprId) -> u32 {
+    let Some(e) = arenas.expr(id) else {
+        return ATTRIBUTE_TARGET_ALL;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::ClassConstFetch(_, member) => {
             attribute_target_constant_value(member).unwrap_or(ATTRIBUTE_TARGET_ALL)
         }
         ExprKind::Literal(Literal::Int(n)) => u32::try_from(*n).unwrap_or(ATTRIBUTE_TARGET_ALL),
         ExprKind::Binary(BinOp::BitOr, l, r) => {
-            eval_attribute_flags_expr(l) | eval_attribute_flags_expr(r)
+            eval_attribute_flags_expr(arenas, *l) | eval_attribute_flags_expr(arenas, *r)
         }
         _ => ATTRIBUTE_TARGET_ALL,
     })
@@ -49,7 +52,7 @@ const ATTRIBUTE_TARGET_ALL: u32 = 127;
 /// with no arguments at all defaults to `Attribute::TARGET_ALL`,
 /// matching real PHP's own `Attribute::__construct(int $flags =
 /// self::TARGET_ALL)` default parameter value.
-pub(crate) fn compute_attribute_targets(attrs: &[Attribute]) -> Option<u32> {
+pub(crate) fn compute_attribute_targets(arenas: &NodeArenas, attrs: &[Attribute]) -> Option<u32> {
     let meta = attrs.iter().find(|a| {
         a.name
             .trim_start_matches('\\')
@@ -58,13 +61,13 @@ pub(crate) fn compute_attribute_targets(attrs: &[Attribute]) -> Option<u32> {
             .unwrap_or(&a.name)
             .eq_ignore_ascii_case("Attribute")
     })?;
-    let flags_arg = meta
-        .args
+    let args = arenas.args(meta.args.clone());
+    let flags_arg = args
         .iter()
         .find(|a| a.name.as_deref() == Some("flags"))
-        .or_else(|| meta.args.first());
+        .or_else(|| args.first());
     Some(match flags_arg {
-        Some(arg) => eval_attribute_flags_expr(&arg.value),
+        Some(arg) => eval_attribute_flags_expr(arenas, arg.value),
         None => ATTRIBUTE_TARGET_ALL,
     })
 }

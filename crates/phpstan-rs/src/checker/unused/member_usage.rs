@@ -2,7 +2,7 @@ use syntax::name::NameSet;
 use types::Name;
 
 use syntax::ast::*;
-use syntax::visit::{Visitor, walk_expr, walk_property_hooks, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 // ---------------------------------------------------------------------
 // Private-member usage (consts / methods / properties)
@@ -67,8 +67,8 @@ pub(crate) fn method_key(name: &str) -> Name {
     Name::from(name.to_ascii_lowercase())
 }
 
-fn is_this(e: &ExprNode) -> bool {
-    matches!(&e.kind, ExprKind::Variable(name) if **name == *"this")
+fn is_this(arenas: &NodeArenas, id: ExprId) -> bool {
+    matches!(arenas.expr(id).map(|e| &e.kind), Some(ExprKind::Variable(name)) if **name == *"this")
 }
 
 /// `$this`, or a local variable syntactically proven (`usage.aliases`) to
@@ -76,17 +76,22 @@ fn is_this(e: &ExprNode) -> bool {
 /// `$sub = new self(); ...; $sub->privateMethod();`, or
 /// `if ($x instanceof self) { ...; $x->privateProp; }`. See
 /// `MemberUsage::aliases`'s own doc comment for how that set is built.
-fn is_this_or_aliased(e: &ExprNode, usage: &MemberUsage) -> bool {
-    is_this(e)
-        || matches!(&e.kind, ExprKind::Variable(name) if usage.aliases.contains(name.as_ref()))
+fn is_this_or_aliased(arenas: &NodeArenas, id: ExprId, usage: &MemberUsage) -> bool {
+    is_this(arenas, id)
+        || matches!(arenas.expr(id).map(|e| &e.kind), Some(ExprKind::Variable(name)) if usage.aliases.contains(name.as_ref()))
 }
 
 /// `new self(...)`/`new static(...)`/`new <SameClass>(...)` - the
 /// declaration-based half of `MemberUsage::aliases`'s detection, paired
 /// with the `Assign` arm below.
-fn is_new_self_instance(e: &ExprNode, fqn: &str) -> bool {
-    matches!(&e.kind, ExprKind::New(callee, _)
-        if matches!(&callee.kind, ExprKind::Name(class_ref) if class_ref_is_self(class_ref, fqn)))
+fn is_new_self_instance(arenas: &NodeArenas, id: ExprId, fqn: &str) -> bool {
+    let Some(expr) = arenas.expr(id) else {
+        return false;
+    };
+    let ExprKind::New(callee, _) = &expr.kind else {
+        return false;
+    };
+    matches!(arenas.expr(*callee).map(|callee| &callee.kind), Some(ExprKind::Name(class_ref)) if arenas.qualified_name(class_ref).is_some_and(|class_ref| class_ref_is_self(class_ref, fqn)))
 }
 
 /// Marks `l` - the left-hand side of an `Assign`/`CompoundAssign` - as a
@@ -98,9 +103,18 @@ fn is_new_self_instance(e: &ExprNode, fqn: &str) -> bool {
 /// only ever mutated in place might go unreported as "never written", but
 /// this can never *cause* a false "unused"/"only written" report, since
 /// falling back to a plain read only ever adds usage, never removes it.
-fn mark_write_target(l: &ExprNode, fqn: &str, usage: &mut MemberUsage, also_read: bool) -> bool {
-    match &l.kind {
-        ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
+fn mark_write_target(
+    arenas: &NodeArenas,
+    id: ExprId,
+    fqn: &str,
+    usage: &mut MemberUsage,
+    also_read: bool,
+) -> bool {
+    let Some(left) = arenas.expr(id) else {
+        return false;
+    };
+    match &left.kind {
+        ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(arenas, *base, usage) => {
             usage.writes.insert(Name::from(&name.name));
             if also_read {
                 usage.reads.insert(Name::from(&name.name));
@@ -130,12 +144,15 @@ struct Members<'u> {
     usage: &'u mut MemberUsage,
 }
 
-impl<'ast> Visitor<'ast> for Members<'_> {
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+impl Visitor for Members<'_> {
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
 
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else {
+            return;
+        };
         syntax::stack::guard(|| {
             let (fqn, usage) = (self.fqn, &mut *self.usage);
             match &expr.kind {
@@ -143,27 +160,29 @@ impl<'ast> Visitor<'ast> for Members<'_> {
                 // write only, not also as a read the way walking it as an
                 // expression would.
                 ExprKind::Assign(l, r) | ExprKind::AssignRef(l, r) => {
-                    self.visit_expr(r);
+                    self.visit_expr(arenas, *r);
                     // `$var = new self()`/`new static()`/`new <SameClass>()`
                     // - see `MemberUsage::aliases`'s own doc comment.
-                    if let ExprKind::Variable(name) = &l.kind
-                        && is_new_self_instance(r, self.fqn)
+                    if let Some(ExprKind::Variable(name)) = arenas.expr(*l).map(|left| &left.kind)
+                        && is_new_self_instance(arenas, *r, self.fqn)
                     {
                         self.usage.aliases.insert(name.clone());
                     }
-                    if !mark_write_target(l, self.fqn, self.usage, false) {
-                        self.visit_expr(l);
+                    if !mark_write_target(arenas, *l, self.fqn, self.usage, false) {
+                        self.visit_expr(arenas, *l);
                     }
                     return;
                 }
                 ExprKind::CompoundAssign(_, l, r) => {
-                    self.visit_expr(r);
-                    if !mark_write_target(l, self.fqn, self.usage, true) {
-                        self.visit_expr(l);
+                    self.visit_expr(arenas, *r);
+                    if !mark_write_target(arenas, *l, self.fqn, self.usage, true) {
+                        self.visit_expr(arenas, *l);
                     }
                     return;
                 }
-                ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
+                ExprKind::PropertyAccess(base, name, _)
+                    if is_this_or_aliased(arenas, *base, usage) =>
+                {
                     usage.reads.insert(name.name.clone());
                 }
                 // `$var instanceof self`/`static`/`<SameClass>`, either
@@ -175,8 +194,11 @@ impl<'ast> Visitor<'ast> for Members<'_> {
                 // safe direction here, matching this project's "favor false
                 // negatives [on `unused`] over false positives" default.
                 ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref)) => {
-                    if let ExprKind::Variable(name) = &inner.kind
-                        && class_ref_is_self(class_ref, fqn)
+                    if let Some(ExprKind::Variable(name)) =
+                        arenas.expr(*inner).map(|inner| &inner.kind)
+                        && arenas
+                            .qualified_name(class_ref)
+                            .is_some_and(|class_ref| class_ref_is_self(class_ref, fqn))
                     {
                         usage.aliases.insert(name.clone());
                     }
@@ -195,15 +217,25 @@ impl<'ast> Visitor<'ast> for Members<'_> {
                         usage.consts.insert(member.name.clone());
                     }
                 }
-                ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
-                    ExprKind::Literal(Literal::String(member)) => {
-                        if target_is_self(target, fqn) {
-                            usage.consts.insert(Name::from(&*member.to_str_lossy()));
+                ExprKind::DynamicClassConstFetch(target, name) => {
+                    match arenas.expr(*name).map(|name| &name.kind) {
+                        Some(ExprKind::Literal(Literal::String(member))) => {
+                            if target_is_self(target, fqn) {
+                                if let Some(bytes) = arenas.string_bytes(member) {
+                                    usage.consts.insert(Name::from(
+                                        String::from_utf8_lossy(bytes).into_owned(),
+                                    ));
+                                } else {
+                                    usage.escaped = true;
+                                }
+                            }
                         }
+                        _ => usage.escaped = true,
                     }
-                    _ => usage.escaped = true,
-                },
-                ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
+                }
+                ExprKind::MethodCall(recv, name, ..)
+                    if is_this_or_aliased(arenas, *recv, usage) =>
+                {
                     usage.methods.insert(method_key(&name.name));
                 }
                 ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn) => {
@@ -223,36 +255,50 @@ impl<'ast> Visitor<'ast> for Members<'_> {
                 // be a real false-positive source for exactly the kind of
                 // private helper method this check is meant to protect.
                 ExprKind::ArrayLiteral(items) => {
-                    if let [a, b] = items.as_slice()
+                    let items = arenas.array_items(items.clone());
+                    if let [a, b] = items
                         && a.key.is_none()
                         && b.key.is_none()
                         && !a.spread
                         && !b.spread
-                        && (is_this_or_aliased(&a.value, usage)
-                            || matches!(&a.value.kind, ExprKind::ClassNameFetch(target)
+                        && (is_this_or_aliased(arenas, a.value, usage)
+                            || matches!(arenas.expr(a.value).map(|e| &e.kind), Some(ExprKind::ClassNameFetch(target))
                                 if target_is_self(target, fqn)))
-                        && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
+                        && let Some(ExprKind::Literal(Literal::String(name))) =
+                            arenas.expr(b.value).map(|e| &e.kind)
                     {
-                        usage.methods.insert(method_key(&name.to_str_lossy()));
+                        if let Some(bytes) = arenas.string_bytes(name) {
+                            usage
+                                .methods
+                                .insert(method_key(&String::from_utf8_lossy(bytes)));
+                        } else {
+                            usage.escaped = true;
+                        }
                     }
                 }
                 _ => {}
             }
-            walk_expr(self, expr);
+            arena::walk_expr(self, arenas, id);
         })
     }
 }
 
-pub(crate) fn walk_expr_for_members(expr: &ExprNode, fqn: &str, usage: &mut MemberUsage) {
-    Members { fqn, usage }.visit_expr(expr);
+pub(crate) fn walk_expr_for_members(
+    arenas: &NodeArenas,
+    expr: ExprId,
+    fqn: &str,
+    usage: &mut MemberUsage,
+) {
+    Members { fqn, usage }.visit_expr(arenas, expr);
 }
 
 pub(crate) fn walk_property_hooks_for_members(
+    arenas: &NodeArenas,
     hooks: &PropertyHooks,
     fqn: &str,
     usage: &mut MemberUsage,
 ) {
-    walk_property_hooks(&mut Members { fqn, usage }, hooks);
+    arena::walk_property_hooks(&mut Members { fqn, usage }, arenas, hooks);
 }
 
 /// A `get`-only property hook (`{ get => ...; }`, no `set`) can't be
@@ -271,8 +317,13 @@ pub(crate) fn hook_read_write_shape(hooks: Option<&PropertyHooks>) -> (bool, boo
     }
 }
 
-pub(crate) fn walk_stmt_body_for_members(body: &[StmtNode], fqn: &str, usage: &mut MemberUsage) {
-    walk_stmts(&mut Members { fqn, usage }, body);
+pub(crate) fn walk_stmt_body_for_members(
+    arenas: &NodeArenas,
+    body: &[StmtId],
+    fqn: &str,
+    usage: &mut MemberUsage,
+) {
+    arena::walk_stmts(&mut Members { fqn, usage }, arenas, body);
 }
 
 /// The declaration-based half of `MemberUsage::aliases`'s detection: a
@@ -283,11 +334,19 @@ pub(crate) fn walk_stmt_body_for_members(body: &[StmtNode], fqn: &str, usage: &m
 /// (`?self`) or union (`self|null`) type hint is skipped, matching this
 /// project's existing "conservative when the shape gets more complex"
 /// direction elsewhere in this same file.
-pub(crate) fn seed_self_typed_param_aliases(params: &[Param], fqn: &str, usage: &mut MemberUsage) {
+pub(crate) fn seed_self_typed_param_aliases(
+    arenas: &NodeArenas,
+    params: &[Param],
+    fqn: &str,
+    usage: &mut MemberUsage,
+) {
     for p in params {
         let is_self = p.type_hint.as_ref().is_some_and(|hint| match &hint.kind {
             TypeHintKind::Keyword(NativeType::SelfType | NativeType::Static, _) => true,
-            TypeHintKind::Name(name) => class_ref_is_self(name, fqn),
+            TypeHintKind::Name(name) => arenas
+                .qualified_names(name)
+                .first()
+                .is_some_and(|name| class_ref_is_self(name, fqn)),
             _ => false,
         });
         if is_self {

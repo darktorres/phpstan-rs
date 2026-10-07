@@ -103,7 +103,7 @@ impl<'a> Checker<'a> {
         if is_nullable(&ty) {
             self.report(
                 format!("A possibly-null value ({ty}) is silently coerced {context}."),
-                operand.span,
+                self.expr_span(operand.id),
                 0,
                 id,
             );
@@ -112,8 +112,17 @@ impl<'a> Checker<'a> {
 
     /// `isset`/`empty` of a variable or property holding an object, which a
     /// null check or `instanceof` says more precisely.
-    fn check_object_probes(&mut self, which: &str, operands: &[ExprNode], locals: &Locals) {
-        for operand in operands {
+    fn check_object_probes(
+        &mut self,
+        arenas: &NodeArenas,
+        which: &str,
+        operands: &[ExprId],
+        locals: &Locals,
+    ) {
+        for &operand_id in operands {
+            let Some(operand) = arenas.expr(operand_id) else {
+                continue;
+            };
             // An offset or static probe asks whether the key or member
             // exists, not what the value is.
             if !matches!(
@@ -131,7 +140,7 @@ impl<'a> Checker<'a> {
                 };
                 self.report(
                     format!("{which}() on an object ({ty}) says less than {instead}."),
-                    operand.span,
+                    self.expr_span(operand.id),
                     0,
                     format!("{which}.object"),
                 );
@@ -141,14 +150,24 @@ impl<'a> Checker<'a> {
 
     /// The expression-level checks, before `e` itself is checked.
     pub(crate) fn check_strict_expression_idioms(&mut self, e: &ExprNode, locals: &Locals) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         if self.settings.shipmonk.check_null_coercion {
             match &e.kind {
-                ExprKind::Isset(operands) => self.check_object_probes("isset", operands, locals),
+                ExprKind::Isset(operands) => {
+                    self.check_object_probes(arenas, "isset", arenas.expr_ids(operands), locals)
+                }
                 ExprKind::Empty(operand) => {
-                    self.check_object_probes("empty", std::slice::from_ref(&**operand), locals)
+                    self.check_object_probes(arenas, "empty", std::slice::from_ref(operand), locals)
                 }
                 ExprKind::Interpolated(parts) => {
-                    for part in parts {
+                    for part in arenas
+                        .expr_ids(parts)
+                        .iter()
+                        .filter_map(|id| arenas.expr(*id))
+                    {
                         if !matches!(part.kind, ExprKind::Literal(Literal::String(_))) {
                             self.nullable_operand(
                                 part,
@@ -160,7 +179,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 ExprKind::Binary(BinOp::Concat, l, r) => {
-                    for side in [l, r] {
+                    for side in [*l, *r].into_iter().filter_map(|id| arenas.expr(id)) {
                         self.nullable_operand(
                             side,
                             locals,
@@ -174,7 +193,7 @@ impl<'a> Checker<'a> {
                     l,
                     r,
                 ) => {
-                    for side in [l, r] {
+                    for side in [*l, *r].into_iter().filter_map(|id| arenas.expr(id)) {
                         self.nullable_operand(
                             side,
                             locals,
@@ -184,7 +203,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 ExprKind::CompoundAssign(op, target, value) if !matches!(op, BinOp::Coalesce) => {
-                    for side in [target, value] {
+                    for side in [*target, *value]
+                        .into_iter()
+                        .filter_map(|id| arenas.expr(id))
+                    {
                         self.nullable_operand(
                             side,
                             locals,
@@ -199,8 +221,11 @@ impl<'a> Checker<'a> {
         if self.settings.extras.check_identity_vs_equals
             && let ExprKind::Binary(op @ (BinOp::Identical | BinOp::NotIdentical), l, r) = &e.kind
         {
-            let left = self.infer_expr(l, locals);
-            let right = self.infer_expr(r, locals);
+            let (Some(left_expr), Some(right_expr)) = (arenas.expr(*l), arenas.expr(*r)) else {
+                return;
+            };
+            let left = self.infer_expr(left_expr, locals);
+            let right = self.infer_expr(right_expr, locals);
             let owner = match self.equals_method_owner(&left, &right) {
                 Some(class) => Some((class, l, r)),
                 None => self
@@ -215,10 +240,16 @@ impl<'a> Checker<'a> {
                 };
                 self.report(format!(
                         "{operator} between {class} objects compares identity; {class} defines equals() to compare values, use {negation}{}->equals({}).",
-                        syntax::printer::print_expr(receiver),
-                        syntax::printer::print_expr(argument)
+                        syntax::printer::print_expr(
+                            arenas,
+                            *receiver,
+                        ),
+                        syntax::printer::print_expr(
+                            arenas,
+                            *argument,
+                        )
                     ),
-                    e.span,
+                    self.expr_span(e.id),
                     0,
                     "identical.equalsMethod",
                 );
@@ -226,14 +257,23 @@ impl<'a> Checker<'a> {
         }
         if self.settings.shipmonk.check_enum_exhaustiveness
             && let ExprKind::Match { subject, arms } = &e.kind
-            && let Some(default) = match_default(arms)
-            && let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals))
         {
-            self.report(format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),
-                default.span,
-                0,
-                "match.enumDefault",
-            );
+            let arms = arenas.match_arms(arms.clone());
+            let subject = arenas
+                .expr(*subject)
+                .expect("match subject belongs to its retained file owner");
+            if let Some(default) = match_default(arms).map(|id| {
+                arenas
+                    .expr(id)
+                    .expect("match default body belongs to its retained file owner")
+            }) && let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals))
+            {
+                self.report(format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),
+                    self.expr_span(default.id),
+                    0,
+                    "match.enumDefault",
+                );
+            }
         }
     }
 
@@ -242,53 +282,68 @@ impl<'a> Checker<'a> {
         if !self.settings.shipmonk.check_enum_exhaustiveness {
             return;
         }
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
         match &stmt.kind {
             StmtKind::Switch { subject, .. } => {
+                let Some(subject) = arenas.expr(*subject) else {
+                    return;
+                };
                 if let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals)) {
                     self.report(format!("switch over enum {enum_name}; a match would be checked for exhaustiveness."),
-                        stmt.span,
+                        self.stmt_span(stmt.id),
                         0,
                         "enum.switch",
                     );
                 }
             }
             StmtKind::If(_) => {
-                if self.enum_chain_tails.contains(&stmt.span) {
+                if self.enum_chain_tails.contains(&self.stmt_span(stmt.id)) {
                     return;
                 }
                 // The chain's conditions, `elseif`s and `else if`s alike,
                 // while each compares one subject with an enum case.
                 let mut compared: Vec<(String, String)> = Vec::new();
                 let mut chain_ifs: Vec<syntax::span::Span> = Vec::new();
-                let mut current = Some(stmt);
-                'chain: while let Some(StmtNode {
-                    kind: StmtKind::If(if_stmt),
-                    span,
-                    ..
-                }) = current
-                {
-                    chain_ifs.push(*span);
-                    for cond in if_stmt.conditions() {
+                let mut current = Some(stmt.id);
+                'chain: while let Some(stmt_id) = current {
+                    let Some(stmt) = arenas.stmt(stmt_id) else {
+                        break 'chain;
+                    };
+                    let StmtKind::If(if_stmt) = &stmt.kind else {
+                        break 'chain;
+                    };
+                    chain_ifs.push(
+                        arenas
+                            .stmt_span(stmt_id)
+                            .expect("if statement has an arena span"),
+                    );
+                    for cond in if_stmt.conditions(arenas).filter_map(|id| arenas.expr(id)) {
                         let ExprKind::Binary(BinOp::Identical, l, r) = &cond.kind else {
                             break 'chain;
                         };
-                        let (subject, case) = match (&l.kind, &r.kind) {
-                            (_, ExprKind::ClassConstFetch(..)) => (l, r),
-                            (ExprKind::ClassConstFetch(..), _) => (r, l),
+                        let (Some(left), Some(right)) = (arenas.expr(*l), arenas.expr(*r)) else {
+                            break 'chain;
+                        };
+                        let (subject, case) = match (&left.kind, &right.kind) {
+                            (_, ExprKind::ClassConstFetch(..)) => (*l, right),
+                            (ExprKind::ClassConstFetch(..), _) => (*r, left),
                             _ => break 'chain,
                         };
                         let Some(enum_name) = self.enum_of(&self.infer_expr(case, locals)) else {
                             break 'chain;
                         };
-                        compared.push((syntax::printer::print_expr(subject), enum_name));
+                        compared.push((syntax::printer::print_expr(arenas, subject), enum_name));
                     }
-                    current = if_stmt.else_branch.as_deref();
+                    current = if_stmt.else_branch;
                 }
                 if compared.len() >= 2 && compared.windows(2).all(|w| w[0] == w[1]) {
                     self.enum_chain_tails.extend(chain_ifs);
                     let enum_name = &compared[0].1;
                     self.report(format!("if/elseif chain over cases of enum {enum_name}; a match would be checked for exhaustiveness."),
-                        stmt.span,
+                        self.stmt_span(stmt.id),
                         0,
                         "enum.ifChain",
                     );

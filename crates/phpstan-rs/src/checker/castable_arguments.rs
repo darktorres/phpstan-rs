@@ -6,7 +6,7 @@
 
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
-use syntax::ast::{Arg, ExprNode};
+use syntax::ast::{Arg, ExprNode, NodeArenas};
 use types::Type;
 
 const SORT_REGULAR: i64 = 0;
@@ -42,6 +42,7 @@ impl<'a> Checker<'a> {
     /// and name.
     pub(crate) fn check_castable_array_arguments(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         sig: &FunctionReflection,
         args: &[Arg],
@@ -56,13 +57,29 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     let name = self.castable_parameter_name(sig, args, i);
-                    self.check_castable_array(&function, &name, &arg.value, Cast::String, locals);
+                    if let Some(value) = arenas.expr(arg.value) {
+                        self.check_castable_array(
+                            arenas,
+                            &function,
+                            &name,
+                            value,
+                            Cast::String,
+                            locals,
+                        );
+                    }
                 }
             }
             "array_combine" | "natcasesort" | "natsort" | "array_fill_keys" => {
                 if let Some(value) = resolved.first().copied().flatten() {
                     let name = self.castable_parameter_name(sig, args, 0);
-                    self.check_castable_array(&function, &name, value, Cast::String, locals);
+                    self.check_castable_array(
+                        arenas,
+                        &function,
+                        &name,
+                        value,
+                        Cast::String,
+                        locals,
+                    );
                 }
             }
             "array_sum" | "array_product" => {
@@ -70,7 +87,16 @@ impl<'a> Checker<'a> {
                     && !arg.spread
                 {
                     let name = self.castable_parameter_name(sig, args, 0);
-                    self.check_castable_array(&function, &name, &arg.value, Cast::Number, locals);
+                    if let Some(value) = arenas.expr(arg.value) {
+                        self.check_castable_array(
+                            arenas,
+                            &function,
+                            &name,
+                            value,
+                            Cast::Number,
+                            locals,
+                        );
+                    }
                 }
             }
             "implode" | "join" => {
@@ -78,16 +104,16 @@ impl<'a> Checker<'a> {
                     return;
                 }
                 let named = |n: &str| args.iter().any(|a| a.name.as_deref() == Some(n));
-                let (value, index) = match args {
-                    [only] => (&only.value, 0),
-                    [_, second] if !named("separator") && !named("array") => (&second.value, 1),
+                let (value_id, index) = match args {
+                    [only] => (only.value, 0),
+                    [_, second] if !named("separator") && !named("array") => (second.value, 1),
                     [first, second] => {
                         let array_arg = if first.name.as_deref() == Some("array") {
                             first
                         } else {
                             second
                         };
-                        (&array_arg.value, 1)
+                        (array_arg.value, 1)
                     }
                     _ => return,
                 };
@@ -98,7 +124,16 @@ impl<'a> Checker<'a> {
                 } else {
                     format!("#{} $array", index + 1)
                 };
-                self.check_castable_array(&function, &name, value, Cast::ImplodeString, locals);
+                if let Some(value) = arenas.expr(value_id) {
+                    self.check_castable_array(
+                        arenas,
+                        &function,
+                        &name,
+                        value,
+                        Cast::ImplodeString,
+                        locals,
+                    );
+                }
             }
             "array_unique" | "sort" | "rsort" | "asort" | "arsort" => {
                 let Some(value) = resolved.first().copied().flatten() else {
@@ -135,7 +170,7 @@ impl<'a> Checker<'a> {
                     (false, false) => return,
                 };
                 let name = self.castable_parameter_name(sig, args, 0);
-                self.check_castable_array(&function, &name, value, cast, locals);
+                self.check_castable_array(arenas, &function, &name, value, cast, locals);
             }
             _ => {}
         }
@@ -164,6 +199,7 @@ impl<'a> Checker<'a> {
 
     fn check_castable_array(
         &mut self,
+        arenas: &NodeArenas,
         function: &str,
         param_name: &str,
         value: &ExprNode,
@@ -192,7 +228,13 @@ impl<'a> Checker<'a> {
                 "Parameter {param_name} of function {function} expects {}, {array_ty} given.",
                 cast.expectation()
             ),
-            value.peeled().span,
+            arenas
+                .peeled(value.id)
+                .and_then(|id| arenas.expr(id))
+                .map_or_else(
+                    || self.expr_span(value.id),
+                    |value| self.expr_span(value.id),
+                ),
             level,
             "argument.type",
         );

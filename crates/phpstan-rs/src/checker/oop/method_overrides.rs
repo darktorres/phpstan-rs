@@ -8,18 +8,23 @@ use types::Type;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let Some(def) = arenas.class(c.def) else {
+            return;
+        };
+        let methods = arenas.methods(def.methods.clone());
         // Redeclaring a native enum method is itself the error.
-        for m in c
-            .def
-            .methods
+        for m in methods
             .iter()
-            .filter(|m| !super::enums::is_native_enum_method(&c.def, &m.function.name))
+            .filter(|m| !super::enums::is_native_enum_method(def, &m.function.name))
         {
+            let attrs = arenas.attributes(m.function.attrs.clone());
             let decl = DeclSpans {
                 name: m.function.name.span,
-                override_removal: m
-                    .function
-                    .attrs
+                override_removal: attrs
                     .iter()
                     .find(|a| crate::registry::is_override_attribute_name(&a.name))
                     .map(|a| a.removal_span),
@@ -46,13 +51,9 @@ impl<'a> Checker<'a> {
         // for class-level diagnostics with no more specific member
         // location (`check_class_completeness`, `check_trait_conflicts`,
         // ...).
-        if !c.def.trait_uses.is_empty() {
-            let own_method_names: rustc_hash::FxHashSet<&str> = c
-                .def
-                .methods
-                .iter()
-                .map(|m| m.function.name.as_ref())
-                .collect();
+        if !def.trait_uses(arenas).is_empty() {
+            let own_method_names: rustc_hash::FxHashSet<&str> =
+                methods.iter().map(|m| m.function.name.as_ref()).collect();
             let mut trait_method_names: Vec<Name> = self
                 .registry
                 .method_names(fqn)
@@ -72,7 +73,7 @@ impl<'a> Checker<'a> {
                 else {
                     continue;
                 };
-                self.check_one_method_override(fqn, &name, &own_visibility, c.def.span, None);
+                self.check_one_method_override(fqn, &name, &own_visibility, def.span, None);
             }
         }
     }

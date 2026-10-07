@@ -13,7 +13,13 @@ impl<'a> Checker<'a> {
         if !self.settings.extras.check_new_exception_discarded {
             return;
         }
-        let inner = e.peeled();
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = owner.arenas();
+        let Some(inner) = arenas.peeled(e.id).and_then(|id| arenas.expr(id)) else {
+            return;
+        };
         if !matches!(inner.kind, ExprKind::New(..)) {
             return;
         }
@@ -24,7 +30,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("Construction of {class} is discarded - did you forget the throw keyword?"),
-                e.span,
+                self.expr_span(e.id),
                 5,
                 "new.exceptionNotThrown",
             );

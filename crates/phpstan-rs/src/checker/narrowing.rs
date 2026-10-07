@@ -21,30 +21,34 @@ pub(crate) use predicates::{
 /// `key_of` (a bare `count(...)` call isn't itself a narrowable
 /// key). Returns the call's own argument and whether `count(...)` was
 /// written on the left (`count($x) > 0`) or the right (`0 < count($x)`).
-pub(crate) fn count_call_operand<'e>(
-    l: &'e ExprNode,
-    r: &'e ExprNode,
-) -> Option<(&'e ExprNode, bool)> {
-    count_call(l)
+pub(crate) fn count_call_operand(
+    arenas: &NodeArenas,
+    l: &ExprNode,
+    r: &ExprNode,
+) -> Option<(ExprId, bool)> {
+    count_call(arenas, l)
         .map(|(a, _)| (a, true))
-        .or_else(|| count_call(r).map(|(a, _)| (a, false)))
+        .or_else(|| count_call(arenas, r).map(|(a, _)| (a, false)))
 }
 
 /// `count($x)` or `sizeof($x)`, with its mode argument if written: `$x`
 /// and the mode.
-fn count_call(e: &ExprNode) -> Option<(&ExprNode, Option<&ExprNode>)> {
-    let ExprKind::Call(callee, args) = &e.peeled().kind else {
+fn count_call(arenas: &NodeArenas, e: &ExprNode) -> Option<(ExprId, Option<ExprId>)> {
+    let id = arenas.peeled(e.id)?;
+    let ExprKind::Call(callee, args) = &arenas.expr(id)?.kind else {
         return None;
     };
+    let callee = arenas.expr(*callee)?;
     let ExprKind::Name(name) = &callee.kind else {
         return None;
     };
+    let name = arenas.qualified_name(name)?;
     if !matches!(name.trim_start_matches('\\'), "count" | "sizeof") {
         return None;
     }
-    match args.as_slice() {
-        [counted] => Some((&counted.value, None)),
-        [counted, mode] => Some((&counted.value, Some(&mode.value))),
+    match arenas.args(args.clone()) {
+        [counted] => Some((counted.value, None)),
+        [counted, mode] => Some((counted.value, Some(mode.value))),
         _ => None,
     }
 }
@@ -72,10 +76,11 @@ pub(super) fn mirror_comparison(op: &BinOp) -> BinOp {
 /// semantics. A *non*-nullsafe chain returns `None`: `$a->b()` proven
 /// non-null says nothing new about `$a` (it was already known non-null,
 /// or this expression could never have been reached at all).
-pub(super) fn nullsafe_receiver(e: &ExprNode) -> Option<&ExprNode> {
-    match &e.kind {
+pub(super) fn nullsafe_receiver(arenas: &NodeArenas, id: ExprId) -> Option<&ExprNode> {
+    let expr = arenas.expr(arenas.peeled(id)?)?;
+    match &expr.kind {
         ExprKind::PropertyAccess(base, _, ObjectOperator::NullsafeArrow)
-        | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => Some(base),
+        | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => arenas.expr(*base),
         _ => None,
     }
 }
@@ -90,9 +95,12 @@ pub(super) fn nullsafe_receiver(e: &ExprNode) -> Option<&ExprNode> {
 /// `$y = $x;`) - not attempted: compound `&&`/`||`, `isset()`/array-dim
 /// correlation, `match`-arm correlation (the genuinely large part of
 /// real PHPStan's own mechanism this project declines to build).
-fn condition_alias_shape(rhs: &ExprNode) -> bool {
+fn condition_alias_shape(arenas: &NodeArenas, id: ExprId) -> bool {
     syntax::stack::guard(|| {
-        match &rhs.kind {
+        let Some(expr) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+            return false;
+        };
+        match &expr.kind {
             ExprKind::Instanceof(..)
             // `Lt`/`Gt`/`LtEq`/`GtEq` alongside the equality-family
             // operators - needed so a numeric-comparison leaf inside a
@@ -133,7 +141,7 @@ fn condition_alias_shape(rhs: &ExprNode) -> bool {
             // just one shared target), so a rebind of *any* of them still
             // correctly invalidates the whole alias.
             ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
-                condition_alias_shape(l) && condition_alias_shape(r)
+                condition_alias_shape(arenas, *l) && condition_alias_shape(arenas, *r)
             }
             // `! $isUserFound` as one leaf of a larger `||`/`&&` tree (`!
             // $isUserFound || $email === null`) - negation doesn't add or
@@ -141,13 +149,14 @@ fn condition_alias_shape(rhs: &ExprNode) -> bool {
             // means, which `apply_narrowing`'s own `Unary(Not, ...)` arm
             // already re-derives correctly by recursing with `!branch_true`
             // when the stored alias expression is replayed wholesale.
-            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_shape(inner),
+            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_shape(arenas, *inner),
             // `$x = $a?->b();` - proving `$x` non-null later should also
             // narrow `$a` (`nullsafe_receiver`'s own doc comment); storing
             // the whole chain as `$x`'s alias, targeted at `$a`'s own key
             // rather than `$x->b`'s, is what `condition_alias_targets` below
             // does.
-            _ if nullsafe_receiver(rhs).is_some() => true,
+            ExprKind::PropertyAccess(_, _, ObjectOperator::NullsafeArrow)
+            | ExprKind::MethodCall(_, _, _, ObjectOperator::NullsafeArrow) => true,
             _ => false,
         }
     })
@@ -164,9 +173,15 @@ fn condition_alias_shape(rhs: &ExprNode) -> bool {
 /// "is this name referenced anywhere in it," not narrow/instanceof-specific
 /// shape recognition the way `key_of`/`truthiness_discriminant_subject`
 /// do elsewhere in this module.
-fn cond_references_variable(e: &ExprNode, name: &str) -> bool {
-    syntax::visit::any_expr_in_scope(
-        e,
+fn cond_references_variable(arenas: Option<&NodeArenas>, e: &ExprNode, name: &str) -> bool {
+    let Some(arenas) = arenas else {
+        // Without the owner, conservatively assume the condition may read
+        // the variable and avoid recording a stale implication.
+        return true;
+    };
+    syntax::visit::arena::any_expr_in_scope(
+        arenas,
+        e.id,
         |e| matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name),
     )
 }
@@ -180,14 +195,24 @@ fn cond_references_variable(e: &ExprNode, name: &str) -> bool {
 /// same atom" under a naive `key_of`-only comparison, since
 /// `key_of` only ever identifies the *subject*, not the value
 /// compared against.
-fn disjunctive_syllogism_atom_key(e: &ExprNode, locals: &Locals) -> Option<LocalKey> {
-    let e = e.peeled();
-    let inner = match &e.kind {
-        ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => inner,
-        _ => e,
-    };
-    match &inner.kind {
-        ExprKind::Variable(_) => locals.key_of(inner),
+fn disjunctive_syllogism_atom_key(
+    arenas: &NodeArenas,
+    id: ExprId,
+    locals: &Locals,
+) -> Option<LocalKey> {
+    let id = arenas.peeled(id)?;
+    let e = arenas.expr(id)?;
+    match &e.kind {
+        ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => {
+            let inner = arenas.peeled(*inner)?;
+            let inner = arenas.expr(inner)?;
+            if matches!(&inner.kind, ExprKind::Variable(_)) {
+                locals.key_of(arenas, inner)
+            } else {
+                None
+            }
+        }
+        ExprKind::Variable(_) => locals.key_of(arenas, e),
         _ => None,
     }
 }
@@ -203,16 +228,21 @@ fn disjunctive_syllogism_atom_key(e: &ExprNode, locals: &Locals) -> Option<Local
 /// two corpus-confirmed ones - matching this project's "don't guess"
 /// precedent throughout `narrowing.rs` rather than a general condition
 /// canonicalizer.
-fn truthiness_discriminant_subject(cond: &ExprNode, locals: &Locals) -> Option<LocalKey> {
+fn truthiness_discriminant_subject(
+    arenas: &NodeArenas,
+    cond: &ExprNode,
+    locals: &Locals,
+) -> Option<LocalKey> {
     match &cond.kind {
         // Apart from `$x === true`'s key: a truthy `$x` is that only for
         // a bool.
-        ExprKind::Variable(_) => Some(locals.intern(KeyData::Truthy(locals.key_of(cond)?))),
+        ExprKind::Variable(_) => Some(locals.intern(KeyData::Truthy(locals.key_of(arenas, cond)?))),
         ExprKind::Isset(operands) => {
-            let [operand] = operands.as_slice() else {
+            let [operand] = arenas.expr_ids(operands) else {
                 return None;
             };
-            Some(locals.intern(KeyData::Isset(locals.key_of(operand)?)))
+            let operand = arenas.expr(*operand)?;
+            Some(locals.intern(KeyData::Isset(locals.key_of(arenas, operand)?)))
         }
         _ => None,
     }
@@ -222,29 +252,54 @@ impl<'a> Checker<'a> {
     /// A true `isset($a['x'][$k])` also proves every container along the
     /// chain held an offset - see `Type::to_isset_container`.
     fn narrow_isset_containers(&self, arg: &ExprNode, locals: &mut Locals) {
-        let mut e = arg.peeled();
+        let Some(arenas) = self.syntax_arenas() else {
+            return;
+        };
+        let Some(mut id) = arenas.peeled(arg.id) else {
+            return;
+        };
         loop {
-            let (base, lit_key) = match &e.kind {
-                ExprKind::Index(base, Some(idx)) => (base, crate::checker::literal_shape_key(idx)),
+            let Some(e) = arenas.expr(id) else {
+                return;
+            };
+            let (base_id, lit_key) = match &e.kind {
+                ExprKind::Index(base, Some(idx)) => {
+                    let lit_key = arenas
+                        .expr(*idx)
+                        .and_then(|key| crate::checker::literal_shape_key(arenas, key));
+                    (*base, lit_key)
+                }
                 ExprKind::PropertyAccess(base, _, _)
                 | ExprKind::DynamicPropertyAccess(base, _, _) => {
-                    if let Some(base_key) = locals.key_of(base) {
+                    let Some(base) = arenas.expr(*base) else {
+                        return;
+                    };
+                    if let Some(base_key) = locals.key_of(arenas, base) {
                         let current = self.current_narrowed_type(base, base_key, locals);
                         locals.insert(base_key, current.without(&Type::null()));
                     }
-                    e = base.peeled();
+                    let Some(base_id) = arenas.peeled(base.id) else {
+                        return;
+                    };
+                    id = base_id;
                     continue;
                 }
                 _ => return,
             };
-            if let Some(base_key) = locals.key_of(base) {
+            let Some(base) = arenas.expr(base_id) else {
+                return;
+            };
+            if let Some(base_key) = locals.key_of(arenas, base) {
                 let current = self.current_narrowed_type(base, base_key, locals);
                 let narrowed = current.to_isset_container(lit_key.as_ref());
                 if !narrowed.is_never() {
                     locals.insert(base_key, narrowed);
                 }
             }
-            e = base.peeled();
+            let Some(base_id) = arenas.peeled(base_id) else {
+                return;
+            };
+            id = base_id;
         }
     }
 
@@ -255,6 +310,7 @@ impl<'a> Checker<'a> {
     /// silently skips the rest).
     fn apply_function_conditional_asserts(
         &self,
+        arenas: &NodeArenas,
         name: &QualifiedName,
         args: &[Arg],
         locals: &mut Locals,
@@ -283,14 +339,21 @@ impl<'a> Checker<'a> {
     /// already uses - a real, sound inference, not a new narrowing rule
     /// of its own.
     pub(crate) fn apply_disjunctive_syllogism(&self, cond: &ExprNode, locals: &mut Locals) {
-        let Some(cond_key) = disjunctive_syllogism_atom_key(cond, locals) else {
+        let arenas = self
+            .syntax_arenas()
+            .expect("disjunctive narrowing requires the syntax tree owner");
+        let Some(cond_key) = disjunctive_syllogism_atom_key(arenas, cond.id, locals) else {
             return;
         };
         for (l, r) in self.pending_or_disjunctions.iter().rev() {
-            if disjunctive_syllogism_atom_key(l, locals) == Some(cond_key) {
-                self.apply_narrowing(r, locals, true);
-            } else if disjunctive_syllogism_atom_key(r, locals) == Some(cond_key) {
-                self.apply_narrowing(l, locals, true);
+            if disjunctive_syllogism_atom_key(arenas, *l, locals) == Some(cond_key) {
+                if let Some(other) = arenas.expr(*r) {
+                    self.apply_narrowing(other, locals, true);
+                }
+            } else if disjunctive_syllogism_atom_key(arenas, *r, locals) == Some(cond_key) {
+                if let Some(other) = arenas.expr(*l) {
+                    self.apply_narrowing(other, locals, true);
+                }
             }
         }
     }
@@ -391,9 +454,15 @@ impl<'a> Checker<'a> {
         branch_true: bool,
     ) -> Option<(LocalKey, Type)> {
         if branch_true && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind {
-            match (before.key_of(l), before.key_of(r)) {
-                (Some(key), _) => Some((key, self.infer_expr(r, before))),
-                (None, Some(key)) => Some((key, self.infer_expr(l, before))),
+            let Some(arenas) = self.syntax_arenas() else {
+                return None;
+            };
+            let (Some(l_expr), Some(r_expr)) = (arenas.expr(*l), arenas.expr(*r)) else {
+                return None;
+            };
+            match (before.key_of(arenas, l_expr), before.key_of(arenas, r_expr)) {
+                (Some(key), _) => Some((key, self.infer_expr(r_expr, before))),
+                (None, Some(key)) => Some((key, self.infer_expr(l_expr, before))),
                 (None, None) => None,
             }
             .filter(|(_, ty)| {
@@ -402,16 +471,18 @@ impl<'a> Checker<'a> {
                     || ty.string_literal_value().is_some()
             })
         } else {
-            truthiness_discriminant_subject(cond, before).map(|key| {
-                (
-                    key,
-                    if branch_true {
-                        Type::bool_literal(true)
-                    } else {
-                        Type::bool_literal(false)
-                    },
-                )
-            })
+            self.syntax_arenas()
+                .and_then(|arenas| truthiness_discriminant_subject(arenas, cond, before))
+                .map(|key| {
+                    (
+                        key,
+                        if branch_true {
+                            Type::bool_literal(true)
+                        } else {
+                            Type::bool_literal(false)
+                        },
+                    )
+                })
         }
     }
 
@@ -532,7 +603,7 @@ impl<'a> Checker<'a> {
             // a synthetic per-field key (`"row[id]"`) never matches a bare
             // `ExprKind::Variable` walk and isn't this shape's own hazard.
             if let KeyData::Var(variable) = before.data(*name)
-                && cond_references_variable(cond, &variable)
+                && cond_references_variable(self.syntax_arenas(), cond, &variable)
             {
                 continue;
             }
@@ -589,10 +660,18 @@ fn record_implied_facts(
 /// as an alias, matching this project's "don't guess, don't false-
 /// positive" precedent throughout `narrowing.rs`, not a false
 /// conclusion.
-fn condition_alias_targets(rhs: &ExprNode, locals: &Locals) -> Option<Vec<LocalKey>> {
+fn condition_alias_targets(
+    arenas: &NodeArenas,
+    id: ExprId,
+    locals: &Locals,
+) -> Option<Vec<LocalKey>> {
     syntax::stack::guard(|| {
+        let id = arenas.peeled(id)?;
+        let rhs = arenas.expr(id)?;
         match &rhs.kind {
-            ExprKind::Instanceof(inner, _) => Some(vec![locals.key_of(inner)?]),
+            ExprKind::Instanceof(inner, _) => {
+                Some(vec![locals.key_of(arenas, arenas.expr(*inner)?)?])
+            }
             // `condition_alias_shape`'s own identical comparison-operator
             // extension, mirrored here so a numeric-comparison leaf inside a
             // larger tree still contributes its own narrowable operand as a
@@ -608,48 +687,60 @@ fn condition_alias_targets(rhs: &ExprNode, locals: &Locals) -> Option<Vec<LocalK
                 | BinOp::GtEq,
                 l,
                 r,
-            ) => Some(vec![locals.key_of(l).or_else(|| locals.key_of(r))?]),
+            ) => {
+                let l = arenas.expr(*l)?;
+                let r = arenas.expr(*r)?;
+                Some(vec![
+                    locals
+                        .key_of(arenas, l)
+                        .or_else(|| locals.key_of(arenas, r))?,
+                ])
+            }
             // A stored preg call is replayed with its operands' later
             // values, so rebinding any of them drops the alias.
-            ExprKind::Call(..) if let Some(call) = crate::checker::preg_call(rhs) => {
-                let mut targets = vec![locals.key_of(call.matches?)?];
-                targets.extend(call.subject.and_then(|e| locals.key_of(e)));
+            ExprKind::Call(..) if let Some(call) = crate::checker::preg_call(arenas, id) => {
+                let mut targets = vec![locals.key_of(arenas, call.matches?)?];
+                targets.extend(call.subject.and_then(|e| locals.key_of(arenas, e)));
                 for operand in [Some(call.pattern), call.offset].into_iter().flatten() {
                     if !matches!(
-                        operand.peeled().kind,
+                        operand.kind,
                         ExprKind::Literal(_) | ExprKind::Name(_) | ExprKind::ClassConstFetch(..)
                     ) {
-                        targets.push(locals.key_of(operand)?);
+                        targets.push(locals.key_of(arenas, operand)?);
                     }
                 }
                 Some(targets)
             }
-            ExprKind::Call(_, args) => match args.as_slice() {
-                [single_arg] => Some(vec![locals.key_of(&single_arg.value)?]),
+            ExprKind::Call(_, args) => match arenas.args(args.clone()) {
+                [single_arg] => Some(vec![locals.key_of(arenas, arenas.expr(single_arg.value)?)?]),
                 _ => None,
             },
-            ExprKind::Isset(operands) => operands.iter().map(|e| locals.key_of(e)).collect(),
-            ExprKind::Empty(operand) => Some(vec![locals.key_of(operand)?]),
+            ExprKind::Isset(operands) => arenas
+                .expr_ids(operands)
+                .iter()
+                .map(|e| locals.key_of(arenas, arenas.expr(*e)?))
+                .collect(),
+            ExprKind::Empty(operand) => Some(vec![locals.key_of(arenas, arenas.expr(*operand)?)?]),
             ExprKind::Variable(name) => Some(vec![locals.var_key(name)]),
             ExprKind::Binary(
                 BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr,
                 l,
                 r,
             ) => {
-                let mut targets = condition_alias_targets(l, locals)?;
-                for key in condition_alias_targets(r, locals)? {
+                let mut targets = condition_alias_targets(arenas, *l, locals)?;
+                for key in condition_alias_targets(arenas, *r, locals)? {
                     if !targets.contains(&key) {
                         targets.push(key);
                     }
                 }
                 Some(targets)
             }
-            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(inner, locals),
+            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(arenas, *inner, locals),
             // Targets the *receiver*'s own key, not the chain's - see
             // `nullsafe_receiver`'s own doc comment for why.
             ExprKind::PropertyAccess(base, _, ObjectOperator::NullsafeArrow)
             | ExprKind::MethodCall(base, _, _, ObjectOperator::NullsafeArrow) => {
-                Some(vec![locals.key_of(base)?])
+                Some(vec![locals.key_of(arenas, arenas.expr(*base)?)?])
             }
             _ => None,
         }
@@ -667,6 +758,10 @@ impl<'a> Checker<'a> {
     }
 
     fn apply_narrowing_unguarded(&self, cond: &ExprNode, locals: &mut Locals, branch_true: bool) {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("narrowed expressions retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         // A preg call's truthiness narrows its `$matches` and subject.
         self.apply_preg_result_narrowing(cond, locals, branch_true);
         // `function_exists('foo')`'s own true branch proves `foo` is
@@ -679,53 +774,80 @@ impl<'a> Checker<'a> {
         // already recurses into this for free (`if (function_exists('foo')
         // && ...)`).
         if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && fn_name
-                .rsplit('\\')
-                .next()
-                .unwrap_or(fn_name)
-                .eq_ignore_ascii_case("function_exists")
-            && let [guarded_arg] = args.as_slice()
-            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
-        {
-            locals
-                .guarded_functions_mut()
-                .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
-        }
-        // `class_exists('X')`'s true branch (or `interface_exists`,
-        // `trait_exists`, `enum_exists`) proves the class-like `X` declared.
-        if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && matches!(
+            && let Some(call_id) = arenas.peeled(cond.id)
+            && let Some(ExprNode {
+                kind: ExprKind::Call(callee, args),
+                ..
+            }) = arenas.expr(call_id)
+            && let Some(callee) = arenas.peeled(*callee).and_then(|id| arenas.expr(id))
+            && let ExprKind::Name(fn_name) = &callee.kind
+            && let Some(fn_name) = arenas.qualified_name(fn_name)
+            && [
+                "class_exists",
+                "interface_exists",
+                "trait_exists",
+                "enum_exists",
+            ]
+            .iter()
+            .any(|candidate| {
                 fn_name
                     .rsplit('\\')
                     .next()
                     .unwrap_or(fn_name)
-                    .to_ascii_lowercase()
-                    .as_str(),
-                "class_exists" | "interface_exists" | "trait_exists" | "enum_exists"
-            )
-            && let Some(guarded_arg) = args.first()
-            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+                    .eq_ignore_ascii_case(candidate)
+            })
+            && let Some(guarded_arg) = arenas.args(args.clone()).first()
+            && let Some(guarded_arg) = arenas.expr(guarded_arg.value)
+            && let Some(guarded_name) = literal_string_value(arenas, guarded_arg.id)
         {
             locals
                 .guarded_classes_mut()
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
+        // `function_exists('name')` proves the named function is available
+        // on this branch. Keep the fact keyed case-insensitively, matching
+        // PHP's function-name lookup and the registry's guard consumers.
+        if branch_true
+            && let Some(call_id) = arenas.peeled(cond.id)
+            && let Some(ExprNode {
+                kind: ExprKind::Call(callee, args),
+                ..
+            }) = arenas.expr(call_id)
+            && let Some(callee) = arenas.peeled(*callee).and_then(|id| arenas.expr(id))
+            && let ExprKind::Name(fn_name) = &callee.kind
+            && let Some(fn_name) = arenas.qualified_name(fn_name)
+            && fn_name
+                .rsplit('\\')
+                .next()
+                .unwrap_or(fn_name)
+                .eq_ignore_ascii_case("function_exists")
+            && let Some(guarded_arg) = arenas.args(args.clone()).first()
+            && let Some(guarded_arg) = arenas.expr(guarded_arg.value)
+            && let Some(guarded_name) = literal_string_value(arenas, guarded_arg.id)
+        {
+            locals
+                .guarded_functions_mut()
+                .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
+        }
         // `defined('NAME')`'s true branch proves the global constant
         // `NAME` exists, the constant counterpart of `function_exists`.
         if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
+            && let Some(call_id) = arenas.peeled(cond.id)
+            && let Some(ExprNode {
+                kind: ExprKind::Call(callee, args),
+                ..
+            }) = arenas.expr(call_id)
+            && let Some(callee) = arenas.peeled(*callee).and_then(|id| arenas.expr(id))
+            && let ExprKind::Name(fn_name) = &callee.kind
+            && let Some(fn_name) = arenas.qualified_name(fn_name)
             && fn_name
                 .rsplit('\\')
                 .next()
                 .unwrap_or(fn_name)
                 .eq_ignore_ascii_case("defined")
-            && let [guarded_arg] = args.as_slice()
-            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+            && let [guarded_arg] = arenas.args(args.clone())
+            && let Some(guarded_arg) = arenas.expr(guarded_arg.value)
+            && let Some(guarded_name) = literal_string_value(arenas, guarded_arg.id)
         {
             locals
                 .guarded_constants_mut()
@@ -741,11 +863,19 @@ impl<'a> Checker<'a> {
         // per-receiver fact instead of a global one): only the exact
         // (bare variable, literal string) shape is recognized.
         if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && let [recv_arg, name_arg] = args.as_slice()
-            && let ExprKind::Variable(recv_name) = &recv_arg.value.peeled().kind
-            && let Some(member_name) = literal_string_value(&name_arg.value)
+            && let Some(call_id) = arenas.peeled(cond.id)
+            && let Some(ExprNode {
+                kind: ExprKind::Call(callee, args),
+                ..
+            }) = arenas.expr(call_id)
+            && let Some(callee) = arenas.peeled(*callee).and_then(|id| arenas.expr(id))
+            && let ExprKind::Name(fn_name) = &callee.kind
+            && let Some(fn_name) = arenas.qualified_name(fn_name)
+            && let [recv_arg, name_arg] = arenas.args(args.clone())
+            && let Some(recv_arg) = arenas.peeled(recv_arg.value).and_then(|id| arenas.expr(id))
+            && let ExprKind::Variable(recv_name) = &recv_arg.kind
+            && let Some(name_arg) = arenas.expr(name_arg.value)
+            && let Some(member_name) = literal_string_value(arenas, name_arg.id)
         {
             let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);
             if bare.eq_ignore_ascii_case("method_exists") {
@@ -769,12 +899,20 @@ impl<'a> Checker<'a> {
             // so it's left alone, same conservative choice `||` mirrors
             // for its own unrepresentable branch below.
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) if branch_true => {
-                self.apply_narrowing(l, locals, true);
-                self.apply_narrowing(r, locals, true);
+                if let Some(l) = arenas.expr(*l) {
+                    self.apply_narrowing(l, locals, true);
+                }
+                if let Some(r) = arenas.expr(*r) {
+                    self.apply_narrowing(r, locals, true);
+                }
             }
             ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) if !branch_true => {
-                self.apply_narrowing(l, locals, false);
-                self.apply_narrowing(r, locals, false);
+                if let Some(l) = arenas.expr(*l) {
+                    self.apply_narrowing(l, locals, false);
+                }
+                if let Some(r) = arenas.expr(*r) {
+                    self.apply_narrowing(r, locals, false);
+                }
             }
             // "At least one is true, but not sure
             // which" isn't representable in general - but when every
@@ -821,13 +959,19 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Binary(op, l, r) => {
-                self.apply_comparison_narrowing(op, l, r, locals, branch_true);
+                if let (Some(l), Some(r)) = (arenas.expr(*l), arenas.expr(*r)) {
+                    self.apply_comparison_narrowing(op, l, r, locals, branch_true);
+                }
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
-                self.apply_narrowing(inner, locals, !branch_true);
+                if let Some(inner) = arenas.expr(*inner) {
+                    self.apply_narrowing(inner, locals, !branch_true);
+                }
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                self.apply_narrowing(inner, locals, branch_true)
+                if let Some(inner) = arenas.expr(*inner) {
+                    self.apply_narrowing(inner, locals, branch_true)
+                }
             }
             // `(bool) $x`'s own truthiness is exactly `$x`'s -
             // PHP's cast doesn't change which values are truthy/falsy, it
@@ -837,12 +981,17 @@ impl<'a> Checker<'a> {
             // Any other cast (`(int)`, `(string)`, ...) genuinely changes
             // the value and isn't narrowable this way, so it's left alone.
             ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => {
-                self.apply_narrowing(inner, locals, branch_true);
+                if let Some(inner) = arenas.expr(*inner) {
+                    self.apply_narrowing(inner, locals, branch_true);
+                }
             }
             // `empty($x)` is PHP's falsy check: false leaves the truthy
             // values, true the falsy ones - for a defined variable, which
             // `empty()` of an undefined one can't be told apart from.
             ExprKind::Empty(operand) => {
+                let Some(operand) = arenas.expr(*operand) else {
+                    return;
+                };
                 let defined = is_defined_variable(operand, locals);
                 self.narrow_emptiness(operand, branch_true, defined, locals);
             }
@@ -852,8 +1001,10 @@ impl<'a> Checker<'a> {
             // is null or unset: with a single operand that's a defined
             // variable, it's null.
             ExprKind::Isset(operands) => {
-                if let [operand] = operands.as_slice()
-                    && let Some(key) = locals.key_of(operand)
+                let operands = arenas.expr_ids(operands);
+                if let [operand_id] = operands
+                    && let Some(operand) = arenas.expr(*operand_id)
+                    && let Some(key) = self.key_of_expr(locals, operand)
                 {
                     // The identical `isset($x)` re-checked later replays
                     // what the first occurrence's matching branch learned
@@ -862,16 +1013,20 @@ impl<'a> Checker<'a> {
                     self.replay_truthiness_discriminant_facts(isset, locals, branch_true);
                 }
                 if branch_true {
-                    for operand in operands {
-                        if let Some(key) = locals.key_of(operand) {
+                    for operand_id in operands {
+                        let Some(operand) = arenas.expr(*operand_id) else {
+                            continue;
+                        };
+                        if let Some(key) = self.key_of_expr(locals, operand) {
                             let current = self.current_narrowed_type(operand, key, locals);
                             locals.insert(key, current.without(&Type::null()));
                         }
                         self.narrow_isset_containers(operand, locals);
                     }
-                } else if let [operand] = operands.as_slice()
+                } else if let [operand_id] = operands
+                    && let Some(operand) = arenas.expr(*operand_id)
                     && is_defined_variable(operand, locals)
-                    && let Some(key) = locals.key_of(operand)
+                    && let Some(key) = self.key_of_expr(locals, operand)
                 {
                     let current = self.current_narrowed_type(operand, key, locals);
                     let null = if self
@@ -887,14 +1042,23 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Call(callee, args) => {
+                let callee = arenas
+                    .expr(*callee)
+                    .expect("narrowing call callee belongs to its retained file owner");
+                let callee_name = match &callee.kind {
+                    ExprKind::Name(name) => arenas.qualified_name(name),
+                    _ => None,
+                };
+                let args = arenas.args(args.clone());
                 // `key_of`, not a bare `ExprKind::
                 // Variable` match - without this, `is_string($arr['key'])`
                 // (or `empty($arr['key'])`) never narrowed `$arr['key']`
                 // at all, the array-index counterpart of the exact gap
                 // the `instanceof` arm below already covers for property
                 // chains (`$arg->value instanceof Variable`).
-                if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
-                    && let Some(key) = locals.key_of(&single_arg.value)
+                if let (Some(name), [single_arg]) = (callee_name, args)
+                    && let Some(single_arg) = arenas.expr(single_arg.value)
+                    && let Some(key) = self.key_of_expr(locals, single_arg)
                 {
                     // The function the call reaches: `\is_array($x)` and
                     // `is_array($x)` in a namespace alike, but not a
@@ -911,12 +1075,12 @@ impl<'a> Checker<'a> {
                         // same asymmetry the comparison form's own arm
                         // already accepts (`Type::to_non_empty_array`
                         // has no "prove empty" counterpart).
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
+                        let current = self.current_narrowed_type(single_arg, key, locals);
                         locals.insert(key, current.to_non_empty_array());
                     } else if name == "array_is_list" {
                         // Passing proves list-ness. Failing proves the
                         // array non-empty, as an empty array is a list.
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
+                        let current = self.current_narrowed_type(single_arg, key, locals);
                         let narrowed = if branch_true {
                             current.to_list()
                         } else {
@@ -938,7 +1102,7 @@ impl<'a> Checker<'a> {
                         // (`"hello"`) is exactly the ordinary case that
                         // makes `!is_numeric` true. The two directions
                         // need different exclusion sets instead.
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
+                        let current = self.current_narrowed_type(single_arg, key, locals);
                         let narrowed = if branch_true {
                             // Bool/True/False/Null can never satisfy
                             // is_numeric - unconditionally safe to drop.
@@ -973,56 +1137,69 @@ impl<'a> Checker<'a> {
                         };
                         locals.insert(key, narrowed);
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
+                        let current = self.current_narrowed_type(single_arg, key, locals);
                         let narrowed = if branch_true {
                             self.relation().narrow(&current, &target_ty)
                         } else {
                             self.exclude(&current, &target_ty)
                         };
                         locals.insert(key, narrowed);
-                    } else if let ExprKind::Name(raw) = &callee.kind {
-                        self.apply_function_conditional_asserts(raw, args, locals, branch_true);
+                    } else if let Some(raw) = callee_name {
+                        self.apply_function_conditional_asserts(
+                            arenas,
+                            raw,
+                            args,
+                            locals,
+                            branch_true,
+                        );
                     }
-                } else if let ExprKind::Name(name) = &callee.kind
+                } else if let Some(name) = callee_name
                     && name.trim_start_matches('\\') == "in_array"
-                    && let [needle, haystack, strict] = args.as_slice()
+                    && let [needle, haystack, strict] = args
                     // Only the strict form - a loose comparison's type
                     // juggling makes the real match set wider than the
                     // haystack's own values.
-                    && matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(true)))
+                    && arenas
+                        .expr(strict.value)
+                        .is_some_and(|strict| matches!(strict.kind, ExprKind::Literal(Literal::Bool(true))))
                 {
-                    self.narrow_strict_membership(
-                        &needle.value,
-                        &haystack.value,
-                        branch_true,
-                        locals,
-                    );
-                } else if let ExprKind::Name(name) = &callee.kind
+                    if let (Some(needle), Some(haystack)) =
+                        (arenas.expr(needle.value), arenas.expr(haystack.value))
+                    {
+                        self.narrow_strict_membership(needle, haystack, branch_true, locals);
+                    }
+                } else if let Some(name) = callee_name
                     && name.trim_start_matches('\\') == "in_array"
-                    && let [needle, haystack, rest @ ..] = args.as_slice()
+                    && let [needle, haystack, rest @ ..] = args
                     && !rest.iter().any(|strict| {
-                        !matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(false)))
+                        !arenas.expr(strict.value).is_some_and(|strict| {
+                            matches!(strict.kind, ExprKind::Literal(Literal::Bool(false)))
+                        })
                     })
                 {
-                    self.narrow_loose_membership(
-                        &needle.value,
-                        &haystack.value,
-                        branch_true,
-                        locals,
-                    );
-                } else if let ExprKind::Name(name) = &callee.kind
+                    if let (Some(needle), Some(haystack)) =
+                        (arenas.expr(needle.value), arenas.expr(haystack.value))
+                    {
+                        self.narrow_loose_membership(needle, haystack, branch_true, locals);
+                    }
+                } else if let Some(name) = callee_name
                     && name.trim_start_matches('\\') == "array_key_exists"
-                    && let [key_arg, arr_arg] = args.as_slice()
+                    && let [key_arg, arr_arg] = args
                 {
-                    self.narrow_key_presence(&key_arg.value, &arr_arg.value, branch_true, locals);
-                } else if let ExprKind::Name(name) = &callee.kind
+                    if let (Some(key), Some(array)) =
+                        (arenas.expr(key_arg.value), arenas.expr(arr_arg.value))
+                    {
+                        self.narrow_key_presence(key, array, branch_true, locals);
+                    }
+                } else if let Some(name) = callee_name
                     && matches!(
                         name.trim_start_matches('\\'),
                         "str_contains" | "str_starts_with" | "str_ends_with"
                     )
                     && branch_true
-                    && let [haystack, needle] = args.as_slice()
-                    && let Some(key) = locals.key_of(&haystack.value)
+                    && let [haystack, needle] = args
+                    && let Some(haystack_expr) = arenas.expr(haystack.value)
+                    && let Some(key) = self.key_of_expr(locals, haystack_expr)
                 {
                     // Real PHPStan's own
                     // `StrContainingTypeSpecifyingExtension` - a haystack
@@ -1043,7 +1220,10 @@ impl<'a> Checker<'a> {
                     // (position `0` is falsy despite being a match) this
                     // checker doesn't otherwise model, unlike these three
                     // genuinely bool-returning functions.
-                    let needle_ty = self.infer_expr(&needle.value, locals);
+                    let Some(needle_expr) = arenas.expr(needle.value) else {
+                        return;
+                    };
+                    let needle_ty = self.infer_expr(needle_expr, locals);
                     if let Some(needle_lit) = needle_ty.string_literal_value()
                         && !needle_lit.is_empty()
                     {
@@ -1052,13 +1232,14 @@ impl<'a> Checker<'a> {
                         } else {
                             AccessoryKind::NonFalsyString
                         };
-                        let current = self.current_narrowed_type(&haystack.value, key, locals);
+                        let current = self.current_narrowed_type(haystack_expr, key, locals);
                         locals.insert(key, current.with_string_accessory(kind));
                     }
-                } else if let ExprKind::Name(name) = &callee.kind
+                } else if let Some(name) = callee_name
                     && matches!(name.trim_start_matches('\\'), "is_a")
-                    && let [obj_arg, class_arg, ..] = args.as_slice()
-                    && let Some(key) = locals.key_of(&obj_arg.value)
+                    && let [obj_arg, class_arg, ..] = args
+                    && let Some(obj_expr) = arenas.expr(obj_arg.value)
+                    && let Some(key) = self.key_of_expr(locals, obj_expr)
                 {
                     // `is_a($x, SomeClass::class)`/`is_a($x, 'SomeClass')`
                     // is semantically `$x instanceof SomeClass` with its
@@ -1075,15 +1256,18 @@ impl<'a> Checker<'a> {
                     // `None` the same way a dynamic `instanceof` target
                     // does. `Foo::class` is a `ClassNameFetch`, not a
                     // string `literal_string_value` handles.
-                    let class = match &class_arg.value.kind {
+                    let Some(class_expr) = arenas.expr(class_arg.value) else {
+                        return;
+                    };
+                    let class = match &class_expr.kind {
                         ExprKind::ClassNameFetch(target) => {
                             target.as_name().map(|name| self.resolve_name_expr(name))
                         }
-                        _ => literal_string_value(&class_arg.value)
+                        _ => literal_string_value(arenas, class_expr.id)
                             .map(|name| self.class_type_named(&name)),
                     };
                     if let Some(resolved) = class {
-                        let current = self.current_narrowed_type(&obj_arg.value, key, locals);
+                        let current = self.current_narrowed_type(obj_expr, key, locals);
                         if branch_true {
                             locals.insert(
                                 key,
@@ -1093,8 +1277,14 @@ impl<'a> Checker<'a> {
                             locals.insert(key, self.exclude(&current, &resolved));
                         }
                     }
-                } else if let ExprKind::Name(name) = &callee.kind {
-                    self.apply_function_conditional_asserts(name, args, locals, branch_true);
+                } else if let Some(name) = callee_name {
+                    self.apply_function_conditional_asserts(
+                        arenas,
+                        name,
+                        args,
+                        locals,
+                        branch_true,
+                    );
                 }
             }
             // `@phpstan-assert-if-true`/`-if-false` on a method's own
@@ -1110,6 +1300,9 @@ impl<'a> Checker<'a> {
             // already narrow the receiver's own full current type
             // generically, Union or not.
             ExprKind::MethodCall(recv, method, args, _) => {
+                let Some(recv) = arenas.expr(*recv) else {
+                    return;
+                };
                 let recv_ty = self.infer_expr(recv, locals);
                 let class = recv_ty.first_object_class().cloned();
                 if let Some(class) = class
@@ -1121,7 +1314,13 @@ impl<'a> Checker<'a> {
                         sig.assert_if_false()
                     };
                     if !infos.is_empty() {
-                        self.apply_assert_infos(infos, sig, Some(recv), args, locals);
+                        self.apply_assert_infos(
+                            infos,
+                            sig,
+                            Some(recv),
+                            arenas.args(args.clone()),
+                            locals,
+                        );
                     }
                 }
             }
@@ -1138,7 +1337,13 @@ impl<'a> Checker<'a> {
                         sig.assert_if_false()
                     };
                     if !infos.is_empty() {
-                        self.apply_assert_infos(infos, sig, None, args, locals);
+                        self.apply_assert_infos(
+                            infos,
+                            sig,
+                            None,
+                            arenas.args(args.clone()),
+                            locals,
+                        );
                     }
                 }
             }
@@ -1150,8 +1355,12 @@ impl<'a> Checker<'a> {
                 // `Type::without` already does soundly elsewhere.
                 // A dynamic target (`$x instanceof $className`) still
                 // doesn't name a concrete class to narrow to either way.
-                if let Some(key) = locals.key_of(inner)
+                let Some(inner) = arenas.expr(*inner) else {
+                    return;
+                };
+                if let Some(key) = self.key_of_expr(locals, inner)
                     && let InstanceofTarget::Name(class_name) = target
+                    && let Some(class_name) = arenas.qualified_name(class_name)
                 {
                     let resolved = self.resolve_name_expr(class_name);
                     if branch_true {
@@ -1198,15 +1407,21 @@ impl<'a> Checker<'a> {
             // branch instead of a real non-zero `int` (`substr()`'s 3rd
             // argument expects `int|null`, not `int<0, max>|false`).
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-                let (rhs_ty, native) = match self.assigned_values.get(&cond.span) {
+                let syntax_owner = self
+                    .syntax_tree_owner()
+                    .expect("condition assignment retains its parsed file owner");
+                let (Some(lhs), Some(rhs)) = (arenas.expr(*lhs), arenas.expr(*rhs)) else {
+                    return;
+                };
+                let (rhs_ty, native) = match self.assigned_values.get(&self.expr_span(cond.id)) {
                     Some((ty, native)) => (ty.clone(), native.clone()),
                     None => (
                         self.infer_expr(rhs, locals),
                         matches!(cond.kind, ExprKind::Assign(..))
-                            .then(|| self.native_expr_type(rhs, locals)),
+                            .then(|| self.native_expr_type_id(arenas, rhs.id, locals)),
                     ),
                 };
-                self.bind_assignment_target(lhs, rhs_ty, locals);
+                self.bind_assignment_target(syntax_owner.arenas(), lhs, rhs_ty, locals);
                 if let ExprKind::Variable(name) = &lhs.kind
                     && let Some(native) = native
                 {
@@ -1215,10 +1430,10 @@ impl<'a> Checker<'a> {
                 }
                 // The value's own subjects (`$x` in `$o = $x instanceof
                 // Foo`), unless it reads a variable the target replaced.
-                if !reads_assigned_variable(lhs, rhs) {
+                if !reads_assigned_variable(self.syntax_arenas(), lhs, rhs) {
                     self.apply_narrowing(rhs, locals, branch_true);
                 }
-                if let Some(key) = locals.key_of(lhs)
+                if let Some(key) = self.key_of_expr(locals, lhs)
                     && let Some(current) = locals.get(key).cloned()
                 {
                     let narrowed = if branch_true {
@@ -1247,7 +1462,12 @@ impl<'a> Checker<'a> {
             ExprKind::Variable(name) => {
                 let key = locals.var_key(name);
                 if let Some((_, alias)) = locals.condition_aliases().get(&key).cloned() {
-                    self.apply_narrowing(&alias, locals, branch_true);
+                    let arenas = self
+                        .syntax_arenas()
+                        .expect("condition aliases require the syntax tree owner");
+                    if let Some(alias) = arenas.expr(alias) {
+                        self.apply_narrowing(alias, locals, branch_true);
+                    }
                 }
                 let truthy = locals.intern(KeyData::Truthy(key));
                 self.replay_truthiness_discriminant_facts(truthy, locals, branch_true);
@@ -1267,8 +1487,10 @@ impl<'a> Checker<'a> {
             // members this project can represent (`Null`/`False`); the
             // falsy branch isn't safely narrowable to anything more
             // specific than the current type.
-            _ if branch_true && locals.key_of(cond).is_some() => {
-                let key = locals.key_of(cond).expect("checked by guard above");
+            _ if branch_true && self.key_of_expr(locals, cond).is_some() => {
+                let key = self
+                    .key_of_expr(locals, cond)
+                    .expect("checked by guard above");
                 let current = self.current_narrowed_type(cond, key, locals);
                 locals.insert(key, current.without_falsy());
             }
@@ -1280,12 +1502,11 @@ impl<'a> Checker<'a> {
     /// narrowing`'s own `ExprKind::Variable` arm for the replay half) -
     /// called right after an ordinary assignment binds `lhs`. Cheap on
     /// the fast path: `condition_alias_shape` is a plain `matches!` with
-    /// no clone, so the overwhelming majority of assignments that could
+    /// owner lookup, so the overwhelming majority of assignments that could
     /// never qualify (`$x = 5;`, `$x = $obj->method();` with no
     /// recognized shape) cost one match check and nothing else. Only the
-    /// narrow subset that passes it pays for `rhs.clone()` (an owned
-    /// `ExprNode` deep-clone, once), which then lives behind an `Rc` so every
-    /// later branch-fork of `Locals` stays O(1).
+    /// narrow subset that passes it records the existing `ExprId`, which is
+    /// copyable and keeps each branch-fork of `Locals` O(1).
     pub(crate) fn record_condition_alias(
         &self,
         lhs: &ExprNode,
@@ -1295,7 +1516,10 @@ impl<'a> Checker<'a> {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };
-        if !condition_alias_shape(rhs) {
+        let Some(arenas) = self.syntax_arenas() else {
+            return;
+        };
+        if !condition_alias_shape(arenas, rhs.id) {
             return;
         }
         // Real-PHPStan-confirmed self-reference guard
@@ -1307,7 +1531,7 @@ impl<'a> Checker<'a> {
         if matches!(&rhs.kind, ExprKind::Variable(n) if n == name) {
             return;
         }
-        let Some(target_keys) = condition_alias_targets(rhs, locals) else {
+        let Some(target_keys) = condition_alias_targets(arenas, rhs.id, locals) else {
             return;
         };
         // The same self-reference hazard as the bare-`Variable` check
@@ -1318,7 +1542,7 @@ impl<'a> Checker<'a> {
         if target_keys.contains(&alias) {
             return;
         }
-        locals.set_condition_alias(alias, target_keys, std::rc::Rc::new(rhs.clone()));
+        locals.set_condition_alias(alias, target_keys, rhs.id);
     }
 
     /// A different shape from `record_condition_alias` above: a flag
@@ -1343,10 +1567,10 @@ impl<'a> Checker<'a> {
     /// mechanism a direct alias already gets.
     ///
     /// Recorded into *both* `then_locals` and `else_locals` directly
-    /// (with the identical `Rc`, not just one side left to `merge_scopes`'s
-    /// own "both branches must agree" `Rc::ptr_eq` filter) - unlike an
+    /// (with the identical ID, not just one side left to `merge_scopes`'s
+    /// own "both branches must agree" ID-equality filter) - unlike an
     /// ordinary top-level `record_condition_alias` call (which runs
-    /// before any branching, so both forks inherit the same `Rc` for
+    /// before any branching, so both forks inherit the same ID for
     /// free), this alias is only ever created on one specific path
     /// through the `if`, so `else_locals` needs it written in explicitly
     /// or the merge would drop it (else_locals never independently
@@ -1372,17 +1596,32 @@ impl<'a> Checker<'a> {
         then_locals: &mut Locals,
         else_locals: &mut Locals,
     ) {
-        let single = match &then_branch.kind {
-            StmtKind::Block(stmts) => match stmts.as_slice() {
-                [only] => only,
-                _ => return,
-            },
-            _ => then_branch,
-        };
-        let StmtKind::Expression(assign) = &single.kind else {
+        let Some(arenas) = self.syntax_arenas() else {
             return;
         };
-        let ExprKind::Assign(lhs, rhs) = &assign.kind else {
+        let single_id = match &then_branch.kind {
+            StmtKind::Block(stmts) => match arenas.stmt_ids(stmts) {
+                [only] => *only,
+                _ => return,
+            },
+            _ => then_branch.id,
+        };
+        let Some(single) = arenas.stmt(single_id) else {
+            return;
+        };
+        let StmtKind::Expression(assign_id) = &single.kind else {
+            return;
+        };
+        let Some(assign) = arenas.expr(*assign_id) else {
+            return;
+        };
+        let ExprKind::Assign(lhs_id, rhs_id) = &assign.kind else {
+            return;
+        };
+        let Some(lhs) = arenas.expr(*lhs_id) else {
+            return;
+        };
+        let Some(rhs) = arenas.expr(*rhs_id) else {
             return;
         };
         let ExprKind::Variable(name) = &lhs.kind else {
@@ -1394,19 +1633,18 @@ impl<'a> Checker<'a> {
         if !else_locals.contains_var(name) {
             return;
         }
-        if !condition_alias_shape(cond) {
+        if !condition_alias_shape(arenas, cond.id) {
             return;
         }
-        let Some(target_keys) = condition_alias_targets(cond, else_locals) else {
+        let Some(target_keys) = condition_alias_targets(arenas, cond.id, else_locals) else {
             return;
         };
         let flag = else_locals.var_key(name);
         if target_keys.contains(&flag) {
             return;
         }
-        let alias = std::rc::Rc::new(cond.clone());
-        then_locals.set_condition_alias(flag, target_keys.clone(), alias.clone());
-        else_locals.set_condition_alias(flag, target_keys, alias);
+        then_locals.set_condition_alias(flag, target_keys.clone(), cond.id);
+        else_locals.set_condition_alias(flag, target_keys, cond.id);
     }
 
     /// `AssertRuleHelper`'s equivalent - a `@phpstan-
@@ -1559,22 +1797,26 @@ fn is_defined_variable(e: &ExprNode, locals: &Locals) -> bool {
 /// constant `c`: an ordering, or `None` for loose equality. `None` overall
 /// when `cond` isn't one.
 fn spaceship_comparison<'e>(
+    arenas: &'e NodeArenas,
     op: &BinOp,
     l: &'e ExprNode,
     r: &'e ExprNode,
 ) -> Option<(Option<types::OrderingOp>, &'e ExprNode, &'e ExprNode)> {
-    let (spaceship, constant, op) = match (&l.peeled().kind, &r.peeled().kind) {
-        (ExprKind::Binary(BinOp::Spaceship, ..), _) => (l.peeled(), r, *op),
-        (_, ExprKind::Binary(BinOp::Spaceship, ..)) => (r.peeled(), l, mirror_comparison(op)),
+    let l_peeled = arenas.peeled(l.id).and_then(|id| arenas.expr(id))?;
+    let r_peeled = arenas.peeled(r.id).and_then(|id| arenas.expr(id))?;
+    let (spaceship, constant, op) = match (&l_peeled.kind, &r_peeled.kind) {
+        (ExprKind::Binary(BinOp::Spaceship, ..), _) => (l_peeled, r, *op),
+        (_, ExprKind::Binary(BinOp::Spaceship, ..)) => (r_peeled, l, mirror_comparison(op)),
         _ => return None,
     };
     let ExprKind::Binary(BinOp::Spaceship, a, b) = &spaceship.kind else {
         return None;
     };
-    let n = match &constant.peeled().kind {
+    let constant = arenas.peeled(constant.id).and_then(|id| arenas.expr(id))?;
+    let n = match &constant.kind {
         ExprKind::Literal(Literal::Int(n)) => *n,
-        ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.kind {
-            ExprKind::Literal(Literal::Int(n)) => -*n,
+        ExprKind::Unary(UnaryOp::Neg, inner) => match arenas.expr(*inner).map(|e| &e.kind) {
+            Some(ExprKind::Literal(Literal::Int(n))) => -*n,
             _ => return None,
         },
         _ => return None,
@@ -1588,16 +1830,17 @@ fn spaceship_comparison<'e>(
         (BinOp::Identical | BinOp::Eq, 0) => None,
         _ => return None,
     };
-    Some((encoded, a, b))
+    Some((encoded, arenas.expr(*a)?, arenas.expr(*b)?))
 }
 
 /// The `count($x)` side of a comparison: `$x`, its mode argument, and
 /// whether it's on the left.
 fn comparison_count_operand<'e>(
+    arenas: &NodeArenas,
     op: &BinOp,
     l: &'e ExprNode,
     r: &'e ExprNode,
-) -> Option<(&'e ExprNode, Option<&'e ExprNode>, bool)> {
+) -> Option<(ExprId, Option<ExprId>, bool)> {
     if !matches!(
         op,
         BinOp::Lt
@@ -1611,9 +1854,9 @@ fn comparison_count_operand<'e>(
     ) {
         return None;
     }
-    count_call(l)
+    count_call(arenas, l)
         .map(|(a, m)| (a, m, true))
-        .or_else(|| count_call(r).map(|(a, m)| (a, m, false)))
+        .or_else(|| count_call(arenas, r).map(|(a, m)| (a, m, false)))
 }
 
 impl Checker<'_> {
@@ -1628,9 +1871,17 @@ impl Checker<'_> {
         holds: bool,
         locals: &mut Locals,
     ) {
-        let Some((counted, mode, count_on_left)) = comparison_count_operand(op, l, r) else {
+        let Some(arenas) = self.syntax_arenas() else {
             return;
         };
+        let Some((counted, mode, count_on_left)) = comparison_count_operand(arenas, op, l, r)
+        else {
+            return;
+        };
+        let Some(counted) = arenas.expr(counted) else {
+            return;
+        };
+        let mode = mode.and_then(|id| arenas.expr(id));
         let other = if count_on_left { r } else { l };
         let op = if count_on_left {
             *op
@@ -1682,7 +1933,7 @@ impl Checker<'_> {
         known_defined: bool,
         locals: &mut Locals,
     ) {
-        let Some(key) = locals.key_of(operand) else {
+        let Some(key) = self.key_of_expr(locals, operand) else {
             return;
         };
         let current = self.current_narrowed_type(operand, key, locals);
@@ -1704,10 +1955,13 @@ impl Checker<'_> {
         present: bool,
         locals: &mut Locals,
     ) {
+        let Some(arenas) = self.syntax_arenas() else {
+            return;
+        };
         let (Some(lit_key), Some(shape_key), Some(arr_key)) = (
-            crate::checker::literal_string_key(key),
-            crate::checker::literal_shape_key(key),
-            locals.key_of(arr),
+            crate::checker::literal_string_key(arenas, key),
+            crate::checker::literal_shape_key(arenas, key),
+            self.key_of_expr(locals, arr),
         ) else {
             return;
         };
@@ -1736,7 +1990,7 @@ impl Checker<'_> {
         let Some((target_ty, excluded_ty)) = self.in_array_narrowing(haystack, locals) else {
             return;
         };
-        let Some(key) = locals.key_of(needle) else {
+        let Some(key) = self.key_of_expr(locals, needle) else {
             return;
         };
         let current = self.current_narrowed_type(needle, key, locals);
@@ -1765,7 +2019,7 @@ impl Checker<'_> {
         holds: bool,
         locals: &mut Locals,
     ) {
-        if let Some(key) = locals.key_of(counted)
+        if let Some(key) = self.key_of_expr(locals, counted)
             && other_ty.is_int().yes()
             && let Some((bl, bh)) = other_ty.int_bounds()
         {
@@ -1829,7 +2083,7 @@ impl Checker<'_> {
         contained: bool,
         locals: &mut Locals,
     ) {
-        let Some(key) = locals.key_of(needle) else {
+        let Some(key) = self.key_of_expr(locals, needle) else {
             return;
         };
         let Some(values) = self.infer_expr(haystack, locals).array_value_type() else {
@@ -1858,19 +2112,38 @@ impl Checker<'_> {
 
 /// A comparison operand as the value it compares: an assignment's target
 /// and its assigned value, or the operand itself and no value.
-fn condition_operand(e: &ExprNode) -> (&ExprNode, Option<&ExprNode>) {
-    match &e.peeled().kind {
-        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => (lhs, Some(rhs)),
-        _ => (e, None),
+fn condition_operand<'e>(
+    arenas: &'e NodeArenas,
+    e: &'e ExprNode,
+) -> Option<(&'e ExprNode, Option<&'e ExprNode>)> {
+    let Some(peeled) = arenas.peeled(e.id).and_then(|id| arenas.expr(id)) else {
+        return None;
+    };
+    match &peeled.kind {
+        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
+            match (arenas.expr(*lhs), arenas.expr(*rhs)) {
+                (Some(lhs), Some(rhs)) => Some((lhs, Some(rhs))),
+                _ => None,
+            }
+        }
+        _ => Some((e, None)),
     }
 }
 
 /// Whether `value` reads a variable `target` names, whose old value it
 /// meant; after the assignment, the name holds the new one.
-fn reads_assigned_variable(target: &ExprNode, value: &ExprNode) -> bool {
-    syntax::visit::any_expr_in_scope(
-        target,
-        |t| matches!(&t.kind, ExprKind::Variable(v) if cond_references_variable(value, v)),
+fn reads_assigned_variable(
+    arenas: Option<&NodeArenas>,
+    target: &ExprNode,
+    value: &ExprNode,
+) -> bool {
+    let Some(arenas) = arenas else {
+        return true;
+    };
+    syntax::visit::arena::any_expr_in_scope(
+        arenas,
+        target.id,
+        |t| matches!(&t.kind, ExprKind::Variable(v) if cond_references_variable(Some(arenas), value, v)),
     )
 }
 
@@ -1887,13 +2160,24 @@ impl Checker<'_> {
         locals: &mut Locals,
         holds: bool,
     ) {
-        let ((lt, lv), (rt, rv)) = (condition_operand(l), condition_operand(r));
+        let Some(arenas) = self.syntax_arenas() else {
+            self.compare_operands(op, l, r, locals, holds);
+            return;
+        };
+        let Some((lt, lv)) = condition_operand(arenas, l) else {
+            self.compare_operands(op, l, r, locals, holds);
+            return;
+        };
+        let Some((rt, rv)) = condition_operand(arenas, r) else {
+            self.compare_operands(op, l, r, locals, holds);
+            return;
+        };
         self.compare_operands(op, lt, rt, locals, holds);
         if lv.is_none() && rv.is_none() {
             return;
         }
-        if lv.is_some_and(|v| reads_assigned_variable(lt, v))
-            || rv.is_some_and(|v| reads_assigned_variable(rt, v))
+        if lv.is_some_and(|v| reads_assigned_variable(Some(arenas), lt, v))
+            || rv.is_some_and(|v| reads_assigned_variable(Some(arenas), rt, v))
         {
             return;
         }
@@ -1911,7 +2195,9 @@ impl Checker<'_> {
         holds: bool,
     ) {
         self.apply_preg_comparison(op, l, r, locals, holds);
-        if let Some((spaceship_op, a, b)) = spaceship_comparison(op, l, r) {
+        if let Some(arenas) = self.syntax_arenas()
+            && let Some((spaceship_op, a, b)) = spaceship_comparison(arenas, op, l, r)
+        {
             // `($a <=> $b) < 0` is `$a < $b`; `=== 0` or `== 0` is
             // `$a == $b`.
             match spaceship_op {
@@ -1922,7 +2208,10 @@ impl Checker<'_> {
         }
         // A comparison with `count($x)` narrows `$x` by the count it
         // proves, then the other side as any comparison does.
-        if comparison_count_operand(op, l, r).is_some() {
+        if self
+            .syntax_arenas()
+            .is_some_and(|arenas| comparison_count_operand(arenas, op, l, r).is_some())
+        {
             self.apply_count_narrowing(op, l, r, holds, locals);
             return;
         }

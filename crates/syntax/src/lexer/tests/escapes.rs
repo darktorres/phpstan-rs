@@ -10,7 +10,10 @@ fn assert_lone_literal(tok: &Token, expected: PhpString) {
     let [StringPart::Literal(s, _)] = parts.as_slice() else {
         panic!("expected one literal part, got {parts:?}");
     };
-    assert_eq!(*s, expected);
+    let crate::ast::StringPayload::Owned(value) = s else {
+        panic!("detached token should own its literal payload, got {s:?}");
+    };
+    assert_eq!(*value, expected);
 }
 
 // All of PHP's real double-quoted escape sequences must decode, not
@@ -92,7 +95,7 @@ fn a_non_utf8_source_byte_stays_as_written() {
     let toks = Lexer::from_bytes(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::StringLit(PhpString::from(vec![0xe9, b't', 0xe9]))
+        Token::StringLit(PhpString::from(vec![0xe9, b't', 0xe9]).into())
     );
 }
 

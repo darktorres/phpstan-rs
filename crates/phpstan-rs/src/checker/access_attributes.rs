@@ -147,7 +147,13 @@ impl<'a> Checker<'a> {
     /// `RestrictTraitTo` on the traits `fqn` uses, and `InjectableVersion`
     /// in its constructor's (and `CheckInjectableVersion` methods')
     /// parameter types.
-    pub(crate) fn check_class_access_attributes(&mut self, fqn: &str, c: &ClassDecl) {
+    pub(crate) fn check_class_access_attributes(
+        &mut self,
+        arenas: &NodeArenas,
+        fqn: &str,
+        c: &ClassDecl,
+        def: &ClassDef,
+    ) {
         if !self.settings.language_extensions {
             return;
         }
@@ -174,9 +180,8 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(|a| self.registry.is_subclass_of(fqn, a) || fqn.eq_ignore_ascii_case(a))
             {
-                let span = c
-                    .def
-                    .used_traits()
+                let span = def
+                    .used_traits(arenas)
                     .find(|u| {
                         u.resolved_class()
                             .is_some_and(|resolved| resolved.eq_ignore_ascii_case(&trait_name))
@@ -192,7 +197,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for m in &c.def.methods {
+        for m in arenas.methods(def.methods.clone()) {
             let checked = m.function.is_constructor()
                 || info
                     .method_access()
@@ -210,7 +215,7 @@ impl<'a> Checker<'a> {
             let findings: Vec<(Span, String, String, String)> = sig
                 .params()
                 .iter()
-                .zip(&m.function.params)
+                .zip(arenas.params(m.function.params.clone()))
                 .flat_map(|(param, decl)| {
                     param
                         .ty()

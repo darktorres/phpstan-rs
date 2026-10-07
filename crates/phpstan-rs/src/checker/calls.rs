@@ -46,8 +46,15 @@ impl<'a> Checker<'a> {
         let Some(sig) = sig else {
             return;
         };
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("hinted call arguments retain their parsed file owner");
         self.inlay_param_name_hints
-            .extend(call_arg_param_name_hints(args, sig.params()));
+            .extend(call_arg_param_name_hints(
+                syntax_owner.arenas(),
+                args,
+                sig.params(),
+            ));
     }
 
     /// A bare-variable argument that isn't defined yet is either a real bug
@@ -68,6 +75,7 @@ impl<'a> Checker<'a> {
     /// parameter, not whichever parameter sits at the same index.
     pub(crate) fn predefine_byref_or_unknown_args(
         &self,
+        arenas: &NodeArenas,
         call_name: Option<&str>,
         sig: Option<&FunctionReflection>,
         args: &[Arg],
@@ -77,14 +85,17 @@ impl<'a> Checker<'a> {
         {
             let mut empty_dims = self.by_ref_empty_dim_args.borrow_mut();
             for (i, arg) in args.iter().enumerate() {
-                if !matches!(arg.value.kind, ExprKind::Index(_, None)) {
+                let arg_expr = arenas
+                    .expr(arg.value)
+                    .expect("call argument belongs to its retained file owner");
+                if !matches!(arg_expr.kind, ExprKind::Index(_, None)) {
                     continue;
                 }
                 let by_ref = match sig {
                     None => true,
                     Some(sig) => resolved
                         .iter()
-                        .position(|slot| slot.is_some_and(|e| std::ptr::eq(e, &arg.value)))
+                        .position(|slot| slot.is_some_and(|e| e.id == arg.value))
                         .or(Some(i))
                         .and_then(|p| {
                             sig.params()
@@ -94,13 +105,16 @@ impl<'a> Checker<'a> {
                         .is_some_and(|param| param.by_ref()),
                 };
                 if by_ref {
-                    empty_dims.insert(arg.value.span);
+                    empty_dims.insert(self.expr_span(arg_expr.id));
                 }
             }
         }
         let Some(sig) = sig else {
             for arg in args {
-                let ExprKind::Variable(name) = &arg.value.kind else {
+                let arg_expr = arenas
+                    .expr(arg.value)
+                    .expect("call argument belongs to its retained file owner");
+                let ExprKind::Variable(name) = &arg_expr.kind else {
                     continue;
                 };
                 // Real PHP by-ref auto-vivification: an unhinted
@@ -109,7 +123,7 @@ impl<'a> Checker<'a> {
                 // `declare`, not `insert`, matching
                 // `bind_assignment_target`'s own index-write treatment.
                 if !locals.contains_var(name) {
-                    locals.declare_var(name, Type::mixed(), arg.value.span);
+                    locals.declare_var(name, Type::mixed(), self.expr_span(arg_expr.id));
                 }
                 locals.clear_native_var(name);
             }
@@ -137,7 +151,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !locals.contains_var(name) {
-                locals.declare_var(name, Type::mixed(), arg_expr.span);
+                locals.declare_var(name, Type::mixed(), self.expr_span(arg_expr.id));
                 continue;
             }
             // The callee may write anything its own native type allows.
@@ -211,7 +225,14 @@ impl<'a> Checker<'a> {
                         if let Some(elem_ty) = current.array_value_type() {
                             let pushed_ty = args[1..]
                                 .iter()
-                                .map(|a| self.infer_expr(&a.value, locals))
+                                .map(|a| {
+                                    self.infer_expr(
+                                        arenas.expr(a.value).expect(
+                                            "call argument belongs to its retained file owner",
+                                        ),
+                                        locals,
+                                    )
+                                })
                                 .union_all_with(&self.relation());
                             let combined_elem = match pushed_ty {
                                 Some(pushed_ty) => self.relation().union(elem_ty, pushed_ty),
@@ -260,8 +281,14 @@ impl<'a> Checker<'a> {
                     // type widens to include the replacement's own.
                     "array_splice" if current.is_list().yes() => {
                         if let Some(elem_ty) = current.array_value_type() {
-                            let replacement_ty =
-                                args.get(3).map(|a| self.infer_expr(&a.value, locals));
+                            let replacement_ty = args.get(3).map(|a| {
+                                self.infer_expr(
+                                    arenas
+                                        .expr(a.value)
+                                        .expect("call argument belongs to its retained file owner"),
+                                    locals,
+                                )
+                            });
                             let (combined_elem, non_empty) = match &replacement_ty {
                                 Some(r) => (
                                     self.relation().union(
@@ -342,7 +369,10 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &mut Locals,
     ) {
-        let resolved = resolve_call_args(args, sig.params());
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("call arguments retain their parsed file owner");
+        let resolved = resolve_call_args(syntax_owner.arenas(), args, sig.params());
         for (i, slot) in resolved.iter().enumerate() {
             let Some(arg_expr) = slot else {
                 continue;
@@ -378,13 +408,18 @@ impl<'a> Checker<'a> {
             is_builtin,
             span,
         } = call;
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("call arguments retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         if self.settings.extras.check_boolean_trap {
-            self.check_boolean_trap_arguments(callee_label, sig, args, defining_class);
+            self.check_boolean_trap_arguments(arenas, callee_label, sig, args, defining_class);
         }
         if self.settings.extras.check_swapped_arguments {
-            self.check_swapped_argument_names(callee_label, sig, args, defining_class);
+            self.check_swapped_argument_names(arenas, callee_label, sig, args, defining_class);
         }
         self.check_parameters(parameters::ParametersCheck {
+            arenas,
             callee,
             sig,
             args,
@@ -410,6 +445,7 @@ impl<'a> Checker<'a> {
     /// callable value).
     pub(crate) fn check_dynamic_callable_args(
         &mut self,
+        arenas: &NodeArenas,
         sig: &types::CallableSig,
         args: &[Arg],
         locals: &Locals,
@@ -459,7 +495,10 @@ impl<'a> Checker<'a> {
                     _ => continue,
                 },
             };
-            let arg_ty = self.infer_expr(&a.value, locals);
+            let value = arenas
+                .expr(a.value)
+                .expect("dynamic callable argument belongs to its retained file owner");
+            let arg_ty = self.infer_expr(value, locals);
             // See the identical, earlier comment in this file's own
             // ordinary-call argument check for why no separate `Mixed`
             // bail-out is needed here.
@@ -471,7 +510,7 @@ impl<'a> Checker<'a> {
                         param.ty,
                         arg_ty
                     ),
-                    a.value.span,
+                    self.expr_span(value.id),
                     5,
                     from,
                     "argument.type",
@@ -489,6 +528,7 @@ impl<'a> Checker<'a> {
     /// positional distinction this check depends on.
     fn check_boolean_trap_arguments(
         &mut self,
+        arenas: &NodeArenas,
         callee_label: CalleeLabel<'_>,
         sig: &FunctionReflection,
         args: &[Arg],
@@ -501,7 +541,11 @@ impl<'a> Checker<'a> {
             }
             let index = positional_index;
             positional_index += 1;
-            let literal = match &arg.value.peeled().kind {
+            let value = arenas
+                .peeled(arg.value)
+                .and_then(|id| arenas.expr(id))
+                .expect("call argument belongs to its retained file owner");
+            let literal = match &value.kind {
                 ExprKind::Literal(Literal::Bool(v)) => *v,
                 _ => continue,
             };
@@ -520,7 +564,7 @@ impl<'a> Checker<'a> {
                     index + 1,
                     param.name()
                 ),
-                arg.value.span,
+                self.expr_span(value.id),
                 0,
                 "argument.booleanTrap",
             );
@@ -537,12 +581,13 @@ impl<'a> Checker<'a> {
     /// partial match, to keep the false-positive rate low.
     fn check_swapped_argument_names(
         &mut self,
+        arenas: &NodeArenas,
         callee_label: CalleeLabel<'_>,
         sig: &FunctionReflection,
         args: &[Arg],
         defining_class: Option<&str>,
     ) {
-        let mut positional: Vec<(usize, &ExprNode)> = Vec::new();
+        let mut positional: Vec<(usize, ExprId)> = Vec::new();
         let mut positional_index = 0usize;
         for arg in args {
             if arg.spread || arg.name.is_some() {
@@ -550,19 +595,33 @@ impl<'a> Checker<'a> {
             }
             let index = positional_index;
             positional_index += 1;
-            if let ExprKind::Variable(_) = &arg.value.peeled().kind {
-                positional.push((index, &arg.value));
+            let value = arenas
+                .peeled(arg.value)
+                .and_then(|id| arenas.expr(id))
+                .expect("call argument belongs to its retained file owner");
+            if matches!(&value.kind, ExprKind::Variable(_)) {
+                positional.push((index, arg.value));
             }
         }
         for window in positional.windows(2) {
-            let [(i, a), (j, b)] = window else { continue };
+            let [(i, a_id), (j, b_id)] = window else {
+                continue;
+            };
             if *j != *i + 1 {
                 continue;
             }
-            let ExprKind::Variable(a_name) = &a.peeled().kind else {
+            let a = arenas
+                .peeled(*a_id)
+                .and_then(|id| arenas.expr(id))
+                .expect("call argument belongs to its retained file owner");
+            let b = arenas
+                .peeled(*b_id)
+                .and_then(|id| arenas.expr(id))
+                .expect("call argument belongs to its retained file owner");
+            let ExprKind::Variable(a_name) = &a.kind else {
                 continue;
             };
-            let ExprKind::Variable(b_name) = &b.peeled().kind else {
+            let ExprKind::Variable(b_name) = &b.kind else {
                 continue;
             };
             let (Some(param_a), Some(param_b)) = (sig.params().get(*i), sig.params().get(*j))
@@ -595,7 +654,7 @@ impl<'a> Checker<'a> {
                     param_a.name(),
                     param_b.name()
                 ),
-                a.span,
+                self.expr_span(a.id),
                 5,
                 "arguments.possiblySwapped",
             );
@@ -613,7 +672,12 @@ impl<'a> Checker<'a> {
     /// PHPStan's `isDefaultEscaped`/`removeDefaultEscapedDelimiters`
     /// exactly - a mismatch against one of those is inconsequential,
     /// since `preg_quote` escapes it either way).
-    pub(crate) fn check_preg_quote_delimiter(&mut self, name: &str, args: &[Arg]) {
+    pub(crate) fn check_preg_quote_delimiter(
+        &mut self,
+        arenas: &NodeArenas,
+        name: &str,
+        args: &[Arg],
+    ) {
         const PREG_PATTERN_FUNCTIONS: &[&str] = &[
             "preg_match",
             "preg_match_all",
@@ -632,11 +696,16 @@ impl<'a> Checker<'a> {
         let Some(pattern_arg) = args.first() else {
             return;
         };
-        let pattern_expr = pattern_arg.value.peeled();
+        let Some(pattern_id) = arenas.peeled(pattern_arg.value) else {
+            return;
+        };
+        let Some(pattern_expr) = arenas.expr(pattern_id) else {
+            return;
+        };
         let ExprKind::Binary(BinOp::Concat, _, _) = &pattern_expr.kind else {
             return;
         };
-        let Some(delimiter) = concat_leftmost_delimiter(pattern_expr) else {
+        let Some(delimiter) = concat_leftmost_delimiter(arenas, pattern_id) else {
             return;
         };
         // `preg_quote($str)` always escapes this fixed character set
@@ -655,14 +724,18 @@ impl<'a> Checker<'a> {
             return;
         }
         let mut quote_calls = Vec::new();
-        find_preg_quote_calls(pattern_expr, &mut quote_calls);
+        find_preg_quote_calls(arenas, pattern_id, &mut quote_calls);
         for call_args in quote_calls {
+            let call_args = arenas.args(call_args.clone());
             if call_args.len() == 1 {
+                let Some(only_arg) = arenas.expr(call_args[0].value) else {
+                    continue;
+                };
                 self.report(
                     format!(
                         "Call to preg_quote() is missing delimiter {delimiter} to be effective."
                     ),
-                    call_args[0].value.span,
+                    self.expr_span(only_arg.id),
                     0,
                     "argument.invalidPregQuote",
                 );
@@ -670,15 +743,19 @@ impl<'a> Checker<'a> {
             }
             let Some(given) = call_args
                 .get(1)
-                .and_then(|a| literal_string_value(&a.value))
+                .and_then(|a| arenas.expr(a.value))
+                .and_then(|expr| literal_string_value(arenas, expr.id))
             else {
                 continue;
             };
             if !given.starts_with(delimiter) {
+                let Some(delimiter_arg) = arenas.expr(call_args[1].value) else {
+                    continue;
+                };
                 self.report(format!(
                         "Call to preg_quote() uses invalid delimiter {given} while pattern uses {delimiter}."
                     ),
-                    call_args[1].value.span,
+                    self.expr_span(delimiter_arg.id),
                     0,
                     "argument.invalidPregQuote",
                 );
@@ -695,11 +772,14 @@ impl<'a> Checker<'a> {
     /// `None` rather than guessing.
     fn resolve_call_user_func_callable(
         &self,
-        callable_expr: &ExprNode,
+        arenas: &NodeArenas,
+        callable_expr: ExprId,
         locals: &Locals,
     ) -> Option<&FunctionReflection> {
-        let callable_expr = callable_expr.peeled();
-        if let Some(name) = literal_string_value(callable_expr) {
+        let callable_expr = arenas
+            .peeled(callable_expr)
+            .and_then(|id| arenas.expr(id))?;
+        if let Some(name) = literal_string_value(arenas, callable_expr.id) {
             return self.registry.lookup_function(name.trim_start_matches('\\'));
         }
         let ty = self.infer_expr(callable_expr, locals);
@@ -734,6 +814,7 @@ impl<'a> Checker<'a> {
     /// its inferred array shape.
     pub(crate) fn check_call_user_func(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         args: &[Arg],
         locals: &mut Locals,
@@ -743,7 +824,8 @@ impl<'a> Checker<'a> {
             if args.is_empty() || args[1..].iter().any(|a| a.spread) {
                 return;
             }
-            let Some(sig) = self.resolve_call_user_func_callable(&args[0].value, locals) else {
+            let Some(sig) = self.resolve_call_user_func_callable(arenas, args[0].value, locals)
+            else {
                 return;
             };
             let sig = sig.clone();
@@ -763,13 +845,21 @@ impl<'a> Checker<'a> {
             if args.len() != 2 {
                 return;
             }
-            let Some(sig) = self.resolve_call_user_func_callable(&args[0].value, locals) else {
+            let Some(sig) = self.resolve_call_user_func_callable(arenas, args[0].value, locals)
+            else {
                 return;
             };
             let sig = sig.clone();
-            let ExprKind::ArrayLiteral(items) = &args[1].value.peeled().kind else {
+            let Some(array_id) = arenas.peeled(args[1].value) else {
                 return;
             };
+            let Some(array) = arenas.expr(array_id) else {
+                return;
+            };
+            let ExprKind::ArrayLiteral(items) = &array.kind else {
+                return;
+            };
+            let items = arenas.array_items(items.clone());
             if items.iter().any(|item| item.spread || item.key.is_some()) {
                 return;
             }
@@ -829,6 +919,7 @@ impl<'a> Checker<'a> {
 /// following a spread (legal PHP: `f(...$a, name: $b)`) still resolves
 /// exactly as it would anywhere else.
 pub(crate) fn resolve_call_args<'a>(
+    arenas: &'a syntax::ast::NodeArenas,
     args: &'a [Arg],
     params: &[ParameterReflection],
 ) -> Vec<Option<&'a ExprNode>> {
@@ -840,9 +931,12 @@ pub(crate) fn resolve_call_args<'a>(
             spread_seen = true;
             continue;
         }
+        let value = arenas
+            .expr(arg.value)
+            .expect("call argument belongs to its retained file owner");
         if let Some(name) = &arg.name {
             if let Some(pos) = params.iter().position(|p| p.name().as_ref() == &*name.name) {
-                resolved[pos] = Some(&arg.value);
+                resolved[pos] = Some(value);
             }
             continue;
         }
@@ -855,9 +949,9 @@ pub(crate) fn resolve_call_args<'a>(
             continue;
         }
         if positional_index < resolved.len() {
-            resolved[positional_index] = Some(&arg.value);
+            resolved[positional_index] = Some(value);
         } else if params.last().is_some_and(|p| p.variadic()) {
-            resolved.push(Some(&arg.value));
+            resolved.push(Some(value));
         }
         positional_index += 1;
     }
@@ -873,6 +967,7 @@ pub(crate) fn resolve_call_args<'a>(
 /// (mirroring `resolve_call_args`'s own variadic-overflow handling),
 /// reusing that same declared name for every overflow argument.
 pub(crate) fn call_arg_param_name_hints(
+    arenas: &NodeArenas,
     args: &[Arg],
     params: &[ParameterReflection],
 ) -> Vec<(Span, Name)> {
@@ -891,9 +986,17 @@ pub(crate) fn call_arg_param_name_hints(
             continue;
         }
         if let Some(param) = params.get(positional_index) {
-            hints.push((arg.value.span, param.name().clone()));
+            let span = arenas
+                .expr(arg.value)
+                .and_then(|expr| arenas.expr_span(expr.id))
+                .expect("hinted call argument belongs to its retained file owner");
+            hints.push((span, param.name().clone()));
         } else if let Some(param) = params.last().filter(|p| p.variadic()) {
-            hints.push((arg.value.span, param.name().clone()));
+            let span = arenas
+                .expr(arg.value)
+                .and_then(|expr| arenas.expr_span(expr.id))
+                .expect("hinted call argument belongs to its retained file owner");
+            hints.push((span, param.name().clone()));
         }
         positional_index += 1;
     }
@@ -907,13 +1010,17 @@ pub(crate) fn call_arg_param_name_hints(
 /// evaluation order (`'/' . $x . '/'` starts with the leftmost `'/'`
 /// literal). `None` when the leaf isn't a literal at all (a variable, a
 /// function call) - don't guess.
-fn concat_leftmost_delimiter(e: &ExprNode) -> Option<char> {
+fn concat_leftmost_delimiter(arenas: &NodeArenas, id: ExprId) -> Option<char> {
     syntax::stack::guard(|| {
-        let e = e.peeled();
+        let id = arenas.peeled(id)?;
+        let e = arenas.expr(id)?;
         if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
-            return concat_leftmost_delimiter(l);
+            return concat_leftmost_delimiter(arenas, *l);
         }
-        literal_string_value(e)?.trim_start().chars().next()
+        literal_string_value(arenas, e.id)?
+            .trim_start()
+            .chars()
+            .next()
     })
 }
 
@@ -921,22 +1028,34 @@ fn concat_leftmost_delimiter(e: &ExprNode) -> Option<char> {
 /// `.right` at every node, unlike `concat_leftmost_delimiter`'s own
 /// left-only descent) collecting each `preg_quote(...)` call's own
 /// argument list found anywhere in it.
-fn find_preg_quote_calls<'a>(e: &'a ExprNode, out: &mut Vec<&'a [Arg]>) {
+fn find_preg_quote_calls(arenas: &NodeArenas, id: ExprId, out: &mut Vec<ArgRange>) {
     syntax::stack::guard(|| {
-        let e = e.peeled();
+        let Some(id) = arenas.peeled(id) else {
+            return;
+        };
+        let Some(e) = arenas.expr(id) else {
+            return;
+        };
         match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
-                find_preg_quote_calls(l, out);
-                find_preg_quote_calls(r, out);
+                find_preg_quote_calls(arenas, *l, out);
+                find_preg_quote_calls(arenas, *r, out);
             }
             ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(n) = &callee.peeled().kind
+                let Some(callee_id) = arenas.peeled(*callee) else {
+                    return;
+                };
+                let Some(callee) = arenas.expr(callee_id) else {
+                    return;
+                };
+                if let ExprKind::Name(n) = &callee.kind
+                    && let Some(n) = arenas.qualified_name(n)
                     && n.rsplit('\\')
                         .next()
                         .unwrap_or(n)
                         .eq_ignore_ascii_case("preg_quote")
                 {
-                    out.push(args);
+                    out.push(args.clone());
                 }
             }
             _ => {}
@@ -952,23 +1071,31 @@ fn find_preg_quote_calls<'a>(e: &'a ExprNode, out: &mut Vec<&'a [Arg]>) {
 /// deep, can be relied on to name a genuine, always-evaluated storage
 /// location, which is exactly what passing an argument by reference
 /// needs.
-pub(crate) fn contains_nullsafe_access(expr: &ExprNode) -> bool {
-    syntax::stack::guard(|| match &expr.peeled().kind {
-        ExprKind::PropertyAccess(base, _, nullsafe) => {
-            nullsafe.is_nullsafe() || contains_nullsafe_access(base)
+pub(crate) fn contains_nullsafe_access(arenas: &NodeArenas, expr: ExprId) -> bool {
+    let mut id = expr;
+    loop {
+        let Some(peeled) = arenas.peeled(id) else {
+            return false;
+        };
+        let Some(expr) = arenas.expr(peeled) else {
+            return false;
+        };
+        match &expr.kind {
+            ExprKind::PropertyAccess(base, _, nullsafe)
+            | ExprKind::MethodCall(base, _, _, nullsafe) => {
+                if nullsafe.is_nullsafe() {
+                    return true;
+                }
+                id = *base;
+            }
+            ExprKind::DynamicPropertyAccess(base, _, _)
+            | ExprKind::DynamicMethodCall(base, _, _, _)
+            | ExprKind::Index(base, _) => id = *base,
+            ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
+            | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => id = *base,
+            _ => return false,
         }
-        ExprKind::MethodCall(base, _, _, nullsafe) => {
-            nullsafe.is_nullsafe() || contains_nullsafe_access(base)
-        }
-        ExprKind::DynamicPropertyAccess(base, _, _) => contains_nullsafe_access(base),
-        ExprKind::DynamicMethodCall(base, _, _, _) => contains_nullsafe_access(base),
-        ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
-        | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => {
-            contains_nullsafe_access(base)
-        }
-        ExprKind::Index(base, _) => contains_nullsafe_access(base),
-        _ => false,
-    })
+    }
 }
 
 /// Whether `expr` is one of the narrow expression shapes real PHP itself
@@ -984,17 +1111,20 @@ pub(crate) fn contains_nullsafe_access(expr: &ExprNode) -> bool {
 /// function/method that itself returns by reference, so every remaining
 /// shape (a call result, a literal, an operator expression, ...) is
 /// conservatively treated as illegal.
-pub(crate) fn is_valid_byref_argument_expr(expr: &ExprNode) -> bool {
+pub(crate) fn is_valid_byref_argument_expr(arenas: &NodeArenas, expr: ExprId) -> bool {
     matches!(
-        expr.peeled().kind,
-        ExprKind::Variable(_)
-            | ExprKind::DynamicVariable(_)
-            | ExprKind::Index(_, _)
-            | ExprKind::PropertyAccess(_, _, _)
-            | ExprKind::DynamicPropertyAccess(_, _, _)
-            | ExprKind::ClassConstFetch(..)
-            | ExprKind::ClassNameFetch(_)
-            | ExprKind::StaticPropertyFetch(..)
-            | ExprKind::DynamicStaticPropertyFetch(..)
+        arenas
+            .peeled(expr)
+            .and_then(|id| arenas.expr(id))
+            .map(|expr| &expr.kind),
+        Some(ExprKind::Variable(_))
+            | Some(ExprKind::DynamicVariable(_))
+            | Some(ExprKind::Index(_, _))
+            | Some(ExprKind::PropertyAccess(_, _, _))
+            | Some(ExprKind::DynamicPropertyAccess(_, _, _))
+            | Some(ExprKind::ClassConstFetch(..))
+            | Some(ExprKind::ClassNameFetch(_))
+            | Some(ExprKind::StaticPropertyFetch(..))
+            | Some(ExprKind::DynamicStaticPropertyFetch(..))
     )
 }

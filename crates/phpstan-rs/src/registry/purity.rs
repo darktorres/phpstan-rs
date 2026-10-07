@@ -43,7 +43,7 @@ use crate::registry::summaries::PurityCall;
 use crate::registry::{ClassId, FnId, FunctionReflection, MethodRef, Registry};
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
@@ -470,10 +470,10 @@ fn new_target_class(name: &QualifiedName, declaring_class: Option<&str>) -> Opti
 /// being mutated, through the exact same reference, whether the
 /// assignment target is written as a bare `PropertyAccess` or an
 /// `Index` chain ending in one.
-fn property_write_target(e: &ExprNode) -> bool {
-    syntax::stack::guard(|| match &e.kind {
-        ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
-        ExprKind::Index(base, _) => property_write_target(base),
+fn property_write_target(arenas: &NodeArenas, id: ExprId) -> bool {
+    syntax::stack::guard(|| match arenas.expr(id).map(|e| &e.kind) {
+        Some(ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..)) => true,
+        Some(ExprKind::Index(base, _)) => property_write_target(arenas, *base),
         _ => false,
     })
 }
@@ -686,7 +686,8 @@ pub(crate) struct ImpurePointOccurrence {
 /// `implicit_calls` are the offsets in `body` the checker found calling an
 /// `ArrayAccess` method, which the walk can't tell from an array's.
 pub(crate) fn collect_impure_points(
-    body: &[StmtNode],
+    arenas: &NodeArenas,
+    body: &[StmtId],
     declaring_class: Option<&str>,
     registry: &Registry,
     implicit_calls: &[Span],
@@ -696,7 +697,7 @@ pub(crate) fn collect_impure_points(
         registry,
         out: Vec::new(),
     };
-    walk_stmts(&mut points, body);
+    arena::walk_stmts(&mut points, arenas, body);
     for span in implicit_calls {
         points.push(*span, "methodCall", "call to unknown method", false);
     }
@@ -744,35 +745,44 @@ impl ImpurePoints<'_> {
     }
 }
 
-impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
-    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+impl Visitor for ImpurePoints<'_> {
+    fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
-    fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+    fn visit_class_def(&mut self, _: &NodeArenas, _: &ClassDef) {}
 
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
+        let stmt_span = arenas
+            .stmt_span(id)
+            .expect("purity statement has an arena span");
         syntax::stack::guard(|| {
             match &stmt.kind {
-                StmtKind::Echo(_) => self.push(stmt.span, "echo", "echo", true),
-                StmtKind::Global(_) => self.push(stmt.span, "global", "global variable", true),
-                StmtKind::StaticVar(_) => self.push(stmt.span, "static", "static variable", true),
+                StmtKind::Echo(_) => self.push(stmt_span, "echo", "echo", true),
+                StmtKind::Global(_) => self.push(stmt_span, "global", "global variable", true),
+                StmtKind::StaticVar(_) => self.push(stmt_span, "static", "static variable", true),
                 StmtKind::InlineHtml(_) => self.push(
-                    stmt.span,
+                    stmt_span,
                     "betweenPhpTags",
                     "output between PHP opening and closing tags",
                     true,
                 ),
                 StmtKind::Unset(targets) => {
-                    for _ in targets.iter().filter(|t| property_write_target(t)) {
-                        self.push(stmt.span, "propertyUnset", "property unset", true);
+                    for _ in arenas
+                        .expr_ids(targets)
+                        .iter()
+                        .filter(|target| property_write_target(arenas, **target))
+                    {
+                        self.push(stmt_span, "propertyUnset", "property unset", true);
                     }
                 }
                 _ => {}
             }
-            walk_stmt(self, stmt);
+            arena::walk_stmt(self, arenas, id);
         })
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
         syntax::stack::guard(|| {
             match &e.kind {
                 // Only a static property read is mutable shared state; a
@@ -783,7 +793,9 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
                 // in the "fewer false positives" direction.
                 ExprKind::StaticPropertyFetch(..) => {
                     self.push(
-                        e.span,
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
                         "staticPropertyAccess",
                         "static property access",
                         true,
@@ -791,32 +803,90 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
                 }
                 ExprKind::Variable(name) if is_superglobal(name) => {
                     self.push(
-                        e.span,
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
                         "superglobal",
                         "access to superglobal variable",
                         true,
                     );
                 }
-                ExprKind::Yield(..) => self.push(e.span, "yield", "yield", true),
-                ExprKind::YieldFrom(_) => self.push(e.span, "yieldFrom", "yield from", true),
-                ExprKind::Exit(..) => self.push(e.span, "exit", "exit", true),
-                ExprKind::Print(_) => self.push(e.span, "print", "print", true),
-                ExprKind::Eval(_) => self.push(e.span, "eval", "eval", true),
-                ExprKind::Include(..) => self.push(e.span, "include", "include", true),
+                ExprKind::Yield(..) => self.push(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    "yield",
+                    "yield",
+                    true,
+                ),
+                ExprKind::YieldFrom(_) => self.push(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    "yieldFrom",
+                    "yield from",
+                    true,
+                ),
+                ExprKind::Exit(..) => self.push(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    "exit",
+                    "exit",
+                    true,
+                ),
+                ExprKind::Print(_) => self.push(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    "print",
+                    "print",
+                    true,
+                ),
+                ExprKind::Eval(_) => self.push(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    "eval",
+                    "eval",
+                    true,
+                ),
+                ExprKind::Include(..) => self.push(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    "include",
+                    "include",
+                    true,
+                ),
                 ExprKind::Assign(lhs, _) | ExprKind::CompoundAssign(_, lhs, _)
-                    if property_write_target(lhs) =>
+                    if property_write_target(arenas, *lhs) =>
                 {
-                    self.push(e.span, "propertyAssign", "property assignment", true);
+                    self.push(
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                        "propertyAssign",
+                        "property assignment",
+                        true,
+                    );
                 }
                 ExprKind::Call(callee, _) => {
-                    let known = matches!(&callee.kind, ExprKind::Name(name)
-                        if self.registry.resolve_function(name).is_some());
+                    let known = matches!(arenas.expr(*callee).map(|e| &e.kind), Some(ExprKind::Name(name))
+                        if arenas.qualified_name(name).is_some_and(|name| self.registry.resolve_function(name).is_some()));
                     if !known {
-                        self.push(e.span, "functionCall", "call to unknown function", false);
+                        self.push(
+                            arenas
+                                .expr_span(e.id)
+                                .expect("expression has a parallel span"),
+                            "functionCall",
+                            "call to unknown function",
+                            false,
+                        );
                     }
                 }
                 ExprKind::MethodCall(recv, name, _, _) => {
-                    let resolved = matches!(&recv.kind, ExprKind::Variable(v) if *v == "this")
+                    let resolved = matches!(arenas.expr(*recv).map(|e| &e.kind), Some(ExprKind::Variable(v)) if *v == "this")
                         && self.declaring_class.is_some_and(|class| {
                             self.registry
                                 .lookup_method_with_owner(class, name)
@@ -825,20 +895,43 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
                                 })
                         });
                     if !resolved {
-                        self.push(e.span, "methodCall", "call to unknown method", false);
+                        self.push(
+                            arenas
+                                .expr_span(e.id)
+                                .expect("expression has a parallel span"),
+                            "methodCall",
+                            "call to unknown method",
+                            false,
+                        );
                     }
                 }
                 ExprKind::DynamicStaticCall(..) | ExprKind::DynamicMethodCall(..) => {
-                    self.push(e.span, "methodCall", "call to unknown method", false);
+                    self.push(
+                        arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                        "methodCall",
+                        "call to unknown method",
+                        false,
+                    );
                 }
                 ExprKind::StaticCall(receiver, name, _) => {
                     if !self.static_call_resolves(receiver, name) {
-                        self.push(e.span, "methodCall", "call to unknown method", false);
+                        self.push(
+                            arenas
+                                .expr_span(e.id)
+                                .expect("expression has a parallel span"),
+                            "methodCall",
+                            "call to unknown method",
+                            false,
+                        );
                     }
                 }
                 ExprKind::New(callee, _) => {
-                    let resolved = match &callee.kind {
-                        ExprKind::Name(name) => new_target_class(name, self.declaring_class)
+                    let resolved = match arenas.expr(*callee).map(|e| &e.kind) {
+                        Some(ExprKind::Name(name)) => arenas
+                            .qualified_name(name)
+                            .and_then(|name| new_target_class(name, self.declaring_class))
                             .is_some_and(|class| {
                                 self.registry
                                     .lookup_class(&class)
@@ -851,13 +944,20 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
                         _ => false,
                     };
                     if !resolved {
-                        self.push(e.span, "new", "instantiation of unknown class", false);
+                        self.push(
+                            arenas
+                                .expr_span(e.id)
+                                .expect("expression has a parallel span"),
+                            "new",
+                            "instantiation of unknown class",
+                            false,
+                        );
                     }
                 }
-                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => return,
+                ExprKind::Closure(_) | ExprKind::ArrowFn(_) => return,
                 _ => {}
             }
-            walk_expr(self, e);
+            arena::walk_expr(self, arenas, id);
         })
     }
 }
@@ -876,7 +976,7 @@ mod tests {
         )
         .tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let mut registry = Registry::build(&program);
+        let mut registry = Registry::build(&program.arenas, program.statements());
 
         assert!(registry.function_is_pure("leaf"));
         assert!(registry.function_is_pure("caller"));

@@ -17,6 +17,7 @@ impl<'a> Checker<'a> {
     /// the check stops at the first key that could be any of several.
     pub(crate) fn check_array_literal_duplicate_keys(
         &mut self,
+        arenas: &NodeArenas,
         items: &[ArrayItem],
         locals: &Locals,
     ) {
@@ -28,8 +29,16 @@ impl<'a> Checker<'a> {
         let mut seen: Vec<(ShapeKey, (Span, u32))> = Vec::new();
         let mut next_index = self.registry.next_array_index();
         for item in items {
-            let item_span = item.key.as_ref().map_or(item.value.span, |k| k.span);
-            let key = match &item.key {
+            let value = arenas
+                .expr(item.value)
+                .expect("array item value belongs to its retained file owner");
+            let item_key = item.key.map(|id| {
+                arenas
+                    .expr(id)
+                    .expect("array item key belongs to its retained file owner")
+            });
+            let item_span = item_key.map_or(self.expr_span(value.id), |k| self.expr_span(k.id));
+            let key = match item_key {
                 // Appending past `PHP_INT_MAX` throws, so nothing after it
                 // is an element; a key the PHP versions disagree on may
                 // coincide with a later one or not.
@@ -77,16 +86,26 @@ impl<'a> Checker<'a> {
     /// so far) while every key is known, and a non-empty general array of
     /// every key and value once one isn't. A spread item goes through
     /// `infer_spread_array_literal_type`.
-    pub(crate) fn infer_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
+    pub(crate) fn infer_array_literal_type(
+        &self,
+        arenas: &NodeArenas,
+        items: &[ArrayItem],
+        locals: &Locals,
+    ) -> Type {
         if items.iter().any(|item| item.spread) {
-            return self.infer_spread_array_literal_type(items, locals);
+            return self.infer_spread_array_literal_type(arenas, items, locals);
         }
         let mut shape = Shape::sealed(Vec::new());
         let mut next_index = self.registry.next_array_index();
         // Once a key isn't known, every key and value so far and after.
         let mut general: Option<(Vec<Type>, Vec<Type>)> = None;
         for item in items {
-            let key = match &item.key {
+            let item_key = item.key.map(|id| {
+                arenas
+                    .expr(id)
+                    .expect("array item key belongs to its retained file owner")
+            });
+            let key = match item_key {
                 // Appending past `PHP_INT_MAX` throws: the literal has no
                 // value.
                 None => match next_index.take() {
@@ -97,7 +116,10 @@ impl<'a> Checker<'a> {
                 },
                 Some(k) => self.array_literal_key(k, locals),
             };
-            let value_ty = self.infer_expr(&item.value, locals);
+            let value = arenas
+                .expr(item.value)
+                .expect("array item value belongs to its retained file owner");
+            let value_ty = self.infer_expr(value, locals);
             match (key, &mut general) {
                 (Ok(key), None) => {
                     if let ShapeKey::Int(n) = key {
@@ -144,7 +166,12 @@ impl<'a> Checker<'a> {
     /// After that it is a general array of every key and value: a list
     /// while every source is list-safe and no item has a key, non-empty
     /// once a plain item or a non-empty source appears.
-    fn infer_spread_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
+    fn infer_spread_array_literal_type(
+        &self,
+        arenas: &NodeArenas,
+        items: &[ArrayItem],
+        locals: &Locals,
+    ) -> Type {
         let mut shape = Shape::sealed(Vec::new());
         let mut next_index = self.registry.next_array_index();
         let mut degraded = false;
@@ -154,7 +181,10 @@ impl<'a> Checker<'a> {
         let mut known_non_empty = false;
 
         for item in items {
-            let value_ty = self.infer_expr(&item.value, locals);
+            let value = arenas
+                .expr(item.value)
+                .expect("array item value belongs to its retained file owner");
+            let value_ty = self.infer_expr(value, locals);
             if item.spread {
                 if !degraded {
                     if let [inner] = value_ty.constant_arrays()[..] {
@@ -213,7 +243,12 @@ impl<'a> Checker<'a> {
                     }
                 }
             } else {
-                let key = match &item.key {
+                let item_key = item.key.map(|id| {
+                    arenas
+                        .expr(id)
+                        .expect("array item key belongs to its retained file owner")
+                });
+                let key = match item_key {
                     None => match next_index.take() {
                         AppendKey::Key(n) => Ok(ShapeKey::Int(n)),
                         AppendKey::Throws if !degraded => return Type::never(),
@@ -315,6 +350,7 @@ impl<'a> Checker<'a> {
     /// (assigned, returned, passed as an argument, ...).
     pub(crate) fn check_useless_return_value_call(
         &mut self,
+        arenas: &NodeArenas,
         name: &str,
         args: &[Arg],
         locals: &Locals,
@@ -337,7 +373,16 @@ impl<'a> Checker<'a> {
         let is_useless = match args.len() {
             0 => return,
             1 => true,
-            _ => self.infer_expr(&args[1].value, locals).bool_literal_value() == Some(false),
+            _ => {
+                self.infer_expr(
+                    arenas
+                        .expr(args[1].value)
+                        .expect("return-flag argument belongs to its retained file owner"),
+                    locals,
+                )
+                .bool_literal_value()
+                    == Some(false)
+            }
         };
         if !is_useless {
             return;
@@ -365,11 +410,22 @@ impl<'a> Checker<'a> {
     /// the tracked element type across the branch, and a `try { $x =
     /// ...; } finally { array_filter([..., $x]); }` shape must account
     /// for the possibility the assignment inside `try` never ran.
-    pub(crate) fn check_array_filter_no_op(&mut self, args: &[Arg], locals: &Locals, span: Span) {
+    pub(crate) fn check_array_filter_no_op(
+        &mut self,
+        arenas: &NodeArenas,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+    ) {
         if args.len() != 1 {
             return;
         }
-        let arr_ty = self.infer_expr(&args[0].value, locals);
+        let arr_ty = self.infer_expr(
+            arenas
+                .expr(args[0].value)
+                .expect("array_filter argument belongs to its retained file owner"),
+            locals,
+        );
         if !arr_ty.is_array().yes() {
             return;
         }
@@ -417,11 +473,22 @@ impl<'a> Checker<'a> {
     /// the same accessory-marker check this call's own return-type
     /// inference already relies on to know it *always* produces a fresh
     /// list regardless of the input's own shape).
-    pub(crate) fn check_array_values_no_op(&mut self, args: &[Arg], locals: &Locals, span: Span) {
+    pub(crate) fn check_array_values_no_op(
+        &mut self,
+        arenas: &NodeArenas,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+    ) {
         if args.len() != 1 {
             return;
         }
-        let arr_ty = self.infer_expr(&args[0].value, locals);
+        let arr_ty = self.infer_expr(
+            arenas
+                .expr(args[0].value)
+                .expect("array_values argument belongs to its retained file owner"),
+            locals,
+        );
         if !arr_ty.is_array().yes() {
             return;
         }
@@ -584,6 +651,7 @@ impl<'a> Checker<'a> {
     /// so they stay in sync.
     pub(crate) fn narrow_enum_from_call(
         &self,
+        arenas: &NodeArenas,
         class: &str,
         method: &str,
         args: &[Arg],
@@ -593,7 +661,12 @@ impl<'a> Checker<'a> {
         if (method != "from" && method != "tryFrom") || args.len() != 1 {
             return fallback;
         }
-        let arg_ty = self.infer_expr(&args[0].value, locals);
+        let arg_ty = self.infer_expr(
+            arenas
+                .expr(args[0].value)
+                .expect("enum conversion argument belongs to its retained file owner"),
+            locals,
+        );
         match self.registry.enum_case_for_value(class, &arg_ty) {
             Some(case) => Type::enum_case(class.into(), case.into()),
             None => fallback,
@@ -628,7 +701,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("Invalid array key type {desc}."),
-                key_expr.span,
+                self.expr_span(key_expr.id),
                 3,
                 "array.invalidKey",
             );
@@ -638,7 +711,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("Key {from} will be cast to {to} in the array."),
-                key_expr.span,
+                self.expr_span(key_expr.id),
                 4,
                 "array.keyCast",
             );
@@ -708,7 +781,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("Invalid array key type {desc}."),
-                idx.span,
+                self.expr_span(idx.id),
                 3,
                 "offsetAccess.invalidOffset",
             );
@@ -718,7 +791,7 @@ impl<'a> Checker<'a> {
         {
             self.report(
                 format!("Key {from} will be cast to {to} in the array access."),
-                idx.span,
+                self.expr_span(idx.id),
                 4,
                 "offsetAccess.keyCast",
             );

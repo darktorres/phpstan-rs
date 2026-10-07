@@ -33,7 +33,7 @@
 //! not a good trade for a rule whose whole point is confidence.
 
 use crate::checker::Checker;
-use syntax::ast::{BinOp, ExprKind, ExprNode, UnaryOp};
+use syntax::ast::{BinOp, ExprKind, ExprNode, NodeArenas, UnaryOp};
 use syntax::span::Span;
 use types::UnionAll as _;
 use types::{ArithmeticOp, OrderingOp, Type};
@@ -267,7 +267,7 @@ impl<'a> Checker<'a> {
         }
         self.report(
             format!("Only booleans are allowed in {context}, {ty} given."),
-            e.span,
+            self.expr_span(e.id),
             5,
             identifier,
         );
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
         }
         self.report(
             format!("Only booleans are allowed in {sigil}, {ty} given on the {side} side."),
-            e.span,
+            self.expr_span(e.id),
             5,
             identifier,
         );
@@ -321,12 +321,15 @@ impl<'a> Checker<'a> {
         ) {
             return;
         }
-        if !is_duplicate_side_effect_free_operand(l, r) {
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        if !is_duplicate_side_effect_free_operand(owner.arenas(), l, r) {
             return;
         }
         self.report(
             "Both sides of this expression are the same.".to_string(),
-            l.span,
+            self.expr_span(l.id),
             5,
             "expr.duplicateOperands",
         );
@@ -337,12 +340,15 @@ impl<'a> Checker<'a> {
     /// real, meaningful operation (doubling), not a no-op, so it's
     /// deliberately not covered here.
     pub(crate) fn check_self_assignment(&mut self, lhs: &ExprNode, rhs: &ExprNode) {
-        if !is_duplicate_side_effect_free_operand(lhs, rhs) {
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        if !is_duplicate_side_effect_free_operand(owner.arenas(), lhs, rhs) {
             return;
         }
         self.report(
             "This assignment has no effect, both sides are the same.".to_string(),
-            lhs.span,
+            self.expr_span(lhs.id),
             5,
             "expr.duplicateOperands",
         );
@@ -792,15 +798,32 @@ pub(crate) fn binop_sigil(op: &BinOp) -> &'static str {
 /// fresh, non-identical value each time, so "looks the same" wouldn't
 /// mean "IS the same" there. Never a literal either - `1 === 1` isn't
 /// a copy-paste mistake the way `$x === $x` is.
-fn is_duplicate_side_effect_free_operand(l: &ExprNode, r: &ExprNode) -> bool {
-    syntax::stack::guard(|| match (&l.peeled().kind, &r.peeled().kind) {
+fn is_duplicate_side_effect_free_operand(arenas: &NodeArenas, l: &ExprNode, r: &ExprNode) -> bool {
+    let (Some(l), Some(r)) = (
+        arenas.peeled(l.id).and_then(|id| arenas.expr(id)),
+        arenas.peeled(r.id).and_then(|id| arenas.expr(id)),
+    ) else {
+        return false;
+    };
+    syntax::stack::guard(|| match (&l.kind, &r.kind) {
         (ExprKind::Variable(a), ExprKind::Variable(b)) => a == b,
         (ExprKind::PropertyAccess(la, lp, ln), ExprKind::PropertyAccess(ra, rp, rn)) => {
-            ln == rn && lp.name == rp.name && is_duplicate_side_effect_free_operand(la, ra)
+            let (Some(la), Some(ra)) = (arenas.expr(*la), arenas.expr(*ra)) else {
+                return false;
+            };
+            ln == rn && lp.name == rp.name && is_duplicate_side_effect_free_operand(arenas, la, ra)
         }
         (ExprKind::Index(la, Some(li)), ExprKind::Index(ra, Some(ri))) => {
-            is_duplicate_side_effect_free_operand(la, ra)
-                && is_duplicate_side_effect_free_operand(li, ri)
+            let (Some(la), Some(ra), Some(li), Some(ri)) = (
+                arenas.expr(*la),
+                arenas.expr(*ra),
+                arenas.expr(*li),
+                arenas.expr(*ri),
+            ) else {
+                return false;
+            };
+            is_duplicate_side_effect_free_operand(arenas, la, ra)
+                && is_duplicate_side_effect_free_operand(arenas, li, ri)
         }
         _ => false,
     })

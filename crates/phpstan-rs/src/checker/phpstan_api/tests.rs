@@ -19,22 +19,32 @@
 
 use super::*;
 use crate::registry::Registry;
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
 
-fn parse(src: &str) -> Vec<StmtNode> {
-    let tokens = Lexer::new(src).tokenize_with_spans();
-    Parser::new(tokens).parse_program().unwrap()
+fn parse(src: &str) -> syntax::ParsedFile {
+    syntax::parse(src).unwrap()
 }
 
 fn diagnostics_for(stub_src: &str, consumer_src: &str) -> Vec<Diagnostic> {
-    let stub = parse(stub_src);
-    let consumer = parse(consumer_src);
-    let mut combined = stub.clone();
-    combined.extend(consumer.clone());
-    let registry = Registry::build(&combined);
+    let source = format!("{stub_src}?>\n{consumer_src}");
+    let consumer_start = stub_src.len() as u32 + 3;
+    let combined = parse(&source);
+    let registry = Registry::build(&combined.arenas, combined.statements());
+    let consumer_stmts: Vec<_> = combined
+        .statements()
+        .iter()
+        .copied()
+        .filter(|id| {
+            combined.arenas.stmt(*id).is_some_and(|_| {
+                combined
+                    .arenas
+                    .stmt_span(*id)
+                    .is_some_and(|span| span.start >= consumer_start)
+            })
+        })
+        .collect();
     check_phpstan_api_usage(
-        &consumer,
+        &combined.arenas,
+        &consumer_stmts,
         &syntax::span::LineIndex::default(),
         &registry,
         None,
@@ -294,9 +304,8 @@ mod namespace_in_3rd_party_package {
         php_path: &Path,
         src: &str,
     ) -> Vec<diagnostics::Diagnostic> {
-        let tokens = Lexer::new(src).tokenize_with_spans();
-        let program = Parser::new(tokens).parse_program().unwrap();
-        let registry = Registry::build(&program);
+        let program = syntax::parse(src).unwrap();
+        let registry = Registry::build(&program.arenas, program.statements());
         let absolute_root = std::fs::canonicalize(&root.0).unwrap();
         let packages = composer::PackageIndex::new(
             composer::PackageContext::load(&absolute_root, &absolute_root)
@@ -307,7 +316,8 @@ mod namespace_in_3rd_party_package {
         let file = absolute_root.join(php_path.strip_prefix(&root.0).unwrap());
         let package = packages.owner(&file).and_then(|o| packages.name(o));
         check_phpstan_api_usage(
-            &program,
+            &program.arenas,
+            program.statements(),
             &syntax::span::LineIndex::default(),
             &registry,
             Some(package),

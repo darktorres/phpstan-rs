@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::lexer::{LexEnd, Lexed, LexedDoc, Lexer, Tok};
+use crate::lexer::{LexEnd, Lexed, Lexer};
 use crate::name::{Interner, Name};
 use crate::name_resolution::Resolution;
 use crate::span::{LineIndex, Span};
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, Token, TokenKind, TokenPayload, TokenRef, TokenStream};
 
 /// Parse failure details.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,9 +63,8 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 pub struct Parser<'a> {
-    // Where the tokens come from: the lexer, as the parser asks for them,
-    // or a list already made.
-    supply: std::cell::RefCell<Supply<'a>>,
+    // Flat whole-file tokens; parser lookahead indexes the arrays directly.
+    token_stream: TokenStream,
     // The namespace and imports in effect where the parser is, which each
     // name it makes is resolved by, in the order PHP applies them.
     pub(crate) ctx: std::cell::RefCell<crate::name_resolution::NameContext>,
@@ -77,15 +76,12 @@ pub struct Parser<'a> {
     doc_texts: std::cell::RefCell<rustc_hash::FxHashMap<DocCommentRanges, Arc<str>>>,
     source: Option<&'a [u8]>,
     source_backed_strings: bool,
-    // The tokens not yet consumed, the current one first: the parser looks
-    // a few tokens ahead and never back, so these are all of the file it
-    // holds. Filled to `LOOKAHEAD` tokens past the current one whenever
-    // the supply has them, so `peek_at` is a read and not a pull.
-    pub(crate) ahead: std::collections::VecDeque<Tok>,
-    // Whether `Token::Eof` is queued: the supply has no more.
-    eof_queued: bool,
-    // How many tokens have been consumed.
+    // Independent cursors through token kinds, sparse payloads, and docs.
     pub(crate) pos: usize,
+    payload_pos: usize,
+    doc_pos: usize,
+    current_docs: Option<Box<crate::lexer::DocGroup>>,
+    last_name_id: Option<crate::name::NameId>,
     // Where the last consumed token ended, and its span.
     pub(crate) last_end: u32,
     pub(crate) last_span: Span,
@@ -115,6 +111,13 @@ pub struct Parser<'a> {
     array_item_scratch: Vec<ArrayItem>,
     // Reused for match arms while their conditions and bodies are parsed.
     match_arm_scratch: Vec<MatchArm>,
+    // Reused for statement payload lists while nested statements are parsed.
+    elseif_scratch: Vec<ElseIf>,
+    switch_case_scratch: Vec<SwitchCase>,
+    catch_clause_scratch: Vec<CatchClause>,
+    declare_directive_scratch: Vec<DeclareDirective>,
+    global_var_scratch: Vec<GlobalVar>,
+    static_var_scratch: Vec<StaticVarDecl>,
     // Reused for class-body member lists while nested declarations are parsed.
     property_scratch: Vec<PropertyDecl>,
     method_scratch: Vec<MethodDecl>,
@@ -126,6 +129,7 @@ pub struct Parser<'a> {
     trait_alias_scratch: Vec<TraitAlias>,
     trait_precedence_scratch: Vec<TraitPrecedence>,
     closure_use_scratch: Vec<ClosureUse>,
+    type_hint_scratch: Vec<TypeHint>,
     // One reusable parameter buffer per nesting depth; defaults may contain
     // closures with their own parameter lists.
     param_list_scratch: Vec<Vec<ParamDraft>>,
@@ -156,7 +160,7 @@ pub struct Parser<'a> {
     // Whether the opt-in PHPStan stub-attribute rules changed a declaration
     // while it was being built. A caller then rebuilds reference products
     // from this final tree instead of using records from discarded nodes.
-    pub(crate) stub_attributes_changed: bool,
+    pub(crate) stub_attributes_changed: std::cell::Cell<bool>,
     // Whether any parsed attribute resolves to one of the historical stub
     // attributes. Once false, parser hooks can skip the stub-rule scans.
     pub(crate) stub_attributes_mentioned: bool,
@@ -184,36 +188,6 @@ pub(crate) enum NameKind {
 
 /// How many tokens past the current one the parser holds.
 pub(crate) const LOOKAHEAD: usize = 8;
-
-/// A parser's tokens: lexed as it reads, or made before.
-enum Supply<'a> {
-    Lexer(Box<Lexer<'a>>),
-    List(std::vec::IntoIter<Tok>),
-}
-
-impl Supply<'_> {
-    fn next(&mut self) -> Option<(Tok, bool)> {
-        match self {
-            Supply::Lexer(lexer) => {
-                let token = lexer.next_tok();
-                Some((token, lexer.has_decoded_bytes()))
-            }
-            Supply::List(tokens) => tokens.next().map(|token| (token, false)),
-        }
-    }
-
-    fn set_decoded_bytes_base(&mut self, base: u32) {
-        if let Supply::Lexer(lexer) = self {
-            lexer.set_decoded_bytes_base(base);
-        }
-    }
-
-    fn drain_decoded_bytes_to(&mut self, destination: &mut Vec<u8>) {
-        if let Supply::Lexer(lexer) = self {
-            lexer.drain_decoded_bytes_to(destination);
-        }
-    }
-}
 
 /// The labels seen and the `goto` targets met so far in one function-like
 /// body.
@@ -261,99 +235,139 @@ pub(crate) struct MemberStart {
     pub(crate) consts: usize,
 }
 
-impl<'a> Parser<'a> {
-    /// A parser of spanned tokens, doc comments among them as tokens of
-    /// their own (the list `Lexer::tokenize_with_spans` makes).
-    pub fn new(tokens: Vec<(Token, Span, Option<String>)>) -> Parser<'static> {
-        let mut lexed = Lexed {
-            tokens: Vec::with_capacity(tokens.len()),
-            spans: Vec::with_capacity(tokens.len()),
-            keyword_raw: Vec::new(),
-            docs: Vec::new(),
-            line_index: Arc::default(),
+
+fn names_for_tokens(tokens: &[Token], keyword_raw: &[(usize, String)]) -> Box<[Name]> {
+    let mut names = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
+    let raw_by_token: std::collections::HashMap<usize, &str> = keyword_raw
+        .iter()
+        .map(|(index, spelling)| (*index, spelling.as_str()))
+        .collect();
+    for (index, token) in tokens.iter().enumerate() {
+        let name = match token {
+            Token::Variable(name) | Token::Identifier(name) => Some(name.clone()),
+            Token::Keyword(keyword) => Some(Interner::global().name(
+                raw_by_token.get(&index).copied().unwrap_or_else(|| keyword.as_str()),
+            )),
+            _ => None,
         };
-        for (token, span, keyword_raw) in tokens {
+        if let Some(name) = name && seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+    names.into_boxed_slice()
+}
+
+fn fold_doc_text<'a>(docs: impl Iterator<Item = &'a str>) -> Arc<str> {
+    let bodies = docs
+        .map(|doc| doc.trim().trim_start_matches("/**").trim_end_matches("*/"))
+        .collect::<Vec<_>>();
+    Arc::from(format!("/**{}\n*/", bodies.join("\n")))
+}
+
+impl<'a> Parser<'a> {
+    /// Compatibility adapter for callers that still build a token vector.
+    pub fn new(tokens: Vec<(Token, Span, Option<String>)>) -> Parser<'static> {
+        let mut lexed_tokens = Vec::with_capacity(tokens.len());
+        let mut spans = Vec::with_capacity(tokens.len());
+        let mut keyword_raw = Vec::new();
+        let mut docs = Vec::new();
+        for (token, span, raw) in tokens {
             match token {
-                Token::DocComment(text) => lexed.docs.push(LexedDoc {
-                    before: lexed.tokens.len(),
-                    text,
+                Token::DocComment(text) => docs.push(crate::lexer::DocEntry {
+                    before: u32::try_from(lexed_tokens.len()).expect("token stream exceeds u32 indexes"),
                     span,
+                    text,
                 }),
                 other => {
-                    if let Some(raw) = keyword_raw {
-                        lexed.keyword_raw.push((lexed.tokens.len(), raw));
+                    if let Some(raw) = raw {
+                        keyword_raw.push((lexed_tokens.len(), raw));
                     }
-                    lexed.tokens.push(other);
-                    lexed.spans.push(span);
+                    lexed_tokens.push(other);
+                    spans.push(span);
                 }
             }
         }
-        Parser::from_lexed(lexed)
+        let names = names_for_tokens(&lexed_tokens, &keyword_raw);
+        let stream = TokenStream::from_lexed_parts(
+            lexed_tokens,
+            spans,
+            keyword_raw,
+            docs,
+            Arc::default(),
+            names,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            crate::lexer::FileFacts::default(),
+        );
+        Parser::from_token_stream(stream)
     }
 
-    /// A parser of what the lexer found.
+    /// A parser of legacy lexer output, retained while readers migrate.
     pub fn from_lexed(lexed: Lexed) -> Parser<'static> {
-        let (tokens, line_index) = lexed.into_toks();
-        Parser::with_supply(Supply::List(tokens.into_iter()), line_index)
+        let Lexed { tokens, spans, keyword_raw, docs, line_index } = lexed;
+        let names = names_for_tokens(&tokens, &keyword_raw);
+        let docs = docs.into_iter().map(|doc| crate::lexer::DocEntry {
+            before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
+            span: doc.span,
+            text: doc.text,
+        }).collect();
+        Parser::from_token_stream(TokenStream::from_lexed_parts(
+            tokens, spans, keyword_raw, docs, line_index, names,
+            Vec::new(), Vec::new(), Vec::new(), Vec::new(), crate::lexer::FileFacts::default(),
+        ))
     }
 
-    /// A parser that lexes as it reads: the tokens past the few it looks
-    /// at are not lexed until they are needed.
+    /// Parses an already lexed flat stream.
+    pub fn from_token_stream(stream: TokenStream) -> Parser<'static> {
+        Self::from_token_stream_with_node_arenas(stream, NodeArenas::default(), None, false)
+    }
+
+    /// A parser that consumes the lexer's complete flat stream.
     pub fn from_lexer(lexer: Lexer<'a>) -> Parser<'a> {
-        // This standalone parser returns arenas without a source owner.
-        // Keep its string payloads resolvable in those arenas.
-        Self::from_lexer_with_node_arenas(
-            lexer.with_source_backed_strings(false),
-            NodeArenas::default(),
-        )
+        let stream = lexer.with_source_backed_strings(false).lex_token_stream();
+        Self::from_token_stream_with_node_arenas(stream, NodeArenas::default(), None, false)
     }
 
     pub(crate) fn from_lexer_with_node_arenas(
         mut lexer: Lexer<'a>,
         mut node_arenas: NodeArenas,
     ) -> Parser<'a> {
-        let line_index = lexer.line_index();
         let source = lexer.source_bytes();
-        let tracks_name_ids = lexer.tracks_file_names();
+        let source_backed_strings = lexer.source_backed_strings();
         node_arenas.clear_preserving_bases();
-        let decoded_bytes_base = node_arenas.decoded_bytes_base;
-        lexer.set_decoded_bytes_base(decoded_bytes_base);
-        Parser::with_supply_and_node_arenas(
-            Supply::Lexer(Box::new(lexer)),
-            line_index,
-            node_arenas,
-            tracks_name_ids,
-            Some(source),
+        lexer.set_decoded_bytes_base(node_arenas.decoded_bytes_base);
+        Self::from_token_stream_with_node_arenas(
+            lexer.lex_token_stream(), node_arenas, Some(source), source_backed_strings,
         )
     }
 
-    fn with_supply(supply: Supply<'a>, line_index: Arc<LineIndex>) -> Parser<'a> {
-        Self::with_supply_and_node_arenas(supply, line_index, NodeArenas::default(), true, None)
-    }
-
-    fn with_supply_and_node_arenas(
-        supply: Supply<'a>,
-        line_index: Arc<LineIndex>,
-        node_arenas: NodeArenas,
-        tracks_name_ids: bool,
+    pub(crate) fn from_token_stream_with_node_arenas(
+        mut token_stream: TokenStream,
+        mut node_arenas: NodeArenas,
         source: Option<&'a [u8]>,
+        source_backed_strings: bool,
     ) -> Parser<'a> {
-        let source_backed_strings = matches!(
-            &supply,
-            Supply::Lexer(lexer) if lexer.source_backed_strings()
-        );
+        node_arenas.clear_preserving_bases();
+        node_arenas.decoded_bytes.append(&mut token_stream.decoded_bytes);
         let expr_base = node_arenas.expr_base;
         let stmt_base = node_arenas.stmt_base;
+        let line_index = Arc::clone(&token_stream.line_index);
+        let tracks_name_ids = !token_stream.names.is_empty();
         let mut parser = Parser {
-            supply: std::cell::RefCell::new(supply),
+            token_stream,
             ctx: std::cell::RefCell::default(),
             recorder: std::cell::RefCell::default(),
             doc_texts: std::cell::RefCell::default(),
             source,
             source_backed_strings,
-            ahead: std::collections::VecDeque::with_capacity(LOOKAHEAD + 2),
-            eof_queued: false,
             pos: 0,
+            payload_pos: 0,
+            doc_pos: 0,
+            current_docs: None,
+            last_name_id: None,
             last_end: 0,
             last_span: Span::default(),
             line_index,
@@ -368,6 +382,12 @@ impl<'a> Parser<'a> {
             arg_list_scratch: Vec::new(),
             array_item_scratch: Vec::new(),
             match_arm_scratch: Vec::new(),
+            elseif_scratch: Vec::new(),
+            switch_case_scratch: Vec::new(),
+            catch_clause_scratch: Vec::new(),
+            declare_directive_scratch: Vec::new(),
+            global_var_scratch: Vec::new(),
+            static_var_scratch: Vec::new(),
             property_scratch: Vec::new(),
             method_scratch: Vec::new(),
             class_const_scratch: Vec::new(),
@@ -378,6 +398,7 @@ impl<'a> Parser<'a> {
             trait_alias_scratch: Vec::new(),
             trait_precedence_scratch: Vec::new(),
             closure_use_scratch: Vec::new(),
+            type_hint_scratch: Vec::new(),
             param_list_scratch: Vec::new(),
             param_list_depth: 0,
             destructure_item_scratch: Vec::new(),
@@ -389,77 +410,102 @@ impl<'a> Parser<'a> {
             nested_depth: std::cell::Cell::new(0),
             saw_nested_declaration: std::cell::Cell::new(false),
             saw_property_unset: false,
-            stub_attributes_changed: false,
+            stub_attributes_changed: std::cell::Cell::new(false),
             stub_attributes_mentioned: false,
             goto_scopes: vec![GotoScope::default()],
         };
-        parser.fill(LOOKAHEAD);
+        parser.load_current_docs();
         parser
     }
 
-    /// Queues tokens until the current one and `count` more are held, or
-    /// the supply has no more.
-    pub(crate) fn fill(&mut self, count: usize) {
-        while !self.eof_queued && self.ahead.len() <= count {
-            let Some((tok, has_decoded_bytes)) = self.supply.get_mut().next() else {
-                self.eof_queued = true;
-                break;
-            };
-            if has_decoded_bytes {
-                let mut arenas = self.node_arenas.borrow_mut();
-                self.supply
-                    .get_mut()
-                    .drain_decoded_bytes_to(&mut arenas.decoded_bytes);
+    fn load_current_docs(&mut self) {
+        let first = self.doc_pos;
+        while self.doc_pos < self.token_stream.docs.len()
+            && self.token_stream.docs[self.doc_pos].before as usize == self.pos
+        {
+            self.doc_pos += 1;
+        }
+        let entries = &self.token_stream.docs[first..self.doc_pos];
+        self.current_docs = match entries {
+            [] => None,
+            [doc] => Some(Box::new(crate::lexer::DocGroup {
+                last: Some(Arc::clone(&doc.text)),
+                last_range: Some(doc.span),
+                folded: None,
+                folded_ranges: None,
+                first_start: Some(doc.span.start),
+            })),
+            several => {
+                let folded_text = fold_doc_text(several.iter().map(|doc| doc.text.as_ref()));
+                Some(Box::new(crate::lexer::DocGroup {
+                    last: Some(Arc::clone(&several[several.len() - 1].text)),
+                    last_range: Some(several[several.len() - 1].span),
+                    folded: Some(Arc::clone(&folded_text)),
+                    folded_ranges: Some(DocCommentRanges::group(
+                        several.iter().map(|doc| doc.span).collect::<Vec<_>>(),
+                    )),
+                    first_start: Some(several[0].span.start),
+                }))
             }
-            if self.source.is_none()
-                && let Some(group) = tok.docs.as_deref()
-            {
-                let mut texts = self.doc_texts.borrow_mut();
-                if let Some(span) = group.last_range {
-                    let ranges = DocCommentRanges::One(span);
-                    let text = self
-                        .source
-                        .and_then(|source| ranges.text(source))
-                        .map(|text| Arc::<str>::from(text.as_ref()))
-                        .or_else(|| group.last.clone());
-                    if let Some(text) = text {
-                        texts.insert(ranges, text);
-                    }
-                }
-                if let Some(ranges) = group.folded_ranges.as_ref() {
-                    let text = self
-                        .source
-                        .and_then(|source| ranges.text(source))
-                        .map(|text| Arc::<str>::from(text.as_ref()))
-                        .or_else(|| group.folded.clone());
-                    if let Some(text) = text {
-                        texts.insert(ranges.clone(), text);
-                    }
-                }
+        };
+        if self.source.is_none()
+            && let Some(group) = self.current_docs.as_deref()
+        {
+            let mut texts = self.doc_texts.borrow_mut();
+            if let (Some(span), Some(text)) = (group.last_range, group.last.as_ref()) {
+                texts.insert(DocCommentRanges::One(span), Arc::clone(text));
             }
-            self.eof_queued = matches!(tok.token, Token::Eof);
-            self.ahead.push_back(tok);
+            if let (Some(ranges), Some(text)) = (group.folded_ranges.as_ref(), group.folded.as_ref()) {
+                texts.insert(ranges.clone(), Arc::clone(text));
+            }
         }
     }
 
-    /// Takes the current token off the front, and queues one more.
-    pub(crate) fn pop(&mut self) -> Option<Tok> {
-        let tok = self.ahead.pop_front()?;
+    /// Advances one token and keeps the payload cursor aligned with the
+    /// sparse payload table.
+    pub(crate) fn pop(&mut self) {
+        let kind = self.token_stream.kind_at(self.pos);
+        self.last_span = self.token_stream.span_at(self.pos);
+        self.last_end = self.last_span.end;
+        if self.payload_pos < self.token_stream.payloads.len()
+            && self.token_stream.payloads[self.payload_pos].token as usize == self.pos
+        {
+            self.payload_pos += 1;
+        }
         self.pos += 1;
-        self.last_end = tok.span.end;
-        self.last_span = tok.span;
-        self.fill(LOOKAHEAD);
-        Some(tok)
+        self.last_name_id = None;
+        self.current_docs = None;
+        if kind != TokenKind::Eof {
+            self.load_current_docs();
+        }
     }
 
-    /// The lexer's own record of the file once the parse is over: the rest
-    /// of the file is lexed, so that what it found in the part the parse
-    /// did not reach is there too. None for a parser of a list of tokens.
-    pub fn into_lex_end(self) -> Option<LexEnd> {
-        match self.supply.into_inner() {
-            Supply::Lexer(lexer) => Some(lexer.finish()),
-            Supply::List(_) => None,
+    pub(crate) fn token_ref(&self, offset: usize) -> TokenRef<'_> {
+        self.token_stream.token_at(self.pos.saturating_add(offset))
+    }
+
+    pub(crate) fn take_payload(&mut self) -> Option<TokenPayload> {
+        let entry = self.token_stream.payloads.get_mut(self.payload_pos)?;
+        if entry.token as usize != self.pos {
+            return None;
         }
+        Some(std::mem::replace(&mut entry.payload, TokenPayload::Empty))
+    }
+
+    pub(crate) fn remember_name_id(&mut self, id: Option<crate::name::NameId>) {
+        self.last_name_id = id;
+    }
+
+    pub(crate) fn into_lex_end(self) -> Option<LexEnd> {
+        let stream = self.token_stream;
+        Some(LexEnd {
+            ignore_marks: stream.ignore_marks,
+            warnings: stream.warnings,
+            facts: stream.facts,
+            line_index: stream.line_index,
+            names: stream.names,
+            decoded_bytes: Vec::new(),
+        })
     }
 }
 
@@ -549,11 +595,11 @@ impl Parser<'_> {
     /// at it when it is the list's last: whether there was one.
     pub(crate) fn eat_list_comma(
         &mut self,
-        closer: &Token,
+        closer: &TokenRef<'_>,
         mark: crate::lexer::SyntaxMark,
     ) -> bool {
         let comma = self.current_span();
-        if !self.eat(&Token::Comma) {
+        if !self.eat(&TokenRef::Comma) {
             return false;
         }
         if self.check(closer) {
@@ -565,7 +611,7 @@ impl Parser<'_> {
     /// The span of the token about to be read: the last one's when none
     /// is left.
     pub(crate) fn current_span(&self) -> Span {
-        self.ahead.front().map_or(self.last_span, |tok| tok.span)
+        self.token_stream.span_at(self.pos)
     }
 
     /// The position a `StmtId`/`ExprId` about to be parsed starts at - call
@@ -584,10 +630,9 @@ impl Parser<'_> {
         methods: usize,
         consts: usize,
     ) -> MemberStart {
-        let first = self.ahead.front();
         MemberStart {
-            start: first
-                .and_then(|tok| tok.docs.as_ref()?.first_start)
+            start: self.current_docs.as_deref()
+                .and_then(|docs| docs.first_start)
                 .unwrap_or_else(|| self.current_pos()),
             previous_end: (self.pos > 0).then_some(self.last_end),
             properties,
@@ -599,13 +644,12 @@ impl Parser<'_> {
     /// Stops the parse where it is: the rest of the file is not read, as
     /// for `__halt_compiler()`, after which PHP reads no more code.
     pub(crate) fn skip_to_eof(&mut self) {
-        self.ahead.clear();
-        self.eof_queued = true;
-        let eof = match self.supply.get_mut() {
-            Supply::Lexer(lexer) => lexer.skip_to_end(),
-            Supply::List(tokens) => tokens.last().map_or(self.last_span, |tok| tok.span),
-        };
-        self.pos += 1;
+        let last = self.token_stream.kinds.len().saturating_sub(1);
+        let eof = self.token_stream.span_at(last);
+        self.pos = last;
+        self.payload_pos = self.token_stream.payloads.len();
+        self.doc_pos = self.token_stream.docs.len();
+        self.current_docs = None;
         self.last_span = eof;
         self.last_end = eof.end;
     }
@@ -666,19 +710,16 @@ impl Parser<'_> {
     /// is a function, the class of a `::` is a class, and anything else is
     /// a constant.
     pub(crate) fn name_kind_ahead(&self) -> NameKind {
-        match self.peek() {
-            Token::DoubleColon => NameKind::Class,
-            Token::LParen => NameKind::Function,
+        match self.token_ref(0) {
+            TokenRef::DoubleColon => NameKind::Class,
+            TokenRef::LParen => NameKind::Function,
             _ => NameKind::Constant,
         }
     }
 
     /// The name for `text`, through the lexer's tables when it has them.
     pub(crate) fn intern(&self, text: &str) -> Name {
-        match &mut *self.supply.borrow_mut() {
-            Supply::Lexer(lexer) => lexer.intern(text),
-            Supply::List(_) => self.interner.name(text),
-        }
+        self.interner.name(text)
     }
 
     /// A reference by name, resolved as `kind` in the namespace and
@@ -857,8 +898,10 @@ impl Parser<'_> {
                 }
             }
             StmtKind::Global(vars) => {
+                let range = vars.clone();
+                let arenas = self.node_arenas.borrow();
                 let mut recorder = self.recorder.borrow_mut();
-                for name in vars.iter().filter_map(|v| v.name()) {
+                for name in arenas.global_vars(range).iter().filter_map(GlobalVar::name) {
                     recorder.global_variable(name);
                 }
             }
@@ -878,7 +921,15 @@ impl Parser<'_> {
                     .namespaced_name = Some(namespaced_name);
             }
             StmtKind::ClassDecl(c) => {
-                c.namespaced_name = self.ctx.borrow().declared_name(&c.name).into();
+                let namespaced_name = {
+                    let arenas = self.node_arenas.borrow();
+                    let decl = arenas.class_decl(c.clone());
+                    self.ctx.borrow().declared_name(&decl.name).into()
+                };
+                self.node_arenas
+                    .borrow_mut()
+                    .class_decl_mut(c.clone())
+                    .namespaced_name = namespaced_name;
             }
             StmtKind::GlobalConst(consts) => {
                 let ctx = self.ctx.borrow();
@@ -901,8 +952,8 @@ impl Parser<'_> {
             end: self.previous_end(),
         };
         let id = self.stmt_id();
-        let node = StmtNode { id, kind, span };
-        self.node_arenas.borrow_mut().alloc_stmt(node)
+        let node = StmtNode { id, kind };
+        self.node_arenas.borrow_mut().alloc_stmt(node, span)
     }
 
     /// Same as `stmt`, for expressions.
@@ -921,7 +972,7 @@ impl Parser<'_> {
         let id = self.expr_id();
         self.node_arenas
             .borrow_mut()
-            .alloc_expr(ExprNode { id, kind, span })
+            .alloc_expr(ExprNode { id, kind }, span)
     }
 
     pub(crate) fn take_node_arenas(&self) -> NodeArenas {
@@ -1020,6 +1071,66 @@ impl Parser<'_> {
             .alloc_match_arms(self.match_arm_scratch.drain(start..))
     }
 
+    pub(crate) fn begin_elseifs(&self) -> usize {
+        self.elseif_scratch.len()
+    }
+
+    pub(crate) fn finish_elseifs(&mut self, start: usize) -> ElseIfRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_elseifs(self.elseif_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_switch_cases(&self) -> usize {
+        self.switch_case_scratch.len()
+    }
+
+    pub(crate) fn finish_switch_cases(&mut self, start: usize) -> SwitchCaseRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_switch_cases(self.switch_case_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_catch_clauses(&self) -> usize {
+        self.catch_clause_scratch.len()
+    }
+
+    pub(crate) fn finish_catch_clauses(&mut self, start: usize) -> CatchClauseRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_catch_clauses(self.catch_clause_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_declare_directives(&self) -> usize {
+        self.declare_directive_scratch.len()
+    }
+
+    pub(crate) fn finish_declare_directives(&mut self, start: usize) -> DeclareDirectiveRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_declare_directives(self.declare_directive_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_global_vars(&self) -> usize {
+        self.global_var_scratch.len()
+    }
+
+    pub(crate) fn finish_global_vars(&mut self, start: usize) -> GlobalVarRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_global_vars(self.global_var_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_static_vars(&self) -> usize {
+        self.static_var_scratch.len()
+    }
+
+    pub(crate) fn finish_static_vars(&mut self, start: usize) -> StaticVarRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_static_vars(self.static_var_scratch.drain(start..))
+    }
+
     pub(crate) fn begin_param_list(&mut self) -> usize {
         let depth = self.param_list_depth;
         if depth == self.param_list_scratch.len() {
@@ -1048,6 +1159,28 @@ impl Parser<'_> {
         range
     }
 
+    pub(crate) fn begin_type_hint_list(&self) -> usize {
+        self.type_hint_scratch.len()
+    }
+
+    pub(crate) fn push_type_hint(&mut self, hint: TypeHint) {
+        self.type_hint_scratch.push(hint);
+    }
+
+    pub(crate) fn finish_type_hint_list(&mut self, start: usize) -> TypeHintRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_type_hints(self.type_hint_scratch.drain(start..))
+    }
+
+    pub(crate) fn finish_qualified_names(&mut self, start: usize) -> QualifiedNameRange {
+        let names = self
+            .qualified_name_scratch
+            .drain(start..)
+            .collect::<Vec<_>>();
+        self.node_arenas.borrow_mut().alloc_qualified_names(names)
+    }
+
     pub(crate) fn begin_destructure_items(&self) -> usize {
         self.destructure_item_scratch.len()
     }
@@ -1056,7 +1189,7 @@ impl Parser<'_> {
         self.destructure_item_scratch.push(item);
     }
 
-    pub(crate) fn destructure_items(&self, start: usize) -> &[DestructureItem] {
+    pub(crate) fn destructure_items_scratch(&self, start: usize) -> &[DestructureItem] {
         &self.destructure_item_scratch[start..]
     }
 
@@ -1070,6 +1203,20 @@ impl Parser<'_> {
         std::cell::Ref::map(self.node_arenas.borrow(), |arenas| {
             arenas.expr(id).expect("parser expression id exists")
         })
+    }
+
+    pub(crate) fn expr_span(&self, id: ExprId) -> Span {
+        self.node_arenas
+            .borrow()
+            .expr_span(id)
+            .expect("parser expression id has a parallel span")
+    }
+
+    pub(crate) fn stmt_span(&self, id: StmtId) -> Span {
+        self.node_arenas
+            .borrow()
+            .stmt_span(id)
+            .expect("parser statement id has a parallel span")
     }
 
     pub(crate) fn expr_node_mut(&self, id: ExprId) -> std::cell::RefMut<'_, ExprNode> {
@@ -1093,10 +1240,8 @@ impl Parser<'_> {
     /// Updates the parallel span when parsing later extends a node's span.
     pub(crate) fn set_expr_span(&self, id: ExprId, span: Span) {
         let index = u32::from(id.into_raw()) - self.expr_span_base;
-        let local_id = ExprId::from_raw(la_arena::RawIdx::from_u32(index));
         let mut arenas = self.node_arenas.borrow_mut();
         arenas.expr_spans[index as usize] = span;
-        arenas.exprs[local_id].span = span;
     }
 
     /// Consumes any doc comment immediately preceding the current position -
@@ -1109,10 +1254,22 @@ impl Parser<'_> {
     /// The AST migration keeps the range and drops the text after recorder
     /// products that outlive the tree have been made.
     pub(crate) fn take_doc_comment_with_range(&mut self) -> Option<(Arc<str>, DocCommentRanges)> {
-        let group = self.ahead.front_mut()?.docs.as_mut()?;
-        let text = group.last.take()?;
-        let range = DocCommentRanges::One(group.last_range.take()?);
+        let group = self.current_docs.as_mut()?;
+        let range = group
+            .folded_ranges
+            .take()
+            .or_else(|| group.last_range.take().map(DocCommentRanges::One))?;
+        let text = group.folded.take().or_else(|| group.last.take())?;
         Some((text, range))
+    }
+
+    pub(crate) fn current_doc_ranges(&self) -> Option<DocCommentRanges> {
+        self.current_docs.as_deref().and_then(|group| {
+            group
+                .folded_ranges
+                .clone()
+                .or_else(|| group.last_range.map(DocCommentRanges::One))
+        })
     }
 
     #[hotpath::measure]
@@ -1122,8 +1279,8 @@ impl Parser<'_> {
             // See parse_statement's own Namespace arm for why the
             // backslash check matters: `namespace\foo();` at the top
             // level is a relative-name call, not a declaration.
-            if matches!(self.peek(), Token::Keyword(Keyword::Namespace))
-                && !matches!(self.peek_at(1), Token::Backslash)
+            if matches!(self.peek(), TokenRef::Keyword(Keyword::Namespace))
+                && !matches!(self.peek_at(1), TokenRef::Backslash)
             {
                 self.parse_namespace_stmt()?;
             } else if let Some(stmt) = self.parse_statement(true)? {
@@ -1153,19 +1310,19 @@ impl Parser<'_> {
         let start = self.current_pos();
         self.skip(); // `namespace`
         let name = self.parse_qualified_name();
-        if self.check(&Token::LBrace) {
-            let marker = self.stmt(StmtKind::Namespace(name.to_string()), start);
+        if self.check(&TokenRef::LBrace) {
+            let marker = self.stmt(StmtKind::Namespace(name.clone()), start);
             self.push_stmt_list_item(marker);
-            self.expect(&Token::LBrace)?;
-            while !self.check(&Token::RBrace) && !self.at_eof() {
+            self.expect(&TokenRef::LBrace)?;
+            while !self.check(&TokenRef::RBrace) && !self.at_eof() {
                 if let Some(stmt) = self.parse_statement(true)? {
                     self.push_stmt_list_item(stmt);
                 }
             }
-            self.expect(&Token::RBrace)?;
+            self.expect(&TokenRef::RBrace)?;
         } else {
             self.expect_semicolon()?;
-            let marker = self.stmt(StmtKind::Namespace(name.to_string()), start);
+            let marker = self.stmt(StmtKind::Namespace(name), start);
             self.push_stmt_list_item(marker);
         }
         Ok(())

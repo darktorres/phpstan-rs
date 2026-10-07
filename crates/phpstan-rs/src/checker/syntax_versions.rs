@@ -166,7 +166,11 @@ impl Visitor for Gates<'_, '_> {
         };
         match &stmt.kind {
             StmtKind::StaticVar(vars) => {
-                for &value in vars.iter().filter_map(|(_, value)| value.as_ref()) {
+                for value in arenas
+                    .static_vars(vars.clone())
+                    .iter()
+                    .filter_map(|variable| variable.default)
+                {
                     self.initializer(arenas, value);
                 }
             }
@@ -177,13 +181,13 @@ impl Visitor for Gates<'_, '_> {
             }
             StmtKind::ClassDecl(class)
                 if arenas
-                    .class(class.def)
+                    .class(arenas.class_decl(class.clone()).def)
                     .is_some_and(|def| def.kind == ClassKind::Enum) =>
             {
                 self.report(
                     PhpFeature::Enums,
                     "Enums are",
-                    class.name.span,
+                    arenas.class_decl(class.clone()).name.span,
                     "enum.notSupported",
                 );
             }
@@ -216,7 +220,7 @@ impl Visitor for Gates<'_, '_> {
     }
 
     fn visit_attribute(&mut self, arenas: &NodeArenas, attribute: &Attribute) {
-        for arg in arenas.args(attribute.args) {
+        for arg in arenas.args(attribute.args.clone()) {
             self.initializer(arenas, arg.value);
             self.visit_expr(arenas, arg.value);
         }
@@ -246,7 +250,7 @@ impl Visitor for Gates<'_, '_> {
         let Some(expr) = arenas.expr(id) else {
             return;
         };
-        let span = expr.span;
+        let span = arenas.expr_span(expr.id).unwrap_or_default();
         match &expr.kind {
             ExprKind::Destructure(items, syntax) => {
                 let items = arenas.destructure_items(items);
@@ -275,7 +279,12 @@ impl Visitor for Gates<'_, '_> {
                     );
                 }
             }
-            ExprKind::ArrayLiteral(items) if items.iter().any(|item| item.spread) => {
+            ExprKind::ArrayLiteral(items)
+                if arenas
+                    .array_items(items.clone())
+                    .iter()
+                    .any(|item| item.spread) =>
+            {
                 self.report(
                     PhpFeature::SpreadInArrays,
                     "Spreading into an array is",
@@ -380,7 +389,7 @@ fn new_in(arenas: &NodeArenas, value: ExprId) -> Option<Span> {
                 return;
             };
             match &expr.kind {
-                ExprKind::New(..) | ExprKind::NewAnonymousClass(_) => self.0 = Some(expr.span),
+                ExprKind::New(..) | ExprKind::NewAnonymousClass(_) => self.0 = arenas.expr_span(id),
                 ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {}
                 _ => arena::walk_expr(self, arenas, id),
             }

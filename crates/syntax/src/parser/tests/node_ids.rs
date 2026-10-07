@@ -2,7 +2,8 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::visit::{Visitor, walk_expr, walk_stmt};
+use crate::ast::NodeArenas;
+use crate::visit::arena::{self, Visitor};
 
 #[test]
 fn parsed_file_and_node_ids_are_send_sync_and_copy() {
@@ -21,14 +22,30 @@ struct Ids {
     expressions: Vec<(ExprId, crate::span::Span)>,
 }
 
-impl<'ast> Visitor<'ast> for Ids {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
-        self.statements.push((stmt.id, stmt.span));
-        walk_stmt(self, stmt);
+impl Visitor for Ids {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
+        self.statements.push((
+            id,
+            arenas
+                .stmt_span(id)
+                .expect("visited statement has its parallel span"),
+        ));
+        arena::walk_stmt(self, arenas, id);
     }
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
-        self.expressions.push((e.id, e.span));
-        walk_expr(self, e);
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else {
+            return;
+        };
+        self.expressions.push((
+            id,
+            arenas
+                .expr_span(id)
+                .expect("visited expression has its parallel span"),
+        ));
+        arena::walk_expr(self, arenas, id);
     }
 }
 
@@ -44,7 +61,7 @@ fn statements_and_expressions_have_dense_typed_ids() {
     )
     .unwrap();
     let mut ids = Ids::default();
-    crate::visit::walk_stmts(&mut ids, &parsed.stmts);
+    arena::walk_stmts(&mut ids, &parsed.arenas, parsed.statements());
     ids.statements
         .sort_by_key(|(id, _)| u32::from(id.into_raw()));
     ids.expressions
@@ -74,7 +91,7 @@ fn reused_arenas_restart_ids_and_keep_every_node_span_aligned() {
     .unwrap();
 
     let mut ids = Ids::default();
-    crate::visit::walk_stmts(&mut ids, &parsed.stmts);
+    arena::walk_stmts(&mut ids, &parsed.arenas, parsed.statements());
     ids.statements
         .sort_by_key(|(id, _)| u32::from(id.into_raw()));
     ids.expressions

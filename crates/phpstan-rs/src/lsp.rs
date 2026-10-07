@@ -1233,6 +1233,27 @@ impl Workspace {
             .with_sql(self.project.sql())
             .with_settings(self.project.check_settings())
             .with_bodies(self.project.bodies());
+        if let Some(owner) = scope.owner() {
+            checker = checker.with_owned_parsed_file(std::sync::Arc::clone(owner));
+        }
+        checker.probe_span.set(Some(receiver_span));
+        self.run_probe_scope(&mut checker, scope, is_static, class);
+        checker.probe_hit.into_inner()
+    }
+
+    fn probe_completion_receiver_type(
+        &self,
+        owner: Arc<syntax::ParsedFile>,
+        receiver_span: Span,
+        scope: &navigation::ProbeScope,
+        is_static: bool,
+        class: Option<&str>,
+    ) -> Option<Type> {
+        let mut checker = Checker::new(self.project.registry())
+            .with_sql(self.project.sql())
+            .with_settings(self.project.check_settings())
+            .with_bodies(self.project.bodies())
+            .with_owned_parsed_file(owner);
         checker.probe_span.set(Some(receiver_span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker.probe_hit.into_inner()
@@ -1260,6 +1281,9 @@ impl Workspace {
             .with_sql(self.project.sql())
             .with_settings(self.project.check_settings())
             .with_bodies(self.project.bodies());
+        if let Some(owner) = scope.owner() {
+            checker = checker.with_owned_parsed_file(std::sync::Arc::clone(owner));
+        }
         checker.probe_span.set(Some(span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker
@@ -1282,11 +1306,11 @@ impl Workspace {
         class: Option<&str>,
     ) {
         match scope {
-            navigation::ProbeScope::Function(function) => {
+            navigation::ProbeScope::Function { function, .. } => {
                 checker.check_function(function, class, is_static, true);
             }
-            navigation::ProbeScope::TopLevel(stmts) => {
-                checker.check_program(stmts);
+            navigation::ProbeScope::TopLevel { statements, .. } => {
+                checker.check_program(statements);
             }
         }
     }
@@ -1589,7 +1613,7 @@ impl Workspace {
     /// `textDocument/rename` - Class/Function targets only in v1 (see
     /// this item's own edge-case notes: member and local-variable rename
     /// are out of scope; a `Member` target's own `use_sites` spans cover
-    /// a whole `e.span`-sized expression, not the member name's own
+    /// the whole expression, not the member name's own
     /// precise sub-span, which a text-replacing rename can't safely use).
     /// Always includes the declaration site - unlike `references`, a
     /// rename must rewrite it regardless of any `includeDeclaration`-
@@ -1961,8 +1985,9 @@ impl Workspace {
             .cloned()
             .or_else(|| self.project.source(&path).map(str::to_string))?;
         let ast = self.project.ast_of(&path)?;
-        let stmts = ast.statements();
-        let arenas = ast.arenas();
+        let owner = ast.parsed_file_for_completion();
+        let stmts = owner.statements();
+        let arenas = &owner.arenas;
         let tokens = completion::tokenize(&text);
         let live_index = LineIndex::new(text.as_bytes());
         let stale_index = self.project.line_index(&path)?;
@@ -1972,8 +1997,13 @@ impl Workspace {
             stale: stale_index.offset_in_clamped(position.line, position.character, self.unit),
             stale_index,
         };
-        match completion::build_member_probe(&text, &tokens, cursor, stmts, self.project.registry())
-        {
+        match completion::build_member_probe(
+            &text,
+            &tokens,
+            cursor,
+            &owner,
+            self.project.registry(),
+        ) {
             Some(completion::MemberProbe::Resolved {
                 ty,
                 is_static,
@@ -1985,13 +2015,15 @@ impl Workspace {
                 class.as_deref(),
             ))),
             Some(completion::MemberProbe::NeedsProbe {
+                owner,
                 scope,
                 scope_is_static,
                 class,
                 probe_span,
                 is_static,
             }) => {
-                let ty = self.probe_receiver_type(
+                let ty = self.probe_completion_receiver_type(
+                    owner,
                     probe_span,
                     &scope,
                     scope_is_static,

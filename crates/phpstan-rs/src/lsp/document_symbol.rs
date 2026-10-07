@@ -5,32 +5,49 @@
 
 use lsp_types::{DocumentSymbol, SymbolKind};
 
-use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, StmtKind, StmtNode};
+use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, NodeArenas, StmtId, StmtKind};
 use syntax::span::Span;
 
 use super::protocol::Positions;
 
-pub(super) fn document_symbols(stmts: &[StmtNode], index: Positions<'_>) -> Vec<DocumentSymbol> {
+pub(super) fn document_symbols(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    index: Positions<'_>,
+) -> Vec<DocumentSymbol> {
     syntax::stack::guard(|| {
         let mut symbols = Vec::new();
-        for stmt in stmts {
+        for id in stmts {
+            let Some(stmt) = arenas.stmt(id.clone()) else {
+                continue;
+            };
             match &stmt.kind {
-                StmtKind::FunctionDecl(f) => {
-                    symbols.push(function_symbol(f, SymbolKind::FUNCTION, index))
+                StmtKind::FunctionDecl(id) => {
+                    if let Some(f) = arenas.function(id.clone()) {
+                        symbols.push(function_symbol(f, SymbolKind::FUNCTION, index));
+                    }
                 }
-                StmtKind::ClassDecl(c) => symbols.push(class_symbol(c, index)),
+                StmtKind::ClassDecl(c) => {
+                    symbols.push(class_symbol(arenas, arenas.class_decl(c.clone()), index))
+                }
                 StmtKind::Namespace(_) | StmtKind::Use(_) => {}
                 // A conditional top-level declaration (`if (...) { class Foo {} }`)
                 // still gets an outline entry.
                 StmtKind::If(if_stmt) => {
-                    for body in if_stmt.bodies() {
-                        symbols.extend(document_symbols(std::slice::from_ref(body), index));
+                    for body in if_stmt.bodies(arenas) {
+                        symbols.extend(document_symbols(
+                            arenas,
+                            std::slice::from_ref(&body),
+                            index,
+                        ));
                     }
                 }
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
+                StmtKind::Block(inner) => {
+                    symbols.extend(document_symbols(arenas, arenas.stmt_ids(inner), index))
+                }
+                StmtKind::Declare {
                     body: Some(inner), ..
-                } => symbols.extend(document_symbols(inner, index)),
+                } => symbols.extend(document_symbols(arenas, arenas.stmt_ids(inner), index)),
                 _ => {}
             }
         }
@@ -98,15 +115,17 @@ pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
     }
 }
 
-fn class_symbol(c: &ClassDecl, index: Positions<'_>) -> DocumentSymbol {
-    let kind = class_kind_symbol_kind(c.def.kind);
-    let mut children: Vec<DocumentSymbol> = c
-        .def
-        .consts
+fn class_symbol(arenas: &NodeArenas, c: &ClassDecl, index: Positions<'_>) -> DocumentSymbol {
+    let def = arenas
+        .class(c.def)
+        .expect("class definition ID belongs to its syntax tree");
+    let kind = class_kind_symbol_kind(def.kind);
+    let mut children: Vec<DocumentSymbol> = def
+        .consts(arenas)
         .iter()
         .map(|k| const_symbol(k, index))
         .collect();
-    children.extend(c.def.enum_cases.iter().map(|case| {
+    children.extend(def.enum_cases(arenas).iter().map(|case| {
         symbol(
             case.name.to_string(),
             SymbolKind::ENUM_MEMBER,
@@ -116,7 +135,7 @@ fn class_symbol(c: &ClassDecl, index: Positions<'_>) -> DocumentSymbol {
             index,
         )
     }));
-    children.extend(c.def.properties.iter().map(|p| {
+    children.extend(def.properties(arenas).iter().map(|p| {
         symbol(
             p.name.to_string(),
             SymbolKind::PROPERTY,
@@ -126,11 +145,16 @@ fn class_symbol(c: &ClassDecl, index: Positions<'_>) -> DocumentSymbol {
             index,
         )
     }));
-    children.extend(c.def.methods.iter().map(|m| method_symbol(m, index)));
+    children.extend(
+        arenas
+            .methods(def.methods.clone())
+            .iter()
+            .map(|m| method_symbol(m, index)),
+    );
     symbol(
         c.name.to_string(),
         kind,
-        c.def.span,
+        def.span,
         c.name.span,
         children,
         index,

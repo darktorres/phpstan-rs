@@ -12,7 +12,7 @@ use crate::architecture::{ArchitectureRule, NamePattern, Selector};
 use crate::registry::stubs;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 use types::Type;
 
 use super::Project;
@@ -26,17 +26,22 @@ fn contains(outer: Span, inner: Span) -> bool {
 
 /// Spans of the class operand of every `new` in `stmts`, wherever it is:
 /// parameter defaults, property hooks and constants included.
-fn new_class_spans(stmts: &[StmtNode], out: &mut FxHashSet<Span>) {
+fn new_class_spans(arenas: &NodeArenas, stmts: &[StmtId], out: &mut FxHashSet<Span>) {
     struct News<'o>(&'o mut FxHashSet<Span>);
-    impl<'ast> Visitor<'ast> for News<'_> {
-        fn visit_expr(&mut self, e: &'ast ExprNode) {
+    impl Visitor for News<'_> {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            let Some(e) = arenas.expr(id) else { return };
             if let ExprKind::New(class, _) = &e.kind {
-                self.0.insert(class.span);
+                if let Some(class) = arenas.expr(class.clone()) {
+                    if let Some(span) = arenas.expr_span(class.id) {
+                        self.0.insert(span);
+                    }
+                }
             }
-            walk_expr(self, e);
+            arena::walk_expr(self, arenas, id);
         }
     }
-    walk_stmts(&mut News(out), stmts);
+    arena::walk_stmts(&mut News(out), arenas, stmts);
 }
 
 /// `(selectors, the class's related classes, whether one must match,
@@ -247,9 +252,14 @@ impl Project {
             if classes.is_empty() {
                 continue;
             }
-            let refs = index_class_fn_refs_without_source(file.ast());
+            let tree = file
+                .tree()
+                .expect("analyzed architecture file must retain its syntax tree");
+            let arenas = tree.arenas();
+            let stmts = tree.statements();
+            let refs = index_class_fn_refs_without_source(arenas, stmts);
             let mut constructed = FxHashSet::default();
-            new_class_spans(file.ast(), &mut constructed);
+            new_class_spans(arenas, stmts, &mut constructed);
             let mut class_names: Vec<&String> = classes.keys().collect();
             class_names.sort();
             for lower in class_names {

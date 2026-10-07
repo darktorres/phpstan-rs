@@ -29,7 +29,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::literal_string_value;
-use syntax::ast::{Arg, ExprKind, ExprNode, StaticTarget};
+use syntax::ast::{Arg, ArgRange, ExprId, ExprKind, ExprNode, NodeArenas, StaticTarget};
 use types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -264,34 +264,28 @@ fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
     Some(out)
 }
 
-fn looks_like_dbal_query_builder_chain(e: &ExprNode) -> bool {
-    let e = e.peeled();
+fn looks_like_dbal_query_builder_chain(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(id) = arenas.peeled(id) else {
+        return false;
+    };
+    let Some(e) = arenas.expr(id) else {
+        return false;
+    };
     syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
-        ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
+        ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(arenas, *inner),
         _ => false,
     })
 }
 
 struct ChainCall {
     method: String,
-    args: Vec<Arg>,
+    args: ArgRange,
 }
 
 enum Cursor<'a> {
     Borrowed(&'a ExprNode),
-    Owned(std::rc::Rc<ExprNode>),
-}
-
-impl std::ops::Deref for Cursor<'_> {
-    type Target = ExprNode;
-
-    fn deref(&self) -> &ExprNode {
-        match self {
-            Cursor::Borrowed(e) => e,
-            Cursor::Owned(e) => e,
-        }
-    }
+    Owned(ExprId),
 }
 
 impl<'a> Checker<'a> {
@@ -322,26 +316,31 @@ impl<'a> Checker<'a> {
         recv: &ExprNode,
         locals: &Locals,
     ) -> Option<DbalQueryBuilderChain> {
-        if !looks_like_dbal_query_builder_chain(recv) {
+        let arenas = self.syntax_arenas()?;
+        if !looks_like_dbal_query_builder_chain(arenas, recv.id) {
             return None;
         }
         let mut calls: Vec<ChainCall> = Vec::new();
         let mut cursor = Cursor::Borrowed(recv);
         loop {
-            match &cursor.peeled().kind {
+            let current = match &cursor {
+                Cursor::Borrowed(e) => arenas.expr(arenas.peeled(e.id)?)?,
+                Cursor::Owned(id) => arenas.expr(arenas.peeled(*id)?)?,
+            };
+            match &current.kind {
                 ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => break,
                 ExprKind::MethodCall(inner, method, args, _) => {
                     calls.push(ChainCall {
                         method: method.to_string(),
                         args: args.clone(),
                     });
-                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
+                    cursor = Cursor::Owned(*inner);
                 }
                 ExprKind::Variable(name) => {
                     let rhs = locals
                         .query_builder_aliases()
                         .get(&locals.find_var(name)?)?;
-                    cursor = Cursor::Owned(rhs.clone());
+                    cursor = Cursor::Owned(*rhs);
                 }
                 _ => return None,
             }
@@ -350,7 +349,13 @@ impl<'a> Checker<'a> {
 
         let mut chain = DbalQueryBuilderChain::default();
         for call in &calls {
-            self.apply_dbal_chain_call(&mut chain, &call.method, &call.args, locals)?;
+            self.apply_dbal_chain_call(
+                arenas,
+                &mut chain,
+                &call.method,
+                call.args.clone(),
+                locals,
+            )?;
         }
         Some(chain)
     }
@@ -360,29 +365,31 @@ impl<'a> Checker<'a> {
     /// 168g precedent for `createQuery($dql)`: a literal or constant-
     /// foldable string needs no chain-walking at all.
     pub(crate) fn foldable_sql_string(&self, expr: &ExprNode, locals: &Locals) -> Option<String> {
-        fold_string_expr(self, expr, locals)
+        fold_string_expr(self, self.syntax_arenas()?, expr.id, locals)
     }
 
     fn apply_dbal_chain_call(
         &self,
+        arenas: &NodeArenas,
         chain: &mut DbalQueryBuilderChain,
         method: &str,
-        args: &[Arg],
+        args: ArgRange,
         locals: &Locals,
     ) -> Option<()> {
+        let args = arenas.args(args.clone());
         match method {
-            "select" => chain.select = self.foldable_sql_arg_strings(args, locals)?,
+            "select" => chain.select = self.foldable_sql_arg_strings(arenas, args, locals)?,
             "addSelect" => chain
                 .select
-                .extend(self.foldable_sql_arg_strings(args, locals)?),
+                .extend(self.foldable_sql_arg_strings(arenas, args, locals)?),
             "distinct" => chain.distinct = true,
             "from" => {
                 let table = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 let alias = args
                     .get(1)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals));
                 chain.from.push(FromClause { table, alias });
             }
             "join" | "innerJoin" | "leftJoin" | "rightJoin" => {
@@ -396,13 +403,13 @@ impl<'a> Checker<'a> {
                 // `DbalQueryBuilderChain::render`'s own doc comment).
                 let table = args
                     .get(1)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 let alias = args
                     .get(2)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 let condition = args
                     .get(3)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals));
                 chain.joins.push(JoinClause {
                     kind,
                     table,
@@ -411,63 +418,68 @@ impl<'a> Checker<'a> {
                 });
             }
             "where" => {
-                chain.where_parts = combine_variadic_predicates(self, args, locals, false)?;
+                chain.where_parts = combine_variadic_predicates(self, arenas, args, locals, false)?;
             }
             "andWhere" => {
-                chain
-                    .where_parts
-                    .extend(combine_variadic_predicates(self, args, locals, false)?);
+                chain.where_parts.extend(combine_variadic_predicates(
+                    self, arenas, args, locals, false,
+                )?);
             }
             "orWhere" => {
-                chain
-                    .where_parts
-                    .extend(combine_variadic_predicates(self, args, locals, true)?);
+                chain.where_parts.extend(combine_variadic_predicates(
+                    self, arenas, args, locals, true,
+                )?);
             }
             "having" => {
-                chain.having_parts = combine_variadic_predicates(self, args, locals, false)?;
+                chain.having_parts =
+                    combine_variadic_predicates(self, arenas, args, locals, false)?;
             }
             "andHaving" => {
-                chain
-                    .having_parts
-                    .extend(combine_variadic_predicates(self, args, locals, false)?);
+                chain.having_parts.extend(combine_variadic_predicates(
+                    self, arenas, args, locals, false,
+                )?);
             }
             "orHaving" => {
-                chain
-                    .having_parts
-                    .extend(combine_variadic_predicates(self, args, locals, true)?);
+                chain.having_parts.extend(combine_variadic_predicates(
+                    self, arenas, args, locals, true,
+                )?);
             }
-            "groupBy" => chain.group_by = self.foldable_sql_arg_strings(args, locals)?,
+            "groupBy" => chain.group_by = self.foldable_sql_arg_strings(arenas, args, locals)?,
             "addGroupBy" => chain
                 .group_by
-                .extend(self.foldable_sql_arg_strings(args, locals)?),
+                .extend(self.foldable_sql_arg_strings(arenas, args, locals)?),
             "orderBy" => {
                 let sort = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 let order = args
                     .get(1)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals));
                 chain.order_by = vec![order_by_entry(sort, order)];
             }
             "addOrderBy" => {
                 let sort = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 let order = args
                     .get(1)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals));
                 chain.order_by.push(order_by_entry(sort, order));
             }
             "setMaxResults" => {
-                chain.limit = args.first().and_then(|a| self.foldable_arg_int(a, locals));
+                chain.limit = args
+                    .first()
+                    .and_then(|a| self.foldable_arg_int(arenas, a, locals));
             }
             "setFirstResult" => {
-                chain.offset = args.first().and_then(|a| self.foldable_arg_int(a, locals));
+                chain.offset = args
+                    .first()
+                    .and_then(|a| self.foldable_arg_int(arenas, a, locals));
             }
             "insert" => {
                 let table = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 chain.dml = Some(Dml::Insert {
                     table,
                     values: Vec::new(),
@@ -476,7 +488,7 @@ impl<'a> Checker<'a> {
             "update" => {
                 let table = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 chain.dml = Some(Dml::Update {
                     table,
                     set: Vec::new(),
@@ -485,16 +497,16 @@ impl<'a> Checker<'a> {
             "delete" => {
                 let table = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 chain.dml = Some(Dml::Delete { table });
             }
             "set" | "setValue" => {
                 let key = args
                     .first()
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 let value = args
                     .get(1)
-                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                    .and_then(|a| self.foldable_sql_arg_string(arenas, a, locals))?;
                 match &mut chain.dml {
                     Some(Dml::Update { set, .. }) => set.push((key, value)),
                     Some(Dml::Insert { values, .. }) => values.push((key, value)),
@@ -502,16 +514,16 @@ impl<'a> Checker<'a> {
                 }
             }
             "values" => {
-                let ExprKind::ArrayLiteral(items) = &args.first()?.value.kind else {
+                let first = arenas.expr(args.first()?.value)?;
+                let ExprKind::ArrayLiteral(items) = &first.kind else {
                     return None;
                 };
                 let mut values = Vec::new();
-                for item in items {
+                for item in arenas.array_items(items.clone()) {
                     let key = item
                         .key
-                        .as_ref()
-                        .and_then(|k| self.foldable_arg_string_expr(k, locals))?;
-                    let value = self.foldable_arg_string_expr(&item.value, locals)?;
+                        .and_then(|k| self.foldable_arg_string_expr(arenas, k, locals))?;
+                    let value = self.foldable_arg_string_expr(arenas, item.value, locals)?;
                     values.push((key, value));
                 }
                 match &mut chain.dml {
@@ -526,17 +538,20 @@ impl<'a> Checker<'a> {
             "setParameter" => {
                 let key = args
                     .first()
-                    .and_then(|a| param_key_from_arg(self, a, locals))?;
+                    .and_then(|a| param_key_from_arg(self, arenas, a, locals))?;
                 let value_ty = args
                     .get(1)
-                    .map(|a| self.infer_expr(&a.value, locals))
+                    .and_then(|a| arenas.expr(a.value))
+                    .map(|value| self.infer_expr(value, locals))
                     .unwrap_or(Type::mixed());
                 let expects_array = args
                     .get(2)
-                    .is_some_and(|a| is_array_parameter_type(self, &a.value));
+                    .and_then(|a| arenas.expr(a.value))
+                    .is_some_and(|value| is_array_parameter_type(self, value));
                 let expects_integer = args
                     .get(2)
-                    .is_some_and(|a| is_integer_parameter_type(self, &a.value));
+                    .and_then(|a| arenas.expr(a.value))
+                    .is_some_and(|value| is_integer_parameter_type(self, value));
                 chain.params.retain(|p| p.key != key);
                 chain.params.push(ParamBinding {
                     key,
@@ -546,7 +561,8 @@ impl<'a> Checker<'a> {
                 });
             }
             "setParameters" => {
-                let ExprKind::ArrayLiteral(items) = &args.first()?.value.kind else {
+                let first = arenas.expr(args.first()?.value)?;
+                let ExprKind::ArrayLiteral(items) = &first.kind else {
                     return None;
                 };
                 // The parallel `$types` array (real signature:
@@ -554,32 +570,37 @@ impl<'a> Checker<'a> {
                 // keyed the same way as `$params` - only consulted for
                 // the `ArrayParameterType::*`/`ParameterType::INTEGER`
                 // exemptions, same as `setParameter`'s own third argument.
-                let types_by_key: Vec<(ParamKey, bool, bool)> =
-                    match args.get(1).map(|a| &a.value.kind) {
-                        Some(ExprKind::ArrayLiteral(type_items)) => type_items
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(position, item)| {
-                                let key = match &item.key {
-                                    Some(k) => param_key_from_expr(self, k, locals)?,
-                                    None => ParamKey::Positional(position as i64),
-                                };
-                                Some((
-                                    key,
-                                    is_array_parameter_type(self, &item.value),
-                                    is_integer_parameter_type(self, &item.value),
-                                ))
-                            })
-                            .collect(),
-                        _ => Vec::new(),
-                    };
+                let types_by_key: Vec<(ParamKey, bool, bool)> = match args
+                    .get(1)
+                    .and_then(|a| arenas.expr(a.value))
+                    .map(|value| &value.kind)
+                {
+                    Some(ExprKind::ArrayLiteral(type_items)) => arenas
+                        .array_items(type_items.clone())
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(position, item)| {
+                            let key = match &item.key {
+                                Some(k) => param_key_from_expr(self, arenas, *k, locals)?,
+                                None => ParamKey::Positional(position as i64),
+                            };
+                            let value = arenas.expr(item.value)?;
+                            Some((
+                                key,
+                                is_array_parameter_type(self, value),
+                                is_integer_parameter_type(self, value),
+                            ))
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
                 let mut params = Vec::new();
-                for (position, item) in items.iter().enumerate() {
+                for (position, item) in arenas.array_items(items.clone()).iter().enumerate() {
                     let key = match &item.key {
-                        Some(k) => param_key_from_expr(self, k, locals)?,
+                        Some(k) => param_key_from_expr(self, arenas, *k, locals)?,
                         None => ParamKey::Positional(position as i64),
                     };
-                    let value_ty = self.infer_expr(&item.value, locals);
+                    let value_ty = self.infer_expr(arenas.expr(item.value)?, locals);
                     let expects_array = types_by_key
                         .iter()
                         .any(|(k, expects_array, _)| *k == key && *expects_array);
@@ -602,28 +623,51 @@ impl<'a> Checker<'a> {
         Some(())
     }
 
-    fn foldable_sql_arg_string(&self, arg: &Arg, locals: &Locals) -> Option<String> {
-        self.foldable_arg_string_expr(&arg.value, locals)
+    fn foldable_sql_arg_string(
+        &self,
+        arenas: &NodeArenas,
+        arg: &Arg,
+        locals: &Locals,
+    ) -> Option<String> {
+        self.foldable_arg_string_expr(arenas, arg.value, locals)
     }
 
-    fn foldable_arg_string_expr(&self, expr: &ExprNode, locals: &Locals) -> Option<String> {
-        fold_string_expr(self, expr, locals)
+    fn foldable_arg_string_expr(
+        &self,
+        arenas: &NodeArenas,
+        expr: ExprId,
+        locals: &Locals,
+    ) -> Option<String> {
+        fold_string_expr(self, arenas, expr, locals)
     }
 
-    fn foldable_sql_arg_strings(&self, args: &[Arg], locals: &Locals) -> Option<Vec<String>> {
+    fn foldable_sql_arg_strings(
+        &self,
+        arenas: &NodeArenas,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<Vec<String>> {
         args.iter()
-            .map(|a| self.foldable_sql_arg_string(a, locals))
+            .map(|a| self.foldable_sql_arg_string(arenas, a, locals))
             .collect()
     }
 
-    fn foldable_arg_int(&self, arg: &Arg, locals: &Locals) -> Option<i64> {
-        self.infer_expr(&arg.value, locals).int_literal_value()
+    fn foldable_arg_int(&self, arenas: &NodeArenas, arg: &Arg, locals: &Locals) -> Option<i64> {
+        self.infer_expr(arenas.expr(arg.value)?, locals)
+            .int_literal_value()
     }
 }
 
-fn fold_string_expr(checker: &Checker, expr: &ExprNode, locals: &Locals) -> Option<String> {
+fn fold_string_expr(
+    checker: &Checker,
+    arenas: &NodeArenas,
+    id: ExprId,
+    locals: &Locals,
+) -> Option<String> {
     syntax::stack::guard(|| {
-        if let Some(s) = literal_string_value(expr) {
+        let id = arenas.peeled(id)?;
+        let expr = arenas.expr(id)?;
+        if let Some(s) = literal_string_value(arenas, id) {
             return Some(s.into_owned());
         }
         match &expr.kind {
@@ -639,20 +683,22 @@ fn fold_string_expr(checker: &Checker, expr: &ExprNode, locals: &Locals) -> Opti
             // `check_expr`'s general narrowing behavior for every caller.
             ExprKind::Interpolated(parts) => {
                 let mut out = String::new();
-                for part in parts {
-                    out.push_str(&fold_string_expr(checker, part, locals)?);
+                for part in arenas.expr_ids(parts) {
+                    out.push_str(&fold_string_expr(checker, arenas, *part, locals)?);
                 }
                 return Some(out);
             }
             ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(name) = &callee.kind
+                if let Some(callee) = arenas.expr(*callee)
+                    && let ExprKind::Name(name) = &callee.kind
+                    && let Some(name) = arenas.qualified_name(name)
                     && name
                         .rsplit('\\')
                         .next_back()
                         .is_some_and(|n| n.eq_ignore_ascii_case("sprintf"))
-                    && !args.iter().any(|a| a.spread)
+                    && !arenas.args(args.clone()).iter().any(|a| a.spread)
                 {
-                    return fold_sprintf_call(checker, args, locals);
+                    return fold_sprintf_call(checker, arenas, arenas.args(args.clone()), locals);
                 }
             }
             _ => {}
@@ -675,8 +721,13 @@ fn fold_string_expr(checker: &Checker, expr: &ExprNode, locals: &Locals) -> Opti
 /// own repeated "only a confidently-understood shape is folded, anything
 /// else falls through rather than guesses" precedent (see `resolve.rs`'s
 /// static-schema JOIN/aggregate bail-outs).
-fn fold_sprintf_call(checker: &Checker, args: &[Arg], locals: &Locals) -> Option<String> {
-    let fmt = fold_string_expr(checker, &args.first()?.value, locals)?;
+fn fold_sprintf_call(
+    checker: &Checker,
+    arenas: &NodeArenas,
+    args: &[Arg],
+    locals: &Locals,
+) -> Option<String> {
+    let fmt = fold_string_expr(checker, arenas, args.first()?.value, locals)?;
     let mut values = args[1..].iter();
     let mut out = String::new();
     let mut chars = fmt.chars().peekable();
@@ -687,13 +738,18 @@ fn fold_sprintf_call(checker: &Checker, args: &[Arg], locals: &Locals) -> Option
         }
         match chars.next()? {
             '%' => out.push('%'),
-            's' => out.push_str(&fold_sprintf_string_arg(checker, values.next()?, locals)?),
+            's' => out.push_str(&fold_sprintf_string_arg(
+                checker,
+                arenas,
+                values.next()?,
+                locals,
+            )?),
             'd' => {
-                let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
+                let n = fold_sprintf_int_arg(checker, arenas, values.next()?, locals)?;
                 out.push_str(&n.to_string());
             }
             'u' => {
-                let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
+                let n = fold_sprintf_int_arg(checker, arenas, values.next()?, locals)?;
                 if n < 0 {
                     return None;
                 }
@@ -711,18 +767,30 @@ fn fold_sprintf_call(checker: &Checker, args: &[Arg], locals: &Locals) -> Option
     Some(out)
 }
 
-fn fold_sprintf_string_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<String> {
-    if let Some(s) = fold_string_expr(checker, &arg.value, locals) {
+fn fold_sprintf_string_arg(
+    checker: &Checker,
+    arenas: &NodeArenas,
+    arg: &Arg,
+    locals: &Locals,
+) -> Option<String> {
+    if let Some(s) = fold_string_expr(checker, arenas, arg.value, locals) {
         return Some(s);
     }
     checker
-        .infer_expr(&arg.value, locals)
+        .infer_expr(arenas.expr(arg.value)?, locals)
         .int_literal_value()
         .map(|n| n.to_string())
 }
 
-fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<i64> {
-    checker.infer_expr(&arg.value, locals).int_literal_value()
+fn fold_sprintf_int_arg(
+    checker: &Checker,
+    arenas: &NodeArenas,
+    arg: &Arg,
+    locals: &Locals,
+) -> Option<i64> {
+    checker
+        .infer_expr(arenas.expr(arg.value)?, locals)
+        .int_literal_value()
 }
 
 /// `ArrayParameterType::INTEGER`/`STRING`/`ASCII`/`BINARY` (real DBAL
@@ -783,8 +851,13 @@ fn is_php_numeric_string(s: &str) -> bool {
     s.trim().parse::<f64>().is_ok()
 }
 
-fn param_key_from_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<ParamKey> {
-    param_key_from_expr(checker, &arg.value, locals)
+fn param_key_from_arg(
+    checker: &Checker,
+    arenas: &NodeArenas,
+    arg: &Arg,
+    locals: &Locals,
+) -> Option<ParamKey> {
+    param_key_from_expr(checker, arenas, arg.value, locals)
 }
 
 /// Real `setParameter(int|string $key, ...)` - a literal/foldable
@@ -794,14 +867,15 @@ fn param_key_from_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<P
 /// "don't guess" leniency every other chain call already has.
 pub(crate) fn param_key_from_expr(
     checker: &Checker,
-    expr: &ExprNode,
+    arenas: &NodeArenas,
+    expr: ExprId,
     locals: &Locals,
 ) -> Option<ParamKey> {
-    if let Some(s) = fold_string_expr(checker, expr, locals) {
+    if let Some(s) = fold_string_expr(checker, arenas, expr, locals) {
         return Some(ParamKey::Named(s));
     }
     checker
-        .infer_expr(expr, locals)
+        .infer_expr(arenas.expr(expr)?, locals)
         .int_literal_value()
         .map(ParamKey::Positional)
 }
@@ -814,13 +888,14 @@ pub(crate) fn param_key_from_expr(
 /// `is_or` says.
 fn combine_variadic_predicates(
     checker: &Checker,
+    arenas: &NodeArenas,
     args: &[Arg],
     locals: &Locals,
     is_or: bool,
 ) -> Option<Vec<(bool, String)>> {
     let mut parts = Vec::new();
     for (i, arg) in args.iter().enumerate() {
-        let s = fold_string_expr(checker, &arg.value, locals)?;
+        let s = fold_string_expr(checker, arenas, arg.value, locals)?;
         parts.push((if i == 0 { is_or } else { false }, s));
     }
     if parts.is_empty() {

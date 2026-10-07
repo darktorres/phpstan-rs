@@ -32,7 +32,7 @@ use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use syntax::ast::*;
 use syntax::declarations::Declared;
 use syntax::span::{LineCol, LineIndex, Range, Span};
-use syntax::visit::{Visitor, walk_expr, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use super::{FileState, Project};
@@ -172,43 +172,55 @@ struct FileFacts {
     probed_symbols: FxHashSet<String>,
 }
 
-fn collect_facts_in_stmts(stmts: &[StmtNode], facts: &mut FileFacts) {
-    walk_stmts(&mut Facts(facts), stmts);
+fn collect_facts_in_stmts(arenas: &NodeArenas, stmts: &[StmtId], facts: &mut FileFacts) {
+    arena::walk_stmts(&mut Facts(facts), arenas, stmts);
 }
 
 /// Every expression in the file: closures, declarations, parameter
 /// defaults, attributes, property hooks and enum case values included.
 struct Facts<'f>(&'f mut FileFacts);
 
-impl<'ast> Visitor<'ast> for Facts<'_> {
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
-        collect_facts_in_expr(e, self.0);
-        walk_expr(self, e);
+impl Visitor for Facts<'_> {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        collect_facts_in_expr(arenas, id, self.0);
+        arena::walk_expr(self, arenas, id);
     }
 }
 
 /// `e`'s own facts, not its operands'.
-fn collect_facts_in_expr(e: &ExprNode, facts: &mut FileFacts) {
+fn collect_facts_in_expr(arenas: &NodeArenas, id: ExprId, facts: &mut FileFacts) {
+    let Some(e) = arenas.expr(id) else { return };
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => facts.strings.push(s.to_string()),
+        ExprKind::Literal(Literal::String(s)) => {
+            if let Some(bytes) = arenas.string_bytes(s) {
+                facts
+                    .strings
+                    .push(String::from_utf8_lossy(bytes).into_owned());
+            }
+        }
         ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(name) = &callee.kind
-                && let Some(ExprKind::Literal(Literal::String(arg))) =
-                    args.first().map(|a| &a.value.kind)
+            if let Some(callee) = arenas.expr(callee.clone())
+                && let ExprKind::Name(name) = &callee.kind
+                && let Some(name) = arenas.qualified_name(name)
+                && let Some(arg) = arenas
+                    .args(args.clone())
+                    .first()
+                    .and_then(|a| arenas.expr(a.value))
+                && let ExprKind::Literal(Literal::String(arg)) = &arg.kind
             {
+                let Some(bytes) = arenas.string_bytes(arg) else {
+                    return;
+                };
+                let text = String::from_utf8_lossy(bytes);
                 match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
                     "extension_loaded" => {
-                        facts
-                            .probed_extensions
-                            .insert(arg.to_str_lossy().to_ascii_lowercase());
+                        facts.probed_extensions.insert(text.to_ascii_lowercase());
                     }
                     "function_exists" | "class_exists" | "interface_exists" | "enum_exists"
                     | "is_callable" => {
-                        facts.probed_symbols.insert(
-                            arg.to_str_lossy()
-                                .trim_start_matches('\\')
-                                .to_ascii_lowercase(),
-                        );
+                        facts
+                            .probed_symbols
+                            .insert(text.trim_start_matches('\\').to_ascii_lowercase());
                     }
                     _ => {}
                 }
@@ -283,8 +295,13 @@ impl Project {
             let production = manifest.covers(&manifest.autoload, &absolute);
             let dev_only = !production && manifest.covers(&manifest.autoload_dev, &absolute);
             let used_before: FxHashSet<String> = used_packages.clone();
+            let tree = file
+                .tree()
+                .expect("analyzed Composer file must retain its syntax tree");
+            let arenas = tree.arenas();
+            let stmts = tree.statements();
             let mut facts = FileFacts::default();
-            collect_facts_in_stmts(file.ast(), &mut facts);
+            collect_facts_in_stmts(arenas, stmts, &mut facts);
             // Class names written as strings (service wiring, config)
             // count as using their package.
             for s in &facts.strings {
@@ -301,7 +318,7 @@ impl Project {
             let mut reported_extensions: FxHashSet<String> = FxHashSet::default();
             let mut reported_dev_symbols: FxHashSet<String> = FxHashSet::default();
             let diagnostics = out.entry((*path).clone()).or_default();
-            for (span, target) in index_class_fn_refs_without_source(file.ast()) {
+            for (span, target) in index_class_fn_refs_without_source(arenas, stmts) {
                 let (kind, display, declared_in, builtin_extension) = match &target {
                     RefTarget::Class(fqn) => {
                         let lower = fqn.to_ascii_lowercase();
@@ -534,7 +551,9 @@ impl Project {
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         let mut declared: Vec<(String, Span)> = Vec::new();
-        collect_declared_classes(file.ast(), &mut declared);
+        if let Some(tree) = file.tree() {
+            collect_declared_classes(tree.arenas(), tree.statements(), &mut declared);
+        }
         if declared.is_empty() {
             return;
         }
@@ -777,8 +796,8 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
 
 /// Every class-like `stmts` declares unconditionally, with its name's
 /// span.
-fn collect_declared_classes(stmts: &[StmtNode], out: &mut Vec<(String, Span)>) {
-    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
+fn collect_declared_classes(arenas: &NodeArenas, stmts: &[StmtId], out: &mut Vec<(String, Span)>) {
+    syntax::declarations::for_each_declaration(arenas, stmts, |declaration, _, _| {
         if let Declared::Class(c) = declaration.declared
             && !declaration.conditional
         {

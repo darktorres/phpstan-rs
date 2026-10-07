@@ -12,7 +12,7 @@ use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::arena::{self, Visitor};
 
 const MAGIC_CONSTANTS: [&str; 10] = [
     "__LINE__",
@@ -35,12 +35,12 @@ pub(crate) struct ConstantFacts {
     pub(crate) magic_in_closure: FxHashSet<Span>,
 }
 
-pub(crate) fn constant_facts(program: &[StmtNode]) -> ConstantFacts {
+pub(crate) fn constant_facts(arenas: &NodeArenas, program: &[StmtId]) -> ConstantFacts {
     let mut collector = Collector {
         out: ConstantFacts::default(),
         in_closure: false,
     };
-    walk_stmts(&mut collector, program);
+    arena::walk_stmts(&mut collector, arenas, program);
     collector.out
 }
 
@@ -53,52 +53,78 @@ struct Collector {
 }
 
 impl Collector {
-    fn body(&mut self, body: &[StmtNode], in_closure: bool) {
+    fn body(&mut self, arenas: &NodeArenas, body: &[StmtId], in_closure: bool) {
         let outer = std::mem::replace(&mut self.in_closure, in_closure);
-        walk_stmts(self, body);
+        arena::walk_stmts(self, arenas, body);
         self.in_closure = outer;
     }
 }
 
-impl<'ast> Visitor<'ast> for Collector {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
+impl Visitor for Collector {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else { return };
         match &stmt.kind {
-            StmtKind::FunctionDecl(f) => self.body(f.body_stmts(), false),
-            StmtKind::ClassDecl(c) => {
-                for m in &c.def.methods {
-                    self.body(m.function.body_stmts(), false);
+            StmtKind::FunctionDecl(id) => {
+                if let Some(function) = arenas.function(*id) {
+                    self.body(arenas, function.body_stmts(arenas), false);
                 }
             }
-            _ => walk_stmt(self, stmt),
+            StmtKind::ClassDecl(c) => {
+                let c = arenas.class_decl(c.clone());
+                if let Some(def) = arenas.class(c.def) {
+                    for m in arenas.methods(def.methods.clone()) {
+                        self.body(arenas, m.function.body_stmts(arenas), false);
+                    }
+                }
+            }
+            _ => arena::walk_stmt(self, arenas, id),
         }
     }
 
-    fn visit_expr(&mut self, e: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(e) = arenas.expr(id) else { return };
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Name(name)
                 if self.in_closure
-                    && ["__FUNCTION__", "__METHOD__"]
-                        .iter()
-                        .any(|m| name.eq_ignore_ascii_case(m)) =>
+                    && ["__FUNCTION__", "__METHOD__"].iter().any(|m| {
+                        arenas
+                            .qualified_name(name)
+                            .is_some_and(|name| name.eq_ignore_ascii_case(m))
+                    }) =>
             {
-                self.out.magic_in_closure.insert(e.span);
+                self.out.magic_in_closure.insert(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                );
             }
-            ExprKind::Closure(closure) => self.body(&closure.body, true),
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr { body, .. } = &**arrow;
+            ExprKind::Closure(id) => {
+                if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) {
+                    self.body(arenas, arenas.stmt_ids(&closure.body), true);
+                }
+            }
+            ExprKind::ArrowFn(id) => {
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*id) else {
+                    return;
+                };
                 let outer = std::mem::replace(&mut self.in_closure, true);
-                self.visit_expr(body);
+                self.visit_expr(arenas, arrow.body);
                 self.in_closure = outer;
             }
-            ExprKind::NewAnonymousClass(class) => {
-                for a in &class.args {
-                    self.visit_expr(&a.value);
+            ExprKind::NewAnonymousClass(id) => {
+                let Some(class) = arenas.anonymous_class(*id) else {
+                    return;
+                };
+                for a in arenas.args(class.args.clone()) {
+                    self.visit_expr(arenas, a.value);
                 }
-                for m in &class.def.methods {
-                    self.body(m.function.body_stmts(), false);
+                if let Some(def) = arenas.class(class.def) {
+                    for m in arenas.methods(def.methods.clone()) {
+                        self.body(arenas, m.function.body_stmts(arenas), false);
+                    }
                 }
             }
-            _ => walk_expr(self, e),
+            _ => arena::walk_expr(self, arenas, id),
         })
     }
 }
@@ -212,6 +238,7 @@ impl<'a> Checker<'a> {
     /// `define('NAME', $value)` against a configured type.
     pub(crate) fn check_define_value(
         &mut self,
+        arenas: &NodeArenas,
         args: &[Arg],
         locals: &crate::checker::Locals,
         span: Span,
@@ -219,11 +246,17 @@ impl<'a> Checker<'a> {
         let [name_arg, value_arg, ..] = args else {
             return;
         };
-        let name_ty = self.infer_expr(&name_arg.value, locals);
+        let Some(name_arg) = arenas.expr(name_arg.value) else {
+            return;
+        };
+        let name_ty = self.infer_expr(name_arg, locals);
         let Some(name) = name_ty.string_literal_value() else {
             return;
         };
-        let value = self.infer_expr(&value_arg.value, locals);
+        let Some(value_arg) = arenas.expr(value_arg.value) else {
+            return;
+        };
+        let value = self.infer_expr(value_arg, locals);
         let Some(name) = name.as_str() else {
             return;
         };

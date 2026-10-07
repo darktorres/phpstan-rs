@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
-use syntax::ast::{ClassDecl, FunctionDecl, StmtKind, StmtNode};
+use syntax::ast::{FunctionDecl, Ident, NodeArenas, StmtId, StmtKind};
 use syntax::span::LineCol;
-use syntax::visit::{self, Visitor};
+use syntax::visit::arena::{self, Visitor};
 use types::Type;
 
 use crate::Registry;
@@ -43,36 +43,41 @@ impl TemplateScope {
 
 /// The templates in scope at the byte offset `at` of a file whose
 /// statements are `stmts`, with class templates from `registry`.
-pub fn template_scope_at(registry: &Registry, stmts: &[StmtNode], at: u32) -> TemplateScope {
+pub fn template_scope_at(
+    registry: &Registry,
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    at: u32,
+) -> TemplateScope {
     let mut finder = Enclosing {
         at,
         class: None,
         function: None,
     };
-    visit::walk_stmts(&mut finder, stmts);
+    arena::walk_stmts(&mut finder, arenas, stmts);
     let mut templates = FxHashMap::default();
     if let Some(class) = finder.class
-        && let Some(info) = registry.class_by_name(class.fq_name())
+        && let Some(info) = registry.class_by_name(&class)
     {
         for (name, arg) in info
             .templates()
             .iter()
-            .zip(registry.own_template_args(class.fq_name()))
+            .zip(registry.own_template_args(&class))
         {
             templates.insert(name.to_string(), arg);
         }
     }
-    if let Some(function) = finder.function
-        && let Some(doc) = function.doc_comment.as_deref()
-    {
-        let ctx = syntax::name_resolution::context_at(stmts, function.span.start);
-        let own = crate::registry::build_template_params(
-            &phpdoc::docblock::parse(doc),
-            &function.name,
-            &ctx,
-        );
-        for (name, param) in own {
-            templates.insert(name, Type::template_param(param));
+    if let Some(function) = finder.function {
+        let ctx = syntax::name_resolution::context_at_ids(arenas, stmts, function.start);
+        if let Some(doc) = function.doc {
+            let own = crate::registry::build_template_params(
+                &phpdoc::docblock::parse(&doc),
+                &function.name,
+                &ctx,
+            );
+            for (name, param) in own {
+                templates.insert(name, Type::template_param(param));
+            }
         }
     }
     TemplateScope { templates }
@@ -80,34 +85,54 @@ pub fn template_scope_at(registry: &Registry, stmts: &[StmtNode], at: u32) -> Te
 
 /// The innermost class and function or method declarations containing a
 /// position.
-struct Enclosing<'ast> {
-    at: u32,
-    class: Option<&'ast ClassDecl>,
-    function: Option<&'ast FunctionDecl>,
+struct FunctionContext {
+    name: Ident,
+    start: u32,
+    doc: Option<Arc<str>>,
 }
 
-impl Enclosing<'_> {
+struct Enclosing {
+    at: u32,
+    class: Option<String>,
+    function: Option<FunctionContext>,
+}
+
+impl Enclosing {
     fn contains(&self, start: u32, end: u32) -> bool {
         start <= self.at && self.at <= end
     }
 }
 
-impl<'ast> Visitor<'ast> for Enclosing<'ast> {
-    fn visit_stmt(&mut self, stmt: &'ast StmtNode) {
-        if !self.contains(stmt.span.start, stmt.span.end) {
+impl Visitor for Enclosing {
+    fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+        let Some(stmt) = arenas.stmt(id) else {
+            return;
+        };
+        let span = arenas
+            .stmt_span(id)
+            .expect("gate statement has an arena span");
+        if !self.contains(span.start, span.end) {
             return;
         }
         if let StmtKind::ClassDecl(class) = &stmt.kind {
-            self.class = Some(class);
+            self.class = Some(arenas.class_decl(class.clone()).fq_name().to_string());
             self.function = None;
         }
-        visit::walk_stmt(self, stmt);
+        arena::walk_stmt(self, arenas, id);
     }
 
-    fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+    fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
         if self.contains(function.span.start, function.span.end) {
-            self.function = Some(function);
-            visit::walk_function_decl(self, function);
+            self.function = Some(FunctionContext {
+                name: function.name.clone(),
+                start: function.span.start,
+                doc: function
+                    .doc_comment
+                    .as_ref()
+                    .and_then(|ranges| arenas.doc_comment_text(ranges))
+                    .map(|doc| Arc::from(doc.as_ref())),
+            });
+            arena::walk_function_decl(self, arenas, function);
         }
     }
 }
@@ -307,7 +332,7 @@ pub fn type_drift_of_fixtures(
 }
 
 /// A file's statements and lines.
-type ParsedScopeFile = (Vec<StmtNode>, Arc<syntax::span::LineIndex>);
+type ParsedScopeFile = syntax::ParsedFile;
 
 /// `template_scope_at` over files read and parsed once each.
 pub struct TemplateScopes<'r> {
@@ -328,13 +353,13 @@ impl<'r> TemplateScopes<'r> {
     pub fn at(&mut self, path: &Path, line: u32, col: u32) -> TemplateScope {
         let stmts = self.files.entry(path.to_path_buf()).or_insert_with(|| {
             let source = std::fs::read(path).ok()?;
-            syntax::parse(&source)
-                .ok()
-                .map(|parsed| (parsed.stmts, parsed.line_index))
+            syntax::parse(&source).ok()
         });
         match stmts {
-            Some((stmts, index)) => match index.offset(LineCol { line, col }) {
-                Some(at) => template_scope_at(self.registry, stmts, at),
+            Some(parsed) => match parsed.line_index.offset(LineCol { line, col }) {
+                Some(at) => {
+                    template_scope_at(self.registry, &parsed.arenas, parsed.statements(), at)
+                }
                 None => TemplateScope::default(),
             },
             None => TemplateScope::default(),
@@ -368,12 +393,12 @@ function free(): void {
 
     fn scope_at(line: u32) -> TemplateScope {
         let parsed = syntax::parse(SOURCE.as_bytes()).unwrap();
-        let registry = Registry::build(&parsed.stmts);
+        let registry = Registry::build(&parsed.arenas, parsed.statements());
         let at = parsed
             .line_index
             .offset(LineCol { line, col: 9 })
             .expect("in the source");
-        template_scope_at(&registry, &parsed.stmts, at)
+        template_scope_at(&registry, &parsed.arenas, parsed.statements(), at)
     }
 
     fn bound(scope: &TemplateScope, name: &str) -> Option<String> {

@@ -47,7 +47,15 @@ impl<'a> Checker<'a> {
         if !f.is_constructor() || f.body.is_none() {
             return;
         }
-        let candidates: Vec<&Param> = f.params.iter().filter(|p| p.promotion.is_none()).collect();
+        let arenas = self
+            .syntax_arenas()
+            .expect("constructor checks must retain the parsed file owner");
+        let candidates: Vec<_> = arenas
+            .params(f.params.clone())
+            .iter()
+            .filter(|p| p.promotion.is_none())
+            .map(|p| (p.name.clone(), p.span))
+            .collect();
         if candidates.is_empty() {
             return;
         }
@@ -58,23 +66,23 @@ impl<'a> Checker<'a> {
         if self.constructor_signature_is_dictated(fqn) {
             return;
         }
-        let usage = collect_var_usage(f.body_stmts());
-        for p in candidates {
-            if usage.contains(&p.name) {
+        let usage = collect_var_usage(arenas, f.body_stmts(arenas));
+        for (name, span) in candidates {
+            if usage.contains(&name) {
                 continue;
             }
             let message = if is_anonymous {
                 format!(
                     "Constructor of an anonymous class has an unused parameter ${}.",
-                    p.name
+                    name
                 )
             } else {
                 format!(
                     "Constructor of class {fqn} has an unused parameter ${}.",
-                    p.name
+                    name
                 )
             };
-            self.report(message, p.span, 1, "constructor.unusedParameter");
+            self.report(message, span, 1, "constructor.unusedParameter");
         }
     }
 
@@ -109,13 +117,16 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_unused_closure_uses(
         &mut self,
         uses: &[ClosureUse],
-        body: &[StmtNode],
+        body: &[StmtId],
         span: Span,
     ) {
         if uses.is_empty() {
             return;
         }
-        let usage = collect_var_usage(body);
+        let arenas = self
+            .syntax_arenas()
+            .expect("closure checks must retain the parsed file owner");
+        let usage = collect_var_usage(arenas, body);
         for u in uses {
             if usage.contains(&u.name) {
                 continue;
@@ -153,12 +164,21 @@ impl<'a> Checker<'a> {
         if self.rebind_escape_all || self.rebind_target_classes.contains(fqn) {
             return;
         }
+        let Some(owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = owner.arenas();
 
         let mut usage = MemberUsage::default();
         let ctor = methods.iter().find(|m| m.function.is_constructor());
         for m in methods {
             usage.aliases.clear();
-            seed_self_typed_param_aliases(&m.function.params, fqn, &mut usage);
+            seed_self_typed_param_aliases(
+                arenas,
+                arenas.params(m.function.params.clone()),
+                fqn,
+                &mut usage,
+            );
             // Two passes over the same body, same accumulator: pass 1
             // fully populates `usage.aliases` (detecting a same-class
             // `new self()` assignment or `instanceof self` check doesn't
@@ -169,40 +189,40 @@ impl<'a> Checker<'a> {
             // it textually precedes the statement that established the
             // alias. HashSet inserts are idempotent, so the redundant work
             // in pass 1's own read/write/method accounting is harmless.
-            walk_stmt_body_for_members(m.function.body_stmts(), fqn, &mut usage);
-            walk_stmt_body_for_members(m.function.body_stmts(), fqn, &mut usage);
+            walk_stmt_body_for_members(arenas, m.function.body_stmts(arenas), fqn, &mut usage);
+            walk_stmt_body_for_members(arenas, m.function.body_stmts(arenas), fqn, &mut usage);
         }
         if let Some(ctor) = ctor {
-            for p in &ctor.function.params {
+            for p in arenas.params(ctor.function.params.clone()) {
                 if let Some(d) = &p.default {
                     // A property/constructor-param default must be a PHP
                     // constant expression - no assignment or `instanceof`
                     // can appear in one, so `usage.aliases` can never be
                     // populated here; cleared anyway.
                     usage.aliases.clear();
-                    walk_expr_for_members(d, fqn, &mut usage);
+                    walk_expr_for_members(arenas, *d, fqn, &mut usage);
                 }
                 if let Some(hooks) = &p.hooks {
                     usage.aliases.clear();
-                    walk_property_hooks_for_members(hooks, fqn, &mut usage);
-                    walk_property_hooks_for_members(hooks, fqn, &mut usage);
+                    walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
+                    walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
                 }
             }
         }
         for p in properties {
             if let Some(d) = &p.default {
                 usage.aliases.clear();
-                walk_expr_for_members(d, fqn, &mut usage);
+                walk_expr_for_members(arenas, *d, fqn, &mut usage);
             }
             if let Some(hooks) = &p.hooks {
                 usage.aliases.clear();
-                walk_property_hooks_for_members(hooks, fqn, &mut usage);
-                walk_property_hooks_for_members(hooks, fqn, &mut usage);
+                walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
+                walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
             }
         }
         for c in consts {
             usage.aliases.clear();
-            walk_expr_for_members(&c.value, fqn, &mut usage);
+            walk_expr_for_members(arenas, c.value, fqn, &mut usage);
         }
 
         // See `MemberUsage::escaped`'s own doc comment - a fully dynamic
@@ -302,33 +322,40 @@ impl<'a> Checker<'a> {
                 p.default.is_some(),
                 only_readable,
                 only_writable,
-                p.doc_comment.as_deref(),
+                p.doc_comment
+                    .as_ref()
+                    .and_then(|ranges| arenas.doc_comment_text(ranges))
+                    .as_deref(),
                 p.span,
                 p.removal_span,
                 &usage,
             );
         }
         if let Some(ctor) = ctor {
-            for param in &ctor.function.params {
-                if param.promotion.map(|promotion| promotion.visibility)
-                    != Some(Visibility::Private)
-                {
-                    continue;
-                }
-                let (only_readable, only_writable) = hook_read_write_shape(param.hooks.as_deref());
+            let private_promotions: Vec<_> = arenas
+                .params(ctor.function.params.clone())
+                .iter()
+                .filter(|param| {
+                    param.promotion.map(|promotion| promotion.visibility)
+                        == Some(Visibility::Private)
+                })
+                .map(|param| (param.name.clone(), param.hooks.clone(), param.span))
+                .collect();
+            for (name, hooks, span) in private_promotions {
+                let (only_readable, only_writable) = hook_read_write_shape(hooks.as_deref());
                 // Promotion is itself an implicit `$this->x = $x` write -
                 // see `check_unused_constructor_parameters`'s own doc
                 // comment for the same reasoning applied to the parameter
                 // side of this same construct.
                 self.report_unused_property(
                     fqn,
-                    &param.name,
+                    &name,
                     false,
                     true,
                     only_readable,
                     only_writable,
                     None,
-                    param.span,
+                    span,
                     None,
                     &usage,
                 );

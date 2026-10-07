@@ -653,7 +653,7 @@ impl ParseFailure {
         ParseFailure {
             line: at.line,
             col: at.col,
-            message: error.message,
+            message: error.message.clone(),
         }
     }
 

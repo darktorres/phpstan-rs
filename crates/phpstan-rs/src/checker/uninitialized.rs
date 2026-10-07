@@ -24,7 +24,7 @@ use rustc_hash::FxHashSet;
 
 use crate::checker::Checker;
 use syntax::ast::*;
-use syntax::visit::any_stmt_in_body;
+use syntax::visit::arena::{self, Visitor};
 
 impl<'a> Checker<'a> {
     /// Flags `property.uninitialized` for a concrete class's own typed,
@@ -43,10 +43,17 @@ impl<'a> Checker<'a> {
         if !self.settings.rules.check_uninitialized_properties {
             return;
         }
-        if c.def.kind != ClassKind::Class || c.def.is_abstract {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let Some(def) = arenas.class(c.def) else {
+            return;
+        };
+        if def.kind != ClassKind::Class || def.is_abstract {
             return;
         }
-        for p in &c.def.properties {
+        for p in def.properties(arenas) {
             if p.is_static || p.is_readonly || p.default.is_some() || p.hooks.is_some() {
                 continue;
             }
@@ -73,16 +80,20 @@ impl<'a> Checker<'a> {
     }
 }
 
-pub(super) fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
-    c.def.methods.iter().any(|m| {
+pub(super) fn class_ever_assigns_property(arenas: &NodeArenas, c: &ClassDecl, prop: &str) -> bool {
+    let Some(def) = arenas.class(c.def) else {
+        return false;
+    };
+    arenas.methods(def.methods.clone()).iter().any(|m| {
         // A static "named constructor" (`public static function
         // create(...): static { $node = new static; ...; $node->prop =
         // ...; return $node; }`) populates a *local* variable holding a
         // fresh instance, not `$this`. Collected once per method (not
         // globally) since the same variable name in a different method
         // could hold anything.
-        let self_vars = collect_self_instance_vars(m.function.body_stmts(), &c.name);
-        body_ever_assigns_property(m.function.body_stmts(), prop, &self_vars)
+        let body = m.function.body_stmts(arenas);
+        let self_vars = collect_self_instance_vars(arenas, body, &c.name);
+        body_ever_assigns_property(arenas, body, prop, &self_vars)
     })
 }
 
@@ -103,7 +114,10 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
     fqn: &str,
     prop: &str,
 ) -> bool {
-    if class_ever_assigns_property(c, prop) {
+    let Some(arenas) = checker.syntax_arenas() else {
+        return false;
+    };
+    if class_ever_assigns_property(arenas, c, prop) {
         return true;
     }
     let mut current = checker
@@ -144,13 +158,42 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
 }
 
 fn body_ever_assigns_property(
-    stmts: &[StmtNode],
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
     prop: &str,
     self_vars: &FxHashSet<String>,
 ) -> bool {
-    stmts
-        .iter()
-        .any(|s| stmt_ever_assigns_property(s, prop, self_vars))
+    struct Search<'a> {
+        prop: &'a str,
+        self_vars: &'a FxHashSet<String>,
+        found: bool,
+    }
+    impl Visitor for Search<'_> {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            if self.found {
+                return;
+            }
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            if let StmtKind::Expression(expr) = &stmt.kind
+                && initializes_property(arenas, *expr, self.prop, self.self_vars)
+            {
+                self.found = true;
+                return;
+            }
+            arena::walk_stmt(self, arenas, id);
+        }
+
+        fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+    }
+    let mut search = Search {
+        prop,
+        self_vars,
+        found: false,
+    };
+    arena::walk_stmts(&mut search, arenas, stmts);
+    search.found
 }
 
 /// Recurses through every nested statement looking for a
@@ -160,17 +203,18 @@ fn body_ever_assigns_property(
 /// conditional - deliberately permissive, unlike a real dataflow
 /// guarantee. Doesn't descend into a closure/arrow-fn's own body; a
 /// property assigned only inside one is an accepted gap.
-fn stmt_ever_assigns_property(stmt: &StmtNode, prop: &str, self_vars: &FxHashSet<String>) -> bool {
-    any_stmt_in_body(
-        stmt,
-        |s| matches!(&s.kind, StmtKind::Expression(e) if initializes_property(e, prop, self_vars)),
-    )
-}
-
-fn initializes_property(e: &ExprNode, prop: &str, self_vars: &FxHashSet<String>) -> bool {
-    match &e.kind {
+fn initializes_property(
+    arenas: &NodeArenas,
+    id: ExprId,
+    prop: &str,
+    self_vars: &FxHashSet<String>,
+) -> bool {
+    let Some(expr) = arenas.expr(id) else {
+        return false;
+    };
+    match &expr.kind {
         ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => {
-            is_tracked_property(lhs, prop, self_vars)
+            is_tracked_property(arenas, *lhs, prop, self_vars)
         }
         // `$this->x ??= $default;` is real PHP's canonical lazy-init
         // idiom for a typed property specifically because `??=`'s
@@ -178,21 +222,29 @@ fn initializes_property(e: &ExprNode, prop: &str, self_vars: &FxHashSet<String>)
         // `isset()` is exempted from the "must not be accessed before
         // initialization" error a raw read throws.
         ExprKind::CompoundAssign(BinOp::Coalesce, lhs, _) => {
-            is_tracked_property(lhs, prop, self_vars)
+            is_tracked_property(arenas, *lhs, prop, self_vars)
         }
         _ => false,
     }
 }
 
-fn is_tracked_property(e: &ExprNode, prop: &str, self_vars: &FxHashSet<String>) -> bool {
-    let ExprKind::PropertyAccess(base, name, _) = &e.kind else {
+fn is_tracked_property(
+    arenas: &NodeArenas,
+    id: ExprId,
+    prop: &str,
+    self_vars: &FxHashSet<String>,
+) -> bool {
+    let Some(expr) = arenas.expr(id) else {
         return false;
     };
-    if **name != *prop {
+    let ExprKind::PropertyAccess(base, name, _) = &expr.kind else {
+        return false;
+    };
+    if name.as_ref() != prop {
         return false;
     }
-    match &base.kind {
-        ExprKind::Variable(v) => **v == *"this" || self_vars.contains(v.as_ref()),
+    match arenas.expr(*base).map(|base| &base.kind) {
+        Some(ExprKind::Variable(v)) => v.as_ref() == "this" || self_vars.contains(v.as_ref()),
         _ => false,
     }
 }
@@ -201,50 +253,76 @@ fn is_tracked_property(e: &ExprNode, prop: &str, self_vars: &FxHashSet<String>) 
 /// static(...)`/a bare `new <ThisClass>(...)` anywhere in `stmts` -
 /// scoped to the single, common `$var = new ...;` expression-statement
 /// shape, not e.g. a ternary-wrapped `new`.
-fn collect_self_instance_vars(stmts: &[StmtNode], class_name: &str) -> FxHashSet<String> {
+fn collect_self_instance_vars(
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
+    class_name: &str,
+) -> FxHashSet<String> {
     let mut vars = FxHashSet::default();
-    collect_self_instance_vars_into(stmts, class_name, &mut vars);
+    collect_self_instance_vars_into(arenas, stmts, class_name, &mut vars);
     vars
 }
 
 fn collect_self_instance_vars_into(
-    stmts: &[StmtNode],
+    arenas: &NodeArenas,
+    stmts: &[StmtId],
     class_name: &str,
     vars: &mut FxHashSet<String>,
 ) {
-    for stmt in stmts {
-        any_stmt_in_body(stmt, |s| {
-            if let StmtKind::Expression(e) = &s.kind
-                && let ExprKind::Assign(lhs, rhs) = &e.kind
-                && let ExprKind::Variable(v) = &lhs.kind
-                && is_new_self_instance(rhs, class_name)
-            {
-                vars.insert(v.to_string());
-            }
-            false
-        });
+    struct Find<'a> {
+        class_name: &'a str,
+        vars: &'a mut FxHashSet<String>,
     }
+    impl Visitor for Find<'_> {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            if let StmtKind::Expression(expr) = &stmt.kind
+                && let Some(ExprKind::Assign(lhs, rhs)) = arenas.expr(*expr).map(|expr| &expr.kind)
+                && let Some(ExprKind::Variable(var)) = arenas.expr(*lhs).map(|lhs| &lhs.kind)
+                && is_new_self_instance(arenas, *rhs, self.class_name)
+            {
+                self.vars.insert(var.to_string());
+            }
+            arena::walk_stmt(self, arenas, id);
+        }
+
+        fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+    }
+    let mut find = Find { class_name, vars };
+    arena::walk_stmts(&mut find, arenas, stmts);
 }
 
-fn is_new_self_instance(e: &ExprNode, class_name: &str) -> bool {
-    syntax::stack::guard(|| {
-        match &e.kind {
+fn is_new_self_instance(arenas: &NodeArenas, id: ExprId, class_name: &str) -> bool {
+    let mut id = id;
+    loop {
+        let Some(expr) = arenas.expr(id) else {
+            return false;
+        };
+        match &expr.kind {
             ExprKind::New(callee, _) => {
-                let ExprKind::Name(name) = &callee.kind else {
+                let Some(ExprKind::Name(name)) = arenas.expr(*callee).map(|callee| &callee.kind)
+                else {
                     return false;
                 };
+                let Some(name) = arenas.qualified_name(name) else {
+                    return false;
+                };
+                let name: &str = name.written.as_ref();
                 let name = name.trim_start_matches('\\');
-                name.eq_ignore_ascii_case("self")
+                let class_suffix = format!("\\{class_name}");
+                return name.eq_ignore_ascii_case("self")
                     || name.eq_ignore_ascii_case("static")
                     || name == class_name
-                    || name.ends_with(&format!("\\{class_name}"))
+                    || name.ends_with(class_suffix.as_str());
             }
             // A chained assignment (`$node = $tag->node = new static;`)
             // whose right-hand side is itself another `Assign`, not a bare
             // `New` - unwrapped recursively until the actual `new` expression
             // at the tail is reached.
-            ExprKind::Assign(_, rhs) => is_new_self_instance(rhs, class_name),
-            _ => false,
+            ExprKind::Assign(_, rhs) => id = *rhs,
+            _ => return false,
         }
-    })
+    }
 }

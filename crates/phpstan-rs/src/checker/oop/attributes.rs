@@ -46,6 +46,10 @@ impl<'a> Checker<'a> {
     /// `Attribute::TARGET_*` flags match where this one is used, are
     /// checked too - see `check_attribute_targets` below.
     pub(crate) fn check_attributes(&mut self, attrs: &[Attribute], label: &str) {
+        let syntax_owner = self
+            .syntax_tree_owner()
+            .expect("attribute arguments retain their parsed file owner");
+        let arenas = syntax_owner.arenas();
         for attr in attrs {
             let fqn = self.resolve_class_name(&attr.name);
             // `lookup_class` (case-insensitive fallback), not a bare
@@ -88,7 +92,7 @@ impl<'a> Checker<'a> {
             // `attribute.noConstructor` on every real, legal use.
             let ctor_sig = self.registry.lookup_method(&canonical, "__construct");
             let Some(ctor_sig) = ctor_sig else {
-                if !attr.args.is_empty() {
+                if !arenas.args(attr.args.clone()).is_empty() {
                     self.report(format!(
                             "Attribute class {canonical} does not have a constructor and must be instantiated without any parameters."
                         ),
@@ -108,14 +112,17 @@ impl<'a> Checker<'a> {
                 );
             }
             let mut locals = self.new_locals();
-            for a in &attr.args {
-                self.check_expr(&a.value, &mut locals, label);
+            let args = arenas.args(attr.args.clone());
+            for a in args {
+                if let Some(value) = arenas.expr(a.value) {
+                    self.check_expr(value, &mut locals, label);
+                }
             }
             self.check_args(CheckArgsCall {
                 callee_label: CalleeLabel::Constructor(&canonical),
                 callee: crate::checker::calls::parameters::Callee::AttributeConstructor(&canonical),
                 sig: ctor_sig,
-                args: &attr.args,
+                args,
                 locals: &mut locals,
                 defining_class: Some(&canonical),
                 is_builtin: self.registry.is_builtin_class(&canonical),
@@ -228,7 +235,11 @@ impl<'a> Checker<'a> {
         let Some(first) = consts.first() else {
             return;
         };
-        if first.attrs.is_empty() {
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let attrs = syntax_owner.arenas().attributes(first.attrs.clone());
+        if attrs.is_empty() {
             return;
         }
         if self
@@ -248,8 +259,8 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        self.check_attributes(&first.attrs, label);
-        self.check_attribute_targets(&first.attrs, ATTRIBUTE_TARGET_CONSTANT, "constant");
+        self.check_attributes(attrs, label);
+        self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_CONSTANT, "constant");
     }
 
     /// Mirrors real PHPStan's `NonClassAttributeClassRule` - a

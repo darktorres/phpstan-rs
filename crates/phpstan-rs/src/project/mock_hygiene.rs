@@ -49,9 +49,9 @@ fn is_test_helper_call(arenas: &NodeArenas, id: ExprId, name: &str) -> Option<Ar
     match &arenas.expr(id)?.kind {
         ExprKind::MethodCall(recv, method, args, _)
             if method.eq_ignore_ascii_case(name)
-                && matches!(arenas.expr(*recv).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") =>
+                && matches!(arenas.expr(recv.clone()).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") =>
         {
-            Some(*args)
+            Some(args.clone())
         }
         ExprKind::StaticCall(StaticTarget::Name(target), method, args)
             if method.eq_ignore_ascii_case(name)
@@ -59,7 +59,7 @@ fn is_test_helper_call(arenas: &NodeArenas, id: ExprId, name: &str) -> Option<Ar
                     .iter()
                     .any(|t| target.eq_ignore_ascii_case(t)) =>
         {
-            Some(*args)
+            Some(args.clone())
         }
         _ => None,
     }
@@ -72,7 +72,13 @@ fn chain(arenas: &NodeArenas, id: ExprId) -> Vec<(&str, &[Arg], Span)> {
     while let Some(node) = arenas.expr(current)
         && let ExprKind::MethodCall(recv, method, args, _) = &node.kind
     {
-        out.push((method.as_ref(), arenas.args(*args), node.span));
+        out.push((
+            method.as_ref(),
+            arenas.args(args.clone()),
+            arenas
+                .expr_span(node.id)
+                .expect("call expression has a parallel span"),
+        ));
         current = *recv;
     }
     out.reverse();
@@ -120,7 +126,7 @@ fn mock_origin(arenas: &NodeArenas, id: ExprId) -> Option<bool> {
 fn origin_key(arenas: &NodeArenas, id: ExprId) -> Option<String> {
     match &arenas.expr(id)?.kind {
         ExprKind::Variable(name) => Some(format!("${name}")),
-        ExprKind::PropertyAccess(object, prop, _) if matches!(arenas.expr(*object).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") => {
+        ExprKind::PropertyAccess(object, prop, _) if matches!(arenas.expr(object.clone()).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") => {
             Some(format!("this->{prop}"))
         }
         _ => None,
@@ -233,11 +239,11 @@ impl<'a> Walker<'a> {
             );
         }
         let mut class_origins = FxHashMap::default();
-        for m in arenas.methods(def.methods) {
+        for m in arenas.methods(def.methods.clone()) {
             collect_origins(arenas, m.function.body_stmts(arenas), &mut class_origins);
         }
         class_origins.retain(|k, _| k.starts_with("this->"));
-        for m in arenas.methods(def.methods) {
+        for m in arenas.methods(def.methods.clone()) {
             let mut origins = class_origins.clone();
             collect_origins(arenas, m.function.body_stmts(arenas), &mut origins);
             let previous = std::mem::replace(&mut self.origins, origins);
@@ -267,7 +273,12 @@ impl<'a> Walker<'a> {
             let span = calls
                 .iter()
                 .find(|(m, _, _)| m.eq_ignore_ascii_case("with"))
-                .map_or(e.span, |(_, _, s)| *s);
+                .map_or(
+                    arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
+                    |(_, _, s)| *s,
+                );
             self.report(
                 span,
                 "->with() on a method configured without ->expects() is never verified; add an expectation or drop the argument constraint.".to_string(),
@@ -285,14 +296,14 @@ impl<'a> Walker<'a> {
             && origin_key(arenas, base).and_then(|k| self.origins.get(&k).copied()) == Some(true)
         {
             self.report(
-                e.span,
+                arenas.expr_span(e.id).expect("expression has a parallel span"),
                 "A mock configured with ->method() but no ->expects() is a stub in disguise; create it with createStub(), or state the expected calls.".to_string(),
                 "mock.methodWithoutExpects",
             );
         }
         if has("willReturnOnConsecutiveCalls") && has("willReturnCallback") {
             self.report(
-                e.span,
+                arenas.expr_span(e.id).expect("expression has a parallel span"),
                 "willReturnOnConsecutiveCalls() and willReturnCallback() configure the same return; keep one.".to_string(),
                 "mock.conflictingReturns",
             );
@@ -321,7 +332,7 @@ impl Visitor for Walker<'_> {
             return;
         };
         if def.kind == ClassKind::Enum {
-            for m in arenas.methods(def.methods) {
+            for m in arenas.methods(def.methods.clone()) {
                 arena::walk_stmts(self, arenas, m.function.body_stmts(arenas));
             }
         } else {
@@ -333,11 +344,13 @@ impl Visitor for Walker<'_> {
         let Some(e) = arenas.expr(id) else { return };
         if let ExprKind::MethodCall(_, method, args, _) = &e.kind
             && method.eq_ignore_ascii_case("expects")
-            && let Some(arg) = arenas.args(*args).first()
+            && let Some(arg) = arenas.args(args.clone()).first()
             && is_test_helper_call(arenas, arg.value, "any").is_some()
         {
             self.report(
-                e.span,
+                arenas
+                    .expr_span(e.id)
+                    .expect("expression has a parallel span"),
                 "->expects($this->any()) asserts nothing; use a stub, or an explicit call count."
                     .to_string(),
                 "mock.expectsAny",
@@ -354,7 +367,7 @@ impl Visitor for Walker<'_> {
             )
         {
             self.report(
-                e.span,
+                arenas.expr_span(e.id).expect("expression has a parallel span"),
                 "atLeast(0) matches any number of calls, including none; use at least 1, or a stub.".to_string(),
                 "mock.atLeastZero",
             );
@@ -362,7 +375,8 @@ impl Visitor for Walker<'_> {
         if !self.banned.is_empty() {
             for factory in MOCK_FACTORIES {
                 if let Some(args) = is_test_helper_call(arenas, id, factory)
-                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class))) = args
+                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class))) = arenas
+                        .args(args.clone())
                         .first()
                         .and_then(|a| arenas.expr(a.value))
                         .map(|e| &e.kind)
@@ -376,7 +390,7 @@ impl Visitor for Walker<'_> {
                         .any(|b| b.trim_start_matches('\\').eq_ignore_ascii_case(resolved))
                     {
                         self.report(
-                            e.span,
+                            arenas.expr_span(e.id).expect("expression has a parallel span"),
                             format!("{resolved} must not be mocked; use a real instance or a purpose-built fake."),
                             "mock.bannedClass",
                         );
@@ -424,7 +438,10 @@ impl Project {
 fn native_members(hint: &TypeHint, arenas: &NodeArenas) -> Vec<Vec<String>> {
     fn part(hint: &TypeHint, arenas: &NodeArenas) -> String {
         match &hint.kind {
-            TypeHintKind::Name(name) => name.resolved_class().unwrap_or(&name.written).to_string(),
+            TypeHintKind::Name(range) => arenas
+                .qualified_name(range)
+                .map(|name| name.resolved_class().unwrap_or(&name.written).to_string())
+                .unwrap_or_else(|| "<unknown>".to_string()),
             TypeHintKind::Keyword(_, written) => written.to_ascii_lowercase(),
             _ => hint.to_string_with(arenas),
         }

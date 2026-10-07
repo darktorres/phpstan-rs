@@ -112,7 +112,7 @@ impl Place {
                     if matches!(&base_node.kind, ExprKind::Variable(v) if **v == *"GLOBALS") {
                         let name = (*key)
                             .and_then(|id| arenas.peeled(id).and_then(|id| arenas.expr(id)))
-                            .and_then(literal_string_value)
+                            .and_then(|node| literal_string_value(arenas, node.id))
                             .map(|name| Name::from(&*name));
                         return Some(Place::root(Root::Global(name)));
                     }
@@ -335,7 +335,9 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
                 out.push(Origin::New(Some(QualifiedName {
                     written: Name::from("stdClass"),
                     resolved: ResolvedName::Exact(Name::from("stdClass")),
-                    span: e.span,
+                    span: arenas
+                        .expr_span(e.id)
+                        .expect("expression has a parallel span"),
                 })));
                 out
             }
@@ -391,7 +393,7 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
             }
             ExprKind::Match { arms, .. } => {
                 let mut out = Vec::new();
-                for arm in arms {
+                for arm in arenas.match_arms(arms.clone()) {
                     out.extend(origins_of(arenas, arm.body)?);
                 }
                 out
@@ -412,7 +414,9 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
                 .map(|callee| &callee.kind)
             {
                 Some(ExprKind::Name(name)) => {
-                    vec![Origin::Returned(Callee::Function(name.clone()))]
+                    vec![Origin::Returned(Callee::Function(
+                        arenas.qualified_name(name)?.clone(),
+                    ))]
                 }
                 _ => return None,
             },
@@ -421,7 +425,7 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
                 method: Some(method.name.clone()),
             })],
             ExprKind::StaticCall(target, method, _) => {
-                vec![Origin::Returned(static_callee(target, method))]
+                vec![Origin::Returned(static_callee(arenas, target, method))]
             }
             ExprKind::New(callee, _) => vec![Origin::New(
                 match arenas
@@ -429,7 +433,7 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
                     .and_then(|id| arenas.expr(id))
                     .map(|callee| &callee.kind)
                 {
-                    Some(ExprKind::Name(name)) => Some(name.clone()),
+                    Some(ExprKind::Name(name)) => Some(arenas.qualified_name(name)?.clone()),
                     _ => None,
                 },
             )],
@@ -571,7 +575,8 @@ impl Summarizer {
                 Some(Callable::Written(self.closure_id(id)))
             }
             ExprKind::ArrayLiteral(items) => {
-                let [first, second] = &items[..] else {
+                let items = arenas.array_items(items.clone());
+                let [first, second] = items else {
                     return None;
                 };
                 let positional = |item: &ArrayItem, at: i64| {
@@ -589,7 +594,11 @@ impl Summarizer {
                     return None;
                 }
                 let method = literal_string_value(
-                    arenas.peeled(second.value).and_then(|id| arenas.expr(id))?,
+                    arenas,
+                    arenas
+                        .peeled(second.value)
+                        .and_then(|id| arenas.expr(id))?
+                        .id,
                 )?;
                 let first_value = arenas.peeled(first.value).and_then(|id| arenas.expr(id))?;
                 let target = match &first_value.kind {
@@ -728,7 +737,7 @@ fn hint_classes(hint: Option<&TypeHint>, arenas: &NodeArenas) -> Option<Box<[Qua
                 | NativeType::True
                 | NativeType::False => {}
             },
-            TypeHintKind::Name(name) => out.push(name.clone()),
+            TypeHintKind::Name(names) => out.extend(arenas.qualified_names(names).iter().cloned()),
             TypeHintKind::Nullable(inner) => add(inner, arenas, out)?,
             TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
                 for member in arenas.type_hints(members) {
@@ -906,6 +915,7 @@ fn new_instance_class(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
             else {
                 return None;
             };
+            let name = arenas.qualified_name(name)?;
             Some(Name::from(name.trim_start_matches('\\')))
         }
         ExprKind::Assign(_, rhs) => new_instance_class(arenas, *rhs),
@@ -1072,7 +1082,7 @@ impl Summarizer {
     /// scope of its own, which takes `captures` from the one the walk is in.
     fn closure(
         &mut self,
-        _arenas: &NodeArenas,
+        arenas: &NodeArenas,
         id: ExprId,
         params: &[Param],
         captures: Option<Box<[(Name, bool)]>>,
@@ -1366,7 +1376,8 @@ impl Summarizer {
 
     /// A call, with the arguments that are places and those that name a
     /// callable.
-    fn call(&mut self, arenas: &NodeArenas, callee: Callee, args: &[Arg]) {
+    fn call(&mut self, arenas: &NodeArenas, callee: Callee, args: ArgRange) {
+        let args = arenas.args(args);
         let mut spread = false;
         let mut arguments = Vec::new();
         let mut places = Vec::new();
@@ -1404,7 +1415,7 @@ impl Summarizer {
                     .and_then(|id| arenas.expr(id))
                     .map(|callee| &callee.kind)
                 {
-                    Some(ExprKind::Name(name)) => Some(name.clone()),
+                    Some(ExprKind::Name(name)) => Some(arenas.qualified_name(name)?.clone()),
                     _ => None,
                 },
             )),
@@ -1429,8 +1440,11 @@ impl Summarizer {
                 .map(|callee| &callee.kind)
             {
                 Some(ExprKind::Name(name)) => {
+                    let name = arenas
+                        .qualified_name(name)
+                        .expect("call name range belongs to its retained file owner");
                     self.purity_call(PurityCall::Function(name.clone()));
-                    self.call(arenas, Callee::Function(name.clone()), args);
+                    self.call(arenas, Callee::Function(name.clone()), args.clone());
                 }
                 _ => {
                     self.impure_unless_in_closure(true);
@@ -1447,7 +1461,7 @@ impl Summarizer {
                             },
                         ),
                     };
-                    self.call(arenas, callee, args);
+                    self.call(arenas, callee, args.clone());
                 }
             },
             ExprKind::MethodCall(recv, method, args, _) => {
@@ -1465,7 +1479,7 @@ impl Summarizer {
                         receiver: receiver(arenas, *recv),
                         method: Some(method.name.clone()),
                     },
-                    args,
+                    args.clone(),
                 );
             }
             ExprKind::DynamicMethodCall(recv, _, args, _) => self.call(
@@ -1474,7 +1488,7 @@ impl Summarizer {
                     receiver: receiver(arenas, *recv),
                     method: None,
                 },
-                args,
+                args.clone(),
             ),
             ExprKind::StaticCall(target, method, args) => {
                 match target.as_name() {
@@ -1483,7 +1497,7 @@ impl Summarizer {
                     }
                     None => self.impure_unless_in_closure(true),
                 }
-                self.call(arenas, static_callee(target, method), args);
+                self.call(arenas, static_callee(arenas, target, method), args.clone());
             }
             ExprKind::DynamicStaticCall(target, _, args) => self.call(
                 arenas,
@@ -1491,7 +1505,7 @@ impl Summarizer {
                     class: target.as_name().cloned(),
                     method: None,
                 },
-                args,
+                args.clone(),
             ),
             ExprKind::New(callee, args) => match arenas
                 .peeled(*callee)
@@ -1499,12 +1513,15 @@ impl Summarizer {
                 .map(|callee| &callee.kind)
             {
                 Some(ExprKind::Name(name)) => {
+                    let name = arenas
+                        .qualified_name(name)
+                        .expect("constructor name range belongs to its retained file owner");
                     self.purity_call(PurityCall::New(name.clone()));
-                    self.call(arenas, Callee::New(Some(name.clone())), args);
+                    self.call(arenas, Callee::New(Some(name.clone())), args.clone());
                 }
                 _ => {
                     self.impure_unless_in_closure(true);
-                    self.call(arenas, Callee::New(None), args);
+                    self.call(arenas, Callee::New(None), args.clone());
                 }
             },
             ExprKind::NewAnonymousClass(class_id) => {
@@ -1512,7 +1529,7 @@ impl Summarizer {
                     self.call(
                         arenas,
                         Callee::Anonymous(arenas.anonymous_class_name(*class_id).cloned()),
-                        arenas.args(class.args),
+                        class.args.clone(),
                     );
                 }
             }
@@ -1538,7 +1555,10 @@ fn writes_computed_variables(arenas: &NodeArenas, id: ExprId) -> bool {
     else {
         return false;
     };
-    let args = arenas.args(*args);
+    let Some(name) = arenas.qualified_name(name) else {
+        return false;
+    };
+    let args = arenas.args(args.clone());
     let name = name.written.trim_start_matches('\\');
     name.eq_ignore_ascii_case("extract")
         || ((name.eq_ignore_ascii_case("parse_str") || name.eq_ignore_ascii_case("mb_parse_str"))
@@ -1585,8 +1605,8 @@ fn property_write_target(arenas: &NodeArenas, id: ExprId) -> bool {
 
 /// What `target::method()` calls: a method, or the parent class's hook of a
 /// property (`parent::$property::get()`).
-fn static_callee(target: &StaticTarget, method: &Ident) -> Callee {
-    if let Some(property) = target.parent_hook_property() {
+fn static_callee(arenas: &NodeArenas, target: &StaticTarget, method: &Ident) -> Callee {
+    if let Some(property) = target.parent_hook_property(arenas) {
         for (name, set) in [("get", false), ("set", true)] {
             if method.name.eq_ignore_ascii_case(name) {
                 return Callee::ParentHook {
@@ -1699,6 +1719,7 @@ impl Visitor for Summarizer {
                     }
                 }
                 StmtKind::Switch { subject, cases } => {
+                    let cases = arenas.switch_cases(cases.clone());
                     let tests = || cases.iter().filter_map(|case| case.test);
                     if tests().any(|test| may_be_string(arenas, test)) {
                         self.implicit(arenas, *subject, Operation::String);
@@ -1755,7 +1776,7 @@ impl Visitor for Summarizer {
                     }
                 }
                 StmtKind::Global(vars) => {
-                    for var in vars {
+                    for var in arenas.global_vars(vars.clone()) {
                         match var {
                             GlobalVar::Name(name) => self.bind(
                                 Some(name.name.clone()),
@@ -1769,8 +1790,8 @@ impl Visitor for Summarizer {
                     }
                 }
                 StmtKind::StaticVar(vars) => {
-                    for (name, _) in vars {
-                        self.bind(Some(name.name.clone()), Binding::Static);
+                    for variable in arenas.static_vars(vars.clone()) {
+                        self.bind(Some(variable.name.name.clone()), Binding::Static);
                     }
                 }
                 _ => {}
@@ -1931,7 +1952,7 @@ impl Visitor for Summarizer {
                     }
                 }
                 ExprKind::Exit(_, Some(args)) => {
-                    if let Some(arg) = args.first() {
+                    if let Some(arg) = arenas.args(args.clone()).first() {
                         self.implicit(arenas, arg.value, Operation::String);
                     }
                 }
@@ -1946,7 +1967,11 @@ impl Visitor for Summarizer {
                     self.implicit(arenas, *inner, Operation::Iterate { keys: true });
                 }
                 ExprKind::ArrayLiteral(items) => {
-                    for item in items.iter().filter(|item| item.spread) {
+                    for item in arenas
+                        .array_items(items.clone())
+                        .iter()
+                        .filter(|item| item.spread)
+                    {
                         self.implicit(arenas, item.value, Operation::Iterate { keys: true });
                     }
                 }
@@ -1957,8 +1982,8 @@ impl Visitor for Summarizer {
                     let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
                         return;
                     };
-                    let captures = closure
-                        .uses
+                    let captures = arenas
+                        .closure_uses(&closure.uses)
                         .iter()
                         .map(|u| (u.name.name.clone(), u.by_ref))
                         .collect();
@@ -1966,7 +1991,7 @@ impl Visitor for Summarizer {
                     self.closure(
                         arenas,
                         id,
-                        arenas.params(closure.params),
+                        arenas.params(closure.params.clone()),
                         Some(captures),
                         |walk| {
                             arena::walk_expr(walk, arenas, id);
@@ -1979,9 +2004,13 @@ impl Visitor for Summarizer {
                         return;
                     };
                     self.closures += 1;
-                    self.closure(arenas, id, arenas.params(arrow.params), None, |walk| {
-                        arena::walk_expr(walk, arenas, id)
-                    });
+                    self.closure(
+                        arenas,
+                        id,
+                        arenas.params(arrow.params.clone()),
+                        None,
+                        |walk| arena::walk_expr(walk, arenas, id),
+                    );
                     self.closures -= 1;
                 }
                 ExprKind::FirstClassCallable(call) => {

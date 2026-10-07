@@ -458,7 +458,7 @@ impl Visitor for ClassFnRefWalker<'_> {
 
     fn visit_attribute(&mut self, arenas: &NodeArenas, attribute: &Attribute) {
         self.class_at(&attribute.name, attribute.name.span);
-        for arg in arenas.args(attribute.args) {
+        for arg in arenas.args(attribute.args.clone()) {
             self.visit_arg(arenas, arg);
         }
     }
@@ -471,23 +471,36 @@ impl Visitor for ClassFnRefWalker<'_> {
                 // class; only the arguments are walked.
                 ExprKind::Call(callee, args) | ExprKind::New(callee, args)
                     if matches!(
-                        arenas.expr(*callee).map(|node| &node.kind),
+                        arenas.expr(callee.clone()).map(|node| &node.kind),
                         Some(ExprKind::Name(_))
                     ) =>
                 {
-                    let Some(callee_node) = arenas.expr(*callee) else {
+                    let Some(callee_node) = arenas.expr(callee.clone()) else {
                         return;
                     };
                     let ExprKind::Name(n) = &callee_node.kind else {
                         unreachable!()
                     };
+                    let Some(n) = arenas.qualified_name(n) else {
+                        return;
+                    };
                     if matches!(expr.kind, ExprKind::Call(..)) {
-                        self.function_at(n, callee_node.span);
+                        self.function_at(
+                            n,
+                            arenas
+                                .expr_span(callee_node.id)
+                                .expect("callee expression has a parallel span"),
+                        );
                     } else {
-                        self.class_at(n, callee_node.span);
+                        self.class_at(
+                            n,
+                            arenas
+                                .expr_span(callee_node.id)
+                                .expect("callee expression has a parallel span"),
+                        );
                     }
-                    for arg in arenas.args(*args) {
-                        self.visit_arg(arg);
+                    for arg in arenas.args(args.clone()) {
+                        self.visit_arg(arenas, arg);
                     }
                     return;
                 }
@@ -496,10 +509,17 @@ impl Visitor for ClassFnRefWalker<'_> {
                 | ExprKind::StaticPropertyFetch(StaticTarget::Name(class), _)
                 | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class), _)
                 | ExprKind::StaticCall(StaticTarget::Name(class), _, _) => {
-                    self.class_at(class, expr.span);
+                    self.class_at(
+                        class,
+                        arenas
+                            .expr_span(expr.id)
+                            .expect("expression has a parallel span"),
+                    );
                 }
                 ExprKind::Instanceof(_, InstanceofTarget::Name(name)) => {
-                    self.class_at(name, name.span);
+                    if let Some(name) = arenas.qualified_name(name) {
+                        self.class_at(name, name.span);
+                    }
                 }
                 _ => {}
             }
