@@ -1769,7 +1769,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
 
 **Design.**
 1. **`peeled` becomes a loop**, with no guard. This step comes first, on its own.
-2. **A file's tree is a handful of typed arenas, addressed by index.** `ParsedFile` has no lifetime and owns:
+2. **A retained file tree is a handful of typed arenas, addressed by index.** `ParsedFile` has no lifetime and owns:
    - `source: Box<[u8]>`, the file's bytes as read;
    - `names: Box<[Name]>`, each distinct name of the file once, which a node refers to by `NameId(u32)`;
    - `exprs: Arena<ExprNode>` and `stmts: Arena<StmtNode>`, with their spans in parallel vectors;
@@ -1790,7 +1790,7 @@ Exact, except one case listed in §11: a `@property` tag shadowed by a declared 
    
    **The arenas are `la-arena`'s** (0.3.1), the crate rust-analyzer's `Body` uses. `Arena<T>` is a `Vec<T>`, `Idx<T>` a `u32` that is `Copy` and typed by what it indexes, `IdxRange<T>` a typed `Range<u32>`, and `ArenaMap` a dense side table. The crate has no `unsafe`. The types keep an expression's id from indexing statements, which bare `u32`s would not.
    - **A kept tree** is a few exact-size allocations.
-   - **A tree that is not kept** (item 3) is built in the worker's scratch store, a set of the same vectors cleared between files, so a context file allocates nothing for its tree once the worker has warmed up.
+   - **A tree that is not kept** (item 3) is built in the worker's scratch store, a set of the same vectors cleared between files, so a context file allocates nothing for its tree once the worker has warmed up. Its transient parse does not copy the source bytes or build the file-local name table and `NameId`s: the tree is discarded after its declarations, references and other products are collected. Names needed during that collection remain on the recursive AST values. Transient `Ident`s therefore have no `NameId`; no reader may retain them or resolve a name through the file table.
    - **The lexer puts each distinct name in `names` once.** This holds whether it still streams (before item 10) or lexes the whole file first (after it).
 3. **Nodes by index.**
    - `ExprId` and `StmtId` (`Idx<ExprNode>`, `Idx<StmtNode>`) are `Copy` and carry no lifetime. So no `'a` runs through the checker, through item 18's persistent scopes, or through the language server's caches.
