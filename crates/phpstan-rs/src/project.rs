@@ -203,7 +203,6 @@ impl SyntaxTree {
         self.name(ident.name_id?)
     }
 
-    #[allow(dead_code)] // Used by file-scoped expression readers in row 9.3.
     pub(crate) fn expr_span(&self, id: syntax::ast::ExprId) -> Option<Span> {
         self.expr_spans
             .get(u32::from(id.into_raw()) as usize)

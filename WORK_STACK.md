@@ -249,7 +249,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   owner directly into project state (`8a5c16ce`). The context AST LRU now
   retains an `Arc<SyntaxTree>` instead of only a statement vector, keeping the
   file-local source/name/span owner available for IDs after a context reparse
-  (unvalidated). Syntax depends on `la-arena` with typed
+  (`90acb6ac`, unvalidated). Syntax depends on `la-arena` with typed
   `ExprId`/`StmtId` aliases. `ExprArena`/`StmtArena` aliases are now named
   (`6611157d`), but are not yet owned or populated by the parser. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
