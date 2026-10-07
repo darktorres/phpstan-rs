@@ -16,8 +16,9 @@ that date.
 ## Where to resume
 
 1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
-   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first; each item ends with a
-   tests-only gate. Full §11 validation and O3 run once, after item 19. Only
+   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first; each item's gate runs
+   workspace and item-specific tests only (including their inherent compile).
+   Full §11 validation and O3 run once, after item 19. Only
    the rows that optimize are built now; the rest are DEFERRED.
 2. Then **level 8's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
@@ -236,7 +237,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   earlier recorded workspace build, oracle corpus runs, and fixture results
   (3,857 passed, 50 existing failures) were additional validation runs, not
   item-gate requirements. The 3.4 scratch-store row remains
-  with item 9. Item 9.2 is in progress: syntax parse results now own their
+  with item 9. Item 9.2 and row 3.4 are implementation-complete; 9.V remains
+  pending, and owner-backed reader migration in 9.3.e is active. Syntax parse
+  results now own their
   source bytes and the lexer's distinct names in first-use order; retained
   project trees carry both alongside the AST, while cache-only context
   entries and dropped context trees release them. Parser-created `Ident`s
@@ -270,16 +273,46 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   transient source/name omission tests are added but unrun. The parser restores scratch arenas on lexer or syntax
   errors, preserving capacity in the worker. A further unrun test verifies
   dense expression/statement IDs and every node span after arena reuse
-  (`7c3a4fac`). Row 3.4 is partial: workers pass the `NodeArenas` bundle
-  across transient parses and reuse span-table capacity, but the payload/list
-  arenas remain empty, so recursive AST nodes and lists still allocate per
-  file. Completing that reuse depends on item 9.2/9.3; the 9.V tests-only
-  gate remains pending. The IDs target
+  (`7c3a4fac`). Rows 9.2 and 3.4 are now implementation-complete: all five
+  specified list families and the function/method/class/closure/anonymous-
+  class payloads are arena-backed, appended fragments retain file-global IDs,
+  and transient parses return warmed capacities after success or failure.
+  New unrun tests cover list-range fragment append and retained/transient
+  capacity reuse. The 9.V tests-only gate remains pending. The item 9 ledger now breaks multi-part steps into
+  separately tracked subtasks, with parent rows summarizing their children.
+  The same breakdown is now present for compound implementation tasks in
+  items 10-19, derived from the 20G plan before those items begin; deferred
+  work and item test gates keep their existing status/order. The item 18 gate
+  now separately tracks its fixpoint replay assertion, randomized type
+  differential test, and radix merge assertion alongside the other test
+  selections.
+  The 9.2 parser now commits all five specified list families—arguments,
+  array items, parameters, match arms and attributes—to typed arenas, and AST
+  fields hold their `IdxRange`s. Interpolation subparsers receive file-global
+  bases for all five arenas; `NodeArenas` resolves ranges against local storage
+  before append and against the merged owner afterward. The unrun fragment
+  test now exercises all five list ranges; the capacity-reuse assertion covers
+  the argument arena.
+  Function, method, class-definition, closure/arrow and anonymous-class
+  payloads now commit to their typed arenas, with file-global IDs and fragment
+  append bases. Other child-list fields remain for 9.7. Owner-backed reader
+  migration resumes at 9.3 now that 9.2 and 3.4 storage work is complete. The
+  first checker consumers now resolve declaration, closure and anonymous-
+  class payloads through the file owner in function-like promotion and
+  uninitialized-property checks, enum checks, and trait checks. The LSP
+  document-symbol reader now carries the tree owner through recursive
+  statement traversal. No
+  item 9 tests or builds have run. 9.3 now resumes with `syntax::visit`,
+  declaration collection, canonical output and the expression printer
+  resolving payload IDs and typed ranges through `NodeArenas`; the legacy
+  resolver/`VisitorMut`, stub indexing and application readers remain. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
   and `StmtNode` signatures (`a2baf3cb`, `56cedf96`); parser methods now
   return those explicit node values (`36d608ba`), and AST child fields use the
-  node names (`e9c7fb2b`). Those fields still hold recursive values. Row 9.3
-  is in progress: the shared `NodeId` is
+  node names (`e9c7fb2b`). Most large payloads and list fields still use
+  `Box`/`Vec` ownership for other child lists; the five specified list
+  families and large payload variants are now arena-backed. Existing
+  row 9.3 migration remains partial: the shared `NodeId` is
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
   indices, and the inference cache is keyed by `ExprId` alone during a
   file's active expression check. Its checker entry point now takes that id
@@ -311,12 +344,277 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   name/source lookup and span alignment (`eee0c503`, `d0a45686`, `a42f63ab`),
   plus `Send + Sync`/`Copy` type invariants (`113b7869`); none have run. The
   workspace call sites now use `ExprNode`/`StmtNode` directly (`1de1a21a`);
-  the unused public `Expr`/`Stmt` aliases were removed (`11e69fee`). The AST
-  remains a recursive value tree. Arena commits
-  are not implemented, and no item gate or full
-  validation has run for item 9. AST children still use boxed/vector storage
-  and `Name` handles; the source copy is interim until payloads become source
-  ranges. Row 4.1 made
+  the unused public `Expr`/`Stmt` aliases were removed (`11e69fee`). Current
+  uncommitted item 9 work changes AST child links to typed IDs, allocates
+  parser-created expression and statement payloads in `NodeArenas`, returns an
+  owning `ParsedProgram`, and begins migrating parser readers. The visitor,
+  canonical/name-resolution readers, registry entry points, and
+  checker consumers still need conversion to resolve IDs through their file
+  owner. The declaration collector, anonymous-class registry scan, registry
+  guard evaluator, project file-declaration path, Composer hygiene fact and
+  reference scans, architecture construction and class-shape scans,
+  mock-hygiene scans, completion's declared-name scan, and unset-property
+  scan now pass the owner and typed IDs. The in-progress conversion also
+  moves `InitFlow`, `FileBodies`, and `GlobalFacts` to owner-backed reads;
+  `Registry::build`/`index_and_flatten` now accept the owner and typed
+  statement IDs. `BodySummary` now accepts owners and IDs, uses the arena
+  visitor, and keys closure/access side tables by `ExprId`. Its place,
+  callable, assignment, and shared-scope readers now resolve through the
+  owner; closure/function/property-hook callers now require the retained
+  owner. The purity-point walk and risky-test assertion scan and their checker
+  callers do the same. Magic-constant context facts and strict-rule
+  assignment-site scans now traverse owner-backed node IDs. Include
+  initializer facts now retain `ExprId`s and the
+  include-path prepasses resolve through the same owner. Row 9.6 now stores
+  IDs in the disjunction stack, initializer table, condition/query-builder
+  alias maps, and both ORM/DBAL chain cursors; it remains unvalidated pending
+  the item gate. The constructor/closure variable-usage scan now also walks
+  expression and statement IDs through the checker’s retained arena owner.
+  The whole-file closure-rebind prepass now does the same. These reader
+  changes remain unvalidated until item 9's tests-only gate. Class/function
+  use-site indexing now also traverses IDs through the syntax-tree owner,
+  including the architecture and Composer-hygiene readers. The class-shape
+  scan also resolves statements and expressions through the owner. Mock
+  hygiene now gets statement/expression IDs and class bodies from the same
+  owner-backed traversal. The declaration dependency collector now also
+  traverses statements and expressions through the file owner; its test
+  helpers use parsed arena IDs. Statement keyword and `declare` checks now
+  resolve their statements and expressions through the checker’s owner too.
+  The PHP expression printer now takes a `NodeArenas` owner and `ExprId`,
+  and its checker call sites pass those IDs rather than recursive nodes.
+  Class reflection construction and virtual-property hook readers now pass
+  the arena owner through to their ID-based hook scans.
+  The banned-construct/type project pass also walks root `StmtId`s and
+  recursive expression IDs through that owner.
+  PHP-version syntax gating now also walks arena IDs; its initializer,
+  receiver, and nested-`new` checks resolve expressions through the owner.
+  By-reference argument checks traverse access chains by `ExprId` as well.
+  File whitespace checks now inspect root and section-ending `StmtId`s via
+  the owner, removing another top-level recursive-AST reader.
+  Use-function/const/class import checks and same-file name-collision checks
+  now resolve top-level statement IDs through the owner too.
+  Pest's file-local `$this`/hook-property facts and parsed `Pest.php` facts
+  now follow statement and closure-expression IDs through the owner.
+  `Checker::check_program` now accepts root `StmtId`s, resolves statements
+  through the owner, and runs its debug span walk over arena IDs. The
+  PHPStan API pass uses an arena-aware namespace/import context walk too.
+  Function-like declaration checks now walk IDs for promotions and
+  by-reference return legality.
+  LSP navigation now follows arena IDs and keeps top-level probe scopes as
+  `StmtId`s for the checker. LSP signature help, catch-hygiene's nested
+  throw scan, the closure syntactic-return collector, premature-property
+  analysis, parent-constructor scan, uninitialized-property scans, loop
+  yield detection, private-member usage, gate template-scope/runtime-call
+  readers, edit-replay span readers, nested-declaration scans, and goto-region
+  discovery now traverse the owning tree's IDs. The member-reference defaults
+  collector also reads declaration/default expression IDs and nested bodies
+  through that same file owner.
+  NoopRule's side-effect search now visits expression IDs through the arena;
+  without a retained owner it conservatively skips this report.
+  Narrowing's condition-variable and assigned-value dependency probes now
+  use owner-backed expression IDs and decline to narrow without an owner.
+  The KeyTable structural-versus-rendered test also walks arena IDs and
+  resolves child nodes through the owner. Binary-precedence tests now group
+  expression trees and assert spans through the parsed file's arena. Parser
+  span, name-ID, and native type-hint tests now resolve declarations and
+  expression children through parsed-file IDs. The shared parser-test helper
+  now returns its arena-owning `ParsedProgram`; namespace/name test readers
+  resolve default and call expressions through its node IDs.
+  Statement/control-flow tests now resolve nested statement and expression
+  edges through the same test owner. Expression/operator tests now inspect
+  precedence, assignment, closure, yield, and dynamic-access shapes by ID.
+  Declaration tests resolve enum values, anonymous-class expressions, and
+  attribute arguments through the owner; string/interpolation tests resolve
+  nested expressions, statements, and spans through arena IDs. The name-
+  resolution tests now traverse parsed programs and query namespace contexts
+  through the owner-backed APIs. The arena visitor now exposes `any_child_*`
+  and `for_each_child_*` expression/statement APIs, including function-scope
+  searches; visitor tests exercise those walks with owner-backed IDs.
+  the obsolete mutable-walk test is removed for row 9.5.
+  Item gates are explicitly `cargo test --workspace` plus item-specific test
+  selections only; the test command's inherent compilation is allowed, and
+  the complete §11 validation remains after item 19. PHP-version readings,
+  server-session cases, warm-cache comparisons, and cross-platform runs are
+  explicitly final-validation work, not item-gate work.
+  Item 9 statement dispatch now resolves `for`/`foreach`/`while`/`do-while`,
+  switch cases, try/catch/finally bodies, and nested function payloads through
+  the retained owner. Switch case expressions and for-loop conditions now
+  follow typed IDs; the matching helpers take statement/expression IDs. No
+  item tests or builds have run. Remaining item 9 reader rows are still in
+  progress; 9.V remains closed until their implementation is complete.
+  Narrowing now resolves `isset` container chains, null-coalesce predicate
+  targets, assignment-valued comparisons, and spaceship comparison operands
+  by `ExprId` through `NodeArenas`. The ledger tracks these under 9.3.e.d;
+  validation remains deferred to 9.V.
+  Preg flag chains, PSR-3 interpolation, closure-context inference, postfix
+  nullsafe-chain walks, and unused-result wrapper reads now also follow IDs
+  through the owner. No item gate has run.
+  Duplicate-operand checks, discarded-exception detection, and castable-array
+  diagnostics also resolve grouping wrappers through the owning arena.
+  Implicit `$this` effect checks now resolve wrapper IDs through the
+  checker’s file owner as well.
+  Ledger items 10–19 now follow the same parent/child tracking as item 9:
+  compound implementation tasks and each tests-only gate have explicit
+  independently verifiable rows, including separate selections for the
+  item-specific tests. This pass split the remaining compound work for
+  heredoc diagnostics, published import scopes, PHPDoc memos, member-use
+  cases and deferred private-property writes. The final O3 profiling task is split
+  into its build/runtime measurements, heap measurements, and server heap.
+  The stub indexing path, remaining registry/test builders, and other
+  checker consumers still need migration. The
+  transient name-ID check uses the arena visitor too.
+  No tests or
+  builds have run for this conversion; the transient parse's missing-`NameId`
+  assertion now reads the expression arena directly instead of using the
+  recursive visitor. Composer's generated autoloader reader now retains its
+  `ParsedFile` and reads statement/expression IDs through the file's arenas.
+  This continuation also migrated global-constant scope facts, include
+  initializer collection, global-variable facts, member-reference defaults,
+  and checker import/declare/version-gate scans to resolve declaration and
+  closure payload IDs through `NodeArenas`. Additional migrations cover
+  `InitFlow`, call/effect summaries, constructor and closure variable-usage
+  facts, PHPStan-API class visits, mock-hygiene class scans, generic-bound and
+  access-attribute checks, risky-test method checks, and project declaration
+  indexing to owner-backed payload and range reads. Class-shape collection now
+  resolves class definitions and method/attribute ranges from `NodeArenas`.
+  Function and parameter reflection, class/member/parameter attributes,
+  promoted-constructor reads, duplicate-property checks, PHPDoc/native
+  signature checks, purity checks, and `array_filter` callback inspection also
+  resolve through the owning arenas. Body-summary collection and nested
+  class/method declaration checks use owner-backed ranges as well. Closure
+  context rebinding and parameter-override checks resolve payloads and params
+  through the owner. Anonymous-class checking and type inference now resolve
+  anonymous-class, closure and arrow-function payload IDs through their file
+  owner; callback return inference and spread-argument effect invalidation
+  read argument, parameter, expression and statement IDs through that owner.
+  The block checker now resolves statement IDs from the owner as it checks
+  them, retaining its goto-region convergence and unreachable-code reporting
+  without rebuilding statement nodes.
+  Closure and arrow-function checking now resolves payloads, parameter and
+  attribute ranges, closure body statements, and arrow body expressions
+  through the owner. The anonymous-class declaration index also resolves the
+  class and definition IDs through its arena visitor. Anonymous-class naming
+  now collects IDs in source order with that visitor and writes each name
+  through `anonymous_class_mut`; its test reader now uses the parsed owner.
+  Ledger row 9.3.d is closed: name resolution and stub transformation moved
+  to 9.5.a/e, while stub indexing is tracked with the owner-backed registry
+  consumers. Row 9.3.e is split into registry products, declaration
+  reflection, recursive checker paths, checker/project facts, and the stub
+  indexing work deferred to 9.5.a/e.
+  Edit-replay, gate-sample, parser-test, risky-test and Pest
+  closure readers were moved to their parsed-file owner too. No tests or builds
+  have run; item 9.3.e remains partial. Ledger row 9.3.d is now split into
+  canonical printers (done), synthetic stub-name resolution (folded into
+  9.5.a/e), anonymous-class naming/declaration readers (done), and the
+  immutable visitor removal (folded into 9.5.a/e). Stub indexing is tracked
+  under 9.3.e and the parse-time transformation under 9.5.a/e.
+  `cargo fmt --all` was run after these edits. Item 9 remains incomplete, so
+  item 10 has not started; the 9.V tests-only gate remains pending.
+  Owner-backed consumer work continued in 9.3.e/f: LSP navigation and
+  signature help now resolve call ranges and anonymous-class payloads through
+  the file owner; Composer's autoloader reader and its `__DIR__` parser test
+  use `ParsedFile`; Pest's call-chain readers resolve argument ranges through
+  `NodeArenas`. The ledger now tracks these 9.3.f deliverables separately.
+  `cargo fmt --all` ran. No tests or builds were run; 9.3.e/f remain partial.
+  Match checking and inference now read arm ranges, conditions, bodies,
+  defaults and subjects through the file's `NodeArenas`; the strict enum
+  default and void-match readers do the same. Magic-number checks now resolve
+  expression, argument, parameter-default, property-default, match and switch
+  IDs from that owner as well. Function, method and constructor call checking
+  now resolves callees, receivers and argument IDs through the owner, including
+  contextual closure arguments and XML literal checks. `cargo fmt --all` ran;
+  no tests or builds ran.
+  `check_expr_impl` now also resolves `instanceof`, ternary, index,
+  dynamic-variable, property, dynamic-property and interpolation operands
+  through the retained file owner. Array-literal checking and inference now
+  resolve each item/key ID and its typed range through `NodeArenas`, including
+  duplicate-key and spread inference helpers. Assignment and compound-
+  assignment operands now resolve through the same owner, and the container-
+  field alias probe uses `NodeArenas::peeled`. Formatting ran; tests and builds
+  remain deferred until the item 9 gate.
+  Destructuring's offset checks and implicit `ArrayAccess` walks now resolve
+  nested target and key IDs through the owner, including foreach destructures.
+  Nullsafe-assignment and assignability checks, plus the recursive
+  assignment-target read walk, now resolve peeled, receiver, index and
+  destructuring IDs through that owner as well.
+  Assignment binding, nested array-shape writes, unset-index updates,
+  by-reference parameter propagation, and statement `@var` destructuring
+  checks now carry the owner through recursive target/key reads.
+  Inference now resolves wrapped expressions, first-class-callable targets,
+  cast and unary operands, binary operands, and assignment values through the
+  same owner. The impossible-instanceof and outcome checks now also resolve
+  dynamic target IDs through the owner.
+  The shared call-argument resolver now turns named and positional argument
+  IDs into owner-backed nodes for function, method, constructor, builtin, and
+  PHPUnit assertion inference/narrowing paths. Builtin return-type cases now
+  and impossible-type predicate checks resolve their direct argument
+  expressions through the same owner. Filter/preg/JSON flag scans, compact's
+  nested names, `sscanf` format reads, and false-literal peeling now resolve
+  argument and array-item IDs through the owner as well. By-reference setup,
+  dynamic-callable checks, boolean/swap heuristics, inlay parameter hints,
+  `preg_quote` traversal, and `call_user_func(_array)` checks now resolve call
+  arguments and recursive operands through that owner. Parameter unpacking,
+  binding, type checks and by-reference validation also resolve through the
+  owner.
+  Strict-comparison mutable-property and loose/numeric-comparison property
+  probes now peel wrappers and follow expression and argument IDs through
+  `NodeArenas`. Quiet-root and always-exists probe walks now resolve index,
+  property and dynamic-property children through that owner too.
+  The impossible-haystack and opt-in loose-haystack comparison rules now
+  resolve needle, haystack and strictness argument IDs through the owner.
+  Useless-return-value and array-filter/array-values call checks, plus enum
+  `from`/`tryFrom` narrowing, now resolve their argument IDs through it too.
+  `exit`, static and dynamic method calls, and dynamic throw-type helpers now
+  resolve argument IDs through the retained owner as well. The same applies
+  to current-time and ini-directive checks, date constructor validation,
+  class-argument return inference, `define` values, format-string and strict
+  call checks, random/key-conversion rules, and attribute constructor args.
+  Global and class/trait constant value inference and function/class/member
+  existence guard narrowing now resolve IDs through `NodeArenas` too.
+  SQL text folding, DBAL query-builder argument chains, and connection
+  parameter validation now resolve expression and list IDs through the owner.
+  `in_array`'s literal-target narrowing and `count()` comparison and loop
+  readers now resolve their array and argument IDs through that owner too.
+  Strict null-coercion probes and identity-versus-equals checks now resolve
+  their expression IDs through the owner; enum match, switch and if-chain
+  readers do the same for subjects, conditions, cases and branches.
+  Strict-rule expression and statement readers now resolve recursive
+  operands, assignment targets, loop targets and switch case IDs through the
+  owner.
+  ArrayAccess read/write/probe chains, property writes and property-by-
+  reference checks, and current-time expression readers now resolve child IDs
+  through the retained tree owner.
+  Nested declaration discovery now retains `StmtId`s and resolves each node
+  from the owner instead of cloning statement values. Formatting ran; tests
+  and builds remain deferred, and item 9.3.e.c is still partial.
+  Literal-string folding now takes `(NodeArenas, ExprId)`; builtin inference,
+  call resolution, narrowing, PHPStan API, PHPDoc/native-type helpers, Doctrine
+  and PHPUnit resolve literal text through the owning file. Formatting ran;
+  no tests or builds have run, and 9.3.e.c remains partial.
+  PSR-3 and preg-pattern argument checks, preg-call shape extraction,
+  condition-alias and predicate-chain narrowing, and include path/guard
+  readers now resolve IDs through their retained file owner as well.
+  Offset-assignment base/key inference and static-target receiver typing,
+  call checks, and diagnostic ranges now resolve expression IDs and spans
+  through the retained owner.
+  Closure/arrow parameter-default checks and property-default/property-width
+  readers now resolve default expression IDs through the file arenas; the
+  property-type site recorder receives its arena owner explicitly.
+  The shared implicit-nullability helper and closure native-parameter reader
+  now resolve default IDs through that owner as well. If-body condition-alias
+  detection now resolves its single statement and assignment operands from
+  `NodeArenas` rather than treating IDs as nodes.
+  Parameter reflection now resolves default IDs through the same owner when
+  inferring constant default types.
+  The audit caught signature help counting arguments through `Arg.value.span`
+  after `value` became an `ExprId`; it now resolves each argument span through
+  `NodeArenas::expr_span`. Formatting ran; tests/builds remain deferred until
+  item 9's implementation rows are complete.
+  `cargo fmt --all` completed; tests/builds remain deferred until item 9's
+  implementation rows are complete.
+  The five specified list arenas and large-payload arenas are implemented;
+  other child-list arenas remain for 9.7, source-backed payloads for 9.4,
+  and statement doc-field removal for 9.8. Row 4.1 made
   the four public declaration tables private behind
   `Registry` read accessors (`e06503ad`, preserving owned stub-table
   extraction). Row 4.2 added stub, context-base and project ID ranges
@@ -541,9 +839,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   item 4.1 is committed at `e06503ad`, 4.2 at `1b8f79aa`, and item 4.3's
   active arena increments are recorded in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`
   through `e22c002f`.
-- **Item 0's validation (0.11)** is under way: the tests, fixtures and
-  runtime oracle pass, and the edit replay over Piwigo and every vendor
-  project found the stale diagnostics and registry state the plan's "Found
+- **Item 0's baseline attempt (0.11)** stopped at the runtime oracle after
+  its build and tests; the edit replay over Piwigo and every vendor project
+  found the stale diagnostics and registry state the plan's "Found
   in item 0's validation" block lists, each fixed. The dumps and O2 became
   one pass, `cargo xtask corpus --full` on a worker per core (rows
   0.11a-0.11c, done), with `cargo xtask progress --watch`. Done since:
@@ -557,15 +855,18 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   16.8 G, 2.32 s, 111 MB (`~/.cache/prs-profile/*-91537c79`). Next, before
   the baseline: the other kinds' profiles (0.11t: `config scoped` 202 G, 33.8 s,
   1.75 GB; the corpus session warm 29.4 s, 7 GB; callgrind stopped, the
-  rest skipped) and `cargo xtask validate` (0.11u, done). The validation
-  itself (0.11) was started and stopped at the runtime oracle (build and
-  tests passed): no snapshot of item 0 is recorded, so item 1's validation
-  has nothing to compare with until one is.
+  rest skipped) and `cargo xtask validate` (0.11u, done). That earlier
+  validation attempt ran a build and tests before stopping at the runtime
+  oracle; no item-0 snapshot was recorded. Under the current gate policy,
+  item 0's validation is not resumed between items: each V row runs tests
+  only, and complete §11 validation runs once after item 19. The missing
+  baseline means dump comparisons remain unavailable.
   Item 1 (rows 1.2-1.8) is done and its validation (1.V) skipped by the
   user, with no run and no snapshot. Item 2 (rows 2.1-2.7) is built; its
   validation (2.V) is the tests. The plan's validation (§11) compares no
-  dumps from here on: no snapshot, no baseline, no equalities between runs,
-  and the items' Oracle bullets name tests and fixtures only.
+  dumps at item gates: no snapshot, no baseline, and no comparisons between
+  runs. Item gates run the workspace and item-specific tests only; runtime
+  oracles, fixtures, and other full-validation work wait until the end.
 - **Deferred until after O3, not optimization** (2026-10-05): in item 0,
   the implicit calls (0.12a-0.12f; magic and interface methods, property
   hooks and a property's magic where it may be unset were built first,

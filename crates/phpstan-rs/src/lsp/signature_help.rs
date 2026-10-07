@@ -35,11 +35,11 @@ use std::path::Path;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use syntax::ast::{Arg, ClassDecl, ExprKind, ExprNode, FunctionDecl, MethodDecl, StmtNode};
+use syntax::ast::{Arg, ClassDecl, ExprId, ExprKind, FunctionDecl, MethodDecl, NodeArenas, StmtId};
 use syntax::span::Span;
-use syntax::visit::{
-    Visitor, walk_args, walk_class_decl, walk_expr, walk_function_decl, walk_method_decl,
-    walk_stmts,
+use syntax::visit::arena::{
+    Visitor, walk_args, walk_class_decl, walk_class_def, walk_expr, walk_function_decl,
+    walk_method_decl, walk_stmts,
 };
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
@@ -74,18 +74,19 @@ pub(crate) struct SigHelp {
 }
 
 pub(crate) fn resolve_at(project: &Project, path: &Path, pos: u32) -> Option<SigHelp> {
-    let stmts = project.ast_of(path)?;
-    let stmts = stmts.statements();
+    let ast = project.ast_of(path)?;
+    let stmts = ast.statements();
+    let arenas = ast.arenas();
     let mut w = Walker {
         registry: project.registry(),
         pos,
-        top_level_stmts: stmts,
+        top_level_stmts: stmts.to_vec(),
         current_function: None,
         current_is_static: false,
         current_class: None,
         best: None,
     };
-    walk_stmts(&mut w, stmts);
+    walk_stmts(&mut w, arenas, stmts);
     w.best
 }
 
@@ -96,14 +97,20 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: u32) -> Option<Sig
 /// reporting an out-of-range index) - `lsp.rs`'s own response-building
 /// step is what actually knows `param_count` and does the clamping
 /// (this function only counts).
-fn active_parameter(args: &[Arg], pos: u32) -> usize {
-    args.iter().filter(|a| a.value.span.end < pos).count()
+fn active_parameter(arenas: &NodeArenas, args: &[Arg], pos: u32) -> usize {
+    args.iter()
+        .filter(|arg| {
+            arenas
+                .expr_span(arg.value)
+                .is_some_and(|span| span.end < pos)
+        })
+        .count()
 }
 
 struct Walker<'a> {
     registry: &'a Registry,
     pos: u32,
-    top_level_stmts: &'a [StmtNode],
+    top_level_stmts: Vec<StmtId>,
     current_function: Option<FunctionDecl>,
     current_is_static: bool,
     /// The class whose body the walk is in; an anonymous class's
@@ -114,18 +121,25 @@ struct Walker<'a> {
     best: Option<SigHelp>,
 }
 
-impl<'a> Walker<'a> {
+impl Walker<'_> {
     fn probe_scope(&self) -> ProbeScope {
         match &self.current_function {
             Some(f) => ProbeScope::Function(Box::new(f.clone())),
-            None => ProbeScope::TopLevel(self.top_level_stmts.to_vec()),
+            None => ProbeScope::TopLevel(self.top_level_stmts.clone()),
         }
     }
 
     /// Offers `target` for a call spanning `span` whose arguments are
     /// `args`, once the cursor is past `boundary`: the callee or member
     /// name. A call around the cursor with no target clears the offer.
-    fn offer(&mut self, span: Span, boundary: u32, args: &[Arg], target: Option<Target>) {
+    fn offer(
+        &mut self,
+        arenas: &NodeArenas,
+        span: Span,
+        boundary: u32,
+        args: &[Arg],
+        target: Option<Target>,
+    ) {
         if !contains(span, self.pos) {
             return;
         }
@@ -133,7 +147,7 @@ impl<'a> Walker<'a> {
             .filter(|_| self.pos_past(boundary))
             .map(|target| SigHelp {
                 target,
-                active_parameter: active_parameter(args, self.pos),
+                active_parameter: active_parameter(arenas, args, self.pos),
             });
     }
 
@@ -146,41 +160,47 @@ impl<'a> Walker<'a> {
     }
 }
 
-impl<'ast> Visitor<'ast> for Walker<'_> {
-    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
+impl Visitor for Walker<'_> {
+    fn visit_class_decl(&mut self, arenas: &NodeArenas, class: &ClassDecl) {
         let previous = self.current_class.replace(class.fq_name().to_string());
-        walk_class_decl(self, class);
+        walk_class_decl(self, arenas, class);
         self.current_class = previous;
     }
 
-    fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
+    fn visit_method_decl(&mut self, arenas: &NodeArenas, method: &MethodDecl) {
         let previous = std::mem::replace(&mut self.current_is_static, method.is_static);
-        walk_method_decl(self, method);
+        walk_method_decl(self, arenas, method);
         self.current_is_static = previous;
     }
 
-    fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+    fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
         let previous = self.current_function.replace(function.clone());
-        walk_function_decl(self, function);
+        walk_function_decl(self, arenas, function);
         self.current_function = previous;
     }
 
-    fn visit_expr(&mut self, expr: &'ast ExprNode) {
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let Some(expr) = arenas.expr(id) else {
+            return;
+        };
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {
-                    let target = match &callee.kind {
-                        ExprKind::Name(n) => self
+                    let callee_node = arenas.expr(*callee);
+                    let target = match callee_node.map(|callee| &callee.kind) {
+                        Some(ExprKind::Name(n)) => self
                             .registry
                             .resolve_function(n)
                             .map(|(fqn, _)| Target::Function(fqn.to_string())),
                         _ => None,
                     };
-                    self.offer(expr.span, callee.span.end, args, target);
+                    let boundary = callee_node.map_or(expr.span.start, |callee| callee.span.end);
+                    self.offer(arenas, expr.span, boundary, arenas.args(*args), target);
                 }
                 ExprKind::New(callee, args) => {
-                    let target = match &callee.kind {
-                        ExprKind::Name(n) => {
+                    let callee_node = arenas.expr(*callee);
+                    let target = match callee_node.map(|callee| &callee.kind) {
+                        Some(ExprKind::Name(n)) => {
                             resolve_class_ref(n, self.current_class.as_deref(), self.registry)
                                 .filter(|fqn| {
                                     self.registry
@@ -191,29 +211,40 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                         }
                         _ => None,
                     };
-                    self.offer(expr.span, callee.span.end, args, target);
+                    let boundary = callee_node.map_or(expr.span.start, |callee| callee.span.end);
+                    self.offer(arenas, expr.span, boundary, arenas.args(*args), target);
                 }
                 ExprKind::MethodCall(recv, method, args, _) => {
+                    let recv_node = arenas.expr(*recv);
                     let target = match &self.current_class {
-                        Some(owner) if matches!(&recv.kind, ExprKind::Variable(v) if *v == "this") => {
+                        Some(owner) if matches!(recv_node.map(|recv| &recv.kind), Some(ExprKind::Variable(v)) if *v == "this") => {
                             Target::Member(owner.clone(), method.to_string())
                         }
                         _ => Target::Instance {
-                            receiver_span: recv.span,
+                            receiver_span: recv_node.map_or(expr.span, |recv| recv.span),
                             member: method.to_string(),
                             scope: self.probe_scope(),
                             is_static: self.current_is_static,
                             class: self.current_class.clone(),
                         },
                     };
-                    self.offer(expr.span, method.span.end, args, Some(target));
+                    self.offer(
+                        arenas,
+                        expr.span,
+                        method.span.end,
+                        arenas.args(*args),
+                        Some(target),
+                    );
                 }
                 // A dynamic name has no signature to offer.
                 ExprKind::DynamicStaticCall(_, _, args)
                 | ExprKind::DynamicMethodCall(_, _, args, _) => {
-                    self.offer(expr.span, expr.span.start, args, None);
+                    self.offer(arenas, expr.span, expr.span.start, arenas.args(*args), None);
                 }
-                ExprKind::NewAnonymousClass(class) => {
+                ExprKind::NewAnonymousClass(class_id) => {
+                    let Some(class) = arenas.anonymous_class(*class_id) else {
+                        return;
+                    };
                     let target = class
                         .name
                         .as_ref()
@@ -223,13 +254,21 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                                 .is_some()
                         })
                         .map(|name| Target::Constructor(name.to_string()));
-                    self.offer(expr.span, expr.span.start, &class.args, target);
-                    walk_args(self, &class.args);
+                    self.offer(
+                        arenas,
+                        expr.span,
+                        expr.span.start,
+                        arenas.args(class.args),
+                        target,
+                    );
+                    walk_args(self, arenas, class.args);
                     let previous = std::mem::replace(
                         &mut self.current_class,
                         class.name.as_ref().map(|name| name.to_string()),
                     );
-                    self.visit_class_def(&class.def);
+                    if let Some(def) = arenas.class(class.def) {
+                        walk_class_def(self, arenas, def);
+                    }
                     self.current_class = previous;
                     return;
                 }
@@ -241,12 +280,18 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
                         resolve_class_ref(class, self.current_class.as_deref(), self.registry)
                     });
                     let target = resolved.map(|fqn| Target::Member(fqn, member.to_string()));
-                    self.offer(expr.span, member.span.end, args, target);
+                    self.offer(
+                        arenas,
+                        expr.span,
+                        member.span.end,
+                        arenas.args(*args),
+                        target,
+                    );
                 }
                 ExprKind::FirstClassCallable(_) => return,
                 _ => {}
             }
-            walk_expr(self, expr);
+            walk_expr(self, arenas, id);
         })
     }
 }
