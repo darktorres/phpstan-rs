@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `7c3a4fac`. Counts below were read from the files on
+State as of 2026-10-06, `5acce76a`. Counts below were read from the files on
 that date.
 
 ## Where to resume
@@ -262,7 +262,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   Public `parse_watching_with_scratch` now accepts a reusable arena bundle and
   returns it inside `ParsedFile`; `into_node_arenas` recovers it after use.
   Load workers now pass their `NodeArenas` bundle across files whose trees are
-  dropped, reclaiming the arenas from each parsed file. The capacity and
+  dropped, reclaiming the arenas from each parsed file. These transient parses
+  omit the extra source-byte copy; retained-tree parses still keep source and
+  names as before. The capacity and
   span-alignment, parse-error reuse, and project tree-to-scratch handoff tests
   are added but unrun. The parser restores scratch arenas on lexer or syntax
   errors, preserving capacity in the worker. A further unrun test verifies
