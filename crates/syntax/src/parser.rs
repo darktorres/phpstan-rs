@@ -215,11 +215,27 @@ impl<'a> Parser<'a> {
     /// A parser that lexes as it reads: the tokens past the few it looks
     /// at are not lexed until they are needed.
     pub fn from_lexer(lexer: Lexer<'a>) -> Parser<'a> {
+        Self::from_lexer_with_node_arenas(lexer, NodeArenas::default())
+    }
+
+    pub(crate) fn from_lexer_with_node_arenas(
+        lexer: Lexer<'a>,
+        mut node_arenas: NodeArenas,
+    ) -> Parser<'a> {
         let line_index = lexer.line_index();
-        Parser::with_supply(Supply::Lexer(Box::new(lexer)), line_index)
+        node_arenas.clear();
+        Parser::with_supply_and_node_arenas(Supply::Lexer(Box::new(lexer)), line_index, node_arenas)
     }
 
     fn with_supply(supply: Supply<'a>, line_index: Arc<LineIndex>) -> Parser<'a> {
+        Self::with_supply_and_node_arenas(supply, line_index, NodeArenas::default())
+    }
+
+    fn with_supply_and_node_arenas(
+        supply: Supply<'a>,
+        line_index: Arc<LineIndex>,
+        node_arenas: NodeArenas,
+    ) -> Parser<'a> {
         let mut parser = Parser {
             supply: std::cell::RefCell::new(supply),
             ctx: std::cell::RefCell::default(),
@@ -234,7 +250,7 @@ impl<'a> Parser<'a> {
             next_stmt_id: std::cell::Cell::new(0),
             expr_span_base: 0,
             stmt_span_base: 0,
-            node_arenas: std::cell::RefCell::new(NodeArenas::default()),
+            node_arenas: std::cell::RefCell::new(node_arenas),
             interner: Interner::global(),
             pattern_only: Vec::new(),
             long_arrays: rustc_hash::FxHashSet::default(),

@@ -37,6 +37,17 @@ pub struct ParsedFile {
 }
 
 impl ParsedFile {
+    /// Returns the file's arenas after its parsed products have been
+    /// consumed, so a worker can reuse their capacities for another file.
+    pub fn into_node_arenas(self) -> NodeArenas {
+        self.arenas
+    }
+
+    /// Compacts the node vectors when this parsed file's tree will be kept.
+    pub fn shrink_node_arenas_to_fit(&mut self) {
+        self.arenas.shrink_to_fit();
+    }
+
     /// Reads an in-file byte range, such as a source-backed AST payload.
     pub fn source_slice(&self, span: crate::span::Span) -> Option<&[u8]> {
         self.source.get(span.start as usize..span.end as usize)
@@ -147,6 +158,28 @@ pub fn parse_watching<'a>(
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
 ) -> Result<ParsedFile, ParseError> {
+    parse_watching_in_arenas(source, names, watch, NodeArenas::default(), true)
+}
+
+/// Parses with reusable node arenas. The returned file owns the bundle
+/// until its products are consumed; `ParsedFile::into_node_arenas` returns
+/// it for reuse after the tree is no longer needed.
+pub fn parse_watching_with_scratch<'a>(
+    source: impl Into<Source<'a>>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+    scratch: NodeArenas,
+) -> Result<ParsedFile, ParseError> {
+    parse_watching_in_arenas(source, names, watch, scratch, false)
+}
+
+fn parse_watching_in_arenas<'a>(
+    source: impl Into<Source<'a>>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+    arenas: NodeArenas,
+    compact_arenas: bool,
+) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let source_bytes: Box<[u8]> = match source {
         Source::Text(text) => text.as_bytes().into(),
@@ -161,7 +194,7 @@ pub fn parse_watching<'a>(
         Some(cache) => lexer.with_name_cache(cache),
         None => lexer,
     };
-    let mut parser = Parser::from_lexer(lexer);
+    let mut parser = Parser::from_lexer_with_node_arenas(lexer, arenas);
     let parsed = parser.parse_program();
     let has_anonymous_class = parser.saw_anonymous_class();
     let has_nested_declaration = parser.saw_nested_declaration();
@@ -186,7 +219,9 @@ pub fn parse_watching<'a>(
         return Err(ParseError::new(error.message.clone(), error.span));
     }
     let stmts = parsed?;
-    arenas.shrink_to_fit();
+    if compact_arenas {
+        arenas.shrink_to_fit();
+    }
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
     facts.unsets_property = unsets_property;
@@ -317,5 +352,31 @@ mod tests {
             assert!(found.same_allocation(&interner.name(text)), "{text}");
         }
         assert!(!cache.is_empty());
+    }
+
+    #[test]
+    fn parse_watching_with_scratch_reuses_node_span_capacity() {
+        let first = parse(b"<?php $first = 1;").unwrap();
+        let scratch = first.into_node_arenas();
+        let expr_capacity = scratch.expr_spans.capacity();
+        let stmt_capacity = scratch.stmt_spans.capacity();
+        assert!(expr_capacity > 0);
+        assert!(stmt_capacity > 0);
+
+        let second =
+            parse_watching_with_scratch(b"<?php $second = 2;", None, None, scratch).unwrap();
+
+        assert!(second.expr_count() > 0);
+        assert!(second.stmt_count() > 0);
+        assert!(second.arenas.expr_spans.capacity() >= expr_capacity);
+        assert!(second.arenas.stmt_spans.capacity() >= stmt_capacity);
+        for (index, span) in second.arenas.expr_spans.iter().enumerate() {
+            let id = ExprId::from_raw(la_arena::RawIdx::from_u32(index as u32));
+            assert_eq!(second.expr_span(id), Some(*span));
+        }
+        for (index, span) in second.arenas.stmt_spans.iter().enumerate() {
+            let id = StmtId::from_raw(la_arena::RawIdx::from_u32(index as u32));
+            assert_eq!(second.stmt_span(id), Some(*span));
+        }
     }
 }
