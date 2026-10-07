@@ -73,6 +73,59 @@ pub type ParamArena = la_arena::Arena<Param>;
 pub type MatchArmArena = la_arena::Arena<MatchArm>;
 pub type AttributeArena = la_arena::Arena<Attribute>;
 
+/// The typed vector storage for one file's syntax tree. A worker can clear
+/// this bundle between context files to retain its warmed capacities; a
+/// kept tree can shrink each vector before it leaves the worker.
+#[derive(Default)]
+pub struct NodeArenas {
+    pub exprs: ExprArena,
+    pub stmts: StmtArena,
+    pub functions: FunctionArena,
+    pub methods: MethodArena,
+    pub classes: ClassArena,
+    pub closures: ClosureArena,
+    pub anonymous_classes: AnonymousClassArena,
+    pub args: ArgArena,
+    pub array_items: ArrayItemArena,
+    pub params: ParamArena,
+    pub match_arms: MatchArmArena,
+    pub attributes: AttributeArena,
+}
+
+impl NodeArenas {
+    /// Drops the current file's nodes but keeps the worker's allocations.
+    pub fn clear(&mut self) {
+        self.exprs.clear();
+        self.stmts.clear();
+        self.functions.clear();
+        self.methods.clear();
+        self.classes.clear();
+        self.closures.clear();
+        self.anonymous_classes.clear();
+        self.args.clear();
+        self.array_items.clear();
+        self.params.clear();
+        self.match_arms.clear();
+        self.attributes.clear();
+    }
+
+    /// Compacts a completed tree before its arenas leave the worker.
+    pub fn shrink_to_fit(&mut self) {
+        self.exprs.shrink_to_fit();
+        self.stmts.shrink_to_fit();
+        self.functions.shrink_to_fit();
+        self.methods.shrink_to_fit();
+        self.classes.shrink_to_fit();
+        self.closures.shrink_to_fit();
+        self.anonymous_classes.shrink_to_fit();
+        self.args.shrink_to_fit();
+        self.array_items.shrink_to_fit();
+        self.params.shrink_to_fit();
+        self.match_arms.shrink_to_fit();
+        self.attributes.shrink_to_fit();
+    }
+}
+
 /// The identity used for an expression synthesized outside a parsed file.
 pub const SYNTHETIC_EXPR_ID: ExprId = ExprId::from_raw(la_arena::RawIdx::from_u32(u32::MAX));
 
