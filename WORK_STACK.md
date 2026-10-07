@@ -10,14 +10,23 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `5d5f9d4d`. Counts below were read from the files on
-that date.
+State as of 2026-10-07, worktree based on `39f0b029`. Counts below were read
+from the files on 2026-10-06.
 
 ## Where to resume
 
 1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
-   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, item 0 first; each item's gate runs
-   workspace and item-specific tests only (including their inherent compile).
+   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, resuming at item 9.7.a; rows 9.2,
+   3.4, 9.3, 9.4, 9.5 and 9.6 are implemented but await the tests-only 9.V gate.
+   Item 9.7 has begun: statement block, `declare`, switch-case, try/catch/finally,
+   closure, property-hook and function bodies use reusable scratch and
+   `StmtIdRange`, with owner-backed readers migrated. Expression ID lists
+   (`Isset`, match conditions, interpolation parts, echo/for/unset) use
+   `ExprIdRange`; destructuring elements use `DestructureItemRange`. Root
+   statement lists now use `StmtIdRange` from parsing through retained project
+   trees. Other child-list families, list-element recorder IDs, exact-size kept
+   arenas and item 9.8 remain.
+   Each item's gate runs workspace and item-specific tests only (including their inherent compile).
    Full §11 validation and O3 run once, after item 19. Only
    the rows that optimize are built now; the rest are DEFERRED.
 2. Then **level 8's deferred rows**, as a plan of their own: the PHP
@@ -238,7 +247,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   (3,857 passed, 50 existing failures) were additional validation runs, not
   item-gate requirements. The 3.4 scratch-store row remains
   with item 9. Item 9.2 and row 3.4 are implementation-complete; 9.V remains
-  pending, and owner-backed reader migration in 9.3.e is active. Syntax parse
+  pending. Rows 9.3's owner-backed reader migrations are complete by source
+  audit, with their tests held for 9.V; implementation is now in 9.4. Syntax parse
   results now own their
   source bytes and the lexer's distinct names in first-use order; retained
   project trees carry both alongside the AST, while cache-only context
@@ -836,6 +846,40 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   a time, in order; each finding is checked against the code, `php` 8.5 and
   the heap profile before it goes in, and §13's review table has a row per
   item. Items 0-19 and §11-§13 were reviewed and committed one by one.
+  Item 9.4 now has a reusable file-owned decoded-byte vector in `NodeArenas`,
+  with typed ranges, fragment append bases, and clear/shrink handling; retained
+  `ParsedFile` exposes the range reader, and the checker can now read source
+  slices through its owning `SyntaxTree`. Inline HTML now travels as its source
+  span through lexer and AST; whitespace checks read the bytes from that owner,
+  and an unrun lexer test covers non-UTF-8 HTML bytes. The demo supplies its
+  source, while checker test helpers retain the project tree. The lexer keeps
+  each doc span through grouping; declaration and statement AST doc fields now
+  store source ranges. The lexer-backed parser resolves those ranges for
+  reference recording, and doc readers have been migrated. The stub-rule tree
+  mutation remains tracked in 9.5.a. Single-quoted unescaped literals now use
+  source ranges with owner-backed syntax printing/canonical reads; transient
+  parses put unescaped literal bytes in the decoded arena, while detached
+  token-list calls materialize values pending item 10. Escaped, interpolated,
+  heredoc and nowdoc payloads now use decoded ranges; Unicode output writes
+  directly into the lexer byte store, and fragment ranges append after the
+  parent range. Checker, registry, project and Composer literal readers now
+  resolve through owners; the LSP audit found no literal-payload readers.
+  Range, escape, Unicode and fragment-append regression coverage is added but
+  unrun. Item 9.7 has now moved every statement-body list to `StmtIdRange`,
+  including function bodies; completion appends probe IDs by committing a new
+  range in its owned parsed file. Root parsed-program, parsed-file and project
+  tree lists now use owner-backed `StmtIdRange`s. Expression child lists and
+  destructuring elements use typed ranges; class inheritance, property,
+  constant, trait-use/adaptation and enum-case lists now use owner-backed
+  ranges, with parser, checker, registry, project, Composer, LSP and parser
+  fixture readers migrated (9.7.b.a-c, unvalidated). Catch-type name lists
+  now use the same qualified-name arena (9.7.b.d.a, unvalidated). Other
+  type/import lists,
+  closure-use lists, remaining scratch builders, list-element recorder IDs,
+  exact-size kept arenas and item 9.8 remain. Items 10-19 have
+  complete child-task and tests-only gate rows.
+  No tests or builds were run;
+  the 9.V gate stays closed until all item 9 implementation rows are complete.
 - **Passes outside the item order,** also in §13: a dependency pass (six
   crates taken: `la-arena`, `wide`, `triomphe`, `quick_cache`, `siphasher`
   and `blake3`; ten considered and not taken; item 15's review added
@@ -845,7 +889,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   (from 19.4 M), and roughly 8 G of the 20.57 G instructions.
 - **Building it** started on 2026-10-03. Its tasks, in order, with their
   state and commits, are in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (items 0-19, each closed by its
-  validation row, then O3). Reading the
+  validation row, then O3). Compound implementation tasks and item-gate test
+  selections are split into child rows throughout items 9-19; an audit of
+  items 10-19 found each implementation task and gate has its subtask rows.
+  Reading the
   starting state (0.1) found four false-report bugs, fixed in item 0
   before the baseline (rows 0.1a-0.1f), and added the implicit calls, now
   part of item 0. Item 3's latest implementation is row 3.2 at `dfa2cebe`;

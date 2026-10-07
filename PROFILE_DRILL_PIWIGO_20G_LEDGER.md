@@ -1,6 +1,6 @@
 # 20 G plan ledger
 
-Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), with tests-only gates at each item's V row and the complete §11 validation once after item 19, plus O3. A compound task is expanded into a parent row and child rows for each independently verifiable subtask before work on its item begins; atomic tasks stay as one row. Parent status summarizes its children. This decomposition covers the implementation work and each tests-only gate in items 9-19, the final O3 results and the deferred-work validation, including deferred subtasks. The design of each row is in the plan, at the step or bullet the row names; this file holds the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table). The plan optimizes (§9, "Only what optimizes"): rows that change what the analysis finds beyond what the optimization needs are DEFERRED until after O3, where they stay in their item's place, and are built then as a plan of their own, validated by row D.V.
+Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), with tests-only gates at each item's V row and the complete §11 validation once after item 19, plus O3. A compound task is expanded into a parent row and child rows for each independently verifiable subtask before work on its item begins; atomic tasks stay as one row. Parent status summarizes its children. This decomposition covers the implementation work and each tests-only gate in items 9-19, the final O3 results and the deferred-work validation, including deferred subtasks. Items 10-19 were audited against the plan on 2026-10-07: every parent subtask reference resolves, and every item gate has separate workspace and item-specific test rows. A second granularity audit split independently verifiable deliverables in items 13-19 that were still bundled. The design of each row is in the plan, at the step or bullet the row names; this file holds the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table). The plan optimizes (§9, "Only what optimizes"): rows that change what the analysis finds beyond what the optimization needs are DEFERRED until after O3, where they stay in their item's place, and are built then as a plan of their own, validated by row D.V.
 
 Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
@@ -189,7 +189,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 3.4.b | scratch store | Transient parse omits source copies, file-local name table and `NameId`s | — | perf | DONE (test added but unrun) |
 | 3.4.c | scratch store | Transient parse returns scratch after both lexer and syntax errors, preserving warmed capacity | — | perf | DONE (error-path test added but unrun) |
 | 3.4.d | scratch store | Parsed expression/statement and list/payload arenas are actually reused across dropped context trees | — | perf | DONE (expression/statement, all five specified list arenas, and function/method/class/closure/anonymous-class payload arenas are populated and returned to worker scratch; retained/transient reuse and error-path tests are added but unrun at 9.V.) |
-| 9.3 | step 3 | Nodes by index (`ExprId`, `StmtId`): parse functions return nodes committed by their callers; `ParseError` boxed; matching and `syntax::visit` over ids; the inference cache by `ExprId` | 9.2 | perf | IN PROGRESS (storage and owner-backed reader migrations are complete except the member-completion probe, assigned to 9.5.c/d for its synthetic-owner dependency. Parser/reader coverage and 9.V remain.) |
+| 9.3 | step 3 | Nodes by index (`ExprId`, `StmtId`): parse functions return nodes committed by their callers; `ParseError` boxed; matching and `syntax::visit` over ids; the inference cache by `ExprId` | 9.2 | perf | DONE (unvalidated; the member-completion probe's synthetic-owner integration is assigned to 9.5.c/d; 9.3.g coverage runs at 9.V.) |
 | 9.3.a | step 3 | Typed expression/statement IDs, parser node returns, boxed `ParseError`, inference cache keyed by `ExprId` | — | perf | DONE (implementation in the current tree; unvalidated) |
 | 9.3.b | step 3 | AST child links and owning `ParsedProgram`/`ParsedFile` reader interfaces use IDs with the correct file owner | — | perf | DONE (child links and parsed-file interfaces use typed IDs; migrated consumers retain or receive their owner. Member-completion probe integration is tracked at 9.5.c/d; unvalidated.) |
 | 9.3.c | step 3 | `syntax::visit` recursively traverses expression and statement IDs through `NodeArenas`, including direct-child and function-scope walks | — | perf | DONE (owner-aware traversal resolves large payload IDs and args/array-items/params/match-arms/attribute/method ranges; tests added but unrun) |
@@ -212,17 +212,57 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.3.f.c.b | same step | Move member-completion receiver parsing and synthetic probe statements to an owner-backed parsed tree | — | perf | SKIP (requires the per-file synthetic-node scratch and completion-owned `ParsedFile` from 9.5.c/d; implemented and covered there.) |
 | 9.3.f.c.c | same step | Audit other LSP parser/test builders and confirm they keep their `ParsedProgram`/`ParsedFile` owner | — | perf | DONE (remaining `Parser::new` tooling tests retain `ParsedProgram`; no `into_kind` consumers remain.) |
 | 9.3.g | step 3 | Add and run parser/reader coverage at 9.V after implementation rows; verify IDs resolve only through their owner | — | val | OPEN (item gate not yet permitted) |
-| 9.4 | step 4 | Payloads as byte ranges; escaped literals decoded once into the file's byte vector | 9.2 | perf | OPEN; see subtask rows 9.4.a-9.4.d |
-| 9.4.a | step 4 | Doc comments and inline HTML refer to ranges in the retained source bytes | — | perf | OPEN |
-| 9.4.b | step 4 | Unescaped string literals refer to source ranges; escaped literals decode once into the file byte vector | — | perf | OPEN |
-| 9.4.c | step 4 | All payload readers consume owner-backed byte ranges and copy only when data outlives the file | — | perf | OPEN |
-| 9.4.d | step 4 | Preserve arbitrary source bytes without lossy decoding where this item owns the representation | — | perf | OPEN (identifier byte semantics are deferred to item 15 as specified in the plan) |
-| 9.5 | step 5 | Nothing changes a tree after its parse. The stub rules apply while a file is parsed, to the files they apply to today, choosing the newest version. Anonymous-class names go in a side table. Synthetic nodes go in a per-file scratch store. Completion and Composer's reader parse their own `ParsedFile`. `VisitorMut` goes | 9.3 | perf | OPEN; see subtask rows 9.5.a-9.5.e |
-| 9.5.a | step 5 | Apply current stub-attribute behavior during parse, to the same files and newest-version choice as today | — | perf | OPEN (version-aware stub semantics remain deferred with item 6.2) |
-| 9.5.b | step 5 | Keep anonymous-class names in a side table keyed by node ID | — | perf | OPEN |
-| 9.5.c | step 5 | Put checker-synthesized nodes in per-file scratch storage and clear them with that file | — | perf | OPEN |
-| 9.5.d | step 5 | Completion and Composer parse and retain their own `ParsedFile` owners; remove `into_kind` extraction | — | perf | OPEN |
-| 9.5.e | step 5 | Remove `VisitorMut` and the second `resolve_names` pass; keep recorded reference/doc-site behavior | — | perf | OPEN |
+| 9.4 | step 4 | Payloads as byte ranges; escaped literals decoded once into the file's byte vector | 9.2 | perf | DONE (unvalidated; source and decoded payload ranges, readers and coverage are implemented. Doc-byte parsing and identifier byte semantics remain explicitly deferred to items 14 and 15.) |
+| 9.4.a | step 4 | Doc comments and inline HTML refer to ranges in the retained source bytes | — | perf | DONE (unvalidated; doc comments and inline HTML are source-backed, with reader and parser-recording coverage added.) |
+| 9.4.a.a | same step | Store declaration and statement doc comments as source ranges, preserving doc grouping and recorded references | — | perf | DONE (unvalidated; see child rows 9.4.a.a.a-9.4.a.a.d) |
+| 9.4.a.a.a | same step | Carry doc-comment source spans and group boundaries through lexer output and parser lookahead | — | perf | DONE (lexer groups retain every comment span and the declaration's last-comment span, including when attributes rekey the doc; grouped-span coverage is added but unrun.) |
+| 9.4.a.a.b | same step | Store declaration and statement doc payloads as source ranges, preserving last-comment and folded-group behavior | — | perf | DONE (unvalidated; all seven declaration/statement fields and property-hook docs hold ranges, with statement grouping and declaration last-comment selection preserved.) |
+| 9.4.a.a.c | same step | Preserve doc-site, frame and reference recording by reading source-backed doc ranges while parsing | — | perf | DONE (unvalidated; live parsing resolves ranges directly from source and copies only into durable reference products. Added source-backed doc-site/frame coverage. Token-list-only parser construction retains its fallback until item 10 replaces that interface.) |
+| 9.4.a.a.d | same step | Migrate doc-comment readers and cover exact source bytes and grouped comments | — | perf | DONE (unvalidated; registry, dependency, checker, project and gate readers resolve ranges through their file owner. Parser coverage checks exact grouped source ranges including CRLF and source-backed recording. Stub-rule tree mutation belongs to 9.5.a.) |
+| 9.4.a.b | same step | Store inline HTML as a source range and migrate its lexer, AST and whitespace readers | — | perf | DONE (lexer and AST carry the exact span; whitespace checks resolve raw bytes through the owner. The standalone demo and checker test helpers supply/retain the source owner. Added lexer and retained-AST source-slice coverage; unvalidated until 9.V.) |
+| 9.4.b | step 4 | Unescaped string literals refer to source ranges; escaped literals decode once into the file byte vector | — | perf | DONE (unvalidated; see 9.4.b.a-9.4.b.b) |
+| 9.4.b.a | same step | Represent unescaped literal payloads as source ranges | — | perf | DONE (unvalidated; lexer-backed retained parses use source ranges, including unescaped interpolation chunks; transient parses use decoded ranges. Detached token-list callers own their temporary tokens and materialize values pending item 10.) |
+| 9.4.b.b | same step | Decode escaped literals once into reusable file bytes, including fragment append ranges | — | perf | DONE (unvalidated; see subtask rows 9.4.b.b.a-9.4.b.b.d) |
+| 9.4.b.b.a | same step | Decode single-quoted and ordinary quoted escapes directly into the file decoded-byte vector | — | perf | DONE (unvalidated; escaped single quotes append directly to the lexer byte store; interpolated quoted escapes use the same store, transferred into the owning arenas as tokens are queued.) |
+| 9.4.b.b.b | same step | Decode interpolation and heredoc escapes into source-owner byte ranges, including indentation stripping | — | perf | DONE (unvalidated; unchanged contiguous quoted chunks use source ranges; escaped chunks, heredoc chunks with stripped indentation, and nowdoc bodies use decoded ranges.) |
+| 9.4.b.b.c | same step | Write Unicode escape output in place in the decoded-byte vector | — | perf | DONE (unvalidated; `\u{...}` UTF-8 bytes append directly to the decoded store, with retained-parse coverage added.) |
+| 9.4.b.b.d | same step | Preserve file-global decoded-byte ranges across interpolation fragment parses and arena append | — | perf | DONE (unvalidated; parser token queuing drains lexer bytes into the owning arena, fragment parsers start at the arena end, and the parent lexer resumes at the appended end; coverage added.) |
+| 9.4.c | step 4 | All payload readers consume owner-backed byte ranges and copy only when data outlives the file | — | perf | DONE (unvalidated; see subtask rows 9.4.c.a-9.4.c.e) |
+| 9.4.c.a | same step | Add owner-backed accessors for source and decoded string payloads; eliminate per-literal AST copies | — | perf | DONE (unvalidated; `NodeArenas::string_bytes` and `ParsedFile::string_bytes` resolve source, decoded, and synthetic payloads; retained literals use ranges, and transient literals use decoded ranges without retaining full source. Detached token-list callers materialize their own temporary values pending item 10.) |
+| 9.4.c.b | same step | Migrate syntax printers, canonical output, visitors and tooling to resolve literal payloads through their file owner | — | perf | DONE (unvalidated; printers and canonical AST output resolve through owner arenas; visitors traverse literal nodes without reading payload text. Detached token builders materialize temporary values pending item 10.) |
+| 9.4.c.c | same step | Migrate checker inference and rule readers to consume owner-backed literal bytes | — | perf | DONE (unvalidated; checker readers resolve through their owning arenas/checker accessors; durable inferred strings are copied at the type boundary.) |
+| 9.4.c.d | same step | Migrate registry, project, LSP and Composer readers; copy only values retained beyond the file owner | — | perf | DONE (unvalidated; registry, project, and Composer literal readers migrated; audit found no LSP literal-payload readers.) |
+| 9.4.c.e | same step | Add source-range, decoded-byte, fragment-append and consumer regression coverage | — | infra | DONE (unvalidated; retained source, transient decode, Unicode output and fragment append tests added; existing printer and reader tests exercise consumer paths.) |
+| 9.4.d | step 4 | Preserve arbitrary source bytes without lossy decoding where this item owns the representation | — | perf | DONE (unvalidated; see 9.4.d.a-9.4.d.c; doc-byte parsing and identifier bytes remain assigned to items 14 and 15.) |
+| 9.4.d.a | same step | Preserve raw bytes for inline HTML and string payloads through source or decoded ranges | — | perf | DONE (unvalidated; added ranges remain arbitrary bytes, with byte-preservation coverage for strings and inline HTML.) |
+| 9.4.d.b | same step | Read and parse doc comments as bytes without lossy decoding | 14 | perf | DEFERRED (to item 14's doc-byte parsing work) |
+| 9.4.d.c | same step | Preserve identifier bytes rather than lossy text during interning | 15 | perf | DEFERRED (to item 15's name-byte work) |
+| 9.5 | step 5 | Nothing changes a tree after its parse. The stub rules apply while a file is parsed, to the files they apply to today, choosing the newest version. Anonymous-class names go in a side table. Synthetic nodes go in a per-file scratch store. Completion and Composer's reader parse their own `ParsedFile`. `VisitorMut` goes | 9.3 | perf | DONE (unvalidated; see 9.5.a-9.5.e) |
+| 9.5.a | step 5 | Apply current stub-attribute behavior during parse, to the same files and newest-version choice as today | — | perf | DONE (unvalidated; see 9.5.a.a-9.5.a.f; version-aware stub semantics remain deferred with item 6.2) |
+| 9.5.a.a | same step | Use attribute mention facts to gate current transformations, preserving today's any-file and newest-version behavior until item 6.2 changes it | — | perf | DONE (unvalidated; parser marks recognized resolved attributes as they are parsed and skips stub-rule scans otherwise.) |
+| 9.5.a.b | same step | Resolve aliased availability and type-aware attributes as declarations are parsed | — | perf | DONE (unvalidated; rules match resolved imported names in the live parser context.) |
+| 9.5.a.c | same step | Apply current newest-version availability behavior while building functions, methods, parameters and class members | — | perf | DONE (unvalidated; superseded functions are omitted from statement lists, methods and parameters follow the existing default/repeated-name conditions, and direct single-statement function bodies preserve their prior behavior.) |
+| 9.5.a.d | same step | Apply newest-version type-aware values to native parameter types and doc overrides during parsing | — | perf | DONE (unvalidated; numeric version keys select the maximum, injected type names use the active imports, and docs retain source locations with transformed final text.) |
+| 9.5.a.e | same step | Preserve name resolution, doc-site/reference recording and downstream registry behavior without post-parse tree mutation | — | perf | DONE (unvalidated; injected names resolve in the live context; transformed trees invalidate stale parser references and downstream indexing walks the final owner-backed AST.) |
+| 9.5.a.f | same step | Add parse-time fixtures for availability removal, aliased attributes, type overrides, docs and file-role selection | — | infra | DONE (unvalidated; parser fixtures cover removals, nested single-statement behavior, aliases, numeric selection, injected names, doc placement, class members, and unrelated attributes; the parser API preserves the old any-file scope.) |
+| 9.5.b | step 5 | Keep anonymous-class names in a side table keyed by node ID | — | perf | DONE (unvalidated; the `AnonymousClass.name` field is removed, owner side-table reads are migrated, and retained/transient coverage is added.) |
+| 9.5.b.a | same step | Build the anonymous-class name side table from node IDs and line starts on the worker | — | perf | DONE (post-parse naming stores each name under its `AnonymousClassId`; unvalidated) |
+| 9.5.b.b | same step | Migrate declaration, registry, diagnostic and tooling readers to the side table | — | perf | DONE (registry, checker, project and LSP consumers resolve names through the `NodeArenas` owner; unvalidated) |
+| 9.5.b.c | same step | Keep the side table owned by the parsed file and cover retained/transient lifetimes | — | perf | DONE (fragment append alignment plus retained and transient owner/scratch-clear coverage added; unrun) |
+| 9.5.c | step 5 | Put checker-synthesized nodes in per-file scratch storage and clear them with that file | — | perf | DONE (unvalidated; checker expressions use reusable bump scratch with reserved synthetic IDs, reset between files; no checker-created statement nodes remain) |
+| 9.5.c.a | same step | Route checker synthetic expression and statement producers through a per-file scratch store | — | perf | DONE (checker-created expressions use per-checker scratch; completion probe statements are committed to their `ParsedFile` owner under 9.5.d; no separate checker statement producers remain) |
+| 9.5.c.b | same step | Reserve synthetic IDs and clear the per-file scratch arena when the file is released | — | perf | DONE (IDs occupy a reserved range, bypass file-local caches and reset with checker file state; unvalidated) |
+| 9.5.c.c | same step | Migrate synthetic-node consumers and cover scratch reuse and lifetime | — | perf | DONE (consumers recognize scratch IDs; uniqueness, reset and bump-capacity reuse tests were added but not run) |
+| 9.5.d | step 5 | Completion and Composer parse and retain their own `ParsedFile` owners; remove `into_kind` extraction | — | perf | DONE (unvalidated; see 9.5.d.a-9.5.d.d) |
+| 9.5.d.a | same step | Keep Composer's generated-autoloader parse and all IDs under its retained `ParsedFile` owner | — | perf | DONE (unvalidated; implementation and owner-backed test are tracked at 9.3.f.b.) |
+| 9.5.d.b | same step | Parse completion expressions and member probes into a completion-owned `ParsedFile` | — | perf | DONE (receiver parsing uses the live `NameContext`, then appends probes into one cloned parsed-file ID space; unvalidated) |
+| 9.5.d.c | same step | Remove the unused `ExprNode::into_kind` and `StmtNode::into_kind` extraction methods | — | perf | DONE (unvalidated; workspace search found no remaining methods or call sites.) |
+| 9.5.d.d | same step | Remove stack-owned synthetic probe nodes and cover completion owner lifetime | — | perf | DONE (probe statements live in the parsed-file arenas and their `Arc` is retained through checker execution; append/context/string tests were added but not run) |
+| 9.5.e | step 5 | Remove `VisitorMut` and the second `resolve_names` pass; keep recorded reference/doc-site behavior | — | perf | DONE (unvalidated; see 9.5.e.a-9.5.e.d.) |
+| 9.5.e.a | same step | Remove the post-parse stub transformation and second name-resolution invocation | — | perf | DONE (unvalidated; project parse no longer calls the post-parse pass or `resolve_names`.) |
+| 9.5.e.b | same step | Remove `VisitorMut` and mutable `walk_*_mut` APIs after remaining callers migrate | — | perf | DONE (unvalidated; no production or test callers remained after parser-time name and stub handling.) |
+| 9.5.e.c | same step | Preserve parser reference, doc-site and frame recording for transformed declarations | — | perf | DONE (unvalidated; transformed trees invalidate stale recorder references and project products are rebuilt from the final owner-backed AST, including synthesized doc tags.) |
+| 9.5.e.d | same step | Preserve registry stub indexing and canonical output from the final owner-backed tree | — | perf | DONE (unvalidated; embedded stubs and registry indexing now retain and read one transformed `ParsedFile`; canonical output includes appended docs.) |
 | 6.2 | step 2 | The stub index records each declaration's, parameter's and per-version type's version range, and each declaration's extension; with it, item 9's stub rules applied to stubs only and recording versions rather than choosing | 9.5 | sem | DEFERRED (after O3, not optimization) |
 | 6.3 | step 2 | Guards decided on run-time evidence only (extensions PHP cannot lack, Composer's `platform_check.php`, the configured runtime); an unknown guard keeps both declarations; readers answer for the configured versions | 6.2 | sem | DEFERRED (after O3, not optimization) |
 | 6.4 | step 2 | New check: a polyfill's signature against its native one | 6.3 | check | DEFERRED (after O3, not optimization) |
@@ -232,15 +272,41 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.6.c | step 6 | Condition and scope alias maps keep `ExprId`s | — | perf | DONE (unvalidated) |
 | 9.6.d | step 6 | Doctrine and DBAL query-builder chains keep `ExprId`s | — | perf | DONE (unvalidated) |
 | 9.7 | step 7 | Lists committed together from scratch as `IdxRange`s; kept trees' arenas moved out at exact size | 9.3 | perf | OPEN; see subtask rows 9.7.a-9.7.d |
-| 9.7.a | step 7 | Build each list in reusable parser scratch storage, then commit once with `alloc_many` | — | perf | PART (the five list families in 9.2 commit complete parser-built temporary vectors once; other AST child-list families remain owned.) |
-| 9.7.b | step 7 | Store list fields as contiguous typed `IdxRange`s and migrate owner-backed readers | — | perf | OPEN |
-| 9.7.c | step 7 | Assign element IDs at commit time and update any recorder that captures list-element IDs | — | perf | OPEN |
-| 9.7.d | step 7 | Move kept arenas out at exact size; retain scratch capacity only for transient trees | — | perf | OPEN |
-| 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN; see subtask rows 9.8.a-9.8.d |
-| 9.8.a | step 8 | Common expression and statement nodes store IDs/ranges/flags, with large variants out of line | — | perf | OPEN |
+| 9.7.a | step 7 | Build each list in reusable parser scratch storage, then commit once with `alloc_many` | — | perf | PART; see 9.7.a.a-9.7.a.d |
+| 9.7.a.a | same step | Build root and statement-body lists in reusable scratch and commit once | — | perf | DONE (unvalidated; root statements, braced/alternative blocks, `declare`, switch-case, try/catch/finally, closure, property-hook and function bodies use reusable scratch.) |
+| 9.7.a.b | same step | Build expression operands, arguments, array items and other expression-child lists in reusable scratch | — | perf | OPEN |
+| 9.7.a.c | same step | Build class-member, declaration and parameter lists in reusable scratch | — | perf | OPEN |
+| 9.7.a.d | same step | Build name, type, import, catch, closure-use and trait-adaptation lists in reusable scratch | — | perf | OPEN |
+| 9.7.b | step 7 | Store list fields as contiguous typed `IdxRange`s and migrate owner-backed readers | — | perf | PART; see 9.7.b.a-9.7.b.e |
+| 9.7.b.a | same step | Move statement and control-flow body lists to typed ranges | — | perf | DONE (unvalidated; the root `ParsedProgram`, `ParsedFile` and retained project tree, `StmtKind::Block`, `StmtKind::Declare`, `SwitchCase`, `Try`/catch/finally, closure, property-hook and function bodies use `StmtIdRange`; parser builders, canonical output and owner-backed readers are migrated.) |
+| 9.7.b.b | same step | Move expression operand and element lists to typed ranges | — | perf | DONE (unvalidated; `Isset`, match-arm conditions, interpolation parts, `Echo`, `For`, and `Unset` lists use `ExprIdRange`; destructuring items use `DestructureItemRange`. Builders commit complete lists to file-owned arenas, fragment offsets and arena lifecycle are wired, and canonical, visitor, printer, checker and summary readers are migrated.) |
+| 9.7.b.c | same step | Move class, member, declaration and relationship lists to typed ranges | — | perf | DONE (unvalidated; class inheritance names, properties, class constants, trait-use clauses, aliases, precedence lists and enum cases are stored as owner-backed typed ranges. Parser construction, canonical output, syntax traversal, checker, registry, project, Composer, LSP and parser-test readers use the owning `NodeArenas`.) |
+| 9.7.b.d | same step | Move name, type, import and trait-adaptation lists to typed ranges | — | perf | PART; see 9.7.b.d.a-9.7.b.d.d |
+| 9.7.b.d.a | same step | Move catch-clause and other standalone qualified-name lists to owner-backed ranges | — | perf | DONE (unvalidated; catch-type names are allocated in the file's qualified-name arena and checker, summary, syntax-version, navigation, use-site, visitor and parser-test readers resolve them through the owner.) |
+| 9.7.b.d.b | same step | Move union and intersection type-hint member lists to owner-backed ranges | — | perf | OPEN |
+| 9.7.b.d.c | same step | Move `use` import lists to owner-backed ranges | — | perf | OPEN |
+| 9.7.b.d.d | same step | Move trait names and adaptation lists to owner-backed ranges | — | perf | DONE (unvalidated; trait names, aliases, precedence clauses and `insteadof` names are covered by 9.7.b.c.) |
+| 9.7.b.e | same step | Move closure-use and property-hook lists to typed ranges | — | perf | OPEN; see 9.7.b.e.a-9.7.b.e.b |
+| 9.7.b.e.a | same step | Move closure `use` captures to an owner-backed range | — | perf | OPEN |
+| 9.7.b.e.b | same step | Move property-hook-related lists to owner-backed ranges | — | perf | OPEN |
+| 9.7.c | step 7 | Assign element IDs at commit time and update any recorder that captures list-element IDs | — | perf | OPEN; see 9.7.c.a-9.7.c.b |
+| 9.7.c.a | same step | Assign child element IDs only when each list is committed | — | perf | OPEN |
+| 9.7.c.b | same step | Update declaration/reference recorders to capture IDs at list commit | — | perf | OPEN |
+| 9.7.d | step 7 | Move kept arenas out at exact size; retain scratch capacity only for transient trees | — | perf | OPEN; see 9.7.d.a-9.7.d.b |
+| 9.7.d.a | same step | Move every retained arena out at exact size | — | perf | OPEN |
+| 9.7.d.b | same step | Retain and reuse cleared list scratch capacity only for transient trees | — | perf | OPEN |
+| 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN; see subtask rows 9.8.a-9.8.e |
+| 9.8.a | step 8 | Common expression and statement nodes store IDs/ranges/flags, with large variants out of line | — | perf | OPEN; see 9.8.a.a-9.8.a.b |
+| 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | OPEN |
+| 9.8.a.b | same step | Keep common statement nodes small and move large statement payloads out of line | — | perf | OPEN |
 | 9.8.b | step 8 | Keep expression and statement spans in parallel vectors, not in each node | — | perf | PART (spans are already parallel to IDs; node structs still also carry spans) |
-| 9.8.c | step 8 | Remove statement doc fields and resolve inline doc use by recorded doc-site offset | — | perf | OPEN |
-| 9.8.d | step 8 | Remove parameter doc fields and resolve parameter docs by doc-site offset; retain attributes in their nodes | — | perf | OPEN |
+| 9.8.c | step 8 | Remove statement doc fields and resolve inline doc use by recorded doc-site offset | — | perf | OPEN; see 9.8.c.a-9.8.c.b |
+| 9.8.c.a | same step | Remove statement doc fields and record doc sites by statement start offset | — | perf | OPEN |
+| 9.8.c.b | same step | Migrate inline-doc readers to resolve the recorded site by offset | — | perf | OPEN |
+| 9.8.d | step 8 | Remove parameter doc fields and resolve parameter docs by doc-site offset; retain attributes in their nodes | — | perf | OPEN; see 9.8.d.a-9.8.d.b |
+| 9.8.d.a | same step | Remove parameter doc fields and record parameter doc sites by offset | — | perf | OPEN |
+| 9.8.d.b | same step | Migrate parameter-doc readers to resolve sites by offset while retaining attributes | — | perf | OPEN |
+| 9.8.e | step 8 | Keep attributes available in their compact node representation | — | perf | OPEN |
 | 9.V | §11 | Tests-only item gate: workspace tests plus item-specific tests, including 3.4's scratch-store tests; full §11 validation waits until item 19 | 9.8 | val | OPEN; see subtask rows 9.V.a-9.V.c |
 | 9.V.a | §11 | Run `cargo test --workspace` after every item 9 implementation row is complete | — | val | OPEN (must not run before 9.2/3.4, 9.3-9.8 are complete) |
 | 9.V.b | §11 | Run item-specific syntax, parser, visitor, cache and reader tests | — | val | OPEN |
@@ -369,21 +435,29 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 12.V.b.b | same gate | Run qualified-name and numeric-literal tests | — | val | OPEN |
 | **13** | **item 13** | **A file's products: the declaration list and one walk** | | | |
 | 13.1 | step 1 | The parser lists declarations, with today's guards. Entries are reserved in source order. Docs by today's rule, resolved in the entry's scope | 9.7, 10.1 | perf | OPEN; see 13.1.a-13.1.c |
-| 13.1.a | same step | Have the parser collect declarations in source order while reserving entries at discovery time | — | perf | OPEN |
+| 13.1.a | same step | Have the parser collect declarations in source order while reserving entries at discovery time | — | perf | OPEN; see 13.1.a.a-13.1.a.e |
+| 13.1.a.a | same step | Collect named class-like declarations | — | perf | OPEN |
+| 13.1.a.b | same step | Collect function declarations | — | perf | OPEN |
+| 13.1.a.c | same step | Collect constants and `define()` declarations | — | perf | OPEN |
+| 13.1.a.d | same step | Reserve declaration slots at discovery and fill their node IDs at commit | — | perf | OPEN |
+| 13.1.a.e | same step | Include anonymous classes using item 9’s name side table | — | perf | OPEN |
 | 13.1.b | same step | Apply current declaration guards and resolve each declaration in its entry scope | — | perf | OPEN |
 | 13.1.c | same step | Attach docs according to the current rule and keep the old collector until 13.5 | — | perf | OPEN |
 | 13.2 | step 1 | Guards follow PHP's binding: exits include `exit`, `die`, `throw` and `__halt_compiler`; a parent from another file means possibly declared; a marker records constants a file defines by a computed name; new check: a run-time-bound declaration after an unconditional exit is dead | 13.1 | check | DEFERRED (after O3, not optimization); see subtask rows 13.2.a, 13.2.b, 13.2.c |
 | 13.2.a | same step | Apply PHP declaration guards for `exit`, `die`, `throw` and `__halt_compiler` | — | sem | DEFERRED (after O3, not optimization) |
-| 13.2.b | same step | Treat a parent declaration from another file as possibly declared and record computed-name constants | — | sem | DEFERRED (after O3, not optimization) |
+| 13.2.b | same step | Treat a parent declaration from another file as possibly declared and record constants defined by computed names | — | sem | DEFERRED (after O3, not optimization); see 13.2.b.a-13.2.b.b |
+| 13.2.b.a | same step | Treat a parent declaration from another file as possibly declared | — | sem | DEFERRED (after O3, not optimization) |
+| 13.2.b.b | same step | Record constants a file defines under computed names | — | sem | DEFERRED (after O3, not optimization) |
 | 13.2.c | same step | Report a run-time-bound declaration after an unconditional exit as dead | — | check | DEFERRED (after O3, not optimization) |
 | 13.3 | step 2 | `ImportScope`s published once | 13.1 | perf | OPEN; see subtask rows 13.3.a-13.3.b |
 | 13.3.a | same step | Build and publish one interned `ImportScope` at each namespace and use declaration | — | perf | OPEN |
 | 13.3.b | same step | Make readers start from the published scope instead of rebuilding import tables | — | perf | OPEN |
-| 13.4 | step 3 | One walk for `BodySummary`, `InitFlow`, `FileSites` and registered families, in today's order | 13.1 | perf | OPEN; see 13.4.a-13.4.d |
+| 13.4 | step 3 | One walk for `BodySummary`, `InitFlow`, `FileSites` and registered families, in today's order | 13.1 | perf | OPEN; see 13.4.a-13.4.e |
 | 13.4.a | same step | Run `BodySummary` in the shared traversal | — | perf | OPEN |
 | 13.4.b | same step | Run `InitFlow` in the shared traversal | — | perf | OPEN |
 | 13.4.c | same step | Run `FileSites` in the shared traversal | — | perf | OPEN |
 | 13.4.d | same step | Run registered traversal families in today’s order | — | perf | OPEN |
+| 13.4.e | same step | After O3, visit assignments, destructuring and short-circuit expressions in PHP evaluation order and add the corresponding `InitFlow` oracle tests | — | sem | DEFERRED (after O3, not optimization) |
 | 13.5 | step 4 | The old collector goes; the stub rules record their types' references | 9.5 | perf | OPEN; see subtask rows 13.5.a, 13.5.b |
 | 13.5.a | same step | Remove the old declaration collector after the parser and shared walk provide its products | — | perf | OPEN |
 | 13.5.b | same step | Record references from types written in stub rules | — | perf | OPEN |
@@ -428,19 +502,33 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 14.5b.c | same step | Delete `text_mentions_mixed` after all callers use node-derived information | — | sem | DEFERRED (after O3, not optimization) |
 | 14.6 | step 2 | The resolution memo keyed by (written `Type`, context id); the context holds whole `TemplateParam`s, aliases and `self` names | 14.4 | perf | OPEN; see 14.6.a-14.6.b |
 | 14.6.a | same step | Key resolution memo entries by written `Type` and context ID | — | perf | OPEN |
-| 14.6.b | same step | Store complete template parameters, aliases and `self` names in the context | — | perf | OPEN |
+| 14.6.b | same step | Store complete template parameters, aliases and `self` names in the context | — | perf | OPEN; see 14.6.b.a-14.6.b.c |
+| 14.6.b.a | same step | Store complete `TemplateParam` values in the resolution context | — | perf | OPEN |
+| 14.6.b.b | same step | Store aliases in the resolution context | — | perf | OPEN |
+| 14.6.b.c | same step | Store `self` names in the resolution context | — | perf | OPEN |
 | 14.7 | step 5 | Tag tokens borrow byte ranges; the doc lexed as bytes with PHP's classes; wrapped tags read as logical text | 9.4 | sem | OPEN; see 14.7.a-14.7.c |
-| 14.7.a | same step | Tokenize PHPDoc from byte ranges using PHP’s byte classes | — | sem | OPEN |
+| 14.7.a | same step | Tokenize PHPDoc from byte ranges using PHP’s byte classes | — | sem | OPEN; see 14.7.a.a-14.7.a.b |
+| 14.7.a.a | same step | Classify PHPDoc tokens using PHP’s byte classes | — | sem | OPEN |
+| 14.7.a.b | same step | Preserve byte payloads for variable, literal, shape-key, template, property, method and constant names | — | sem | OPEN |
 | 14.7.b | same step | Read wrapped tags as logical text without copying the full doc | — | sem | OPEN |
 | 14.7.c | same step | Borrow tag tokens from the source and retain their owner-backed ranges | — | perf | OPEN |
 | 14.8 | step 6 | One parse per doc (the grammar's own splitter deleted); one winner rule per tag (`tag_type_nodes`, `select_var_tag_nodes` and `var_type`/`var_name` go); two memos; `DocNames` goes | 14.2, 14.7 | sem | OPEN; see 14.8.a-14.8.e |
 | 14.8.a | same step | Parse a doc once and remove the grammar’s duplicate splitter | — | sem | OPEN |
-| 14.8.b | same step | Use one winner rule per tag and remove the old node-selection helpers | — | sem | OPEN |
-| 14.8.c | same step | Keep the docblock memo for tags, effects, winners, names and `@var` winners | — | perf | OPEN |
+| 14.8.b | same step | Use one winner rule per tag and remove the old node-selection helpers | — | sem | OPEN; see subtask rows 14.8.b.a-14.8.b.b |
+| 14.8.b.a | same step | Select the winning type node once for each tag, including `@phan-real-return` and `@phan-param-out` | — | sem | OPEN |
+| 14.8.b.b | same step | Select `@var` winners from the shared doc parse and remove the old node-selection helpers | — | sem | OPEN |
+| 14.8.c | same step | Keep the docblock memo for tags, effects, winners, names and `@var` winners | — | perf | OPEN; see 14.8.c.a-14.8.c.d |
+| 14.8.c.a | same step | Store parsed tags and tag effects in the docblock memo | — | perf | OPEN |
+| 14.8.c.b | same step | Store per-tag winning type nodes in the docblock memo | — | perf | OPEN |
+| 14.8.c.c | same step | Store referenced `Name` values for `recorded_references` | — | perf | OPEN |
+| 14.8.c.d | same step | Store `@var` winners in the docblock memo | — | perf | OPEN |
 | 14.8.d | same step | Keep the tag-effect memo and remove the separate tag-value and prefix memos | — | perf | OPEN |
 | 14.8.e | same step | Remove `DocNames` after references read names from the docblock memo | — | perf | OPEN |
 | 14.9 | step 7 | Nodes in their owner's `la-arena`; `DocType` as (owner, `Idx`, `Type`); a serialized `DocType` holds its subtree and type | 14.8 | perf | OPEN; see 14.9.a-14.9.c |
-| 14.9.a | same step | Store PHPDoc nodes in their owner’s `la-arena` | — | perf | OPEN |
+| 14.9.a | same step | Store PHPDoc nodes in their owner’s `la-arena` | — | perf | OPEN; see 14.9.a.a-14.9.a.c |
+| 14.9.a.a | same step | Store each `TagEffect`'s nodes in its own arena | — | perf | OPEN |
+| 14.9.a.b | same step | Store residual `DocBlock` nodes in a docblock-owned arena | — | perf | OPEN |
+| 14.9.a.c | same step | Resolve nodes through owner-carrying references such as `DocType::node` or `NodeRef` | — | perf | OPEN |
 | 14.9.b | same step | Represent `DocType` as owner, index and type | — | perf | OPEN |
 | 14.9.c | same step | Serialize a `DocType` with its subtree and type | — | perf | OPEN |
 | 14.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 14.9 | val | OPEN; see 14.V.a-14.V.b |
@@ -455,10 +543,42 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.1.a | same step | Delete the checker’s string-keyed method memo | — | perf | OPEN |
 | 15.1.b | same step | Delete `class_memo` | — | perf | OPEN |
 | 15.2 | C3 step 6 | Every `String`-keyed map and identifier value takes PHP's identity (`FoldedName`, `Name`, `ConstName`, `ArrayKey`), in the plan's order of cost, then by module | 15.1 | sem | OPEN; see 15.2.a-15.2.d |
-| 15.2.a | same step | Migrate folded-name maps and identifier values in the plan’s cost order | — | sem | OPEN |
-| 15.2.b | same step | Migrate `Name`-keyed maps and values by module | — | sem | OPEN |
-| 15.2.c | same step | Migrate `ConstName`-keyed maps and values by module | — | sem | OPEN |
-| 15.2.d | same step | Migrate `ArrayKey`-keyed maps and values by module | — | sem | OPEN |
+| 15.2.a | same step | Migrate folded-name maps and identifier values in the plan’s cost order | — | sem | OPEN; see 15.2.a.a-15.2.a.c |
+| 15.2.a.a | same step | Migrate folded-name maps in the plan’s cost order | — | sem | OPEN |
+| 15.2.a.b | same step | Migrate folded identifier values in the plan’s cost order | — | sem | OPEN |
+| 15.2.a.c | same step | Migrate the remaining folded-name call sites by module as listed in the plan | — | sem | OPEN |
+| 15.2.b | same step | Migrate `Name`-keyed maps and identifier values by module in the plan’s cost order | — | sem | OPEN; see subtask rows 15.2.b.a-15.2.b.g |
+| 15.2.b.a | same step | Migrate registry entry points and callers from text lookups to `Name` identity | — | sem | OPEN |
+| 15.2.b.b | same step | Migrate `TemplateBindings` and class-template substitution from string keys to `Name` identity | — | sem | OPEN |
+| 15.2.b.c | same step | Migrate checker scope sets, container fields and closure-scope frontier sets to name identity | — | sem | OPEN; see 15.2.b.c.a-15.2.b.c.c |
+| 15.2.b.c.a | same step | Migrate checker scope sets to name identity | — | sem | OPEN |
+| 15.2.b.c.b | same step | Migrate container fields to name identity | — | sem | OPEN |
+| 15.2.b.c.c | same step | Migrate closure-scope frontier sets to name identity | — | sem | OPEN |
+| 15.2.b.d | same step | Keep PHPDoc tokens and type nodes on interned name identity with item 14 | — | sem | OPEN |
+| 15.2.b.e | same step | Migrate assigned-variable and initialization-flow property names without converting names to strings | — | sem | OPEN; see 15.2.b.e.a-15.2.b.e.b |
+| 15.2.b.e.a | same step | Migrate assigned-variable name products to name identity | — | sem | OPEN |
+| 15.2.b.e.b | same step | Migrate initialization-flow property names to name identity | — | sem | OPEN |
+| 15.2.b.f | same step | Remove name text round trips in the parser, name resolution, `bind_self` and key tables | — | sem | OPEN; see 15.2.b.f.a-15.2.b.f.e |
+| 15.2.b.f.a | same step | Reuse lexer `Name` values in parser identifiers instead of re-interning text | — | sem | OPEN |
+| 15.2.b.f.b | same step | Intern qualified names and use paths directly from their source slices | — | sem | OPEN |
+| 15.2.b.f.c | same step | Resolve names from parts without building joined text | — | sem | OPEN |
+| 15.2.b.f.d | same step | Reuse the class `Name` in `bind_self` | — | sem | OPEN |
+| 15.2.b.f.e | same step | Resolve property keys through name identity without a text round trip | — | sem | OPEN |
+| 15.2.b.g | same step | Migrate the remaining `narrowing`, `calls`, `member_usage`, `project`, `types` and `phpdoc` callers by module | — | sem | OPEN; see 15.2.b.g.a-15.2.b.g.f |
+| 15.2.b.g.a | same step | Migrate narrowing callers to name identity | — | sem | OPEN |
+| 15.2.b.g.b | same step | Migrate call-analysis callers to name identity | — | sem | OPEN |
+| 15.2.b.g.c | same step | Migrate member-usage callers to name identity | — | sem | OPEN |
+| 15.2.b.g.d | same step | Migrate project callers to name identity | — | sem | OPEN |
+| 15.2.b.g.e | same step | Migrate type-system callers to name identity | — | sem | OPEN |
+| 15.2.b.g.f | same step | Migrate PHPDoc callers to name identity | — | sem | OPEN |
+| 15.2.c | same step | Migrate `ConstName`-keyed maps and values by module | — | sem | OPEN; see 15.2.c.a-15.2.c.c |
+| 15.2.c.a | same step | Migrate constant-name keys in registry and declaration maps | — | sem | OPEN |
+| 15.2.c.b | same step | Migrate constant-name values in checker and project products | — | sem | OPEN |
+| 15.2.c.c | same step | Migrate remaining constant-name readers in the modules listed in the plan | — | sem | OPEN |
+| 15.2.d | same step | Migrate `ArrayKey`-keyed maps and values by module | — | sem | OPEN; see 15.2.d.a-15.2.d.c |
+| 15.2.d.a | same step | Migrate array-key maps in type shapes and registry products | — | sem | OPEN |
+| 15.2.d.b | same step | Migrate array-key values in checker operations and conversions | — | sem | OPEN |
+| 15.2.d.c | same step | Migrate remaining array-key readers in the modules listed in the plan | — | sem | OPEN |
 | 15.3 | end state | `TableKey for str` and `FoldKey for str` deleted; outside text interned where it enters | 15.2 | perf | OPEN; see 15.3.a-15.3.b |
 | 15.3.a | same step | Delete `TableKey for str` after all callers use interned key identity | — | perf | OPEN |
 | 15.3.b | same step | Delete `FoldKey for str` and intern outside text at its entry point | — | perf | OPEN |
@@ -467,7 +587,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.4.b | same step | Escape non-displayable name bytes as `\x{NN}` wherever name text is shown | — | sem | DEFERRED (after O3, not optimization) |
 | 15.4.c | same step | Decode escaped names in `parse_display` | — | sem | DEFERRED (after O3, not optimization) |
 | 15.5 | fixes | `DiagnosticFix` holds bytes; `apply_fixes` and `resolve_span` work on bytes | 15.4 | sem | DEFERRED (after O3, not optimization); see subtask rows 15.5.a, 15.5.b |
-| 15.5.a | same step | Store diagnostic fix replacement text as bytes | — | sem | DEFERRED (after O3, not optimization) |
+| 15.5.a | same step | Store diagnostic fix `replacement` and `within` as bytes | — | sem | DEFERRED (after O3, not optimization) |
 | 15.5.b | same step | Apply fixes and resolve spans against byte-oriented source text | — | sem | DEFERRED (after O3, not optimization) |
 | 15.6 | serde | `Name` serializes its bytes | 15.4 | perf | DEFERRED (after O3, not optimization); see 15.6.a-15.6.b |
 | 15.6.a | same step | Serialize and deserialize non-human-readable `Name` values as bytes | — | perf | DEFERRED (after O3, not optimization) |
@@ -479,10 +599,11 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.8.a | same step | Use ASCII-only folding for repeated-attribute names | — | sem | DEFERRED (after O3, not optimization) |
 | 15.8.b | same step | Use ASCII-only folding at all restricted-symbol usage sites | — | sem | DEFERRED (after O3, not optimization) |
 | 15.8.c | same step | Use ASCII-only folding at all restricted-symbol definition sites | — | sem | DEFERRED (after O3, not optimization) |
-| 15.9 | documents | Each open document's encoding found with `encoding_rs` (new dependency); overlays encoded back; fixes offered only when encodable | 15.4, 1.4 | sem | DEFERRED (after O3, not optimization); see subtask rows 15.9.a, 15.9.b, 15.9.c |
+| 15.9 | documents | Each open document's encoding found with `encoding_rs` (new dependency); overlays encoded back; fixes offered only when encodable | 15.4, 1.4 | sem | DEFERRED (after O3, not optimization); see subtask rows 15.9.a-15.9.d |
 | 15.9.a | same step | Detect and retain each open document’s encoding with `encoding_rs` | — | sem | DEFERRED (after O3, not optimization) |
 | 15.9.b | same step | Encode overlays back to their document encoding | — | sem | DEFERRED (after O3, not optimization) |
 | 15.9.c | same step | Offer fixes only when their replacement text is encodable in the document | — | sem | DEFERRED (after O3, not optimization) |
+| 15.9.d | same step | When no lossless encoding matches, analyze as UTF-8 and report that non-ASCII names may not match the disk file | — | sem | DEFERRED (after O3, not optimization) |
 | 15.10 | short names | `NameData.last_segment`; a short name is a slice | 15.3 | perf | OPEN; see 15.10.a-15.10.b |
 | 15.10.a | same step | Store `NameData.last_segment` with the name | — | perf | OPEN |
 | 15.10.b | same step | Return a borrowed slice for short-name access | — | perf | OPEN |
@@ -506,7 +627,9 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 16.2.d | same step | Move type nodes to `triomphe::Arc` | — | perf | OPEN |
 | 16.3 | `PhpString` | Interned as a `ThinArc`, shared by literal types and shape keys; `Interner::str` and `WeakTable` go | 16.2 | perf | OPEN; see 16.3.a-16.3.b |
 | 16.3.a | same step | Represent interned `PhpString` values with `ThinArc` | — | perf | OPEN |
-| 16.3.b | same step | Share handles with literal types and shape keys; remove `Interner::str` and `WeakTable` | — | perf | OPEN |
+| 16.3.b | same step | Share handles with literal types and shape keys; remove `Interner::str` and `WeakTable` | — | perf | OPEN; see 16.3.b.a-16.3.b.b |
+| 16.3.b.a | same step | Share interned `PhpString` handles between literal types and shape keys | — | perf | OPEN |
+| 16.3.b.b | same step | Remove the legacy `Interner::str` and `WeakTable` paths | — | perf | OPEN |
 | 16.4 | holders | Every holder holds the handle: `FRONT`, memos' kept arguments, the lexer's tables | 16.2 | perf | OPEN; see 16.4.a-16.4.c |
 | 16.4.a | same step | Make `FRONT` retain interned handles | — | perf | OPEN |
 | 16.4.b | same step | Make memo kept arguments retain handles | — | perf | OPEN |
@@ -528,7 +651,10 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.1.c | same step | Trust `stat` only on filesystems identified as local and sufficiently precise | — | perf | OPEN |
 | 17.2 | step 1 | Every content hash is BLAKE3 with full digests (`blake3`, new), the build's hash and `SOURCES_HASH` included; `twox-hash` removed | 6.8 | perf | OPEN; see 17.2.a-17.2.b |
 | 17.2.a | same step | Use full BLAKE3 digests for every content hash | — | perf | OPEN |
-| 17.2.b | same step | Include the build hash and `SOURCES_HASH`, then remove `twox-hash` | — | perf | OPEN |
+| 17.2.b | same step | Include the build hash and `SOURCES_HASH`, then remove `twox-hash` | — | perf | OPEN; see 17.2.b.a-17.2.b.c |
+| 17.2.b.a | same step | Include the build hash in cache inputs | — | perf | OPEN |
+| 17.2.b.b | same step | Include `SOURCES_HASH` in cache inputs | — | perf | OPEN |
+| 17.2.b.c | same step | Remove `twox-hash` after all content hashes use BLAKE3 | — | perf | OPEN |
 | 17.3 | step 1 | The server writes neither the index nor the base from overlays | 17.1 | perf | OPEN; see subtask rows 17.3.a, 17.3.b |
 | 17.3.a | same step | Write persistent index entries only from file content read from disk, never from overlays | — | perf | OPEN |
 | 17.3.b | same step | Write the context base from the initial disk load before applying overlays | — | perf | OPEN |
@@ -536,20 +662,35 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.4.a | same step | Include configured PHP versions in the per-file cache key | — | perf | DEFERRED (after O3, not optimization) |
 | 17.4.b | same step | Include `short_open_tag` in the per-file cache key | — | perf | DEFERRED (after O3, not optimization) |
 | 17.5 | step 3 | The context base: its contents and file list; keyed by a destructured hash of the tracked settings; stored in item 6's container; the cold and warm paths; the server loads from it | 6.7, 17.2 | perf | OPEN; see 17.5.a-17.5.d |
-| 17.5.a | same step | Store the context base’s contents and file list | — | perf | OPEN |
-| 17.5.b | same step | Key it by a destructured hash of tracked settings and place it in item 6’s container | — | perf | OPEN |
-| 17.5.c | same step | Implement cold and warm load paths | — | perf | OPEN |
+| 17.5.a | same step | Store the context base’s contents and file list | — | perf | OPEN; see 17.5.a.a-17.5.a.e |
+| 17.5.a.a | same step | Store the resolved context-only registry | — | perf | OPEN |
+| 17.5.a.b | same step | Store reverse indexes restricted to context files | — | perf | OPEN |
+| 17.5.a.c | same step | Store each context file’s per-file products, excluding declarations held in the registry | — | perf | OPEN |
+| 17.5.a.d | same step | Store the resolved `changed_since` comparison snapshot | — | perf | OPEN |
+| 17.5.a.e | same step | Store the context file list in load order with role, relative path, Composer owner and content hash | — | perf | OPEN |
+| 17.5.b | same step | Key it by a destructured hash of tracked settings and place it in item 6’s container | — | perf | OPEN; see 17.5.b.a-17.5.b.b |
+| 17.5.b.a | same step | Classify context settings as tracked or untracked, including item 6 runtime evidence | — | perf | OPEN |
+| 17.5.b.b | same step | Hash the tracked settings and place the base in item 6’s container | — | perf | OPEN |
+| 17.5.c | same step | Implement cold and warm load paths | — | perf | OPEN; see 17.5.c.a-17.5.c.b |
+| 17.5.c.a | same step | Create and persist the context base on a cold load | — | perf | OPEN |
+| 17.5.c.b | same step | Reconcile changed, added, removed and reordered files on a warm load | — | perf | OPEN; see 17.5.c.b.a-17.5.c.b.d |
+| 17.5.c.b.a | same step | Update changed files through `update_file` and the appropriate session readers | — | perf | OPEN |
+| 17.5.c.b.b | same step | Add newly discovered files on a warm load | — | perf | OPEN |
+| 17.5.c.b.c | same step | Remove missing files through `remove_file` | — | perf | OPEN |
+| 17.5.c.b.d | same step | Reconcile file order and role changes | — | perf | OPEN |
 | 17.5.d | same step | Load the base in the language server | — | perf | OPEN |
-| 17.6 | Oracle | Tests written: the `stat` cases, the edit replay across two runs, the server loading from the base | 17.5 | infra | OPEN; see 17.6.a-17.6.c |
+| 17.6 | Oracle | Tests written: the `stat` cases, the edit replay across two runs, the server loading from the base | 17.5 | infra | OPEN; see 17.6.a-17.6.d |
 | 17.6.a | same step | Add fixtures for the `stat` cases | — | infra | OPEN |
 | 17.6.b | same step | Test an edit replay across two runs | — | infra | OPEN |
 | 17.6.c | same step | Test server loading from the context base | — | infra | OPEN |
+| 17.6.d | same step | Verify an overlay that differs from disk never enters the persistent index or context base | — | infra | OPEN |
 | 17.V | §11 | Tests-only item gate: workspace and item-specific tests, including `stat` cases; full §11 validation waits until item 19 | 17.6 | val | OPEN; see 17.V.a-17.V.b |
 | 17.V.a | same gate | Run `cargo test --workspace` after item 17 implementation rows are complete | — | val | OPEN |
-| 17.V.b | same gate | Run item-specific stat, two-run edit-replay and context-base tests | — | val | OPEN; see 17.V.b.a-17.V.b.c |
+| 17.V.b | same gate | Run item-specific stat, two-run edit-replay and context-base tests | — | val | OPEN; see 17.V.b.a-17.V.b.d |
 | 17.V.b.a | same gate | Run unit tests for stat fields and local-filesystem trust rules | — | val | OPEN |
 | 17.V.b.b | same gate | Run persistent-index tests across two runs and disk-backed edits | — | val | OPEN |
 | 17.V.b.c | same gate | Run context-base cold/warm path and serialization unit tests | — | val | OPEN |
+| 17.V.b.d | same gate | Run overlay-isolation tests proving disk-derived index and base entries exclude editor-only content | — | val | OPEN |
 | **18** | **item 18** | **The check phase's remainder** | | | |
 | 18.1 | step 1 | §12.10: observers and one inference per node; the PHPStan-API walker as a family; literal types once per node | 13.4 | sem | OPEN; see 18.1.a-18.1.d |
 | 18.1.a | same step | Register observers in the shared traversal | — | sem | OPEN |
@@ -571,7 +712,10 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 18.4 | step 3 | Variables as slots; the computed-name forms marked exactly; per-body key tables | 9.3 | perf | OPEN; see 18.4.a-18.4.c |
 | 18.4.a | same step | Represent local variables as dense slots | — | perf | OPEN |
 | 18.4.b | same step | Mark computed-name forms exactly | — | perf | OPEN |
-| 18.4.c | same step | Build a per-body key table with arrow-function inheritance and closure-use mapping | — | perf | OPEN |
+| 18.4.c | same step | Build a per-body key table with arrow-function inheritance and closure-use mapping | — | perf | OPEN; see 18.4.c.a-18.4.c.c |
+| 18.4.c.a | same step | Number body-local keys densely with variable slots first, then synthetic keys | — | perf | OPEN |
+| 18.4.c.b | same step | Extend the enclosing key table for arrow-function inheritance | — | perf | OPEN |
+| 18.4.c.c | same step | Map closure `use` entries from the enclosing body's keys at closure entry | — | perf | OPEN |
 | 18.5 | step 3 | Scopes as radix arrays, with `IntMap`-style merges and diffs; locals listed by name | 18.4, 16.2 | perf | OPEN; see 18.5.a-18.5.d |
 | 18.5.a | same step | Implement persistent 32-way radix-array nodes over dense keys | — | perf | OPEN |
 | 18.5.b | same step | Write uniquely owned nodes in place and copy only shared paths | — | perf | OPEN |
@@ -584,9 +728,16 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 18.7.a | same step | Add the `MemberIndex` representation | — | sem | OPEN |
 | 18.7.b | same step | Add the normalized-operand fast path | — | sem | OPEN |
 | 18.8 | step 6 | C8 step 2's rest: interning from borrowed parts; copy on first change; memos probed borrowed; shared values borrowed; `Display` into the formatter; `concat` through a byte scratch | 16.3 | perf | OPEN; see 18.8.a-18.8.e |
-| 18.8.a | same step | Gather type-operation members in reusable scratch and intern from borrowed slices | — | perf | OPEN |
+| 18.8.a | same step | Gather type-operation members in reusable scratch and intern from borrowed slices | — | perf | OPEN; see 18.8.a.a-18.8.a.c |
+| 18.8.a.a | same step | Intern direct type-operation results from borrowed member slices | — | perf | OPEN |
+| 18.8.a.b | same step | Intern traversal and transformation results from borrowed member slices | — | perf | OPEN |
+| 18.8.a.c | same step | Intern conversion and reconciliation results from borrowed member slices | — | perf | OPEN |
 | 18.8.b | same step | Probe memos with borrowed members and build keys only on misses | — | perf | OPEN |
-| 18.8.c | same step | Copy traversal output only on the first change and borrow unchanged shared values | — | perf | OPEN |
+| 18.8.c | same step | Copy traversal output only on the first change and borrow unchanged shared values | — | perf | OPEN; see subtask rows 18.8.c.a-18.8.c.d |
+| 18.8.c.a | same step | Allocate traversal output only after the first changed member | — | perf | OPEN |
+| 18.8.c.b | same step | Borrow shared representations instead of cloning them in `into_repr` | — | perf | OPEN |
+| 18.8.c.c | same step | Return unchanged callable signatures by borrow from template-bound operations | — | perf | OPEN |
+| 18.8.c.d | same step | Compare same-member types by hash without sorting a copied member list | — | perf | OPEN |
 | 18.8.d | same step | Write `Display for Type` directly to the formatter | — | perf | OPEN |
 | 18.8.e | same step | Build concatenated bytes in scratch and intern the borrowed result | — | perf | OPEN |
 | 18.9 | step 7 | One argument binding per call | 18.1 | perf | OPEN; see 18.9.a-18.9.b |
@@ -608,7 +759,9 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 18.14.a | same step | Replace one-element vectors with `slice::from_ref` | — | perf | OPEN |
 | 18.14.b | same step | Remove temporary lists used only for iteration or constant data | — | perf | OPEN; see 18.14.b.a-18.14.b.b |
 | 18.14.b.a | same step | Iterate lists directly when their collected values are only traversed once | — | perf | OPEN |
-| 18.14.b.b | same step | Use static slices for constant lists and build fixed per-file lists once | — | perf | OPEN |
+| 18.14.b.b | same step | Use static slices for constant lists and build fixed per-file lists once | — | perf | OPEN; see 18.14.b.b.a-18.14.b.b.b |
+| 18.14.b.b.a | same step | Use static slices for constant lists | — | perf | OPEN |
+| 18.14.b.b.b | same step | Build fixed per-file lists once and reuse them | — | perf | OPEN |
 | 18.14.c | same step | Move per-file and per-check `seen` vectors into reusable scratch | — | perf | OPEN |
 | 18.15 | step 10, F6c | `Locals` behind one `Rc`; throw, catch and loop frames as scratch | — | perf | OPEN; see 18.15.a-18.15.c |
 | 18.15.a | same step | Place `Locals` behind one shared `Rc` | — | perf | OPEN |
@@ -660,7 +813,9 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.2 | retention | `keeps_tree(role, open, mode, checked)`; a batch frees each tree when its check ends | 3.1 | perf | OPEN; see 19.2.a-19.2.c |
 | 19.2.a | same step | Implement one `keeps_tree(role, open, mode, checked)` policy and use it at load, update and check | — | perf | OPEN |
 | 19.2.b | same step | Drop each analysed batch tree when its file check ends | — | perf | OPEN |
-| 19.2.c | same step | Retain open-document trees and bound other server trees by bytes | — | perf | OPEN |
+| 19.2.c | same step | Retain open-document trees and bound other server trees by bytes | — | perf | OPEN; see 19.2.c.a-19.2.c.b |
+| 19.2.c.a | same step | Keep open-document trees resident while their documents are open | — | perf | OPEN |
+| 19.2.c.b | same step | Bound other server trees by their retained arena bytes | — | perf | OPEN |
 | 19.3 | schedule | Each worker takes the largest file left (`scope_fifo` or an atomic cursor) | — | perf | OPEN; see 19.3.a-19.3.b |
 | 19.3.a | same step | Order pending file checks by descending estimated cost | — | perf | OPEN |
 | 19.3.b | same step | Dispatch one file at a time from the ordered work using `scope_fifo` or a shared atomic cursor | — | perf | OPEN |
@@ -673,11 +828,20 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.5 | server | The tree cache: `quick_cache` weighted by bytes, keyed by (`FileId`, content hash); a hash mismatch is an edit | 14.1, 17.2 | perf | OPEN; see 19.5.a-19.5.d |
 | 19.5.a | same step | Use a weighted `quick_cache` bounded by each tree’s arena bytes | — | perf | OPEN |
 | 19.5.b | same step | Key cached trees by `(FileId, content hash)` and keep open-document trees outside the cache | — | perf | OPEN |
-| 19.5.c | same step | Reparse evicted trees through `ast_of` after validating the loaded-content hash | — | perf | OPEN |
+| 19.5.c | same step | Reparse evicted trees through `ast_of` after validating the loaded-content hash | — | perf | OPEN; see 19.5.c.a-19.5.c.b |
+| 19.5.c.a | same step | Reparse an evicted tree on demand through `ast_of` | — | perf | OPEN |
+| 19.5.c.b | same step | Validate reread content against the loaded-content hash before returning a cached or parsed tree | — | perf | OPEN |
 | 19.5.d | same step | Treat a changed reread as an edit and update declarations/references before checking dependents | — | perf | OPEN |
 | 19.6 | readers | `FileState::ast` goes; every reader asks `ast_of` | 19.2 | perf | OPEN; see 19.6.a-19.6.c |
 | 19.6.a | same step | Remove `FileState::ast` and its empty-tree release fallback | — | perf | OPEN |
-| 19.6.b | same step | Route every reader through `ast_of` so an evicted tree is reparsed on demand | — | perf | OPEN |
+| 19.6.b | same step | Route every reader through `ast_of` so an evicted tree is reparsed on demand | — | perf | OPEN; see 19.6.b.a-19.6.b.g |
+| 19.6.b.a | same step | Route architecture, banned-construct and class-shape readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.b | same step | Route Composer and mock-hygiene readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.c | same step | Route use-site and unmatched-ignore readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.d | same step | Route checker and declaration readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.e | same step | Route LSP readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.f | same step | Route dependency and other project readers through `ast_of` | — | perf | OPEN |
+| 19.6.b.g | same step | Audit remaining AST readers and remove direct reads of retained file trees | — | perf | OPEN |
 | 19.6.c | same step | Ensure edits that recheck dependents reparse evicted dependent trees | — | perf | OPEN |
 | 19.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation and O3 follow after this gate | 19.6 | val | OPEN; see 19.V.a-19.V.b |
 | 19.V.a | same gate | Run `cargo test --workspace` after item 19 implementation rows are complete | — | val | OPEN |
