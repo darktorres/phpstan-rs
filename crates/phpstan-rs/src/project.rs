@@ -235,14 +235,14 @@ struct DeclarationSource<'a> {
 /// A file's tree: the one it kept, or one parsed again.
 pub(crate) enum AstRef<'a> {
     Kept(&'a SyntaxTree),
-    Parsed(Arc<Vec<StmtNode>>),
+    Parsed(Arc<SyntaxTree>),
 }
 
 impl AstRef<'_> {
     pub(crate) fn statements(&self) -> &[StmtNode] {
         match self {
             AstRef::Kept(tree) => tree.statements(),
-            AstRef::Parsed(ast) => ast.as_slice(),
+            AstRef::Parsed(tree) => tree.statements(),
         }
     }
 }
@@ -251,12 +251,12 @@ impl AstRef<'_> {
 /// that reads a few of them (the files that declare a class writing a
 /// private property) asks for more than once.
 #[derive(Default)]
-struct AstCache(std::collections::VecDeque<(PathBuf, Arc<Vec<StmtNode>>)>);
+struct AstCache(std::collections::VecDeque<(PathBuf, Arc<SyntaxTree>)>);
 
 impl AstCache {
     const CAPACITY: usize = 32;
 
-    fn get(&mut self, path: &Path) -> Option<Arc<Vec<StmtNode>>> {
+    fn get(&mut self, path: &Path) -> Option<Arc<SyntaxTree>> {
         let at = self.0.iter().position(|(cached, _)| cached == path)?;
         let entry = self.0.remove(at)?;
         let ast = Arc::clone(&entry.1);
@@ -264,11 +264,11 @@ impl AstCache {
         Some(ast)
     }
 
-    fn insert(&mut self, path: PathBuf, ast: Arc<Vec<StmtNode>>) {
+    fn insert(&mut self, path: PathBuf, tree: Arc<SyntaxTree>) {
         if self.0.len() == Self::CAPACITY {
             self.0.pop_front();
         }
-        self.0.push_back((path, ast));
+        self.0.push_back((path, tree));
     }
 }
 
@@ -1222,12 +1222,12 @@ impl Project {
             Err(error) => parse_with_ignores(path, &error.into_bytes(), None),
         }
         .ok()?;
-        let ast = Arc::new(parsed.tree.stmts);
+        let tree = Arc::new(parsed.tree);
         self.ast_cache
             .lock()
             .ok()?
-            .insert(path.to_path_buf(), Arc::clone(&ast));
-        Some(AstRef::Parsed(ast))
+            .insert(path.to_path_buf(), Arc::clone(&tree));
+        Some(AstRef::Parsed(tree))
     }
 
     /// What the bytes `path` was loaded or last edited from are.
