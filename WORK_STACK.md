@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `47b602d6`. Counts below were read from the files on
+State as of 2026-10-06, `5d5f9d4d`. Counts below were read from the files on
 that date.
 
 ## Where to resume
@@ -264,7 +264,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   Load workers now pass their `NodeArenas` bundle across files whose trees are
   dropped, reclaiming the arenas from each parsed file. These transient parses
   omit the extra source-byte copy and the file-local name table and `NameId`s;
-  retained-tree parses still keep source, names and IDs. The capacity and
+  retained-tree parses still keep source, names and IDs. Plan §9.2 now states
+  this distinction explicitly (`5d5f9d4d`). The capacity and
   span-alignment, parse-error reuse, project tree-to-scratch handoff, and
   transient source/name omission tests are added but unrun. The parser restores scratch arenas on lexer or syntax
   errors, preserving capacity in the worker. A further unrun test verifies
