@@ -6,11 +6,11 @@ use crate::token::{Keyword, Token};
 
 /// A class-like body's members, as `Parser::parse_class_body` reads them.
 pub(crate) struct ClassBody {
-    pub properties: Vec<PropertyDecl>,
-    pub methods: Vec<MethodDecl>,
-    pub consts: Vec<ClassConst>,
-    pub trait_uses: Vec<TraitUse>,
-    pub enum_cases: Vec<EnumCase>,
+    pub properties: PropertyRange,
+    pub methods: MethodRange,
+    pub consts: ClassConstRange,
+    pub trait_uses: TraitUseRange,
+    pub enum_cases: EnumCaseRange,
 }
 
 impl Parser<'_> {
@@ -102,16 +102,11 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = body?;
-        let (extends, implements, properties, methods, consts, trait_uses, enum_cases) = {
+        let (extends, implements) = {
             let mut arenas = self.node_arenas.borrow_mut();
             (
                 arenas.alloc_qualified_names(extends),
                 arenas.alloc_qualified_names(implements),
-                arenas.alloc_properties(properties),
-                arenas.alloc_methods(methods),
-                arenas.alloc_class_consts(consts),
-                arenas.alloc_trait_uses(trait_uses),
-                arenas.alloc_enum_cases(enum_cases),
             )
         };
 
@@ -151,18 +146,29 @@ impl Parser<'_> {
         class_is_readonly: bool,
     ) -> Result<ClassBody, ParseError> {
         self.expect(&Token::LBrace)?;
-        let mut properties = Vec::new();
-        let mut methods = Vec::new();
-        let mut consts = Vec::new();
-        let mut trait_uses = Vec::new();
-        let mut enum_cases = Vec::new();
+        let properties_start = self.property_scratch.len();
+        let methods_start = self.method_scratch.len();
+        let consts_start = self.class_const_scratch.len();
+        let trait_uses_start = self.trait_use_scratch.len();
+        let enum_cases_start = self.enum_case_scratch.len();
 
         let mut pending_member: Option<crate::parser::MemberStart> = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             if let Some(member) = pending_member.take() {
-                self.finish_member(member, &mut properties, &mut methods, &mut consts);
+                let span = self.member_removal_span(member);
+                Self::finish_member_at(
+                    member,
+                    span,
+                    &mut self.property_scratch,
+                    &mut self.method_scratch,
+                    &mut self.class_const_scratch,
+                );
             }
-            pending_member = Some(self.member_start(properties.len(), methods.len(), consts.len()));
+            pending_member = Some(self.member_start(
+                self.property_scratch.len(),
+                self.method_scratch.len(),
+                self.class_const_scratch.len(),
+            ));
             let member_start = self.current_pos();
             // `#[Attr]` groups precede everything else about a member
             // (even its visibility/`static`/... modifiers) - parsed
@@ -177,7 +183,7 @@ impl Parser<'_> {
             if self.eat(&Token::Keyword(Keyword::Case)) {
                 let mut case = self.parse_enum_case_rest(attrs, member_start)?;
                 case.attrs = self.strip_stub_attributes(case.attrs);
-                enum_cases.push(case);
+                self.enum_case_scratch.push(case);
                 continue;
             }
 
@@ -197,7 +203,7 @@ impl Parser<'_> {
                     }
                 };
                 self.note_doc(&doc, member_start);
-                trait_uses.push(TraitUse {
+                self.trait_use_scratch.push(TraitUse {
                     traits: self.node_arenas.borrow_mut().alloc_qualified_names(traits),
                     doc_comment: doc,
                     adaptations,
@@ -321,7 +327,7 @@ impl Parser<'_> {
                     let const_attrs =
                         self.transform_stub_member_attrs(attrs.clone(), &mut const_doc);
                     self.note_doc(&const_doc, member_start);
-                    consts.push(ClassConst {
+                    self.class_const_scratch.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
                         name: self.ident(cname, cname_span),
@@ -363,7 +369,7 @@ impl Parser<'_> {
                         }
                     }
                 }
-                methods.push(MethodDecl {
+                self.method_scratch.push(MethodDecl {
                     removal_span: None,
                     visibility,
                     is_static,
@@ -404,7 +410,7 @@ impl Parser<'_> {
                     let property_attrs =
                         self.transform_stub_member_attrs(attrs.clone(), &mut property_doc);
                     self.note_doc(&property_doc, member_start);
-                    properties.push(PropertyDecl {
+                    self.property_scratch.push(PropertyDecl {
                         removal_span: None,
                         name: self.ident(self.intern(&name), name_span),
                         visibility,
@@ -429,7 +435,7 @@ impl Parser<'_> {
                 let property_attrs =
                     self.transform_stub_member_attrs(attrs.clone(), &mut property_doc);
                 self.note_doc(&property_doc, member_start);
-                properties.push(PropertyDecl {
+                self.property_scratch.push(PropertyDecl {
                     removal_span: None,
                     name: self.ident(self.intern(&name), name_span),
                     visibility,
@@ -455,16 +461,24 @@ impl Parser<'_> {
             }
         }
         if let Some(member) = pending_member.take() {
-            self.finish_member(member, &mut properties, &mut methods, &mut consts);
+            let span = self.member_removal_span(member);
+            Self::finish_member_at(
+                member,
+                span,
+                &mut self.property_scratch,
+                &mut self.method_scratch,
+                &mut self.class_const_scratch,
+            );
         }
         self.expect(&Token::RBrace)?;
 
+        let mut arenas = self.node_arenas.borrow_mut();
         Ok(ClassBody {
-            properties,
-            methods,
-            consts,
-            trait_uses,
-            enum_cases,
+            properties: arenas.alloc_properties(self.property_scratch.drain(properties_start..)),
+            methods: arenas.alloc_methods(self.method_scratch.drain(methods_start..)),
+            consts: arenas.alloc_class_consts(self.class_const_scratch.drain(consts_start..)),
+            trait_uses: arenas.alloc_trait_uses(self.trait_use_scratch.drain(trait_uses_start..)),
+            enum_cases: arenas.alloc_enum_cases(self.enum_case_scratch.drain(enum_cases_start..)),
         })
     }
 
@@ -617,16 +631,11 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
-        let (extends, implements, properties, methods, consts, trait_uses, enum_cases) = {
+        let (extends, implements) = {
             let mut arenas = self.node_arenas.borrow_mut();
             (
                 arenas.alloc_qualified_names(extends),
                 arenas.alloc_qualified_names(implements),
-                arenas.alloc_properties(properties),
-                arenas.alloc_methods(methods),
-                arenas.alloc_class_consts(consts),
-                arenas.alloc_trait_uses(trait_uses),
-                arenas.alloc_enum_cases(enum_cases),
             )
         };
 

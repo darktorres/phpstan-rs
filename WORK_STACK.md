@@ -871,7 +871,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   tree lists now use owner-backed `StmtIdRange`s. Expression child lists and
   destructuring elements use typed ranges; expression IDs, destructuring
   elements, arguments, array items and match arms now build in reusable parser
-  scratch before committing. Class inheritance, property,
+  scratch before committing. Class-body properties, methods, constants, trait
+  uses and enum cases also build in reusable scratch before their owner ranges
+  are committed. Class inheritance, property,
   constant, trait-use/adaptation and enum-case lists now use owner-backed
   ranges, with parser, checker, registry, project, Composer, LSP and parser
   fixture readers migrated (9.7.b.a-c, unvalidated). Catch-type name lists

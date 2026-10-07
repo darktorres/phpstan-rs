@@ -115,6 +115,12 @@ pub struct Parser<'a> {
     array_item_scratch: Vec<ArrayItem>,
     // Reused for match arms while their conditions and bodies are parsed.
     match_arm_scratch: Vec<MatchArm>,
+    // Reused for class-body member lists while nested declarations are parsed.
+    property_scratch: Vec<PropertyDecl>,
+    method_scratch: Vec<MethodDecl>,
+    class_const_scratch: Vec<ClassConst>,
+    trait_use_scratch: Vec<TraitUse>,
+    enum_case_scratch: Vec<EnumCase>,
     // Reused for destructuring patterns before their elements are committed
     // together to `NodeArenas::destructure_items`.
     destructure_item_scratch: Vec<DestructureItem>,
@@ -345,6 +351,11 @@ impl<'a> Parser<'a> {
             arg_list_scratch: Vec::new(),
             array_item_scratch: Vec::new(),
             match_arm_scratch: Vec::new(),
+            property_scratch: Vec::new(),
+            method_scratch: Vec::new(),
+            class_const_scratch: Vec::new(),
+            trait_use_scratch: Vec::new(),
+            enum_case_scratch: Vec::new(),
             destructure_item_scratch: Vec::new(),
             interner: Interner::global(),
             pattern_only: Vec::new(),
@@ -599,9 +610,9 @@ impl Parser<'_> {
 
     /// Gives the member begun at `start` its `removal_span`, when it was
     /// the only member its declaration produced.
-    pub(crate) fn finish_member(
-        &self,
+    pub(crate) fn finish_member_at(
         start: MemberStart,
+        span: Span,
         properties: &mut [PropertyDecl],
         methods: &mut [MethodDecl],
         consts: &mut [ClassConst],
@@ -611,7 +622,7 @@ impl Parser<'_> {
             methods.len() - start.methods,
             consts.len() - start.consts,
         );
-        let span = Some(self.member_removal_span(start));
+        let span = Some(span);
         match added {
             (1, 0, 0) => properties[start.properties].removal_span = span,
             (0, 1, 0) => methods[start.methods].removal_span = span,
