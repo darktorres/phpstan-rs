@@ -264,10 +264,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   project trees (`a42f63ab`); parser tests cover name-ID reuse, parsed-file
   name/source lookup and span alignment (`eee0c503`, `d0a45686`, `a42f63ab`),
   plus `Send + Sync`/`Copy` type invariants (`113b7869`); none have run. The
-  workspace call sites now use the explicit node names in place of the
-  `Expr`/`Stmt` aliases;
-  `ExprNode`/`StmtNode` (`1de1a21a`); the unused public aliases were removed
-  (`11e69fee`). The AST remains a recursive value tree. Arena commits
+  workspace call sites now use `ExprNode`/`StmtNode` directly (`1de1a21a`);
+  the unused public `Expr`/`Stmt` aliases were removed (`11e69fee`). The AST
+  remains a recursive value tree. Arena commits
   are not implemented, and no item gate or full
   validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
