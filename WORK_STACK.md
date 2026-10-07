@@ -892,14 +892,15 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   are fixed optional fields, attributes already use ranges, and block bodies
   already use statement ranges.
   Closure captures now use an owner-backed range resolved by syntax, checker
-  and printer readers (9.7.a.d.c.b/9.7.b.e.a, unvalidated). Remaining scratch
-  builders and list-element recorder IDs,
-  exact-size kept arenas and item 9.8 remain. Items 10-19 have
-  complete child-task and tests-only gate rows. A follow-up granularity pass
-  added the PHPDoc cache migration (14.9.d), the deferred document-encoding
-  test (15.9.e), separate hash inputs (17.2.a-d), and the remaining tree-reader
-  sweep (19.6.b.a-d); item 19's cache-validation subtasks now follow execution
-  order.
+  and printer readers (9.7.a.d.c.b/9.7.b.e.a, unvalidated). Node IDs are
+  assigned at arena insertion, syntax recorders capture names/spans rather
+  than node IDs, retained arenas are compacted, and transient arenas are
+  reused. Item 9.7 is implemented but unvalidated; item 9.8 remains. Items
+  10-19 have complete child-task and tests-only gate rows. A follow-up
+  granularity pass added the PHPDoc cache migration (14.9.d), the deferred
+  document-encoding test (15.9.e), separate hash inputs (17.2.a-d), and the
+  remaining tree-reader sweep (19.6.b.a-d); item 19's cache-validation
+  subtasks now follow execution order.
   No tests or builds were run;
   the 9.V gate stays closed until all item 9 implementation rows are complete.
 - **Passes outside the item order,** also in §13: a dependency pass (six

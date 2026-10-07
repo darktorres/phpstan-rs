@@ -271,7 +271,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.6.b | step 6 | File-constant `Initializers` keep `ExprId`s | — | perf | DONE (unvalidated) |
 | 9.6.c | step 6 | Condition and scope alias maps keep `ExprId`s | — | perf | DONE (unvalidated) |
 | 9.6.d | step 6 | Doctrine and DBAL query-builder chains keep `ExprId`s | — | perf | DONE (unvalidated) |
-| 9.7 | step 7 | Lists committed together from scratch as `IdxRange`s; kept trees' arenas moved out at exact size | 9.3 | perf | PART; see subtask rows 9.7.a-9.7.d |
+| 9.7 | step 7 | Lists committed together from scratch as `IdxRange`s; kept trees' arenas moved out at exact size | 9.3 | perf | DONE (unvalidated; all child rows are DONE or SKIP.) |
 | 9.7.a | step 7 | Build each list in reusable parser scratch storage, then commit once with `alloc_many` | — | perf | DONE (unvalidated; all parser scratch list families in 9.7.a.a-9.7.a.d now commit to owner arenas.) |
 | 9.7.a.a | same step | Build root and statement-body lists in reusable scratch and commit once | — | perf | DONE (unvalidated; root statements, braced/alternative blocks, `declare`, switch-case, try/catch/finally, closure, property-hook and function bodies use reusable scratch.) |
 | 9.7.a.b | same step | Build expression operands, arguments, array items and other expression-child lists in reusable scratch | — | perf | DONE (unvalidated; expression-ID lists, destructuring elements, arguments, array items and match arms use reusable parser scratch and commit only when retained; special forms consume/discard argument scratch without storing unused `Arg` records.) |
@@ -297,12 +297,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7.b.e | same step | Move closure-use and property-hook lists to typed ranges | — | perf | DONE (closure captures are owner-backed; the hook review is SKIP because `get`/`set` are fixed optional fields, hook attributes already use ranges, and block bodies use statement ranges); see 9.7.b.e.a-9.7.b.e.b |
 | 9.7.b.e.a | same step | Move closure `use` captures to an owner-backed range | — | perf | DONE (unvalidated; `ClosureExpr::uses` is a typed owner range, with fragment lifecycle, parser construction, canonical output, visitors, checker readers and printing migrated.) |
 | 9.7.b.e.b | same step | Move property-hook-related lists to owner-backed ranges | — | perf | SKIP (`PropertyHooks` has fixed `get`/`set` fields; hook attributes and block bodies already use owner-backed ranges.) |
-| 9.7.c | step 7 | Assign element IDs at commit time and update any recorder that captures list-element IDs | — | perf | OPEN; see 9.7.c.a-9.7.c.b |
-| 9.7.c.a | same step | Assign child element IDs only when each list is committed | — | perf | OPEN |
-| 9.7.c.b | same step | Update declaration/reference recorders to capture IDs at list commit | — | perf | OPEN |
-| 9.7.d | step 7 | Move kept arenas out at exact size; retain scratch capacity only for transient trees | — | perf | OPEN; see 9.7.d.a-9.7.d.b |
-| 9.7.d.a | same step | Move every retained arena out at exact size | — | perf | OPEN |
-| 9.7.d.b | same step | Retain and reuse cleared list scratch capacity only for transient trees | — | perf | OPEN |
+| 9.7.c | step 7 | Assign typed node IDs as nodes commit; update any recorder that captures list-element IDs | — | perf | DONE (node IDs are assigned at arena insertion; recorder review is SKIP because syntax recorders retain names and spans, while item 13's declaration slots own node-ID recording); see 9.7.c.a-9.7.c.b |
+| 9.7.c.a | same step | Assign each expression and statement ID when its completed node is inserted into its typed arena | — | perf | DONE (50c08c1a; parser reserves each typed ID immediately before its completed node is inserted into its matching arena.) |
+| 9.7.c.b | same step | Update declaration/reference recorders to capture IDs at list commit | — | perf | SKIP (syntax recorders capture names and spans, not AST list-element IDs; item 13.1.a.d tracks declaration slots and node IDs.) |
+| 9.7.d | step 7 | Move kept arenas out at exact size; retain scratch capacity only for transient trees | — | perf | DONE (unvalidated; see 9.7.d.a-9.7.d.b.) |
+| 9.7.d.a | same step | Move every retained arena out at exact size | — | perf | DONE (733451be; retained parses shrink each node arena and span table before returning the tree.) |
+| 9.7.d.b | same step | Retain and reuse cleared list scratch capacity only for transient trees | — | perf | DONE (733451be; worker transient parses take and return the reusable NodeArenas bundle, including list scratch capacity.) |
 | 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN; see subtask rows 9.8.a-9.8.e |
 | 9.8.a | step 8 | Common expression and statement nodes store IDs/ranges/flags, with large variants out of line | — | perf | OPEN; see 9.8.a.a-9.8.a.b |
 | 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | OPEN |
