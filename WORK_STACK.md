@@ -259,7 +259,8 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   indices, and the inference cache is keyed by `ExprId` alone during a
   file's active expression check. Its checker entry point now takes that id
   directly (`e5c79b48`). Project checkers now carry the retained `SyntaxTree`
-  owner and assert that their root statement slice belongs to it (`ab80189f`);
+  owner and assert that their root statement slice belongs to it and that
+  statement IDs resolve through its span table (`ab80189f`, `b53aa02e`);
   readers still use recursive values. Commit `36ad3c08` removes the address key
   and adds cache coverage for ID, question, and scope; completion's mixed-tree
   probe bypasses it (`a6960c97`). Parser errors are boxed and their canonical
