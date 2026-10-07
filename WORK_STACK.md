@@ -258,7 +258,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   removed (`fec7cd0a`); the parser reserves distinct typed expression/statement
   indices, and the inference cache is keyed by `ExprId` alone during a
   file's active expression check. Its checker entry point now takes that id
-  directly (`e5c79b48`). Commit `36ad3c08` removes the address key
+  directly (`e5c79b48`). Project checkers now carry the retained `SyntaxTree`
+  owner and assert that their root statement slice belongs to it (`ab80189f`);
+  readers still use recursive values. Commit `36ad3c08` removes the address key
   and adds cache coverage for ID, question, and scope; completion's mixed-tree
   probe bypasses it (`a6960c97`). Parser errors are boxed and their canonical
   print is preserved (`2e33f369`); an unrun regression test asserts their
