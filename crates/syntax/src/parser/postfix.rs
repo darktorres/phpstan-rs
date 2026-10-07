@@ -6,13 +6,13 @@ use crate::span::Span;
 use crate::token::Token;
 
 impl Parser<'_> {
-    pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<ExprId, ParseError> {
         let primary = self.parse_primary()?;
         self.parse_postfix(primary)
     }
 
-    pub(crate) fn parse_postfix(&mut self, mut expr: ExprNode) -> Result<ExprNode, ParseError> {
-        let start = expr.span.start;
+    pub(crate) fn parse_postfix(&mut self, mut expr: ExprId) -> Result<ExprId, ParseError> {
+        let start = self.expr_node(expr).span.start;
         loop {
             match self.peek() {
                 Token::Arrow | Token::NullsafeArrow => {
@@ -31,7 +31,7 @@ impl Parser<'_> {
                         self.skip();
                         let e = self.parse_expression()?;
                         self.expect(&Token::RBrace)?;
-                        Some(self.expr(ExprKind::DynamicVariable(Box::new(e)), brace_start))
+                        Some(self.expr(ExprKind::DynamicVariable(e), brace_start))
                     } else if matches!(self.peek(), Token::Dollar | Token::Variable(_)) {
                         Some(self.parse_primary()?)
                     } else {
@@ -40,25 +40,26 @@ impl Parser<'_> {
                     if let Some(name_expr) = dynamic_name {
                         expr = if self.check(&Token::LParen) {
                             let (args, is_fcc) = self.parse_args()?;
+                            let args = self.commit_args(args);
                             let call = self.expr(
                                 ExprKind::DynamicMethodCall(
-                                    Box::new(expr),
-                                    Box::new(name_expr),
+                                    expr,
+                                    name_expr,
                                     args,
                                     ObjectOperator::from_nullsafe(nullsafe),
                                 ),
                                 start,
                             );
                             if is_fcc {
-                                self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
+                                self.expr(ExprKind::FirstClassCallable(call), start)
                             } else {
                                 call
                             }
                         } else {
                             self.expr(
                                 ExprKind::DynamicPropertyAccess(
-                                    Box::new(expr),
-                                    Box::new(name_expr),
+                                    expr,
+                                    name_expr,
                                     ObjectOperator::from_nullsafe(nullsafe),
                                 ),
                                 start,
@@ -83,9 +84,10 @@ impl Parser<'_> {
                     };
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
+                        let args = self.commit_args(args);
                         let call = self.expr(
                             ExprKind::MethodCall(
-                                Box::new(expr),
+                                expr,
                                 name,
                                 args,
                                 ObjectOperator::from_nullsafe(nullsafe),
@@ -93,14 +95,14 @@ impl Parser<'_> {
                             start,
                         );
                         expr = if is_fcc {
-                            self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
+                            self.expr(ExprKind::FirstClassCallable(call), start)
                         } else {
                             call
                         };
                     } else {
                         expr = self.expr(
                             ExprKind::PropertyAccess(
-                                Box::new(expr),
+                                expr,
                                 name,
                                 ObjectOperator::from_nullsafe(nullsafe),
                             ),
@@ -111,9 +113,9 @@ impl Parser<'_> {
                 Token::DoubleColon => {
                     self.skip();
                     let receiver_expr = expr;
-                    let target = match &receiver_expr.kind {
+                    let target = match &self.expr_node(receiver_expr).kind {
                         ExprKind::Name(n) => StaticTarget::Name(Box::new(n.clone())),
-                        _ => StaticTarget::Expr(Box::new(receiver_expr)),
+                        _ => StaticTarget::Expr(receiver_expr),
                     };
                     // `class` (`Foo::class`) already worked as a special
                     // case; any other keyword is just as valid here
@@ -140,10 +142,8 @@ impl Parser<'_> {
                             let name = self.parse_expression()?;
                             self.expect(&Token::RBrace)?;
                             if !self.check(&Token::LParen) {
-                                expr = self.expr(
-                                    ExprKind::DynamicClassConstFetch(target, Box::new(name)),
-                                    start,
-                                );
+                                expr = self
+                                    .expr(ExprKind::DynamicClassConstFetch(target, name), start);
                                 continue;
                             }
                             StaticMember::Dynamic(name)
@@ -169,19 +169,20 @@ impl Parser<'_> {
                     };
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
+                        let args = self.commit_args(args);
                         let kind = match member {
                             StaticMember::Name(n) => ExprKind::StaticCall(target, n, args),
                             StaticMember::Variable(v, span) => {
                                 let name = self.expr_at(ExprKind::Variable(v), span);
-                                ExprKind::DynamicStaticCall(target, Box::new(name), args)
+                                ExprKind::DynamicStaticCall(target, name, args)
                             }
                             StaticMember::Dynamic(name) => {
-                                ExprKind::DynamicStaticCall(target, Box::new(name), args)
+                                ExprKind::DynamicStaticCall(target, name, args)
                             }
                         };
                         let call = self.expr(kind, start);
                         expr = if is_fcc {
-                            self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
+                            self.expr(ExprKind::FirstClassCallable(call), start)
                         } else {
                             call
                         };
@@ -203,7 +204,7 @@ impl Parser<'_> {
                                 )
                             }
                             StaticMember::Dynamic(name) => {
-                                ExprKind::DynamicStaticPropertyFetch(target, Box::new(name))
+                                ExprKind::DynamicStaticPropertyFetch(target, name)
                             }
                         };
                         expr = self.expr(kind, start);
@@ -214,27 +215,28 @@ impl Parser<'_> {
                     let index = if self.check(&Token::RBracket) {
                         None
                     } else {
-                        Some(Box::new(self.parse_expression()?))
+                        Some(self.parse_expression()?)
                     };
                     self.expect(&Token::RBracket)?;
-                    expr = self.expr(ExprKind::Index(Box::new(expr), index), start);
+                    expr = self.expr(ExprKind::Index(expr, index), start);
                 }
                 Token::LParen => {
                     let (args, is_fcc) = self.parse_args()?;
-                    let call = self.expr(ExprKind::Call(Box::new(expr), args), start);
+                    let args = self.commit_args(args);
+                    let call = self.expr(ExprKind::Call(expr, args), start);
                     expr = if is_fcc {
-                        self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
+                        self.expr(ExprKind::FirstClassCallable(call), start)
                     } else {
                         call
                     };
                 }
                 Token::Increment => {
                     self.skip();
-                    expr = self.expr(ExprKind::Unary(UnaryOp::PostInc, Box::new(expr)), start);
+                    expr = self.expr(ExprKind::Unary(UnaryOp::PostInc, expr), start);
                 }
                 Token::Decrement => {
                     self.skip();
-                    expr = self.expr(ExprKind::Unary(UnaryOp::PostDec, Box::new(expr)), start);
+                    expr = self.expr(ExprKind::Unary(UnaryOp::PostDec, expr), start);
                 }
                 _ => break,
             }
@@ -251,15 +253,16 @@ impl Parser<'_> {
     /// spread marker - needed so a named/reordered-named/spread call
     /// isn't checked as if its arguments were positional in written
     /// order.
-    pub(crate) fn parse_args(&mut self) -> Result<(Vec<Arg>, bool), ParseError> {
+    pub(crate) fn parse_args(&mut self) -> Result<(std::ops::Range<usize>, bool), ParseError> {
         self.expect(&Token::LParen)?;
         if matches!(self.peek(), Token::Ellipsis) && matches!(self.peek_at(1), Token::RParen) {
             self.skip();
             self.skip();
-            return Ok((Vec::new(), true));
+            let start = self.begin_args();
+            return Ok((start..self.arg_list_scratch.len(), true));
         }
 
-        let mut args = Vec::new();
+        let args_start = self.begin_args();
         while !self.check(&Token::RParen) {
             let spread = self.eat(&Token::Ellipsis);
             // named arguments (`name: expr`) - the name is just a label,
@@ -275,7 +278,7 @@ impl Parser<'_> {
                 None
             };
             let value = self.parse_expression()?;
-            args.push(Arg {
+            self.push_arg(Arg {
                 name,
                 spread,
                 value,
@@ -288,7 +291,7 @@ impl Parser<'_> {
             }
         }
         self.expect(&Token::RParen)?;
-        Ok((args, false))
+        Ok((args_start..self.arg_list_scratch.len(), false))
     }
 }
 
@@ -297,5 +300,5 @@ enum StaticMember {
     Name(Ident),
     /// `$name`, and where it is.
     Variable(Name, Span),
-    Dynamic(ExprNode),
+    Dynamic(ExprId),
 }

@@ -46,7 +46,7 @@ impl Parser<'_> {
     /// handling already establishes for every other declaration. Reuses
     /// parse_class_body for the `{ ... }` part, the same as a named
     /// class/interface/trait declaration.
-    pub(crate) fn parse_anonymous_class_new(&mut self, start: u32) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_anonymous_class_new(&mut self, start: u32) -> Result<ExprId, ParseError> {
         let decl_start = self.current_pos();
         let attrs = self.parse_attributes()?;
         let mut class_is_readonly = false;
@@ -73,9 +73,10 @@ impl Parser<'_> {
         self.expect(&Token::Keyword(Keyword::Class))?;
 
         let args = if self.check(&Token::LParen) {
-            self.parse_args()?.0
+            let args = self.parse_args()?.0;
+            self.commit_args(args)
         } else {
-            Vec::new()
+            self.node_arenas.borrow_mut().alloc_args([])
         };
 
         let mut extends = Vec::new();
@@ -101,6 +102,18 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = body?;
+        let (extends, implements, properties, methods, consts, trait_uses, enum_cases) = {
+            let mut arenas = self.node_arenas.borrow_mut();
+            (
+                arenas.alloc_qualified_names(extends),
+                arenas.alloc_qualified_names(implements),
+                arenas.alloc_properties(properties),
+                arenas.alloc_methods(methods),
+                arenas.alloc_class_consts(consts),
+                arenas.alloc_trait_uses(trait_uses),
+                arenas.alloc_enum_cases(enum_cases),
+            )
+        };
 
         let def = ClassDef {
             kind: ClassKind::Class,
@@ -116,19 +129,18 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
             doc_comment: None,
-            attrs,
+            attrs: self.strip_stub_attributes(attrs),
             span: self.span_from(decl_start),
         };
 
+        let def = self.node_arenas.borrow_mut().alloc_class(def);
+        let anonymous_class = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_anonymous_class(AnonymousClass { def, args });
+
         self.saw_anonymous_class = true;
-        Ok(self.expr(
-            ExprKind::NewAnonymousClass(Box::new(AnonymousClass {
-                def,
-                args,
-                name: None,
-            })),
-            start,
-        ))
+        Ok(self.expr(ExprKind::NewAnonymousClass(anonymous_class), start))
     }
 
     /// The `{ ... }` body shared by class/interface/trait declarations and
@@ -163,7 +175,9 @@ impl Parser<'_> {
             // PHP's grammar allows an enum case in any class-like body;
             // outside an enum it is a compile error the checker reports.
             if self.eat(&Token::Keyword(Keyword::Case)) {
-                enum_cases.push(self.parse_enum_case_rest(attrs, member_start)?);
+                let mut case = self.parse_enum_case_rest(attrs, member_start)?;
+                case.attrs = self.strip_stub_attributes(case.attrs);
+                enum_cases.push(case);
                 continue;
             }
 
@@ -176,11 +190,15 @@ impl Parser<'_> {
                     self.parse_trait_adaptations()?
                 } else {
                     self.expect_semicolon()?;
-                    TraitAdaptations::default()
+                    let mut arenas = self.node_arenas.borrow_mut();
+                    TraitAdaptations {
+                        aliases: arenas.alloc_trait_aliases([]),
+                        precedences: arenas.alloc_trait_precedences([]),
+                    }
                 };
                 self.note_doc(&doc, member_start);
                 trait_uses.push(TraitUse {
-                    traits,
+                    traits: self.node_arenas.borrow_mut().alloc_qualified_names(traits),
                     doc_comment: doc,
                     adaptations,
                     span: self.span_from(member_start),
@@ -299,15 +317,18 @@ impl Parser<'_> {
                     };
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
-                    self.note_doc(&doc, member_start);
+                    let mut const_doc = doc.clone();
+                    let const_attrs =
+                        self.transform_stub_member_attrs(attrs.clone(), &mut const_doc);
+                    self.note_doc(&const_doc, member_start);
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
                         name: self.ident(cname, cname_span),
                         value,
-                        doc_comment: doc.clone(),
+                        doc_comment: const_doc,
                         visibility,
-                        attrs: attrs.clone(),
+                        attrs: const_attrs,
                         type_hint: type_hint.clone(),
                         is_final: is_final_member,
                         span: Span {
@@ -324,10 +345,11 @@ impl Parser<'_> {
             }
 
             if self.check(&Token::Keyword(Keyword::Function)) {
-                let mut function = self.parse_function_decl()?;
-                function.doc_comment = doc;
-                function.attrs = attrs;
-                self.note_function(&function);
+                let dropped = self.stub_drops_function(attrs.clone());
+                let function = self.parse_function_decl(attrs, doc, None, !dropped)?;
+                if dropped {
+                    continue;
+                }
                 // PHP 8.2 `readonly class Foo { function __construct(public
                 // int $x) {} }` - shorthand for every property being
                 // readonly, promoted constructor properties included
@@ -335,7 +357,7 @@ impl Parser<'_> {
                 // functions with no such concept, has no way to know this
                 // on its own - only this call site does).
                 if class_is_readonly {
-                    for param in &mut function.params {
+                    for param in self.node_arenas.borrow_mut().params_mut(function.params) {
                         if let Some(promotion) = &mut param.promotion {
                             promotion.readonly = true;
                         }
@@ -378,7 +400,10 @@ impl Parser<'_> {
                 // its own `}`, so no expect_semicolon() afterwards.
                 if self.check(&Token::LBrace) {
                     let hooks = self.parse_property_hooks()?;
-                    self.note_doc(&doc, member_start);
+                    let mut property_doc = doc.clone();
+                    let property_attrs =
+                        self.transform_stub_member_attrs(attrs.clone(), &mut property_doc);
+                    self.note_doc(&property_doc, member_start);
                     properties.push(PropertyDecl {
                         removal_span: None,
                         name: self.ident(self.intern(&name), name_span),
@@ -390,9 +415,9 @@ impl Parser<'_> {
                         is_final: is_final_member,
                         type_hint: type_hint.clone(),
                         default,
-                        doc_comment: doc.clone(),
+                        doc_comment: property_doc,
                         hooks: Some(hooks),
-                        attrs: attrs.clone(),
+                        attrs: property_attrs,
                         span: Span {
                             start: prop_start,
                             end: self.previous_end(),
@@ -400,7 +425,10 @@ impl Parser<'_> {
                     });
                     break;
                 }
-                self.note_doc(&doc, member_start);
+                let mut property_doc = doc.clone();
+                let property_attrs =
+                    self.transform_stub_member_attrs(attrs.clone(), &mut property_doc);
+                self.note_doc(&property_doc, member_start);
                 properties.push(PropertyDecl {
                     removal_span: None,
                     name: self.ident(self.intern(&name), name_span),
@@ -412,9 +440,9 @@ impl Parser<'_> {
                     is_final: is_final_member,
                     type_hint: type_hint.clone(),
                     default,
-                    doc_comment: doc.clone(),
+                    doc_comment: property_doc,
                     hooks: None,
-                    attrs: attrs.clone(),
+                    attrs: property_attrs,
                     span: Span {
                         start: prop_start,
                         end: self.previous_end(),
@@ -444,7 +472,8 @@ impl Parser<'_> {
     /// Other, ...;` and `[Trait::]method as [visibility] [alias];`. A bare
     /// `method as ...` names no trait; flattening finds the one that has it.
     pub(crate) fn parse_trait_adaptations(&mut self) -> Result<TraitAdaptations, ParseError> {
-        let mut out = TraitAdaptations::default();
+        let mut aliases = Vec::new();
+        let mut precedences = Vec::new();
         self.expect(&Token::LBrace)?;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             // A bare name here is a method's, and no reference.
@@ -467,10 +496,13 @@ impl Parser<'_> {
                     for name in &instead_of {
                         self.record_name(name, NameKind::Class);
                     }
-                    out.precedences.push(TraitPrecedence {
+                    precedences.push(TraitPrecedence {
                         trait_name,
                         method,
-                        instead_of,
+                        instead_of: self
+                            .node_arenas
+                            .borrow_mut()
+                            .alloc_qualified_names(instead_of),
                     });
                 }
             } else if self.eat(&Token::Keyword(Keyword::As)) {
@@ -488,7 +520,7 @@ impl Parser<'_> {
                 } else {
                     Some(self.expect_ident()?)
                 };
-                out.aliases.push(TraitAlias {
+                aliases.push(TraitAlias {
                     trait_name,
                     method,
                     visibility,
@@ -498,10 +530,18 @@ impl Parser<'_> {
             self.expect_semicolon()?;
         }
         self.expect(&Token::RBrace)?;
-        Ok(out)
+        let mut arenas = self.node_arenas.borrow_mut();
+        Ok(TraitAdaptations {
+            aliases: arenas.alloc_trait_aliases(aliases),
+            precedences: arenas.alloc_trait_precedences(precedences),
+        })
     }
 
-    pub(crate) fn parse_class_decl(&mut self) -> Result<ClassDecl, ParseError> {
+    pub(crate) fn parse_class_decl(
+        &mut self,
+        attrs: AttributeRange,
+        statement_doc: &mut Option<DocCommentRanges>,
+    ) -> Result<ClassDecl, ParseError> {
         // Captured here, at the very first token of the whole declaration
         // (whichever of `abstract`/`final`/`readonly`/`class`/`interface`/
         // `trait` a caller's dispatch matched on) rather than by a caller
@@ -577,6 +617,18 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
+        let (extends, implements, properties, methods, consts, trait_uses, enum_cases) = {
+            let mut arenas = self.node_arenas.borrow_mut();
+            (
+                arenas.alloc_qualified_names(extends),
+                arenas.alloc_qualified_names(implements),
+                arenas.alloc_properties(properties),
+                arenas.alloc_methods(methods),
+                arenas.alloc_class_consts(consts),
+                arenas.alloc_trait_uses(trait_uses),
+                arenas.alloc_enum_cases(enum_cases),
+            )
+        };
 
         let def = ClassDef {
             kind,
@@ -592,15 +644,13 @@ impl Parser<'_> {
             trait_uses,
             enum_cases,
             doc_comment,
-            // Overwritten by `parse_statement`, the only caller that
-            // actually saw any leading `#[Attr]` groups (both of this
-            // function's own call sites are reached only after
-            // `parse_statement` already consumed and stashed them) - see
-            // its own `Token::Keyword(Keyword::Class | ...)` handling.
-            attrs: Vec::new(),
+            attrs,
             span: self.span_from(start),
         };
+        let mut def = def;
+        self.transform_stub_class_attrs(&mut def, Some(statement_doc));
         self.note_class(&def);
+        let def = self.node_arenas.borrow_mut().alloc_class(def);
         Ok(ClassDecl {
             namespaced_name: name.name.as_str().into(),
             name,

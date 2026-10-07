@@ -274,7 +274,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7 | step 7 | Lists committed together from scratch as `IdxRange`s; kept trees' arenas moved out at exact size | 9.3 | perf | OPEN; see subtask rows 9.7.a-9.7.d |
 | 9.7.a | step 7 | Build each list in reusable parser scratch storage, then commit once with `alloc_many` | — | perf | PART; see 9.7.a.a-9.7.a.d |
 | 9.7.a.a | same step | Build root and statement-body lists in reusable scratch and commit once | — | perf | DONE (unvalidated; root statements, braced/alternative blocks, `declare`, switch-case, try/catch/finally, closure, property-hook and function bodies use reusable scratch.) |
-| 9.7.a.b | same step | Build expression operands, arguments, array items and other expression-child lists in reusable scratch | — | perf | OPEN |
+| 9.7.a.b | same step | Build expression operands, arguments, array items and other expression-child lists in reusable scratch | — | perf | DONE (unvalidated; expression-ID lists, destructuring elements, arguments, array items and match arms use reusable parser scratch and commit only when retained; special forms consume/discard argument scratch without storing unused `Arg` records.) |
 | 9.7.a.c | same step | Build class-member, declaration and parameter lists in reusable scratch | — | perf | OPEN |
 | 9.7.a.d | same step | Build name, type, import, catch, closure-use and trait-adaptation lists in reusable scratch | — | perf | OPEN |
 | 9.7.b | step 7 | Store list fields as contiguous typed `IdxRange`s and migrate owner-backed readers | — | perf | PART; see 9.7.b.a-9.7.b.e |

@@ -7,8 +7,8 @@ impl Parser<'_> {
     pub(crate) fn parse_array_items(
         &mut self,
         close: &Token,
-    ) -> Result<Vec<ArrayItem>, ParseError> {
-        let mut items = Vec::new();
+    ) -> Result<std::ops::Range<usize>, ParseError> {
+        let items_start = self.begin_array_items();
         while !self.check(close) {
             // A skipped slot (`[, $b] = $arr;`), legal only in a
             // destructuring target. A placeholder stands in for it until
@@ -17,13 +17,13 @@ impl Parser<'_> {
                 let span = self.current_span();
                 let placeholder = self.expr(ExprKind::Literal(Literal::Null), span.start);
                 self.pattern_only.push((
-                    placeholder.id,
+                    placeholder,
                     ParseError::new(
                         "Cannot use empty array elements in arrays".to_string(),
                         span,
                     ),
                 ));
-                items.push(ArrayItem {
+                self.push_array_item(ArrayItem {
                     key: None,
                     value: placeholder,
                     spread: false,
@@ -53,14 +53,14 @@ impl Parser<'_> {
                 }
                 let by_ref = self.eat(&Token::Amp);
                 let value = self.parse_expression()?;
-                items.push(ArrayItem {
+                self.push_array_item(ArrayItem {
                     key: Some(first),
                     value,
                     spread,
                     by_ref,
                 });
             } else {
-                items.push(ArrayItem {
+                self.push_array_item(ArrayItem {
                     key: None,
                     value: first,
                     spread,
@@ -72,7 +72,7 @@ impl Parser<'_> {
             }
         }
         self.expect(close)?;
-        Ok(items)
+        Ok(items_start..self.array_item_scratch.len())
     }
 
     /// What follows `new`: a class name, `(expr)`, or a variable with
@@ -80,7 +80,7 @@ impl Parser<'_> {
     /// `new_variable`), never a call, so `new $this->model($v)`
     /// instantiates the class `$this->model` names and `($v)` is the
     /// constructor's arguments.
-    fn parse_new_class_reference(&mut self) -> Result<ExprNode, ParseError> {
+    fn parse_new_class_reference(&mut self) -> Result<ExprId, ParseError> {
         let start = self.current_pos();
         let mut expr = match self.peek() {
             Token::Variable(_) | Token::Dollar | Token::DollarBrace => self.parse_primary()?,
@@ -90,7 +90,7 @@ impl Parser<'_> {
                 self.skip();
                 let e = self.parse_expression()?;
                 self.expect(&Token::RParen)?;
-                return Ok(self.expr(ExprKind::Grouping(Box::new(e)), start));
+                return Ok(self.expr(ExprKind::Grouping(e), start));
             }
             _ => {
                 let name = self.parse_name_reference();
@@ -104,10 +104,10 @@ impl Parser<'_> {
                     let index = if self.check(&Token::RBracket) {
                         None
                     } else {
-                        Some(Box::new(self.parse_expression()?))
+                        Some(self.parse_expression()?)
                     };
                     self.expect(&Token::RBracket)?;
-                    expr = self.expr(ExprKind::Index(Box::new(expr), index), start);
+                    expr = self.expr(ExprKind::Index(expr, index), start);
                 }
                 Token::Arrow | Token::NullsafeArrow => {
                     let nullsafe = matches!(self.peek(), Token::NullsafeArrow);
@@ -119,8 +119,8 @@ impl Parser<'_> {
                             self.expect(&Token::RBrace)?;
                             self.expr(
                                 ExprKind::DynamicPropertyAccess(
-                                    Box::new(expr),
-                                    Box::new(name),
+                                    expr,
+                                    name,
                                     ObjectOperator::from_nullsafe(nullsafe),
                                 ),
                                 start,
@@ -130,8 +130,8 @@ impl Parser<'_> {
                             let name = self.parse_primary()?;
                             self.expr(
                                 ExprKind::DynamicPropertyAccess(
-                                    Box::new(expr),
-                                    Box::new(name),
+                                    expr,
+                                    name,
                                     ObjectOperator::from_nullsafe(nullsafe),
                                 ),
                                 start,
@@ -141,7 +141,7 @@ impl Parser<'_> {
                             let name = self.expect_ident_spanned()?;
                             self.expr(
                                 ExprKind::PropertyAccess(
-                                    Box::new(expr),
+                                    expr,
                                     name,
                                     ObjectOperator::from_nullsafe(nullsafe),
                                 ),
@@ -157,9 +157,9 @@ impl Parser<'_> {
                     ) =>
                 {
                     self.skip();
-                    let target = match &expr.kind {
+                    let target = match &self.expr_node(expr).kind {
                         ExprKind::Name(n) => StaticTarget::Name(Box::new(n.clone())),
-                        _ => StaticTarget::Expr(Box::new(expr)),
+                        _ => StaticTarget::Expr(expr),
                     };
                     expr = if matches!(self.peek(), Token::Variable(_)) {
                         let var_start = self.current_pos();
@@ -176,10 +176,7 @@ impl Parser<'_> {
                         self.expr(ExprKind::StaticPropertyFetch(target, ident), start)
                     } else {
                         let name = self.parse_primary()?;
-                        self.expr(
-                            ExprKind::DynamicStaticPropertyFetch(target, Box::new(name)),
-                            start,
-                        )
+                        self.expr(ExprKind::DynamicStaticPropertyFetch(target, name), start)
                     };
                 }
                 _ => return Ok(expr),
@@ -187,7 +184,7 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn parse_primary(&mut self) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_primary(&mut self) -> Result<ExprId, ParseError> {
         let start = self.current_pos();
         // Matches on `self.peek()` by reference rather than `self.peek()
         // .clone()` - most arms below need no payload at all (delegating
@@ -234,7 +231,7 @@ impl Parser<'_> {
                 self.skip();
                 let name_expr = self.parse_expression()?;
                 self.expect(&Token::RBrace)?;
-                self.expr(ExprKind::DynamicVariable(Box::new(name_expr)), start)
+                self.expr(ExprKind::DynamicVariable(name_expr), start)
             }
             // `$$name` (equivalent to `${$name}`) - recurses to allow
             // `$$$name` chains, though that's vanishingly rare in
@@ -242,25 +239,29 @@ impl Parser<'_> {
             Token::Dollar => {
                 self.skip();
                 let name_expr = crate::stack::guard(|| self.parse_primary())?;
-                self.expr(ExprKind::DynamicVariable(Box::new(name_expr)), start)
+                self.expr(ExprKind::DynamicVariable(name_expr), start)
             }
             Token::LParen => {
                 self.skip();
                 let inner = self.parse_expression()?;
                 self.expect(&Token::RParen)?;
-                self.expr(ExprKind::Grouping(Box::new(inner)), start)
+                self.expr(ExprKind::Grouping(inner), start)
             }
             Token::LBracket => {
                 self.skip();
-                let items = self.parse_array_items(&Token::RBracket)?;
+                let items_start = self.array_item_scratch.len();
+                self.parse_array_items(&Token::RBracket)?;
+                let items = self.finish_array_items(items_start);
                 self.expr(ExprKind::ArrayLiteral(items), start)
             }
             Token::Keyword(Keyword::Array) => {
                 self.skip();
                 self.expect(&Token::LParen)?;
-                let items = self.parse_array_items(&Token::RParen)?;
+                let items_start = self.array_item_scratch.len();
+                self.parse_array_items(&Token::RParen)?;
+                let items = self.finish_array_items(items_start);
                 let array = self.expr(ExprKind::ArrayLiteral(items), start);
-                self.long_arrays.insert(array.id);
+                self.long_arrays.insert(array);
                 array
             }
             // Only ever a destructuring target, so its items are taken as
@@ -277,7 +278,7 @@ impl Parser<'_> {
                 let items = self.destructure_items(items, DestructureSyntax::List, span)?;
                 let list = self.expr(ExprKind::Destructure(items, DestructureSyntax::List), start);
                 self.pattern_only.push((
-                    list.id,
+                    list,
                     ParseError::new(
                         format!(
                             "syntax error, unexpected {:?}, expecting \"=\"",
@@ -305,13 +306,14 @@ impl Parser<'_> {
                 // callable) - kept as a `FirstClassCallable` so the
                 // checker can report it.
                 let (args, is_first_class_callable) = if self.check(&Token::LParen) {
-                    self.parse_args()?
+                    let (args, is_fcc) = self.parse_args()?;
+                    (self.commit_args(args), is_fcc)
                 } else {
-                    (Vec::new(), false)
+                    (self.node_arenas.borrow_mut().alloc_args([]), false)
                 };
-                let new_expr = self.expr(ExprKind::New(Box::new(class_expr), args), start);
+                let new_expr = self.expr(ExprKind::New(class_expr, args), start);
                 if is_first_class_callable {
-                    self.expr(ExprKind::FirstClassCallable(Box::new(new_expr)), start)
+                    self.expr(ExprKind::FirstClassCallable(new_expr), start)
                 } else {
                     new_expr
                 }
@@ -338,7 +340,7 @@ impl Parser<'_> {
                         )),
                         start,
                     );
-                    return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
+                    return Ok(self.expr(ExprKind::FirstClassCallable(name), start));
                 }
                 // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
                 // production (it does NOT allow a postfix chain right
@@ -355,26 +357,23 @@ impl Parser<'_> {
                 // resulting args are kept, matching how the RFC only ever
                 // gives this two real parameters.
                 if matches!(self.peek(), Token::LParen) && self.clone_call_has_top_level_comma() {
-                    let (mut args, _) = self.parse_args()?;
-                    let overrides = if args.len() > 1 {
-                        Some(Box::new(args.remove(1).value))
-                    } else {
-                        None
+                    let (args, _) = self.parse_args()?;
+                    let (obj, overrides) = {
+                        let args = &self.arg_list_scratch[args.clone()];
+                        (args.first().map(|a| a.value), args.get(1).map(|a| a.value))
                     };
-                    let obj = args
-                        .into_iter()
-                        .next()
-                        .map(|a| a.value)
-                        .unwrap_or_else(|| self.expr(ExprKind::Literal(Literal::Null), start));
-                    return Ok(self.expr(ExprKind::Clone(Box::new(obj), overrides), start));
+                    self.discard_args(args);
+                    let obj =
+                        obj.unwrap_or_else(|| self.expr(ExprKind::Literal(Literal::Null), start));
+                    return Ok(self.expr(ExprKind::Clone(obj, overrides), start));
                 }
                 let e = self.parse_unary()?;
-                self.expr(ExprKind::Clone(Box::new(e), None), start)
+                self.expr(ExprKind::Clone(e, None), start)
             }
             Token::Keyword(Keyword::Print) => {
                 self.skip();
                 let e = self.parse_assignment()?;
-                self.expr(ExprKind::Print(Box::new(e)), start)
+                self.expr(ExprKind::Print(e), start)
             }
             // `throw` as an expression (`default => throw new X()`, `$x ??
             // throw new X()`, an arrow function body, ...) - a bare `throw
@@ -385,7 +384,7 @@ impl Parser<'_> {
             Token::Keyword(Keyword::Throw) => {
                 self.skip();
                 let inner = self.parse_expression()?;
-                self.expr(ExprKind::Throw(Box::new(inner)), start)
+                self.expr(ExprKind::Throw(inner), start)
             }
             // `yield`/`yield from` - makes the enclosing function a
             // generator.
@@ -396,7 +395,7 @@ impl Parser<'_> {
                 {
                     self.skip();
                     let inner = self.parse_assignment()?;
-                    return Ok(self.expr(ExprKind::YieldFrom(Box::new(inner)), start));
+                    return Ok(self.expr(ExprKind::YieldFrom(inner), start));
                 }
                 // A bare `yield` (no value): whatever follows can't start an
                 // expression (a closer, `:`, `?`, a binary operator), so
@@ -411,12 +410,9 @@ impl Parser<'_> {
                 let first = self.parse_ternary()?;
                 if self.eat(&Token::FatArrow) {
                     let value = self.parse_ternary()?;
-                    self.expr(
-                        ExprKind::Yield(Some(Box::new(first)), Some(Box::new(value))),
-                        start,
-                    )
+                    self.expr(ExprKind::Yield(Some(first), Some(value)), start)
                 } else {
-                    self.expr(ExprKind::Yield(None, Some(Box::new(first))), start)
+                    self.expr(ExprKind::Yield(None, Some(first)), start)
                 }
             }
             Token::Keyword(
@@ -433,7 +429,7 @@ impl Parser<'_> {
                 };
                 self.skip();
                 let e = self.parse_expression()?;
-                self.expr(ExprKind::Include(kind, Box::new(e)), start)
+                self.expr(ExprKind::Include(kind, e), start)
             }
             Token::Keyword(Keyword::Static)
                 if matches!(
@@ -460,11 +456,19 @@ impl Parser<'_> {
             Token::AttributeStart => {
                 let attrs = self.parse_attributes()?;
                 let is_static = self.eat(&Token::Keyword(Keyword::Static));
-                let mut e = self.parse_closure_like(is_static)?;
-                match &mut e.kind {
-                    ExprKind::Closure(closure) => closure.attrs = attrs,
-                    ExprKind::ArrowFn(arrow) => arrow.attrs = attrs,
-                    _ => {}
+                let e = self.parse_closure_like(is_static)?;
+                let closure = match &self.expr_node(e).kind {
+                    ExprKind::Closure(closure) | ExprKind::ArrowFn(closure) => Some(*closure),
+                    _ => None,
+                };
+                let attrs = self.strip_stub_attributes(attrs);
+                if let Some(closure) = closure
+                    && let Some(payload) = self.node_arenas.borrow_mut().closure_mut(closure)
+                {
+                    match payload {
+                        ClosurePayload::Closure(closure) => closure.attrs = attrs,
+                        ClosurePayload::ArrowFn(arrow) => arrow.attrs = attrs,
+                    }
                 }
                 e
             }
@@ -510,7 +514,7 @@ impl Parser<'_> {
                     unreachable!()
                 };
                 let cmd = self.build_interpolated(parts, start)?;
-                self.expr(ExprKind::ShellExec(Box::new(cmd)), start)
+                self.expr(ExprKind::ShellExec(cmd), start)
             }
             // `namespace\Foo` - a name explicitly relative to the current
             // namespace. Only ever appears as a value in expression
@@ -548,6 +552,7 @@ impl Parser<'_> {
                     // function.
                     if self.check(&Token::LParen) {
                         let (args, is_first_class_callable) = self.parse_args()?;
+                        let args = self.commit_args(args);
                         if is_first_class_callable {
                             let callee = self.expr(
                                 ExprKind::Name(self.qualified_name(
@@ -557,8 +562,8 @@ impl Parser<'_> {
                                 )),
                                 start,
                             );
-                            let call = self.expr(ExprKind::Call(Box::new(callee), args), start);
-                            self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
+                            let call = self.expr(ExprKind::Call(callee, args), start);
+                            self.expr(ExprKind::FirstClassCallable(call), start)
                         } else {
                             self.expr(ExprKind::Exit(kind, Some(args)), start)
                         }
@@ -569,7 +574,7 @@ impl Parser<'_> {
                     let paren = self.current_span();
                     let (args, is_first_class_callable) = self.parse_args()?;
                     // `isset` takes one or more variables, spelled out.
-                    if args.is_empty() || is_first_class_callable {
+                    if self.arg_list_scratch[args.clone()].is_empty() || is_first_class_callable {
                         return Err(ParseError::new(
                             "syntax error, unexpected token \")\"".to_string(),
                             Span {
@@ -578,28 +583,43 @@ impl Parser<'_> {
                             },
                         ));
                     }
-                    let operands = args.into_iter().map(|a| a.value).collect();
+                    let operands_start = self.begin_expr_id_list();
+                    self.expr_id_list_scratch.extend(
+                        self.arg_list_scratch[args.clone()]
+                            .iter()
+                            .map(|arg| arg.value),
+                    );
+                    self.discard_args(args);
+                    let operands = self.finish_expr_id_list(operands_start);
                     self.expr(ExprKind::Isset(operands), start)
                 } else if name.eq_ignore_ascii_case("empty") && self.check(&Token::LParen) {
                     let paren = self.current_span();
                     let (args, _) = self.parse_args()?;
-                    let Some(operand) = args.into_iter().next() else {
+                    let operand = self.arg_list_scratch[args.clone()]
+                        .first()
+                        .map(|arg| arg.value);
+                    self.discard_args(args);
+                    let Some(operand) = operand else {
                         return Err(ParseError::new(
                             "parse error: empty() needs an operand".to_string(),
                             paren,
                         ));
                     };
-                    self.expr(ExprKind::Empty(Box::new(operand.value)), start)
+                    self.expr(ExprKind::Empty(operand), start)
                 } else if name.eq_ignore_ascii_case("eval") && self.check(&Token::LParen) {
                     let paren = self.current_span();
                     let (args, _) = self.parse_args()?;
-                    let Some(code) = args.into_iter().next() else {
+                    let code = self.arg_list_scratch[args.clone()]
+                        .first()
+                        .map(|arg| arg.value);
+                    self.discard_args(args);
+                    let Some(code) = code else {
                         return Err(ParseError::new(
                             "parse error: eval() needs the code to evaluate".to_string(),
                             paren,
                         ));
                     };
-                    self.expr(ExprKind::Eval(Box::new(code.value)), start)
+                    self.expr(ExprKind::Eval(code), start)
                 } else {
                     let kind = self.name_kind_ahead();
                     self.expr(

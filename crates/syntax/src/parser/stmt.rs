@@ -355,9 +355,12 @@ impl Parser<'_> {
                 let (args, _) = self.parse_args()?;
                 self.expect_semicolon()?;
                 let targets_start = self.begin_expr_id_list();
-                for arg in args {
-                    self.push_expr_id_list_item(arg.value);
-                }
+                self.expr_id_list_scratch.extend(
+                    self.arg_list_scratch[args.clone()]
+                        .iter()
+                        .map(|arg| arg.value),
+                );
+                self.discard_args(args);
                 self.saw_property_unset |= self.expr_id_list(targets_start).iter().any(|target| {
                     let arenas = self.node_arenas.borrow();
                     arenas.peeled(*target).is_some_and(|id| {

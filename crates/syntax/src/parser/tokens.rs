@@ -335,11 +335,11 @@ impl Parser<'_> {
     /// groups sitting at the current position - real PHP allows
     /// several bracket groups back-to-back on one declaration
     /// (`#[A] #[B(1)]`, equivalent to the single group `#[A, B(1)]`), so
-    /// this loops rather than parsing just one. Returns an empty `Vec`
+    /// this loops rather than parsing just one. Returns an empty range
     /// without consuming anything when the current token isn't
     /// `AttributeStart` at all - every call site can call this
     /// unconditionally rather than checking first.
-    pub(crate) fn parse_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
+    pub(crate) fn parse_attributes(&mut self) -> Result<AttributeRange, ParseError> {
         let mut attrs = Vec::new();
         while self.check(&Token::AttributeStart) {
             let group_start = self.current_pos();
@@ -348,10 +348,12 @@ impl Parser<'_> {
             loop {
                 let attr_start = self.current_pos();
                 let name = self.parse_name_reference();
+                self.note_stub_attribute(&name);
                 let args = if self.check(&Token::LParen) {
-                    self.parse_args()?.0
+                    let args = self.parse_args()?.0;
+                    self.commit_args(args)
                 } else {
-                    Vec::new()
+                    self.node_arenas.borrow_mut().alloc_args([])
                 };
                 let span = Span {
                     start: attr_start,
@@ -396,7 +398,7 @@ impl Parser<'_> {
                 }
             }
         }
-        Ok(attrs)
+        Ok(self.node_arenas.borrow_mut().alloc_attributes(attrs))
     }
 
     /// Same as `parse_attributes`, but also preserves a doc comment
@@ -411,25 +413,29 @@ impl Parser<'_> {
     /// declaration parser that follows (which looks up its own doc comment
     /// via `take_doc_comment()`, unaware any attributes were even there)
     /// keep finding it unchanged.
-    pub(crate) fn parse_leading_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
+    pub(crate) fn parse_leading_attributes(&mut self) -> Result<AttributeRange, ParseError> {
         if !self.check(&Token::AttributeStart) {
-            return Ok(Vec::new());
+            return Ok(self.node_arenas.borrow_mut().alloc_attributes([]));
         }
-        let doc = self.take_doc_comment();
+        let doc = self.take_doc_comment_with_range();
         let attrs = self.parse_attributes()?;
-        if let Some(doc) = doc
+        if let Some((doc, doc_ranges)) = doc
             && let Some(front) = self.ahead.front_mut()
         {
-            front
+            let group = front
                 .docs
                 .get_or_insert_with(|| {
                     Box::new(DocGroup {
                         last: None,
+                        last_range: None,
                         folded: None,
+                        folded_ranges: None,
                         first_start: None,
                     })
                 })
-                .last = Some(doc);
+                .as_mut();
+            group.last = Some(doc);
+            group.last_range = doc_ranges.spans().last().copied();
         }
         Ok(attrs)
     }

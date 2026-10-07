@@ -109,6 +109,12 @@ pub struct Parser<'a> {
     // Reused for expression-ID lists before their elements are committed
     // together to `NodeArenas::expr_ids`.
     expr_id_list_scratch: Vec<ExprId>,
+    // Reused for argument lists while nested expressions are parsed.
+    arg_list_scratch: Vec<Arg>,
+    // Reused for array elements while nested expressions are parsed.
+    array_item_scratch: Vec<ArrayItem>,
+    // Reused for match arms while their conditions and bodies are parsed.
+    match_arm_scratch: Vec<MatchArm>,
     // Reused for destructuring patterns before their elements are committed
     // together to `NodeArenas::destructure_items`.
     destructure_item_scratch: Vec<DestructureItem>,
@@ -336,6 +342,9 @@ impl<'a> Parser<'a> {
             node_arenas: std::cell::RefCell::new(node_arenas),
             stmt_list_scratch: Vec::new(),
             expr_id_list_scratch: Vec::new(),
+            arg_list_scratch: Vec::new(),
+            array_item_scratch: Vec::new(),
+            match_arm_scratch: Vec::new(),
             destructure_item_scratch: Vec::new(),
             interner: Interner::global(),
             pattern_only: Vec::new(),
@@ -901,6 +910,56 @@ impl Parser<'_> {
 
     pub(crate) fn discard_expr_id_list(&mut self, start: usize) {
         self.expr_id_list_scratch.truncate(start);
+    }
+
+    pub(crate) fn begin_args(&self) -> usize {
+        self.arg_list_scratch.len()
+    }
+
+    pub(crate) fn push_arg(&mut self, arg: Arg) {
+        self.arg_list_scratch.push(arg);
+    }
+
+    pub(crate) fn commit_args(&mut self, range: std::ops::Range<usize>) -> ArgRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_args(self.arg_list_scratch.drain(range.start..))
+    }
+
+    pub(crate) fn discard_args(&mut self, range: std::ops::Range<usize>) {
+        self.arg_list_scratch.truncate(range.start);
+    }
+
+    pub(crate) fn begin_array_items(&self) -> usize {
+        self.array_item_scratch.len()
+    }
+
+    pub(crate) fn push_array_item(&mut self, item: ArrayItem) {
+        self.array_item_scratch.push(item);
+    }
+
+    pub(crate) fn finish_array_items(&mut self, start: usize) -> ArrayItemRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_array_items(self.array_item_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_match_arms(&self) -> usize {
+        self.match_arm_scratch.len()
+    }
+
+    pub(crate) fn push_match_arm(&mut self, arm: MatchArm) {
+        self.match_arm_scratch.push(arm);
+    }
+
+    pub(crate) fn match_arms(&self, start: usize) -> &[MatchArm] {
+        &self.match_arm_scratch[start..]
+    }
+
+    pub(crate) fn finish_match_arms(&mut self, start: usize) -> MatchArmRange {
+        self.node_arenas
+            .borrow_mut()
+            .alloc_match_arms(self.match_arm_scratch.drain(start..))
     }
 
     pub(crate) fn begin_destructure_items(&self) -> usize {

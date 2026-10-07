@@ -48,35 +48,35 @@ enum Infix {
 impl Parser<'_> {
     // ---- expressions (binding power, by PHP's precedence table) ----
 
-    pub fn parse_expression(&mut self) -> Result<ExprNode, ParseError> {
+    pub fn parse_expression(&mut self) -> Result<ExprId, ParseError> {
         self.parse_expr_bp(bp::LOWEST)
     }
 
     /// An expression without the low-precedence `and`/`or`/`xor`: what an
     /// assignment's right side, a `print` operand and a ternary's branches
     /// are.
-    pub(crate) fn parse_assignment(&mut self) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_assignment(&mut self) -> Result<ExprId, ParseError> {
         self.parse_expr_bp(bp::TERNARY)
     }
 
-    pub(crate) fn parse_ternary(&mut self) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_ternary(&mut self) -> Result<ExprId, ParseError> {
         self.parse_expr_bp(bp::TERNARY)
     }
 
     /// A prefix operator's operand and what binds tighter: `clone`'s
     /// operand, an `instanceof` target.
-    pub(crate) fn parse_unary(&mut self) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_unary(&mut self) -> Result<ExprId, ParseError> {
         self.parse_expr_bp(bp::UNARY)
     }
 
     /// The operators of binding power `min` or tighter around one operand,
     /// by `bp`'s levels. One stack guard for each expression nested in
     /// another, where each operand used to pass three.
-    pub(crate) fn parse_expr_bp(&mut self, min: u8) -> Result<ExprNode, ParseError> {
+    pub(crate) fn parse_expr_bp(&mut self, min: u8) -> Result<ExprId, ParseError> {
         crate::stack::guard(|| self.parse_expr_bp_inner(min))
     }
 
-    fn parse_expr_bp_inner(&mut self, min: u8) -> Result<ExprNode, ParseError> {
+    fn parse_expr_bp_inner(&mut self, min: u8) -> Result<ExprId, ParseError> {
         let start = self.current_pos();
         let mut lhs = self.parse_prefix(start)?;
         // The level of the non-associative operator just applied: another
@@ -101,7 +101,7 @@ impl Parser<'_> {
                         power + 1
                     };
                     let rhs = self.parse_expr_bp(next)?;
-                    self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start)
+                    self.expr(ExprKind::Binary(op, lhs, rhs), start)
                 }
                 Infix::Instanceof => {
                     self.skip();
@@ -110,11 +110,11 @@ impl Parser<'_> {
                     // (`$x instanceof $className`, `$x instanceof ('std' .
                     // $class)`) for a runtime-determined class.
                     let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
-                        InstanceofTarget::Expr(Box::new(self.parse_unary()?))
+                        InstanceofTarget::Expr(self.parse_unary()?)
                     } else {
                         InstanceofTarget::Name(self.parse_name_reference())
                     };
-                    self.expr(ExprKind::Instanceof(Box::new(lhs), target), start)
+                    self.expr(ExprKind::Instanceof(lhs, target), start)
                 }
                 Infix::Ternary => self.parse_ternary_rest(lhs, start)?,
             };
@@ -127,9 +127,9 @@ impl Parser<'_> {
     /// the `?`. A ternary is left-associative, and PHP refuses to compile
     /// one that is the condition of another unless both are short
     /// (`$a ?: $b ?: $c`).
-    fn parse_ternary_rest(&mut self, cond: ExprNode, start: u32) -> Result<ExprNode, ParseError> {
+    fn parse_ternary_rest(&mut self, cond: ExprId, start: u32) -> Result<ExprId, ParseError> {
         let short = matches!(self.peek_at(1), Token::Colon);
-        if let ExprKind::Ternary(_, then, _) = &cond.kind
+        if let ExprKind::Ternary(_, then, _) = &self.expr_node(cond).kind
             && !(then.is_none() && short)
         {
             return Err(ParseError::new("Unparenthesized `a ? b : c ? d : e` is not supported; use either `(a ? b : c) ? d : e` or `a ? b : (c ? d : e)`".to_string(), self.current_span()));
@@ -138,20 +138,13 @@ impl Parser<'_> {
         if short {
             self.skip(); // :
             let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
-            return Ok(self.expr(
-                ExprKind::Ternary(Box::new(cond), None, Box::new(else_branch)),
-                start,
-            ));
+            return Ok(self.expr(ExprKind::Ternary(cond, None, else_branch), start));
         }
         let then_branch = self.parse_expr_bp(bp::LOWEST)?;
         self.expect(&Token::Colon)?;
         let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
         Ok(self.expr(
-            ExprKind::Ternary(
-                Box::new(cond),
-                Some(Box::new(then_branch)),
-                Box::new(else_branch),
-            ),
+            ExprKind::Ternary(cond, Some(then_branch), else_branch),
             start,
         ))
     }
@@ -284,16 +277,16 @@ impl Parser<'_> {
     /// `!($x instanceof Y)`: `apply_narrowing`'s `Unary(Not, Instanceof)`
     /// pattern depends on it), and the other prefix operators take their
     /// operand with `**` (`-$a ** 2` is `-($a ** 2)`).
-    fn parse_prefix(&mut self, start: u32) -> Result<ExprNode, ParseError> {
+    fn parse_prefix(&mut self, start: u32) -> Result<ExprId, ParseError> {
         if let Some(spelling) = self.try_parse_cast() {
             let operand = self.parse_expr_bp(bp::UNARY)?;
-            return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
+            return Ok(self.expr(ExprKind::Cast(spelling, operand), start));
         }
         let op = match self.peek() {
             Token::Bang => {
                 self.skip();
                 let operand = self.parse_expr_bp(bp::INSTANCEOF)?;
-                return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
+                return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, operand), start));
             }
             Token::Minus => UnaryOp::Neg,
             Token::Plus => UnaryOp::Plus,
@@ -303,7 +296,7 @@ impl Parser<'_> {
             Token::At => {
                 self.skip();
                 let operand = self.parse_expr_bp(bp::UNARY)?;
-                return Ok(self.expr(ExprKind::ErrorSuppress(Box::new(operand)), start));
+                return Ok(self.expr(ExprKind::ErrorSuppress(operand), start));
             }
             _ => {
                 // An operand: a primary with its postfix chain, taking an
@@ -315,7 +308,7 @@ impl Parser<'_> {
         };
         self.skip();
         let operand = self.parse_expr_bp(bp::UNARY)?;
-        Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start))
+        Ok(self.expr(ExprKind::Unary(op, operand), start))
     }
 
     /// An assignment whose target is the operand just parsed. PHP's grammar
@@ -326,9 +319,9 @@ impl Parser<'_> {
     /// once, to every operand (`parse_pow`).
     pub(crate) fn parse_assignment_tail(
         &mut self,
-        lhs: ExprNode,
+        lhs: ExprId,
         start: u32,
-    ) -> Result<ExprNode, ParseError> {
+    ) -> Result<ExprId, ParseError> {
         let op = match self.peek() {
             Token::Equals => None,
             Token::PlusEquals => Some(BinOp::Add),
@@ -353,16 +346,16 @@ impl Parser<'_> {
                 op_span,
             )
         };
-        let is_pattern = matches!(
-            lhs.kind,
-            ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
-        );
+        let (is_pattern, is_grouping) = {
+            let kind = &self.expr_node(lhs).kind;
+            (
+                matches!(kind, ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)),
+                matches!(kind, ExprKind::Grouping(_)),
+            )
+        };
         // `($a) = 1`: a parenthesized expression isn't a variable, nor is
         // `array(...)`.
-        if matches!(lhs.kind, ExprKind::Grouping(_))
-            || self.long_arrays.contains(&lhs.id)
-            || (is_pattern && op.is_some())
-        {
+        if is_grouping || self.long_arrays.contains(&lhs) || (is_pattern && op.is_some()) {
             return Err(unexpected(&format!("{:?}", self.peek())));
         }
         self.skip();
@@ -385,12 +378,9 @@ impl Parser<'_> {
         };
         let rhs = self.parse_assignment()?;
         Ok(match op {
-            None if is_ref => self.expr(ExprKind::AssignRef(Box::new(lhs), Box::new(rhs)), start),
-            None => self.expr(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), start),
-            Some(binop) => self.expr(
-                ExprKind::CompoundAssign(binop, Box::new(lhs), Box::new(rhs)),
-                start,
-            ),
+            None if is_ref => self.expr(ExprKind::AssignRef(lhs, rhs), start),
+            None => self.expr(ExprKind::Assign(lhs, rhs), start),
+            Some(binop) => self.expr(ExprKind::CompoundAssign(binop, lhs, rhs), start),
         })
     }
 
@@ -398,15 +388,18 @@ impl Parser<'_> {
     /// taken as the destructuring pattern it is there. `top` is whether
     /// `target` is the whole target rather than an item of an enclosing
     /// pattern.
-    pub(crate) fn as_pattern(
-        &mut self,
-        mut target: ExprNode,
-        top: bool,
-    ) -> Result<ExprNode, ParseError> {
-        match &mut target.kind {
+    pub(crate) fn as_pattern(&mut self, target: ExprId, top: bool) -> Result<ExprId, ParseError> {
+        let (kind, target_span) = {
+            let mut node = self.expr_node_mut(target);
+            let span = node.span;
+            (
+                std::mem::replace(&mut node.kind, ExprKind::Literal(Literal::Null)),
+                span,
+            )
+        };
+        match kind {
             ExprKind::ArrayLiteral(items) => {
-                let items = std::mem::take(items);
-                if self.long_arrays.contains(&target.id) {
+                if self.long_arrays.contains(&target) {
                     return Err(ParseError::new(
                         if top {
                             format!("syntax error, unexpected {:?}", self.peek())
@@ -416,22 +409,32 @@ impl Parser<'_> {
                         if top {
                             self.current_span()
                         } else {
-                            target.span
+                            target_span
                         },
                     ));
                 }
-                let items = self.destructure_items(items, DestructureSyntax::Short, target.span)?;
-                Ok(ExprNode {
-                    id: target.id,
-                    kind: ExprKind::Destructure(items, DestructureSyntax::Short),
-                    span: target.span,
-                })
-            }
-            ExprKind::Destructure(..) => {
-                self.take_pattern_only(target.id);
+                let items_start = self.array_item_scratch.len();
+                {
+                    let arenas = self.node_arenas.borrow();
+                    self.array_item_scratch
+                        .extend(arenas.array_items(items).iter().cloned());
+                }
+                let items_range = items_start..self.array_item_scratch.len();
+                let items =
+                    self.destructure_items(items_range, DestructureSyntax::Short, target_span)?;
+                self.expr_node_mut(target).kind =
+                    ExprKind::Destructure(items, DestructureSyntax::Short);
                 Ok(target)
             }
-            _ => Ok(target),
+            kind @ ExprKind::Destructure(..) => {
+                self.expr_node_mut(target).kind = kind;
+                self.take_pattern_only(target);
+                Ok(target)
+            }
+            kind => {
+                self.expr_node_mut(target).kind = kind;
+                Ok(target)
+            }
         }
     }
 
@@ -439,24 +442,39 @@ impl Parser<'_> {
     /// items of the pattern it is, with PHP's compile-time checks on them.
     pub(crate) fn destructure_items(
         &mut self,
-        items: Vec<ArrayItem>,
+        items: std::ops::Range<usize>,
         syntax: DestructureSyntax,
         span: Span,
-    ) -> Result<Vec<DestructureItem>, ParseError> {
+    ) -> Result<DestructureItemRange, ParseError> {
         let error = |message: &str, span: Span| ParseError::new(message.to_string(), span);
-        let keyed = items.iter().any(|item| item.key.is_some());
-        let mut pattern = Vec::with_capacity(items.len());
-        for item in items {
-            let skipped = matches!(item.value.kind, ExprKind::Literal(Literal::Null))
-                && self.take_pattern_only(item.value.id);
+        let keyed = self.array_item_scratch[items.clone()]
+            .iter()
+            .any(|item| item.key.is_some());
+        let items_start = items.start;
+        let pattern_start = self.begin_destructure_items();
+        for item_idx in items {
+            let item = self.array_item_scratch[item_idx].clone();
+            let (is_null, is_array, destructure_syntax, value_span) = {
+                let value = self.expr_node(item.value);
+                (
+                    matches!(&value.kind, ExprKind::Literal(Literal::Null)),
+                    matches!(&value.kind, ExprKind::ArrayLiteral(_)),
+                    match &value.kind {
+                        ExprKind::Destructure(_, syntax) => Some(*syntax),
+                        _ => None,
+                    },
+                    value.span,
+                )
+            };
+            let skipped = is_null && self.take_pattern_only(item.value);
             if skipped {
                 if keyed {
                     return Err(error(
                         "Cannot use empty array entries in keyed array assignment",
-                        item.value.span,
+                        value_span,
                     ));
                 }
-                pattern.push(DestructureItem {
+                self.push_destructure_item(DestructureItem {
                     key: None,
                     target: None,
                     by_ref: false,
@@ -466,35 +484,38 @@ impl Parser<'_> {
             if item.spread {
                 return Err(error(
                     "Spread operator is not supported in assignments",
-                    item.value.span,
+                    value_span,
                 ));
             }
             if item.key.is_some() != keyed {
                 return Err(error(
                     "Cannot mix keyed and unkeyed array entries in assignments",
-                    item.value.span,
+                    value_span,
                 ));
             }
-            let mixed = match (&item.value.kind, syntax) {
-                (ExprKind::ArrayLiteral(_), DestructureSyntax::List) => {
-                    !self.long_arrays.contains(&item.value.id)
-                }
-                (ExprKind::Destructure(_, inner), _) => *inner != syntax,
-                _ => false,
-            };
+            let mixed = (is_array
+                && syntax == DestructureSyntax::List
+                && !self.long_arrays.contains(&item.value))
+                || destructure_syntax.is_some_and(|inner| inner != syntax);
             if mixed {
-                return Err(error("Cannot mix [] and list()", item.value.span));
+                return Err(error("Cannot mix [] and list()", value_span));
             }
-            pattern.push(DestructureItem {
+            let target = self.as_pattern(item.value, false)?;
+            self.push_destructure_item(DestructureItem {
                 key: item.key,
-                target: Some(self.as_pattern(item.value, false)?),
+                target: Some(target),
                 by_ref: item.by_ref,
             });
         }
-        if pattern.iter().all(|item| item.target.is_none()) {
+        if self
+            .destructure_items(pattern_start)
+            .iter()
+            .all(|item| item.target.is_none())
+        {
             return Err(error("Cannot use empty list", span));
         }
-        Ok(pattern)
+        self.array_item_scratch.truncate(items_start);
+        Ok(self.finish_destructure_items(pattern_start))
     }
 
     /// Drops the error waiting on `id` being part of a destructuring
