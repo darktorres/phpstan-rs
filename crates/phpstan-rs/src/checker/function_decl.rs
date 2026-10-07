@@ -609,12 +609,9 @@ impl<'a> Checker<'a> {
                         .and_then(|d| d.params.get(p.name.as_ref()))
                         .cloned()
                         .or_else(|| {
-                            p.doc_comment
-                                .as_ref()
-                                .and_then(|ranges| {
-                                    arenas.and_then(|arenas| arenas.doc_comment_text(ranges))
-                                })
-                                .as_deref()
+                            arenas
+                                .and_then(|arenas| arenas.doc_site(p.span.start))
+                                .map(|site| site.text.as_ref())
                                 .map(docblock::parse_shared)
                                 .and_then(|d| d.var_type.clone())
                         });

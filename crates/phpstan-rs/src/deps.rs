@@ -218,7 +218,11 @@ impl Collector {
         let Some(doc) = doc.and_then(|ranges| arenas.doc_comment_text(ranges)) else {
             return;
         };
-        let parsed = doc_names_of(&doc);
+        self.doc_names_text(&doc);
+    }
+
+    fn doc_names_text(&mut self, doc: &str) {
+        let parsed = doc_names_of(doc);
         for token in &parsed.tokens {
             if parsed.declared.contains(token)
                 || self
@@ -285,8 +289,12 @@ impl Visitor for Collector {
                 .and_then(|def| def.doc_comment.as_ref()),
             _ => None,
         };
-        if declaration_doc != stmt.doc_comment.as_ref() {
-            self.doc_names(arenas, stmt.doc_comment.as_ref());
+        if let Some(site) = arenas.doc_site(stmt.span.start) {
+            let declaration_doc =
+                declaration_doc.and_then(|ranges| arenas.doc_comment_text(ranges));
+            if declaration_doc.as_deref() != Some(site.text.as_ref()) {
+                self.doc_names_text(&site.text);
+            }
         }
         arena::walk_stmt(self, arenas, id);
     }
@@ -339,7 +347,9 @@ impl Visitor for Collector {
     }
 
     fn visit_param(&mut self, arenas: &NodeArenas, param: &Param) {
-        self.doc_names(arenas, param.doc_comment.as_ref());
+        if let Some(site) = arenas.doc_site(param.span.start) {
+            self.doc_names_text(&site.text);
+        }
         arena::walk_param(self, arenas, param);
     }
 

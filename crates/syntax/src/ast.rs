@@ -28,20 +28,6 @@ pub struct StmtNode {
     pub id: StmtId,
     pub kind: StmtKind,
     pub span: Span,
-    // The source range(s) of a `/** ... */` doc comment immediately
-    // preceding this statement, if any. Readers resolve text through the
-    // parsed file that owns these nodes. This lets the checker recognize an inline `@var`
-    // assertion sitting on an arbitrary statement, not just on an actual
-    // declaration (see `checker::stmt::inline_var_annotation`). A statement
-    // that's also a declaration (e.g. a function) claiming its own doc
-    // comment via `Parser::take_doc_comment` still gets the same raw text
-    // here too - harmless, since a declaration's own docblock never has a
-    // `@var $name` tag for that logic to act on. Several nodes can refer to
-    // the same source ranges (e.g. a comma-separated `use`/`const` list).
-    pub doc_comment: Option<DocCommentRanges>,
-    // The line `doc_comment` starts on - where real PHPStan reports a
-    // finding about the comment itself (`varTag.unresolvableType`).
-    pub doc_line: Option<u32>,
 }
 
 /// A typed index into a parsed file's expression arena.
@@ -257,6 +243,10 @@ pub struct NodeArenas {
     pub type_hints: ListArena<TypeHint>,
     pub expr_spans: Vec<Span>,
     pub stmt_spans: Vec<Span>,
+    /// Doc comments keyed by the source offset of the node that owns them.
+    /// Unlike declaration doc ranges, these sites serve statements and
+    /// parameters whose common-case nodes should not carry doc payloads.
+    pub doc_sites: Vec<NodeDocSite>,
     /// Decoded literal bytes retained by this file. Unescaped payloads
     /// refer to `ParsedFile::source` instead of being copied here.
     pub decoded_bytes: Vec<u8>,
@@ -283,6 +273,14 @@ pub struct NodeArenas {
     pub anonymous_classes_base: u32,
     /// File-local offset for decoded-byte ranges in parser fragments.
     pub decoded_bytes_base: u32,
+}
+
+/// A doc comment recorded for lookup by its owning node's start offset.
+#[derive(Debug, Clone)]
+pub struct NodeDocSite {
+    pub pos: u32,
+    pub line: u32,
+    pub text: Arc<str>,
 }
 
 fn idx_with_base<T>(index: la_arena::Idx<T>, base: u32) -> la_arena::Idx<T> {
@@ -971,6 +969,8 @@ impl NodeArenas {
         self.type_hints.append_fragment(fragment.type_hints);
         self.expr_spans.extend(fragment.expr_spans);
         self.stmt_spans.extend(fragment.stmt_spans);
+        self.doc_sites.extend(fragment.doc_sites);
+        self.doc_sites.sort_by_key(|site| site.pos);
         self.decoded_bytes.extend(fragment.decoded_bytes);
     }
 
@@ -1019,6 +1019,14 @@ impl NodeArenas {
         self.stmt_spans.get(local as usize).copied()
     }
 
+    /// Finds a doc comment recorded for a node that starts at `pos`.
+    pub fn doc_site(&self, pos: u32) -> Option<&NodeDocSite> {
+        let end = self.doc_sites.partition_point(|site| site.pos <= pos);
+        end.checked_sub(1)
+            .map(|index| &self.doc_sites[index])
+            .filter(|site| site.pos == pos)
+    }
+
     /// Drops the current file's nodes but keeps the worker's allocations.
     pub fn clear(&mut self) {
         self.source = Arc::from([]);
@@ -1050,6 +1058,7 @@ impl NodeArenas {
         self.type_hints.clear();
         self.expr_spans.clear();
         self.stmt_spans.clear();
+        self.doc_sites.clear();
         self.decoded_bytes.clear();
         self.expr_base = 0;
         self.stmt_base = 0;
@@ -1171,6 +1180,8 @@ impl NodeArenas {
         self.type_hints.shrink_to_fit();
         self.expr_spans.shrink_to_fit();
         self.stmt_spans.shrink_to_fit();
+        self.doc_sites.sort_by_key(|site| site.pos);
+        self.doc_sites.shrink_to_fit();
         self.decoded_bytes.shrink_to_fit();
     }
 }
@@ -1338,12 +1349,6 @@ pub struct Param {
     // (`function f(#[SensitiveParameter] string $password) {}`) - empty
     // for the overwhelming majority of parameters, which have none.
     pub attrs: AttributeRange,
-    // Raw `/** ... */` text immediately preceding this
-    // parameter, if any - real, idiomatic PHP for a promoted
-    // constructor property (`/** @var array<string, mixed>|null */
-    // public ?array $details,`), since it doubles as that property's own
-    // docblock. `None` for the overwhelming majority of parameters.
-    pub doc_comment: Option<DocCommentRanges>,
     pub span: Span,
 }
 
@@ -2842,7 +2847,6 @@ mod arena_tests {
             promotion: None,
             hooks: None,
             attrs,
-            doc_comment: None,
             span: Span::default(),
         }
     }
@@ -3075,8 +3079,6 @@ mod arena_tests {
             id: SYNTHETIC_STMT_ID,
             kind: StmtKind::Break(None),
             span: Span::default(),
-            doc_comment: None,
-            doc_line: None,
         };
 
         let expression_id = arenas.exprs.alloc(expression);
@@ -3096,8 +3098,6 @@ mod arena_tests {
                 id: SYNTHETIC_STMT_ID,
                 kind: StmtKind::Break(None),
                 span: Span::default(),
-                doc_comment: None,
-                doc_line: None,
             }),
             statement_id
         );

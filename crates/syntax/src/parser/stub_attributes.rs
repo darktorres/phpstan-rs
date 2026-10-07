@@ -219,27 +219,27 @@ impl Parser<'_> {
 
     pub(crate) fn transform_stub_params(
         &mut self,
-        params: &mut Vec<Param>,
+        params: &mut Vec<crate::parser::ParamDraft>,
         function_doc: &mut Option<DocCommentRanges>,
     ) {
         if !self.stub_attributes_mentioned {
-            for param in params {
-                self.note_doc(&param.doc_comment, param.span.start);
-            }
             return;
         }
 
-        let names: Vec<Name> = params.iter().map(|param| param.name.name.clone()).collect();
+        let names: Vec<Name> = params
+            .iter()
+            .map(|param| param.node.name.name.clone())
+            .collect();
         let mut keep = vec![true; params.len()];
         for index in 0..params.len() {
-            let attrs = self.attributes(params[index].attrs);
+            let attrs = self.attributes(params[index].node.attrs);
             let superseded = attrs.iter().any(|attr| {
                 self.stub_kind(attr) == Some(Kind::Availability) && self.is_closed_range(attr)
             });
             if superseded {
                 let repeated = names.get(index + 1) == Some(&names[index])
                     || names[..index].contains(&names[index]);
-                if params[index].default.is_none() || repeated {
+                if params[index].node.default.is_none() || repeated {
                     keep[index] = false;
                     self.stub_attributes_changed = true;
                     continue;
@@ -247,16 +247,16 @@ impl Parser<'_> {
             }
             if let Some(last) = attrs.last()
                 && self.stub_kind(last) == Some(Kind::TypeAware)
-                && params[index].type_hint.is_none()
+                && params[index].node.type_hint.is_none()
                 && let Some(ty) = self.newest_type(last)
                 && !ty.contains(['[', ']'])
             {
                 let at = Span {
-                    start: params[index].name.span.start,
-                    end: params[index].name.span.start,
+                    start: params[index].node.name.span.start,
+                    end: params[index].node.name.span.start,
                 };
                 if let Some(hint) = self.parse_stub_native_type(&ty, at) {
-                    params[index].type_hint = Some(hint);
+                    params[index].node.type_hint = Some(hint);
                     let line = format!("@param {ty} ${}", names[index]);
                     if let Some(previous) = params[..index]
                         .iter_mut()
@@ -277,9 +277,8 @@ impl Parser<'_> {
             index += 1;
             retain
         });
-        for param in params {
-            param.attrs = self.strip_stub_attributes(param.attrs);
-            self.note_doc(&param.doc_comment, param.span.start);
+        for draft in params {
+            draft.node.attrs = self.strip_stub_attributes(draft.node.attrs);
         }
     }
 

@@ -25,7 +25,13 @@ from the files on 2026-10-06.
    compact `AttributeRange`s (9.8.e DONE); small-node payloads, duplicated spans,
    and statement/parameter doc-site lookup remain.
    The ledger now tracks implementation subtasks for every item after 9 as well;
-   those items remain OPEN pending level 8's ordered work.
+   those items remain OPEN pending level 8's ordered work. Item 9.8's
+   statement and parameter doc fields are now removed; parser-owned doc sites
+   retain normalized text and comment line by node offset, with checker,
+   registry, dependency, promoted-property and canonical readers migrated.
+   The remaining 9.8 work is moving large expression/statement payloads out of
+   common nodes and removing the duplicated per-node spans. No 9.V tests have
+   run yet.
    Each item's gate runs workspace and item-specific tests only (including their inherent compile).
    Full §11 validation and O3 run once, after item 19. Only
    the rows that optimize are built now; the rest are DEFERRED.

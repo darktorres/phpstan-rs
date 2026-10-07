@@ -1139,10 +1139,9 @@ impl ClassReflection {
                     .filter(|p| {
                         p.promotion.map(|promotion| promotion.visibility).as_ref()
                             != Some(&Visibility::Private)
-                            && p.doc_comment
-                                .as_ref()
-                                .and_then(|ranges| arenas.doc_comment_text(ranges))
-                                .as_deref()
+                            && arenas
+                                .doc_site(p.span.start)
+                                .map(|site| site.text.as_ref())
                                 .map(docblock::parse_shared)
                                 .is_some_and(|d| d.is_final)
                     })
@@ -1258,10 +1257,9 @@ impl ClassReflection {
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
                     .or_else(|| {
-                        p.doc_comment
-                            .as_ref()
-                            .and_then(|ranges| arenas.doc_comment_text(ranges))
-                            .as_deref()
+                        arenas
+                            .doc_site(p.span.start)
+                            .map(|site| site.text.as_ref())
                             .map(docblock::parse_shared)
                             .and_then(|d| d.var_type.clone())
                     });
@@ -1280,11 +1278,9 @@ impl ClassReflection {
                 // A promoted param's own inline `@readonly` - cheap to
                 // support given `p.doc_comment` is already parsed above
                 // for `@var`'s fallback.
-                let param_doc = p
-                    .doc_comment
-                    .as_ref()
-                    .and_then(|ranges| arenas.doc_comment_text(ranges))
-                    .as_deref()
+                let param_doc = arenas
+                    .doc_site(p.span.start)
+                    .map(|site| site.text.as_ref())
                     .map(docblock::parse_shared);
                 let doc_readonly = param_doc.as_ref().is_some_and(|d| d.readonly);
                 let doc_allows_private_mutation =

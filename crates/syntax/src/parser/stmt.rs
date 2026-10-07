@@ -34,18 +34,17 @@ impl Parser<'_> {
         // that's also a declaration (e.g. a function) consuming its own
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
-        let (mut leading_doc_comment, mut leading_doc_line) =
-            match self.ahead.front().and_then(|tok| tok.docs.as_deref()) {
-                Some(group) => (
-                    group
-                        .folded_ranges
-                        .clone()
-                        .or_else(|| group.last_range.map(DocCommentRanges::One)),
-                    group.first_start.map(|start| self.line_index.line(start)),
-                ),
-                None => (None, None),
-            };
-        let mut stmt = match self.peek() {
+        let mut leading_doc_comment = self
+            .ahead
+            .front()
+            .and_then(|tok| tok.docs.as_deref())
+            .and_then(|group| {
+                group
+                    .folded_ranges
+                    .clone()
+                    .or_else(|| group.last_range.map(DocCommentRanges::One))
+            });
+        let stmt = match self.peek() {
             Token::InlineHtml(_) => {
                 let Token::InlineHtml(span) = self.take_token() else {
                     unreachable!()
@@ -146,8 +145,6 @@ impl Parser<'_> {
                 let f =
                     self.parse_function_decl(attrs, doc, Some(&mut leading_doc_comment), !dropped)?;
                 if dropped {
-                    leading_doc_comment = None;
-                    leading_doc_line = None;
                     return Ok(None);
                 } else {
                     let function = self.node_arenas.borrow_mut().alloc_function(f);
@@ -472,14 +469,19 @@ impl Parser<'_> {
         };
         // A declaration's own doc comment is recorded with the declaration; a
         // different one before it is the statement's.
-        let (declaration, stmt_start) = {
+        let (declaration, declaration_start, stmt_start) = {
             let stmt = self.stmt_node(stmt);
             let declaration = match &stmt.kind {
                 StmtKind::FunctionDecl(function) => Some(Ok(*function)),
                 StmtKind::ClassDecl(class) => Some(Err(class.def)),
                 _ => None,
             };
-            (declaration, stmt.span.start)
+            let arenas = self.node_arenas.borrow();
+            let declaration_start = declaration.and_then(|declaration| match declaration {
+                Ok(id) => arenas.function(id).map(|function| function.span.start),
+                Err(id) => arenas.class(id).map(|class| class.span.start),
+            });
+            (declaration, declaration_start, stmt.span.start)
         };
         let declaration_doc = declaration.and_then(|declaration| {
             let arenas = self.node_arenas.borrow();
@@ -490,13 +492,8 @@ impl Parser<'_> {
                 Err(id) => arenas.class(id).and_then(|class| class.doc_comment.clone()),
             }
         });
-        if declaration_doc != leading_doc_comment {
-            self.note_doc(&leading_doc_comment, stmt_start);
-        }
-        {
-            let mut stmt = self.stmt_node_mut(stmt);
-            stmt.doc_comment = leading_doc_comment;
-            stmt.doc_line = leading_doc_line;
+        if declaration_doc != leading_doc_comment || declaration_start != Some(stmt_start) {
+            self.note_node_doc_site(&leading_doc_comment, stmt_start);
         }
         Ok(Some(stmt))
     }

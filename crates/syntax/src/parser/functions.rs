@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::parser::{ParseError, Parser};
+use crate::parser::{ParamDraft, ParseError, Parser};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
@@ -113,20 +113,22 @@ impl Parser<'_> {
             } else {
                 None
             };
-            self.param_list_scratch[params_depth].push(Param {
-                name: self.ident(name, name_span),
-                type_hint,
-                default,
-                by_ref,
-                variadic,
-                promotion,
-                hooks,
-                attrs,
-                doc_comment,
-                span: Span {
-                    start: param_start,
-                    end: self.previous_end(),
+            self.param_list_scratch[params_depth].push(ParamDraft {
+                node: Param {
+                    name: self.ident(name, name_span),
+                    type_hint,
+                    default,
+                    by_ref,
+                    variadic,
+                    promotion,
+                    hooks,
+                    attrs,
+                    span: Span {
+                        start: param_start,
+                        end: self.previous_end(),
+                    },
                 },
+                doc_comment,
             });
             if !self.eat_list_comma(
                 &Token::RParen,
@@ -139,6 +141,9 @@ impl Parser<'_> {
         let mut params = self.take_param_list(params_depth);
         if apply_stub_rules {
             self.transform_stub_params(&mut params, function_doc);
+        }
+        for draft in &params {
+            self.note_node_doc_site(&draft.doc_comment, draft.node.span.start);
         }
         Ok(self.finish_param_list(params_depth, params))
     }

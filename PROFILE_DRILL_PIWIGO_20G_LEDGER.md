@@ -308,12 +308,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | OPEN |
 | 9.8.a.b | same step | Keep common statement nodes small and move large statement payloads out of line | — | perf | OPEN |
 | 9.8.b | step 8 | Keep expression and statement spans in parallel vectors, not in each node | — | perf | PART (spans are already parallel to IDs; node structs still also carry spans) |
-| 9.8.c | step 8 | Remove statement doc fields and resolve inline doc use by recorded doc-site offset | — | perf | OPEN; see 9.8.c.a-9.8.c.b |
-| 9.8.c.a | same step | Remove statement doc fields and record doc sites by statement start offset | — | perf | OPEN |
-| 9.8.c.b | same step | Migrate inline-doc readers to resolve the recorded site by offset | — | perf | OPEN |
-| 9.8.d | step 8 | Remove parameter doc fields and resolve parameter docs by doc-site offset; retain attributes in their nodes | — | perf | OPEN; see 9.8.d.a-9.8.d.b |
-| 9.8.d.a | same step | Remove parameter doc fields and record parameter doc sites by offset | — | perf | OPEN |
-| 9.8.d.b | same step | Migrate parameter-doc readers to resolve sites by offset while retaining attributes | — | perf | OPEN |
+| 9.8.c | step 8 | Remove statement doc fields and resolve inline doc use by recorded doc-site offset | — | perf | DONE (unvalidated; statement nodes no longer carry doc fields; file-owned sites preserve text and source line by statement offset.) |
+| 9.8.c.a | same step | Remove statement doc fields and record doc sites by statement start offset | — | perf | DONE (unvalidated; parser records statement sites, including declaration statements whose attributes shift the statement start.) |
+| 9.8.c.b | same step | Migrate inline-doc readers to resolve the recorded site by offset | — | perf | DONE (unvalidated; checker inline-`@var`, doc validation, canonical printing and dependency fallback resolve through the owner arena.) |
+| 9.8.d | step 8 | Remove parameter doc fields and resolve parameter docs by doc-site offset; retain attributes in their nodes | — | perf | DONE (unvalidated; parse-only `ParamDraft` holds docs through stub rewrites, then owner sites serve readers; `AttributeRange` remains in `Param`.) |
+| 9.8.d.a | same step | Remove parameter doc fields and record parameter doc sites by offset | — | perf | DONE (unvalidated; finalized parameter docs are recorded after parser-time stub rewriting and `Param` no longer stores them.) |
+| 9.8.d.b | same step | Migrate parameter-doc readers to resolve sites by offset while retaining attributes | — | perf | DONE (unvalidated; checker, registry, property-promotion and dependency readers use owner sites; attributes remain in compact parameter nodes.) |
 | 9.8.e | step 8 | Keep attributes available in their compact node representation | — | perf | DONE (attributes already use owner-backed `AttributeRange`s, including parameters; no change required.) |
 | 9.V | §11 | Tests-only item gate: workspace tests plus item-specific tests, including 3.4's scratch-store tests; full §11 validation waits until item 19 | 9.8 | val | OPEN; see subtask rows 9.V.a-9.V.c |
 | 9.V.a | §11 | Run `cargo test --workspace` after every item 9 implementation row is complete | — | val | OPEN (must not run before 9.2/3.4, 9.3-9.8 are complete) |

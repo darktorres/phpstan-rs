@@ -334,13 +334,10 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner
             .as_ref()
             .map(crate::checker::SyntaxTreeOwner::arenas);
-        let Some(doc) = stmt
-            .doc_comment
-            .as_ref()
-            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
-        else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
             return;
         };
+        let doc = site.text.as_ref();
         let Some(arenas) = arenas else {
             return;
         };
@@ -379,13 +376,10 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner
             .as_ref()
             .map(crate::checker::SyntaxTreeOwner::arenas);
-        let Some(doc) = stmt
-            .doc_comment
-            .as_ref()
-            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
-        else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
             return true;
         };
+        let doc = site.text.as_ref();
         if !doc.contains("var")
             || matches!(
                 stmt.kind,
@@ -610,13 +604,10 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner
             .as_ref()
             .map(crate::checker::SyntaxTreeOwner::arenas);
-        let Some(doc) = stmt
-            .doc_comment
-            .as_ref()
-            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
-        else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
             return;
         };
+        let doc = site.text.as_ref();
         if !doc.contains("var")
             || matches!(
                 stmt.kind,
@@ -626,9 +617,9 @@ impl<'a> Checker<'a> {
             return;
         }
         let class = self.current_class.clone();
-        let line = stmt
-            .doc_line
-            .unwrap_or_else(|| self.line_index.line(stmt.span.start));
+        let line = arenas
+            .and_then(|arenas| arenas.doc_site(stmt.span.start))
+            .map_or_else(|| self.line_index.line(stmt.span.start), |site| site.line);
         let at = self.line_index.line_start(line).unwrap_or(stmt.span.start);
         let span = syntax::span::Span { start: at, end: at };
         for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc).iter() {
@@ -1666,13 +1657,10 @@ impl<'a> Checker<'a> {
     /// own rules read its tags.
     fn statement_var_tags_of(&self, stmt: &StmtNode) -> Vec<(Option<String>, Type)> {
         let arenas = self.syntax_arenas();
-        let Some(doc) = stmt
-            .doc_comment
-            .as_ref()
-            .and_then(|ranges| arenas.and_then(|arenas| arenas.doc_comment_text(ranges)))
-        else {
+        let Some(site) = arenas.and_then(|arenas| arenas.doc_site(stmt.span.start)) else {
             return Vec::new();
         };
+        let doc = site.text.as_ref();
         if !doc.contains("var")
             || matches!(
                 stmt.kind,

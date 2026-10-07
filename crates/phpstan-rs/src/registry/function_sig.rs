@@ -687,8 +687,7 @@ impl FunctionReflection {
             let ty = resolve_names_in_type(ty, ctx);
             substitute_type_aliases(ty, class_type_aliases)
         };
-        let params = f
-            .params
+        let params = decl_params
             .iter()
             .map(|p| {
                 // A promoted constructor property's own inline
@@ -700,8 +699,9 @@ impl FunctionReflection {
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
                     .or_else(|| {
-                        p.doc_comment
-                            .as_deref()
+                        arenas
+                            .doc_site(p.span.start)
+                            .map(|site| site.text.as_ref())
                             .map(docblock::parse_shared)
                             .and_then(|d| d.var_type.clone())
                     });
@@ -711,14 +711,14 @@ impl FunctionReflection {
                     ..
                 } = declared_type(doc_ty.as_ref(), p.type_hint.as_ref(), &template_params, ctx);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
-                let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
+                let ty = apply_implicit_nullable_default(ty, arenas, p.default);
                 // Mirrors `ty` with `doc_ty` forced to `None` - the
                 // native-only split `return_type_native` also has.
                 // Still passes through `apply_implicit_nullable_default`,
                 // since that's a native-level PHP fact (an untyped `?`
                 // hint with a `null` default is implicitly nullable),
                 // independent of any docblock merge.
-                let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
+                let ty_native = apply_implicit_nullable_default(ty_native, arenas, p.default);
                 // A real `= value` default always wins; failing that, a
                 // `[optional]` marker on the `@param` tag is trusted too
                 // (phpstorm-stubs models several functions, e.g.
@@ -740,13 +740,13 @@ impl FunctionReflection {
                     .and_then(|d| d.param_out.get(p.name.as_ref()))
                     .map(&resolve_doc_type);
                 ParameterReflection {
-                    attributes: ReflectionAttribute::all(&p.attrs),
+                    attributes: ReflectionAttribute::all(arenas, arenas.attributes(p.attrs)),
                     name: Name::from(&p.name),
                     ty,
                     ty_native,
                     variadic: p.variadic,
                     has_default,
-                    default_ty: p.default.as_ref().map(infer_const_type),
+                    default_ty: p.default.map(|id| infer_const_type(arenas, id)),
                     doc_ty: doc
                         .as_ref()
                         .and_then(|d| d.params.get(p.name.as_ref()))
@@ -768,13 +768,16 @@ impl FunctionReflection {
         } = declared_type(doc_return, f.return_type.as_ref(), &template_params, ctx);
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
-        let no_discard = f
-            .attrs
+        let function_attrs = arenas.attributes(f.attrs);
+        let no_discard = function_attrs
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));
-        let must_use_result = crate::registry::access_attributes::has_must_use_result(&f.attrs);
-        let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
-        let attributes = ReflectionAttribute::all(&f.attrs);
+        let must_use_result =
+            crate::registry::access_attributes::has_must_use_result(function_attrs);
+        let has_override_attr = function_attrs
+            .iter()
+            .any(|a| is_override_attribute_name(&a.name));
+        let attributes = ReflectionAttribute::all(arenas, function_attrs);
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
         let is_api = doc.as_ref().is_some_and(|d| d.api);
@@ -798,9 +801,9 @@ impl FunctionReflection {
             .as_ref()
             .map(|d| {
                 (
-                    resolve_assert_tags(&d.assert_if_true, &f.params, &template_params, ctx),
-                    resolve_assert_tags(&d.assert_if_false, &f.params, &template_params, ctx),
-                    resolve_assert_tags(&d.assert, &f.params, &template_params, ctx),
+                    resolve_assert_tags(&d.assert_if_true, decl_params, &template_params, ctx),
+                    resolve_assert_tags(&d.assert_if_false, decl_params, &template_params, ctx),
+                    resolve_assert_tags(&d.assert, decl_params, &template_params, ctx),
                 )
             })
             .unwrap_or_default();

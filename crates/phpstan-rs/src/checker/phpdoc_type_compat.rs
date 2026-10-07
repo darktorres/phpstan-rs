@@ -20,11 +20,17 @@ use types::{ConditionalSubject, TrinaryLogic};
 impl<'a> Checker<'a> {
     pub(crate) fn check_phpdoc_types_against_native(
         &mut self,
+        params: &[Param],
         f: &FunctionDecl,
         sig: &FunctionReflection,
         class_name: Option<&str>,
     ) {
-        let Some(doc) = f.doc_comment.as_deref() else {
+        let source = self.syntax_source_owner();
+        let Some(doc) = f
+            .doc_comment
+            .as_ref()
+            .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)))
+        else {
             return;
         };
         if !doc.contains("@") {
@@ -47,7 +53,7 @@ impl<'a> Checker<'a> {
             ("@param-out", in_doc_order(&block.param_out)),
         ] {
             for name in &names {
-                let Some(i) = f.params.iter().position(|p| *p.name == **name) else {
+                let Some(i) = params.iter().position(|p| *p.name == **name) else {
                     self.report(
                         format!("PHPDoc tag {tag} references unknown parameter: ${name}"),
                         f.name.span,
@@ -56,7 +62,7 @@ impl<'a> Checker<'a> {
                     );
                     continue;
                 };
-                let (Some(param), Some(param_sig)) = (f.params.get(i), sig.params().get(i)) else {
+                let (Some(param), Some(param_sig)) = (params.get(i), sig.params().get(i)) else {
                     continue;
                 };
                 let node = if tag == "@param-out" {
@@ -278,26 +284,37 @@ impl<'a> Checker<'a> {
         if !doc.contains('@') {
             return;
         }
+        let mut arenas = NodeArenas::default();
         let (name, params, return_type) = match set_param {
             Some(param) => {
                 let value = match param {
-                    Some(p) => p.clone(),
-                    None => Param {
-                        name: Ident {
-                            name: "value".into(),
+                    Some(p) => {
+                        let attributes = self
+                            .syntax_arenas()
+                            .map(|owner| owner.attributes(p.attrs).to_vec())
+                            .unwrap_or_default();
+                        let mut value = p.clone();
+                        value.attrs = arenas.alloc_attributes(attributes);
+                        value
+                    }
+                    None => {
+                        let attrs = arenas.alloc_attributes(std::iter::empty());
+                        Param {
+                            name: Ident {
+                                name: "value".into(),
+                                span,
+                                name_id: None,
+                            },
+                            type_hint: property_type_hint.cloned(),
+                            default: None,
+                            by_ref: false,
+                            variadic: false,
+                            promotion: None,
+                            hooks: None,
+                            attrs,
                             span,
-                            name_id: None,
-                        },
-                        type_hint: property_type_hint.cloned(),
-                        default: None,
-                        by_ref: false,
-                        variadic: false,
-                        promotion: None,
-                        hooks: None,
-                        attrs: Vec::new(),
-                        doc_comment: None,
-                        span,
-                    },
+                        }
+                    }
                 };
                 let void = TypeHint {
                     kind: TypeHintKind::Keyword(NativeType::Void, "void".into()),
@@ -307,6 +324,8 @@ impl<'a> Checker<'a> {
             }
             None => ("get", Vec::new(), property_type_hint.cloned()),
         };
+        let params = arenas.alloc_params(params);
+        let attrs = arenas.alloc_attributes(std::iter::empty());
         let decl = FunctionDecl {
             namespaced_name: None,
             name: Ident {
@@ -319,50 +338,69 @@ impl<'a> Checker<'a> {
             body: None,
             by_ref: false,
             doc_comment: Some(doc.into()),
-            attrs: Vec::new(),
+            attrs,
             span,
         };
+        let params = arenas.params(params);
         let previous_class = self.current_class.replace(fqn.to_string());
         let class_templates = self.current_class_template_params();
         self.current_class = previous_class;
         let aliases = self.registry.effective_type_aliases_by_name(fqn);
         let sig = FunctionReflection::from_decl(
             &decl,
+            &arenas,
             &self.name_ctx,
             &class_templates,
             &aliases,
             Visibility::Public,
         );
         let sig = self.registry.finalize_standalone_sig(sig);
-        self.check_phpdoc_types_against_native(&decl, &sig, Some(fqn));
+        self.check_phpdoc_types_against_native(params, &decl, &sig, Some(fqn));
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDef) {
         if !self.registry.has_class(fqn) {
             return;
         }
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return;
+        };
+        let arenas = syntax_owner.arenas();
+        let source = self.syntax_source_owner();
         // A promoted property's PHPDoc type is its constructor `@param`,
         // else its own inline `@var`.
-        let ctor = c.methods.iter().find(|m| m.function.is_constructor());
+        let ctor = arenas
+            .methods(c.methods)
+            .iter()
+            .find(|m| m.function.is_constructor());
         let ctor_nodes = ctor
-            .and_then(|m| m.function.doc_comment.as_deref())
+            .and_then(|m| {
+                m.function
+                    .doc_comment
+                    .as_ref()
+                    .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)))
+            })
+            .as_deref()
             .map(super::phpdoc_unresolvable::tag_type_nodes)
             .unwrap_or_default();
         let promoted = ctor
             .into_iter()
-            .flat_map(|m| m.function.params.iter())
+            .flat_map(|m| arenas.params(m.function.params).iter())
             .filter(|p| p.promotion.is_some())
             .map(|p| {
                 let node = ctor_nodes.params.get(p.name.as_ref()).cloned().or_else(|| {
-                    p.doc_comment
-                        .as_deref()
+                    arenas
+                        .doc_site(p.span.start)
+                        .map(|site| site.text.as_ref())
                         .and_then(|d| super::phpdoc_unresolvable::tag_type_nodes(d).var)
                 });
                 (&*p.name, p.span, "PHPDoc type", node)
             });
-        let declared = c.properties.iter().map(|p| {
+        let declared = c.properties(arenas).iter().map(|p| {
             let node = p
                 .doc_comment
+                .as_ref()
+                .and_then(|ranges| source.as_ref().and_then(|source| ranges.text(source)))
                 .as_deref()
                 .and_then(|d| super::phpdoc_unresolvable::tag_type_nodes(d).var);
             (&*p.name, p.span, "PHPDoc tag @var", node)

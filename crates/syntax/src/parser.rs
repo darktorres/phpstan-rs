@@ -128,7 +128,7 @@ pub struct Parser<'a> {
     closure_use_scratch: Vec<ClosureUse>,
     // One reusable parameter buffer per nesting depth; defaults may contain
     // closures with their own parameter lists.
-    param_list_scratch: Vec<Vec<Param>>,
+    param_list_scratch: Vec<Vec<ParamDraft>>,
     param_list_depth: usize,
     // Reused for destructuring patterns before their elements are committed
     // together to `NodeArenas::destructure_items`.
@@ -163,6 +163,14 @@ pub struct Parser<'a> {
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
+}
+
+/// A parser-only parameter plus its doc range. The retained `Param` stays
+/// compact; the doc is copied into the owner's offset-indexed doc sites
+/// after parser-time stub rewrites finish.
+pub(crate) struct ParamDraft {
+    pub(crate) node: Param,
+    pub(crate) doc_comment: Option<DocCommentRanges>,
 }
 
 /// What a name is read as: PHP resolves classes, functions and constants
@@ -728,9 +736,36 @@ impl Parser<'_> {
 
     /// Records `doc`, the doc comment of the node that starts at `pos`.
     pub(crate) fn note_doc(&self, doc: &Option<DocCommentRanges>, pos: u32) {
-        let Some(text) = doc.as_ref().and_then(|range| self.doc_text(range)) else {
+        self.record_doc(doc, pos, false);
+    }
+
+    /// Records a statement or parameter doc both for dependency collection
+    /// and for compact lookup by its owning node's source offset.
+    pub(crate) fn note_node_doc_site(&self, doc: &Option<DocCommentRanges>, pos: u32) {
+        self.record_doc(doc, pos, true);
+    }
+
+    fn record_doc(&self, doc: &Option<DocCommentRanges>, pos: u32, node_site: bool) {
+        let Some((range, text)) = doc
+            .as_ref()
+            .and_then(|range| self.doc_text(range).map(|text| (range, text)))
+        else {
             return;
         };
+        if node_site {
+            let line = range.spans().first().map_or_else(
+                || self.line_index.line(pos),
+                |span| self.line_index.line(span.start),
+            );
+            self.node_arenas
+                .borrow_mut()
+                .doc_sites
+                .push(crate::ast::NodeDocSite {
+                    pos,
+                    line,
+                    text: Arc::clone(&text),
+                });
+        }
         self.recorder
             .borrow_mut()
             .doc(&Some(text), pos, &self.ctx.borrow());
@@ -866,13 +901,7 @@ impl Parser<'_> {
             end: self.previous_end(),
         };
         let id = self.stmt_id();
-        let node = StmtNode {
-            id,
-            kind,
-            span,
-            doc_comment: None,
-            doc_line: None,
-        };
+        let node = StmtNode { id, kind, span };
         self.node_arenas.borrow_mut().alloc_stmt(node)
     }
 
@@ -896,7 +925,9 @@ impl Parser<'_> {
     }
 
     pub(crate) fn take_node_arenas(&self) -> NodeArenas {
-        std::mem::take(&mut *self.node_arenas.borrow_mut())
+        let mut arenas = std::mem::take(&mut *self.node_arenas.borrow_mut());
+        arenas.doc_sites.sort_by_key(|site| site.pos);
+        arenas
     }
 
     pub(crate) fn begin_stmt_list(&self) -> usize {
@@ -999,12 +1030,19 @@ impl Parser<'_> {
         depth
     }
 
-    pub(crate) fn take_param_list(&mut self, depth: usize) -> Vec<Param> {
+    pub(crate) fn take_param_list(&mut self, depth: usize) -> Vec<ParamDraft> {
         std::mem::take(&mut self.param_list_scratch[depth])
     }
 
-    pub(crate) fn finish_param_list(&mut self, depth: usize, mut params: Vec<Param>) -> ParamRange {
-        let range = self.node_arenas.borrow_mut().alloc_params(params.drain(..));
+    pub(crate) fn finish_param_list(
+        &mut self,
+        depth: usize,
+        mut params: Vec<ParamDraft>,
+    ) -> ParamRange {
+        let range = self
+            .node_arenas
+            .borrow_mut()
+            .alloc_params(params.drain(..).map(|draft| draft.node));
         self.param_list_scratch[depth] = params;
         self.param_list_depth = depth;
         range

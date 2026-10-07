@@ -70,7 +70,6 @@ impl Parser<'_> {
                     promotion: None,
                     hooks: None,
                     attrs,
-                    doc_comment: None,
                     span: Span {
                         start: param_start,
                         end: self.previous_end(),
@@ -91,7 +90,7 @@ impl Parser<'_> {
                 PropertyHookBody::Arrow(e)
             } else if self.check(&Token::LBrace) {
                 let depth = self.enter_goto_scope();
-                let stmts = self.parse_stmt_list_block();
+                let stmts = self.parse_stmt_list_block_range();
                 let end = self.leave_goto_scope(depth);
                 goto_labels = end.goto_labels;
                 is_generator = end.is_generator;

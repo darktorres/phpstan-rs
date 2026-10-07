@@ -19,34 +19,18 @@ impl Canonical for DocCommentRanges {
 
 impl Canonical for StmtNode {
     fn canonical(&self, p: &mut Printer) {
-        let StmtNode {
-            id: _,
-            kind,
-            span,
-            doc_comment,
-            doc_line,
-        } = self;
+        let StmtNode { id: _, kind, span } = self;
         span.canonical(p);
         p.atom(" ");
-        if doc_comment.is_some() || doc_line.is_some() {
-            p.tuple("doc", &[doc_line, doc_comment]);
-            p.atom(" ");
-        }
         kind.canonical(p);
     }
 
     fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
-        let StmtNode {
-            id: _,
-            kind,
-            span,
-            doc_comment,
-            doc_line,
-        } = self;
+        let StmtNode { id: _, kind, span } = self;
         span.canonical(p);
         p.atom(" ");
-        if doc_comment.is_some() || doc_line.is_some() {
-            p.tuple_with("doc", &[doc_line, doc_comment], arenas);
+        if let Some(site) = arenas.doc_site(span.start) {
+            p.tuple("doc", &[&site.line, &site.text]);
             p.atom(" ");
         }
         kind.canonical_with(p, arenas);
@@ -321,18 +305,42 @@ canonical_struct!(Promotion {
     is_final,
 });
 
-canonical_struct!(Param {
-    name,
-    type_hint,
-    default,
-    by_ref,
-    variadic,
-    promotion,
-    hooks,
-    attrs,
-    doc_comment,
-    span,
-});
+impl Canonical for Param {
+    fn canonical(&self, p: &mut Printer) {
+        p.node(
+            "Param",
+            &[
+                ("name", &self.name),
+                ("type_hint", &self.type_hint),
+                ("default", &self.default),
+                ("by_ref", &self.by_ref),
+                ("variadic", &self.variadic),
+                ("promotion", &self.promotion),
+                ("hooks", &self.hooks),
+                ("attrs", &self.attrs),
+                ("span", &self.span),
+            ],
+        );
+    }
+
+    fn canonical_with(&self, p: &mut Printer, arenas: &NodeArenas) {
+        let mut fields: Vec<(&str, &dyn Canonical)> = vec![
+            ("name", &self.name),
+            ("type_hint", &self.type_hint),
+            ("default", &self.default),
+            ("by_ref", &self.by_ref),
+            ("variadic", &self.variadic),
+            ("promotion", &self.promotion),
+            ("hooks", &self.hooks),
+            ("attrs", &self.attrs),
+            ("span", &self.span),
+        ];
+        if let Some(site) = arenas.doc_site(self.span.start) {
+            fields.push(("doc_comment", &site.text));
+        }
+        p.node_with("Param", &fields, arenas);
+    }
+}
 
 canonical_struct!(GotoLabel { name, backward });
 

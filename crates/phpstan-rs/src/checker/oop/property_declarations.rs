@@ -118,9 +118,9 @@ impl<'a> Checker<'a> {
                         type_hint: p.type_hint.as_ref(),
                         has_default: false,
                         hooks: p.hooks.as_deref(),
-                        doc_comment: p.doc_comment.as_ref().and_then(|ranges| {
-                            source.as_ref().and_then(|source| ranges.text(source))
-                        }),
+                        doc_comment: arenas
+                            .doc_site(p.span.start)
+                            .map(|site| Cow::Borrowed(site.text.as_ref())),
                     }),
             );
         }
