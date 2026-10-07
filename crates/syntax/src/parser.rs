@@ -121,6 +121,10 @@ pub struct Parser<'a> {
     class_const_scratch: Vec<ClassConst>,
     trait_use_scratch: Vec<TraitUse>,
     enum_case_scratch: Vec<EnumCase>,
+    // One reusable parameter buffer per nesting depth; defaults may contain
+    // closures with their own parameter lists.
+    param_list_scratch: Vec<Vec<Param>>,
+    param_list_depth: usize,
     // Reused for destructuring patterns before their elements are committed
     // together to `NodeArenas::destructure_items`.
     destructure_item_scratch: Vec<DestructureItem>,
@@ -356,6 +360,8 @@ impl<'a> Parser<'a> {
             class_const_scratch: Vec::new(),
             trait_use_scratch: Vec::new(),
             enum_case_scratch: Vec::new(),
+            param_list_scratch: Vec::new(),
+            param_list_depth: 0,
             destructure_item_scratch: Vec::new(),
             interner: Interner::global(),
             pattern_only: Vec::new(),
@@ -971,6 +977,27 @@ impl Parser<'_> {
         self.node_arenas
             .borrow_mut()
             .alloc_match_arms(self.match_arm_scratch.drain(start..))
+    }
+
+    pub(crate) fn begin_param_list(&mut self) -> usize {
+        let depth = self.param_list_depth;
+        if depth == self.param_list_scratch.len() {
+            self.param_list_scratch.push(Vec::new());
+        }
+        self.param_list_scratch[depth].clear();
+        self.param_list_depth += 1;
+        depth
+    }
+
+    pub(crate) fn take_param_list(&mut self, depth: usize) -> Vec<Param> {
+        std::mem::take(&mut self.param_list_scratch[depth])
+    }
+
+    pub(crate) fn finish_param_list(&mut self, depth: usize, mut params: Vec<Param>) -> ParamRange {
+        let range = self.node_arenas.borrow_mut().alloc_params(params.drain(..));
+        self.param_list_scratch[depth] = params;
+        self.param_list_depth = depth;
+        range
     }
 
     pub(crate) fn begin_destructure_items(&self) -> usize {

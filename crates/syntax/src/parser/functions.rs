@@ -6,9 +6,13 @@ use crate::token::{Keyword, Token};
 impl Parser<'_> {
     // ---- functions / params ----
 
-    pub(crate) fn parse_params(&mut self) -> Result<Vec<Param>, ParseError> {
+    pub(crate) fn parse_params(
+        &mut self,
+        function_doc: &mut Option<DocCommentRanges>,
+        apply_stub_rules: bool,
+    ) -> Result<ParamRange, ParseError> {
         self.expect(&Token::LParen)?;
-        let mut params = Vec::new();
+        let params_depth = self.begin_param_list();
         while !self.check(&Token::RParen) {
             let param_start = self.current_pos();
             // `#[Attr]` groups on a parameter precede everything else
@@ -109,8 +113,7 @@ impl Parser<'_> {
             } else {
                 None
             };
-            self.note_doc(&doc_comment, param_start);
-            params.push(Param {
+            self.param_list_scratch[params_depth].push(Param {
                 name: self.ident(name, name_span),
                 type_hint,
                 default,
@@ -133,10 +136,20 @@ impl Parser<'_> {
             }
         }
         self.expect(&Token::RParen)?;
-        Ok(params)
+        let mut params = self.take_param_list(params_depth);
+        if apply_stub_rules {
+            self.transform_stub_params(&mut params, function_doc);
+        }
+        Ok(self.finish_param_list(params_depth, params))
     }
 
-    pub(crate) fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
+    pub(crate) fn parse_function_decl(
+        &mut self,
+        attrs: AttributeRange,
+        doc_comment: Option<DocCommentRanges>,
+        mut statement_doc: Option<&mut Option<DocCommentRanges>>,
+        record: bool,
+    ) -> Result<FunctionDecl, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Function))?;
         let by_ref = self.eat(&Token::Amp);
@@ -146,7 +159,24 @@ impl Parser<'_> {
             start: name_start,
             end: self.previous_end(),
         };
-        let params = self.parse_params()?;
+        let mut doc_comment = doc_comment;
+        let overrides = if record {
+            self.return_overrides(attrs.clone())
+        } else {
+            Vec::new()
+        };
+        for ty in &overrides {
+            self.append_tag(&mut doc_comment, &format!("@return {ty}"));
+            if let Some(doc) = statement_doc.as_deref_mut() {
+                self.append_tag(doc, &format!("@return {ty}"));
+            }
+        }
+        let attrs = if record {
+            self.strip_stub_attributes(attrs)
+        } else {
+            attrs
+        };
+        let params = self.parse_params(&mut doc_comment, record)?;
         let return_type = if self.eat(&Token::Colon) {
             self.parse_type_hint()?
         } else {
@@ -158,39 +188,33 @@ impl Parser<'_> {
             let open = self.current_span();
             let depth = self.enter_goto_scope();
             self.recorder.borrow_mut().enter_body();
-            let stmts = self.parse_stmt_list_block();
+            let stmts = self.parse_stmt_list_block_range();
             self.recorder.borrow_mut().leave_body();
             let end = self.leave_goto_scope(depth);
             Some(FunctionBody {
                 open,
-                stmts: std::sync::Arc::new(stmts?),
+                stmts: stmts?,
                 goto_labels: end.goto_labels,
                 is_generator: end.is_generator,
             })
         };
-        Ok(FunctionDecl {
+        let function = FunctionDecl {
             namespaced_name: None,
             name: self.ident(name, name_span),
             params,
             return_type,
             body,
             by_ref,
-            // Callers that saw a preceding doc comment overwrite this -
-            // parse_function_decl itself is entered after any modifiers
-            // (and thus after the doc comment's position) have already
-            // been consumed.
-            doc_comment: None,
-            // Overwritten by whichever caller actually saw the leading
-            // `#[Attr]` group(s), if any - same "entered after modifiers"
-            // reasoning as `doc_comment` just above: a top-level function
-            // is reached from `parse_statement`, a method from
-            // `parse_class_body`/`parse_enum_decl`'s own member loops, both
-            // of which parse attributes before dispatching here.
-            attrs: Vec::new(),
+            doc_comment,
+            attrs,
             span: Span {
                 start,
                 end: self.previous_end(),
             },
-        })
+        };
+        if record {
+            self.note_function(&function);
+        }
+        Ok(function)
     }
 }
