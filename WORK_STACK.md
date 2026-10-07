@@ -10,7 +10,7 @@ starting a new tracking file. When a level is finished, mark it done here
 and say which level to resume. Per-item progress stays in the level's own
 documents; this file holds only the order and the pointers.
 
-State as of 2026-10-06, `f212a16a`. Counts below were read from the files on
+State as of 2026-10-06, `7c3a4fac`. Counts below were read from the files on
 that date.
 
 ## Where to resume
@@ -265,7 +265,9 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   dropped, reclaiming the arenas from each parsed file. The capacity and
   span-alignment, parse-error reuse, and project tree-to-scratch handoff tests
   are added but unrun. The parser restores scratch arenas on lexer or syntax
-  errors, preserving capacity in the worker. Row 3.4 is implemented with item 9.2;
+  errors, preserving capacity in the worker. A further unrun test verifies
+  dense expression/statement IDs and every node span after arena reuse
+  (`7c3a4fac`). Row 3.4 is implemented with item 9.2;
   item 9.V remains the pending tests-only gate. The node payload arenas remain
   empty. The IDs target
   `ExprNode`/`StmtNode` (`9763cc81`), and syntax visitor/canonical readers use explicit `ExprNode`
