@@ -232,10 +232,10 @@ analysis finds that the optimization does not need, is deferred until after
 O3 (2026-10-05; the plan's §9, "Only what optimizes").
 
 - **State: items 4.6-4.8, 5.1-5.9, 6.1/6.6, 7.1-7.5, and 8.1-8.4 implementation complete; tests-only gates 4.V through 8.V passed. Item 9 is active; 9.1 (`3f9ad5b8`) is done.** Item 8 (`451f0fa6`, follow-up `2d383a89`) removed serialized declaration case-reference fields and explicit-`mixed` flags, computes those facts while checking the declaration AST/docblock, preserves inherited explicit-`mixed` semantics in the effective type tree, avoids the unique-parameter dedup map/order allocations, and refines singleton doc types without temporary member vectors. Its workspace gate passed: 2,114 tests, 0 failed. Full §11 validation remains deferred until item 19. Items 0-2 are closed. Item 3's
-  implementation is done (3.1-3.2); its validation at 3.V passed the gate
-  workspace build, workspace tests, and the scoped and all-on oracle corpus
-  runs. The fixture suite reported 3,857 passed and 50 failed, matching the
-  existing failure count recorded at 2.V. The 3.4 scratch-store row remains
+  implementation is done (3.1-3.2); its workspace tests passed at 3.V. The
+  earlier recorded workspace build, oracle corpus runs, and fixture results
+  (3,857 passed, 50 existing failures) were additional validation runs, not
+  item-gate requirements. The 3.4 scratch-store row remains
   with item 9. Item 9.2 is in progress: syntax parse results now own their
   source bytes and the lexer's distinct names in first-use order; retained
   project trees carry both alongside the AST, while cache-only context
@@ -263,9 +263,10 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   in typed-ID-indexed tables through retained
   project trees (`a42f63ab`); parser tests cover name-ID reuse, parsed-file
   name/source lookup and span alignment (`eee0c503`, `d0a45686`, `a42f63ab`),
-  plus `Send + Sync`/`Copy` type invariants (`113b7869`); none have run. Nodes
-  still use recursive
-  storage, arena commits are not implemented, and no item gate or full
+  plus `Send + Sync`/`Copy` type invariants (`113b7869`); none have run. The
+  workspace call sites are being migrated from the `Expr`/`Stmt` aliases to
+  `ExprNode`/`StmtNode`; the AST remains a recursive value tree. Arena commits
+  are not implemented, and no item gate or full
   validation has run for item 9. AST children still use boxed/vector storage
   and `Name` handles; the source copy is interim until payloads become source
   ranges. Row 4.1 made

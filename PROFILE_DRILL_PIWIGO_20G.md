@@ -2562,9 +2562,9 @@ Exact; the private-property judgment's writes from bound closures and reflection
 
 ## 11. Item test gates and final validation
 
-**When.** An item gate runs only its tests when its last row lands, before the next item's first row. Between rows, format edits with `cargo fmt`; defer builds, checks and clippy until the item's rows are complete. A test failure is fixed within the item and the affected tests rerun. The complete validation below runs once after all items 0-19 are implemented; O3 is measured at that final gate. Item 3's scratch store waits for item 9's step 2, and is included in final validation. Item 6's step 2, which waits for the stub rules (item 9, step 5), is deferred. The deferred rows are validated together after O3 (ledger row D.V).
+**When.** An item gate runs only the workspace tests and tests added by that item when its last row lands, before the next item's first row. The test command may compile what it needs to execute those tests. Do not run separate builds, checks, clippy, formatting checks, diff checks, runtime oracles, fixtures, corpus passes, or dump comparisons at an item gate. Between rows, format edits with `cargo fmt`. A test failure is fixed within the item and the affected tests rerun. The complete validation below runs once after all items 0-19 are implemented; O3 is measured at that final gate. Item 3's scratch store waits for item 9's step 2, and is included in final validation. Item 6's step 2, which waits for the stub rules (item 9, step 5), is deferred. The deferred rows are validated together after O3 (ledger row D.V).
 
-**Item gates.** Run the workspace tests and any tests added by the item. Do not run a profile build, runtime oracle, fixture or corpus pass, or compare snapshots at an item gate.
+**Item gates.** Run the workspace tests and any tests added by the item, and nothing else as part of the gate. Do not run a separate build or check, clippy, formatting or diff checks, a profile build, runtime oracle, fixture or corpus pass, or snapshot comparison at an item gate.
 
 **Final validation.** Run once after item 19. One heavy job at a time, each under `nice -n 19` with `/proc/loadavg` noted, with no `timeout`, in this order; a job may use the whole machine:
 1. the `gate` build;
