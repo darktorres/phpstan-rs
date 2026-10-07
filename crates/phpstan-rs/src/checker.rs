@@ -279,6 +279,9 @@ type MethodMemo<'a> = FxHashMap<
 
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
+    // The owning file for this check's node IDs and file-local payloads.
+    // Standalone checkers may not have a parsed-file owner.
+    pub(crate) syntax_tree: Option<&'a crate::project::SyntaxTree>,
     // The class the last `class_info` was asked for.
     class_memo: std::cell::RefCell<(String, Option<&'a crate::registry::ClassReflection>)>,
     // Each statement's resolved `@var` tags, by the address and length of
@@ -1045,6 +1048,12 @@ impl<'a> Checker<'a> {
         self
     }
 
+    /// Gives the checker the file that owns the syntax node IDs it reads.
+    pub(crate) fn with_syntax_tree(mut self, syntax_tree: &'a crate::project::SyntaxTree) -> Self {
+        self.syntax_tree = Some(syntax_tree);
+        self
+    }
+
     /// The lines of the file to check, for its diagnostics' lines and
     /// columns.
     pub fn with_line_index(mut self, line_index: &Arc<LineIndex>) -> Self {
@@ -1136,6 +1145,7 @@ impl<'a> Checker<'a> {
             std::sync::LazyLock::new(Default::default);
         Checker {
             registry,
+            syntax_tree: None,
             class_memo: std::cell::RefCell::new((String::new(), None)),
             var_tag_memo: std::cell::RefCell::new(FxHashMap::default()),
             method_memo: std::cell::RefCell::new(FxHashMap::default()),
@@ -1788,6 +1798,10 @@ impl<'a> Checker<'a> {
 
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[StmtNode]) {
+        if let Some(tree) = self.syntax_tree {
+            debug_assert_eq!(program.as_ptr(), tree.statements().as_ptr());
+            debug_assert_eq!(program.len(), tree.statements().len());
+        }
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
                 strict_rules::assigned_variables(program)

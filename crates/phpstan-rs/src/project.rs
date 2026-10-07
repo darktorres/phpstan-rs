@@ -3048,6 +3048,9 @@ impl Project {
             .with_settings(&self.settings)
             .with_bodies(&self.files)
             .with_line_index(&file.line_index);
+        if let Some(tree) = file.kept_tree.as_ref() {
+            checker = checker.with_syntax_tree(tree);
+        }
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_current_file(path);
