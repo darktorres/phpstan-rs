@@ -171,7 +171,7 @@ pub(crate) struct FileState {
 /// owning file and gives the AST one storage boundary for the arena
 /// migration.
 #[cfg_attr(test, derive(Clone))]
-struct SyntaxTree {
+pub(crate) struct SyntaxTree {
     stmts: Vec<StmtNode>,
     #[allow(dead_code)] // Read by source-backed payloads in rows 9.3-9.4.
     source: Box<[u8]>,
@@ -184,8 +184,37 @@ struct SyntaxTree {
 }
 
 impl SyntaxTree {
-    fn statements(&self) -> &[StmtNode] {
+    pub(crate) fn statements(&self) -> &[StmtNode] {
         &self.stmts
+    }
+
+    #[allow(dead_code)] // Used as payloads become source ranges in row 9.4.
+    pub(crate) fn source_slice(&self, span: Span) -> Option<&[u8]> {
+        self.source.get(span.start as usize..span.end as usize)
+    }
+
+    #[allow(dead_code)] // Used by file-scoped NameId readers in row 9.3.
+    pub(crate) fn name(&self, id: syntax::name::NameId) -> Option<&Name> {
+        self.names.get(u32::from(id.into_raw()) as usize)
+    }
+
+    #[allow(dead_code)] // Used by file-scoped NameId readers in row 9.3.
+    pub(crate) fn ident_name(&self, ident: &syntax::ast::Ident) -> Option<&Name> {
+        self.name(ident.name_id?)
+    }
+
+    #[allow(dead_code)] // Used by file-scoped expression readers in row 9.3.
+    pub(crate) fn expr_span(&self, id: syntax::ast::ExprId) -> Option<Span> {
+        self.expr_spans
+            .get(u32::from(id.into_raw()) as usize)
+            .copied()
+    }
+
+    #[allow(dead_code)] // Used by file-scoped statement readers in row 9.3.
+    pub(crate) fn stmt_span(&self, id: syntax::ast::StmtId) -> Option<Span> {
+        self.stmt_spans
+            .get(u32::from(id.into_raw()) as usize)
+            .copied()
     }
 }
 
