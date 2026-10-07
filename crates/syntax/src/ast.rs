@@ -1695,6 +1695,52 @@ pub fn literal_string_value(e: &ExprNode) -> Option<std::borrow::Cow<'_, str>> {
     })
 }
 
+#[cfg(test)]
+mod arena_tests {
+    use super::*;
+
+    #[test]
+    fn node_arena_scratch_clear_reuses_typed_indices() {
+        let mut arenas = NodeArenas::default();
+        let expression = ExprNode {
+            id: SYNTHETIC_EXPR_ID,
+            kind: ExprKind::Literal(Literal::Null),
+            span: Span::default(),
+        };
+        let statement = StmtNode {
+            id: SYNTHETIC_STMT_ID,
+            kind: StmtKind::Break(None),
+            span: Span::default(),
+            doc_comment: None,
+            doc_line: None,
+        };
+
+        let expression_id = arenas.exprs.alloc(expression);
+        let statement_id = arenas.stmts.alloc(statement);
+        arenas.clear();
+
+        assert_eq!(
+            arenas.exprs.alloc(ExprNode {
+                id: SYNTHETIC_EXPR_ID,
+                kind: ExprKind::Literal(Literal::Null),
+                span: Span::default(),
+            }),
+            expression_id
+        );
+        assert_eq!(
+            arenas.stmts.alloc(StmtNode {
+                id: SYNTHETIC_STMT_ID,
+                kind: StmtKind::Break(None),
+                span: Span::default(),
+                doc_comment: None,
+                doc_line: None,
+            }),
+            statement_id
+        );
+        arenas.shrink_to_fit();
+    }
+}
+
 /// Whether `name` (without its `$`) is one of PHP's superglobals.
 pub fn is_superglobal(name: &str) -> bool {
     matches!(
