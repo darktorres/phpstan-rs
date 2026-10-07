@@ -16,7 +16,7 @@ from the files on 2026-10-06.
 ## Where to resume
 
 1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
-   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, resuming at item 9.8.a. Rows 9.2,
+   `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`, resuming at item 9.8.a.a.a. Rows 9.2,
    3.4, 9.3, 9.4, 9.5, 9.6 and 9.7 are implemented but await the tests-only
    9.V gate. Item 9.7's parser scratch lists commit into owner-backed typed
    ranges; node IDs are assigned on insertion, and retained arenas are compacted

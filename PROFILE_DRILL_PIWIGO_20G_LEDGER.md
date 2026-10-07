@@ -305,8 +305,13 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 9.7.d.b | same step | Retain and reuse cleared list scratch capacity only for transient trees | — | perf | DONE (733451be; worker transient parses take and return the reusable NodeArenas bundle, including list scratch capacity.) |
 | 9.8 | step 8 | Small nodes; statements and parameters without doc fields (doc sites by offset); attributes stay in their node | 9.3 | perf | OPEN; see subtask rows 9.8.a-9.8.e |
 | 9.8.a | step 8 | Common expression and statement nodes store IDs/ranges/flags, with large variants out of line | — | perf | OPEN; see 9.8.a.a-9.8.a.b |
-| 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | OPEN |
-| 9.8.a.b | same step | Keep common statement nodes small and move large statement payloads out of line | — | perf | OPEN |
+| 9.8.a.a | same step | Keep common expression nodes small and move large expression payloads out of line | — | perf | OPEN; see 9.8.a.a.a-9.8.a.a.b |
+| 9.8.a.a.a | same step | Move qualified-name expression payloads, including `instanceof` names, out of common expression variants | — | perf | OPEN |
+| 9.8.a.a.b | same step | Review remaining expression variants and move any oversized payloads out of common nodes | — | perf | OPEN |
+| 9.8.a.b | same step | Keep common statement nodes small and move large statement payloads out of line | — | perf | OPEN; see 9.8.a.b.a-9.8.a.b.c |
+| 9.8.a.b.a | same step | Move `if`, `switch` and `try` payloads and their branch/case/catch lists out of statement nodes | — | perf | OPEN |
+| 9.8.a.b.b | same step | Move `declare`, `global` and `static` statement collections into typed owner ranges | — | perf | OPEN |
+| 9.8.a.b.c | same step | Review remaining statement variants and move any oversized payloads out of common nodes | — | perf | OPEN |
 | 9.8.b | step 8 | Keep expression and statement spans in parallel vectors, not in each node | — | perf | PART (spans are already parallel to IDs; node structs still also carry spans) |
 | 9.8.c | step 8 | Remove statement doc fields and resolve inline doc use by recorded doc-site offset | — | perf | DONE (unvalidated; statement nodes no longer carry doc fields; file-owned sites preserve text and source line by statement offset.) |
 | 9.8.c.a | same step | Remove statement doc fields and record doc sites by statement start offset | — | perf | DONE (unvalidated; parser records statement sites, including declaration statements whose attributes shift the statement start.) |
