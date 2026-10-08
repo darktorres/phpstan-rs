@@ -351,9 +351,18 @@ impl Registry {
             }
         }
 
+        // A superglobal is what PHP fills it with; the code that writes a
+        // key of it does not make it narrower.
         let global_variables = accumulators
             .into_iter()
-            .map(|(name, acc)| (name, acc.finish()))
+            .map(|(name, acc)| {
+                let ty = if syntax::ast::is_superglobal(&name) {
+                    crate::checker::unassigned_variable_type(&name)
+                } else {
+                    acc.finish()
+                };
+                (name, ty)
+            })
             .collect();
         self.global_variables = global_variables;
     }
