@@ -167,10 +167,9 @@ impl Parser<'_> {
     }
 
     pub(crate) fn take_inline_html(&mut self) -> Option<Span> {
-        if self.peek().kind() != TokenKind::InlineHtml {
+        let Token::InlineHtml(span) = self.peek() else {
             return None;
-        }
-        let span = self.current_span();
+        };
         self.skip();
         Some(span)
     }

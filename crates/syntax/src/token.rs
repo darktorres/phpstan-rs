@@ -56,6 +56,8 @@ pub enum TokenPayload {
     Interpolation(Vec<StringPart>),
     Shell(Vec<StringPart>),
     DocComment(Arc<str>),
+    /// The text itself: the token's own span runs on through the open tag.
+    InlineHtml(Span),
 }
 
 /// A borrowed view of one flat-stream token. Payload-bearing variants borrow
@@ -260,7 +262,10 @@ impl TokenStream {
         use TokenRef as R;
         let kind = self.kind_at(index);
         match kind {
-            K::InlineHtml => R::InlineHtml(self.span_at(index)),
+            K::InlineHtml => R::InlineHtml(match self.payload_at(index) {
+                Some(P::InlineHtml(html)) => *html,
+                _ => self.span_at(index),
+            }),
             K::DocComment => match self.payload_at(index) { Some(P::DocComment(text)) => R::DocComment(text), _ => R::DocComment("") },
             K::Variable => match self.payload_at(index) { Some(P::Name(id)) => self.name(*id).map_or(R::Eof, R::Variable), _ => R::Eof },
             K::Integer => match self.payload_at(index) { Some(P::Integer(value)) => R::Integer(*value), _ => R::Eof },
@@ -435,7 +440,7 @@ impl Token {
             (kind, Some(TokenPayload::Name(id)))
         };
         match self {
-            InlineHtml(_) => plain(TokenKind::InlineHtml),
+            InlineHtml(html) => (TokenKind::InlineHtml, Some(TokenPayload::InlineHtml(html))),
             DocComment(text) => (TokenKind::DocComment, Some(TokenPayload::DocComment(text))),
             Variable(name) => named(TokenKind::Variable, name),
             Integer(n) => (TokenKind::Integer, Some(TokenPayload::Integer(n))),
