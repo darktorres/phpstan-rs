@@ -4,7 +4,7 @@
 //! magic method, an `ArrayAccess` or an iterator's method) is such a call.
 //! A property's facts go on each value whose type may hold an object the
 //! call writes, except an object the scope made that never leaves it
-//! (`SharedScope::unescaped`); a static property's by the class declaring
+//! (`SharedScope::made`); a static property's by the class declaring
 //! it; and a variable bound to a written global, static variable or place,
 //! or captured by reference by a closure the call may run, is reset to what
 //! it may hold.
@@ -593,7 +593,7 @@ impl Checker<'_> {
         locals: &Locals,
     ) -> bool {
         if let KeyData::Var(name) = root_variable(base, locals)
-            && scope.unescaped.contains(&name)
+            && scope.unescaped_at(&name, self.stmt_at.get())
         {
             return false;
         }

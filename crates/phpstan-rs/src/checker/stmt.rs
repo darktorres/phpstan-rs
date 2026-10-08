@@ -300,6 +300,23 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) -> Completion {
+        let at = self
+            .syntax_arenas()
+            .and_then(|arenas| arenas.stmt_span(stmt.id))
+            .map(|span| span.start);
+        let outer = self.stmt_at.replace(at);
+        let completion = self.check_stmt_in_place(stmt, locals, declared_return, label);
+        self.stmt_at.set(outer);
+        completion
+    }
+
+    fn check_stmt_in_place(
+        &mut self,
+        stmt: &StmtNode,
+        locals: &mut Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+    ) -> Completion {
         syntax::stack::guard(|| {
             if self.settings.shipmonk.check_enum_exhaustiveness {
                 self.check_strict_statement_idioms(stmt, locals);

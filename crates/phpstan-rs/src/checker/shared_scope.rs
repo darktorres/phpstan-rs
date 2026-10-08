@@ -42,11 +42,12 @@ pub(crate) struct SharedScope {
     /// callables the scope wrote, each one summarized
     /// (`BodySummary::of_closure`).
     pub(crate) closures: FxHashMap<Name, Vec<(ExprId, BodySummary)>>,
-    /// The variables holding only objects the scope made, used only as the
-    /// base of a property access, an operand of `===`, `!==`, `instanceof`,
-    /// `isset` or `empty`, or an assignment's target: no other code can
-    /// reach those objects.
-    pub(crate) unescaped: FxHashSet<Name>,
+    /// The variables holding only objects the scope made, each with where
+    /// the object may first leave the scope: no other code can reach it
+    /// before that, while it is used only as the base of a property access,
+    /// an operand of `===`, `!==`, `instanceof`, `isset` or `empty`, or an
+    /// assignment's target (`unescaped_at`).
+    pub(crate) made: FxHashMap<Name, Vec<Escape>>,
     /// The variables a reference to the variable or to one of its elements
     /// may exist for, wherever in the scope it is taken: a by-reference
     /// parameter, an `&` binding, a by-reference array item, `foreach`
@@ -57,7 +58,37 @@ pub(crate) struct SharedScope {
     pub(crate) all_exposed: bool,
 }
 
+/// A use of a variable that may let the object it holds leave the scope.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Escape {
+    /// Where the statement it is in starts; `None` when that is not known,
+    /// or a jump may run the code before it again.
+    stmt: Option<u32>,
+    /// The outermost loop around the statement: the code in it runs again
+    /// after it.
+    in_loop: Option<(u32, u32)>,
+}
+
 impl SharedScope {
+    /// Whether no code but the scope's own can reach the object `name`
+    /// holds at the statement starting at `at`: it holds only objects the
+    /// scope made, and none of its uses before that, or in a loop that
+    /// contains it, lets the object leave.
+    pub(crate) fn unescaped_at(&self, name: &Name, at: Option<u32>) -> bool {
+        let Some(escapes) = self.made.get(name) else {
+            return false;
+        };
+        escapes.is_empty()
+            || at.is_some_and(|at| {
+                escapes.iter().all(|escape| {
+                    escape.stmt.is_some_and(|stmt| at < stmt)
+                        && !escape
+                            .in_loop
+                            .is_some_and(|(start, end)| start <= at && at < end)
+                })
+            })
+    }
+
     /// The shared scope of the statements `body`, a function's, a closure's
     /// (whose `use` list is `uses`) or a file's top level.
     pub(crate) fn of(
@@ -137,7 +168,13 @@ struct Scan {
     references: FxHashMap<Name, Place>,
     captured: FxHashMap<Name, FxHashSet<u32>>,
     held: FxHashMap<Name, Held>,
-    escaped: FxHashSet<Name>,
+    escapes: FxHashMap<Name, Vec<Escape>>,
+    /// Where the statement being scanned starts.
+    stmt_at: Option<u32>,
+    /// The loops being scanned, outermost first.
+    loops: Vec<(u32, u32)>,
+    /// A jump may run code again.
+    jumps: bool,
     exposed: FxHashSet<Name>,
     all_exposed: bool,
 }
@@ -150,20 +187,27 @@ impl Scan {
                 || self.references.contains_key(name)
                 || self.captured.contains_key(name)
         };
-        let mut unescaped = FxHashSet::default();
+        let mut made = FxHashMap::default();
         let mut closures = FxHashMap::default();
+        let mut escapes = self.escapes;
         for (name, held) in self.held {
             if bound(&name) || top_level {
                 continue;
             }
             match held {
-                Held::Made if !self.escaped.contains(&name) => {
-                    unescaped.insert(name);
+                Held::Made => {
+                    let mut escapes = escapes.remove(&name).unwrap_or_default();
+                    if self.jumps {
+                        for escape in &mut escapes {
+                            escape.stmt = None;
+                        }
+                    }
+                    made.insert(name, escapes);
                 }
                 Held::Closures(bodies) => {
                     closures.insert(name, bodies);
                 }
-                Held::Made | Held::Other => {}
+                Held::Other => {}
             }
         }
         SharedScope {
@@ -176,7 +220,7 @@ impl Scan {
             references: self.references,
             captured: self.captured,
             closures,
-            unescaped,
+            made,
             exposed: self.exposed,
             all_exposed: self.all_exposed,
         }
@@ -210,6 +254,16 @@ impl Scan {
             _ => Held::Other,
         };
         self.held.insert(name.clone(), joined);
+    }
+
+    /// A use of the variable `name` that may let the object it holds leave
+    /// the scope, in the statement being scanned.
+    fn escape(&mut self, name: &Name) {
+        let escape = Escape {
+            stmt: self.stmt_at,
+            in_loop: self.loops.first().copied(),
+        };
+        self.escapes.entry(name.clone()).or_default().push(escape);
     }
 
     /// A use of `e` that does not let the object it is leave the scope:
@@ -301,6 +355,38 @@ impl Visitor for Scan {
 
     fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
         let Some(stmt) = arenas.stmt(id) else { return };
+        let span = arenas.stmt_span(id);
+        let outer = std::mem::replace(&mut self.stmt_at, span.map(|span| span.start));
+        let looped = matches!(
+            stmt.kind,
+            StmtKind::While { .. }
+                | StmtKind::DoWhile { .. }
+                | StmtKind::For { .. }
+                | StmtKind::Foreach { .. }
+        );
+        if looped {
+            match span {
+                Some(span) => self.loops.push((span.start, span.end)),
+                None => self.jumps = true,
+            }
+        }
+        if matches!(stmt.kind, StmtKind::Goto(_)) {
+            self.jumps = true;
+        }
+        self.scan_stmt(arenas, id, stmt);
+        if looped && span.is_some() {
+            self.loops.pop();
+        }
+        self.stmt_at = outer;
+    }
+
+    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+        self.scan_expr(arenas, id);
+    }
+}
+
+impl Scan {
+    fn scan_stmt(&mut self, arenas: &NodeArenas, id: StmtId, stmt: &StmtNode) {
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Global(vars) => {
                 for var in arenas.global_vars(vars.clone()) {
@@ -371,12 +457,10 @@ impl Visitor for Scan {
         })
     }
 
-    fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+    fn scan_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(e) = arenas.expr(id) else { return };
         syntax::stack::guard(|| match &e.kind {
-            ExprKind::Variable(name) => {
-                self.escaped.insert(name.clone());
-            }
+            ExprKind::Variable(name) => self.escape(name),
             ExprKind::PropertyAccess(base, _, _) => self.kept(arenas, *base),
             ExprKind::DynamicPropertyAccess(base, name, _) => {
                 self.kept(arenas, *base);
@@ -463,7 +547,7 @@ impl Visitor for Scan {
             ExprKind::Closure(closure_id) => {
                 if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) {
                     for u in arenas.closure_uses(&closure.uses) {
-                        self.escaped.insert(u.name.name.clone());
+                        self.escape(&u.name.name);
                         if u.by_ref {
                             self.captured
                                 .entry(u.name.name.clone())

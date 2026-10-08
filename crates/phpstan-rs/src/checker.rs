@@ -760,6 +760,9 @@ pub struct Checker<'a> {
     // (`shared_scope`), and what the closures it wrote may have left in the
     // variables they capture by reference.
     pub(crate) shared_scope: std::rc::Rc<shared_scope::SharedScope>,
+    // Where the statement being checked starts, as the scope's escapes are
+    // placed (`SharedScope::unescaped_at`); `None` outside one.
+    pub(crate) stmt_at: std::cell::Cell<Option<u32>>,
     // What each closure or arrow function written in the file took of the
     // variables around it, by value, where it was written: the object each
     // held (`note_captures`).
@@ -1392,6 +1395,7 @@ impl<'a> Checker<'a> {
             keys: keys::KeyTableRef::default(),
             static_var_names: NameSet::default(),
             shared_scope: Default::default(),
+            stmt_at: Default::default(),
             closure_captures: Default::default(),
             captured_types: Default::default(),
             capture_entries: Default::default(),
