@@ -848,7 +848,10 @@ fn hook_access(operation: &Operation) -> Option<(Option<&Name>, bool, bool)> {
         Operation::Property(prop, access) => Some((prop.as_ref(), *access == Access::Write, false)),
         Operation::Iterate { .. } => Some((None, false, true)),
         Operation::Clone { with: true } => Some((None, true, false)),
-        Operation::Clone { with: false } | Operation::Element(_) | Operation::String => None,
+        Operation::Clone { with: false }
+        | Operation::Element(_)
+        | Operation::String
+        | Operation::Destroy => None,
     }
 }
 
@@ -868,6 +871,7 @@ fn implicit_method_names(operation: &Operation) -> Vec<&'static str> {
         Operation::Property(_, access) => vec![property_magic_method(*access)],
         Operation::Element(access) => vec![element_method(*access)],
         Operation::String => vec!["__toString"],
+        Operation::Destroy => vec!["__destruct"],
         Operation::Clone { with: false } => vec!["__clone"],
         Operation::Clone { with: true } => vec!["__clone", "__set"],
         Operation::Iterate { keys } => {
@@ -2639,6 +2643,12 @@ impl Reach<'_> {
         let (classes, exact) = match holder {
             Holder::Classes(classes) => (classes, false),
             Holder::Made(Some(classes)) => (classes, true),
+            // A value of a class nothing says cannot be told apart from any
+            // object of the program, and a destructor runs where the value
+            // dies, which no summary places.
+            Holder::Unknown | Holder::Made(None) if matches!(operation, Operation::Destroy) => {
+                return Some(());
+            }
             Holder::Unknown | Holder::Made(None) => {
                 for method in implicit_method_names(operation) {
                     for class in registry
@@ -2727,6 +2737,7 @@ impl Reach<'_> {
                 }
             }
             Operation::String => vec!["__toString"],
+            Operation::Destroy => vec!["__destruct"],
             Operation::Clone { with: false } => vec!["__clone"],
             Operation::Clone { with: true } => vec!["__clone", "__set"],
             Operation::Iterate { keys } => {

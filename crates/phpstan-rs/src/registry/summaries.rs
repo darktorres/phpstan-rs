@@ -257,6 +257,9 @@ pub(crate) enum Operation {
     /// `Iterator`'s methods, or an `IteratorAggregate`'s `getIterator` and
     /// those of the iterator it gives.
     Iterate { keys: bool },
+    /// The value at the place stops being held, by an `unset` or an
+    /// assignment over it: `__destruct` of an object nothing else holds.
+    Destroy,
 }
 
 /// What an access does with a property or an element.
@@ -1745,6 +1748,7 @@ impl Visitor for Summarizer {
             match &stmt.kind {
                 StmtKind::Unset(targets) => {
                     for &target in arenas.expr_ids(targets) {
+                        self.implicit(arenas, target, Operation::Destroy);
                         self.write(arenas, target, None, Some(vec![Origin::NoObject]));
                         self.mark(arenas, target, UNSET);
                     }
@@ -1865,6 +1869,20 @@ impl Visitor for Summarizer {
                 ExprKind::Assign(lhs, rhs) => {
                     let made = self.made_by(arenas, *rhs);
                     let origins = origins_of(arenas, *rhs);
+                    if matches!(
+                        arenas
+                            .peeled(*lhs)
+                            .and_then(|id| arenas.expr(id))
+                            .map(|e| &e.kind),
+                        Some(
+                            ExprKind::Variable(_)
+                                | ExprKind::PropertyAccess(..)
+                                | ExprKind::StaticPropertyFetch(..)
+                                | ExprKind::Index(..)
+                        )
+                    ) {
+                        self.implicit(arenas, *lhs, Operation::Destroy);
+                    }
                     self.write(arenas, *lhs, made, origins.clone());
                     if let Some(ExprNode {
                         kind: ExprKind::Destructure(items, _),
@@ -2177,6 +2195,7 @@ syntax::canonical_enum!(Operation {
     String,
     Clone { with },
     Iterate { keys },
+    Destroy,
 });
 
 syntax::canonical_enum!(Access {

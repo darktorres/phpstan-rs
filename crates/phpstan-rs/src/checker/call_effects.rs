@@ -411,6 +411,9 @@ impl Checker<'_> {
         if ty.is_object().no() {
             return;
         }
+        if matches!(operation, Operation::Destroy) && holder_of(ty) == Holder::Unknown {
+            return;
+        }
         let call = CallWrites {
             callee: Callee::Implicit {
                 on: None,

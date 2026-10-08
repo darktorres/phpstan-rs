@@ -2455,6 +2455,17 @@ impl<'a> Checker<'a> {
                 // statement that defines it. PropertyAccess/Index targets
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
+                if matches!(&e.kind, ExprKind::Assign(..))
+                    && match &lhs.kind {
+                        ExprKind::Variable(name) => locals.contains_var(name),
+                        ExprKind::PropertyAccess(..)
+                        | ExprKind::StaticPropertyFetch(..)
+                        | ExprKind::Index(_, Some(_)) => true,
+                        _ => false,
+                    }
+                {
+                    self.forget_what_an_operation_on_may_change(lhs, Operation::Destroy, locals);
+                }
                 self.check_assignment_target(arenas, lhs, locals, label);
                 match &lhs.kind {
                     _ if matches!(&e.kind, ExprKind::AssignRef(..)) => {
