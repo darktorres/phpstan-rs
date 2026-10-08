@@ -37,7 +37,10 @@ pub(crate) struct SharedScope {
     pub(crate) references: FxHashMap<Name, Place>,
     /// The variables a closure captures by reference: the scope's own
     /// captures, for a closure's scope, and those of the closures it writes.
-    pub(crate) captured: FxHashMap<Name, FxHashSet<u32>>,
+    pub(crate) captured: FxHashMap<Name, Capture>,
+    /// Where each closure the scope wrote may first leave it: by the id of
+    /// its expression.
+    pub(crate) closure_escapes: FxHashMap<u32, Vec<Escape>>,
     /// The variables holding only closures, arrow functions or first-class
     /// callables the scope wrote, each one summarized
     /// (`BodySummary::of_closure`).
@@ -58,6 +61,16 @@ pub(crate) struct SharedScope {
     pub(crate) all_exposed: bool,
 }
 
+/// What shares a variable with a closure that captures it by reference.
+#[derive(Debug, Default)]
+pub(crate) struct Capture {
+    /// The scope is a closure's, which captures the variable.
+    pub(crate) own: bool,
+    /// The closures the scope wrote that capture it, by the id of their
+    /// expression.
+    pub(crate) closures: FxHashSet<u32>,
+}
+
 /// A use of a variable that may let the object it holds leave the scope.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Escape {
@@ -69,24 +82,39 @@ pub(crate) struct Escape {
     in_loop: Option<(u32, u32)>,
 }
 
+impl Escape {
+    /// Whether any of `escapes` has happened by the statement starting at
+    /// `at`: it is not before it, or it is in a loop `at` is in.
+    fn reached(escapes: &[Escape], at: Option<u32>) -> bool {
+        let Some(at) = at else {
+            return !escapes.is_empty();
+        };
+        escapes.iter().any(|escape| {
+            escape.stmt.is_none_or(|stmt| stmt <= at)
+                || escape
+                    .in_loop
+                    .is_some_and(|(start, end)| start <= at && at < end)
+        })
+    }
+}
+
 impl SharedScope {
     /// Whether no code but the scope's own can reach the object `name`
     /// holds at the statement starting at `at`: it holds only objects the
     /// scope made, and none of its uses before that, or in a loop that
     /// contains it, lets the object leave.
     pub(crate) fn unescaped_at(&self, name: &Name, at: Option<u32>) -> bool {
-        let Some(escapes) = self.made.get(name) else {
-            return false;
-        };
-        escapes.is_empty()
-            || at.is_some_and(|at| {
-                escapes.iter().all(|escape| {
-                    escape.stmt.is_some_and(|stmt| at < stmt)
-                        && !escape
-                            .in_loop
-                            .is_some_and(|(start, end)| start <= at && at < end)
-                })
-            })
+        self.made
+            .get(name)
+            .is_some_and(|escapes| !Escape::reached(escapes, at))
+    }
+
+    /// Whether code other than the scope's own may hold the closure written
+    /// as `closure` at the statement starting at `at`.
+    pub(crate) fn closure_left_at(&self, closure: u32, at: Option<u32>) -> bool {
+        self.closure_escapes
+            .get(&closure)
+            .is_none_or(|escapes| Escape::reached(escapes, at))
     }
 
     /// The shared scope of the statements `body`, a function's, a closure's
@@ -101,7 +129,7 @@ impl SharedScope {
         let mut scan = Scan::default();
         for u in uses {
             if u.by_ref {
-                scan.captured.entry(u.name.name.clone()).or_default();
+                scan.captured.entry(u.name.name.clone()).or_default().own = true;
                 scan.held.insert(u.name.name.clone(), Held::Other);
             }
         }
@@ -166,7 +194,12 @@ struct Scan {
     any_global: bool,
     statics: FxHashSet<Name>,
     references: FxHashMap<Name, Place>,
-    captured: FxHashMap<Name, FxHashSet<u32>>,
+    captured: FxHashMap<Name, Capture>,
+    /// The uses of a variable that may let what it holds leave the scope,
+    /// other than calling it.
+    leaks: FxHashMap<Name, Vec<Escape>>,
+    /// Where each closure was written.
+    closure_at: FxHashMap<u32, Escape>,
     held: FxHashMap<Name, Held>,
     escapes: FxHashMap<Name, Vec<Escape>>,
     /// Where the statement being scanned starts.
@@ -190,6 +223,11 @@ impl Scan {
         let mut made = FxHashMap::default();
         let mut closures = FxHashMap::default();
         let mut escapes = self.escapes;
+        let mut closure_escapes: FxHashMap<u32, Vec<Escape>> = self
+            .closure_at
+            .iter()
+            .map(|(&closure, &escape)| (closure, vec![escape]))
+            .collect();
         for (name, held) in self.held {
             if bound(&name) || top_level {
                 continue;
@@ -205,6 +243,10 @@ impl Scan {
                     made.insert(name, escapes);
                 }
                 Held::Closures(bodies) => {
+                    let leaks = self.leaks.get(&name).cloned().unwrap_or_default();
+                    for (id, _) in &bodies {
+                        closure_escapes.insert(id.into_raw().into_u32(), leaks.clone());
+                    }
                     closures.insert(name, bodies);
                 }
                 Held::Other => {}
@@ -220,6 +262,7 @@ impl Scan {
             references: self.references,
             captured: self.captured,
             closures,
+            closure_escapes,
             made,
             exposed: self.exposed,
             all_exposed: self.all_exposed,
@@ -259,11 +302,23 @@ impl Scan {
     /// A use of the variable `name` that may let the object it holds leave
     /// the scope, in the statement being scanned.
     fn escape(&mut self, name: &Name) {
-        let escape = Escape {
+        let escape = self.here();
+        self.escapes.entry(name.clone()).or_default().push(escape);
+        self.leaks.entry(name.clone()).or_default().push(escape);
+    }
+
+    /// Calling the variable `name`: what it holds, if an object, gets its
+    /// `__invoke` a `$this`, but a closure it holds leaves nothing.
+    fn call(&mut self, name: &Name) {
+        let escape = self.here();
+        self.escapes.entry(name.clone()).or_default().push(escape);
+    }
+
+    fn here(&self) -> Escape {
+        Escape {
             stmt: self.stmt_at,
             in_loop: self.loops.first().copied(),
-        };
-        self.escapes.entry(name.clone()).or_default().push(escape);
+        }
     }
 
     /// A use of `e` that does not let the object it is leave the scope:
@@ -536,15 +591,26 @@ impl Scan {
                 self.all_exposed = true;
                 arena::walk_expr(self, arenas, id);
             }
-            ExprKind::Call(..) => {
+            ExprKind::Call(callee, args) => {
                 if writes_computed_variables(arenas, id) {
                     self.all_exposed = true;
                 }
-                arena::walk_expr(self, arenas, id);
+                match arenas.peeled(*callee).and_then(|id| arenas.expr(id)) {
+                    Some(ExprNode {
+                        kind: ExprKind::Variable(name),
+                        ..
+                    }) => {
+                        self.call(name);
+                        arena::walk_args(self, arenas, args.clone());
+                    }
+                    _ => arena::walk_expr(self, arenas, id),
+                }
             }
             // A closure's body is a scope of its own; what it captures leaves
             // this one.
             ExprKind::Closure(closure_id) => {
+                self.closure_at
+                    .insert(id.into_raw().into_u32(), self.here());
                 if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) {
                     for u in arenas.closure_uses(&closure.uses) {
                         self.escape(&u.name.name);
@@ -552,6 +618,7 @@ impl Scan {
                             self.captured
                                 .entry(u.name.name.clone())
                                 .or_default()
+                                .closures
                                 .insert(id.into_raw().into_u32());
                         }
                     }

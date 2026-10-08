@@ -801,14 +801,22 @@ impl Checker<'_> {
                 out.push((name.clone(), Shared::Reference(place.clone())));
             }
         }
-        for (name, closures) in &scope.captured {
-            let run = closures.iter().any(|&closure| {
+        let at = self.stmt_at.get();
+        for (name, capture) in &scope.captured {
+            let run = capture.closures.iter().any(|&closure| {
                 storages.iter().any(|storage| {
                     matches!(storage, Storage::Captured { closure: found, var }
                         if *found == closure && var == name)
                 })
             });
-            if anything || run {
+            // Unknown code runs a closure it may hold, or the scope's own.
+            let unknown = anything
+                && (capture.own
+                    || capture
+                        .closures
+                        .iter()
+                        .any(|&closure| scope.closure_left_at(closure, at)));
+            if run || unknown {
                 out.push((name.clone(), Shared::Captured));
             }
         }
