@@ -52,7 +52,7 @@ use crate::registry::summaries::{
     Operation, Origin, PairTarget, Place, Receiver, Root, Step, WriteFacts,
 };
 use crate::registry::{
-    FunctionReflection, NameSet, PropertyReflection, Registry, is_non_overridable,
+    FunctionReflection, NameMap, PropertyReflection, Registry, is_non_overridable,
 };
 use types::Type;
 
@@ -523,17 +523,19 @@ mod builtin_runs {
             .map_or(&[], |at| RUNS[at].1)
     }
 
-    /// Whether a method of the class (lowercased) ran a callable or an
-    /// object's method its object was made with.
-    pub(super) fn holding(class: &str) -> bool {
-        HOLDING.binary_search(&class).is_ok()
+    /// Whether the method (`class::method`, lowercased) ran a callable or
+    /// an object's method its object was made with, or given by another
+    /// method.
+    pub(super) fn holding(name: &str) -> bool {
+        HOLDING.binary_search(&name).is_ok()
     }
 
-    /// The stream-wrapper methods (lowercased) a method of the class
-    /// (lowercased) ran through a URL its object was made with.
-    pub(super) fn held_wrappers(class: &str) -> &'static [&'static str] {
+    /// The stream-wrapper methods (lowercased) the method (`class::method`,
+    /// lowercased) ran through a URL its object was made with, or given by
+    /// another method.
+    pub(super) fn held_wrappers(name: &str) -> &'static [&'static str] {
         HELD_WRAPPERS
-            .binary_search_by(|&(entry, _)| entry.cmp(class))
+            .binary_search_by(|&(entry, _)| entry.cmp(name))
             .map_or(&[], |at| HELD_WRAPPERS[at].1)
     }
 }
@@ -1031,8 +1033,13 @@ impl Registry {
         wrappers.settle();
         self.stream_wrappers = Arc::new(wrappers);
         let mut running_code = (*self.base_builtin_methods_running_code).clone();
-        for name in self.own_builtin_methods_running_code() {
-            running_code.insert(name);
+        for (name, mut owners) in self.own_builtin_methods_running_code() {
+            if let Some(known) = running_code.get(name.as_str()) {
+                owners.extend(known.iter().cloned());
+                owners.sort_unstable();
+                owners.dedup();
+            }
+            running_code.insert(Name::from(name), owners);
         }
         self.builtin_methods_running_code = running_code;
         let registry: &Registry = self;
@@ -1368,26 +1375,6 @@ impl Registry {
             .any(|class| self.stub_holding_classes.contains(class))
     }
 
-    fn builtin_holds_code(&self, class: &str) -> bool {
-        self.builtin_lineage(class)
-            .iter()
-            .any(|class| builtin_runs::holding(class))
-    }
-
-    /// The stream-wrapper methods an object of the builtin class `class` may
-    /// run through a URL it was made with.
-    fn builtin_held_wrappers(&self, class: &str) -> Vec<&'static str> {
-        let mut out = Vec::new();
-        for class in self.builtin_lineage(class) {
-            for method in builtin_runs::held_wrappers(&class) {
-                if !out.contains(method) {
-                    out.push(*method);
-                }
-            }
-        }
-        out
-    }
-
     /// What a call of the stub `key` (`sig`) whose arguments are not known
     /// may write: nothing when a call of it was seen to run no code through
     /// any argument, its object holds none, and none of its parameters
@@ -1458,9 +1445,9 @@ impl Registry {
             // its doc declares pure writes nothing, unless it takes code.
             return !sig.declared_pure || takes_code;
         };
-        key.class.as_deref().is_some_and(|class| {
-            self.builtin_holds_code(class) || !self.builtin_held_wrappers(class).is_empty()
-        }) || !builtin_runs::runs(&name).is_empty()
+        builtin_runs::holding(&name)
+            || !builtin_runs::held_wrappers(&name).is_empty()
+            || !builtin_runs::runs(&name).is_empty()
             || takes_code
     }
 
@@ -1529,19 +1516,15 @@ impl Registry {
     }
 
     /// Every loaded declaration of `method` with a body, and every `__call`
-    /// and `__callStatic`: what a call on an object or a class not known may
-    /// run. `None` when a builtin method of that name runs code passed to
-    /// it.
-    fn methods_named(&self, method: &str) -> Option<Vec<DeclKey>> {
-        if self
-            .builtin_methods_running_code()
-            .contains(&method.to_ascii_lowercase())
-        {
-            return None;
-        }
+    /// and `__callStatic`, and the builtin ones that run code passed to
+    /// them: what a call on an object or a class not known may run.
+    fn methods_named(&self, method: &str) -> Vec<DeclKey> {
         let mut out: Vec<DeclKey> = Vec::new();
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
-        let declaring = self.classes_declaring(method).map(|class| (class, method));
+        let declaring = self
+            .classes_declaring(method)
+            .chain(self.builtin_classes_running_code(method))
+            .map(|class| (class, method));
         let magic = ["__call", "__callStatic"].into_iter().flat_map(|magic| {
             self.classes_declaring(magic)
                 .map(move |class| (class, magic))
@@ -1554,16 +1537,22 @@ impl Registry {
                 }
             }
         }
-        Some(out)
+        out
+    }
+
+    /// The builtin classes declaring `method`, which runs code passed to
+    /// it.
+    fn builtin_classes_running_code(&self, method: &str) -> impl Iterator<Item = &Name> {
+        self.builtin_methods_running_code()
+            .get(method.to_ascii_lowercase().as_str())
+            .into_iter()
+            .flatten()
     }
 
     /// What calling `method` on an object of a class not known may write.
     pub(crate) fn method_effect_by_name(&self, method: &str) -> Effect {
-        let Some(keys) = self.methods_named(method) else {
-            return Effect::anything();
-        };
         let mut effect = Effect::nothing();
-        for key in keys {
+        for key in self.methods_named(method) {
             effect.join(&self.settled_effect(&key));
             if effect.is_anything() {
                 break;
@@ -1578,15 +1567,15 @@ impl Registry {
 
     /// The names (lowercased) of the builtin methods that run code passed to
     /// them, found once: the stubs do not change.
-    fn builtin_methods_running_code(&self) -> &NameSet {
+    fn builtin_methods_running_code(&self) -> &NameMap<Vec<Name>> {
         &self.builtin_methods_running_code
     }
 
-    /// The names, lowercased, of the builtin methods of the classes the
-    /// registry holds itself that run code passed to them: a stub method
-    /// whose effect is anything.
-    pub(crate) fn own_builtin_methods_running_code(&self) -> FxHashSet<String> {
-        let mut names = FxHashSet::default();
+    /// The builtin methods of the classes the registry holds itself that
+    /// run code passed to them, a stub method whose effect is anything: by
+    /// name, lowercased, with the classes declaring each.
+    pub(crate) fn own_builtin_methods_running_code(&self) -> FxHashMap<String, Vec<Name>> {
+        let mut names: FxHashMap<String, Vec<Name>> = FxHashMap::default();
         for (class, _) in self.class_ids.iter() {
             for method in self.method_names(class) {
                 let Some(sig) = self.lookup_own_method(class, method) else {
@@ -1602,9 +1591,15 @@ impl Registry {
                     .stub_effect(&method_key(&owner, method), sig)
                     .is_anything()
                 {
-                    names.insert(method.to_ascii_lowercase());
+                    let owners = names.entry(method.to_ascii_lowercase()).or_default();
+                    if !owners.contains(&owner) {
+                        owners.push(owner);
+                    }
                 }
             }
+        }
+        for owners in names.values_mut() {
+            owners.sort_unstable();
         }
         names
     }
@@ -2149,10 +2144,13 @@ impl Reach<'_> {
         // run anything; the constructor that is making one runs what the
         // table says it runs, and nothing of what it keeps.
         if key.member != "__construct"
-            && key.class.as_deref().is_some_and(|class| match &entry {
-                Some(_) => registry.builtin_holds_code(class),
-                None => registry.stub_holds_code(class),
-            })
+            && match &entry {
+                Some(name) => builtin_runs::holding(name),
+                None => key
+                    .class
+                    .as_deref()
+                    .is_some_and(|class| registry.stub_holds_code(class)),
+            }
         {
             return None;
         }
@@ -2167,8 +2165,8 @@ impl Reach<'_> {
                 }
             }
         };
-        if let Some(class) = &key.class {
-            for method in registry.builtin_held_wrappers(class) {
+        if let Some(name) = &entry {
+            for method in builtin_runs::held_wrappers(name) {
                 wrapper_runs(method, &mut out);
             }
         }
@@ -2249,7 +2247,7 @@ impl Reach<'_> {
                         }
                         None => Holder::Unknown,
                     };
-                    out.extend(self.method_targets_on(&holder, method)?);
+                    out.extend(self.method_targets_on(&holder, method));
                 }
                 BuiltinRun::Wrapper(method) => wrapper_runs(method, &mut out),
             }
@@ -2261,15 +2259,14 @@ impl Reach<'_> {
     /// run, PHP calling it: by the hierarchy over its classes when each has
     /// the method, and every loaded declaration of it otherwise, since the
     /// method may run on an object the first one gave back. Nothing for a
-    /// value that is no object. `None` when a builtin method of the name runs
-    /// code passed to it.
-    fn method_targets_on(&self, holder: &Holder, method: &str) -> Option<Vec<(DeclKey, Transfer)>> {
+    /// value that is no object.
+    fn method_targets_on(&self, holder: &Holder, method: &str) -> Vec<(DeclKey, Transfer)> {
         let registry = self.registry;
         let has_method = |class: &Name| {
             registry.lookup_method(class, method).is_some()
                 || registry.lookup_method(class, "__call").is_some()
         };
-        Some(match holder {
+        match holder {
             Holder::Classes(classes) if classes.is_empty() => Vec::new(),
             Holder::Classes(classes) if classes.iter().all(has_method) => classes
                 .iter()
@@ -2286,11 +2283,11 @@ impl Reach<'_> {
                 .map(|key| (key, Transfer::Made))
                 .collect(),
             _ => registry
-                .methods_named(method)?
+                .methods_named(method)
                 .into_iter()
                 .map(|key| (key, Transfer::Other(None)))
                 .collect(),
-        })
+        }
     }
 
     /// The declarations a callable the body names runs.
@@ -2428,7 +2425,7 @@ impl Reach<'_> {
                     (Holder::Unknown | Holder::Made(None), Some(method)) => {
                         out.extend(
                             self.registry
-                                .methods_named(method)?
+                                .methods_named(method)
                                 .into_iter()
                                 .map(|key| (key, transfer(None))),
                         );
@@ -2441,7 +2438,7 @@ impl Reach<'_> {
                 Some(class) => self.static_targets(class, method.as_ref())?,
                 None => self
                     .registry
-                    .methods_named(method.as_ref()?)?
+                    .methods_named(method.as_ref()?)
                     .into_iter()
                     .map(|key| (key, Transfer::Static))
                     .collect(),
@@ -2644,14 +2641,10 @@ impl Reach<'_> {
             Holder::Made(Some(classes)) => (classes, true),
             Holder::Unknown | Holder::Made(None) => {
                 for method in implicit_method_names(operation) {
-                    if self
-                        .registry
-                        .builtin_methods_running_code()
-                        .contains(&method.to_ascii_lowercase())
+                    for class in registry
+                        .classes_declaring(method)
+                        .chain(registry.builtin_classes_running_code(method))
                     {
-                        return None;
-                    }
-                    for class in registry.classes_declaring(method) {
                         if !self.implicit_methods(class, operation).contains(&method) {
                             continue;
                         }

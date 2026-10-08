@@ -77,11 +77,11 @@ fn a_missing_method_reaches_the_call_method_of_each_class() {
 fn a_name_on_an_unknown_object_reaches_every_declaration_and_every_call_method() {
     let registry = registry(SHAPES);
     assert_eq!(
-        names(registry.methods_named("area").unwrap()),
+        names(registry.methods_named("area")),
         ["base::area", "circle::area", "magic::__call", "shape::area"]
     );
     assert_eq!(
-        names(registry.methods_named("NAME").unwrap()),
+        names(registry.methods_named("NAME")),
         ["base::name", "magic::__call", "tiny::name"]
     );
 }

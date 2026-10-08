@@ -536,15 +536,16 @@ pub struct Registry {
     // what that one keeps. Rebuilt with `stub_effect_results`.
     #[serde(skip)]
     pub(crate) stub_holding_classes: FxHashSet<String>,
-    // The names, lowercased, of the builtin methods that run code passed
-    // to them (`registry::effects`): the base's, and those of the classes
-    // the registry holds itself, as the last finish found them. Stored
-    // with the registry, whose classes a load reads lazily.
+    // The builtin methods that run code passed to them
+    // (`registry::effects`), by name, lowercased, with the classes declaring
+    // each: the base's, and those of the classes the registry holds itself,
+    // as the last finish found them. Stored with the registry, whose
+    // classes a load reads lazily.
     #[serde(skip)]
-    builtin_methods_running_code: NameSet,
+    builtin_methods_running_code: NameMap<Vec<Name>>,
     // `builtin_methods_running_code` of the base, as it was when frozen.
     #[serde(skip)]
-    base_builtin_methods_running_code: Arc<NameSet>,
+    base_builtin_methods_running_code: Arc<NameMap<Vec<Name>>>,
     // The loaded classes declaring each method name with a body, lowercased,
     // as the last finish found them (`registry::effects`).
     #[serde(skip)]

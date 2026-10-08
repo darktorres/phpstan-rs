@@ -782,12 +782,26 @@ fn the_stored_maps_and_sets_read_back_whole() {
         unconditionally_declared_classes,
         unconditionally_declared_functions,
         stub_provided_functions,
-        names_with_assert_tags,
-        builtin_methods_running_code
+        names_with_assert_tags
     );
+    assert_eq!(
+        back.builtin_methods_running_code.len(),
+        registry.builtin_methods_running_code.len()
+    );
+    for (name, owners) in registry.builtin_methods_running_code.iter() {
+        assert_eq!(
+            back.builtin_methods_running_code.get(name),
+            Some(owners),
+            "{name}"
+        );
+    }
     // A loaded registry reads its classes lazily: what is made from them
     // comes stored, not from the classes it holds itself.
-    assert!(registry.builtin_methods_running_code.contains("getmessage"));
+    assert!(
+        registry
+            .builtin_methods_running_code
+            .contains_key("getmessage")
+    );
 }
 
 #[test]

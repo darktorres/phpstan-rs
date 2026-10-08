@@ -13,7 +13,9 @@
 // <builtin> is a function's name, or `Class::method`, lowercased. <where>
 // is the parameter's position (from 0), followed by `[]` when what ran was
 // reached through the elements of an array passed there, and prefixed by
-// `new:` for a parameter of the class's constructor. <kind> is `calls` (the callable
+// `new:` for a parameter of the class's constructor, or by `by:<method>:`
+// for a parameter of another method of the class, called on the object
+// before this one. <kind> is `calls` (the callable
 // was invoked), `method` (the method <detail> was called on the object), or
 // `wrapper` (the wrapper method <detail> ran). Every builtin that was
 // called is listed with the kind `probed`; a builtin missing from the
@@ -27,7 +29,10 @@
 //   php tools/builtin-runs/record.php > crates/phpstan-rs/src/registry/data/builtin-runs-8.5.tsv
 //
 // A regular expression as the first argument limits it to the builtins
-// whose lowercased name it matches.
+// whose lowercased name it matches. `--jobs=N` sets the number of workers
+// (one for each processor by default): each takes the next function or
+// method from a queue as it finishes its last, so the machine stays busy
+// to the end.
 
 declare(strict_types=0);
 
@@ -38,6 +43,22 @@ ini_set('memory_limit', '512M');
 if (!function_exists('pcntl_fork')) {
     fwrite(STDERR, "pcntl is needed\n");
     exit(1);
+}
+
+// A probe that aborts (a failed assertion in an extension, a fault) must not
+// start the system's crash handler, which costs seconds for each: processes
+// that are not dumpable never start it, and the setting is inherited by every
+// worker and probe. It needs FFI, which PHP allows only when asked.
+if (extension_loaded('ffi')) {
+    if (ini_get('ffi.enable') !== '1' && getenv('BUILTIN_RUNS_REEXEC') === false) {
+        putenv('BUILTIN_RUNS_REEXEC=1');
+        pcntl_exec(PHP_BINARY, ['-d', 'ffi.enable=1', ...$argv]);
+    }
+    try {
+        FFI::cdef('int prctl(int option, unsigned long a, unsigned long b, unsigned long c, unsigned long d);', 'libc.so.6')
+            ->prctl(4, 0, 0, 0, 0);
+    } catch (Throwable) {
+    }
 }
 
 // What the probes saw, in the child: one entry per line of output.
@@ -357,7 +378,7 @@ function record(string $builtin, string $where, ?array $seen, array &$out): void
 }
 
 // Calls that would stop the probing itself or reach outside the child.
-$skipped = [
+const SKIPPED = [
     'pcntl_fork', 'pcntl_rfork', 'pcntl_exec', 'pcntl_alarm', 'pcntl_signal', 'pcntl_wait', 'pcntl_waitpid',
     'posix_kill', 'posix_setsid', 'posix_setuid', 'posix_setgid', 'posix_seteuid', 'posix_setegid',
     'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
@@ -370,21 +391,62 @@ $skipped = [
     'stream_wrapper_restore', 'excimer_set_timeout',
 ];
 
-$dir = sys_get_temp_dir() . '/builtin-runs-' . getmypid();
-@mkdir($dir);
-chdir($dir);
+// Functions the probing skips because they reach outside the child (a
+// program, the network, a delay) but take no callable and no object whose
+// methods PHP calls: they run no user code, as a call of them is taken.
+const RUNS_NOTHING = [
+    'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
+    'sleep', 'usleep', 'time_nanosleep', 'time_sleep_until',
+    'mail', 'fsockopen', 'pfsockopen', 'stream_socket_server',
+    'gethostbyname', 'gethostbynamel', 'gethostbyaddr', 'dns_get_record', 'checkdnsrr', 'getmxrr',
+];
 
-$out = [];
-$only = $argv[1] ?? null;
-$wanted = static fn (string $builtin): bool => $only === null || preg_match($only, $builtin) === 1;
+/** The classes whose methods are probed: the ones PHP defines, not the recorders. */
+function probed_classes(): array
+{
+    $classes = [];
+    foreach (get_declared_classes() as $class) {
+        $reflection = new ReflectionClass($class);
+        if ($reflection->isInternal() && !in_array($class, [RecordingWrapper::class, RecordingIterator::class, RecordingObject::class, RecordingSleeper::class, Seen::class], true)) {
+            $classes[] = $class;
+        }
+    }
+    return $classes;
+}
 
-foreach (get_defined_functions()['internal'] as $function) {
-    if (in_array($function, $skipped, true) || str_starts_with($function, 'posix_') || str_starts_with($function, 'pcntl_')) {
-        continue;
+/**
+ * How to make an object of `$reflection` to call a method on: plainly, and
+ * with a probe at each constructor parameter.
+ *
+ * @return list<array{string, Closure(): mixed}>
+ */
+function makers(ReflectionClass $reflection): array
+{
+    $constructor = $reflection->getConstructor();
+    $ctorParams = $constructor?->getParameters() ?? [];
+    $makers = [['', static fn () => $reflection->isInstantiable()
+        ? ($constructor === null ? $reflection->newInstance() : $reflection->newInstanceArgs(arguments($ctorParams, -1, null)))
+        : null]];
+    foreach ($ctorParams as $at => $param) {
+        foreach (probes_for($param) as [$probe, $make]) {
+            $makers[] = [where('new:', $at, $probe), static fn () => $reflection->newInstanceArgs(arguments($ctorParams, $at, $make()))];
+        }
     }
-    if (!$wanted(strtolower($function))) {
-        continue;
-    }
+    return $makers;
+}
+
+/** The public methods a class declares itself, not abstract. */
+function own_methods(ReflectionClass $reflection): array
+{
+    return array_values(array_filter(
+        $reflection->getMethods(ReflectionMethod::IS_PUBLIC),
+        static fn (ReflectionMethod $method): bool => !$method->isAbstract() && $method->getDeclaringClass()->getName() === $reflection->getName(),
+    ));
+}
+
+/** The lines for a function. */
+function probe_function(string $function, array &$out): void
+{
     $reflection = new ReflectionFunction($function);
     $params = $reflection->getParameters();
     $seen = in_child(static function () use ($function, $params): void {
@@ -416,106 +478,306 @@ foreach (get_defined_functions()['internal'] as $function) {
     }
 }
 
-foreach (get_declared_classes() as $class) {
+/** The lines for a method: plainly, with a probe at each parameter, and on an object made with a probe. */
+function probe_method(string $class, string $name, array &$out): void
+{
     $reflection = new ReflectionClass($class);
-    if (!$reflection->isInternal() || in_array($class, [RecordingWrapper::class, RecordingIterator::class, RecordingObject::class, RecordingSleeper::class, Seen::class], true)) {
-        continue;
-    }
-    $constructor = $reflection->getConstructor();
-    $ctorParams = $constructor?->getParameters() ?? [];
-    // How to make an object to call a method on: plainly, and with a probe
-    // at each constructor parameter.
-    $makers = [['', static fn () => $reflection->isInstantiable()
-        ? ($constructor === null ? $reflection->newInstance() : $reflection->newInstanceArgs(arguments($ctorParams, -1, null)))
-        : null]];
-    foreach ($ctorParams as $at => $param) {
+    $method = $reflection->getMethod($name);
+    $makers = makers($reflection);
+    $builtin = strtolower($class . '::' . $name);
+    $params = $method->getParameters();
+    $static = $method->isStatic();
+    // The method, plainly, on a plain object.
+    $seen = in_child(static function () use ($makers, $static, $class, $name, $params): void {
+        $object = $static ? null : ($makers[0][1])();
+        if (!$static && $object === null) {
+            return;
+        }
+        Seen::$entries = [];
+        Seen::$where = 'plain';
+        Seen::add('reached');
+        $args = arguments($params, -1, null);
+        $static ? $class::$name(...$args) : $object->$name(...$args);
+        Seen::returned();
+    });
+    record($builtin, 'plain', $seen, $out);
+    // A probe at each of the method's parameters, on a plain object.
+    foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
-            $makers[] = [where('new:', $at, $probe), static fn () => $reflection->newInstanceArgs(arguments($ctorParams, $at, $make()))];
-        }
-    }
-    foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-        if ($method->isAbstract() || $method->getDeclaringClass()->getName() !== $class) {
-            continue;
-        }
-        $builtin = strtolower($class . '::' . $method->getName());
-        if (!$wanted($builtin)) {
-            continue;
-        }
-        $params = $method->getParameters();
-        $name = $method->getName();
-        $static = $method->isStatic();
-        // The method, plainly, on a plain object.
-        $seen = in_child(static function () use ($makers, $static, $class, $name, $params): void {
-            $object = $static ? null : ($makers[0][1])();
-            if (!$static && $object === null) {
-                return;
-            }
-            Seen::$entries = [];
-            Seen::$where = 'plain';
-            Seen::add('reached');
-            $args = arguments($params, -1, null);
-            $static ? $class::$name(...$args) : $object->$name(...$args);
-            Seen::returned();
-        });
-        record($builtin, 'plain', $seen, $out);
-        // A probe at each of the method's parameters, on a plain object.
-        foreach ($params as $at => $param) {
-            foreach (probes_for($param) as [$probe, $make]) {
-                $where = where('', $at, $probe);
-                $seen = in_child(static function () use ($makers, $static, $class, $name, $params, $at, $make, $where): void {
-                    $object = $static ? null : ($makers[0][1])();
-                    if (!$static && $object === null) {
-                        return;
-                    }
-                    $value = $make();
-                    Seen::$entries = [];
-                    Seen::$where = $where;
-                    $args = arguments($params, $at, $value);
-                    Seen::add('reached');
-                    $static ? $class::$name(...$args) : $object->$name(...$args);
-                    Seen::returned();
-                });
-                record($builtin, $where, $seen, $out);
-            }
-        }
-        if ($static) {
-            continue;
-        }
-        // The method, plainly, on an object made with a probe.
-        foreach (array_slice($makers, 1) as [$where, $make]) {
-            $seen = in_child(static function () use ($make, $where, $name, $params): void {
-                Seen::$where = $where;
-                $object = $make();
+            $where = where('', $at, $probe);
+            $seen = in_child(static function () use ($makers, $static, $class, $name, $params, $at, $make, $where): void {
+                $object = $static ? null : ($makers[0][1])();
+                if (!$static && $object === null) {
+                    return;
+                }
+                $value = $make();
                 Seen::$entries = [];
+                Seen::$where = $where;
+                $args = arguments($params, $at, $value);
                 Seen::add('reached');
-                $object->$name(...arguments($params, -1, null));
+                $static ? $class::$name(...$args) : $object->$name(...$args);
                 Seen::returned();
             });
             record($builtin, $where, $seen, $out);
         }
     }
+    if ($static) {
+        return;
+    }
+    // The method, plainly, on an object made with a probe.
+    foreach (array_slice($makers, 1) as [$where, $make]) {
+        $seen = in_child(static function () use ($make, $where, $name, $params): void {
+            Seen::$where = $where;
+            $object = $make();
+            Seen::$entries = [];
+            Seen::add('reached');
+            $object->$name(...arguments($params, -1, null));
+            Seen::returned();
+        });
+        record($builtin, $where, $seen, $out);
+    }
 }
 
-chdir('/');
-$entries = new RecursiveIteratorIterator(
-    new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-    RecursiveIteratorIterator::CHILD_FIRST,
-);
-foreach ($entries as $entry) {
-    $entry->isDir() && !$entry->isLink() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+/**
+ * The lines for the methods of a class called after `$firstName` was given
+ * the probe `$probeAt` of its parameter `$paramAt`: what each runs of what
+ * the first kept.
+ */
+function probe_held(string $class, string $firstName, int $paramAt, int $probeAt, callable $wanted, array &$out): void
+{
+    $reflection = new ReflectionClass($class);
+    if (!$reflection->isInstantiable()) {
+        return;
+    }
+    $makers = makers($reflection);
+    $instance = array_values(array_filter(
+        own_methods($reflection),
+        static fn (ReflectionMethod $method): bool => !$method->isStatic() && $method->getName() !== '__construct',
+    ));
+    $firstParams = $reflection->getMethod($firstName)->getParameters();
+    foreach ($firstParams as $at => $param) {
+        if ($at !== $paramAt) {
+            continue;
+        }
+        foreach (probes_for($param) as $index => [$probe, $make]) {
+            if ($index !== $probeAt) {
+                continue;
+            }
+            foreach ($instance as $then) {
+                $builtin = strtolower($class . '::' . $then->getName());
+                if (!$wanted($builtin)) {
+                    continue;
+                }
+                $where = 'by:' . strtolower($firstName) . ':' . where('', $at, $probe);
+                $thenName = $then->getName();
+                $thenParams = $then->getParameters();
+                $seen = in_child(static function () use ($makers, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
+                    $object = ($makers[0][1])();
+                    if ($object === null) {
+                        return;
+                    }
+                    $value = $make();
+                    try {
+                        $object->$firstName(...arguments($firstParams, $at, $value));
+                    } catch (Throwable) {
+                    }
+                    Seen::$entries = [];
+                    Seen::$where = $where;
+                    Seen::add('reached');
+                    $object->$thenName(...arguments($thenParams, -1, null));
+                    Seen::returned();
+                });
+                record($builtin, $where, $seen, $out);
+            }
+        }
+    }
 }
-rmdir($dir);
 
-// Functions the probing above skips because they reach outside the child
-// (a program, the network, a delay) but take no callable and no object whose
-// methods PHP calls: they run no user code, as a call of them is taken.
-$runsNothing = [
-    'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
-    'sleep', 'usleep', 'time_nanosleep', 'time_sleep_until',
-    'mail', 'fsockopen', 'pfsockopen', 'stream_socket_server',
-    'gethostbyname', 'gethostbynamel', 'gethostbyaddr', 'dns_get_record', 'checkdnsrr', 'getmxrr',
-];
-foreach ($runsNothing as $function) {
+/**
+ * The units of work, each a function, a method, or a method given one probe
+ * at one parameter and followed by each other method of the class: small
+ * enough, and taken the dearest first, that a pool of workers taking the
+ * next one as it frees keeps every worker busy to the end.
+ *
+ * @return list<array{string, string, string, int, int}>
+ */
+function units(callable $wanted): array
+{
+    $costed = [];
+    $add = static function (int $cost, array $unit) use (&$costed): void {
+        $costed[] = [$cost, count($costed), $unit];
+    };
+    foreach (get_defined_functions()['internal'] as $function) {
+        if (in_array($function, SKIPPED, true) || str_starts_with($function, 'posix_') || str_starts_with($function, 'pcntl_')) {
+            continue;
+        }
+        if ($wanted(strtolower($function))) {
+            $add(1, ['function', $function, '', 0, 0]);
+        }
+    }
+    foreach (probed_classes() as $class) {
+        $reflection = new ReflectionClass($class);
+        $own = own_methods($reflection);
+        $instance = array_filter($own, static fn (ReflectionMethod $method): bool => !$method->isStatic() && $method->getName() !== '__construct');
+        foreach ($own as $method) {
+            if ($wanted(strtolower($class . '::' . $method->getName()))) {
+                $add(1 + count($method->getParameters()), ['method', $class, $method->getName(), 0, 0]);
+            }
+            if (!$reflection->isInstantiable() || $method->isStatic() || $method->getName() === '__construct') {
+                continue;
+            }
+            foreach ($method->getParameters() as $at => $param) {
+                foreach (array_keys(probes_for($param)) as $index) {
+                    $add(count($instance), ['held', $class, $method->getName(), $at, $index]);
+                }
+            }
+        }
+    }
+    usort($costed, static fn (array $a, array $b): int => [$b[0], $a[1]] <=> [$a[0], $b[1]]);
+    return array_map(static fn (array $entry): array => $entry[2], $costed);
+}
+
+/** Runs one unit, giving back the lines it found. */
+function run_unit(array $unit, callable $wanted): array
+{
+    $out = [];
+    [$kind, $name, $method, $paramAt, $probeAt] = $unit;
+    match ($kind) {
+        'function' => probe_function($name, $out),
+        'method' => probe_method($name, $method, $out),
+        'held' => probe_held($name, $method, $paramAt, $probeAt, $wanted, $out),
+    };
+    return $out;
+}
+
+/** Removes a directory and what is in it. */
+function remove_directory(string $dir): void
+{
+    chdir('/');
+    if (!is_dir($dir)) {
+        return;
+    }
+    $entries = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
+    );
+    foreach ($entries as $entry) {
+        $entry->isDir() && !$entry->isLink() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+    }
+    rmdir($dir);
+}
+
+/** A message on a socket: one line. */
+function send(mixed $socket, mixed $message): void
+{
+    fwrite($socket, base64_encode(serialize($message)) . "\n");
+}
+
+/** The message on a socket, or `null` when it was closed. */
+function receive(mixed $socket): mixed
+{
+    $line = fgets($socket);
+    if ($line === false) {
+        return null;
+    }
+    return unserialize(base64_decode(trim($line)), ['allowed_classes' => false]);
+}
+
+/**
+ * A worker: takes units from the parent one at a time, in a directory of
+ * its own, and sends back the lines each found.
+ */
+function work(mixed $socket, callable $wanted): never
+{
+    $dir = sys_get_temp_dir() . '/builtin-runs-' . getmypid();
+    @mkdir($dir);
+    chdir($dir);
+    send($socket, ['ready', []]);
+    while (is_array($unit = receive($socket))) {
+        send($socket, ['done', run_unit($unit, $wanted)]);
+    }
+    remove_directory($dir);
+    exit(0);
+}
+
+/**
+ * Runs the units on `$jobs` workers: each takes the next unit from the front
+ * of the queue when it has finished its last.
+ *
+ * @param list<array{string, string, string, int, int}> $units
+ * @return array<string, true>
+ */
+function run_units(array $units, int $jobs, callable $wanted): array
+{
+    $out = [];
+    $sockets = [];
+    for ($i = 0; $i < $jobs; $i++) {
+        $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        $pid = pcntl_fork();
+        if ($pid === -1) {
+            fwrite(STDERR, "fork failed\n");
+            exit(1);
+        }
+        if ($pid === 0) {
+            fclose($pair[0]);
+            foreach ($sockets as $other) {
+                fclose($other);
+            }
+            work($pair[1], $wanted);
+        }
+        fclose($pair[1]);
+        $sockets[$pid] = $pair[0];
+    }
+    $next = 0;
+    $total = count($units);
+    while ($sockets !== []) {
+        $read = array_values($sockets);
+        $write = $except = null;
+        if (stream_select($read, $write, $except, null) === false) {
+            fwrite(STDERR, "select failed\n");
+            exit(1);
+        }
+        foreach ($read as $socket) {
+            $pid = array_search($socket, $sockets, true);
+            $message = receive($socket);
+            if (is_array($message)) {
+                foreach (array_keys($message[1]) as $line) {
+                    $out[$line] = true;
+                }
+            }
+            if ($message !== null && $next < $total) {
+                send($socket, $units[$next++]);
+                if ($next % 500 === 0) {
+                    fwrite(STDERR, "$next / $total\n");
+                }
+                continue;
+            }
+            fclose($socket);
+            unset($sockets[$pid]);
+            pcntl_waitpid($pid, $status);
+        }
+    }
+    return $out;
+}
+
+/** The number of workers asked for, or one for each processor. */
+function jobs(array $argv): int
+{
+    foreach ($argv as $argument) {
+        if (str_starts_with($argument, '--jobs=')) {
+            return max(1, (int) substr($argument, 7));
+        }
+    }
+    return max(1, (int) shell_exec('nproc 2>/dev/null') ?: 1);
+}
+
+$arguments = array_values(array_filter(array_slice($argv, 1), static fn (string $argument): bool => !str_starts_with($argument, '--')));
+$only = $arguments[0] ?? null;
+$wanted = static fn (string $builtin): bool => $only === null || preg_match($only, $builtin) === 1;
+
+$out = run_units(units($wanted), jobs($argv), $wanted);
+
+foreach (RUNS_NOTHING as $function) {
     if (function_exists($function) && $wanted($function)) {
         $out["$function\t\tprobed\t"] = true;
     }

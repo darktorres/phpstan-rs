@@ -12,10 +12,19 @@ appenditerator::append	0	method	key
 appenditerator::append	0	method	rewind
 appenditerator::append	0	method	valid
 appenditerator::current		probed	
+appenditerator::current	by:append:0	method	current
+appenditerator::current	by:append:0	method	key
+appenditerator::current	by:append:0	method	valid
 appenditerator::getarrayiterator		probed	
 appenditerator::getiteratorindex		probed	
 appenditerator::next		probed	
+appenditerator::next	by:append:0	method	next
+appenditerator::next	by:append:0	method	valid
 appenditerator::rewind		probed	
+appenditerator::rewind	by:append:0	method	current
+appenditerator::rewind	by:append:0	method	key
+appenditerator::rewind	by:append:0	method	rewind
+appenditerator::rewind	by:append:0	method	valid
 appenditerator::valid		probed	
 array_all		probed	
 array_all	1	calls	
@@ -130,6 +139,12 @@ arrayiterator::offsetunset		probed
 arrayiterator::rewind		probed	
 arrayiterator::seek		probed	
 arrayiterator::serialize		probed	
+arrayiterator::serialize	by:append:0	method	__serialize
+arrayiterator::serialize	by:append:0	method	__sleep
+arrayiterator::serialize	by:append:0[]	method	__serialize
+arrayiterator::serialize	by:offsetset:1	method	__serialize
+arrayiterator::serialize	by:offsetset:1	method	__sleep
+arrayiterator::serialize	by:offsetset:1[]	method	__serialize
 arrayiterator::serialize	new:0	method	__serialize
 arrayiterator::serialize	new:0	method	__sleep
 arrayiterator::serialize	new:0[]	method	__serialize
@@ -152,14 +167,25 @@ arrayobject::getiterator		probed
 arrayobject::getiteratorclass		probed	
 arrayobject::ksort		probed	
 arrayobject::natcasesort		probed	
+arrayobject::natcasesort	by:exchangearray:0[]	method	__tostring
 arrayobject::natcasesort	new:0[]	method	__tostring
 arrayobject::natsort		probed	
+arrayobject::natsort	by:exchangearray:0[]	method	__tostring
 arrayobject::natsort	new:0[]	method	__tostring
 arrayobject::offsetexists		probed	
 arrayobject::offsetget		probed	
 arrayobject::offsetset		probed	
 arrayobject::offsetunset		probed	
 arrayobject::serialize		probed	
+arrayobject::serialize	by:append:0	method	__serialize
+arrayobject::serialize	by:append:0	method	__sleep
+arrayobject::serialize	by:append:0[]	method	__serialize
+arrayobject::serialize	by:exchangearray:0	method	__serialize
+arrayobject::serialize	by:exchangearray:0	method	__sleep
+arrayobject::serialize	by:exchangearray:0[]	method	__serialize
+arrayobject::serialize	by:offsetset:1	method	__serialize
+arrayobject::serialize	by:offsetset:1	method	__sleep
+arrayobject::serialize	by:offsetset:1[]	method	__serialize
 arrayobject::serialize	new:0	method	__serialize
 arrayobject::serialize	new:0	method	__sleep
 arrayobject::serialize	new:0[]	method	__serialize
@@ -800,6 +826,8 @@ exception::gettrace		probed
 exception::gettraceasstring		probed	
 excimerprofiler::clearflushcallback		probed	
 excimerprofiler::flush		probed	
+excimerprofiler::flush	by:setflushcallback:0	calls	
+excimerprofiler::flush	by:setflushcallback:0	method	__invoke
 excimerprofiler::getlog		probed	
 excimerprofiler::seteventtype		probed	
 excimerprofiler::setflushcallback		probed	
@@ -7834,13 +7862,20 @@ multipleiterator::attachiterator		probed
 multipleiterator::containsiterator		probed	
 multipleiterator::countiterators		probed	
 multipleiterator::current		probed	
+multipleiterator::current	by:attachiterator:0	method	current
+multipleiterator::current	by:attachiterator:0	method	valid
 multipleiterator::detachiterator		probed	
 multipleiterator::getflags		probed	
 multipleiterator::key		probed	
+multipleiterator::key	by:attachiterator:0	method	key
+multipleiterator::key	by:attachiterator:0	method	valid
 multipleiterator::next		probed	
+multipleiterator::next	by:attachiterator:0	method	next
 multipleiterator::rewind		probed	
+multipleiterator::rewind	by:attachiterator:0	method	rewind
 multipleiterator::setflags		probed	
 multipleiterator::valid		probed	
+multipleiterator::valid	by:attachiterator:0	method	valid
 mysqli::__construct		probed	
 mysqli::autocommit		probed	
 mysqli::begin_transaction		probed	
@@ -8065,6 +8100,8 @@ openssl_cipher_key_length		probed
 openssl_cms_decrypt		probed	
 openssl_cms_decrypt	2	method	__tostring
 openssl_cms_encrypt		probed	
+openssl_cms_encrypt	2	method	__tostring
+openssl_cms_encrypt	2[]	method	__tostring
 openssl_cms_read		probed	
 openssl_cms_sign		probed	
 openssl_cms_sign	2	method	__tostring
@@ -8113,6 +8150,8 @@ openssl_pkcs12_read		probed
 openssl_pkcs7_decrypt		probed	
 openssl_pkcs7_decrypt	2	method	__tostring
 openssl_pkcs7_encrypt		probed	
+openssl_pkcs7_encrypt	2	method	__tostring
+openssl_pkcs7_encrypt	2[]	method	__tostring
 openssl_pkcs7_read		probed	
 openssl_pkcs7_sign		probed	
 openssl_pkcs7_sign	2	method	__tostring
@@ -9021,6 +9060,12 @@ spldoublylinkedlist::prev		probed
 spldoublylinkedlist::push		probed	
 spldoublylinkedlist::rewind		probed	
 spldoublylinkedlist::serialize		probed	
+spldoublylinkedlist::serialize	by:push:0	method	__serialize
+spldoublylinkedlist::serialize	by:push:0	method	__sleep
+spldoublylinkedlist::serialize	by:push:0[]	method	__serialize
+spldoublylinkedlist::serialize	by:unshift:0	method	__serialize
+spldoublylinkedlist::serialize	by:unshift:0	method	__sleep
+spldoublylinkedlist::serialize	by:unshift:0[]	method	__serialize
 spldoublylinkedlist::setiteratormode		probed	
 spldoublylinkedlist::shift		probed	
 spldoublylinkedlist::top		probed	
@@ -9102,6 +9147,7 @@ splfileobject::fpassthru		probed
 splfileobject::fpassthru	new:0	wrapper	stream_eof
 splfileobject::fpassthru	new:0	wrapper	stream_read
 splfileobject::fputcsv		probed	
+splfileobject::fputcsv	0[]	method	__tostring
 splfileobject::fputcsv	new:0	wrapper	stream_write
 splfileobject::fread		probed	
 splfileobject::fread	new:0	wrapper	stream_eof
@@ -9179,6 +9225,13 @@ splobjectstorage::removeallexcept		probed
 splobjectstorage::rewind		probed	
 splobjectstorage::seek		probed	
 splobjectstorage::serialize		probed	
+splobjectstorage::serialize	by:attach:0	method	__serialize
+splobjectstorage::serialize	by:attach:0	method	__sleep
+splobjectstorage::serialize	by:attach:1	method	__serialize
+splobjectstorage::serialize	by:attach:1	method	__sleep
+splobjectstorage::serialize	by:attach:1[]	method	__serialize
+splobjectstorage::serialize	by:offsetset:0	method	__serialize
+splobjectstorage::serialize	by:offsetset:0	method	__sleep
 splobjectstorage::setinfo		probed	
 splobjectstorage::unserialize		probed	
 splobjectstorage::valid		probed	
@@ -9214,7 +9267,29 @@ sprintf		probed
 spx_profiler_full_report_set_custom_metadata_str		probed	
 spx_profiler_start		probed	
 spx_profiler_stop		probed	
+sqlite3::__construct		probed	
+sqlite3::backup		probed	
+sqlite3::busytimeout		probed	
+sqlite3::changes		probed	
+sqlite3::close		probed	
+sqlite3::createaggregate		probed	
+sqlite3::createcollation		probed	
+sqlite3::createfunction		probed	
+sqlite3::enableexceptions		probed	
+sqlite3::enableextendedresultcodes		probed	
 sqlite3::escapestring		probed	
+sqlite3::exec		probed	
+sqlite3::lasterrorcode		probed	
+sqlite3::lasterrormsg		probed	
+sqlite3::lastextendederrorcode		probed	
+sqlite3::lastinsertrowid		probed	
+sqlite3::loadextension		probed	
+sqlite3::open		probed	
+sqlite3::openblob		probed	
+sqlite3::prepare		probed	
+sqlite3::query		probed	
+sqlite3::querysingle		probed	
+sqlite3::setauthorizer		probed	
 sqlite3::version		probed	
 sqrt		probed	
 srand		probed	
@@ -9565,6 +9640,7 @@ xmlwriter::endattribute		probed
 xmlwriter::endcdata		probed	
 xmlwriter::endcomment		probed	
 xmlwriter::enddocument		probed	
+xmlwriter::enddocument	by:openuri:0	wrapper	stream_write
 xmlwriter::enddtd		probed	
 xmlwriter::enddtdattlist		probed	
 xmlwriter::enddtdelement		probed	
@@ -9574,8 +9650,10 @@ xmlwriter::endpi		probed
 xmlwriter::flush		probed	
 xmlwriter::fullendelement		probed	
 xmlwriter::openmemory		probed	
+xmlwriter::openmemory	by:openuri:0	wrapper	stream_close
 xmlwriter::openuri		probed	
 xmlwriter::openuri	0	wrapper	stream_open
+xmlwriter::openuri	by:openuri:0	wrapper	stream_close
 xmlwriter::outputmemory		probed	
 xmlwriter::setindent		probed	
 xmlwriter::setindentstring		probed	

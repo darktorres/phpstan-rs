@@ -46,7 +46,8 @@ struct Table {
 /// `builtin<TAB>place<TAB>kind<TAB>detail`, lowercased: `probed` with no
 /// place or detail; `calls` with no detail; `method` or `wrapper` with
 /// one; a place an argument's position, `[]` after it for its elements,
-/// and `new:` before it for one the object was made with, on a method.
+/// and `new:` before it for one the object was made with, or `by:<method>:`
+/// for one another method of the class was given, on a method.
 fn read_table(path: &Path) -> Table {
     let text =
         fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
@@ -79,9 +80,16 @@ fn read_table(path: &Path) -> Table {
             "method" | "wrapper" => fail("a method or wrapper line names its method"),
             _ => fail("the kind is probed, calls, method or wrapper"),
         };
-        let (made, at) = match place.strip_prefix("new:") {
+        let (held, at) = match place.strip_prefix("new:") {
             Some(at) => (true, at),
-            None => (false, place),
+            None => match place
+                .strip_prefix("by:")
+                .and_then(|rest| rest.split_once(':'))
+            {
+                Some((method, at)) if !method.is_empty() => (true, at),
+                Some(_) => fail("a by place names the method"),
+                None => (false, place),
+            },
         };
         let (at, elements) = match at.strip_suffix("[]") {
             Some(at) => (at, true),
@@ -90,17 +98,17 @@ fn read_table(path: &Path) -> Table {
         let Ok(at) = at.parse::<u32>() else {
             fail("the place is an argument's position");
         };
-        if made {
-            let Some((class, _)) = builtin.split_once("::") else {
-                fail("only a method's object is made with an argument");
-            };
+        if held {
+            if !builtin.contains("::") {
+                fail("only a method runs what its object was given");
+            }
             if kind == "wrapper" {
-                let held = table.held_wrappers.entry(class.to_owned()).or_default();
-                if !held.iter().any(|method| method == detail) {
-                    held.push(detail.to_owned());
+                let wrappers = table.held_wrappers.entry(builtin.to_owned()).or_default();
+                if !wrappers.iter().any(|method| method == detail) {
+                    wrappers.push(detail.to_owned());
                 }
             } else {
-                table.holding.push(class.to_owned());
+                table.holding.push(builtin.to_owned());
             }
             continue;
         }
