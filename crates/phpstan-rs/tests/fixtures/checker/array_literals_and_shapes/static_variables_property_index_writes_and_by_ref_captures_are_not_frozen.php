@@ -18,6 +18,6 @@
             function job(): void {
                 $job = ['id' => 1];
                 $start = function () use (&$job): void { $job['process'] = 5; };
-                $stop = function () use (&$job): void { echo $job['process']; };
+                $stop = function () use (&$job): void { $seen = $job['process']; };
             }
         

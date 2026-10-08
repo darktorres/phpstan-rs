@@ -15,5 +15,5 @@ function writesAComputedGlobal(string $key): void
 
 $any = 1;
 $any = 5;
-wild('anything');
+wild($_GET['f']);
 assertType('mixed', $any);

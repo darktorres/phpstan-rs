@@ -64,7 +64,7 @@ function aFunctionThatReturnsWhatItMade(): void
 {
     $box = makeBox();
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $box->id);
 }
 
@@ -72,7 +72,7 @@ function aFunctionThatReturnsWhatAnotherMade(): void
 {
     $box = viaMakeBox();
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $box->id);
 }
 
@@ -80,7 +80,7 @@ function aStaticMethodThatReturnsWhatItMade(): void
 {
     $box = Registry::make();
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $box->id);
 }
 
@@ -88,7 +88,7 @@ function aStaticMethodThatReturnsWhatAnotherMade(): void
 {
     $box = Registry::viaMake();
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $box->id);
 }
 
@@ -96,7 +96,7 @@ function aFunctionThatReturnsAStaticVariable(): void
 {
     $box = sharedBox();
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int|null', $box->id);
 }
 
@@ -104,7 +104,7 @@ function aFunctionThatStoredWhatItReturns(): void
 {
     $box = leakedBox();
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int|null', $box->id);
 }
 
@@ -112,6 +112,6 @@ function aFunctionThatReturnsItsArgument(Box $given): void
 {
     $box = handedBack($given);
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int|null', $box->id);
 }

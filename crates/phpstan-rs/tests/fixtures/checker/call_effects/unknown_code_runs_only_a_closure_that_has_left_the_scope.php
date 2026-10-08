@@ -8,8 +8,15 @@ function wild(string $name): void
     $name();
 }
 
+final class Store
+{
+    /** @var list<callable> */
+    public static array $callbacks = [];
+}
+
 function register(callable $callback): void
 {
+    Store::$callbacks[] = $callback;
 }
 
 function aClosureNeverHandedOutIsNotRunByUnknownCode(): void
@@ -19,7 +26,7 @@ function aClosureNeverHandedOutIsNotRunByUnknownCode(): void
         $count = (int) ($_GET['n'] ?? 0);
     };
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $count);
     $bump();
 }
@@ -32,7 +39,7 @@ function aClosureHandedOutIsRunByUnknownCode(): void
     };
     register($bump);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int', $count);
 }
 
@@ -43,7 +50,7 @@ function aClosureHandedOutLaterIsNotRunBeforeThat(): void
         $count = (int) ($_GET['n'] ?? 0);
     };
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $count);
     register($bump);
 }

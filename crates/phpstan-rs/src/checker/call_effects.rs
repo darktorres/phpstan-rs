@@ -570,9 +570,7 @@ impl Checker<'_> {
             let ty = match shared {
                 Shared::Global(global) => self
                     .registry
-                    .global_variables()
-                    .get(global.as_str())
-                    .cloned()
+                    .global_in_scope_of(None, global.as_str())
                     .unwrap_or_else(Type::mixed),
                 Shared::TopLevel { global, named } => {
                     let written = named

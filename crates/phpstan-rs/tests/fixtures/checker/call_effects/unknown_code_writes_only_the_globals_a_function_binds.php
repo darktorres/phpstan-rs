@@ -18,6 +18,6 @@ $never = 1;
 $bound = 1;
 $never = 5;
 $bound = 5;
-wild('anything');
+wild($_GET['f']);
 assertType('5', $never);
 assertType('mixed', $bound);

@@ -286,7 +286,8 @@ impl GlobalScopes {
     /// to run in a global scope of its own or `name` is written nowhere.
     fn fact(&self, file: FileId, name: &str, everywhere: &NameMap<Type>) -> Option<Type> {
         let scope = &self.scopes[*self.scope_of.get(&file)? as usize];
-        if scope.open || scope.dynamic || syntax::ast::is_superglobal(name) {
+        if scope.open || scope.dynamic || self.function_dynamic || syntax::ast::is_superglobal(name)
+        {
             return everywhere.get(name).cloned();
         }
         let (own, anywhere) = (scope.facts.get(name), self.function_facts.get(name));
@@ -784,6 +785,11 @@ impl Registry {
     /// may write it there says, or the whole program's when `file`'s global
     /// scope is not known.
     pub(crate) fn global_in_scope_of(&self, file: Option<FileId>, name: &str) -> Option<Type> {
+        // A body that writes globals it names by computing the name may
+        // leave any value in any of them.
+        if self.global_scopes.function_dynamic && !syntax::ast::is_superglobal(name) {
+            return None;
+        }
         match file {
             Some(file) if self.global_scopes.scope_of.contains_key(&file) => {
                 self.global_scopes.fact(file, name, &self.global_variables)

@@ -44,7 +44,7 @@ function throughAWriter(Factory $factory): void
 
 function throughAReader(Factory $factory): void
 {
-    $factory->reader()->read();
+    echo $factory->reader()->read();
 }
 
 function onANewWriter(): void
@@ -54,7 +54,7 @@ function onANewWriter(): void
 
 function onANewReader(): void
 {
-    (new Reader())->read();
+    echo (new Reader())->read();
 }
 
 function theWriterChainIsForgotten(Factory $factory): void

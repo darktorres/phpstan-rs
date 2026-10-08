@@ -67,7 +67,7 @@ function aBuiltinThatReleasesTheClosure(): void
     };
     array_map($bump, [1]);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $count);
 }
 
@@ -79,7 +79,7 @@ function aBuiltinThatKeepsTheClosure(): void
     };
     register_shutdown_function($bump);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int', $count);
 }
 
@@ -91,7 +91,7 @@ function aFunctionThatOnlyCallsTheClosure(): void
     };
     calls($bump);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $count);
 }
 
@@ -103,7 +103,7 @@ function aFunctionThatPassesTheClosureToOneThatOnlyCallsIt(): void
     };
     viaCalls($bump);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $count);
 }
 
@@ -115,7 +115,7 @@ function aFunctionThatCallsItselfWithTheClosure(): void
     };
     loops($bump, 2);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $count);
 }
 
@@ -127,7 +127,7 @@ function aFunctionThatStoresTheClosure(): void
     };
     stores($bump);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int', $count);
 }
 
@@ -139,16 +139,16 @@ function aFunctionThatPassesTheClosureToOneThatStoresIt(): void
     };
     viaStores($bump);
     $count = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int', $count);
 }
 
 function aFunctionThatOnlyReadsTheObject(): void
 {
     $box = new Box();
-    inspects($box);
+    echo inspects($box);
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('5', $box->id);
 }
 
@@ -157,6 +157,6 @@ function aFunctionThatKeepsTheObject(): void
     $box = new Box();
     keeps($box);
     $box->id = 5;
-    wild('anything');
+    wild($_GET['f']);
     assertType('int|null', $box->id);
 }
