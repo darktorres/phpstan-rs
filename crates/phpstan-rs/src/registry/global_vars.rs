@@ -621,6 +621,15 @@ impl Registry {
         )
     }
 
+    /// What the functions that bind the global `name` may write to it, when
+    /// any does.
+    pub(crate) fn global_written_by_functions(&self, name: &str) -> Option<Type> {
+        self.global_scopes
+            .function_facts
+            .get(name)
+            .map(|written| written.clone().finish())
+    }
+
     /// What the global variable `name` may hold where the top level of
     /// `file` runs, after code that is not known ran: what every site that
     /// may write it there says, or the whole program's when `file`'s global

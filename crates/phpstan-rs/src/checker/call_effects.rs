@@ -228,8 +228,10 @@ enum Shared {
     /// To what the global of this name may hold.
     Global(Name),
     /// To what the global of this name may hold in the global scope the
-    /// file's top level runs in.
-    TopLevel(Name),
+    /// file's top level runs in; when the effect names this global alone
+    /// (`named`), to what it holds there now and the functions that bind it
+    /// may write.
+    TopLevel { global: Name, named: bool },
     /// To anything: a static variable.
     Anything,
     /// To what the place it refers to may hold, by its declaration.
@@ -529,10 +531,20 @@ impl Checker<'_> {
                     .get(global.as_str())
                     .cloned()
                     .unwrap_or_else(Type::mixed),
-                Shared::TopLevel(global) => self
-                    .registry
-                    .global_in_scope_of(self.current_file_id, global.as_str())
-                    .unwrap_or_else(Type::mixed),
+                Shared::TopLevel { global, named } => {
+                    let written = named
+                        .then(|| self.registry.global_written_by_functions(global.as_str()))
+                        .flatten();
+                    match (locals.get_var(&name), written) {
+                        (Some(held), Some(written)) => {
+                            self.relation().union_of(vec![held.clone(), written])
+                        }
+                        _ => self
+                            .registry
+                            .global_in_scope_of(self.current_file_id, global.as_str())
+                            .unwrap_or_else(Type::mixed),
+                    }
+                }
                 Shared::Anything => Type::mixed(),
                 Shared::Reference(place) => self.place_type(&place),
                 Shared::Captured => match (locals.get_var(&name), self.captured_types.get(&name)) {
@@ -718,7 +730,17 @@ impl Checker<'_> {
                 || (is_superglobal(&name) && *name != *"GLOBALS");
             if global && global_written(&name) {
                 let shared = if scope.top_level {
-                    Shared::TopLevel(name.clone())
+                    Shared::TopLevel {
+                        global: name.clone(),
+                        named: !anything
+                            && !is_superglobal(&name)
+                            && !storages
+                                .iter()
+                                .any(|storage| matches!(storage, Storage::Global(None)))
+                            && storages.iter().any(|storage| {
+                                matches!(storage, Storage::Global(Some(global)) if *global == name)
+                            }),
+                    }
                 } else {
                     Shared::Global(name.clone())
                 };
