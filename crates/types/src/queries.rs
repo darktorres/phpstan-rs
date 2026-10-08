@@ -274,6 +274,7 @@ impl Type {
             ("mixed", Repr::Mixed(..)) => true,
             ("object", Repr::ObjectWithoutClass) => true,
             ("callable", Repr::Callable(_)) => true,
+            ("resource", Repr::Resource { .. }) => true,
             ("iterable", Repr::Object(n, _)) if n.eq_ignore_ascii_case("Traversable") => true,
             (class, Repr::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),
             _ => false,

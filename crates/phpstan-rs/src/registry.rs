@@ -529,6 +529,11 @@ pub struct Registry {
     // pass; unlike the signature, this is a derived Registry result.
     #[serde(skip)]
     pub(crate) stub_effect_results: FxHashMap<effects::EffectId, bool>,
+    // The stub classes, lowercased, that no run of PHP has seen and that
+    // have a method taking code or an object, whose other methods may run
+    // what that one keeps. Rebuilt with `stub_effect_results`.
+    #[serde(skip)]
+    pub(crate) stub_holding_classes: FxHashSet<String>,
     // The names, lowercased, of the builtin methods that run code passed
     // to them (`registry::effects`): the base's, and those of the classes
     // the registry holds itself, as the last finish found them. Stored
@@ -1181,6 +1186,7 @@ impl Registry {
         self.deferred_class_results.clear();
         // Declarations remain as built. Finishing results are reset by ID.
         self.stub_effect_results.clear();
+        self.stub_holding_classes.clear();
     }
 
     /// Starts a stable hierarchy snapshot for the next read-only finishing
@@ -1396,6 +1402,7 @@ impl Registry {
         };
         if scope.is_all() {
             self.stub_effect_results.clear();
+        self.stub_holding_classes.clear();
             self.class_const_types.clear();
             self.class_const_types_by_id.clear();
             self.function_results.clear();
@@ -1444,6 +1451,7 @@ impl Registry {
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
         self.stub_effect_results.clear();
+        self.stub_holding_classes.clear();
         body_scope.map(|_| snapshot(self))
     }
 
@@ -1471,6 +1479,7 @@ impl Registry {
         // IDs may be reassigned from project to stub space below. The next
         // effect pass rebuilds this ephemeral memo against the frozen IDs.
         self.stub_effect_results.clear();
+        self.stub_holding_classes.clear();
         self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
         self.base_builtin_methods_running_code =
             Arc::new(self.builtin_methods_running_code.clone());
@@ -2686,6 +2695,7 @@ impl Registry {
             .map(|(id, settled)| (id.with_generation(generation), settled))
             .collect();
         base.stub_effect_results.clear();
+        base.stub_holding_classes.clear();
         *self = base;
         self.advance_relation_generation();
     }

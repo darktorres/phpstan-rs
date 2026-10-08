@@ -534,6 +534,107 @@ mod builtin_runs {
     }
 }
 
+/// The methods PHP calls on an object it is given where it takes an
+/// iterator, a countable, an array-like, a serialisable or any object.
+const ITERATION_HOOKS: [&str; 6] = ["getiterator", "valid", "current", "key", "next", "rewind"];
+const OFFSET_HOOKS: [&str; 4] = ["offsetget", "offsetset", "offsetexists", "offsetunset"];
+const SERIALIZATION_HOOKS: [&str; 6] = [
+    "serialize",
+    "unserialize",
+    "__serialize",
+    "__unserialize",
+    "__sleep",
+    "__wakeup",
+];
+const STREAM_WRAPPER_METHODS: [&str; 19] = [
+    "stream_open",
+    "stream_read",
+    "stream_write",
+    "stream_close",
+    "stream_eof",
+    "stream_tell",
+    "stream_seek",
+    "stream_flush",
+    "stream_stat",
+    "stream_lock",
+    "stream_truncate",
+    "stream_set_option",
+    "stream_cast",
+    "stream_metadata",
+    "url_stat",
+    "dir_opendir",
+    "dir_readdir",
+    "dir_closedir",
+    "dir_rewinddir",
+];
+const PATH_PARAMETER_NAMES: [&str; 8] = [
+    "filename",
+    "file",
+    "path",
+    "filepath",
+    "url",
+    "uri",
+    "directory",
+    "dir",
+];
+
+/// What a stub that no run of PHP has seen may run through its parameters,
+/// read from their types the way `tools/builtin-runs/record.php` measures
+/// them: a string is converted, an array's elements are converted, an
+/// iterator iterated, a countable counted, any object or `mixed` may be any
+/// of these, and a path or a stream may be a registered wrapper's.
+fn derived_runs(sig: &FunctionReflection) -> Vec<(Position, BuiltinRun)> {
+    let mut runs = Vec::new();
+    for (at, p) in sig.params.iter().enumerate() {
+        let at = at as u32;
+        let any = p.ty.mentions_any(&["mixed", "object"]);
+        let on = |names: &[&str]| any || p.ty.mentions_any(names);
+        let mut row = |elements: bool, methods: &[&'static str]| {
+            for &method in methods {
+                runs.push((Position { at, elements }, BuiltinRun::Method(method)));
+            }
+        };
+        let is_string = on(&["string", "Stringable"]);
+        if is_string {
+            row(false, &["__tostring"]);
+        }
+        if p.ty.mentions_any(&["array", "iterable"]) || any {
+            row(true, &["__tostring"]);
+        }
+        if on(&["Traversable", "IteratorAggregate", "Iterator", "iterable"]) {
+            row(false, &ITERATION_HOOKS);
+        }
+        if on(&["Countable"]) {
+            row(false, &["count"]);
+        }
+        if on(&["ArrayAccess"]) {
+            row(false, &OFFSET_HOOKS);
+        }
+        if on(&["JsonSerializable"]) {
+            row(false, &["jsonserialize"]);
+        }
+        if on(&["Serializable"]) {
+            row(false, &SERIALIZATION_HOOKS);
+        }
+        if any {
+            row(false, &["__debuginfo"]);
+        }
+        let names_a_path = PATH_PARAMETER_NAMES.contains(&p.name.as_ref());
+        if (is_string && names_a_path) || p.ty.mentions_any(&["resource"]) {
+            for method in STREAM_WRAPPER_METHODS {
+                runs.push((
+                    Position {
+                        at,
+                        elements: false,
+                    },
+                    BuiltinRun::Wrapper(method),
+                ));
+            }
+        }
+    }
+    runs
+}
+
 /// The parameter types through which a builtin runs code an object
 /// brings, or writes the object's properties itself: a callable, an
 /// untyped object (`ReflectionProperty::setValue`), and the interfaces a
@@ -1257,6 +1358,12 @@ impl Registry {
 
     /// Whether an object of the builtin class `class` may run a callable or
     /// an object's method it was made with.
+    fn stub_holds_code(&self, class: &str) -> bool {
+        self.builtin_lineage(class)
+            .iter()
+            .any(|class| self.stub_holding_classes.contains(class))
+    }
+
     fn builtin_holds_code(&self, class: &str) -> bool {
         self.builtin_lineage(class)
             .iter()
@@ -1313,6 +1420,7 @@ impl Registry {
                 results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
             }
         }
+        let mut holding = FxHashSet::default();
         for (class, _) in self.class_ids.iter() {
             for method in self.method_names(class) {
                 let Some(sig) = self.lookup_own_method(class, method) else {
@@ -1321,10 +1429,19 @@ impl Registry {
                 if sig.is_stub {
                     let key = method_key(class, method);
                     results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
+                    if self.builtin_entry(&key).is_none()
+                        && sig
+                            .params
+                            .iter()
+                            .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES))
+                    {
+                        holding.insert(class.to_ascii_lowercase());
+                    }
                 }
             }
         }
         self.stub_effect_results = results;
+        self.stub_holding_classes = holding;
     }
 
     fn stub_runs_code(&self, key: &DeclKey, sig: &FunctionReflection) -> bool {
@@ -2007,19 +2124,31 @@ impl Reach<'_> {
         call: &CallWrites,
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
-        let Some(name) = registry.builtin_entry(key) else {
-            // A stub no run of PHP has seen runs nothing when it is taken at
-            // its word (`Registry::stub_effect`), and anything otherwise.
-            return registry.stub_effect(key, sig).is_nothing().then(Vec::new);
+        let entry = registry.builtin_entry(key);
+        // A stub no run of PHP has seen runs what its parameters let it run.
+        let derived;
+        let runs: &[(Position, BuiltinRun)] = match &entry {
+            Some(name) => builtin_runs::runs(name),
+            None => {
+                let takes_code = sig
+                    .params
+                    .iter()
+                    .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
+                if sig.declared_pure && !takes_code {
+                    return Some(Vec::new());
+                }
+                derived = derived_runs(sig);
+                &derived
+            }
         };
         // A method of a class whose objects run what they were made with may
         // run anything; the constructor that is making one runs what the
         // table says it runs, and nothing of what it keeps.
         if key.member != "__construct"
-            && key
-                .class
-                .as_deref()
-                .is_some_and(|class| registry.builtin_holds_code(class))
+            && key.class.as_deref().is_some_and(|class| match &entry {
+                Some(_) => registry.builtin_holds_code(class),
+                None => registry.stub_holds_code(class),
+            })
         {
             return None;
         }
@@ -2056,7 +2185,6 @@ impl Reach<'_> {
                 );
             }
         }
-        let runs = builtin_runs::runs(&name);
         // Each parameter a callable is passed at runs it.
         for (at, param) in sig.params.iter().enumerate() {
             let at = at as u32;
