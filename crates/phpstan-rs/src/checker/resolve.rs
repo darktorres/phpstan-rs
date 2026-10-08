@@ -204,7 +204,18 @@ impl<'a> Checker<'a> {
         let Some(method_name) = &self.current_method else {
             return rustc_hash::FxHashMap::default();
         };
-        let sig = match &self.current_class {
+        self.function_template_params(self.current_class.as_deref(), method_name)
+    }
+
+    /// `current_function_template_params` for the function `method_name`
+    /// of `class` (none for a plain function), whatever the checker is
+    /// inside of: a declaration check reads its own before it enters it.
+    pub(crate) fn function_template_params(
+        &self,
+        class: Option<&str>,
+        method_name: &str,
+    ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
+        let sig = match class {
             Some(class) => self.registry.lookup_method(class, method_name),
             // A plain function's own `label`/`current_method` is
             // deliberately the bare name (matching real PHPStan's

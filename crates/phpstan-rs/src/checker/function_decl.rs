@@ -486,7 +486,7 @@ impl<'a> Checker<'a> {
             self,
             doc_nodes.as_ref().and_then(|n| n.return_type.as_ref()),
         );
-        let function_template_params = self.current_function_template_params();
+        let function_template_params = self.function_template_params(class_name, &f.name);
         match sig {
             // The registry's FunctionReflection already has PHPDoc types merged
             // in - using it here, instead of re-deriving from the raw
