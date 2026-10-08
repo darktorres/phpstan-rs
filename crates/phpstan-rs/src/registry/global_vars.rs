@@ -169,6 +169,8 @@ impl SiteContribution {
 pub(in crate::registry) struct GlobalScopes {
     /// What the function bodies write after their own `global`.
     function_facts: NameMap<GlobalAccumulator>,
+    /// Some function body writes globals whose names it computes.
+    function_dynamic: bool,
     /// The scope each file's top level runs in, when it runs in a global one.
     scope_of: FxHashMap<FileId, u32>,
     scopes: Vec<GlobalScope>,
@@ -222,6 +224,9 @@ impl GlobalScopes {
             if self.function_facts.get(name) != before.function_facts.get(name) {
                 out.insert(name.clone());
             }
+        }
+        if self.function_dynamic != before.function_dynamic {
+            all(&mut out);
         }
         let (now, was) = (self.by_first_file(), before.by_first_file());
         for first in now.keys().chain(was.keys()) {
@@ -296,6 +301,7 @@ pub(in crate::registry) struct FileSites {
     sites: Vec<StagedSite>,
     include_sites: Vec<IncludeSite>,
     dynamic_top_level: bool,
+    dynamic_function: bool,
 }
 
 /// An assigned value, as far as its type can be said before the registry
@@ -417,6 +423,11 @@ pub struct GlobalFacts {
     /// (`extract`, `$$name`).
     #[serde(default)]
     dynamic_top_level: bool,
+    /// A function body writes the global `$GLOBALS` names with a computed
+    /// key, or imports one with `global $$n`: any global may be written
+    /// from a function.
+    #[serde(default)]
+    dynamic_function: bool,
 }
 
 impl GlobalFacts {
@@ -443,6 +454,7 @@ impl GlobalFacts {
                 .collect(),
             include_sites: self.include_sites.clone(),
             dynamic_top_level: self.dynamic_top_level,
+            dynamic_function: self.dynamic_function,
         }
     }
 }
@@ -570,6 +582,7 @@ impl Registry {
             ..GlobalScopes::default()
         };
         for (id, ..) in files {
+            scopes.function_dynamic |= self.global_sites[id].dynamic_function;
             if self.global_sites[id].dynamic_top_level
                 && graph.global_scope.contains(id)
                 && let Some(scope) = graph.component.get(id)
@@ -628,6 +641,15 @@ impl Registry {
             .function_facts
             .get(name)
             .map(|written| written.clone().finish())
+    }
+
+    /// Whether code of the loaded program that is not known may write the
+    /// global `name`: a function body binds it or writes it by name, or
+    /// writes a global it computes the name of.
+    pub(crate) fn code_may_write_global(&self, name: &str) -> bool {
+        syntax::ast::is_superglobal(name)
+            || self.global_scopes.function_dynamic
+            || self.global_scopes.function_facts.contains_key(name)
     }
 
     /// What the global variable `name` may hold where the top level of
@@ -950,6 +972,16 @@ impl Visitor for Scope<'_> {
                     self.unset(arenas, *target);
                 }
             }
+            StmtKind::Global(vars) => {
+                if !self.top_level
+                    && arenas
+                        .global_vars(vars.clone())
+                        .iter()
+                        .any(|var| matches!(var, GlobalVar::Dynamic(_)))
+                {
+                    self.out.dynamic_function = true;
+                }
+            }
             StmtKind::Try { catches, .. } => {
                 for clause in arenas.catch_clauses(catches.clone()) {
                     if let Some(var) = &clause.var
@@ -1014,6 +1046,10 @@ impl Visitor for Scope<'_> {
                     *lhs,
                     Some(ContributionFact::Whole(static_value(arenas, *rhs))),
                 );
+                // A reference to a global writes it wherever it is used.
+                if matches!(&expr.kind, ExprKind::AssignRef(..)) {
+                    self.written(arenas, *rhs);
+                }
             }
             ExprKind::CompoundAssign(_, lhs, _) => {
                 handle_write_expr(arenas, id, self.top_level, self.global_names, self.out);
@@ -1127,6 +1163,19 @@ impl Scope<'_> {
             }
         } else if names_computed_variable(arenas, expr.id) {
             self.computed_write();
+        } else if names_computed_global(arenas, expr.id) {
+            self.computed_global_write();
+        }
+    }
+
+    /// Records that code in this scope writes a global whose name it
+    /// computes: any global of the scope at a file's top level, any global
+    /// from a body.
+    fn computed_global_write(&mut self) {
+        if self.top_level {
+            self.out.dynamic_top_level = true;
+        } else {
+            self.out.dynamic_function = true;
         }
     }
 
@@ -1201,6 +1250,8 @@ impl Scope<'_> {
                     });
                 } else if self.top_level && names_computed_variable(arenas, expr.id) {
                     self.computed_write();
+                } else if names_computed_global(arenas, expr.id) {
+                    self.computed_global_write();
                 }
             }
             ExprKind::DynamicVariable(_) if self.top_level => self.computed_write(),
@@ -1224,6 +1275,10 @@ impl Scope<'_> {
             };
             if names_computed_variable(arenas, expr.id) {
                 self.computed_write();
+                continue;
+            }
+            if names_computed_global(arenas, expr.id) {
+                self.computed_global_write();
                 continue;
             }
             if self.globals_written(arenas, expr.id, None) {
@@ -1388,6 +1443,30 @@ fn globals_element(arenas: &NodeArenas, id: ExprId) -> Option<(Name, Under)> {
             _ => None,
         }
     })
+}
+
+/// Whether `id` is an element of `$GLOBALS` named by a computed key, or
+/// something inside one.
+fn names_computed_global(arenas: &NodeArenas, id: ExprId) -> bool {
+    let mut current = id;
+    loop {
+        let Some(expr) = arenas.peeled(current).and_then(|id| arenas.expr(id)) else {
+            return false;
+        };
+        let ExprKind::Index(base, key) = &expr.kind else {
+            return false;
+        };
+        let is_globals = arenas
+            .peeled(*base)
+            .and_then(|id| arenas.expr(id))
+            .is_some_and(
+                |base| matches!(&base.kind, ExprKind::Variable(name) if name.as_str() == "GLOBALS"),
+            );
+        if is_globals {
+            return key.is_none_or(|key| literal_string_key(arenas, key).is_none());
+        }
+        current = *base;
+    }
 }
 
 /// Whether `id` is a variable named by a computed expression, or an element
@@ -1583,6 +1662,7 @@ syntax::canonical_struct!(GlobalFacts {
     sites,
     include_sites,
     dynamic_top_level,
+    dynamic_function,
 });
 
 syntax::canonical_struct!(SiteFact {
@@ -1625,6 +1705,7 @@ syntax::canonical_struct!(FileSites {
     sites,
     include_sites,
     dynamic_top_level,
+    dynamic_function,
 });
 
 syntax::canonical_struct!(StagedSite {
@@ -1655,6 +1736,7 @@ syntax::canonical_struct!(GlobalScope {
 
 syntax::canonical_struct!(GlobalScopes {
     function_facts,
+    function_dynamic,
     scope_of,
     scopes,
 });

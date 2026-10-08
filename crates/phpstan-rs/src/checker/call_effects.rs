@@ -541,7 +541,13 @@ impl Checker<'_> {
             purge_stale_narrowing_for(locals, key);
             locals.remove(key);
         }
-        for (name, shared) in self.shared_variables_written(&storages, anything, &scope, locals) {
+        for (name, shared) in self.shared_variables_written(
+            &storages,
+            anything,
+            effect.is_arbitrary(),
+            &scope,
+            locals,
+        ) {
             let ty = match shared {
                 Shared::Global(global) => self
                     .registry
@@ -624,7 +630,8 @@ impl Checker<'_> {
             Storage::Static { .. }
             | Storage::Global(_)
             | Storage::StaticVar { .. }
-            | Storage::Captured { .. } => false,
+            | Storage::Captured { .. }
+            | Storage::Unknown => false,
         })
     }
 
@@ -725,12 +732,16 @@ impl Checker<'_> {
         &self,
         storages: &[&Storage],
         anything: bool,
+        arbitrary: bool,
         scope: &SharedScope,
         locals: &Locals,
     ) -> Vec<(Name, Shared)> {
         let mut out: Vec<(Name, Shared)> = Vec::new();
+        // Code of the loaded program writes a global only where a function
+        // body writes it or binds it.
         let global_written = |name: &Name| {
-            anything
+            arbitrary
+                || (anything && self.registry.code_may_write_global(name))
                 || storages.iter().any(|storage| match storage {
                     Storage::Global(None) => true,
                     Storage::Global(Some(global)) => global == name,

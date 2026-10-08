@@ -88,6 +88,9 @@ pub(crate) enum Storage {
     /// that wrote the closure: the closure by the id of its expression in
     /// that scope's file, and the variable.
     Captured { closure: u32, var: Name },
+    /// Whatever code of the loaded program a call the analysis cannot
+    /// resolve may run.
+    Unknown,
 }
 
 /// What code may write: a set of storages, or anything.
@@ -109,7 +112,23 @@ impl Effect {
         Effect(None)
     }
 
+    /// What a call may write that runs code the analysis cannot resolve: any
+    /// code of the loaded program.
+    pub(crate) fn unknown() -> Effect {
+        Effect(Some(BTreeSet::from([Storage::Unknown])))
+    }
+
+    /// Whether it may write anything the code of the loaded program may, or
+    /// anything at all.
     pub(crate) fn is_anything(&self) -> bool {
+        self.0
+            .as_ref()
+            .is_none_or(|storages| storages.contains(&Storage::Unknown))
+    }
+
+    /// Whether it may write anything at all: it runs code that is not in the
+    /// loaded program (`eval`, an include of a file not known).
+    pub(crate) fn is_arbitrary(&self) -> bool {
         self.0.is_none()
     }
 
@@ -274,7 +293,7 @@ impl Settled {
         if self.runs.is_empty() {
             self.effect.clone()
         } else {
-            Effect::anything()
+            Effect::unknown()
         }
     }
 }
@@ -773,8 +792,16 @@ struct IdPassed {
 
 impl Classification<'_> {
     fn anything() -> Self {
+        Classification::of(Effect::anything())
+    }
+
+    fn unknown() -> Self {
+        Classification::of(Effect::unknown())
+    }
+
+    fn of(own: Effect) -> Self {
         Classification {
-            own: Effect::anything(),
+            own,
             calls: Vec::new(),
             sites: Vec::new(),
             runs: Vec::new(),
@@ -1134,7 +1161,7 @@ impl Registry {
         );
         let mut effects = settle(registry, &classified, |id| {
             registry.effect_decl_key(id).map_or_else(
-                || Settled::of(Effect::anything()),
+                || Settled::of(Effect::unknown()),
                 |key| Settled::of(registry.declaration_effect(&key)),
             )
         });
@@ -1408,7 +1435,7 @@ impl Registry {
             .copied()
             .unwrap_or_else(|| self.stub_runs_code(key, sig));
         if runs_code {
-            Effect::anything()
+            Effect::unknown()
         } else {
             Effect::nothing()
         }
@@ -1813,11 +1840,11 @@ fn run_passed(
     read: &mut Vec<EffectId>,
 ) {
     let Some(site) = site else {
-        into.effect = Effect::anything();
+        into.effect = Effect::unknown();
         return;
     };
     let Some(callee_key) = registry.effect_decl_key(callee) else {
-        into.effect = Effect::anything();
+        into.effect = Effect::unknown();
         return;
     };
     let default;
@@ -1825,7 +1852,7 @@ fn run_passed(
         Passing::Argument(at) => match site.passed.iter().find(|(passed, _)| *passed == at) {
             Some((_, passed)) => (&passed.runs[..], &passed.params[..]),
             None => {
-                into.effect = Effect::anything();
+                into.effect = Effect::unknown();
                 return;
             }
         },
@@ -1837,7 +1864,7 @@ fn run_passed(
             (&default[..], &[][..])
         }
         Passing::Unknown => {
-            into.effect = Effect::anything();
+            into.effect = Effect::unknown();
             return;
         }
     };
@@ -1851,7 +1878,7 @@ fn run_passed(
             }
         } else if !found.runs.is_empty() {
             // It runs its own parameters' arguments, which the callee passes.
-            into.effect = Effect::anything();
+            into.effect = Effect::unknown();
         }
         read.push(run.clone());
         if into.effect.is_anything() {
@@ -2895,7 +2922,7 @@ impl Registry {
             .collect();
         let effects = settle(self, &classified, |id| {
             self.effect_decl_key(id)
-                .map_or_else(|| Settled::of(Effect::anything()), |key| self.settled(&key))
+                .map_or_else(|| Settled::of(Effect::unknown()), |key| self.settled(&key))
         });
         effects
             .get(&self.effect_id_for(&holder.closure(0)))
@@ -2913,14 +2940,14 @@ impl Registry {
             ctx,
         };
         let Some(targets) = reach.call_targets(&call.callee, Some(call)) else {
-            return Effect::anything();
+            return Effect::unknown();
         };
         let mut effect = Effect::nothing();
         for (key, transfer) in targets {
             let runs = match self.builtin(&key) {
                 Some(sig) => match reach.builtin_runs(&key, sig, &transfer, call) {
                     Some(runs) => runs,
-                    None => return Effect::anything(),
+                    None => return Effect::unknown(),
                 },
                 None => {
                     let settled = self.settled(&key);
@@ -2941,7 +2968,7 @@ impl Registry {
                             Passing::Unknown => None,
                         };
                         let Some(passed) = passed else {
-                            return Effect::anything();
+                            return Effect::unknown();
                         };
                         runs.extend(passed.into_iter().map(|(run, own)| {
                             let bound = condition.bound(&transfer, &own);
@@ -3018,7 +3045,8 @@ impl<'r> Resolve<'r> {
             };
             let classification = match found {
                 Some((targets, written_args)) => level.classify(key, targets, written_args),
-                None => Classification::anything(),
+                None if level.facts.anything => Classification::anything(),
+                None => Classification::unknown(),
             };
             out.push((scope_key, classification));
         }
@@ -3520,7 +3548,7 @@ impl<'r> Level<'r> {
                 // declares.
                 if let Some(sig) = self.registry.builtin(&key) {
                     let Some(runs) = reach.builtin_runs(&key, sig, &transfer, call) else {
-                        return Classification::anything();
+                        return Classification::unknown();
                     };
                     for (key, transfer) in runs {
                         if siteless.insert((key.clone(), transfer.clone())) {
@@ -3936,7 +3964,7 @@ impl<'r> Level<'r> {
     fn place_storages(&self, place: &Place, out: &mut Effect, depth: u32) {
         // A chain of references this long is a cycle.
         if depth > 16 {
-            *out = Effect::anything();
+            *out = Effect::unknown();
             return;
         }
         let last_property = place
@@ -4147,6 +4175,7 @@ syntax::canonical_enum!(Storage {
         var,
     },
     Captured { closure, var },
+    Unknown,
 });
 
 #[cfg(test)]
