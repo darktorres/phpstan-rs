@@ -744,6 +744,25 @@ impl<'a> Checker<'a> {
                     self.inlay_local_type_hints
                         .push((self.expr_span(lhs.id), ty.clone()));
                 }
+                // The result of an expression statement is destroyed where
+                // it was made.
+                if matches!(
+                    e.kind,
+                    ExprKind::New(..)
+                        | ExprKind::Clone(..)
+                        | ExprKind::Call(..)
+                        | ExprKind::MethodCall(..)
+                        | ExprKind::DynamicMethodCall(..)
+                        | ExprKind::StaticCall(..)
+                        | ExprKind::DynamicStaticCall(..)
+                ) {
+                    self.forget_what_an_operation_may_change(
+                        &ty,
+                        false,
+                        crate::registry::summaries::Operation::Destroy,
+                        locals,
+                    );
+                }
                 self.check_no_discard_statement(e, locals);
                 self.check_new_exception_discarded(e, locals);
                 // NoopRule's own supported slice - see `checker::noop`'s
@@ -833,9 +852,10 @@ impl<'a> Checker<'a> {
                     && arenas
                         .expr(*rhs)
                         .is_some_and(|rhs| self.infer_expr(rhs, locals).is_never())
-                    && let Some(lhs) = arenas.expr(*lhs) {
-                        self.apply_narrowing(lhs, locals, true);
-                    }
+                    && let Some(lhs) = arenas.expr(*lhs)
+                {
+                    self.apply_narrowing(lhs, locals, true);
+                }
             }
             StmtKind::Return(Some(e_id)) => {
                 let Some(e) = arenas.expr(*e_id) else {

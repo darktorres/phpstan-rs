@@ -520,6 +520,26 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
     })
 }
 
+/// Whether the expression `id` is a value made where it is written and held
+/// by nothing: an object a `new`, a `clone` or a call gives.
+fn is_temporary(arenas: &NodeArenas, id: ExprId) -> bool {
+    matches!(
+        arenas
+            .peeled(id)
+            .and_then(|id| arenas.expr(id))
+            .map(|e| &e.kind),
+        Some(
+            ExprKind::New(..)
+                | ExprKind::Clone(..)
+                | ExprKind::Call(..)
+                | ExprKind::MethodCall(..)
+                | ExprKind::DynamicMethodCall(..)
+                | ExprKind::StaticCall(..)
+                | ExprKind::DynamicStaticCall(..)
+        )
+    )
+}
+
 /// Where the elements of a value from `origins` come from: an element of
 /// each place; `None` when one is not a place.
 fn element_origins(origins: Vec<Origin>) -> Option<Vec<Origin>> {
@@ -869,7 +889,7 @@ impl BodySummary {
                 )
             })
             .collect();
-        BodySummary::of_function_in(arenas, &[], &running, Some(stmts))
+        BodySummary::summarize(arenas, &[], &running, Some(stmts), false)
     }
 
     /// The summary of the body of a function with the parameters `params`:
@@ -886,6 +906,18 @@ impl BodySummary {
         body: &[StmtId],
         file: Option<&[StmtId]>,
     ) -> BodySummary {
+        BodySummary::summarize(arenas, params, body, file, true)
+    }
+
+    /// The summary of `body`; the variables it wrote die with it when
+    /// `ends`, which a file's top level does not (they are globals).
+    fn summarize(
+        arenas: &NodeArenas,
+        params: &[Param],
+        body: &[StmtId],
+        file: Option<&[StmtId]>,
+        ends: bool,
+    ) -> BodySummary {
         let mut walk = Summarizer {
             names: file,
             ..Summarizer::default()
@@ -898,6 +930,14 @@ impl BodySummary {
             walk.write_this_property(&param.name.name);
         }
         arena::walk_stmts(&mut walk, arenas, body);
+        if ends {
+            let by_ref = params
+                .iter()
+                .filter(|param| param.by_ref)
+                .map(|param| param.name.name.clone())
+                .collect();
+            walk.destroy_locals(&by_ref, &FxHashSet::default());
+        }
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
         summary.parameters = ParamUses::of(arenas, params, body);
@@ -1218,6 +1258,17 @@ impl Summarizer<'_> {
         let within = self.current.replace(id);
         let narrowed = std::mem::take(&mut self.narrowed);
         walk(self);
+        let by_ref = params
+            .iter()
+            .filter(|param| param.by_ref)
+            .map(|param| param.name.name.clone())
+            .collect();
+        let shared = self
+            .enclosing
+            .last()
+            .map(|enclosing| enclosing.shared.clone())
+            .unwrap_or_default();
+        self.destroy_locals(&by_ref, &shared);
         self.narrowed = narrowed;
         let Some(enclosing) = self.enclosing.pop() else {
             unreachable!("pushed above");
@@ -1639,6 +1690,42 @@ impl Summarizer<'_> {
     /// An operation PHP may run code of the value `operand` for.
     fn implicit(&mut self, arenas: &NodeArenas, operand: ExprId, operation: Operation) {
         self.implicit_on(self.origins(arenas, operand), operation);
+    }
+
+    /// The value `id` dies where it is written when nothing holds it: a
+    /// temporary is destroyed at the end of the statement that made it.
+    fn dies(&mut self, arenas: &NodeArenas, id: ExprId) {
+        if is_temporary(arenas, id) {
+            self.implicit(arenas, id, Operation::Destroy);
+        }
+    }
+
+    /// The variables the scope wrote die when it ends, but for the
+    /// parameters taken by reference, the variables bound to a place,
+    /// global or static, and those `shared` with the scope around it.
+    fn destroy_locals(&mut self, by_ref: &FxHashSet<Name>, shared: &FxHashSet<Name>) {
+        let bound: FxHashSet<Name> = self
+            .scope
+            .bindings
+            .iter()
+            .filter_map(|(name, _)| name.clone())
+            .collect();
+        let mut locals: Vec<(Name, Option<Vec<Origin>>)> = self
+            .scope
+            .origins
+            .iter()
+            .filter(|(name, _)| {
+                **name != *"this"
+                    && !by_ref.contains(*name)
+                    && !shared.contains(*name)
+                    && !bound.contains(*name)
+            })
+            .map(|(name, origins)| (name.clone(), origins.clone()))
+            .collect();
+        locals.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_, origins) in locals {
+            self.implicit_on(origins, Operation::Destroy);
+        }
     }
 
     /// An operation PHP may run code of a value from `on` for, from
@@ -2273,6 +2360,7 @@ impl Visitor for Summarizer<'_> {
         if arg.spread {
             self.implicit(arenas, arg.value, Operation::Iterate { keys: true });
         }
+        self.dies(arenas, arg.value);
         arena::walk_arg(self, arenas, arg);
     }
 
@@ -2321,6 +2409,9 @@ impl Visitor for Summarizer<'_> {
             {
                 self.assigned.statement(arenas, *expr);
             }
+            if let StmtKind::Expression(expr) = &stmt.kind {
+                self.dies(arenas, *expr);
+            }
             match &stmt.kind {
                 StmtKind::Unset(targets) => {
                     for &target in arenas.expr_ids(targets) {
@@ -2361,10 +2452,17 @@ impl Visitor for Summarizer<'_> {
                         },
                     );
                     if let Some(key) = key {
+                        self.implicit(arenas, *key, Operation::Destroy);
                         self.write(arenas, *key, None, None);
                         self.mark(arenas, *key, WRITE);
                     }
                     let element = source.and_then(element_origins);
+                    if !*by_ref {
+                        self.implicit(arenas, *value, Operation::Destroy);
+                    }
+                    if is_temporary(arenas, *subject) {
+                        self.implicit_on(element.clone(), Operation::Destroy);
+                    }
                     let value_node = arenas.peeled(*value).and_then(|id| arenas.expr(id));
                     match value_node.map(|node| &node.kind) {
                         Some(ExprKind::Variable(name)) if *by_ref => {
@@ -2456,6 +2554,14 @@ impl Visitor for Summarizer<'_> {
             self.impure_unless_in_closure(impure);
             let peeled = arenas.peeled(id).unwrap_or(id);
             let access = self.accesses.remove(&peeled).unwrap_or(READ);
+            if let ExprKind::MethodCall(base, ..)
+            | ExprKind::DynamicMethodCall(base, ..)
+            | ExprKind::PropertyAccess(base, ..)
+            | ExprKind::DynamicPropertyAccess(base, ..)
+            | ExprKind::Index(base, _) = &e.kind
+            {
+                self.dies(arenas, *base);
+            }
             match &e.kind {
                 ExprKind::Assign(lhs, rhs) => {
                     let made = self.made_by(arenas, *rhs);

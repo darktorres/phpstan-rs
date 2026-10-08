@@ -433,10 +433,7 @@ impl Checker<'_> {
         if !locals.has_state_to_forget() && self.shared_scope.binds_nothing() {
             return;
         }
-        if ty.is_object().no() {
-            return;
-        }
-        if matches!(operation, Operation::Destroy) && holder_of(ty) == Holder::Unknown {
+        if ty.is_object().no() || ty.is_void() {
             return;
         }
         let call = CallWrites {

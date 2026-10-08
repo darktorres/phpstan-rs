@@ -2796,12 +2796,6 @@ impl Reach<'_> {
         let (classes, exact) = match holder {
             Holder::Classes(classes) => (classes, false),
             Holder::Made(Some(classes)) => (classes, true),
-            // A value of a class nothing says cannot be told apart from any
-            // object of the program, and a destructor runs where the value
-            // dies, which no summary places.
-            Holder::Unknown | Holder::Made(None) if matches!(operation, Operation::Destroy) => {
-                return Some(());
-            }
             Holder::Unknown | Holder::Made(None) => {
                 for method in implicit_method_names(operation) {
                     for class in registry
@@ -2809,6 +2803,13 @@ impl Reach<'_> {
                         .chain(registry.builtin_classes_running_code(method))
                     {
                         if !self.implicit_methods(class, operation).contains(&method) {
+                            continue;
+                        }
+                        // A builtin destructor frees what its object holds
+                        // and runs no code of its own.
+                        if matches!(operation, Operation::Destroy)
+                            && registry.is_builtin_class(class)
+                        {
                             continue;
                         }
                         if let Some(key) = self.implicit_method(class, method) {

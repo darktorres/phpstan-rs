@@ -742,6 +742,27 @@ impl<'a> Checker<'a> {
             iterate.clone(),
             locals,
         );
+        // Each iteration overwrites the loop variables, destroying what they
+        // held; a subject made where it is written dies with the loop.
+        let destroy = crate::registry::summaries::Operation::Destroy;
+        if !by_ref {
+            self.forget_what_an_operation_on_may_change(value, destroy.clone(), locals);
+        }
+        if let Some(key) = key {
+            self.forget_what_an_operation_on_may_change(key, destroy.clone(), locals);
+        }
+        if matches!(
+            subject.kind,
+            ExprKind::New(..)
+                | ExprKind::Clone(..)
+                | ExprKind::Call(..)
+                | ExprKind::MethodCall(..)
+                | ExprKind::DynamicMethodCall(..)
+                | ExprKind::StaticCall(..)
+                | ExprKind::DynamicStaticCall(..)
+        ) {
+            self.forget_what_an_operation_may_change(&element_ty, false, destroy, locals);
+        }
         let entry = locals.clone();
         self.loop_depth += 1;
         // Mirrors real PHPStan's own `ForeachHandler::processStmt`'s
