@@ -488,6 +488,10 @@ struct Position {
     elements: bool,
 }
 
+/// What the code around a closure knows of the object each variable it
+/// captures holds.
+pub(crate) type CapturedHolders<'a> = &'a dyn Fn(&str) -> Option<Holder>;
+
 /// What a builtin runs through an argument.
 #[derive(Debug, Clone, Copy)]
 enum BuiltinRun {
@@ -2852,7 +2856,7 @@ impl Registry {
         &self,
         summary: &BodySummary,
         class: Option<&str>,
-        captured: Option<&dyn Fn(&str) -> Option<Holder>>,
+        captured: Option<CapturedHolders<'_>>,
     ) -> Effect {
         let holder = DeclKey {
             class: class.map(str::to_ascii_lowercase),
@@ -2952,7 +2956,7 @@ struct Resolve<'r> {
     value: Option<(&'r str, &'r Type)>,
     // What the code that wrote the closure this summary is of knows of the
     // object a variable it captures by value holds.
-    captured: Option<&'r dyn Fn(&str) -> Option<Holder>>,
+    captured: Option<CapturedHolders<'r>>,
 }
 
 /// What each of a scope's calls reaches, and the places its calls may write

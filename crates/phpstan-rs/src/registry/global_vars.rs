@@ -29,7 +29,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::registry::infer_const_type;
 use crate::registry::summaries::ArgAt;
 use syntax::ast::{
-    BinOp, ClosurePayload, ExprId, ExprKind, ExprNode, GlobalVar, Literal, NodeArenas,
+    BinOp, ClosurePayload, ExprId, ExprKind, GlobalVar, Literal, NodeArenas,
     QualifiedName, StaticTarget, StmtId, StmtKind, UnaryOp,
 };
 use syntax::visit::arena::{self, Visitor};
