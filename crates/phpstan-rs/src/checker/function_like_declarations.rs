@@ -42,6 +42,9 @@ const SUPERGLOBALS: [&str; 9] = [
 fn collect_return_exprs(arenas: &NodeArenas, body: &[StmtId]) -> Vec<ExprId> {
     struct Returns(Vec<ExprId>);
     impl Visitor for Returns {
+        // A closure or arrow function in an expression returns for itself.
+        fn visit_expr(&mut self, _: &NodeArenas, _: ExprId) {}
+
         fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
             let Some(stmt) = arenas.stmt(id) else {
                 return;
