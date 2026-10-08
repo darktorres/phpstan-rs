@@ -669,6 +669,7 @@ macro_rules! canonical_struct {
                 );
             }
             #[allow(unused_variables)]
+            #[allow(unused_variables)]
             fn canonical_with(
                 &self,
                 p: &mut $crate::canonical::Printer,
@@ -692,6 +693,7 @@ macro_rules! canonical_struct {
                     &[$($field as &dyn $crate::canonical::Canonical),*],
                 );
             }
+            #[allow(unused_variables)]
             fn canonical_with(
                 &self,
                 p: &mut $crate::canonical::Printer,
@@ -727,6 +729,7 @@ macro_rules! canonical_enum {
                     )*
                 }
             }
+            #[allow(unused_variables)]
             fn canonical_with(
                 &self,
                 p: &mut $crate::canonical::Printer,
