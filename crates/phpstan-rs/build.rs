@@ -40,12 +40,14 @@ struct Table {
     runs: BTreeMap<String, Vec<Run>>,
     holding: Vec<String>,
     held_wrappers: BTreeMap<String, Vec<String>>,
+    /// The positions at which a function keeps none of a callable it is given.
+    releases: BTreeMap<String, Vec<u32>>,
 }
 
 /// Reads the table, failing on a line that is not
 /// `builtin<TAB>place<TAB>kind<TAB>detail`, lowercased: `probed` with no
-/// place or detail; `calls` with no detail; `method` or `wrapper` with
-/// one; a place an argument's position, `[]` after it for its elements,
+/// place or detail; `calls` or `releases` with no detail; `method` or
+/// `wrapper` with one; a place an argument's position, `[]` after it for its elements,
 /// and `new:` before it for one the object was made with, or `by:<method>:`
 /// for one another method of the class was given, on a method.
 fn read_table(path: &Path) -> Table {
@@ -72,13 +74,27 @@ fn read_table(path: &Path) -> Table {
             table.probed.push(builtin.to_owned());
             continue;
         }
+        if kind == "releases" {
+            let Ok(at) = place.parse::<u32>() else {
+                fail("a releases line's place is an argument's position");
+            };
+            if !detail.is_empty() || builtin.contains("::") {
+                fail("a releases line is a function's, with no detail");
+            }
+            table
+                .releases
+                .entry(builtin.to_owned())
+                .or_default()
+                .push(at);
+            continue;
+        }
         let run = match kind {
             "calls" if detail.is_empty() => "BuiltinRun::Calls".to_owned(),
             "method" if !detail.is_empty() => format!("BuiltinRun::Method({detail:?})"),
             "wrapper" if !detail.is_empty() => format!("BuiltinRun::Wrapper({detail:?})"),
             "calls" => fail("a calls line has no detail"),
             "method" | "wrapper" => fail("a method or wrapper line names its method"),
-            _ => fail("the kind is probed, calls, method or wrapper"),
+            _ => fail("the kind is probed, calls, method, wrapper or releases"),
         };
         let (held, at) = match place.strip_prefix("new:") {
             Some(at) => (true, at),
@@ -122,6 +138,10 @@ fn read_table(path: &Path) -> Table {
         names.sort_unstable();
         names.dedup();
     }
+    for positions in table.releases.values_mut() {
+        positions.sort_unstable();
+        positions.dedup();
+    }
     table
 }
 
@@ -153,6 +173,10 @@ fn write_table(table: &Table, out: &Path) {
     let _ = writeln!(code, "];\nstatic HELD_WRAPPERS: &[(&str, &[&str])] = &[");
     for (name, methods) in &table.held_wrappers {
         let _ = writeln!(code, "    ({name:?}, &{methods:?}),");
+    }
+    let _ = writeln!(code, "];\nstatic RELEASES: &[(&str, &[u32])] = &[");
+    for (name, positions) in &table.releases {
+        let _ = writeln!(code, "    ({name:?}, &{positions:?}),");
     }
     let _ = writeln!(code, "];");
     fs::write(out, code).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));

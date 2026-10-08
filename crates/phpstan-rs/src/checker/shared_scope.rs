@@ -12,6 +12,7 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
+use crate::registry::Registry;
 use crate::registry::summaries::{
     BodySummary, Place, Step, destructures_by_ref, writes_computed_variables,
 };
@@ -80,6 +81,9 @@ pub(crate) struct Escape {
     /// The outermost loop around the statement: the code in it runs again
     /// after it.
     in_loop: Option<(u32, u32)>,
+    /// The use leaves the object with code that returns it: only the code
+    /// of the statement itself may reach it.
+    transient: bool,
 }
 
 impl Escape {
@@ -89,11 +93,15 @@ impl Escape {
         let Some(at) = at else {
             return !escapes.is_empty();
         };
-        escapes.iter().any(|escape| {
-            escape.stmt.is_none_or(|stmt| stmt <= at)
-                || escape
-                    .in_loop
-                    .is_some_and(|(start, end)| start <= at && at < end)
+        escapes.iter().any(|escape| match escape.stmt {
+            None => true,
+            Some(stmt) if escape.transient => stmt == at,
+            Some(stmt) => {
+                stmt <= at
+                    || escape
+                        .in_loop
+                        .is_some_and(|(start, end)| start <= at && at < end)
+            }
         })
     }
 }
@@ -120,13 +128,14 @@ impl SharedScope {
     /// The shared scope of the statements `body`, a function's, a closure's
     /// (whose `use` list is `uses`) or a file's top level.
     pub(crate) fn of(
+        registry: &Registry,
         arenas: &NodeArenas,
         body: &[StmtId],
         uses: &[ClosureUse],
         function: Option<(Option<Name>, Name)>,
         top_level: bool,
     ) -> SharedScope {
-        let mut scan = Scan::default();
+        let mut scan = Scan::new(registry);
         for u in uses {
             if u.by_ref {
                 scan.captured.entry(u.name.name.clone()).or_default().own = true;
@@ -138,8 +147,12 @@ impl SharedScope {
     }
 
     /// The shared scope of an arrow function's body, which binds nothing.
-    pub(crate) fn of_arrow_function(arenas: &NodeArenas, body: ExprId) -> SharedScope {
-        let mut scan = Scan::default();
+    pub(crate) fn of_arrow_function(
+        registry: &Registry,
+        arenas: &NodeArenas,
+        body: ExprId,
+    ) -> SharedScope {
+        let mut scan = Scan::new(registry);
         scan.visit_expr(arenas, body);
         scan.finish(None, false)
     }
@@ -189,7 +202,10 @@ enum Held {
 }
 
 #[derive(Default)]
-struct Scan {
+struct Scan<'r> {
+    /// What the functions the scope calls do with their arguments; `None`
+    /// when it is not known, and every call keeps them.
+    registry: Option<&'r Registry>,
     globals: FxHashSet<Name>,
     any_global: bool,
     statics: FxHashSet<Name>,
@@ -212,7 +228,14 @@ struct Scan {
     all_exposed: bool,
 }
 
-impl Scan {
+impl<'r> Scan<'r> {
+    fn new(registry: &'r Registry) -> Scan<'r> {
+        Scan {
+            registry: Some(registry),
+            ..Scan::default()
+        }
+    }
+
     fn finish(self, function: Option<(Option<Name>, Name)>, top_level: bool) -> SharedScope {
         let bound = |name: &Name| {
             self.globals.contains(name)
@@ -307,6 +330,17 @@ impl Scan {
         self.leaks.entry(name.clone()).or_default().push(escape);
     }
 
+    /// Passing the variable `name` to a function that keeps nothing of it:
+    /// code reaches the object it holds during the call alone, and a closure
+    /// it holds leaves nothing.
+    fn passed(&mut self, name: &Name) {
+        let escape = Escape {
+            transient: true,
+            ..self.here()
+        };
+        self.escapes.entry(name.clone()).or_default().push(escape);
+    }
+
     /// Calling the variable `name`: what it holds, if an object, gets its
     /// `__invoke` a `$this`, but a closure it holds leaves nothing.
     fn call(&mut self, name: &Name) {
@@ -318,6 +352,7 @@ impl Scan {
         Escape {
             stmt: self.stmt_at,
             in_loop: self.loops.first().copied(),
+            transient: false,
         }
     }
 
@@ -402,7 +437,7 @@ fn held_by(arenas: &NodeArenas, id: ExprId) -> Held {
     })
 }
 
-impl Visitor for Scan {
+impl Visitor for Scan<'_> {
     // A declaration nested in the scope is a scope of its own.
     fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
@@ -440,7 +475,7 @@ impl Visitor for Scan {
     }
 }
 
-impl Scan {
+impl Scan<'_> {
     fn scan_stmt(&mut self, arenas: &NodeArenas, id: StmtId, stmt: &StmtNode) {
         syntax::stack::guard(|| match &stmt.kind {
             StmtKind::Global(vars) => {
@@ -603,6 +638,10 @@ impl Scan {
                         self.call(name);
                         arena::walk_args(self, arenas, args.clone());
                     }
+                    Some(ExprNode {
+                        kind: ExprKind::Name(callee),
+                        ..
+                    }) => self.call_function(arenas, id, callee, args),
                     _ => arena::walk_expr(self, arenas, id),
                 }
             }
@@ -626,5 +665,43 @@ impl Scan {
             }
             _ => arena::walk_expr(self, arenas, id),
         })
+    }
+}
+
+impl Scan<'_> {
+    /// A call of the function written as `callee`: an argument that is a
+    /// variable the function keeps nothing of leaves nothing.
+    fn call_function(
+        &mut self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        callee: &QualifiedNameRange,
+        args: &ArgRange,
+    ) {
+        let Some((registry, callee)) = self.registry.zip(arenas.qualified_name(callee)) else {
+            arena::walk_expr(self, arenas, id);
+            return;
+        };
+        let mut positional = true;
+        for (at, arg) in arenas.args(args.clone()).iter().enumerate() {
+            positional &= !arg.spread;
+            let variable = arenas
+                .peeled(arg.value)
+                .and_then(|value| arenas.expr(value))
+                .and_then(|value| match &value.kind {
+                    ExprKind::Variable(name) => Some(name),
+                    _ => None,
+                });
+            match variable {
+                Some(name)
+                    if positional
+                        && arg.name.is_none()
+                        && registry.releases_argument(callee, at as u32) =>
+                {
+                    self.passed(name);
+                }
+                _ => self.visit_expr(arenas, arg.value),
+            }
+        }
     }
 }

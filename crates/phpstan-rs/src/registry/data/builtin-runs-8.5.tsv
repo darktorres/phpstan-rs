@@ -28,8 +28,10 @@ appenditerator::rewind	by:append:0	method	valid
 appenditerator::valid		probed	
 array_all		probed	
 array_all	1	calls	
+array_all	1	releases	
 array_any		probed	
 array_any	1	calls	
+array_any	1	releases	
 array_change_key_case		probed	
 array_chunk		probed	
 array_column		probed	
@@ -53,10 +55,13 @@ array_fill_keys		probed
 array_fill_keys	0[]	method	__tostring
 array_filter		probed	
 array_filter	1	calls	
+array_filter	1	releases	
 array_find		probed	
 array_find	1	calls	
+array_find	1	releases	
 array_find_key		probed	
 array_find_key	1	calls	
+array_find_key	1	releases	
 array_first		probed	
 array_flip		probed	
 array_intersect		probed	
@@ -79,6 +84,7 @@ array_keys		probed
 array_last		probed	
 array_map		probed	
 array_map	0	calls	
+array_map	0	releases	
 array_merge		probed	
 array_merge_recursive		probed	
 array_multisort		probed	
@@ -89,6 +95,7 @@ array_push		probed
 array_rand		probed	
 array_reduce		probed	
 array_reduce	1	calls	
+array_reduce	1	releases	
 array_replace		probed	
 array_replace_recursive		probed	
 array_reverse		probed	
@@ -113,8 +120,10 @@ array_unshift		probed
 array_values		probed	
 array_walk		probed	
 array_walk	1	calls	
+array_walk	1	releases	
 array_walk_recursive		probed	
 array_walk_recursive	1	calls	
+array_walk_recursive	1	releases	
 arrayiterator::__construct		probed	
 arrayiterator::__debuginfo		probed	
 arrayiterator::__serialize		probed	
@@ -286,8 +295,10 @@ cal_info		probed
 cal_to_jd		probed	
 call_user_func		probed	
 call_user_func	0	calls	
+call_user_func	0	releases	
 call_user_func_array		probed	
 call_user_func_array	0	calls	
+call_user_func_array	0	releases	
 callbackfilteriterator::__construct		probed	
 callbackfilteriterator::accept		probed	
 ceil		probed	
@@ -1005,6 +1016,7 @@ fopen	0	wrapper	stream_open
 forward_static_call		probed	
 forward_static_call_array		probed	
 forward_static_call_array	0	calls	
+forward_static_call_array	0	releases	
 fpassthru		probed	
 fpassthru	0	wrapper	stream_eof
 fpassthru	0	wrapper	stream_read
@@ -7742,6 +7754,7 @@ mb_ereg_match		probed
 mb_ereg_replace		probed	
 mb_ereg_replace_callback		probed	
 mb_ereg_replace_callback	1	calls	
+mb_ereg_replace_callback	1	releases	
 mb_ereg_search		probed	
 mb_ereg_search_getpos		probed	
 mb_ereg_search_getregs		probed	
@@ -8091,6 +8104,7 @@ opcache_invalidate		probed
 opcache_is_script_cached		probed	
 opcache_is_script_cached_in_file_cache		probed	
 opcache_jit_blacklist		probed	
+opcache_jit_blacklist	0	releases	
 opcache_reset		probed	
 opendir		probed	
 opendir	0	wrapper	dir_opendir
@@ -8491,6 +8505,7 @@ preg_replace	0[]	method	__tostring
 preg_replace	2[]	method	__tostring
 preg_replace_callback		probed	
 preg_replace_callback	0[]	method	__tostring
+preg_replace_callback	1	releases	
 preg_replace_callback	2[]	method	__tostring
 preg_replace_callback_array		probed	
 preg_split		probed	
@@ -9037,6 +9052,7 @@ spl_autoload_extensions		probed
 spl_autoload_functions		probed	
 spl_autoload_register		probed	
 spl_autoload_unregister		probed	
+spl_autoload_unregister	0	releases	
 spl_classes		probed	
 spl_object_hash		probed	
 spl_object_id		probed	
@@ -9450,6 +9466,7 @@ trigger_error		probed
 trim		probed	
 uasort		probed	
 uasort	1	calls	
+uasort	1	releases	
 ucfirst		probed	
 uconverter::__construct		probed	
 uconverter::convert		probed	
@@ -9473,6 +9490,7 @@ uconverter::transcode		probed
 ucwords		probed	
 uksort		probed	
 uksort	1	calls	
+uksort	1	releases	
 umask		probed	
 uniqid		probed	
 unixtojd		probed	
@@ -9480,6 +9498,7 @@ unlink		probed
 unlink	0	wrapper	unlink
 unpack		probed	
 unregister_tick_function		probed	
+unregister_tick_function	0	releases	
 unserialize		probed	
 uri\rfc3986\uri::__construct		probed	
 uri\rfc3986\uri::__debuginfo		probed	
@@ -9549,6 +9568,7 @@ user_error		probed
 usleep		probed	
 usort		probed	
 usort	1	calls	
+usort	1	releases	
 utf8_decode		probed	
 utf8_encode		probed	
 var_dump		probed	

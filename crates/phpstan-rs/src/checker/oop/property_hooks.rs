@@ -242,6 +242,7 @@ impl<'a> Checker<'a> {
         };
         let hook_scope = match body {
             PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
+                self.registry,
                 arenas,
                 arenas.stmt_ids(stmts),
                 &[],
@@ -252,7 +253,7 @@ impl<'a> Checker<'a> {
                 false,
             ),
             PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(arenas, *e)
+                crate::checker::shared_scope::SharedScope::of_arrow_function(self.registry, arenas, *e)
             }
             PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
         };
@@ -581,6 +582,7 @@ impl<'a> Checker<'a> {
         };
         let hook_scope = match body {
             PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
+                self.registry,
                 arenas,
                 arenas.stmt_ids(stmts),
                 &[],
@@ -591,7 +593,7 @@ impl<'a> Checker<'a> {
                 false,
             ),
             PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(arenas, *e)
+                crate::checker::shared_scope::SharedScope::of_arrow_function(self.registry, arenas, *e)
             }
             PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
         };

@@ -33,6 +33,7 @@ mod packed;
 mod property_topology;
 pub mod provenance;
 mod purity;
+mod retention;
 pub mod reflection_attribute;
 mod relation;
 mod resolve;
@@ -1073,6 +1074,9 @@ impl Registry {
             self.function_results.remove(&id);
             self.purity_results.pure_functions.remove(&id);
             self.purity_results.function_dependencies.remove(&id);
+            self.purity_results
+                .released_parameters
+                .retain(|(function, _)| *function != id);
         }
     }
 

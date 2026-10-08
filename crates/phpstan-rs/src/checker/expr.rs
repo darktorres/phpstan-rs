@@ -4609,7 +4609,8 @@ impl<'a> Checker<'a> {
                 let mut closure_scope = crate::checker::shared_scope::SharedScope {
                     closure: true,
                     ..crate::checker::shared_scope::SharedScope::of(
-                        arenas,
+                        self.registry,
+            arenas,
                         body,
                         uses,
                         Some((
@@ -4909,6 +4910,7 @@ impl<'a> Checker<'a> {
                 let mut arrow_scope = crate::checker::shared_scope::SharedScope {
                     closure: true,
                     ..crate::checker::shared_scope::SharedScope::of_arrow_function(
+                        self.registry,
                         self.syntax_arenas()
                             .expect("arrow checks require the syntax tree owner"),
                         body.id,

@@ -556,6 +556,14 @@ mod builtin_runs {
             .map_or(&[], |at| RUNS[at].1)
     }
 
+    /// Whether the function (lowercased) kept none of a callable given as
+    /// its argument `at` once it returned.
+    pub(super) fn releases(name: &str, at: u32) -> bool {
+        RELEASES
+            .binary_search_by(|&(entry, _)| entry.cmp(name))
+            .is_ok_and(|found| RELEASES[found].1.contains(&at))
+    }
+
     /// Whether the method (`class::method`, lowercased) ran a callable or
     /// an object's method its object was made with, or given by another
     /// method.
@@ -571,6 +579,12 @@ mod builtin_runs {
             .binary_search_by(|&(entry, _)| entry.cmp(name))
             .map_or(&[], |at| HELD_WRAPPERS[at].1)
     }
+}
+
+/// Whether the builtin function `name` (lowercased) was seen to keep none of
+/// a callable it was given as its argument `at` once it returned.
+pub(crate) fn builtin_releases(name: &str, at: u32) -> bool {
+    builtin_runs::releases(name, at)
 }
 
 /// The methods PHP calls on an object it is given where it takes an

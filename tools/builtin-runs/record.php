@@ -16,8 +16,11 @@
 // `new:` for a parameter of the class's constructor, or by `by:<method>:`
 // for a parameter of another method of the class, called on the object
 // before this one. <kind> is `calls` (the callable
-// was invoked), `method` (the method <detail> was called on the object), or
-// `wrapper` (the wrapper method <detail> ran). Every builtin that was
+// was invoked), `method` (the method <detail> was called on the object),
+// `wrapper` (the wrapper method <detail> ran), or `releases` (a function
+// given a callable at a parameter declared to take one kept none of it,
+// nor of what it gave back, once it returned; a position with no such line
+// may keep it). Every builtin that was
 // called is listed with the kind `probed`; a builtin missing from the
 // output is one this PHP does not define, or one no call reached (an
 // abstract class's method, a constructor that would not take the values).
@@ -67,6 +70,8 @@ final class Seen
     /** @var array<string, true> */
     public static array $entries = [];
     public static string $where = '';
+    /** What callables passed as plain values were called with. */
+    public static array $given = [];
     // Set once the call returns: what runs after it (a destructor, a stream
     // closed as it goes) is no part of it.
     public static bool $done = false;
@@ -82,6 +87,13 @@ final class Seen
     {
         self::add('returned');
         self::$done = true;
+    }
+
+    // Recorded after the call, once what the call was given has been let go:
+    // the call kept none of it.
+    public static function released(string $where): void
+    {
+        self::$entries[$where . "\t" . 'releases' . "\t"] = true;
     }
 }
 
@@ -236,6 +248,22 @@ function admits(?ReflectionType $type, string $name): bool
     return false;
 }
 
+/** Whether `$type` names a callable, not merely admits one as `mixed` does. */
+function names_callable(?ReflectionType $type): bool
+{
+    if ($type instanceof ReflectionNamedType) {
+        return in_array(strtolower($type->getName()), ['callable', 'closure'], true);
+    }
+    if ($type instanceof ReflectionUnionType) {
+        foreach ($type->getTypes() as $member) {
+            if (names_callable($member)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /**
  * The probes for a parameter: each a description and a function that makes
  * the value passed.
@@ -284,7 +312,10 @@ function plain_value(ReflectionParameter $param): mixed
         }
     }
     if (admits($type, 'callable')) {
-        return static fn (mixed ...$args): int => 0;
+        return static function (mixed ...$args): int {
+            Seen::$given[] = $args;
+            return 0;
+        };
     }
     if (admits($type, 'iterable')) {
         return [1, 2];
@@ -459,19 +490,36 @@ function probe_function(string $function, array &$out): void
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $where = where('', $at, $probe);
-            $seen = in_child(static function () use ($function, $params, $at, $make, $where): void {
-                $value = $make();
-                Seen::$entries = [];
-                Seen::$where = $where;
-                $args = arguments($params, $at, $value);
-                $refs = [];
-                foreach ($args as $i => $arg) {
-                    $refs[$i] = $arg;
-                    $args[$i] = &$refs[$i];
+            $seen = in_child(static function () use ($function, $params, $at, $make, $where, $probe): void {
+                $weak = null;
+                // What the call gave back and the other arguments, which a
+                // caller still holds once it returned.
+                $kept = (static function () use ($function, $params, $at, $make, $where, &$weak): array {
+                    $value = $make();
+                    if (is_object($value)) {
+                        $weak = WeakReference::create($value);
+                    }
+                    Seen::$entries = [];
+                    Seen::$where = $where;
+                    $args = arguments($params, $at, $value);
+                    $refs = [];
+                    foreach ($args as $i => $arg) {
+                        $refs[$i] = $arg;
+                        $args[$i] = &$refs[$i];
+                    }
+                    Seen::add('reached');
+                    $result = call_user_func_array($function, $args);
+                    Seen::returned();
+                    unset($refs[$at]);
+                    return [$result, $refs];
+                })();
+                if ($probe === 'callable' && $weak !== null && names_callable($params[$at]->getType()) && !$params[$at]->isPassedByReference()) {
+                    gc_collect_cycles();
+                    if ($weak->get() === null) {
+                        Seen::released($where);
+                    }
                 }
-                Seen::add('reached');
-                call_user_func_array($function, $args);
-                Seen::returned();
+                unset($kept);
             });
             record(strtolower($function), $where, $seen, $out);
         }

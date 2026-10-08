@@ -2107,7 +2107,7 @@ impl<'a> Checker<'a> {
 
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
-        let top_level_scope = shared_scope::SharedScope::of(arenas, stmts, &[], None, true);
+        let top_level_scope = shared_scope::SharedScope::of(self.registry, arenas, stmts, &[], None, true);
         let enclosing_scope = self.enter_shared_scope(top_level_scope);
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here: real PHP only

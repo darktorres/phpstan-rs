@@ -350,7 +350,8 @@ impl<'a> Checker<'a> {
                     self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
                         closure: true,
                         ..crate::checker::shared_scope::SharedScope::of(
-                            arenas,
+                            self.registry,
+            arenas,
                             body,
                             uses,
                             Some((

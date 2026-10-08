@@ -72,6 +72,9 @@ pub(crate) struct PurityResults {
     pub(crate) pure_methods: FxHashSet<MethodRef>,
     pub(crate) function_dependencies: FxHashMap<FnId, Option<Vec<PurityDependency>>>,
     pub(crate) method_dependencies: FxHashMap<MethodRef, Option<Vec<PurityDependency>>>,
+    /// The parameters of functions of the program that a call leaves no
+    /// other code able to reach what it was given as (`Registry::resolve_retention`).
+    pub(crate) released_parameters: FxHashSet<(FnId, u32)>,
 }
 
 impl Registry {
@@ -86,6 +89,7 @@ impl Registry {
     pub(crate) fn resolve_transitive_purity(&mut self, bodies: &dyn BodySource) {
         let candidates = self.classify_purity(bodies);
         self.run_purity_fixed_point(&candidates);
+        self.resolve_retention(bodies);
         self.resolve_effects(bodies);
     }
 
@@ -148,6 +152,9 @@ impl Registry {
         self.purity_results
             .function_dependencies
             .retain(|id, _| !function_ids.contains(id));
+        self.purity_results
+            .released_parameters
+            .retain(|(id, _)| !function_ids.contains(id));
         self.purity_results
             .method_dependencies
             .retain(|method, _| !class_ids.contains(&method.class()));

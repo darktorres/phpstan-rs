@@ -16,6 +16,8 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
+use crate::registry::retention::{ParamUse, ParamUses};
+
 /// A call a body's purity is conditional on, in the form the body wrote it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum PurityCall {
@@ -804,6 +806,8 @@ pub struct BodySummary {
     pub(crate) empty: bool,
     /// The properties the body assigns, when it assigns any.
     pub(crate) assigned: Option<Box<AssignedProperties>>,
+    /// What the body does with its parameters, when it has any.
+    pub(crate) parameters: Option<Box<ParamUses>>,
 }
 
 impl BodySummary {
@@ -834,6 +838,7 @@ impl BodySummary {
         arena::walk_stmts(&mut walk, arenas, body);
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
+        summary.parameters = ParamUses::of(arenas, params, body);
         summary
     }
 
@@ -1092,6 +1097,7 @@ impl Summarizer {
             closures: self.written.into_boxed_slice(),
             empty: false,
             assigned: self.assigned.finish(),
+            parameters: None,
         }
     }
 
@@ -2280,7 +2286,12 @@ syntax::canonical_struct!(BodySummary {
     closures,
     empty,
     assigned,
+    parameters,
 });
+
+syntax::canonical_struct!(ParamUses { params });
+
+syntax::canonical_struct!(ParamUse { kept, passed });
 
 syntax::canonical_struct!(AssignedProperties {
     on_this,

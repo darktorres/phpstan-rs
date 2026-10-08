@@ -957,6 +957,7 @@ impl<'a> Checker<'a> {
         let body_stmts = f.body_stmts(arenas);
         let previous_assigned_variables = self.enter_assigned_variables(arenas, body_stmts);
         let mut scope = crate::checker::shared_scope::SharedScope::of(
+            self.registry,
             arenas,
             body_stmts,
             &[],
