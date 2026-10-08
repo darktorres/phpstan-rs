@@ -471,6 +471,11 @@ impl Checker<'_> {
         if prop.is_none() && self.private_array(base, scope, locals) {
             return false;
         }
+        if let Some(prop) = prop
+            && self.readonly_property(base, prop, locals)
+        {
+            return false;
+        }
         if anything {
             return true;
         }
@@ -489,6 +494,27 @@ impl Checker<'_> {
             } => names(written) && self.may_hold(&base_ty, class.as_deref()),
             Storage::Static { .. } | Storage::Global(_) | Storage::StaticVar { .. } => false,
         })
+    }
+
+    /// Whether `prop` is a native `readonly` property of every class the
+    /// value at `base` may be: once initialised it is written by no code, so
+    /// what the scope knows of it holds through any call.
+    fn readonly_property(&self, base: LocalKey, prop: &Name, locals: &Locals) -> bool {
+        let Some(ty) = self.key_type(base, locals) else {
+            return false;
+        };
+        if !ty.is_object().yes() {
+            return false;
+        }
+        let classes = ty.object_class_names();
+        !classes.is_empty()
+            && classes.iter().all(|class| {
+                self.registry
+                    .lookup_property(class, prop)
+                    .is_some_and(|declared| {
+                        declared.is_readonly() && !declared.readonly_by_phpdoc()
+                    })
+            })
     }
 
     /// Whether the element facts of the value at `base` rest on arrays and
