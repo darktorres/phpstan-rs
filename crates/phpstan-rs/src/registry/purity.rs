@@ -75,6 +75,10 @@ pub(crate) struct PurityResults {
     /// The parameters of functions of the program that a call leaves no
     /// other code able to reach what it was given as (`Registry::resolve_retention`).
     pub(crate) released_parameters: FxHashSet<(FnId, u32)>,
+    /// The functions and static methods whose bodies return only objects
+    /// they made (`Registry::resolve_fresh`).
+    pub(crate) fresh_functions: FxHashSet<FnId>,
+    pub(crate) fresh_methods: FxHashSet<MethodRef>,
 }
 
 impl Registry {
@@ -90,6 +94,7 @@ impl Registry {
         let candidates = self.classify_purity(bodies);
         self.run_purity_fixed_point(&candidates);
         self.resolve_retention(bodies);
+        self.resolve_fresh(bodies);
         self.resolve_effects(bodies);
     }
 
@@ -155,6 +160,12 @@ impl Registry {
         self.purity_results
             .released_parameters
             .retain(|(id, _)| !function_ids.contains(id));
+        self.purity_results
+            .fresh_functions
+            .retain(|id| !function_ids.contains(id));
+        self.purity_results
+            .fresh_methods
+            .retain(|method| !class_ids.contains(&method.class()));
         self.purity_results
             .method_dependencies
             .retain(|method, _| !class_ids.contains(&method.class()));

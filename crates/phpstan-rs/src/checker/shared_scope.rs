@@ -419,8 +419,10 @@ fn root_is_computed(arenas: &NodeArenas, id: ExprId) -> bool {
     })
 }
 
-/// What the scope made or wrote that `e` evaluates to.
-fn held_by(arenas: &NodeArenas, id: ExprId) -> Held {
+/// What the scope made or wrote that `e` evaluates to: an object made by
+/// `new` or `clone`, or given back by a function that returns only objects
+/// it made.
+fn held_by(registry: Option<&Registry>, arenas: &NodeArenas, id: ExprId) -> Held {
     let Some(id) = arenas.peeled(id) else {
         return Held::Other;
     };
@@ -432,7 +434,29 @@ fn held_by(arenas: &NodeArenas, id: ExprId) -> Held {
         ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
             Held::Closures(vec![(id, BodySummary::of_closure(arenas, id))])
         }
-        ExprKind::Assign(_, rhs) => held_by(arenas, *rhs),
+        ExprKind::Assign(_, rhs) => held_by(registry, arenas, *rhs),
+        ExprKind::Call(callee, _) => {
+            let fresh = registry.is_some_and(|registry| {
+                match arenas.peeled(*callee).and_then(|id| arenas.expr(id)) {
+                    Some(ExprNode {
+                        kind: ExprKind::Name(name),
+                        ..
+                    }) => arenas
+                        .qualified_name(name)
+                        .is_some_and(|name| registry.function_returns_fresh(name)),
+                    _ => false,
+                }
+            });
+            if fresh { Held::Made } else { Held::Other }
+        }
+        ExprKind::StaticCall(target, method, _) => {
+            let fresh = registry.is_some_and(|registry| {
+                target
+                    .as_name()
+                    .is_some_and(|class| registry.static_method_returns_fresh(class, &method.name))
+            });
+            if fresh { Held::Made } else { Held::Other }
+        }
         _ => Held::Other,
     })
 }
@@ -567,7 +591,7 @@ impl Scan<'_> {
                 {
                     self.expose(arenas, *rhs);
                 }
-                self.assign(arenas, *lhs, held_by(arenas, *rhs));
+                self.assign(arenas, *lhs, held_by(self.registry, arenas, *rhs));
                 self.visit_expr(arenas, *rhs);
             }
             ExprKind::AssignRef(lhs, rhs) => {

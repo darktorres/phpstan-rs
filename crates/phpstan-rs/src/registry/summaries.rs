@@ -16,6 +16,7 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
+use crate::registry::fresh::{FreshCall, FreshReturns};
 use crate::registry::retention::{ParamUse, ParamUses};
 
 /// A call a body's purity is conditional on, in the form the body wrote it.
@@ -808,6 +809,8 @@ pub struct BodySummary {
     pub(crate) assigned: Option<Box<AssignedProperties>>,
     /// What the body does with its parameters, when it has any.
     pub(crate) parameters: Option<Box<ParamUses>>,
+    /// What the body returns, when it returns only objects it made.
+    pub(crate) fresh: Option<Box<FreshReturns>>,
 }
 
 impl BodySummary {
@@ -839,6 +842,7 @@ impl BodySummary {
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
         summary.parameters = ParamUses::of(arenas, params, body);
+        summary.fresh = FreshReturns::of(arenas, params, body);
         summary
     }
 
@@ -1098,6 +1102,7 @@ impl Summarizer {
             empty: false,
             assigned: self.assigned.finish(),
             parameters: None,
+            fresh: None,
         }
     }
 
@@ -2287,7 +2292,15 @@ syntax::canonical_struct!(BodySummary {
     empty,
     assigned,
     parameters,
+    fresh,
 });
+
+syntax::canonical_enum!(FreshCall {
+    Function(name),
+    Static(class, method),
+});
+
+syntax::canonical_struct!(FreshReturns { calls });
 
 syntax::canonical_struct!(ParamUses { params });
 

@@ -17,6 +17,7 @@ use class_info::{ResolvedTypeImport, TraitAlias};
 mod container;
 mod effects;
 mod file_decls;
+mod fresh;
 mod function_sig;
 mod generics;
 mod global_vars;
@@ -1046,6 +1047,9 @@ impl Registry {
             self.purity_results
                 .method_dependencies
                 .retain(|method, _| method.class() != id);
+            self.purity_results
+                .fresh_methods
+                .retain(|method| method.class() != id);
             self.class_const_types.retain(|(class, _), _| *class != id);
             self.class_const_types_by_id.remove(&id);
             self.class_constant_results
@@ -1077,6 +1081,7 @@ impl Registry {
             self.purity_results
                 .released_parameters
                 .retain(|(function, _)| *function != id);
+            self.purity_results.fresh_functions.remove(&id);
         }
     }
 
