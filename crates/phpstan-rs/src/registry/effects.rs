@@ -3781,6 +3781,11 @@ impl<'r> Level<'r> {
             },
             Root::Variable(Some(name)) => self.variable_holder(name),
             Root::Static(class, Some(prop)) => self.static_holder(class, prop),
+            // A superglobal is an array of strings, files or session values
+            // PHP itself fills.
+            Root::Global(Some(name)) if syntax::ast::is_superglobal(name) => {
+                Holder::Classes(Vec::new())
+            }
             Root::Variable(None)
             | Root::Static(_, None)
             | Root::DynamicStatic(_)
