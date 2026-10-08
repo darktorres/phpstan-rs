@@ -27,9 +27,10 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::registry::infer_const_type;
+use crate::registry::summaries::ArgAt;
 use syntax::ast::{
     BinOp, ClosurePayload, ExprId, ExprKind, ExprNode, GlobalVar, Literal, NodeArenas,
-    QualifiedName, StaticTarget, StmtId, StmtKind,
+    QualifiedName, StaticTarget, StmtId, StmtKind, UnaryOp,
 };
 use syntax::visit::arena::{self, Visitor};
 
@@ -202,6 +203,69 @@ enum ContributionFact {
     Field(String, StaticValue),
     /// A field of unknown value.
     FieldMixed(String),
+    /// The variable, or the field `key` of it, passed as an argument that
+    /// the callee may take by reference.
+    ByRefArgument {
+        callee: ByRefCallee,
+        at: ArgAt,
+        key: Option<String>,
+    },
+}
+
+/// What a call passing a variable by reference calls, as written.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum ByRefCallee {
+    Function(QualifiedName),
+    /// A method, a static method or a constructor, by its name.
+    Method(Name),
+    /// A callee that is computed.
+    Unknown,
+}
+
+/// The names of the methods any loaded class declares with a parameter
+/// taken by reference, found on first use.
+struct ByRefMethods<'r> {
+    registry: &'r Registry,
+    names: std::sync::OnceLock<FxHashSet<String>>,
+}
+
+impl ByRefMethods<'_> {
+    fn declared(&self, method: &str) -> bool {
+        let names = self.names.get_or_init(|| {
+            let mut names = FxHashSet::default();
+            for (class, _) in self.registry.class_ids.iter() {
+                for name in self.registry.method_names(class) {
+                    if self
+                        .registry
+                        .lookup_own_method(class, name)
+                        .is_some_and(|sig| sig.params.iter().any(|p| p.by_ref))
+                    {
+                        names.insert(name.to_ascii_lowercase());
+                    }
+                }
+            }
+            names
+        });
+        names.contains(&method.to_ascii_lowercase())
+    }
+}
+
+/// Whether the function `sig` takes the argument passed `at` by reference.
+fn takes_by_ref(sig: &crate::registry::FunctionReflection, at: &ArgAt) -> bool {
+    match at {
+        ArgAt::Position(at) => sig
+            .params
+            .get(*at as usize)
+            .or_else(|| sig.params.last().filter(|p| p.variadic))
+            .is_some_and(|p| p.by_ref),
+        ArgAt::Named(name) => sig
+            .params
+            .iter()
+            .find(|p| p.name.as_ref() == name.as_str())
+            .or_else(|| sig.params.last().filter(|p| p.variadic))
+            .is_some_and(|p| p.by_ref),
+        ArgAt::Spread => sig.params.iter().any(|p| p.by_ref),
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -231,15 +295,17 @@ impl GlobalFacts {
     }
 
     /// The sites with what they assign, as `registry` says it is.
-    fn resolve(&self, id: FileId, registry: &Registry) -> FileSites {
+    fn resolve(&self, id: FileId, registry: &Registry, methods: &ByRefMethods) -> FileSites {
         FileSites {
             sites: self
                 .sites
                 .iter()
-                .map(|site| StagedSite {
-                    gate: site.top_level.then_some(id),
-                    name: site.name.clone(),
-                    contribution: site.contribution.resolve(registry),
+                .filter_map(|site| {
+                    Some(StagedSite {
+                        gate: site.top_level.then_some(id),
+                        name: site.name.clone(),
+                        contribution: site.contribution.resolve(registry, methods)?,
+                    })
                 })
                 .collect(),
             include_sites: self.include_sites.clone(),
@@ -248,8 +314,8 @@ impl GlobalFacts {
 }
 
 impl ContributionFact {
-    fn resolve(&self, registry: &Registry) -> SiteContribution {
-        match self {
+    fn resolve(&self, registry: &Registry, methods: &ByRefMethods) -> Option<SiteContribution> {
+        Some(match self {
             ContributionFact::Mixed => SiteContribution::WholeValue(Type::mixed()),
             ContributionFact::Whole(value) => {
                 SiteContribution::WholeValue(resolve_value(value, registry))
@@ -284,7 +350,23 @@ impl ContributionFact {
             ContributionFact::FieldMixed(key) => {
                 SiteContribution::ShapeField(key.clone(), Type::mixed())
             }
-        }
+            ContributionFact::ByRefArgument { callee, at, key } => {
+                let by_ref = match callee {
+                    ByRefCallee::Function(name) => registry
+                        .resolve_function(name)
+                        .is_some_and(|(_, sig)| takes_by_ref(sig, at)),
+                    ByRefCallee::Method(name) => methods.declared(name),
+                    ByRefCallee::Unknown => true,
+                };
+                if !by_ref {
+                    return None;
+                }
+                match key {
+                    Some(key) => SiteContribution::ShapeField(key.clone(), Type::mixed()),
+                    None => SiteContribution::WholeValue(Type::mixed()),
+                }
+            }
+        })
     }
 }
 
@@ -317,12 +399,16 @@ impl Registry {
         // (`hierarchy.rs`): build the whole result into locals first,
         // assign into `self` only once the borrow is done.
         let registry: &Registry = self;
+        let methods = ByRefMethods {
+            registry,
+            names: std::sync::OnceLock::new(),
+        };
         // Each file's walk reads only the registry, so the files are
         // walked side by side; the sites come back in the files' order.
         let walked: Vec<(FileId, FileSites)> = files
             .par_iter()
             .filter(|(id, ..)| !registry.global_sites.contains_key(id))
-            .map(|(id, _, facts)| (*id, facts.resolve(*id, registry)))
+            .map(|(id, _, facts)| (*id, facts.resolve(*id, registry, &methods)))
             .collect();
         self.global_sites.extend(walked);
 
@@ -594,8 +680,32 @@ impl Visitor for Scope<'_> {
                 }
                 return;
             }
-            StmtKind::Expression(e) => {
-                handle_top_expr_statement(arenas, *e, self.top_level, self.global_names, self.out);
+            StmtKind::Foreach {
+                subject,
+                key,
+                value,
+                by_ref,
+                ..
+            } => {
+                for target in key.iter().chain(Some(value)) {
+                    self.written(arenas, *target);
+                }
+                if *by_ref {
+                    self.written(arenas, *subject);
+                }
+            }
+            StmtKind::Try { catches, .. } => {
+                for clause in arenas.catch_clauses(catches.clone()) {
+                    if let Some(var) = &clause.var
+                        && self.is_site(&var.name)
+                    {
+                        self.out.sites.push(SiteFact {
+                            top_level: self.top_level,
+                            name: var.name.clone(),
+                            contribution: ContributionFact::Mixed,
+                        });
+                    }
+                }
             }
             _ => {}
         }
@@ -622,11 +732,67 @@ impl Visitor for Scope<'_> {
                 }
                 return;
             }
+            // An arrow function's body is a scope of its own, which takes
+            // the variables around it by value.
+            ExprKind::ArrowFn(_) => {
+                let names = NameSet::default();
+                let mut inner = Scope {
+                    top_level: false,
+                    global_names: &names,
+                    out: &mut *self.out,
+                };
+                arena::walk_expr(&mut inner, arenas, id);
+                return;
+            }
             ExprKind::Include(_, target) => {
                 self.out.include_sites.push(IncludeSite {
                     top_level: self.top_level,
                     suffix: resolve_include_target_suffix(arenas, *target),
                 });
+            }
+            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => {
+                handle_write_expr(arenas, id, self.top_level, self.global_names, self.out);
+                self.written_pattern(arenas, *lhs);
+            }
+            ExprKind::CompoundAssign(..) => {
+                handle_write_expr(arenas, id, self.top_level, self.global_names, self.out);
+            }
+            ExprKind::Unary(
+                UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
+                operand,
+            ) => self.written(arenas, *operand),
+            ExprKind::Call(callee, args) => {
+                let callee = match arenas
+                    .peeled(*callee)
+                    .and_then(|id| arenas.expr(id))
+                    .map(|callee| &callee.kind)
+                {
+                    Some(ExprKind::Name(name)) => arenas
+                        .qualified_name(name)
+                        .map_or(ByRefCallee::Unknown, |name| {
+                            ByRefCallee::Function(name.clone())
+                        }),
+                    _ => ByRefCallee::Unknown,
+                };
+                self.passed(arenas, callee, args.clone());
+            }
+            ExprKind::MethodCall(_, method, args, _) | ExprKind::StaticCall(_, method, args) => {
+                self.passed(
+                    arenas,
+                    ByRefCallee::Method(method.name.clone()),
+                    args.clone(),
+                );
+            }
+            ExprKind::New(_, args) => {
+                self.passed(
+                    arenas,
+                    ByRefCallee::Method(Name::from("__construct")),
+                    args.clone(),
+                );
+            }
+            ExprKind::DynamicMethodCall(_, _, args, _)
+            | ExprKind::DynamicStaticCall(_, _, args) => {
+                self.passed(arenas, ByRefCallee::Unknown, args.clone());
             }
             _ => {}
         }
@@ -634,11 +800,99 @@ impl Visitor for Scope<'_> {
     }
 }
 
+impl Scope<'_> {
+    fn is_site(&self, name: &str) -> bool {
+        self.top_level || self.global_names.contains(name)
+    }
+
+    /// Records that `target` is written a value not known: the variable
+    /// whole, or the field of it a literal key names, or each target of a
+    /// pattern.
+    fn written(&mut self, arenas: &NodeArenas, target: ExprId) {
+        let Some(expr) = arenas.peeled(target).and_then(|id| arenas.expr(id)) else {
+            return;
+        };
+        match &expr.kind {
+            ExprKind::Variable(name) if self.is_site(name) => self.out.sites.push(SiteFact {
+                top_level: self.top_level,
+                name: name.clone(),
+                contribution: ContributionFact::Mixed,
+            }),
+            ExprKind::Index(..) => {
+                if let Some((name, key)) = root_variable_and_first_key(arenas, expr.id)
+                    && self.is_site(name)
+                {
+                    self.out.sites.push(SiteFact {
+                        top_level: self.top_level,
+                        name: name.clone(),
+                        contribution: ContributionFact::FieldMixed(key),
+                    });
+                }
+            }
+            ExprKind::Destructure(items, _) => {
+                for item in arenas.destructure_items(items) {
+                    if let Some(target) = item.target {
+                        self.written(arenas, target);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Records the targets of `lhs` when it is a pattern.
+    fn written_pattern(&mut self, arenas: &NodeArenas, lhs: ExprId) {
+        if arenas
+            .peeled(lhs)
+            .and_then(|id| arenas.expr(id))
+            .is_some_and(|expr| matches!(expr.kind, ExprKind::Destructure(..)))
+        {
+            self.written(arenas, lhs);
+        }
+    }
+
+    /// Records the variables a call passes as arguments the callee may
+    /// take by reference.
+    fn passed(&mut self, arenas: &NodeArenas, callee: ByRefCallee, args: syntax::ast::ArgRange) {
+        let mut spread = false;
+        for (at, arg) in arenas.args(args).iter().enumerate() {
+            spread |= arg.spread;
+            let at = match &arg.name {
+                _ if spread => ArgAt::Spread,
+                Some(name) => ArgAt::Named(name.name.clone()),
+                None => ArgAt::Position(at as u32),
+            };
+            let Some(expr) = arenas.peeled(arg.value).and_then(|id| arenas.expr(id)) else {
+                continue;
+            };
+            let (name, key) = match &expr.kind {
+                ExprKind::Variable(name) => (name, None),
+                ExprKind::Index(..) => match root_variable_and_first_key(arenas, expr.id) {
+                    Some((name, key)) => (name, Some(key)),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            if self.is_site(name) {
+                self.out.sites.push(SiteFact {
+                    top_level: self.top_level,
+                    name: name.clone(),
+                    contribution: ContributionFact::ByRefArgument {
+                        callee: callee.clone(),
+                        at,
+                        key,
+                    },
+                });
+            }
+        }
+    }
+}
+
 /// An expression statement's assignment to a variable that is a global
 /// here (at file top level, or imported with `global`): records it as a
 /// site of that global, gated on the file being included when at top
 /// level. A compound assignment only widens the variable.
-fn handle_top_expr_statement(
+fn handle_write_expr(
     arenas: &NodeArenas,
     id: ExprId,
     top_level: bool,
@@ -929,6 +1183,13 @@ syntax::canonical_enum!(ContributionFact {
     },
     Field(key, value),
     FieldMixed(key),
+    ByRefArgument { callee, at, key },
+});
+
+syntax::canonical_enum!(ByRefCallee {
+    Function(name),
+    Method(name),
+    Unknown,
 });
 
 syntax::canonical_enum!(StaticValue {
