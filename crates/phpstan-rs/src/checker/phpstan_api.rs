@@ -79,8 +79,8 @@ use syntax::visit::arena::{self, Visitor};
 /// these rules that cares which package a file belongs to), and it never
 /// fires without a file, the same "no signal, stay quiet" leniency every
 /// other unresolvable case in this module already gets.
-pub(crate) fn check_phpstan_api_usage<'a>(
-    arenas: &'a NodeArenas,
+pub(crate) fn check_phpstan_api_usage(
+    arenas: &NodeArenas,
     program: &[StmtId],
     line_index: &LineIndex,
     registry: &Registry,
@@ -924,22 +924,18 @@ impl Visitor for Walker<'_> {
                         kind: ExprKind::Name(n),
                         ..
                     }) = arenas.expr(*callee)
-                    {
-                        if let Some(name) = arenas.qualified_name(n) {
+                        && let Some(name) = arenas.qualified_name(n) {
                             self.check_runtime_reflection_function(name, self.expr_span(e.id));
                         }
-                    }
                 }
                 ExprKind::New(callee, _) => {
                     if let Some(ExprNode {
                         kind: ExprKind::Name(n),
                         ..
                     }) = arenas.expr(*callee)
-                    {
-                        if let Some(name) = arenas.qualified_name(n) {
+                        && let Some(name) = arenas.qualified_name(n) {
                             self.check_new(name, self.expr_span(e.id));
                         }
-                    }
                 }
                 ExprKind::StaticCall(target, method, _) => {
                     // Resolved unconditionally, NOT pre-filtered through

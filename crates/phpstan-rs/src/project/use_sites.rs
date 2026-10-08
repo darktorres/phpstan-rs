@@ -471,11 +471,11 @@ impl Visitor for ClassFnRefWalker<'_> {
                 // class; only the arguments are walked.
                 ExprKind::Call(callee, args) | ExprKind::New(callee, args)
                     if matches!(
-                        arenas.expr(callee.clone()).map(|node| &node.kind),
+                        arenas.expr(*callee).map(|node| &node.kind),
                         Some(ExprKind::Name(_))
                     ) =>
                 {
-                    let Some(callee_node) = arenas.expr(callee.clone()) else {
+                    let Some(callee_node) = arenas.expr(*callee) else {
                         return;
                     };
                     let ExprKind::Name(n) = &callee_node.kind else {

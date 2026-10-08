@@ -198,7 +198,7 @@ impl Visitor for Walker<'_> {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {
-                    let callee_node = arenas.expr(callee.clone());
+                    let callee_node = arenas.expr(*callee);
                     let target = match callee_node.map(|callee| &callee.kind) {
                         Some(ExprKind::Name(n)) => arenas
                             .qualified_name(n)
@@ -221,7 +221,7 @@ impl Visitor for Walker<'_> {
                     );
                 }
                 ExprKind::New(callee, args) => {
-                    let callee_node = arenas.expr(callee.clone());
+                    let callee_node = arenas.expr(*callee);
                     let target = match callee_node.map(|callee| &callee.kind) {
                         Some(ExprKind::Name(n)) => arenas
                             .qualified_name(n)
@@ -251,7 +251,7 @@ impl Visitor for Walker<'_> {
                     );
                 }
                 ExprKind::MethodCall(recv, method, args, _) => {
-                    let recv_node = arenas.expr(recv.clone());
+                    let recv_node = arenas.expr(*recv);
                     let target = match &self.current_class {
                         Some(owner) if matches!(recv_node.map(|recv| &recv.kind), Some(ExprKind::Variable(v)) if *v == "this") => {
                             Target::Member(owner.clone(), method.to_string())
@@ -288,7 +288,7 @@ impl Visitor for Walker<'_> {
                     );
                 }
                 ExprKind::NewAnonymousClass(class_id) => {
-                    let Some(class) = arenas.anonymous_class(class_id.clone()) else {
+                    let Some(class) = arenas.anonymous_class(*class_id) else {
                         return;
                     };
                     let target = arenas

@@ -88,15 +88,15 @@ fn this_type_from_class_names(names: Vec<String>) -> Option<Type> {
 /// checked first, ahead of any directory-scoped `Pest.php` config.
 pub(crate) fn file_local_this_type(arenas: &NodeArenas, program: &[StmtId]) -> Option<Type> {
     program.iter().find_map(|id| {
-        let stmt = arenas.stmt(id.clone())?;
+        let stmt = arenas.stmt(*id)?;
         let StmtKind::Expression(e) = &stmt.kind else {
             return None;
         };
-        let e = arenas.expr(arenas.peeled(e.clone())?)?;
+        let e = arenas.expr(arenas.peeled(*e)?)?;
         let ExprKind::Call(callee, args) = &e.kind else {
             return None;
         };
-        let ExprKind::Name(name) = &arenas.expr(callee.clone())?.kind else {
+        let ExprKind::Name(name) = &arenas.expr(*callee)?.kind else {
             return None;
         };
         let name = arenas.qualified_name(name)?;
@@ -147,13 +147,13 @@ pub(crate) fn file_local_hook_properties(
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let Some(e) = arenas.peeled(e.clone()).and_then(|id| arenas.expr(id)) else {
+        let Some(e) = arenas.peeled(*e).and_then(|id| arenas.expr(id)) else {
             continue;
         };
         let ExprKind::Call(callee, args) = &e.kind else {
             continue;
         };
-        let Some(callee) = arenas.expr(callee.clone()) else {
+        let Some(callee) = arenas.expr(*callee) else {
             continue;
         };
         let ExprKind::Name(name) = &callee.kind else {
@@ -189,7 +189,7 @@ fn collect_hook_closure_properties(
     let ExprKind::Closure(closure_id) = &expr.kind else {
         return;
     };
-    let Some(ClosurePayload::Closure(closure)) = arenas.closure(closure_id.clone()) else {
+    let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
         return;
     };
     for &id in arenas.stmt_ids(&closure.body) {
@@ -199,19 +199,19 @@ fn collect_hook_closure_properties(
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let Some(e) = arenas.peeled(e.clone()).and_then(|id| arenas.expr(id)) else {
+        let Some(e) = arenas.peeled(*e).and_then(|id| arenas.expr(id)) else {
             continue;
         };
         let (ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _)) = &e.kind else {
             continue;
         };
-        let Some(lhs) = arenas.expr(lhs.clone()) else {
+        let Some(lhs) = arenas.expr(*lhs) else {
             continue;
         };
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             continue;
         };
-        if matches!(arenas.expr(base.clone()).map(|e| &e.kind), Some(ExprKind::Variable(name)) if **name == *"this")
+        if matches!(arenas.expr(*base).map(|e| &e.kind), Some(ExprKind::Variable(name)) if **name == *"this")
         {
             props.insert(prop.to_string());
         }
@@ -236,7 +236,7 @@ fn walk_uses_chain(
         let expr = arenas.expr(arenas.peeled(expr)?)?;
         match &expr.kind {
             ExprKind::Call(callee, args) => {
-                let ExprKind::Name(name) = &arenas.expr(callee.clone())?.kind else {
+                let ExprKind::Name(name) = &arenas.expr(*callee)?.kind else {
                     return None;
                 };
                 let name = arenas.qualified_name(name)?;
@@ -290,7 +290,7 @@ impl PestFacts {
             let StmtKind::Expression(e) = &stmt.kind else {
                 continue;
             };
-            let e = arenas.expr(arenas.peeled(e.clone())?)?;
+            let e = arenas.expr(arenas.peeled(*e)?)?;
             let ExprKind::MethodCall(inner, method, in_args, _) = &e.kind else {
                 continue;
             };

@@ -923,11 +923,10 @@ impl<V: Clone> NameTable<V> {
         if let Some(base) = self.base.take() {
             for i in 0..base.len() {
                 let name = base.name(i);
-                if !self.hidden.contains(name.lower()) {
-                    if let Some(value) = base.value_shared(i) {
+                if !self.hidden.contains(name.lower())
+                    && let Some(value) = base.value_shared(i) {
                         all.push((name.clone(), Arc::clone(value)));
                     }
-                }
             }
         }
         all.extend(std::mem::take(&mut self.entries));
@@ -964,11 +963,10 @@ impl<'a, V> Iterator for Iter<'a, V> {
         let base: &'a Base<V> = base;
         for i in positions {
             let name = base.name(i);
-            if !self.hidden.contains(name.lower()) {
-                if let Some(value) = base.value(i) {
+            if !self.hidden.contains(name.lower())
+                && let Some(value) = base.value(i) {
                     return Some((name, value));
                 }
-            }
         }
         None
     }
@@ -996,11 +994,10 @@ impl<V: Clone> IntoIterator for NameTable<V> {
         if let Some(base) = &self.base {
             for i in 0..base.len() {
                 let name = base.name(i);
-                if !self.hidden.contains(name.lower()) {
-                    if let Some(value) = base.value(i) {
+                if !self.hidden.contains(name.lower())
+                    && let Some(value) = base.value(i) {
                         all.push((name.clone(), value.clone()));
                     }
-                }
             }
         }
         all.extend(self.entries.into_iter().map(|(name, value)| {

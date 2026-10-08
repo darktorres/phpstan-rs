@@ -49,7 +49,7 @@ fn is_test_helper_call(arenas: &NodeArenas, id: ExprId, name: &str) -> Option<Ar
     match &arenas.expr(id)?.kind {
         ExprKind::MethodCall(recv, method, args, _)
             if method.eq_ignore_ascii_case(name)
-                && matches!(arenas.expr(recv.clone()).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") =>
+                && matches!(arenas.expr(*recv).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") =>
         {
             Some(args.clone())
         }
@@ -126,7 +126,7 @@ fn mock_origin(arenas: &NodeArenas, id: ExprId) -> Option<bool> {
 fn origin_key(arenas: &NodeArenas, id: ExprId) -> Option<String> {
     match &arenas.expr(id)?.kind {
         ExprKind::Variable(name) => Some(format!("${name}")),
-        ExprKind::PropertyAccess(object, prop, _) if matches!(arenas.expr(object.clone()).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") => {
+        ExprKind::PropertyAccess(object, prop, _) if matches!(arenas.expr(*object).map(|e| &e.kind), Some(ExprKind::Variable(v)) if v.as_ref() == "this") => {
             Some(format!("this->{prop}"))
         }
         _ => None,

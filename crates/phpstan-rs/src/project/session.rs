@@ -1336,11 +1336,10 @@ impl Session {
             );
             if let Read::Loaded(file) = &mut read {
                 shared.index_use_sites(&mut file.parsed, &file.source);
-                if !keeps_tree {
-                    if let Some(scratch) = file.parsed.drop_tree() {
+                if !keeps_tree
+                    && let Some(scratch) = file.parsed.drop_tree() {
                         state.scratch = scratch;
                     }
-                }
                 if !(self.settings.retain_source && held) {
                     file.source = String::new();
                 }

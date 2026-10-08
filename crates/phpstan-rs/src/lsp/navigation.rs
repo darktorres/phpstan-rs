@@ -472,7 +472,7 @@ impl Visitor for Walker<'_> {
                 self.visit_stmt(arenas, *body);
             }
             StmtKind::FunctionDecl(function_id) => {
-                if let Some(function) = arenas.function(function_id.clone()) {
+                if let Some(function) = arenas.function(*function_id) {
                     self.record(
                         function.name.span,
                         Resolved::Function(function.fq_name().to_string()),
@@ -607,7 +607,7 @@ impl Visitor for Walker<'_> {
         syntax::stack::guard(|| {
             match &expr.kind {
                 ExprKind::NewAnonymousClass(class_id) => {
-                    let Some(class) = arenas.anonymous_class(class_id.clone()) else {
+                    let Some(class) = arenas.anonymous_class(*class_id) else {
                         return;
                     };
                     arena::walk_args(self, arenas, class.args.clone());
@@ -628,14 +628,14 @@ impl Visitor for Walker<'_> {
                 // some other way (see the plain `ExprKind::Name` arm below).
                 ExprKind::Call(callee, args)
                     if matches!(
-                        arenas.expr(callee.clone()).map(|e| &e.kind),
+                        arenas.expr(*callee).map(|e| &e.kind),
                         Some(ExprKind::Name(_))
                     ) =>
                 {
                     let Some(ExprNode {
                         kind: ExprKind::Name(n),
                         ..
-                    }) = arenas.expr(callee.clone())
+                    }) = arenas.expr(*callee)
                     else {
                         unreachable!()
                     };
@@ -654,14 +654,14 @@ impl Visitor for Walker<'_> {
                 // mirror image of `Call` just above.
                 ExprKind::New(callee, args)
                     if matches!(
-                        arenas.expr(callee.clone()).map(|e| &e.kind),
+                        arenas.expr(*callee).map(|e| &e.kind),
                         Some(ExprKind::Name(_))
                     ) =>
                 {
                     let Some(ExprNode {
                         kind: ExprKind::Name(n),
                         ..
-                    }) = arenas.expr(callee.clone())
+                    }) = arenas.expr(*callee)
                     else {
                         unreachable!()
                     };
@@ -763,7 +763,7 @@ impl Visitor for Walker<'_> {
                 }
                 ExprKind::Closure(closure_id) => {
                     let Some(syntax::ast::ClosurePayload::Closure(closure)) =
-                        arenas.closure(closure_id.clone())
+                        arenas.closure(*closure_id)
                     else {
                         return;
                     };
@@ -798,7 +798,7 @@ impl Visitor for Walker<'_> {
                 }
                 ExprKind::ArrowFn(arrow_id) => {
                     let Some(syntax::ast::ClosurePayload::ArrowFn(arrow)) =
-                        arenas.closure(arrow_id.clone())
+                        arenas.closure(*arrow_id)
                     else {
                         return;
                     };

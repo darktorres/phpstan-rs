@@ -10,7 +10,7 @@
 use crate::checker::call_effects::is_this;
 use crate::checker::{Checker, Locals};
 use crate::registry::summaries::{Access, Operation};
-use syntax::ast::{DestructureItem, DestructureItemRange, ExprKind, ExprNode, NodeArenas};
+use syntax::ast::{DestructureItemRange, ExprKind, ExprNode, NodeArenas};
 use syntax::span::Span;
 use types::Type;
 

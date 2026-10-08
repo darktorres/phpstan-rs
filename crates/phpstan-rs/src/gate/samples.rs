@@ -591,7 +591,7 @@ impl syntax::visit::arena::Visitor for Declared {
         };
         match &stmt.kind {
             syntax::ast::StmtKind::FunctionDecl(function_id) => {
-                if let Some(function) = arenas.function(function_id.clone()) {
+                if let Some(function) = arenas.function(*function_id) {
                     self.functions
                         .push((function.fq_name().to_string(), function.span));
                 }

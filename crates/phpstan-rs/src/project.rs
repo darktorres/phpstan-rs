@@ -23,7 +23,7 @@ use composer::dir_table::{DirTable, EntryKind};
 use declared_classes::DeclaredClass;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
-use syntax::ast::{StmtId, StmtKind, StmtNode};
+use syntax::ast::{StmtId, StmtKind};
 use syntax::declarations::Declared;
 use syntax::lexer::LexWarning;
 use syntax::parser::ParseError;

@@ -199,7 +199,7 @@ fn collect_facts_in_expr(arenas: &NodeArenas, id: ExprId, facts: &mut FileFacts)
             }
         }
         ExprKind::Call(callee, args) => {
-            if let Some(callee) = arenas.expr(callee.clone())
+            if let Some(callee) = arenas.expr(*callee)
                 && let ExprKind::Name(name) = &callee.kind
                 && let Some(name) = arenas.qualified_name(name)
                 && let Some(arg) = arenas

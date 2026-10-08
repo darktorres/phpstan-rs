@@ -177,7 +177,7 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
     impl Rule for ChecksGuard {
         fn wants_expr(&self, arenas: &NodeArenas, kind: &ExprKind) -> bool {
             matches!(kind, ExprKind::Call(callee, _)
-                if matches!(arenas.expr(callee.clone()).map(|callee| &callee.kind), Some(ExprKind::Name(n))
+                if matches!(arenas.expr(*callee).map(|callee| &callee.kind), Some(ExprKind::Name(n))
                     if arenas.qualified_name(n).is_some_and(|n| n == "maybe_missing")))
         }
 

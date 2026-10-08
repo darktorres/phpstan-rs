@@ -31,13 +31,11 @@ fn new_class_spans(arenas: &NodeArenas, stmts: &[StmtId], out: &mut FxHashSet<Sp
     impl Visitor for News<'_> {
         fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
             let Some(e) = arenas.expr(id) else { return };
-            if let ExprKind::New(class, _) = &e.kind {
-                if let Some(class) = arenas.expr(class.clone()) {
-                    if let Some(span) = arenas.expr_span(class.id) {
+            if let ExprKind::New(class, _) = &e.kind
+                && let Some(class) = arenas.expr(*class)
+                    && let Some(span) = arenas.expr_span(class.id) {
                         self.0.insert(span);
                     }
-                }
-            }
             arena::walk_expr(self, arenas, id);
         }
     }

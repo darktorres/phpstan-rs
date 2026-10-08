@@ -849,7 +849,7 @@ impl<'a> Checker<'a> {
         idx: &ExprNode,
         locals: &Locals,
     ) {
-        let Some(owner) = self.syntax_tree_owner() else {
+        let Some(_owner) = self.syntax_tree_owner() else {
             return;
         };
         if locals.may_have_member_narrowing()

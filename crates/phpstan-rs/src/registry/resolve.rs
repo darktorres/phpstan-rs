@@ -1104,7 +1104,7 @@ impl Registry {
                 properties.push((name.clone(), Arc::new(prop)));
             }
         }
-        let constants = class_constant_entries(self, &info, class_id)
+        let constants = class_constant_entries(self, info, class_id)
             .into_iter()
             .filter_map(|(slot, _, constant)| {
                 let current = self

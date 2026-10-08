@@ -1369,7 +1369,7 @@ impl Registry {
             .get(&owner)
             .and_then(|id| self.property_result_by_name(*id, prop))
             .or_else(|| {
-                self.class(&owner)?
+                self.class(owner)?
                     .2
                     .properties
                     .get(prop)

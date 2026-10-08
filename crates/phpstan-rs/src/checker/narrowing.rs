@@ -310,7 +310,7 @@ impl<'a> Checker<'a> {
     /// silently skips the rest).
     fn apply_function_conditional_asserts(
         &self,
-        arenas: &NodeArenas,
+        _arenas: &NodeArenas,
         name: &QualifiedName,
         args: &[Arg],
         locals: &mut Locals,
@@ -350,11 +350,10 @@ impl<'a> Checker<'a> {
                 if let Some(other) = arenas.expr(*r) {
                     self.apply_narrowing(other, locals, true);
                 }
-            } else if disjunctive_syllogism_atom_key(arenas, *r, locals) == Some(cond_key) {
-                if let Some(other) = arenas.expr(*l) {
+            } else if disjunctive_syllogism_atom_key(arenas, *r, locals) == Some(cond_key)
+                && let Some(other) = arenas.expr(*l) {
                     self.apply_narrowing(other, locals, true);
                 }
-            }
         }
     }
 

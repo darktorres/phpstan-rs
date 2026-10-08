@@ -18,12 +18,12 @@ pub(super) fn document_symbols(
     syntax::stack::guard(|| {
         let mut symbols = Vec::new();
         for id in stmts {
-            let Some(stmt) = arenas.stmt(id.clone()) else {
+            let Some(stmt) = arenas.stmt(*id) else {
                 continue;
             };
             match &stmt.kind {
                 StmtKind::FunctionDecl(id) => {
-                    if let Some(f) = arenas.function(id.clone()) {
+                    if let Some(f) = arenas.function(*id) {
                         symbols.push(function_symbol(f, SymbolKind::FUNCTION, index));
                     }
                 }

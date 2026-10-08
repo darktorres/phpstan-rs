@@ -288,7 +288,7 @@ impl Visitor for Collector {
         // declaration does not have is read here.
         let declaration_doc = match &stmt.kind {
             StmtKind::FunctionDecl(function) => arenas
-                .function(function.clone())
+                .function(*function)
                 .and_then(|function| function.doc_comment.as_ref()),
             StmtKind::ClassDecl(class) => arenas
                 .class(arenas.class_decl(class.clone()).def)
@@ -382,25 +382,23 @@ impl Visitor for Collector {
             }
             ExprKind::Call(callee, args)
                 if matches!(
-                    arenas.expr(callee.clone()).map(|e| &e.kind),
+                    arenas.expr(*callee).map(|e| &e.kind),
                     Some(ExprKind::Name(_))
                 ) =>
             {
                 if let Some(ExprNode {
                     kind: ExprKind::Name(name),
                     ..
-                }) = arenas.expr(callee.clone())
-                {
-                    if let Some(name) = arenas.qualified_name(name) {
+                }) = arenas.expr(*callee)
+                    && let Some(name) = arenas.qualified_name(name) {
                         self.add_name(name, NameKind::Function);
                     }
-                }
                 for arg in arenas.args(args.clone()) {
                     arena::walk_arg(self, arenas, arg);
                 }
             }
             ExprKind::New(class, args) => {
-                match arenas.expr(class.clone()).map(|e| &e.kind) {
+                match arenas.expr(*class).map(|e| &e.kind) {
                     Some(ExprKind::Name(name)) => {
                         if let Some(name) = arenas.qualified_name(name) {
                             self.add_name(name, NameKind::Class);

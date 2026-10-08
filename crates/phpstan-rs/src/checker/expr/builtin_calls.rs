@@ -356,7 +356,7 @@ impl<'a> Checker<'a> {
             // modeled and what's deliberately not (a computed filter
             // value, sanitize filters, `FILTER_DEFAULT`).
             "filter_var" if (2..=3).contains(&args.len()) => {
-                let flags_arg = args.get(2).map(|a| arg_expr(a));
+                let flags_arg = args.get(2).map(&arg_expr);
                 let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
                 if let ExprKind::Name(filter_name) = &arg_expr(&args[1]).kind
                     && let Some(filter_name) = arenas.qualified_name(filter_name)
@@ -423,7 +423,7 @@ impl<'a> Checker<'a> {
             // project has no "internal function throws TypeError"
             // tracking to model an invalid one with.
             "filter_input" if (2..=4).contains(&args.len()) => {
-                let flags_arg = args.get(3).map(|a| arg_expr(a));
+                let flags_arg = args.get(3).map(&arg_expr);
                 let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
                 // `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` aren't
                 // modeled for `filter_input`: its subject is always the
@@ -835,7 +835,7 @@ impl<'a> Checker<'a> {
                     && let Some(ty) = self.mysqli_fetch_type(
                         name.trim_start_matches("mysqli_"),
                         type_args.first(),
-                        args.get(1).map(|a| arg_expr(a)),
+                        args.get(1).map(&arg_expr),
                     )
                 {
                     return ty;

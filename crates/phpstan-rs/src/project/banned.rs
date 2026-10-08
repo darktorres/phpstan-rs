@@ -173,7 +173,7 @@ impl<'a> Walker<'a> {
                 if let Some(ExprNode {
                     kind: ExprKind::Name(name),
                     ..
-                }) = arenas.expr(callee.clone())
+                }) = arenas.expr(*callee)
                 {
                     let name = arenas
                         .qualified_name(name)
@@ -280,12 +280,12 @@ impl<'a> Walker<'a> {
                     "Assignment by reference".to_string(),
                 );
                 if matches!(
-                    arenas.expr(target.clone()).map(|e| &e.kind),
+                    arenas.expr(*target).map(|e| &e.kind),
                     Some(ExprKind::Index(_, None))
                 ) {
                     self.ban(
                         BannedConstruct::ArrayAppend,
-                        arenas.expr_span(target.clone()).unwrap_or(
+                        arenas.expr_span(*target).unwrap_or(
                             arenas
                                 .expr_span(e.id)
                                 .expect("expression has a parallel span"),
@@ -296,13 +296,13 @@ impl<'a> Walker<'a> {
             }
             ExprKind::Assign(target, _) | ExprKind::CompoundAssign(_, target, _)
                 if matches!(
-                    arenas.expr(target.clone()).map(|e| &e.kind),
+                    arenas.expr(*target).map(|e| &e.kind),
                     Some(ExprKind::Index(_, None))
                 ) =>
             {
                 self.ban(
                     BannedConstruct::ArrayAppend,
-                    arenas.expr_span(target.clone()).unwrap_or(
+                    arenas.expr_span(*target).unwrap_or(
                         arenas
                             .expr_span(e.id)
                             .expect("expression has a parallel span"),
@@ -386,7 +386,7 @@ impl<'a> Walker<'a> {
                 );
             }
             ExprKind::Closure(closure_id) => {
-                let Some(ClosurePayload::Closure(closure)) = arenas.closure(closure_id.clone())
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id)
                 else {
                     return;
                 };
@@ -406,7 +406,7 @@ impl<'a> Walker<'a> {
                 );
             }
             ExprKind::ArrowFn(arrow_id) => {
-                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(arrow_id.clone()) else {
+                let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*arrow_id) else {
                     return;
                 };
                 if arrow.by_ref {
@@ -425,7 +425,7 @@ impl<'a> Walker<'a> {
                 );
             }
             ExprKind::NewAnonymousClass(class_id) => {
-                if let Some(class) = arenas.anonymous_class(class_id.clone()) {
+                if let Some(class) = arenas.anonymous_class(*class_id) {
                     self.arguments(
                         arenas,
                         class.args.clone(),
@@ -502,7 +502,7 @@ impl Visitor for Walker<'_> {
                 ),
             ),
             StmtKind::FunctionDecl(function_id) => {
-                let Some(f) = arenas.function(function_id.clone()) else {
+                let Some(f) = arenas.function(*function_id) else {
                     return;
                 };
                 let fqn = f.fq_name().to_string();
@@ -535,7 +535,7 @@ impl Visitor for Walker<'_> {
         if let ExprKind::NewAnonymousClass(class) = &e.kind {
             self.classes.push(
                 arenas
-                    .anonymous_class_name(class.clone())
+                    .anonymous_class_name(*class)
                     .map(ToString::to_string),
             );
             arena::walk_expr(self, arenas, id);

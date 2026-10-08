@@ -3915,7 +3915,7 @@ impl<'a> Checker<'a> {
                         args_range,
                         self.expr_span(e.id),
                     );
-                    return self.check_expr(&call, locals, label);
+                    return self.check_expr(call, locals, label);
                 }
                 let class = self.resolve_static_target_class(target, locals, label);
                 for a in args {
@@ -5989,7 +5989,7 @@ impl<'a> Checker<'a> {
                             args.clone(),
                             self.expr_span(e.id),
                         );
-                        self.infer_expr(&call, locals)
+                        self.infer_expr(call, locals)
                     }
                     _ => Type::mixed(),
                 }

@@ -1119,9 +1119,9 @@ impl<'a> Checker<'a> {
     }
 
     /// The owner of the file-local IDs used by this checker's syntax nodes.
-    pub(crate) fn syntax_arenas<'s>(&'s self) -> Option<&'s syntax::ast::NodeArenas> {
+    pub(crate) fn syntax_arenas(&self) -> Option<&syntax::ast::NodeArenas> {
         self.syntax_tree
-            .or_else(|| self.syntax_tree_owned.as_deref())
+            .or(self.syntax_tree_owned.as_deref())
             .map(crate::project::SyntaxTree::arenas)
             .or_else(|| self.syntax_file_owned.as_deref().map(|file| &file.arenas))
     }
@@ -1130,7 +1130,7 @@ impl<'a> Checker<'a> {
     /// file-local spans.
     pub(crate) fn syntax_source_slice(&self, span: syntax::span::Span) -> Option<&[u8]> {
         self.syntax_tree
-            .or_else(|| self.syntax_tree_owned.as_deref())
+            .or(self.syntax_tree_owned.as_deref())
             .and_then(|tree| tree.source_slice(span))
             .or_else(|| {
                 self.syntax_file_owned
@@ -1173,7 +1173,7 @@ impl<'a> Checker<'a> {
     /// payload slices across mutable checker operations.
     pub(crate) fn syntax_source_owner(&self) -> Option<Arc<[u8]>> {
         self.syntax_tree
-            .or_else(|| self.syntax_tree_owned.as_deref())
+            .or(self.syntax_tree_owned.as_deref())
             .map(|tree| Arc::clone(&tree.arenas().source))
             .or_else(|| {
                 self.syntax_file_owned
@@ -1224,7 +1224,7 @@ impl<'a> Checker<'a> {
     /// The root statements for the file-local IDs used by this checker.
     pub(crate) fn syntax_statements(&self) -> Option<&[syntax::ast::StmtId]> {
         self.syntax_tree
-            .or_else(|| self.syntax_tree_owned.as_deref())
+            .or(self.syntax_tree_owned.as_deref())
             .map(crate::project::SyntaxTree::statements)
             .or_else(|| {
                 self.syntax_file_owned
@@ -2049,7 +2049,7 @@ impl<'a> Checker<'a> {
         debug_assert_eq!(program, stmts);
         if let Some(tree) = self
             .syntax_tree
-            .or_else(|| self.syntax_tree_owned.as_deref())
+            .or(self.syntax_tree_owned.as_deref())
         {
             debug_assert_eq!(program, tree.statements());
             #[cfg(debug_assertions)]
@@ -2177,8 +2177,8 @@ impl<'a> Checker<'a> {
                         .as_ref()
                         .and_then(|ranges| arenas.doc_comment_text(ranges));
                     if is_enum {
-                        self.check_enum_template_tag(&fqn, &def);
-                        self.check_enum_case_values(&fqn, &def);
+                        self.check_enum_template_tag(&fqn, def);
+                        self.check_enum_case_values(&fqn, def);
                         self.check_enum_sanity(&fqn, c);
                     } else {
                         self.check_enum_cases_outside_enum(def.enum_cases(arenas));
@@ -2217,22 +2217,22 @@ impl<'a> Checker<'a> {
                     self.check_mixin_types(&fqn, class_doc.as_deref(), def.span);
                     self.check_type_alias_types(&fqn, class_doc.as_deref(), def.span);
                     self.check_method_overrides(&fqn, c);
-                    self.check_property_overrides(&fqn, &def);
+                    self.check_property_overrides(&fqn, def);
                     self.check_require_tags(&fqn, def.span);
-                    self.check_require_tag_types(&def);
+                    self.check_require_tag_types(def);
                     self.check_sealed_hierarchy(&fqn, def.span);
-                    self.check_sealed_tag_types(&def);
+                    self.check_sealed_tag_types(def);
                     self.check_unknown_phpstan_tags_in_class(c);
                     if self.settings.sidz.check_magic_numbers {
                         self.check_magic_numbers_in_properties(arenas, def.properties(arenas));
                     }
-                    self.check_property_hooks(&fqn, &def);
-                    self.check_property_variances(&fqn, &def);
+                    self.check_property_hooks(&fqn, def);
+                    self.check_property_variances(&fqn, def);
                     self.check_trait_conflicts(&fqn, def.span);
                     self.check_uninitialized_properties(&fqn, c);
-                    self.check_default_property_types(arenas, &fqn, &def);
+                    self.check_default_property_types(arenas, &fqn, def);
                     self.check_premature_property_access(&fqn, c);
-                    self.check_duplicate_class_members(&fqn, &def);
+                    self.check_duplicate_class_members(&fqn, def);
                     if self.settings.phpunit.check_risky_tests {
                         self.check_risky_test_methods(arenas, &fqn, def);
                     }
@@ -2340,10 +2340,10 @@ impl<'a> Checker<'a> {
                             def.properties(arenas),
                             def.consts(arenas),
                         );
-                        self.record_property_type_site(arenas, &fqn, vec![Name::from(&fqn)], &def);
-                        self.check_parent_constructor_call(&fqn, &def);
+                        self.record_property_type_site(arenas, &fqn, vec![Name::from(&fqn)], def);
+                        self.check_parent_constructor_call(&fqn, def);
                         self.check_class_access_attributes(arenas, &fqn, c, def);
-                        self.check_promoted_property_candidate(&fqn, &def);
+                        self.check_promoted_property_candidate(&fqn, def);
                     }
                 }
                 _ => self.check_nested_declarations(stmt),
@@ -2376,7 +2376,7 @@ fn assert_node_spans(arenas: &NodeArenas, program: &[StmtId]) {
 
     impl syntax::visit::arena::Visitor for CheckSpans<'_> {
         fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
-            let Some(stmt) = arenas.stmt(id) else {
+            let Some(_stmt) = arenas.stmt(id) else {
                 debug_assert!(false, "statement ID does not resolve in the tree owner");
                 return;
             };
@@ -2385,7 +2385,7 @@ fn assert_node_spans(arenas: &NodeArenas, program: &[StmtId]) {
         }
 
         fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
-            let Some(expr) = arenas.expr(id) else {
+            let Some(_expr) = arenas.expr(id) else {
                 debug_assert!(false, "expression ID does not resolve in the tree owner");
                 return;
             };

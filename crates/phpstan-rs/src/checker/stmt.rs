@@ -815,11 +815,9 @@ impl<'a> Checker<'a> {
                     && arenas
                         .expr(*rhs)
                         .is_some_and(|rhs| self.infer_expr(rhs, locals).is_never())
-                {
-                    if let Some(lhs) = arenas.expr(*lhs) {
+                    && let Some(lhs) = arenas.expr(*lhs) {
                         self.apply_narrowing(lhs, locals, true);
                     }
-                }
             }
             StmtKind::Return(Some(e_id)) => {
                 let Some(e) = arenas.expr(*e_id) else {

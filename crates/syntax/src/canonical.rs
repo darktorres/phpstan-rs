@@ -668,6 +668,7 @@ macro_rules! canonical_struct {
                     &[$((stringify!($field), $field as &dyn $crate::canonical::Canonical)),*],
                 );
             }
+            #[allow(unused_variables)]
             fn canonical_with(
                 &self,
                 p: &mut $crate::canonical::Printer,

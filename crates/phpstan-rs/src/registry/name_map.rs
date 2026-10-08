@@ -185,11 +185,10 @@ impl<V: Clone> NameMap<V> {
         if let Some(base) = self.base.take() {
             for i in 0..base.len() {
                 let name = base.name(i);
-                if !self.hidden.contains(name.as_str()) {
-                    if let Some(value) = base.value(i) {
+                if !self.hidden.contains(name.as_str())
+                    && let Some(value) = base.value(i) {
                         all.push((name.clone(), value.clone()));
                     }
-                }
             }
         }
         all.extend(std::mem::take(&mut self.entries));
@@ -225,11 +224,10 @@ impl<'a, V> Iterator for Iter<'a, V> {
         let base: &'a Base<V> = base;
         for i in positions {
             let name = base.name(i);
-            if !self.hidden.contains(name.as_str()) {
-                if let Some(value) = base.value(i) {
+            if !self.hidden.contains(name.as_str())
+                && let Some(value) = base.value(i) {
                     return Some((name, value));
                 }
-            }
         }
         None
     }
@@ -257,11 +255,10 @@ impl<V: Clone> IntoIterator for NameMap<V> {
         if let Some(base) = &self.base {
             for i in 0..base.len() {
                 let name = base.name(i);
-                if !self.hidden.contains(name.as_str()) {
-                    if let Some(value) = base.value(i) {
+                if !self.hidden.contains(name.as_str())
+                    && let Some(value) = base.value(i) {
                         all.push((name.clone(), value.clone()));
                     }
-                }
             }
         }
         all.extend(self.entries);

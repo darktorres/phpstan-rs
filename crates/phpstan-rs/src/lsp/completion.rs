@@ -246,15 +246,15 @@ fn find_enclosing_names(
     (function_name, class_name)
 }
 
-fn find_function_by_name<'a>(
-    file: &'a ParsedFile,
+fn find_function_by_name(
+    file: &ParsedFile,
     class_name: Option<&str>,
     function_name: &str,
 ) -> Option<(FunctionDecl, bool)> {
     let arenas = &file.arenas;
     match class_name {
         Some(class_name) => file.statements().iter().find_map(|id| {
-            let stmt = arenas.stmt(id.clone())?;
+            let stmt = arenas.stmt(*id)?;
             let StmtKind::ClassDecl(decl) = &stmt.kind else {
                 return None;
             };
@@ -270,11 +270,11 @@ fn find_function_by_name<'a>(
                 .map(|m| (m.function.clone(), m.is_static))
         }),
         None => file.statements().iter().find_map(|id| {
-            let stmt = arenas.stmt(id.clone())?;
+            let stmt = arenas.stmt(*id)?;
             let StmtKind::FunctionDecl(function) = &stmt.kind else {
                 return None;
             };
-            let function = arenas.function(function.clone())?;
+            let function = arenas.function(*function)?;
             (function.name.as_ref() == function_name).then(|| (function.clone(), false))
         }),
     }
@@ -550,7 +550,7 @@ fn short_name(fqn: &str) -> &str {
 fn find_use_insertion_point(arenas: &NodeArenas, stmts: &[StmtId]) -> Option<u32> {
     stmts
         .iter()
-        .filter_map(|id| arenas.stmt(id.clone()))
+        .filter_map(|id| arenas.stmt(*id))
         .rfind(|stmt| matches!(&stmt.kind, StmtKind::Use(_) | StmtKind::Namespace(_)))
         .and_then(|s| arenas.stmt_span(s.id).map(|span| span.end))
 }

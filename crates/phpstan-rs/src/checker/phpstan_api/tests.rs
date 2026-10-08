@@ -264,8 +264,8 @@ mod namespace_in_3rd_party_package {
 
     use super::super::check_phpstan_api_usage;
     use crate::registry::Registry;
-    use syntax::lexer::Lexer;
-    use syntax::parser::Parser;
+    
+    
 
     struct TempDir(PathBuf);
 

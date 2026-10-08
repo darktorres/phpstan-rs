@@ -10,7 +10,7 @@ use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
     ClassId, ClassReflection, FnId, FunctionReflection, folded_key, function_key, infer_const_type,
 };
-use syntax::ast::{ExprId, ExprNode, NodeArenas, StmtId, StmtNode, Visibility};
+use syntax::ast::{ExprId, NodeArenas, StmtId, Visibility};
 use syntax::declarations::{Declaration, Declared, GuardTerm, for_each_declaration};
 use syntax::name_resolution::NameContext;
 use syntax::php_string::PhpString;

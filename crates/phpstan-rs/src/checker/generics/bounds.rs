@@ -168,7 +168,7 @@ impl<'a> Checker<'a> {
     /// generic bound violation can be written
     /// (`class Bad extends Collection<NotAShape> {}`) without ever
     /// showing up in a method signature.
-    pub(crate) fn check_class_generic_bounds(&mut self, fqn: &str, c: &ClassDecl, def: &ClassDef) {
+    pub(crate) fn check_class_generic_bounds(&mut self, fqn: &str, _c: &ClassDecl, def: &ClassDef) {
         let source = self.syntax_source_owner();
         let Some(info) = self.class_info(fqn) else {
             return;

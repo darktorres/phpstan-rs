@@ -1282,16 +1282,14 @@ impl Registry {
                 }
             }
             for (name, old_id) in &changed.class_ids_before {
-                if body_scope.is_all()
+                if (body_scope.is_all()
                     || self
                         .class_ids
                         .get(name.as_str())
-                        .is_some_and(|id| snapshot_class_ids.contains(id))
-                {
-                    if let Some(old_id) = old_id {
+                        .is_some_and(|id| snapshot_class_ids.contains(id)))
+                    && let Some(old_id) = old_id {
                         snapshot_class_ids.insert(*old_id);
                     }
-                }
             }
             if let Some(names) = body_scope.class_keys() {
                 for name in names {
@@ -1940,7 +1938,7 @@ impl Registry {
             let now = now_id.and_then(|id| self.class_by_id(id));
             let declaration_changed = match (old, now) {
                 (Some(old), Some(now)) => {
-                    Arc::as_ptr(old) != now as *const ClassReflection && old.as_ref() != now
+                    !std::ptr::eq(Arc::as_ptr(old), now) && old.as_ref() != now
                 }
                 (None, None) => false,
                 _ => true,
@@ -1959,7 +1957,7 @@ impl Registry {
             let now = now_id.and_then(|id| self.function_declaration_by_id(id));
             let declaration_changed = match (old, now) {
                 (Some(old), Some(now)) => {
-                    Arc::as_ptr(old) != now as *const FunctionReflection && old.as_ref() != now
+                    !std::ptr::eq(Arc::as_ptr(old), now) && old.as_ref() != now
                 }
                 (None, None) => false,
                 _ => true,

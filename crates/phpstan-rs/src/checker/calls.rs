@@ -903,7 +903,7 @@ impl<'a> Checker<'a> {
                 .map(|item| Arg {
                     name: None,
                     spread: false,
-                    value: item.value.clone(),
+                    value: item.value,
                 })
                 .collect();
             self.maybe_record_param_name_hints(Some(&sig), &synthesized);

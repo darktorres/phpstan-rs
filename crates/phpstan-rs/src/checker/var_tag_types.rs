@@ -620,7 +620,7 @@ impl<'a> Checker<'a> {
             checks.push((
                 tag.clone(),
                 Described {
-                    native: self.native_expr_type(&variable, locals),
+                    native: self.native_expr_type(variable, locals),
                     doc: current.clone(),
                     shape: ValueShape::Other,
                 },
