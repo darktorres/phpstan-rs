@@ -19,6 +19,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 - **Subtasks.** Before an item starts, decompose every compound task from its plan into child rows for all its independently verifiable deliverables, including separate child rows for each item-gate test selection. Keep the plan's dependency order; update each child as it lands and derive the parent status from its children. Items 9-19 currently follow this structure; apply it to any later plan additions too.
 - **Per row:** `cargo fmt`, then a commit with an explicit pathspec, since another session may share the checkout. At an item gate, run tests only: the workspace test suite and tests added by that item. The test command may compile what it needs to execute those tests. Do not add separate builds, checks, clippy, formatting checks, diff checks, runtime oracles, fixtures, corpus runs, or dump comparisons to the gate. Full §11 validation runs once after item 19. A row may take several commits; its status takes the last one's hash.
 - **Item gates and final validation.** Each item's last row, *N*.V, runs only `cargo test --workspace` and item-specific test selections. The compilation inherent in running those tests is allowed. No separate build, check, clippy, formatting check, diff check, runtime oracle, fixture, corpus pass, or dump comparison is part of an item gate. The complete §11 validation (both builds, workspace tests, runtime oracle, corpus passes and comparisons) runs once after item 19; O3 runs at that final gate. No full validation runs between items.
+- **Out-of-band profiling.** A historical release timing sweep was run on 2026-10-07 to compare item endpoints. It is observational data, not an item gate, and does not alter any gate's status. Results and limitations are recorded below and in §12 of the plan.
 - **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
 - **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
 - **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
@@ -950,3 +951,22 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | D.V.b | same gate | Run generated runtime-oracle calls on every supported PHP version image | — | val | DEFERRED (after O3) |
 | D.V.c | same gate | Run the recorder and construct cases defined by the PHP catalog's oracle | — | val | DEFERRED (after O3) |
 | D.V.d | same gate | Run the complete §11 validation for the deferred plan and catalog | — | val | DEFERRED (after O3) |
+
+## Out-of-band release timing sweep (2026-10-07)
+
+The checks used `/home/torres/piwigo17-frozen`, `phpstan-rs.toml`, the release profile (thin LTO, one codegen unit), an isolated warmed stub cache per commit, and `PHPSTAN_RS_NO_FILE_CACHE=1`. Check command: `phpstan-rs check-project --config phpstan-rs.toml --format json`. The first five checkpoints used two warmups and ten measured runs. After a 60-second cap was requested, later checks were capped; censored runs have no average.
+
+| checkpoint | profiled commit | release build | result |
+|---|---|---|---:|
+| 1.V code snapshot (gate skipped) | `e75694ac` | pass | 4.960 ± 0.244 s (10 runs) |
+| 2.V | `8e54a635` | pass | 5.244 ± 0.423 s (10 runs) |
+| 3.V | `642125ee` | pass | 4.586 ± 0.142 s (10 runs) |
+| 4.V code endpoint after item 4.8 | `45dbbe04` | pass | 9.782 ± 0.113 s (10 runs) |
+| 5.V | `31392685` | pass | 6.131 ± 0.431 s (10 runs) |
+| 6.V | `acb344c6` | pass | >60 s; interrupted |
+| 7.V | `cda15216` | pass | warm check >60 s; timed check skipped |
+| 8.V | `451f0fa6` | pass | >60 s; interrupted |
+| 9.V | `0db9170f` | failed | no timing; release build failed with Rust errors in `phpstan-rs-syntax` |
+| 10.1 | `257b8049` | pass | >60 s; interrupted |
+
+The first five means show 4.V at 2.13× the 3.V time, then a partial recovery at 5.V. Results from 6.V onward are censored. Other Rust compilation and a Callgrind process were active during portions of the later sweep, so the censored results also include machine contention. The 4.V hash is the code endpoint after 4.8; the 9.V snapshot already contained unfinished item 10 work and was not buildable. Detailed binaries and raw output remain in `.corpus-runs/gate/release-sweep/README.md`.

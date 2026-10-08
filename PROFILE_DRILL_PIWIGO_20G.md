@@ -2655,6 +2655,23 @@ Exact; the private-property judgment's writes from bound closures and reflection
 | 18 | check phase remainder, rule temporaries | ≈1.6-2.0 G | — | 3.61 M allocations | semantic (§12.10's families, the statement result, the union pass) |
 | 19 | each tree until its last reader | — | — | batch: the analysed trees freed during the check; server: open documents and a cache weighted by bytes | exact |
 
+**Interim release timing sweep (2026-10-07; separate from the final O3 validation).** Historical item endpoints were checked against `/home/torres/piwigo17-frozen` with `check-project --config phpstan-rs.toml --format json`, using the release profile (thin LTO, one codegen unit), an isolated warmed stub cache per commit, and per-file cache disabled. The first five checkpoints used two warmups and ten measured runs; after a 60-second limit was requested, later checks were capped and no average was reported.
+
+| checkpoint | commit | release build | elapsed time |
+|---|---|---|---:|
+| 1.V code snapshot (gate skipped) | `e75694ac` | pass | 4.960 ± 0.244 s (10 runs) |
+| 2.V | `8e54a635` | pass | 5.244 ± 0.423 s (10 runs) |
+| 3.V | `642125ee` | pass | 4.586 ± 0.142 s (10 runs) |
+| 4.V code endpoint after item 4.8 | `45dbbe04` | pass | 9.782 ± 0.113 s (10 runs) |
+| 5.V | `31392685` | pass | 6.131 ± 0.431 s (10 runs) |
+| 6.V | `acb344c6` | pass | >60 s; interrupted |
+| 7.V | `cda15216` | pass | warm check >60 s; timed check skipped |
+| 8.V | `451f0fa6` | pass | >60 s; interrupted |
+| 9.V | `0db9170f` | failed | no run; release build failed in `phpstan-rs-syntax` |
+| 10.1 | `257b8049` | pass | >60 s; interrupted |
+
+The 4.V measurement uses the code endpoint after 4.8. The 9.V snapshot already included the unfinished item 10 flat-token-stream work and did not compile. The first five measurements show a jump at item 4 (9.782 s from 4.586 s at 3.V), followed by a partial recovery at item 5 (6.131 s). Results from 6.V onward are censored by the cutoff; other Rust compilation and a Callgrind process were active during parts of that later sweep, so they do not establish an uncontended runtime. Per-commit binaries, raw timing files, logs, and outputs are in `.corpus-runs/gate/release-sweep/README.md`.
+
 **Instructions.** The rows sum to ≈8.2-9.3 G of this run's 20.57 G (items 3 and 5 at their instruction savings, item 7 at none to ≈0.3 G, items 9 and 18 at the ends of their ranges). Some costs are counted by two rows, and this profile does not separate the shares:
 - 3 and 9, the tree drops;
 - 9 and 10, the parser's allocation;
