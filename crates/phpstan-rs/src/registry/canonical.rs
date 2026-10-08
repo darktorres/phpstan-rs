@@ -524,6 +524,7 @@ impl CanonicalOver for Registry {
             stream_wrappers,
             global_sites,
             global_scopes,
+            include_targets: _,
         } = self;
         p.node(
             "Registry",
@@ -741,6 +742,7 @@ canonical_struct!(Registry {
     member_owners_cache,
     effects,
     effects_cache,
+    include_targets,
     class_declarations,
     function_declarations,
     stub_effect_results,

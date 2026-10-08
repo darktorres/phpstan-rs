@@ -609,7 +609,8 @@ impl Registry {
                     .map(move |site| (*id, site))
             })
             .collect();
-        let graph = resolve_global_scope_files(files, &include_sites);
+        let graph =
+            resolve_global_scope_files(files, &include_sites, resolve_include_targets(files));
 
         let mut accumulators: NameMap<GlobalAccumulator> = NameMap::default();
         let mut scopes = GlobalScopes {
@@ -666,6 +667,18 @@ impl Registry {
             .collect();
         self.global_variables = global_variables;
         self.global_scopes = Arc::new(scopes);
+    }
+
+    /// Finds the file each include of `files` names, which the effects of an
+    /// include read.
+    pub(crate) fn resolve_includes(&mut self, files: &[(FileId, &Path, &GlobalFacts)]) {
+        self.include_targets = Arc::new(resolve_include_targets(files));
+    }
+
+    /// The file the include at `at` of `file` names: `Some(None)` when it
+    /// names no single loaded file, `None` when the include is not known.
+    pub(crate) fn include_target(&self, file: FileId, at: u32) -> Option<Option<FileId>> {
+        self.include_targets.get(&(file, at)).copied()
     }
 
     /// What each include of the loaded files may write to the variables of
@@ -753,6 +766,44 @@ impl Registry {
         files
     }
 
+    /// The files with an include of a file that now names another, or whose
+    /// top level may now write other things than it did in `before`.
+    pub(crate) fn files_with_changed_includes(&self, before: &ResolvedSnapshot) -> Vec<FileId> {
+        use crate::registry::effects::EffectId;
+        let changed: FxHashSet<FileId> = self
+            .effects
+            .iter()
+            .filter_map(|(id, settled)| match id {
+                EffectId::File(file) => {
+                    (before.effects.get(id).map(|(_, was)| was) != Some(settled)).then_some(*file)
+                }
+                _ => None,
+            })
+            .chain(
+                before
+                    .effects
+                    .keys()
+                    .filter(|id| !self.effects.contains_key(*id))
+                    .filter_map(|id| match id {
+                        EffectId::File(file) => Some(*file),
+                        _ => None,
+                    }),
+            )
+            .collect();
+        let mut files: Vec<FileId> = self
+            .include_targets
+            .iter()
+            .filter(|(key, target)| {
+                before.include_targets.get(key) != Some(target)
+                    || target.is_some_and(|target| changed.contains(&target))
+            })
+            .map(|((file, _), _)| *file)
+            .collect();
+        files.sort_unstable();
+        files.dedup();
+        files
+    }
+
     /// The names whose fact in some global scope differs from what `before`
     /// had.
     pub(crate) fn changed_global_scope_names(&self, before: &ResolvedSnapshot) -> Vec<Name> {
@@ -814,17 +865,16 @@ struct IncludeGraph {
     targets: FxHashMap<(FileId, u32), Option<FileId>>,
 }
 
-/// Resolves the include graph: the files whose own
-/// top level genuinely runs in real global scope on at least one resolved
-/// path, and which of them share a scope - see the module doc comment. A file with no resolved incoming
-/// edges at all (including every file this corpus's own dynamic includes
-/// only ever reach) defaults to included, matching today's behavior; a
-/// file whose only resolved incoming edges are all from inside a function
-/// body is excluded.
-fn resolve_global_scope_files(
+/// The file each include of `files` names, by the file it is in and its
+/// place there: the one loaded file whose path ends with the path the
+/// include writes; `None` when it writes none or more than one file's.
+pub(in crate::registry) fn resolve_include_targets(
     files: &[(FileId, &Path, &GlobalFacts)],
-    include_sites: &[(FileId, &IncludeSite)],
-) -> IncludeGraph {
+) -> FxHashMap<(FileId, u32), Option<FileId>> {
+    let include_sites: Vec<(FileId, &IncludeSite)> = files
+        .iter()
+        .flat_map(|(id, _, facts)| facts.include_sites.iter().map(move |site| (*id, site)))
+        .collect();
     // Each file's path with `/` separators, grouped by file name: an
     // include's target can only be a file of its last segment's name.
     // Normalize paths independently, then index borrowed names and paths.
@@ -840,22 +890,9 @@ fn resolve_global_scope_files(
         by_file_name.entry(name).or_default().push((*id, text));
     }
 
-    let mut top_level_edges: FxHashMap<FileId, Vec<FileId>> = FxHashMap::default();
-    // Every resolved incoming edge, top-level or not - a file targeted
-    // *only* by function-scoped includes still has a real incoming edge
-    // here, and must NOT default to "root" just because none of its
-    // edges happen to be top-level (that was a real bug: it made a
-    // file's own top level count as included whenever its only resolved
-    // includers were all inside a function, exactly backwards from the
-    // "excluded" outcome that shape is supposed to get).
-    let mut has_any_incoming: FxHashSet<FileId> = FxHashSet::default();
-    // The files with a top-level include that names no single file.
-    let mut unresolved: FxHashSet<FileId> = FxHashSet::default();
-
     // Each include site is resolved independently against the filename
-    // index. The resulting relation is ID-addressed before the serial graph
-    // bookkeeping and reachability walk.
-    let resolved_edges: Vec<(FileId, u32, Option<FileId>, bool)> = include_sites
+    // index.
+    include_sites
         .par_iter()
         .map(|(source, site)| {
             let target = site.suffix.as_deref().and_then(|suffix| {
@@ -873,22 +910,46 @@ fn resolve_global_scope_files(
                 // previous exact-one-match rule without allocating a Vec.
                 matches.next().is_none().then_some(target)
             });
-            (*source, site.at, target, site.top_level)
+            ((*source, site.at), target)
         })
-        .collect();
+        .collect()
+}
 
-    let mut targets: FxHashMap<(FileId, u32), Option<FileId>> = FxHashMap::default();
-    for (source, at, target, top_level) in resolved_edges {
-        targets.insert((source, at), target);
+/// Resolves the include graph: the files whose own
+/// top level genuinely runs in real global scope on at least one resolved
+/// path, and which of them share a scope - see the module doc comment. A file with no resolved incoming
+/// edges at all (including every file this corpus's own dynamic includes
+/// only ever reach) defaults to included, matching today's behavior; a
+/// file whose only resolved incoming edges are all from inside a function
+/// body is excluded.
+fn resolve_global_scope_files(
+    files: &[(FileId, &Path, &GlobalFacts)],
+    include_sites: &[(FileId, &IncludeSite)],
+    targets: FxHashMap<(FileId, u32), Option<FileId>>,
+) -> IncludeGraph {
+    let mut top_level_edges: FxHashMap<FileId, Vec<FileId>> = FxHashMap::default();
+    // Every resolved incoming edge, top-level or not - a file targeted
+    // *only* by function-scoped includes still has a real incoming edge
+    // here, and must NOT default to "root" just because none of its
+    // edges happen to be top-level (that was a real bug: it made a
+    // file's own top level count as included whenever its only resolved
+    // includers were all inside a function, exactly backwards from the
+    // "excluded" outcome that shape is supposed to get).
+    let mut has_any_incoming: FxHashSet<FileId> = FxHashSet::default();
+    // The files with a top-level include that names no single file.
+    let mut unresolved: FxHashSet<FileId> = FxHashSet::default();
+
+    for (source, site) in include_sites {
+        let (target, top_level) = (targets[&(*source, site.at)], site.top_level);
         let Some(target) = target else {
             if top_level {
-                unresolved.insert(source);
+                unresolved.insert(*source);
             }
             continue;
         };
         has_any_incoming.insert(target);
         if top_level {
-            top_level_edges.entry(source).or_default().push(target);
+            top_level_edges.entry(*source).or_default().push(target);
         }
     }
 

@@ -2183,6 +2183,7 @@ impl<'a> Checker<'a> {
                     locals,
                     self.expr_span(e.id),
                 );
+                self.forget_what_an_include_may_change(e.id, locals);
                 self.forget_variables_an_include_writes(e.id, locals);
                 locals.set_any_variable_may_exist(true);
                 Type::mixed()

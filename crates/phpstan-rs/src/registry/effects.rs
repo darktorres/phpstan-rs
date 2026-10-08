@@ -46,6 +46,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
 
+use crate::file_id::FileId;
 use crate::registry::bodies::BodySource;
 use crate::registry::summaries::{
     Access, ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, ClosureFacts, Made,
@@ -329,6 +330,8 @@ pub(crate) enum EffectId {
         caller: Box<EffectId>,
         ordinal: u32,
     },
+    /// The top level of a file: what including it may write.
+    File(FileId),
     Named(DeclKey),
 }
 
@@ -352,6 +355,7 @@ impl EffectId {
                 caller: Box::new(caller.with_generation(generation)),
                 ordinal,
             },
+            EffectId::File(file) => EffectId::File(file),
             EffectId::Named(key) => EffectId::Named(key),
         }
     }
@@ -425,7 +429,36 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
     }
 }
 
+/// The class of the keys that name the top level of a file: a name no class
+/// has.
+const FILE_CLASS: &str = "\0file";
+
 impl DeclKey {
+    /// The key of the top level of `file`.
+    fn file(file: FileId) -> DeclKey {
+        DeclKey {
+            class: Some(FILE_CLASS.to_string()),
+            member: file.index().to_string(),
+        }
+    }
+
+    /// The key of the top level of a file that is not known: code of
+    /// arbitrary content.
+    fn unresolved_include() -> DeclKey {
+        DeclKey {
+            class: Some(FILE_CLASS.to_string()),
+            member: "unresolved".to_string(),
+        }
+    }
+
+    /// The file whose top level the key names, when it names one.
+    fn file_id(&self) -> Option<FileId> {
+        if self.class.as_deref() != Some(FILE_CLASS) {
+            return None;
+        }
+        self.member.parse().ok().map(FileId::new)
+    }
+
     /// The key of the closure, arrow function or first-class callable this
     /// declaration's body lists at `index`: a name no declaration has.
     fn closure(&self, index: u32) -> DeclKey {
@@ -855,7 +888,10 @@ enum Passing<'c> {
 /// arguments as its own: `__call` and `__callStatic` take another method's
 /// as an array.
 fn passes_arguments(callee: &Callee, key: &DeclKey) -> bool {
-    if matches!(callee, Callee::Implicit { .. } | Callee::ParentHook { .. }) {
+    if matches!(
+        callee,
+        Callee::Implicit { .. } | Callee::ParentHook { .. } | Callee::Include(_)
+    ) {
         return false;
     }
     if key.member != "__call" && key.member != "__callstatic" {
@@ -994,6 +1030,9 @@ fn classification_by_id<'r>(
 
 impl Registry {
     pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
+        if let Some(file) = key.file_id() {
+            return EffectId::File(file);
+        }
         if let Some((caller, ordinal)) = closure_parent(key) {
             return EffectId::Closure {
                 caller: Box::new(self.effect_id_for(&caller)),
@@ -1056,7 +1095,8 @@ impl Registry {
                     *kind == PropertyHookKind::Set,
                 ))
             }
-            EffectId::Closure { .. } => None,
+            // A file's number is no part of what is kept between runs.
+            EffectId::Closure { .. } | EffectId::File(_) => None,
             EffectId::Named(key) => Some(key.clone()),
         }
     }
@@ -1081,6 +1121,12 @@ impl Registry {
     /// call reaches depends on the whole hierarchy, which any file may
     /// change.
     pub(crate) fn resolve_effects(&mut self, bodies: &dyn BodySource) {
+        let loaded = bodies.files();
+        let facts: Vec<_> = loaded
+            .iter()
+            .map(|file| (file.id, file.path, file.global_facts))
+            .collect();
+        self.resolve_includes(&facts);
         self.methods_by_name = Arc::new(methods_by_name(self));
         self.prepare_stub_effect_results();
         let mut unset = crate::registry::bodies::UnsetProperties::default();
@@ -1141,6 +1187,19 @@ impl Registry {
                         })
                 }),
         );
+        classified.par_extend(
+            loaded
+                .par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .flat_map_iter(|file| {
+                    registry
+                        .classify_file(file.id, file.top_level)
+                        .into_iter()
+                        .map(|(key, classification)| {
+                            classification_by_id(registry, key, classification)
+                        })
+                }),
+        );
         let hooks: Vec<(&Name, &Name, &PropertyReflection, bool)> = registry
             .own_classes_by_id()
             .flat_map(|(_, class, _)| {
@@ -1173,11 +1232,13 @@ impl Registry {
                         })
                 }),
         );
-        let mut effects = settle(registry, &classified, |id| {
-            registry.effect_decl_key(id).map_or_else(
+        let mut effects = settle(registry, &classified, |id| match id {
+            // A file the program does not hold, or holds no summary of.
+            EffectId::File(_) => Settled::of(Effect::anything()),
+            id => registry.effect_decl_key(id).map_or_else(
                 || Settled::of(Effect::unknown()),
                 |key| Settled::of(registry.declaration_effect(&key)),
-            )
+            ),
         });
         // A closure's effect is taken where it runs; no call names it. Keep
         // its result through settlement, then omit it from the registry.
@@ -1681,11 +1742,33 @@ impl Registry {
             registry: self,
             class: class.map(Name::as_str),
             member: member.clone(),
+            file: sig.provenance.file_id(),
+            file_scope: false,
             summary,
             value: None,
             captured: None,
         };
         resolve.run(&key, Some(sig))
+    }
+
+    /// The classification of the top level of `file`, summarised as
+    /// `summary`, and of each closure it wrote, under its own.
+    fn classify_file<'r>(
+        &'r self,
+        file: FileId,
+        summary: &'r BodySummary,
+    ) -> Vec<(DeclKey, Classification<'r>)> {
+        let resolve = Resolve {
+            registry: self,
+            class: None,
+            member: Name::from(format!("{{file#{}}}", file.index())),
+            file: Some(file),
+            file_scope: true,
+            summary,
+            value: None,
+            captured: None,
+        };
+        resolve.run(&DeclKey::file(file), None)
     }
 
     /// The classification of the body of `class`'s `get` hook of
@@ -1708,6 +1791,8 @@ impl Registry {
             registry: self,
             class: Some(class.as_str()),
             member: Name::from(format!("${property}::{}", if set { "set" } else { "get" })),
+            file: declared.provenance().file_id(),
+            file_scope: false,
             summary,
             value: value.map(|value| (value.as_str(), ty)),
             captured: None,
@@ -2055,6 +2140,8 @@ fn place_variable(place: &Place) -> Option<&Name> {
 pub(crate) trait CallContext {
     /// The class the calling code belongs to.
     fn class(&self) -> Option<&str>;
+    /// The file the calling code is in, when it is known.
+    fn file(&self) -> Option<FileId>;
     /// The object a method is called on, and whether it is the caller's own
     /// `$this`.
     fn receiver(&self, receiver: &Receiver) -> (Holder, bool);
@@ -2547,6 +2634,17 @@ impl Reach<'_> {
                 self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
                 out
             }
+            // The file's top level runs in the including code's scope, as its
+            // own `$this`; a file that is not known is code of any content.
+            Callee::Include(at) => match self
+                .ctx
+                .file()
+                .and_then(|file| registry.include_target(file, *at))
+                .flatten()
+            {
+                Some(target) => vec![(DeclKey::file(target), Transfer::Same)],
+                None => vec![(DeclKey::unresolved_include(), Transfer::Same)],
+            },
             Callee::ParentHook { property, set } => {
                 let parent = registry
                     .class_references_by_name(self.ctx.class()?)?
@@ -2915,6 +3013,7 @@ impl Registry {
         &self,
         summary: &BodySummary,
         class: Option<&str>,
+        file: Option<FileId>,
         captured: Option<CapturedHolders<'_>>,
     ) -> Effect {
         let holder = DeclKey {
@@ -2925,6 +3024,8 @@ impl Registry {
             registry: self,
             class,
             member: Name::from("{closure}"),
+            file,
+            file_scope: false,
             summary,
             value: None,
             captured,
@@ -3009,6 +3110,12 @@ struct Resolve<'r> {
     registry: &'r Registry,
     class: Option<&'r str>,
     member: Name,
+    // The file the body is in, which says what its includes name; `None`
+    // when it is not known.
+    file: Option<FileId>,
+    // Whether the body is a file's top level, whose variables are those of
+    // the scope that includes it.
+    file_scope: bool,
     summary: &'r BodySummary,
     // A `set` hook's parameter, by its name and the type of what it is
     // passed.
@@ -3282,6 +3389,16 @@ impl<'r> Resolve<'r> {
         }
         let mut level = self.level(facts, lost, bindings);
         level.closure = true;
+        // What a closure writes of a variable it shares by reference with a
+        // file's top level, the file's scope has.
+        level.file_scope = false;
+        level.shared_with_file = captures
+            .iter()
+            .filter(|&&(name, by_ref)| {
+                by_ref && (parent.file_scope || parent.shared_with_file.contains(&name))
+            })
+            .map(|&(name, _)| name)
+            .collect();
         if !facts.computed {
             level.params = params;
             level.made = made;
@@ -3313,6 +3430,9 @@ impl<'r> Resolve<'r> {
             registry: self.registry,
             class: self.class,
             member: self.member.clone(),
+            file: self.file,
+            file_scope: self.file_scope,
+            shared_with_file: Vec::new(),
             facts,
             params: FxHashMap::default(),
             made: FxHashMap::default(),
@@ -3345,6 +3465,12 @@ struct Level<'r> {
     registry: &'r Registry,
     class: Option<&'r str>,
     member: Name,
+    file: Option<FileId>,
+    // A file's top level, whose variables belong to the scope including it.
+    file_scope: bool,
+    // The variables of a file's top level a closure written there shares
+    // with it by reference.
+    shared_with_file: Vec<&'r str>,
     facts: &'r WriteFacts,
     // The parameters whose declared type holds all through the scope:
     // neither assigned nor passed where a parameter is by reference. A
@@ -3380,6 +3506,10 @@ struct Level<'r> {
 impl CallContext for Level<'_> {
     fn class(&self) -> Option<&str> {
         self.class
+    }
+
+    fn file(&self) -> Option<FileId> {
+        self.file
     }
 
     /// The object a method is called on, and whether it is the body's own
@@ -4040,6 +4170,7 @@ impl<'r> Level<'r> {
     /// change by what it is bound to: a global, the declaration's static
     /// variable, or the place a reference was taken of.
     fn variable_storages(&self, name: Option<&Name>, place: &Place, out: &mut Effect, depth: u32) {
+        let mut bound_here = false;
         for (bound, binding) in self.bindings.iter().copied() {
             let applies = match (bound, name) {
                 (None, _) | (_, None) => true,
@@ -4048,6 +4179,7 @@ impl<'r> Level<'r> {
             if !applies {
                 continue;
             }
+            bound_here = true;
             let variable = bound.as_ref().or(name);
             match binding {
                 Binding::Global(global) => out.insert(Storage::Global(
@@ -4068,6 +4200,15 @@ impl<'r> Level<'r> {
                     self.place_storages(&through, out, depth + 1);
                 }
             }
+        }
+        // A variable of a file's top level is the including scope's: a
+        // global when that is the top level of a script.
+        let shared = match name {
+            Some(name) => self.shared_with_file.contains(&name.as_str()),
+            None => !self.shared_with_file.is_empty(),
+        };
+        if !bound_here && (self.file_scope || shared) {
+            out.insert(Storage::Global(name.cloned()));
         }
     }
 

@@ -243,6 +243,9 @@ pub(crate) enum Callee {
         property: Name,
         set: bool,
     },
+    /// An `include` or `require`, by the id of its expression in the file:
+    /// the top level of the file it names, run in the scope it is written in.
+    Include(u32),
 }
 
 /// An operation on a value through which PHP may run the value's code.
@@ -825,6 +828,27 @@ impl BodySummary {
     /// The summary of the statements of one body.
     pub fn of(arenas: &NodeArenas, body: &[StmtId]) -> BodySummary {
         BodySummary::of_function(arenas, &[], body)
+    }
+
+    /// The summary of the top level of a file: the statements that run when
+    /// it is included, which are all but the declarations it makes.
+    pub fn of_file(arenas: &NodeArenas, stmts: &[StmtId]) -> BodySummary {
+        let running: Vec<StmtId> = stmts
+            .iter()
+            .copied()
+            .filter(|id| {
+                !matches!(
+                    arenas.stmt(*id).map(|stmt| &stmt.kind),
+                    Some(
+                        StmtKind::FunctionDecl(_)
+                            | StmtKind::ClassDecl(_)
+                            | StmtKind::Namespace(_)
+                            | StmtKind::Use(_)
+                    )
+                )
+            })
+            .collect();
+        BodySummary::of(arenas, &running)
     }
 
     /// The summary of the body of a function with the parameters `params`:
@@ -1483,6 +1507,19 @@ impl Summarizer {
 }
 
 impl Summarizer {
+    /// Records the include `id` as a call of the file it names. The file
+    /// runs in this scope, so it may assign any variable of it.
+    fn record_include(&mut self, id: ExprId) {
+        self.write_computed();
+        self.scope.calls.push(CallWrites {
+            callee: Callee::Include(u32::from(id.into_raw())),
+            arguments: Box::new([]),
+            places: Box::new([]),
+            objectless: Box::new([]),
+            callables: Box::new([]),
+        });
+    }
+
     /// Records `e` when it is a call.
     fn record_call(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(e) = arenas.expr(id) else { return };
@@ -1960,7 +1997,8 @@ impl Visitor for Summarizer {
                     self.write(arenas, *target, None, Some(vec![Origin::Arithmetic]));
                     self.mark(arenas, *target, READ | WRITE);
                 }
-                ExprKind::Eval(_) | ExprKind::Include(..) => self.scope.anything = true,
+                ExprKind::Eval(_) => self.scope.anything = true,
+                ExprKind::Include(..) => self.record_include(id),
                 _ => {
                     self.record_call(arenas, id);
                     if writes_computed_variables(arenas, id) {
@@ -2205,6 +2243,7 @@ syntax::canonical_enum!(Callee {
     Written(ids),
     Implicit { on, operation },
     ParentHook { property, set },
+    Include(at),
 });
 
 syntax::canonical_enum!(Operation {

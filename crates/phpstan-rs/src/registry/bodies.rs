@@ -36,6 +36,19 @@ pub trait BodySource: Sync {
     /// Adds to `out` the classes every file at hand registers as stream
     /// wrappers.
     fn stream_wrappers(&self, out: &mut StreamWrappers);
+
+    /// Every file at hand.
+    fn files(&self) -> Vec<LoadedFile<'_>>;
+}
+
+/// A loaded file, as the passes that settle what code writes read it.
+pub struct LoadedFile<'a> {
+    pub(crate) id: crate::file_id::FileId,
+    pub(crate) path: &'a std::path::Path,
+    pub(crate) global_facts: &'a crate::registry::global_vars::GlobalFacts,
+    /// What the file's top level, the code that runs when it is included,
+    /// may write.
+    pub(crate) top_level: &'a Arc<BodySummary>,
 }
 
 /// What the passes read of a hook's body, and the name of the parameter a
@@ -61,6 +74,10 @@ impl BodySource for NoBodies {
     fn unset_properties(&self, _: &mut UnsetProperties) {}
 
     fn stream_wrappers(&self, _: &mut StreamWrappers) {}
+
+    fn files(&self) -> Vec<LoadedFile<'_>> {
+        Vec::new()
+    }
 }
 
 /// The properties code unsets (`unset($o->p)`): by name, and whether it
@@ -356,12 +373,25 @@ type Hooks = (Option<Arc<BodySummary>>, Option<(Arc<BodySummary>, Name)>);
 /// One file's function and method bodies, anonymous classes' included, by
 /// the span of their name, its properties' hooks, by the span of the
 /// property's name, and the properties it unsets.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct FileBodies {
     bodies: FxHashMap<Span, Body>,
     hooks: FxHashMap<Span, Hooks>,
     unset: UnsetProperties,
     wrappers: StreamWrappers,
+    top_level: Arc<BodySummary>,
+}
+
+impl Default for FileBodies {
+    fn default() -> FileBodies {
+        FileBodies {
+            bodies: FxHashMap::default(),
+            hooks: FxHashMap::default(),
+            unset: UnsetProperties::default(),
+            wrappers: StreamWrappers::default(),
+            top_level: Arc::new(BodySummary::of_file(&NodeArenas::default(), &[])),
+        }
+    }
 }
 
 impl FileBodies {
@@ -494,7 +524,14 @@ impl FileBodies {
             } else {
                 StreamWrappers::default()
             },
+            top_level: Arc::new(BodySummary::of_file(arenas, stmts)),
         }
+    }
+
+    /// What the top level of the file, the code that runs when it is
+    /// included, may write.
+    pub(crate) fn top_level(&self) -> &Arc<BodySummary> {
+        &self.top_level
     }
 
     /// What the passes read of the body of the declaration whose name is at
@@ -537,7 +574,10 @@ impl serde::Serialize for FileBodies {
             .into_iter()
             .map(|(span, body)| (span, &body.summary, &body.flow))
             .collect();
-        serde::Serialize::serialize(&(bodies, hooks, &self.unset, &self.wrappers), serializer)
+        serde::Serialize::serialize(
+            &(bodies, hooks, &self.unset, &self.wrappers, &self.top_level),
+            serializer,
+        )
     }
 }
 
@@ -548,8 +588,9 @@ impl<'de> serde::Deserialize<'de> for FileBodies {
             Vec<(Span, Hooks)>,
             UnsetProperties,
             StreamWrappers,
+            Arc<BodySummary>,
         );
-        let (bodies, hooks, unset, wrappers): Stored =
+        let (bodies, hooks, unset, wrappers, top_level): Stored =
             serde::Deserialize::deserialize(deserializer)?;
         Ok(FileBodies {
             bodies: bodies
@@ -559,6 +600,7 @@ impl<'de> serde::Deserialize<'de> for FileBodies {
             hooks: hooks.into_iter().collect(),
             unset,
             wrappers,
+            top_level,
         })
     }
 }
@@ -585,6 +627,10 @@ impl BodySource for FileBodies {
     fn stream_wrappers(&self, out: &mut StreamWrappers) {
         out.add(&self.wrappers);
     }
+
+    fn files(&self) -> Vec<LoadedFile<'_>> {
+        Vec::new()
+    }
 }
 
 /// A body's summary and flow.
@@ -605,6 +651,7 @@ impl syntax::canonical::Canonical for FileBodies {
             hooks,
             unset,
             wrappers,
+            top_level,
         } = self;
         let mut bodies: Vec<(&Span, &Body)> = bodies.iter().collect();
         bodies.sort_unstable_by_key(|(span, _)| (span.start, span.end));
@@ -617,6 +664,7 @@ impl syntax::canonical::Canonical for FileBodies {
                 ("hooks", &hooks),
                 ("unset", unset),
                 ("wrappers", wrappers),
+                ("top_level", top_level),
             ],
         );
     }

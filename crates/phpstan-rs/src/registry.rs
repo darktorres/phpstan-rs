@@ -179,6 +179,7 @@ pub(crate) struct ResolvedSnapshot {
     effects: FxHashMap<effects::EffectId, (Option<effects::DeclKey>, effects::Settled)>,
     global_variables: syntax::name::NameMap<Type>,
     global_scopes: Arc<global_vars::GlobalScopes>,
+    include_targets: Arc<FxHashMap<(crate::file_id::FileId, u32), Option<crate::file_id::FileId>>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -568,6 +569,11 @@ pub struct Registry {
     // by the files that share one global scope.
     #[serde(skip)]
     global_scopes: Arc<global_vars::GlobalScopes>,
+    // The file each include of the loaded files names, by the file it is in
+    // and the id of its expression there; `None` when it names no single
+    // loaded file. Found before the effects, which read it.
+    #[serde(skip)]
+    include_targets: Arc<FxHashMap<(crate::file_id::FileId, u32), Option<crate::file_id::FileId>>>,
 }
 
 impl Registry {
@@ -1407,6 +1413,7 @@ impl Registry {
                 .collect(),
             global_variables: registry.global_variables().clone(),
             global_scopes: Arc::clone(&registry.global_scopes),
+            include_targets: Arc::clone(&registry.include_targets),
             class_results: class_results_before.clone(),
         };
         if scope.is_all() {

@@ -358,6 +358,17 @@ impl BodySource for file_table::FileTable<FileState> {
             file.bodies.stream_wrappers(out);
         }
     }
+
+    fn files(&self) -> Vec<crate::registry::bodies::LoadedFile<'_>> {
+        self.iter_with_ids()
+            .map(|(id, path, file)| crate::registry::bodies::LoadedFile {
+                id,
+                path: path.as_path(),
+                global_facts: &file.global_facts,
+                top_level: file.bodies.top_level(),
+            })
+            .collect()
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -2236,6 +2247,8 @@ impl Project {
             self.walk_affected(&mut walk, self.registry.changed_global_variables(before));
             walk.affected
                 .extend(self.registry.files_with_changed_include_writes(before));
+            walk.affected
+                .extend(self.registry.files_with_changed_includes(before));
         }
         walk.affected
             .into_iter()

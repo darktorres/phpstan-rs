@@ -19,6 +19,7 @@ use types::Type;
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::shared_scope::SharedScope;
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for, purge_stale_narrowing_for_var};
+use crate::file_id::FileId;
 use crate::registry::summaries::{
     ArgAt, BodySummary, CallWrites, Callable, Callee, Operation, Origin, PairTarget, Place,
     Receiver, Root, Step, call_of,
@@ -84,6 +85,7 @@ impl TypedCall<'_, '_> {
             let mut effect = self.checker.registry.closure_effect(
                 &summary,
                 self.class(),
+                self.checker.current_file_id,
                 Some(&self.captured_holder()),
             );
             effect.join(&captured_effect(arenas, id));
@@ -101,12 +103,12 @@ impl TypedCall<'_, '_> {
             // variables hold now.
             let captured = self.checker.closure_captures.get(id);
             let taken = |name: &str| captured?.get(&Name::from(name)).cloned();
-            effect.join(
-                &self
-                    .checker
-                    .registry
-                    .closure_effect(closure, self.class(), Some(&taken)),
-            );
+            effect.join(&self.checker.registry.closure_effect(
+                closure,
+                self.class(),
+                self.checker.current_file_id,
+                Some(&taken),
+            ));
             if let Some(arenas) = self.checker.syntax_arenas() {
                 effect.join(&captured_effect(arenas, *id));
             }
@@ -121,6 +123,10 @@ impl TypedCall<'_, '_> {
 impl CallContext for TypedCall<'_, '_> {
     fn class(&self) -> Option<&str> {
         self.checker.current_class.as_deref()
+    }
+
+    fn file(&self) -> Option<FileId> {
+        self.checker.current_file_id
     }
 
     fn receiver(&self, receiver: &Receiver) -> (Holder, bool) {
@@ -506,6 +512,34 @@ impl Checker<'_> {
         }
         let ty = self.infer_expr(operand, locals);
         self.forget_what_an_operation_may_change(&ty, is_this(self, operand), operation, locals);
+    }
+
+    /// After the include `at`, what the top level of the file it names, or
+    /// any code when it names none, may have written is stale.
+    pub(crate) fn forget_what_an_include_may_change(&self, at: ExprId, locals: &mut Locals) {
+        let call = CallWrites {
+            callee: Callee::Include(u32::from(at.into_raw())),
+            arguments: Box::new([]),
+            places: Box::new([]),
+            objectless: Box::new([]),
+            callables: Box::new([]),
+        };
+        let effect = {
+            let ctx = TypedCall {
+                checker: self,
+                locals,
+                callee: None,
+                receiver: None,
+                arenas: self.syntax_arenas(),
+                args: &[],
+                written: Default::default(),
+                operand: None,
+            };
+            let mut effect = self.registry.call_effect(&call, &ctx);
+            effect.join(&ctx.written.borrow());
+            effect
+        };
+        self.forget_effect(&effect, locals);
     }
 
     /// Forgets the variables the include `at` may write: the file it
