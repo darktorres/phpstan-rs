@@ -6308,10 +6308,17 @@ impl<'a> Checker<'a> {
                             inferred,
                         ))
                     }
-                    _ => closure
-                        .return_type
-                        .as_deref()
-                        .map(|hint| self.resolve_type_hint(Some(hint))),
+                    _ => match closure.return_type.as_deref() {
+                        Some(hint) => Some(self.resolve_type_hint(Some(hint))),
+                        // No hint: what its return statements give, which
+                        // is `void` for a body that returns nothing.
+                        None => self.closure_syntactic_return_type(
+                            arenas,
+                            closure,
+                            locals,
+                            Some(param_overrides),
+                        ),
+                    },
                 }
             }
             // A first-class callable (`intval(...)`, `TagId::from(...)`,
