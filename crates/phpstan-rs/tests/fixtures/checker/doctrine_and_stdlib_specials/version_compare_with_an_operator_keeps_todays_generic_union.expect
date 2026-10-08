@@ -1,1 +1,1 @@
-3:24-3:53 return.type L3 | return type mismatch: expected int, got int|bool
+3:24-3:53 return.type L3 F7 | return type mismatch: expected int, got int|bool

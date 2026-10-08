@@ -22,6 +22,6 @@
                 assertType("array{0: 'c', 1: 'x', 7: true, 8: false}", Consts::LIST);
                 assertType('array{}', Consts::EMPTY);
                 assertType("array{debug: Level::Debug, info: Level::Info}", Level::NAMES);
-                assertType('mixed', Consts::LOOP_A);
+                assertType('never', Consts::LOOP_A);
             }
         

@@ -1,1 +1,1 @@
-6:35-6:37 argument.type L5 | Parameter #1 $x of function needsNarrower expects int<0, max>|string, int<min, 9>|string given.
+6:35-6:37 argument.type L5 F7 | Parameter #1 $x of function needsNarrower expects int<0, max>|string, int<min, 9>|string given.

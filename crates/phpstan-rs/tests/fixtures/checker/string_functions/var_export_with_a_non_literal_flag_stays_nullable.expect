@@ -1,2 +1,2 @@
 2:24-2:26 missingType.parameter L6 | Function f() has parameter $x with no type specified.
-3:24-3:45 return.type L3 | return type mismatch: expected string, got string|null
+3:24-3:45 return.type L3 F8 | return type mismatch: expected string, got string|null
