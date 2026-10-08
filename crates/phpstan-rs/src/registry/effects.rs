@@ -84,6 +84,10 @@ pub(crate) enum Storage {
         function: Name,
         var: Option<Name>,
     },
+    /// A variable a closure captures by reference, shared with the scope
+    /// that wrote the closure: the closure by the id of its expression in
+    /// that scope's file, and the variable.
+    Captured { closure: u32, var: Name },
 }
 
 /// What code may write: a set of storages, or anything.
@@ -107,6 +111,16 @@ impl Effect {
 
     pub(crate) fn is_anything(&self) -> bool {
         self.0.is_none()
+    }
+
+    /// What running the closure `closure` writes of the variables it
+    /// captures by reference.
+    pub(crate) fn captured(closure: u32, vars: impl IntoIterator<Item = Name>) -> Effect {
+        Effect(Some(
+            vars.into_iter()
+                .map(|var| Storage::Captured { closure, var })
+                .collect(),
+        ))
     }
 
     pub(crate) fn is_nothing(&self) -> bool {
@@ -4132,6 +4146,7 @@ syntax::canonical_enum!(Storage {
         function,
         var,
     },
+    Captured { closure, var },
 });
 
 #[cfg(test)]

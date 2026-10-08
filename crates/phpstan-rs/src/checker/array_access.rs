@@ -88,7 +88,7 @@ impl<'a> Checker<'a> {
         for (member, _) in &self.members_implementing(base_ty, interface) {
             effect.join(&self.method_call_effect(member, method));
         }
-        self.forget_effect(&effect, false, locals);
+        self.forget_effect(&effect, locals);
     }
 
     /// The throw point and the impure point of PHP calling `method` of

@@ -1631,7 +1631,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let scope = std::rc::Rc::clone(&self.shared_scope);
-        for name in &scope.captured {
+        for name in scope.captured.keys() {
             let Some(held) = locals.get_var(name) else {
                 continue;
             };

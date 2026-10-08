@@ -9,7 +9,7 @@
 //! or captured by reference by a closure the call may run, is reset to what
 //! it may hold.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use syntax::ast::*;
@@ -38,8 +38,6 @@ struct TypedCall<'c, 'a> {
     args: &'c [Arg],
     /// What the closures the scope wrote that the call runs may write.
     written: RefCell<Effect>,
-    /// Whether the call runs a closure the scope wrote.
-    runs_written: Cell<bool>,
     /// The object an operation's operand is, and whether it is the scope's
     /// own `$this`, for an operation PHP may run code for.
     operand: Option<(Holder, bool)>,
@@ -83,11 +81,13 @@ impl TypedCall<'_, '_> {
         )
         .then(|| {
             let summary = BodySummary::of_closure(arenas, id);
-            self.checker.registry.closure_effect(
+            let mut effect = self.checker.registry.closure_effect(
                 &summary,
                 self.class(),
                 Some(&self.captured_holder()),
-            )
+            );
+            effect.join(&captured_effect(arenas, id));
+            effect
         })
     }
 
@@ -107,6 +107,9 @@ impl TypedCall<'_, '_> {
                     .registry
                     .closure_effect(closure, self.class(), Some(&taken)),
             );
+            if let Some(arenas) = self.checker.syntax_arenas() {
+                effect.join(&captured_effect(arenas, *id));
+            }
             if effect.is_anything() {
                 break;
             }
@@ -202,7 +205,6 @@ impl CallContext for TypedCall<'_, '_> {
         self.written
             .borrow_mut()
             .join(&effect.transferred(transfer));
-        self.runs_written.set(true);
         true
     }
 
@@ -213,6 +215,25 @@ impl CallContext for TypedCall<'_, '_> {
     fn rebindable(&self) -> bool {
         self.checker.shared_scope.closure
     }
+}
+
+/// What running the closure written as `id` writes of the variables it
+/// captures by reference.
+fn captured_effect(arenas: &NodeArenas, id: ExprId) -> Effect {
+    let Some(ExprKind::Closure(closure)) = arenas.expr(id).map(|e| &e.kind) else {
+        return Effect::nothing();
+    };
+    let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) else {
+        return Effect::nothing();
+    };
+    Effect::captured(
+        id.into_raw().into_u32(),
+        arenas
+            .closure_uses(&closure.uses)
+            .iter()
+            .filter(|u| u.by_ref)
+            .map(|u| u.name.name.clone()),
+    )
 }
 
 /// Whether `e` is the scope's own `$this`.
@@ -375,7 +396,7 @@ impl Checker<'_> {
             })
             .cloned()
             .collect();
-        let (effect, ran_written) = {
+        let effect = {
             let ctx = TypedCall {
                 checker: self,
                 locals,
@@ -384,17 +405,13 @@ impl Checker<'_> {
                 arenas: Some(arenas),
                 args,
                 written: Default::default(),
-                runs_written: Cell::new(false),
                 operand: None,
             };
             let mut effect = self.registry.call_effect(&call, &ctx);
             effect.join(&ctx.written.borrow());
-            (effect, ctx.runs_written.get())
+            effect
         };
-        // A closure the scope wrote writes what it captures by reference as
-        // its own variables, which no effect names.
-        let runs_written = effect.is_anything() || ran_written;
-        self.forget_effect(&effect, runs_written, locals);
+        self.forget_effect(&effect, locals);
     }
 
     /// After `operation` on a value of type `ty`, what the code PHP may run
@@ -435,12 +452,11 @@ impl Checker<'_> {
                 arenas: self.syntax_arenas(),
                 args: &[],
                 written: Default::default(),
-                runs_written: Cell::new(false),
                 operand: Some((holder_of(ty), this)),
             };
             self.registry.call_effect(&call, &ctx)
         };
-        self.forget_effect(&effect, effect.is_anything(), locals);
+        self.forget_effect(&effect, locals);
     }
 
     /// After the binary operator `op` on `l` and `r`, each with its type,
@@ -492,11 +508,10 @@ impl Checker<'_> {
         self.forget_what_an_operation_may_change(&ty, is_this(self, operand), operation, locals);
     }
 
-    /// Forgets what `effect` may have written, and the variables captured by
-    /// reference when the call runs a closure the scope wrote.
-    pub(crate) fn forget_effect(&self, effect: &Effect, runs_written: bool, locals: &mut Locals) {
+    /// Forgets what `effect` may have written.
+    pub(crate) fn forget_effect(&self, effect: &Effect, locals: &mut Locals) {
         let scope = Rc::clone(&self.shared_scope);
-        if effect.is_nothing() && !runs_written {
+        if effect.is_nothing() {
             return;
         }
         let anything = effect.is_anything();
@@ -526,9 +541,7 @@ impl Checker<'_> {
             purge_stale_narrowing_for(locals, key);
             locals.remove(key);
         }
-        for (name, shared) in
-            self.shared_variables_written(&storages, anything, runs_written, &scope, locals)
-        {
+        for (name, shared) in self.shared_variables_written(&storages, anything, &scope, locals) {
             let ty = match shared {
                 Shared::Global(global) => self
                     .registry
@@ -608,7 +621,10 @@ impl Checker<'_> {
                 class,
                 prop: written,
             } => names(written) && self.may_hold(&base_ty, class.as_deref()),
-            Storage::Static { .. } | Storage::Global(_) | Storage::StaticVar { .. } => false,
+            Storage::Static { .. }
+            | Storage::Global(_)
+            | Storage::StaticVar { .. }
+            | Storage::Captured { .. } => false,
         })
     }
 
@@ -709,7 +725,6 @@ impl Checker<'_> {
         &self,
         storages: &[&Storage],
         anything: bool,
-        runs_written: bool,
         scope: &SharedScope,
         locals: &Locals,
     ) -> Vec<(Name, Shared)> {
@@ -786,8 +801,14 @@ impl Checker<'_> {
                 out.push((name.clone(), Shared::Reference(place.clone())));
             }
         }
-        if runs_written {
-            for name in &scope.captured {
+        for (name, closures) in &scope.captured {
+            let run = closures.iter().any(|&closure| {
+                storages.iter().any(|storage| {
+                    matches!(storage, Storage::Captured { closure: found, var }
+                        if *found == closure && var == name)
+                })
+            });
+            if anything || run {
                 out.push((name.clone(), Shared::Captured));
             }
         }

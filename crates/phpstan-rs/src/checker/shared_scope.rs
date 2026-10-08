@@ -37,7 +37,7 @@ pub(crate) struct SharedScope {
     pub(crate) references: FxHashMap<Name, Place>,
     /// The variables a closure captures by reference: the scope's own
     /// captures, for a closure's scope, and those of the closures it writes.
-    pub(crate) captured: FxHashSet<Name>,
+    pub(crate) captured: FxHashMap<Name, FxHashSet<u32>>,
     /// The variables holding only closures, arrow functions or first-class
     /// callables the scope wrote, each one summarized
     /// (`BodySummary::of_closure`).
@@ -70,7 +70,7 @@ impl SharedScope {
         let mut scan = Scan::default();
         for u in uses {
             if u.by_ref {
-                scan.captured.insert(u.name.name.clone());
+                scan.captured.entry(u.name.name.clone()).or_default();
                 scan.held.insert(u.name.name.clone(), Held::Other);
             }
         }
@@ -103,7 +103,7 @@ impl SharedScope {
             && !self.globals.contains(name)
             && !self.statics.contains(name)
             && !self.references.contains_key(name)
-            && !self.captured.contains(name)
+            && !self.captured.contains_key(name)
             && !self.exposed.contains(name)
     }
 
@@ -135,7 +135,7 @@ struct Scan {
     any_global: bool,
     statics: FxHashSet<Name>,
     references: FxHashMap<Name, Place>,
-    captured: FxHashSet<Name>,
+    captured: FxHashMap<Name, FxHashSet<u32>>,
     held: FxHashMap<Name, Held>,
     escaped: FxHashSet<Name>,
     exposed: FxHashSet<Name>,
@@ -148,7 +148,7 @@ impl Scan {
             self.globals.contains(name)
                 || self.statics.contains(name)
                 || self.references.contains_key(name)
-                || self.captured.contains(name)
+                || self.captured.contains_key(name)
         };
         let mut unescaped = FxHashSet::default();
         let mut closures = FxHashMap::default();
@@ -465,7 +465,10 @@ impl Visitor for Scan {
                     for u in arenas.closure_uses(&closure.uses) {
                         self.escaped.insert(u.name.name.clone());
                         if u.by_ref {
-                            self.captured.insert(u.name.name.clone());
+                            self.captured
+                                .entry(u.name.name.clone())
+                                .or_default()
+                                .insert(id.into_raw().into_u32());
                         }
                     }
                 }
