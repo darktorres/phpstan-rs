@@ -41,7 +41,7 @@ pub(crate) struct SharedScope {
     /// The variables holding only closures, arrow functions or first-class
     /// callables the scope wrote, each one summarized
     /// (`BodySummary::of_closure`).
-    pub(crate) closures: FxHashMap<Name, Vec<BodySummary>>,
+    pub(crate) closures: FxHashMap<Name, Vec<(ExprId, BodySummary)>>,
     /// The variables holding only objects the scope made, used only as the
     /// base of a property access, an operand of `===`, `!==`, `instanceof`,
     /// `isset` or `empty`, or an assignment's target: no other code can
@@ -122,8 +122,9 @@ impl SharedScope {
 enum Held {
     /// Only objects the scope made.
     Made,
-    /// Only closures the scope wrote, each one summarized.
-    Closures(Vec<BodySummary>),
+    /// Only closures the scope wrote, each by its expression and
+    /// summarized.
+    Closures(Vec<(ExprId, BodySummary)>),
     /// Anything else.
     Other,
 }
@@ -285,7 +286,7 @@ fn held_by(arenas: &NodeArenas, id: ExprId) -> Held {
     syntax::stack::guard(|| match &e.kind {
         ExprKind::New(..) | ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Held::Made,
         ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
-            Held::Closures(vec![BodySummary::of_closure(arenas, id)])
+            Held::Closures(vec![(id, BodySummary::of_closure(arenas, id))])
         }
         ExprKind::Assign(_, rhs) => held_by(arenas, *rhs),
         _ => Held::Other,

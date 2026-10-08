@@ -64,7 +64,7 @@ impl TypedCall<'_, '_> {
     }
 
     /// What the scope knows of the object the variable `name` holds, for a
-    /// closure that captures it by value.
+    /// closure written where the call is that captures it by value.
     fn captured_holder(&self) -> impl Fn(&str) -> Option<Holder> + '_ {
         |name| self.locals.get_var(name).map(holder_of)
     }
@@ -96,12 +96,17 @@ impl TypedCall<'_, '_> {
     fn held_effect(&self, name: &Name) -> Option<Effect> {
         let closures = self.checker.shared_scope.closures.get(name)?;
         let mut effect = Effect::nothing();
-        for closure in closures {
-            effect.join(&self.checker.registry.closure_effect(
-                closure,
-                self.class(),
-                Some(&self.captured_holder()),
-            ));
+        for (id, closure) in closures {
+            // What the closure took where it was written, not what the
+            // variables hold now.
+            let captured = self.checker.closure_captures.get(id);
+            let taken = |name: &str| captured?.get(&Name::from(name)).cloned();
+            effect.join(
+                &self
+                    .checker
+                    .registry
+                    .closure_effect(closure, self.class(), Some(&taken)),
+            );
             if effect.is_anything() {
                 break;
             }
@@ -230,7 +235,82 @@ enum Shared {
     Captured,
 }
 
+/// The names of the variables an arrow function's body mentions, a closure's
+/// `use` list included: what it may take of the code around it.
+fn mentioned_variables(arenas: &NodeArenas, body: ExprId) -> Vec<Name> {
+    struct Mentions(Vec<Name>);
+    impl syntax::visit::arena::Visitor for Mentions {
+        fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+            let Some(e) = arenas.expr(id) else { return };
+            match &e.kind {
+                ExprKind::Variable(name) => self.0.push(name.clone()),
+                ExprKind::Closure(closure) => {
+                    if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
+                        self.0.extend(
+                            arenas
+                                .closure_uses(&closure.uses)
+                                .iter()
+                                .map(|u| u.name.name.clone()),
+                        );
+                    }
+                }
+                _ => {}
+            }
+            syntax::visit::arena::walk_expr(self, arenas, id);
+        }
+    }
+    let mut mentions = Mentions(Vec::new());
+    syntax::visit::arena::Visitor::visit_expr(&mut mentions, arenas, body);
+    mentions.0.sort_unstable();
+    mentions.0.dedup();
+    mentions.0
+}
+
 impl Checker<'_> {
+    /// Notes what the closure `id`, written where `locals` is, takes by
+    /// value of the variables it names: the object each holds, joined with
+    /// what an earlier pass over the code noted.
+    pub(crate) fn note_captures(
+        &mut self,
+        id: ExprId,
+        names: impl IntoIterator<Item = Name>,
+        locals: &Locals,
+    ) {
+        let now: rustc_hash::FxHashMap<Name, Holder> = names
+            .into_iter()
+            .filter_map(|name| {
+                let held = holder_of(locals.get_var(&name)?);
+                Some((name, held))
+            })
+            .collect();
+        let noted = match self.closure_captures.remove(&id) {
+            None => now,
+            Some(mut before) => {
+                before.retain(|name, held| match now.get(name) {
+                    Some(other) => {
+                        *held = std::mem::replace(held, Holder::Unknown).join(other.clone());
+                        true
+                    }
+                    None => false,
+                });
+                before
+            }
+        };
+        self.closure_captures.insert(id, noted);
+    }
+
+    /// Notes what the arrow function `id` with body `body`, written where
+    /// `locals` is, takes of the variables around it.
+    pub(crate) fn note_arrow_captures(
+        &mut self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        body: ExprId,
+        locals: &Locals,
+    ) {
+        self.note_captures(id, mentioned_variables(arenas, body), locals);
+    }
+
     /// After a call, what it may have written is stale: see the module's
     /// doc comment. So is what iterating an argument spread into it may
     /// have written.

@@ -1917,7 +1917,7 @@ pub(crate) enum Holder {
 
 impl Holder {
     /// The object a value either holder describes may be.
-    fn join(self, other: Holder) -> Holder {
+    pub(crate) fn join(self, other: Holder) -> Holder {
         match (self, other) {
             (Holder::Classes(none), other) | (other, Holder::Classes(none)) if none.is_empty() => {
                 other
@@ -3111,7 +3111,10 @@ impl<'r> Resolve<'r> {
         let mut levels = vec![level];
         for (index, closure) in self.summary.closures.iter().enumerate() {
             let parent = closure.within.map_or(0, |within| within as usize + 1);
-            let level = self.closure_level(closure, &levels[parent], &lost[index + 1]);
+            let mut level = self.closure_level(closure, &levels[parent], &lost[index + 1]);
+            if index == 0 && closure.captures.is_none() {
+                level.outer = self.captured;
+            }
             levels.push(level);
         }
         levels
@@ -3260,6 +3263,7 @@ impl<'r> Resolve<'r> {
             bindings,
             runs: Default::default(),
             params_run: Default::default(),
+            outer: None,
         }
     }
 }
@@ -3307,6 +3311,10 @@ struct Level<'r> {
     runs: std::cell::RefCell<Vec<(u32, Transfer)>>,
     // The declaration's parameters whose arguments its calls run.
     params_run: std::cell::RefCell<Vec<Condition>>,
+    // For an arrow function or a first-class callable, which take every
+    // variable around them by value: what the code that wrote it knows of
+    // the object a variable it does not write holds.
+    outer: Option<&'r dyn Fn(&str) -> Option<Holder>>,
 }
 
 impl CallContext for Level<'_> {
@@ -3613,9 +3621,15 @@ impl<'r> Level<'r> {
                     .unwrap_or(Holder::Unknown);
             }
         }
+        if self.facts.reassigned.contains(name) {
+            return Holder::Unknown;
+        }
         match self.base.get(name.as_str()) {
-            Some(held) if !self.facts.reassigned.contains(name) => held.clone(),
-            _ => Holder::Unknown,
+            Some(held) => held.clone(),
+            None => self
+                .outer
+                .and_then(|outer| outer(name.as_str()))
+                .unwrap_or(Holder::Unknown),
         }
     }
 

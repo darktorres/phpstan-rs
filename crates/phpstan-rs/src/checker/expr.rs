@@ -4339,6 +4339,13 @@ impl<'a> Checker<'a> {
                 };
                 let params = arenas.params(closure.params.clone());
                 let uses = arenas.closure_uses(&closure.uses);
+                self.note_captures(
+                    e.id,
+                    uses.iter()
+                        .filter(|u| !u.by_ref)
+                        .map(|u| u.name.name.clone()),
+                    locals,
+                );
                 let body = arenas.stmt_ids(&closure.body);
                 let goto_labels = &closure.goto_labels;
                 let is_generator = closure.is_generator;
@@ -4822,6 +4829,7 @@ impl<'a> Checker<'a> {
                 // An arrow function DOES automatically capture the whole
                 // enclosing scope by value (implicit, no `use (...)`
                 // needed) - a plain clone of `locals` is exactly that.
+                self.note_arrow_captures(arenas, e.id, body.id, locals);
                 let mut arrow_locals = locals.clone();
                 for p in params {
                     let (ty, case_refs) =
