@@ -195,7 +195,10 @@ pub(crate) enum Receiver {
     Variable(Name),
     /// A static property, the class as written.
     Static(QualifiedName, Name),
-    /// Any other value: a call's result, an element, a literal.
+    /// A value whose origins the body shows: a call's result, an element,
+    /// a `new`, a constant.
+    Origins(Box<[Origin]>),
+    /// Any other value.
     Unknown,
 }
 
@@ -1682,7 +1685,10 @@ fn receiver(arenas: &NodeArenas, id: ExprId) -> Receiver {
         ExprKind::StaticPropertyFetch(StaticTarget::Name(class), prop) => {
             Receiver::Static((**class).clone(), prop.name.clone())
         }
-        _ => Receiver::Unknown,
+        _ => match origins_of(arenas, id) {
+            Some(origins) => Receiver::Origins(origins.into_boxed_slice()),
+            None => Receiver::Unknown,
+        },
     }
 }
 
@@ -2174,6 +2180,7 @@ syntax::canonical_enum!(Receiver {
     ThisProperty(prop),
     Variable(name),
     Static(class, prop),
+    Origins(origins),
     Unknown,
 });
 

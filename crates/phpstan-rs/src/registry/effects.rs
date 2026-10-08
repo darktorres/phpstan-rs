@@ -3346,6 +3346,7 @@ impl CallContext for Level<'_> {
             ),
             Receiver::Variable(name) => (self.variable_holder(name), false),
             Receiver::Static(class, prop) => (self.static_holder(class, prop), false),
+            Receiver::Origins(origins) => self.operand(Some(origins)),
             Receiver::Unknown => (Holder::Unknown, false),
         }
     }

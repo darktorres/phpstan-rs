@@ -154,7 +154,7 @@ impl CallContext for TypedCall<'_, '_> {
             }
             // The call's own receiver: the only one of these kinds a call the
             // checker asks about has (`forget_what_a_call_may_change`).
-            Receiver::Static(..) | Receiver::Unknown => (
+            Receiver::Static(..) | Receiver::Origins(_) | Receiver::Unknown => (
                 self.receiver
                     .map_or(Holder::Unknown, |receiver| self.inferred(receiver)),
                 false,
@@ -366,7 +366,9 @@ impl Checker<'_> {
                 !matches!(
                     callable,
                     Callable::Pair(
-                        PairTarget::Object(Receiver::Static(..) | Receiver::Unknown),
+                        PairTarget::Object(
+                            Receiver::Static(..) | Receiver::Origins(_) | Receiver::Unknown
+                        ),
                         _
                     )
                 )
