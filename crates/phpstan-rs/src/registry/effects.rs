@@ -3946,6 +3946,16 @@ impl<'r> Level<'r> {
         Holder::Classes(classes)
     }
 
+    /// The declared types of the static property `class::$prop`, as seen
+    /// from each class `class` may be; `None` when one is not known.
+    fn static_types(&self, class: &QualifiedName, prop: &Name) -> Option<Vec<Type>> {
+        let mut types = Vec::new();
+        for (owner, _) in self.static_property_owners(class, Some(prop)) {
+            types.push(self.registry.lookup_property(&owner?, prop)?.ty().clone());
+        }
+        Some(types)
+    }
+
     /// Each storage `class::$prop` may be: the class declaring the static
     /// property, as seen from each class `class` may be, with its name;
     /// `None` for a class not known.
@@ -4064,6 +4074,19 @@ impl<'r> Level<'r> {
     /// The object at `root` and `steps` may be, by the declared types along
     /// the way.
     fn value_holder(&self, root: &Root, steps: &[Step]) -> Holder {
+        // The declared types of the value the place starts from, when it
+        // has them: an array of objects holds objects its own holder, the
+        // object it is, does not name.
+        let typed: Option<Vec<Type>> = match root {
+            Root::Variable(Some(name)) if !self.made.contains_key(name.as_str()) => {
+                match self.params.get(name.as_str()) {
+                    Some(Declared::Param { ty, .. }) => Some(vec![(*ty).clone()]),
+                    _ => None,
+                }
+            }
+            Root::Static(class, Some(prop)) => self.static_types(class, prop),
+            _ => None,
+        };
         let start = match root {
             Root::This => match self.class {
                 Some(class) => Holder::Classes(vec![Name::from(class)]),
@@ -4074,7 +4097,7 @@ impl<'r> Level<'r> {
             // A superglobal is an array of strings, files or session values
             // PHP itself fills.
             Root::Global(Some(name)) if syntax::ast::is_superglobal(name) => {
-                Holder::Classes(Vec::new())
+                return Holder::Classes(Vec::new());
             }
             Root::Variable(None)
             | Root::Static(_, None)
@@ -4082,18 +4105,20 @@ impl<'r> Level<'r> {
             | Root::Global(_)
             | Root::Value => Holder::Unknown,
         };
-        // A value that holds no object at any depth has none in a part of it.
-        if steps.is_empty() || matches!(&start, Holder::Classes(classes) if classes.is_empty()) {
+        if steps.is_empty() {
             return start;
         }
-        let (Holder::Classes(classes) | Holder::Made(Some(classes))) = start else {
-            return Holder::Unknown;
-        };
         // The types of the value reached so far, once a step leaves the
         // object the walk starts from.
-        let mut reached: Option<Vec<Type>> = None;
+        let mut reached: Option<Vec<Type>> = typed;
+        let classes = match (&reached, start) {
+            (Some(_), _) => Vec::new(),
+            (None, Holder::Classes(classes) | Holder::Made(Some(classes))) => classes,
+            (None, _) => return Holder::Unknown,
+        };
         for step in steps {
             reached = Some(match (step, &reached) {
+                // A value that is no object has no property.
                 (Step::Property(Some(prop)), None) => match self.property_types(&classes, prop) {
                     Some(types) => types,
                     None => return Holder::Unknown,
