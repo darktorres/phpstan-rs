@@ -2,4 +2,4 @@
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 9:38-9:50 missingType.iterableValue L6 | Method Holder::fill() has parameter $items with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-21:70-21:79 offsetAccess.mightNotExist L7 | Offset 'process' might not exist on array{id: 1, process?: mixed, ...}.
+21:67-21:76 offsetAccess.mightNotExist L7 | Offset 'process' might not exist on array{id: 1, process?: mixed, ...}.
