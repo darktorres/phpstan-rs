@@ -384,31 +384,77 @@ enum ByRefCallee {
     Unknown,
 }
 
-/// The names of the methods any loaded class declares with a parameter
-/// taken by reference, found on first use.
+/// The parameters of a method, as far as passing an argument by reference
+/// goes.
+struct MethodParams {
+    /// Each parameter's name and whether it is taken by reference.
+    params: Vec<(String, bool)>,
+    /// The last parameter takes any number of arguments.
+    variadic: bool,
+}
+
+impl MethodParams {
+    fn takes_by_ref(&self, at: &ArgAt) -> bool {
+        let last = || {
+            self.variadic
+                .then(|| self.params.last())
+                .flatten()
+                .is_some_and(|(_, by_ref)| *by_ref)
+        };
+        match at {
+            ArgAt::Position(at) => self
+                .params
+                .get(*at as usize)
+                .map_or_else(last, |(_, by_ref)| *by_ref),
+            ArgAt::Named(name) => self
+                .params
+                .iter()
+                .find(|(param, _)| param == name.as_str())
+                .map_or_else(last, |(_, by_ref)| *by_ref),
+            ArgAt::Spread => self.params.iter().any(|(_, by_ref)| *by_ref),
+        }
+    }
+}
+
+/// The methods any loaded class declares with a parameter taken by
+/// reference, by name, found on first use. A call's receiver is not known
+/// where the sites are found, so a call passing an argument by reference
+/// counts when a method of that name takes that argument so.
 struct ByRefMethods<'r> {
     registry: &'r Registry,
-    names: std::sync::OnceLock<FxHashSet<String>>,
+    names: std::sync::OnceLock<FxHashMap<String, Vec<MethodParams>>>,
 }
 
 impl ByRefMethods<'_> {
-    fn declared(&self, method: &str) -> bool {
+    fn takes_by_ref(&self, method: &str, at: &ArgAt) -> bool {
         let names = self.names.get_or_init(|| {
-            let mut names = FxHashSet::default();
+            let mut names: FxHashMap<String, Vec<MethodParams>> = FxHashMap::default();
             for (class, _) in self.registry.class_ids.iter() {
                 for name in self.registry.method_names(class) {
-                    if self
-                        .registry
-                        .lookup_own_method(class, name)
-                        .is_some_and(|sig| sig.params.iter().any(|p| p.by_ref))
-                    {
-                        names.insert(name.to_ascii_lowercase());
+                    let Some(sig) = self.registry.lookup_own_method(class, name) else {
+                        continue;
+                    };
+                    if !sig.params.iter().any(|p| p.by_ref) {
+                        continue;
                     }
+                    names
+                        .entry(name.to_ascii_lowercase())
+                        .or_default()
+                        .push(MethodParams {
+                            params: sig
+                                .params
+                                .iter()
+                                .map(|p| (p.name.to_string(), p.by_ref))
+                                .collect(),
+                            variadic: sig.params.last().is_some_and(|p| p.variadic),
+                        });
                 }
             }
             names
         });
-        names.contains(&method.to_ascii_lowercase())
+        names
+            .get(&method.to_ascii_lowercase())
+            .is_some_and(|all| all.iter().any(|params| params.takes_by_ref(at)))
     }
 }
 
@@ -543,7 +589,7 @@ impl ContributionFact {
                     ByRefCallee::Function(name) => registry
                         .resolve_function(name)
                         .is_some_and(|(_, sig)| takes_by_ref(sig, at)),
-                    ByRefCallee::Method(name) => methods.declared(name),
+                    ByRefCallee::Method(name) => methods.takes_by_ref(name, at),
                     ByRefCallee::Unknown => true,
                 };
                 if !by_ref {
