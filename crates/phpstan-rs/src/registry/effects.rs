@@ -3850,6 +3850,9 @@ syntax::canonical_enum!(Storage {
 });
 
 #[cfg(test)]
+mod hierarchy_queries;
+
+#[cfg(test)]
 mod effect_id_tests {
     use super::*;
     use crate::registry::container::{Reader, Writer};
