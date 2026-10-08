@@ -1309,6 +1309,10 @@ fn edits_across_every_fixture_match_a_fresh_load() {
     // lazily (`Project::phpstan_base`) makes the others wait for it, and
     // its build runs on `worker_pool()`: were the groups that pool's
     // workers, all of them would be waiting and none could serve the build.
+    // The builds also run rayon work: started inside the pool, one would
+    // steal another group's task, which waits for the build it is in.
+    Project::plain_base();
+    Project::phpstan_base();
     let pool = rayon::ThreadPoolBuilder::new()
         .stack_size(crate::project::WORKER_STACK_SIZE)
         .build()
@@ -1406,6 +1410,34 @@ fn a_rebuild_follows_the_order_files_were_loaded_not_their_paths() {
         .expect("parses");
     let fresh = load(z, a_after);
     assert_eq!(methods(&edited), methods(&fresh));
+}
+
+#[test]
+fn a_stub_restored_by_an_edit_does_not_take_an_id_the_edited_file_was_given() {
+    let shadow = "<?php namespace PHPStan\\Rules; /** @api */ class Rule {}";
+    let user = "<?php namespace App; class MyRule implements \\PHPStan\\Rules\\Rule {}";
+    let helper = "<?php namespace PHPStan\\Rules; /** @api */ trait RuleHelperTrait {}";
+    let load = |first: &str| {
+        Files::new()
+            .analysed("a.php", first)
+            .analysed("b.php", user)
+            .load()
+    };
+    let messages = |project: &Project| -> Vec<String> {
+        let mut all: Vec<String> = project
+            .analyzed_paths()
+            .iter()
+            .flat_map(|path| project.check_file(path))
+            .map(|d| d.message)
+            .collect();
+        all.sort();
+        all
+    };
+    let mut edited = load(shadow);
+    edited
+        .update_file(Path::new("a.php"), helper)
+        .expect("parses");
+    assert_eq!(messages(&edited), messages(&load(helper)));
 }
 
 /// One edit as the language server makes it.

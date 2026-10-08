@@ -34,10 +34,10 @@ mod packed;
 mod property_topology;
 pub mod provenance;
 mod purity;
-mod retention;
 pub mod reflection_attribute;
 mod relation;
 mod resolve;
+mod retention;
 pub(crate) mod scope;
 mod shared;
 mod stub_cache;
@@ -290,6 +290,14 @@ pub struct Registry {
     class_ids: NameTable<ClassId>,
     #[serde(skip)]
     project_class_names: Vec<Option<Name>>,
+    /// The first class id local a declaration the registry places itself
+    /// (a stub merged over a project's declarations) may take: the
+    /// project's own high-water mark, so that no id it has handed to a
+    /// file is taken twice.
+    #[serde(skip)]
+    class_local_floor: u32,
+    #[serde(skip)]
+    function_local_floor: u32,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     #[serde(skip)]
@@ -969,16 +977,47 @@ impl Registry {
         (self.function_ids.get(name) == Some(&id)).then_some(name)
     }
 
+    /// The class id local for a declaration placed without one reserved:
+    /// above every name held and every local the project has handed out.
+    fn next_class_local(&mut self) -> u32 {
+        let local = u32::try_from(self.project_class_names.len())
+            .expect("project class id range exhausted")
+            .max(self.class_local_floor);
+        self.class_local_floor = local
+            .checked_add(1)
+            .expect("project class id range exhausted");
+        local
+    }
+
+    fn next_function_local(&mut self) -> u32 {
+        let local = u32::try_from(self.project_function_names.len())
+            .expect("project function id range exhausted")
+            .max(self.function_local_floor);
+        self.function_local_floor = local
+            .checked_add(1)
+            .expect("project function id range exhausted");
+        local
+    }
+
+    /// Raises the first id locals the registry itself places declarations
+    /// at to the project's high-water marks.
+    pub(crate) fn raise_local_floors(&mut self, classes: u32, functions: u32) {
+        self.class_local_floor = self.class_local_floor.max(classes);
+        self.function_local_floor = self.function_local_floor.max(functions);
+    }
+
+    /// The first class and function id locals nothing has taken.
+    pub(crate) fn local_floors(&self) -> (u32, u32) {
+        (self.class_local_floor, self.function_local_floor)
+    }
+
     fn ensure_class_id(&mut self, name: &Name, reserved: Option<u32>) {
         if let Some(existing_id) = self.class_ids.get(name).copied() {
             if existing_id.source() == Some(IdSource::Project) {
                 return;
             }
             let declaration = self.class_declarations.get(&existing_id).cloned();
-            let local = reserved.unwrap_or_else(|| {
-                u32::try_from(self.project_class_names.len())
-                    .expect("project class id range exhausted")
-            });
+            let local = reserved.unwrap_or_else(|| self.next_class_local());
             let id = ClassId::project_in_generation(local, self.id_generation);
             self.class_ids.insert(name.clone(), id);
             if self.project_class_names.len() <= id.local() as usize {
@@ -991,9 +1030,7 @@ impl Registry {
             }
             return;
         }
-        let local = reserved.unwrap_or_else(|| {
-            u32::try_from(self.project_class_names.len()).expect("project class id range exhausted")
-        });
+        let local = reserved.unwrap_or_else(|| self.next_class_local());
         let id = ClassId::project_in_generation(local, self.id_generation);
         self.class_ids.insert(name.clone(), id);
         if self.project_class_names.len() <= id.local() as usize {
@@ -1009,10 +1046,7 @@ impl Registry {
                 return;
             }
             let declaration = self.function_declarations.get(&existing_id).cloned();
-            let local = reserved.unwrap_or_else(|| {
-                u32::try_from(self.project_function_names.len())
-                    .expect("project function id range exhausted")
-            });
+            let local = reserved.unwrap_or_else(|| self.next_function_local());
             let id = FnId::project_in_generation(local, self.id_generation);
             self.function_ids.insert(name.clone(), id);
             if self.project_function_names.len() <= id.local() as usize {
@@ -1025,10 +1059,7 @@ impl Registry {
             }
             return;
         }
-        let local = reserved.unwrap_or_else(|| {
-            u32::try_from(self.project_function_names.len())
-                .expect("project function id range exhausted")
-        });
+        let local = reserved.unwrap_or_else(|| self.next_function_local());
         let id = FnId::project_in_generation(local, self.id_generation);
         self.function_ids.insert(name.clone(), id);
         if self.project_function_names.len() <= id.local() as usize {

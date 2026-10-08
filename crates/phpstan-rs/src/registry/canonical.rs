@@ -458,6 +458,8 @@ impl CanonicalOver for Registry {
             class_declarations: _,
             class_ids: _,
             project_class_names: _,
+            class_local_floor: _,
+            function_local_floor: _,
             configured_assertions,
             configured_class_argument_returns,
             functions: _,
