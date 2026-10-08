@@ -1,6 +1,6 @@
 # 20 G plan ledger
 
-Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), with tests-only gates at each item's V row and the complete §11 validation once after item 19, plus O3. A compound task is expanded into a parent row and child rows for each independently verifiable subtask before work on its item begins; atomic tasks stay as one row. Parent status summarizes its children. This decomposition covers the implementation work and each tests-only gate in items 9-19, the final §11 validation and O3 results, and the deferred-work validation, including deferred subtasks. Items 10-19 were audited against the plan on 2026-10-07: every parent subtask reference resolves, and every item gate has separate workspace and item-specific test rows. A second granularity audit split independently verifiable deliverables in items 13-19 that were still bundled. A follow-up audit added focused test selections for items 10-14 and 17, plus explicit final-only PHP, platform, server-session, cache and dump-oracle cases. The design of each row is in the plan, at the step or bullet the row names; this file holds the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table). The plan optimizes (§9, "Only what optimizes"): rows that change what the analysis finds beyond what the optimization needs are DEFERRED until after O3, where they stay in their item's place, and are built then as a plan of their own, validated by row D.V.
+Tracks building the plan of `PROFILE_DRILL_PIWIGO_20G.md`: items 0-19 (§10), with tests-only gates through 9.V, tests and item profiles at future gates 10.V-19.V, and the complete §11 validation once after item 19, plus O3. A compound task is expanded into a parent row and child rows for each independently verifiable subtask before work on its item begins; atomic tasks stay as one row. Parent status summarizes its children. This decomposition covers the implementation work and each gate's test and profile rows, the final §11 validation and O3 results, and the deferred-work validation, including deferred subtasks. Items 10-19 were audited against the plan on 2026-10-07: every parent subtask reference resolves, and every item gate has separate workspace, item-specific test, Callgrind and heap rows. A second granularity audit split independently verifiable deliverables in items 13-19 that were still bundled. A follow-up audit added focused test selections for items 10-14 and 17, plus explicit final-only PHP, platform, server-session, cache and dump-oracle cases. The design of each row is in the plan, at the step or bullet the row names; this file holds the order and the state. The plan was reviewed in full at `d6e43bf7` (§13's review table). The plan optimizes (§9, "Only what optimizes"): rows that change what the analysis finds beyond what the optimization needs are DEFERRED until after O3, where they stay in their item's place, and are built then as a plan of their own, validated by row D.V.
 
 Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
@@ -17,9 +17,9 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 
 - **In order.** Item 0 comes first, and the rows run top to bottom; an item starts after the previous item's tests-only gate; within an item they are in an order that builds, which is not always the plan's step order (the *plan* column gives the step). The *needs* column names a row in another item that must be done first. Within item 0, the dumps (0.4-0.10) come before the oracle run (0.2), whose edit replay records them, and the deletions (0.3) after it. A row that needs a later item's row sits right after it and is tested with that item: 3.4 after 9.2, with 9.V. The deferred 6.2-6.4 sit after 9.5, which they need. A deferred row is skipped where it sits, and a row left open never needs one.
 - **Subtasks.** Before an item starts, decompose every compound task from its plan into child rows for all its independently verifiable deliverables, including separate child rows for each item-gate test selection. Keep the plan's dependency order; update each child as it lands and derive the parent status from its children. Items 9-19 currently follow this structure; apply it to any later plan additions too.
-- **Per row:** `cargo fmt`, then a commit with an explicit pathspec, since another session may share the checkout. At an item gate, run tests only: the workspace test suite and tests added by that item. The test command may compile what it needs to execute those tests. Do not add separate builds, checks, clippy, formatting checks, diff checks, runtime oracles, fixtures, corpus runs, or dump comparisons to the gate. Full §11 validation runs once after item 19. A row may take several commits; its status takes the last one's hash.
-- **Item gates and final validation.** Each item's last row, *N*.V, runs only `cargo test --workspace` and item-specific test selections. The compilation inherent in running those tests is allowed. No separate build, check, clippy, formatting check, diff check, runtime oracle, fixture, corpus pass, or dump comparison is part of an item gate. The complete §11 validation (both builds, workspace tests, runtime oracle, corpus passes and comparisons) runs once after item 19; O3 runs at that final gate. No full validation runs between items.
-- **Out-of-band profiling.** A historical release timing sweep was run on 2026-10-07 to compare item endpoints. It is observational data, not an item gate, and does not alter any gate's status. Results and limitations are recorded below and in §12 of the plan.
+- **Per row:** `cargo fmt`, then a commit with an explicit pathspec, since another session may share the checkout. Item gates through 9.V were tests-only. Future gates 10.V-19.V run the workspace and item-specific tests, then the two profile tasks listed under each gate. Do not add unrelated checks, runtime oracles, fixtures, corpus passes, or dump comparisons to those gates. Full §11 validation still runs once after item 19. A row may take several commits; its status takes the last one's hash.
+- **Item gates and final validation.** By user direction, gates 10.V-19.V extend the plan's tests-only gates with `cargo test --workspace`, item-specific test selections, one Callgrind run and one heap run; this exception applies only to the ledger's future gates. Use the §11/`CLAUDE.md` 20G profile recipe: the `dhat` profile with frame pointers for Callgrind (`--separate-threads=yes`), and the `dhat-heap` profile for heap accounting. Run the Piwigo `check-project --config phpstan-rs.toml --format json` workload with a warm stub cache and `PHPSTAN_RS_NO_FILE_CACHE=1`; run heavy jobs one at a time under `nice -n 19`, with no timeout. Preserve raw per-thread Callgrind outputs and `dhat-heap.json` under `.corpus-runs/gate/profiles/<N.V>/`; record the profiled commit, total Ir, per-thread summary, allocation count/bytes and peak/exit retained bytes by holder in the ledger. These gate profiles do not replace the complete §11 validation and O3, which still run once after item 19. No full validation runs between items.
+- **Out-of-band profiling.** A historical release timing sweep was run on 2026-10-07 to compare item endpoints. It was observational and did not alter any gate's status. Results and limitations are recorded below and in §12 of the plan. The requested Callgrind and heap runs are now explicit subtasks of future gates 10.V-19.V.
 - **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
 - **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
 - **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
@@ -378,13 +378,15 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 10.9.b | same step | Lex stub type strings through a reusable scratch token stream | — | perf | OPEN |
 | 10.9.c | same step | Give completion its own token stream | — | perf | OPEN |
 | 10.9.d | same step | Replace test token constructors with `Parser::new(TokenStream)` | — | perf | OPEN |
-| 10.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 10.9 | val | OPEN; see 10.V.a-10.V.b |
+| 10.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 10.9 | val | OPEN; see 10.V.a-10.V.d |
 | 10.V.a | same gate | Run `cargo test --workspace` after item 10 implementation rows are complete | — | val | OPEN |
 | 10.V.b | same gate | Run item-specific token-stream, lexer and parser and Phar-stub tests | — | val | OPEN; see 10.V.b.a-10.V.b.d |
 | 10.V.b.a | same gate | Run TokenStream layout, cursor and buffer-reuse tests | — | val | OPEN |
 | 10.V.b.b | same gate | Run lexer token, payload, documentation and interpolation tests | — | val | OPEN |
 | 10.V.b.c | same gate | Run parser cursor, interpolation and current halt-position tests | — | val | OPEN |
 | 10.V.b.d | same gate | Run token-stream and payload tests against Phar stubs | — | val | OPEN |
+| 10.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/10.V/callgrind/` and record total Ir and per-thread summary | 10.V.a, 10.V.b | val | OPEN |
+| 10.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/10.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 10.V.a, 10.V.b | val | OPEN |
 | **11** | **item 11** | **Line starts, columns, offsets** | | | |
 | 11.1 | step 1 | `LineStarts` for every file, `LineIndex` for analysed files and open documents; `enum Lines` in `FileState` | — | perf | OPEN; see 11.1.a-11.1.c |
 | 11.1.a | same step | Build exact-size `LineStarts` for every file using per-worker scratch | — | perf | OPEN |
@@ -410,7 +412,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 11.7.b | same step | Record member-removal boundary offsets and compute fix spans only when requested | — | perf | OPEN |
 | 11.7.c | same step | Record leading-doc offsets rather than line numbers | — | perf | OPEN |
 | 11.7.d | same step | Derive anonymous-class lines from `LineStarts` on the worker | — | perf | OPEN |
-| 11.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 11.7 | val | OPEN; see 11.V.a-11.V.b |
+| 11.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 11.7 | val | OPEN; see 11.V.a-11.V.d |
 | 11.V.a | same gate | Run `cargo test --workspace` after item 11 implementation rows are complete | — | val | OPEN |
 | 11.V.b | same gate | Run item-specific line-start, line-index, column, LSP and cache tests | — | val | OPEN; see 11.V.b.a-11.V.b.f |
 | 11.V.b.a | same gate | Run line-break and exact-size `LineStarts` tests | — | val | OPEN |
@@ -419,6 +421,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 11.V.b.d | same gate | Run cache representation tests for `LineStarts` | — | val | OPEN |
 | 11.V.b.e | same gate | Run UTF-8 and UTF-16 column round-trip tests on multibyte and astral text | — | val | OPEN |
 | 11.V.b.f | same gate | Run language-server position tests for line starts, columns and offsets | — | val | OPEN |
+| 11.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/11.V/callgrind/` and record total Ir and per-thread summary | 11.V.a, 11.V.b | val | OPEN |
+| 11.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/11.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 11.V.a, 11.V.b | val | OPEN |
 | **12** | **item 12** | **Lexer details** | | | |
 | 12.1 | step 1 | The identifier lookup inlined; watch bits cached with each name in the cross-file cache | 10.2 | perf | OPEN; see 12.1.a-12.1.b |
 | 12.1.a | same step | Inline identifier lookup in the identifier lexer arm with a length-first probe | — | perf | OPEN |
@@ -462,7 +466,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 12.13.a | same step | Recognize `<?php` only when followed by PHP whitespace | — | sem | DEFERRED (after O3, not optimization) |
 | 12.13.b | same step | Recognize short open tags according to configured `short_open_tag` | — | sem | DEFERRED (after O3, not optimization) |
 | 12.13.c | same step | Report the short-open-tag result when the setting is unknown | — | check | DEFERRED (after O3, not optimization) |
-| 12.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 12.9 | val | OPEN; see 12.V.a-12.V.b |
+| 12.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 12.9 | val | OPEN; see 12.V.a-12.V.d |
 | 12.V.a | same gate | Run `cargo test --workspace` after item 12 implementation rows are complete | — | val | OPEN |
 | 12.V.b | same gate | Run item-specific lexer, name-key, use-map and type-name tests for implemented item 12 changes | — | val | OPEN; see 12.V.b.a-12.V.b.f |
 | 12.V.b.a | same gate | Run identifier, keyword, blank-run and operator lexer tests | — | val | OPEN |
@@ -471,6 +475,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 12.V.b.d | same gate | Run namespace/name constant-key hashing and equality tests | — | val | OPEN |
 | 12.V.b.e | same gate | Run `UseMap::get` tests for the validated-name UTF-8 invariant | — | val | OPEN |
 | 12.V.b.f | same gate | Run native type-name matching tests, including mixed-case names | — | val | OPEN |
+| 12.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/12.V/callgrind/` and record total Ir and per-thread summary | 12.V.a, 12.V.b | val | OPEN |
+| 12.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/12.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 12.V.a, 12.V.b | val | OPEN |
 | **13** | **item 13** | **A file's products: the declaration list and one walk** | | | |
 | 13.1 | step 1 | The parser lists declarations, with today's guards. Entries are reserved in source order. Docs by today's rule, resolved in the entry's scope | 9.7, 10.1 | perf | OPEN; see 13.1.a-13.1.c |
 | 13.1.a | same step | Have the parser collect declarations in source order while reserving entries at discovery time | — | perf | OPEN; see 13.1.a.a-13.1.a.e |
@@ -509,7 +515,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 13.8.a | same step | Collect references in one per-file vector and sort once | — | perf | OPEN |
 | 13.8.b | same step | Store the interned `ImportScope` in doc sites | — | perf | OPEN |
 | 13.8.c | same step | Store declaration names as `Name` values | — | perf | OPEN |
-| 13.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 13.8 | val | OPEN; see 13.V.a-13.V.b |
+| 13.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 13.8 | val | OPEN; see 13.V.a-13.V.d |
 | 13.V.a | same gate | Run `cargo test --workspace` after item 13 implementation rows are complete | — | val | OPEN |
 | 13.V.b | same gate | Run item-specific declaration-list, binding, shared-walk and file-product tests | — | val | OPEN; see 13.V.b.a-13.V.b.d |
 | 13.V.b.a | same gate | Run declaration-list construction and ordering tests | — | val | OPEN |
@@ -520,6 +526,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 13.V.b.d.b | same gate | Run function declaration binding tests | — | val | OPEN |
 | 13.V.b.d.c | same gate | Run constant and `define()` declaration product tests | — | val | OPEN |
 | 13.V.b.d.d | same gate | Run anonymous-class declaration and name-side-table tests | — | val | OPEN |
+| 13.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/13.V/callgrind/` and record total Ir and per-thread summary | 13.V.a, 13.V.b | val | OPEN |
+| 13.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/13.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 13.V.a, 13.V.b | val | OPEN |
 | **14** | **item 14** | **PHPDoc finished** | | | |
 | 14.1 | step 8 | `syntax::memo::Memo` becomes the fingerprint-keyed memo: keyed SipHash-1-3-128 (`siphasher`, now direct) bounded by `quick_cache`'s weighted cache (new dependency); shard clearing goes | — | perf | OPEN; see 14.1.a-14.1.c |
 | 14.1.a | same step | Use keyed SipHash-1-3-128 fingerprints for memo keys | — | perf | OPEN |
@@ -575,7 +583,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 14.9.b | same step | Represent `DocType` as owner, index and type | — | perf | OPEN |
 | 14.9.c | same step | Serialize a `DocType` with its subtree and type | — | perf | OPEN |
 | 14.9.d | same step | Advance per-file and stub cache records and keys for serialized `DocType` subtrees and lowered types | 5.8 | perf | OPEN |
-| 14.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 14.9 | val | OPEN; see 14.V.a-14.V.b |
+| 14.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 14.9 | val | OPEN; see 14.V.a-14.V.d |
 | 14.V.a | same gate | Run `cargo test --workspace` after item 14 implementation rows are complete | — | val | OPEN |
 | 14.V.b | same gate | Run item-specific PHPDoc parsing, lowering, resolution, serialization and memo tests | — | val | OPEN; see 14.V.b.a-14.V.b.h |
 | 14.V.b.a | same gate | Run PHPDoc tokenization and single-parse tests | — | val | OPEN |
@@ -588,6 +596,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 14.V.b.f | same gate | Run byte-class, byte-payload and logically wrapped-tag tests | — | val | OPEN |
 | 14.V.b.g | same gate | Run spelling-sensitive `TagEffect` and recorded-reference name tests | — | val | OPEN |
 | 14.V.b.h | same gate | Run per-file and stub-cache `DocType` serialization round-trip tests | — | val | OPEN |
+| 14.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/14.V/callgrind/` and record total Ir and per-thread summary | 14.V.a, 14.V.b | val | OPEN |
+| 14.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/14.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 14.V.a, 14.V.b | val | OPEN |
 | **15** | **item 15** | **Names held as names, as bytes** | | | |
 | 15.1 | C3 step 7 | The checker's method memo and `class_memo` deleted | — | perf | OPEN; see subtask rows 15.1.a, 15.1.b |
 | 15.1.a | same step | Delete the checker’s string-keyed method memo | — | perf | OPEN |
@@ -661,12 +671,14 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 15.11 | two sites | Name resolution hashes the parts without building text; a callee's folded name reused | 15.3 | perf | OPEN; see 15.11.a-15.11.b |
 | 15.11.a | same step | Hash name parts during resolution without constructing joined text | — | perf | OPEN |
 | 15.11.b | same step | Reuse a callee’s folded name instead of rebuilding it | — | perf | OPEN |
-| 15.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 15.11 | val | OPEN; see 15.V.a-15.V.b |
+| 15.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation waits until item 19 | 15.11 | val | OPEN; see 15.V.a-15.V.d |
 | 15.V.a | same gate | Run `cargo test --workspace` after item 15 implementation rows are complete | — | val | OPEN |
 | 15.V.b | same gate | Run item-specific name-identity, map-key and name-resolution tests for the implemented item 15 changes | — | val | OPEN; see 15.V.b.a-15.V.b.c |
 | 15.V.b.a | same gate | Run interned name-identity and folded-name tests | — | val | OPEN |
 | 15.V.b.b | same gate | Run registry, scope and container key tests | — | val | OPEN |
 | 15.V.b.c | same gate | Run name-resolution and short-name tests | — | val | OPEN |
+| 15.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/15.V/callgrind/` and record total Ir and per-thread summary | 15.V.a, 15.V.b | val | OPEN |
+| 15.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/15.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 15.V.a, 15.V.b | val | OPEN |
 | **16** | **item 16** | **Interned values** | | | |
 | 16.1 | name | `Name` as `triomphe::ThinArc<Header, u8>` (new dependency), one allocation, with `last_segment` in the header | 15.10 | perf | OPEN; see 16.1.a-16.1.b |
 | 16.1.a | same step | Represent `Name` with `triomphe::ThinArc<Header, u8>` and one allocation | — | perf | OPEN |
@@ -691,10 +703,12 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 16.6 | Oracle | The `loom` model of drop, lookup and sweep (`loom`, test-only); the leak test after the edit replay | 16.2 | infra | OPEN; see 16.6.a-16.6.b |
 | 16.6.a | same step | Add a test-only `loom` model for drop, lookup and sweep | — | infra | OPEN |
 | 16.6.b | same step | Add the leak test after the edit-replay scenario | — | infra | OPEN |
-| 16.V | §11 | Tests-only item gate: workspace and item-specific tests, including `loom` and leak tests; full §11 validation waits until item 19 | 16.6 | val | OPEN; see 16.V.a-16.V.c |
+| 16.V | §11 | Tests plus Callgrind and heap gate: workspace and item-specific tests, including `loom` and leak tests; full §11 validation waits until item 19 | 16.6 | val | OPEN; see 16.V.a-16.V.e |
 | 16.V.a | same gate | Run `cargo test --workspace` after item 16 implementation rows are complete | — | val | OPEN |
 | 16.V.b | same gate | Run the test-only `loom` model for intern-table drop, lookup and sweep | — | val | OPEN |
 | 16.V.c | same gate | Run the leak test after the edit-replay scenario | — | val | OPEN |
+| 16.V.d | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/16.V/callgrind/` and record total Ir and per-thread summary | 16.V.a, 16.V.b | val | OPEN |
+| 16.V.e | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/16.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 16.V.a, 16.V.b | val | OPEN |
 | **17** | **item 17** | **Warm runs** | | | |
 | 17.1 | step 1 | The stat index: per-platform fields; the racy rule applied where the file was read; `stat` trusted only on filesystems identified as local and fine (`rustix` direct, `sysinfo` new) | 1.4 | perf | OPEN; see 17.1.a-17.1.c |
 | 17.1.a | same step | Represent platform-specific stat fields in the index | — | perf | OPEN |
@@ -739,7 +753,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.6.b.e | same step | Compare warm and cold semantic products after the replay | — | infra | OPEN |
 | 17.6.c | same step | Test server loading from the context base | — | infra | OPEN |
 | 17.6.d | same step | Verify an overlay that differs from disk never enters the persistent index or context base | — | infra | OPEN |
-| 17.V | §11 | Tests-only item gate: workspace and item-specific tests, including `stat` cases; full §11 validation waits until item 19 | 17.6 | val | OPEN; see 17.V.a-17.V.b |
+| 17.V | §11 | Tests plus Callgrind and heap gate: workspace and item-specific tests, including `stat` cases; full §11 validation waits until item 19 | 17.6 | val | OPEN; see 17.V.a-17.V.d |
 | 17.V.a | same gate | Run `cargo test --workspace` after item 17 implementation rows are complete | — | val | OPEN |
 | 17.V.b | same gate | Run item-specific stat, edit-replay and context-base tests | — | val | OPEN; see 17.V.b.a-17.V.b.e |
 | 17.V.b.a | same gate | Run unit tests for stat fields and local-filesystem trust rules | — | val | OPEN |
@@ -747,6 +761,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 17.V.b.c | same gate | Run context-base cold/warm path and serialization unit tests | — | val | OPEN |
 | 17.V.b.d | same gate | Run overlay-isolation tests proving disk-derived index and base entries exclude editor-only content | — | val | OPEN |
 | 17.V.b.e | same gate | Run warm-replay tests for rename/order/role changes, tracked inputs and checker-only rule changes | — | val | OPEN |
+| 17.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/17.V/callgrind/` and record total Ir and per-thread summary | 17.V.a, 17.V.b | val | OPEN |
+| 17.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/17.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 17.V.a, 17.V.b | val | OPEN |
 | **18** | **item 18** | **The check phase's remainder** | | | |
 | 18.1 | step 1 | §12.10: observers and one inference per node; the PHPStan-API walker as a family; literal types once per node | 13.4 | sem | OPEN; see 18.1.a-18.1.d |
 | 18.1.a | same step | Register observers in the shared traversal | — | sem | OPEN |
@@ -847,7 +863,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 18.18 | step 10 | One checker per worker | — | perf | OPEN; see 18.18.a-18.18.b |
 | 18.18.a | same step | Create one checker per worker | — | perf | OPEN |
 | 18.18.b | same step | Reset worker checker state between files instead of rebuilding it | — | perf | OPEN |
-| 18.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; PHP-version oracle readings wait for final §11 validation | 18.18 | val | OPEN; see 18.V.a-18.V.b |
+| 18.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; PHP-version oracle readings wait for final §11 validation | 18.18 | val | OPEN; see 18.V.a-18.V.d |
 | 18.V.a | same gate | Run `cargo test --workspace` after item 18 implementation rows are complete | — | val | OPEN |
 | 18.V.b | same gate | Run item-specific traversal, checker-state, type-operation and text-analysis tests; defer PHP-version oracle readings to final §11 validation | — | val | OPEN; see 18.V.b.a-18.V.b.g |
 | 18.V.b.a | same gate | Run shared traversal, observer and one-inference-per-node tests | — | val | OPEN |
@@ -857,6 +873,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 18.V.b.e | same gate | Run the test-build assertion that each observed pass matches its fixpoint replay reports | — | val | OPEN |
 | 18.V.b.f | same gate | Run the randomized type-operation differential test against the left fold and record differences before the radix/normalized fast path lands | — | val | OPEN |
 | 18.V.b.g | same gate | Run the debug assertion that radix-array merge over a diff matches the full merge | — | val | OPEN |
+| 18.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/18.V/callgrind/` and record total Ir and per-thread summary | 18.V.a, 18.V.b | val | OPEN |
+| 18.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/18.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 18.V.a, 18.V.b | val | OPEN |
 | **19** | **item 19** | **Each tree until its last reader** | | | |
 | 19.1 | passes | The project-wide passes as families: architecture, banned constructs, class shapes (with parent-call facts), Composer hygiene, mock hygiene, unmatched ignores, the use-site index | 13.4, 18.1 | perf | OPEN; see 19.1.a-19.1.g |
 | 19.1.a | same step | Move architecture reads into per-file facts and keep whole-program ordering | — | perf | OPEN |
@@ -896,7 +914,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.6.b.c | same step | Route dependency, declaration and checker-side tree readers through `ast_of` | — | perf | OPEN |
 | 19.6.b.d | same step | Search remaining workspace tree reads and migrate each uncovered reader through `ast_of` | — | perf | OPEN |
 | 19.6.c | same step | Ensure edits that recheck dependents reparse evicted dependent trees | — | perf | OPEN |
-| 19.V | §11 | Tests-only item gate: workspace tests plus item-specific tests; full §11 validation and O3 follow after this gate | 19.6 | val | OPEN; see 19.V.a-19.V.b |
+| 19.V | §11 | Tests plus Callgrind and heap gate: workspace tests plus item-specific tests; full §11 validation and O3 follow after this gate | 19.6 | val | OPEN; see 19.V.a-19.V.d |
 | 19.V.a | same gate | Run `cargo test --workspace` after item 19 implementation rows are complete | — | val | OPEN |
 | 19.V.b | same gate | Run item-specific tree-retention, cache-eviction, reparse and reader tests | — | val | OPEN; see 19.V.b.a-19.V.b.d |
 | 19.V.b.a | same gate | Run batch and server tree-retention tests | — | val | OPEN; see 19.V.b.a.a-19.V.b.a.b |
@@ -907,6 +925,8 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 | 19.V.b.c.a | same gate | Run on-demand reparse tests for an evicted tree whose source hash still matches | — | val | OPEN |
 | 19.V.b.c.b | same gate | Run changed-hash tests proving a reread updates declarations and dependents before checking | — | val | OPEN |
 | 19.V.b.d | same gate | Run reader tests proving no empty tree is returned after eviction | — | val | OPEN |
+| 19.V.c | same gate | Run Callgrind with the 20G frame-pointer dhat profile and `--separate-threads=yes` on the warm-stub Piwigo workload; retain raw per-thread output under `.corpus-runs/gate/profiles/19.V/callgrind/` and record total Ir and per-thread summary | 19.V.a, 19.V.b | val | OPEN |
+| 19.V.d | same gate | Run the 20G `dhat-heap` profile on the same Piwigo workload; retain `dhat-heap.json` under `.corpus-runs/gate/profiles/19.V/heap/` and record allocation count/bytes and peak/exit retained bytes by holder | 19.V.a, 19.V.b | val | OPEN |
 | **V** | **§11** | **Final validation and O3, once** | | | |
 | V.0 | §11 | Complete the single final validation after the 19.V gate | 19.V | val | OPEN; see V.0.a-V.0.g |
 | V.0.a | final gate | Run the final `gate` build | — | val | OPEN |
