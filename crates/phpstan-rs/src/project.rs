@@ -367,6 +367,12 @@ impl BodySource for file_table::FileTable<FileState> {
             file.bodies.unset_properties(out);
         }
     }
+
+    fn stream_wrappers(&self, out: &mut crate::registry::bodies::StreamWrappers) {
+        for file in self.values() {
+            file.bodies.stream_wrappers(out);
+        }
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -3800,6 +3806,7 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
     file_declarations::WATCH,
     checker::unused::REBIND_WATCH,
     checker::includes::WATCH,
+    crate::registry::bodies::WATCH,
 ]);
 
 /// What the tree `ast` refers to, and what its declarations do: from the

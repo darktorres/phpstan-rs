@@ -546,6 +546,10 @@ pub struct Registry {
     // (`registry::effects`).
     #[serde(skip)]
     unset_properties: Arc<bodies::UnsetProperties>,
+    // The classes the loaded files register as stream wrappers, as the last
+    // finish found them (`registry::effects`).
+    #[serde(skip)]
+    stream_wrappers: Arc<bodies::StreamWrappers>,
     // What each file's walk for global variables found, kept for the files
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]

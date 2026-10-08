@@ -921,6 +921,10 @@ impl Registry {
         bodies.unset_properties(&mut unset);
         unset.settle();
         self.unset_properties = Arc::new(unset);
+        let mut wrappers = crate::registry::bodies::StreamWrappers::default();
+        bodies.stream_wrappers(&mut wrappers);
+        wrappers.settle();
+        self.stream_wrappers = Arc::new(wrappers);
         let mut running_code = (*self.base_builtin_methods_running_code).clone();
         for name in self.own_builtin_methods_running_code() {
             running_code.insert(name);
@@ -1393,6 +1397,14 @@ impl Registry {
             .into_iter()
             .flatten()
             .filter_map(|id| self.class_name_by_id(*id))
+    }
+
+    /// Whether `class` may be registered as a stream wrapper: a registration
+    /// names it, or one names a class not known.
+    fn may_be_registered_wrapper(&self, class: &str) -> bool {
+        let lower = class.to_ascii_lowercase();
+        self.stream_wrappers
+            .may_be_registered(&lower, |base| self.is_subclass_of(class, base))
     }
 
     /// Every loaded declaration of `method` with a body, and every `__call`
@@ -2011,7 +2023,10 @@ impl Reach<'_> {
         }
         let mut out = Vec::new();
         let wrapper_runs = |method: &str, out: &mut Vec<(DeclKey, Transfer)>| {
-            for class in registry.classes_declaring(method) {
+            for class in registry
+                .classes_declaring(method)
+                .filter(|class| registry.may_be_registered_wrapper(class))
+            {
                 if let Some((owner, sig)) = registry.lookup_method_with_owner(class, method) {
                     out.push((registry.reached(&owner, method, sig), Transfer::Made));
                 }

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use syntax::ast::{
-    ExprId, ExprKind, FunctionDecl, NodeArenas, Param, PropertyDecl, PropertyHooks, StmtId,
-    StmtKind,
+    ExprId, ExprKind, FunctionDecl, Literal, NodeArenas, Param, PropertyDecl, PropertyHooks,
+    ResolvedName, StaticTarget, StmtId, StmtKind,
 };
 use syntax::name::Name;
 use syntax::span::Span;
@@ -32,6 +32,10 @@ pub trait BodySource: Sync {
 
     /// Adds to `out` the properties every file at hand unsets.
     fn unset_properties(&self, out: &mut UnsetProperties);
+
+    /// Adds to `out` the classes every file at hand registers as stream
+    /// wrappers.
+    fn stream_wrappers(&self, out: &mut StreamWrappers);
 }
 
 /// What the passes read of a hook's body, and the name of the parameter a
@@ -55,6 +59,8 @@ impl BodySource for NoBodies {
     }
 
     fn unset_properties(&self, _: &mut UnsetProperties) {}
+
+    fn stream_wrappers(&self, _: &mut StreamWrappers) {}
 }
 
 /// The properties code unsets (`unset($o->p)`): by name, and whether it
@@ -137,6 +143,204 @@ impl syntax::canonical::Canonical for UnsetProperties {
     }
 }
 
+/// The bit of a file's `FileFacts::mentions` that notes it names
+/// `stream_wrapper_register`.
+pub(crate) const MENTIONS_STREAM_WRAPPER: u32 = 1 << 4;
+
+/// The spellings that set `MENTIONS_STREAM_WRAPPER`.
+pub(crate) const WATCH: &[(&str, u32)] = &[("stream_wrapper_register", MENTIONS_STREAM_WRAPPER)];
+
+/// The classes code registers as stream wrappers with
+/// `stream_wrapper_register()`: only such a class has its methods run by a
+/// stream function.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StreamWrappers {
+    // The registered classes, lowercased, sorted, each once.
+    classes: Vec<Box<str>>,
+    // The classes registered by their own name (`self::class`, `static::class`,
+    // `__CLASS__`) in code a subclass inherits, lowercased, sorted, each once:
+    // they and their subclasses.
+    with_subclasses: Vec<Box<str>>,
+    // A registration names a class not known.
+    any: bool,
+}
+
+impl StreamWrappers {
+    /// The classes the statements `stmts` register, those of the closures,
+    /// the functions and the classes they declare included.
+    fn of(arenas: &NodeArenas, stmts: &[StmtId]) -> StreamWrappers {
+        struct Registrations {
+            found: StreamWrappers,
+            // The class each nested declaration is in, `None` for an
+            // anonymous one.
+            classes: Vec<Option<Box<str>>>,
+        }
+        impl Registrations {
+            fn enclosing(&mut self) {
+                match self.classes.last() {
+                    Some(Some(class)) => self.found.with_subclasses.push(class.clone()),
+                    _ => self.found.any = true,
+                }
+            }
+
+            fn registered(&mut self, arenas: &NodeArenas, value: ExprId) {
+                let Some(value) = arenas.peeled(value).and_then(|id| arenas.expr(id)) else {
+                    self.found.any = true;
+                    return;
+                };
+                match &value.kind {
+                    ExprKind::ClassNameFetch(StaticTarget::Name(name)) => {
+                        let written = name.written.trim_start_matches('\\');
+                        if written.eq_ignore_ascii_case("self")
+                            || written.eq_ignore_ascii_case("static")
+                        {
+                            self.enclosing();
+                        } else if written.eq_ignore_ascii_case("parent") {
+                            self.found.any = true;
+                        } else {
+                            let class = match &name.resolved {
+                                ResolvedName::Exact(class) => class.as_str(),
+                                _ => written,
+                            };
+                            self.found.classes.push(class.to_ascii_lowercase().into());
+                        }
+                    }
+                    ExprKind::Literal(Literal::String(text)) => {
+                        match arenas
+                            .string_bytes(text)
+                            .and_then(|b| std::str::from_utf8(b).ok())
+                        {
+                            Some(class) => self
+                                .found
+                                .classes
+                                .push(class.trim_start_matches('\\').to_ascii_lowercase().into()),
+                            None => self.found.any = true,
+                        }
+                    }
+                    ExprKind::Name(name)
+                        if arenas
+                            .qualified_name(name)
+                            .is_some_and(|name| name.written.eq_ignore_ascii_case("__CLASS__")) =>
+                    {
+                        self.enclosing();
+                    }
+                    _ => self.found.any = true,
+                }
+            }
+        }
+        impl ArenaVisitor for Registrations {
+            fn visit_class_decl(&mut self, arenas: &NodeArenas, class: &syntax::ast::ClassDecl) {
+                self.classes
+                    .push(Some(class.fq_name().to_ascii_lowercase().into()));
+                arena::walk_class_decl(self, arenas, class);
+                self.classes.pop();
+            }
+
+            fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
+                if let Some(e) = arenas.expr(id) {
+                    match &e.kind {
+                        ExprKind::NewAnonymousClass(_) => {
+                            self.classes.push(None);
+                            arena::walk_expr(self, arenas, id);
+                            self.classes.pop();
+                            return;
+                        }
+                        ExprKind::Call(callee, args) => {
+                            let named = arenas
+                                .peeled(*callee)
+                                .and_then(|id| arenas.expr(id))
+                                .and_then(|callee| match &callee.kind {
+                                    ExprKind::Name(name) => arenas.qualified_name(name),
+                                    _ => None,
+                                })
+                                .is_some_and(|name| {
+                                    name.written.rsplit('\\').next().is_some_and(|last| {
+                                        last.eq_ignore_ascii_case("stream_wrapper_register")
+                                    })
+                                });
+                            if named {
+                                let args = arenas.args(args.clone());
+                                let class = args
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(at, arg)| match &arg.name {
+                                        Some(name) => name.name.eq_ignore_ascii_case("class"),
+                                        None => *at == 1,
+                                    })
+                                    .map(|(_, arg)| arg);
+                                match class {
+                                    Some(arg) if !arg.spread => self.registered(arenas, arg.value),
+                                    _ => self.found.any = true,
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                arena::walk_expr(self, arenas, id);
+            }
+        }
+        let mut walk = Registrations {
+            found: StreamWrappers::default(),
+            classes: Vec::new(),
+        };
+        arena::walk_stmts(&mut walk, arenas, stmts);
+        let mut found = walk.found;
+        found.settle();
+        found
+    }
+
+    /// Adds the registrations `other` holds.
+    pub(crate) fn add(&mut self, other: &StreamWrappers) {
+        self.classes.extend(other.classes.iter().cloned());
+        self.with_subclasses
+            .extend(other.with_subclasses.iter().cloned());
+        self.any |= other.any;
+    }
+
+    /// Sorts the names and keeps each once.
+    pub(crate) fn settle(&mut self) {
+        for names in [&mut self.classes, &mut self.with_subclasses] {
+            names.sort_unstable();
+            names.dedup();
+        }
+    }
+
+    /// Whether `class` (lowercased) may be registered (of a settled set);
+    /// `is_subclass_of` tells whether it extends or implements a class.
+    pub(crate) fn may_be_registered(
+        &self,
+        class: &str,
+        is_subclass_of: impl Fn(&str) -> bool,
+    ) -> bool {
+        self.any
+            || self.classes.binary_search_by(|c| (**c).cmp(class)).is_ok()
+            || self
+                .with_subclasses
+                .iter()
+                .any(|base| **base == *class || is_subclass_of(base))
+    }
+}
+
+/// The classes code registers as stream wrappers.
+impl syntax::canonical::Canonical for StreamWrappers {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let StreamWrappers {
+            classes,
+            with_subclasses,
+            any,
+        } = self;
+        p.node(
+            "StreamWrappers",
+            &[
+                ("classes", classes),
+                ("with_subclasses", with_subclasses),
+                ("any", any),
+            ],
+        );
+    }
+}
+
 /// One body: what the passes read of its statements.
 #[derive(Debug, Clone)]
 struct Body {
@@ -157,11 +361,12 @@ pub struct FileBodies {
     bodies: FxHashMap<Span, Body>,
     hooks: FxHashMap<Span, Hooks>,
     unset: UnsetProperties,
+    wrappers: StreamWrappers,
 }
 
 impl FileBodies {
     pub fn of(arenas: &NodeArenas, stmts: &[StmtId]) -> FileBodies {
-        FileBodies::collect(arenas, stmts, true, true)
+        FileBodies::collect(arenas, stmts, true, true, true)
     }
 
     /// The bodies of a file whose facts are known: its expressions are
@@ -174,6 +379,7 @@ impl FileBodies {
             stmts,
             facts.has_anonymous_class || facts.has_nested_declaration,
             facts.unsets_property,
+            facts.mentions & MENTIONS_STREAM_WRAPPER != 0,
         )
     }
 
@@ -182,6 +388,7 @@ impl FileBodies {
         stmts: &[StmtId],
         in_expressions: bool,
         unsets: bool,
+        registers: bool,
     ) -> FileBodies {
         struct Collect {
             bodies: FxHashMap<Span, Body>,
@@ -282,6 +489,11 @@ impl FileBodies {
             } else {
                 UnsetProperties::default()
             },
+            wrappers: if registers {
+                StreamWrappers::of(arenas, stmts)
+            } else {
+                StreamWrappers::default()
+            },
         }
     }
 
@@ -313,7 +525,8 @@ impl FileBodies {
 
 /// A file's bodies as stored: by the span of the declaration's name, in
 /// that order, then the hooks by the span of the property's name, in that
-/// order, then the properties it unsets.
+/// order, then the properties it unsets and the classes it registers as
+/// stream wrappers.
 impl serde::Serialize for FileBodies {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut bodies: Vec<(&Span, &Body)> = self.bodies.iter().collect();
@@ -324,7 +537,7 @@ impl serde::Serialize for FileBodies {
             .into_iter()
             .map(|(span, body)| (span, &body.summary, &body.flow))
             .collect();
-        serde::Serialize::serialize(&(bodies, hooks, &self.unset), serializer)
+        serde::Serialize::serialize(&(bodies, hooks, &self.unset, &self.wrappers), serializer)
     }
 }
 
@@ -334,8 +547,10 @@ impl<'de> serde::Deserialize<'de> for FileBodies {
             Vec<(Span, Arc<BodySummary>, Option<Arc<InitFlow>>)>,
             Vec<(Span, Hooks)>,
             UnsetProperties,
+            StreamWrappers,
         );
-        let (bodies, hooks, unset): Stored = serde::Deserialize::deserialize(deserializer)?;
+        let (bodies, hooks, unset, wrappers): Stored =
+            serde::Deserialize::deserialize(deserializer)?;
         Ok(FileBodies {
             bodies: bodies
                 .into_iter()
@@ -343,6 +558,7 @@ impl<'de> serde::Deserialize<'de> for FileBodies {
                 .collect(),
             hooks: hooks.into_iter().collect(),
             unset,
+            wrappers,
         })
     }
 }
@@ -365,6 +581,10 @@ impl BodySource for FileBodies {
     fn unset_properties(&self, out: &mut UnsetProperties) {
         out.add(&self.unset);
     }
+
+    fn stream_wrappers(&self, out: &mut StreamWrappers) {
+        out.add(&self.wrappers);
+    }
 }
 
 /// A body's summary and flow.
@@ -384,6 +604,7 @@ impl syntax::canonical::Canonical for FileBodies {
             bodies,
             hooks,
             unset,
+            wrappers,
         } = self;
         let mut bodies: Vec<(&Span, &Body)> = bodies.iter().collect();
         bodies.sort_unstable_by_key(|(span, _)| (span.start, span.end));
@@ -391,7 +612,12 @@ impl syntax::canonical::Canonical for FileBodies {
         hooks.sort_unstable_by_key(|(span, _)| (span.start, span.end));
         p.node(
             "FileBodies",
-            &[("bodies", &bodies), ("hooks", &hooks), ("unset", unset)],
+            &[
+                ("bodies", &bodies),
+                ("hooks", &hooks),
+                ("unset", unset),
+                ("wrappers", wrappers),
+            ],
         );
     }
 }

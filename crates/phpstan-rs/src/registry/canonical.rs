@@ -520,6 +520,7 @@ impl CanonicalOver for Registry {
             base_builtin_methods_running_code,
             methods_by_name: _,
             unset_properties,
+            stream_wrappers,
             global_sites,
         } = self;
         p.node(
@@ -660,6 +661,7 @@ impl CanonicalOver for Registry {
                 ),
                 ("methods_by_name", &methods_by_name),
                 ("unset_properties", unset_properties),
+                ("stream_wrappers", stream_wrappers),
                 ("global_sites", global_sites),
             ],
         );
@@ -701,6 +703,7 @@ canonical_struct!(Registry {
     builtin_methods_running_code,
     base_builtin_methods_running_code,
     unset_properties,
+    stream_wrappers,
     global_sites,
 } skip {
     id_generation,
