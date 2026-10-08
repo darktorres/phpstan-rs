@@ -4004,7 +4004,7 @@ impl<'r> Level<'r> {
             | Root::Value => Holder::Unknown,
         };
         // A value that holds no object at any depth has none in a part of it.
-        if steps.is_empty() || matches!(&start, Holder::Classes(classes) if classes.is_empty()) {
+        if steps.is_empty() {
             return start;
         }
         let (Holder::Classes(classes) | Holder::Made(Some(classes))) = start else {

@@ -20,7 +20,12 @@ final class Plain
 final class Documented
 {
     /** @readonly */
-    public ?string $name = null;
+    public ?string $name;
+
+    public function __construct(?string $name)
+    {
+        $this->name = $name;
+    }
 }
 
 function aReadonlyClassKeepsItsFacts(Dto $dto, callable $callback): void
