@@ -78,7 +78,9 @@ pub(crate) use name_table::{Detached, Lazy};
 pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
-pub(crate) use effects::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
+pub(crate) use effects::{
+    CallContext, Effect, Holder, Storage, Transfer, Written, elements_holder_of, holder_of,
+};
 pub(crate) use file_decls::{FileDecls, FileMember};
 pub(crate) use guard::{Guard, GuardExpr};
 pub(crate) use ids::{ClassId, FnId, IdSource, MethodRef, PropertyRef};

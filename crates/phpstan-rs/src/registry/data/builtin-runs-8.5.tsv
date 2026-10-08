@@ -267,6 +267,7 @@ callbackfilteriterator::accept		probed
 ceil		probed	
 chdir		probed	
 checkdate		probed	
+checkdnsrr		probed	
 chgrp		probed	
 chgrp	0	wrapper	stream_metadata
 chmod		probed	
@@ -563,6 +564,7 @@ diskfreespace		probed
 dngettext		probed	
 dns_check_record		probed	
 dns_get_mx		probed	
+dns_get_record		probed	
 dom\adjacentposition::cases		probed	
 dom\adjacentposition::from		probed	
 dom\adjacentposition::tryfrom		probed	
@@ -812,6 +814,7 @@ excimertimer::setinterval		probed
 excimertimer::setperiod		probed	
 excimertimer::start		probed	
 excimertimer::stop		probed	
+exec		probed	
 exif_imagetype		probed	
 exif_imagetype	0	wrapper	stream_close
 exif_imagetype	0	wrapper	stream_eof
@@ -994,6 +997,7 @@ fscanf	0	wrapper	stream_read
 fseek		probed	
 fseek	0	wrapper	stream_seek
 fseek	0	wrapper	stream_tell
+fsockopen		probed	
 fstat		probed	
 fstat	0	wrapper	stream_stat
 fsync		probed	
@@ -1084,6 +1088,9 @@ get_resources		probed
 getcwd		probed	
 getdate		probed	
 getenv		probed	
+gethostbyaddr		probed	
+gethostbyname		probed	
+gethostbynamel		probed	
 gethostname		probed	
 getimagesize		probed	
 getimagesize	0	wrapper	stream_close
@@ -1094,6 +1101,7 @@ getimagesize	0	wrapper	stream_seek
 getimagesize	0	wrapper	stream_tell
 getimagesizefromstring		probed	
 getlastmod		probed	
+getmxrr		probed	
 getmygid		probed	
 getmyinode		probed	
 getmypid		probed	
@@ -7684,6 +7692,7 @@ long2ip		probed
 lstat		probed	
 lstat	0	wrapper	url_stat
 ltrim		probed	
+mail		probed	
 max		probed	
 mb_check_encoding		probed	
 mb_chr		probed	
@@ -8186,6 +8195,7 @@ parse_ini_file	0	wrapper	stream_stat
 parse_ini_string		probed	
 parse_str		probed	
 parse_url		probed	
+passthru		probed	
 password_algos		probed	
 password_get_info		probed	
 password_hash		probed	
@@ -8224,6 +8234,7 @@ pdostatement::nextrowset		probed
 pdostatement::rowcount		probed	
 pdostatement::setattribute		probed	
 pdostatement::setfetchmode		probed	
+pfsockopen		probed	
 pg_affected_rows		probed	
 pg_cancel_query		probed	
 pg_change_password		probed	
@@ -8424,6 +8435,7 @@ phptoken::isignorable		probed
 phptoken::tokenize		probed	
 phpversion		probed	
 pi		probed	
+popen		probed	
 pos		probed	
 pow		probed	
 preg_filter		probed	
@@ -8451,6 +8463,7 @@ printf		probed
 proc_close		probed	
 proc_get_status		probed	
 proc_nice		probed	
+proc_open		probed	
 proc_terminate		probed	
 property_exists		probed	
 propertyhooktype::cases		probed	
@@ -8765,6 +8778,7 @@ sha1_file	0	wrapper	stream_close
 sha1_file	0	wrapper	stream_eof
 sha1_file	0	wrapper	stream_open
 sha1_file	0	wrapper	stream_read
+shell_exec		probed	
 shm_attach		probed	
 shm_detach		probed	
 shm_get_var		probed	
@@ -8821,6 +8835,7 @@ sin		probed
 sinh		probed	
 sizeof		probed	
 sizeof	0	method	count
+sleep		probed	
 socket_accept		probed	
 socket_addrinfo_bind		probed	
 socket_addrinfo_connect		probed	
@@ -9279,6 +9294,7 @@ stream_socket_get_name		probed
 stream_socket_pair		probed	
 stream_socket_recvfrom		probed	
 stream_socket_sendto		probed	
+stream_socket_server		probed	
 stream_socket_shutdown		probed	
 stream_supports_lock		probed	
 stream_supports_lock	0	wrapper	stream_lock
@@ -9321,11 +9337,14 @@ symlink		probed
 sys_get_temp_dir		probed	
 sys_getloadavg		probed	
 syslog		probed	
+system		probed	
 tan		probed	
 tanh		probed	
 tempnam		probed	
 textdomain		probed	
 time		probed	
+time_nanosleep		probed	
+time_sleep_until		probed	
 timezone_abbreviations_list		probed	
 timezone_identifiers_list		probed	
 timezone_location_get		probed	
@@ -9452,6 +9471,7 @@ uri\whatwg\urlvalidationerrortype::cases		probed
 urldecode		probed	
 urlencode		probed	
 user_error		probed	
+usleep		probed	
 usort		probed	
 usort	1	calls	
 utf8_decode		probed	

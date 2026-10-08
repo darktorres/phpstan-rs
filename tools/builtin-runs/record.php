@@ -506,6 +506,21 @@ foreach ($entries as $entry) {
 }
 rmdir($dir);
 
+// Functions the probing above skips because they reach outside the child
+// (a program, the network, a delay) but take no callable and no object whose
+// methods PHP calls: they run no user code, as a call of them is taken.
+$runsNothing = [
+    'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
+    'sleep', 'usleep', 'time_nanosleep', 'time_sleep_until',
+    'mail', 'fsockopen', 'pfsockopen', 'stream_socket_server',
+    'gethostbyname', 'gethostbynamel', 'gethostbyaddr', 'dns_get_record', 'checkdnsrr', 'getmxrr',
+];
+foreach ($runsNothing as $function) {
+    if (function_exists($function) && $wanted($function)) {
+        $out["$function\t\tprobed\t"] = true;
+    }
+}
+
 $lines = array_keys($out);
 sort($lines, SORT_STRING);
 echo implode("\n", $lines), "\n";

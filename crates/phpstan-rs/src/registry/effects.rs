@@ -1736,6 +1736,38 @@ pub(crate) fn object_classes(ty: &Type) -> Option<Vec<Name>> {
     Some(classes)
 }
 
+/// The classes of the objects a value of type `ty` may hold, in the arrays
+/// it is or holds to any depth: `Some` with each one named, `None` when one
+/// may be of a class not named (`object`, `mixed`, an iterable).
+pub(crate) fn element_classes(ty: &Type) -> Option<Vec<Name>> {
+    fn collect(ty: &Type, out: &mut Vec<Name>, depth: u32) -> Option<()> {
+        if depth > 8 {
+            return None;
+        }
+        for member in ty.union_members() {
+            if member.is_array().yes() {
+                collect(&member.array_value_type()?, out, depth + 1)?;
+            } else if let Some((class, _)) = member.as_object() {
+                out.push(Name::from(class));
+            } else if !member.is_object().no() {
+                return None;
+            }
+        }
+        Some(())
+    }
+    let mut classes = Vec::new();
+    collect(ty, &mut classes, 0)?;
+    Some(classes)
+}
+
+/// The holder of the objects a value of type `ty` holds in its elements.
+pub(crate) fn elements_holder_of(ty: &Type) -> Holder {
+    match element_classes(ty) {
+        Some(classes) => Holder::Classes(sorted_classes(classes)),
+        None => Holder::Unknown,
+    }
+}
+
 /// The object a value may be.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Holder {
@@ -1840,6 +1872,11 @@ pub(crate) trait CallContext {
     /// The object the argument passed `at` is; `place` is what it names,
     /// when it names one.
     fn argument(&self, at: &ArgAt, place: Option<&Place>) -> Holder;
+    /// The objects the elements of the argument passed `at` may be, at any
+    /// depth of arrays; `Unknown` when the caller cannot tell.
+    fn elements(&self, _at: &ArgAt, _place: Option<&Place>) -> Holder {
+        Holder::Unknown
+    }
     /// Notes that the call runs what `written` names, its `$this` what
     /// `transfer` says, when the caller knows what that is: only closures,
     /// arrow functions or first-class callables it wrote, or, in a
@@ -1961,10 +1998,14 @@ impl Reach<'_> {
             // its word (`Registry::stub_effect`), and anything otherwise.
             return registry.stub_effect(key, sig).is_nothing().then(Vec::new);
         };
-        if key
-            .class
-            .as_deref()
-            .is_some_and(|class| registry.builtin_holds_code(class))
+        // A method of a class whose objects run what they were made with may
+        // run anything; the constructor that is making one runs what the
+        // table says it runs, and nothing of what it keeps.
+        if key.member != "__construct"
+            && key
+                .class
+                .as_deref()
+                .is_some_and(|class| registry.builtin_holds_code(class))
         {
             return None;
         }
@@ -2043,15 +2084,19 @@ impl Reach<'_> {
                 BuiltinRun::Calls => {}
                 BuiltinRun::Method(method) => {
                     let holder = match call.arguments.iter().find(|arg| arg_at(arg)) {
-                        Some(arg) if !position.elements => {
+                        Some(arg) => {
                             let place = call
                                 .places
                                 .iter()
                                 .find(|(at, _)| at == arg)
                                 .map(|(_, place)| place);
-                            self.ctx.argument(arg, place)
+                            if position.elements {
+                                self.ctx.elements(arg, place)
+                            } else {
+                                self.ctx.argument(arg, place)
+                            }
                         }
-                        _ => Holder::Unknown,
+                        None => Holder::Unknown,
                     };
                     out.extend(self.method_targets_on(&holder, method)?);
                 }

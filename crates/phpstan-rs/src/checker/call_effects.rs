@@ -23,7 +23,9 @@ use crate::registry::summaries::{
     ArgAt, BodySummary, CallWrites, Callable, Callee, Operation, Origin, PairTarget, Place,
     Receiver, Root, Step, call_of,
 };
-use crate::registry::{CallContext, Effect, Holder, Storage, Transfer, Written, holder_of};
+use crate::registry::{
+    CallContext, Effect, Holder, Storage, Transfer, Written, elements_holder_of, holder_of,
+};
 
 /// What a call's caller knows of it, from the types the checker inferred.
 struct TypedCall<'c, 'a> {
@@ -145,8 +147,18 @@ impl CallContext for TypedCall<'_, '_> {
     }
 
     fn argument(&self, at: &ArgAt, _: Option<&Place>) -> Holder {
+        // A spread argument is its array's elements.
+        if matches!(at, ArgAt::Spread) {
+            return self.elements(at, None);
+        }
         self.arg(at)
             .map_or(Holder::Unknown, |arg| self.inferred(arg))
+    }
+
+    fn elements(&self, at: &ArgAt, _: Option<&Place>) -> Holder {
+        self.arg(at).map_or(Holder::Unknown, |arg| {
+            elements_holder_of(&self.checker.infer_expr(arg, self.locals))
+        })
     }
 
     fn runs_written(&self, written: Written<'_>, transfer: &Transfer) -> bool {
