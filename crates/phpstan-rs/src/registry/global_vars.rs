@@ -1263,9 +1263,20 @@ impl Visitor for Scope<'_> {
     fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(expr) = arenas.expr(id) else { return };
         match &expr.kind {
+            // A variable the closure captures by reference that is a global
+            // where it is written is one inside the closure too.
             ExprKind::Closure(id) => {
                 if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) {
-                    walk_function_body(arenas, arenas.stmt_ids(&closure.body), self.out);
+                    let body = arenas.stmt_ids(&closure.body);
+                    let mut names = collect_global_names(arenas, body);
+                    for used in arenas.closure_uses(&closure.uses) {
+                        if used.by_ref
+                            && (self.top_level || self.global_names.contains(&used.name.name))
+                        {
+                            names.insert(used.name.name.clone());
+                        }
+                    }
+                    walk_scope(arenas, body, false, &names, self.out);
                 }
                 return;
             }
@@ -1847,11 +1858,15 @@ fn static_value(arenas: &NodeArenas, id: ExprId) -> StaticValue {
         ExprKind::ArrayLiteral(items) => {
             let mut fields = Vec::new();
             for item in arenas.array_items(items.clone()) {
-                let Some(key_expr) = item.key else {
-                    continue;
+                let key = match item.key {
+                    Some(key_expr) if !item.spread => literal_string_key(arenas, key_expr),
+                    _ => None,
                 };
-                let Some(key) = literal_string_key(arenas, key_expr) else {
-                    continue;
+                // An entry without a key written as a string (a list item,
+                // an integer or computed key, a spread) leaves the array no
+                // shape of named fields.
+                let Some(key) = key else {
+                    return StaticValue::Known(infer_const_type(arenas, expr.id));
                 };
                 fields.push((key, static_value(arenas, item.value)));
             }
