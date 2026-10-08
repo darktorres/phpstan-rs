@@ -196,12 +196,10 @@ impl Parser<'_> {
         // variants move only their payload through the typed helpers.
         Ok(match self.peek() {
             Token::Integer(n) => {
-                let n = n;
                 self.skip();
                 self.expr(ExprKind::Literal(Literal::Int(n)), start)
             }
             Token::Float(f) => {
-                let f = f;
                 self.skip();
                 self.expr(ExprKind::Literal(Literal::Float(f)), start)
             }

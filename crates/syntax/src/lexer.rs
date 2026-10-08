@@ -383,43 +383,7 @@ impl LexOutput {
     /// Converts the legacy owned-token result to the flat token stream.
     /// This is an adapter only; parser input continues to use `Lexed`.
     pub fn into_token_stream(self) -> TokenStream {
-        let Self {
-            lexed,
-            comments,
-            ignore_marks,
-            warnings,
-            facts,
-            names,
-            decoded_bytes,
-        } = self;
-        let Lexed {
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index,
-        } = lexed;
-        let docs = docs
-            .into_iter()
-            .map(|doc| DocEntry {
-                before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
-                span: doc.span,
-                text: doc.text,
-            })
-            .collect();
-        TokenStream::from_lexed_parts(
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index,
-            names,
-            decoded_bytes,
-            comments,
-            ignore_marks,
-            warnings,
-            facts,
-        )
+        TokenStream::from_lexed_parts(self)
     }
 }
 
@@ -488,12 +452,6 @@ impl<'a> Lexer<'a> {
         lossy(&src[range])
     }
 
-    /// The name for `text` as the parser asks for one, by the same tables
-    /// as the lexer's own.
-    pub(crate) fn intern(&mut self, text: &str) -> Name {
-        self.name(text)
-    }
-
     /// The name for `text`: this lexer's own, or the interner's.
     fn name(&mut self, text: &str) -> Name {
         self.name_and_bits(text).0
@@ -551,10 +509,6 @@ impl<'a> Lexer<'a> {
     pub(crate) fn without_file_names(mut self) -> Self {
         self.track_file_names = false;
         self
-    }
-
-    pub(crate) fn tracks_file_names(&self) -> bool {
-        self.track_file_names
     }
 
     /// Notes the spellings of `watch` in the facts of the file.
@@ -869,26 +823,9 @@ impl<'a> Lexer<'a> {
         self.decoded_base = base;
     }
 
-    pub(crate) fn has_decoded_bytes(&self) -> bool {
-        !self.decoded_bytes.is_empty()
-    }
-
-    pub(crate) fn drain_decoded_bytes_to(&mut self, destination: &mut Vec<u8>) {
-        let len = self.decoded_bytes.len();
-        destination.append(&mut self.decoded_bytes);
-        self.decoded_base = self
-            .decoded_base
-            .checked_add(u32::try_from(len).expect("decoded byte vector exhausted"))
-            .expect("decoded byte vector exhausted");
-    }
-
     pub(crate) fn with_source_backed_strings(mut self, enabled: bool) -> Self {
         self.source_backed_strings = enabled;
         self
-    }
-
-    pub(crate) fn source_backed_strings(&self) -> bool {
-        self.source_backed_strings
     }
 
     pub(crate) fn decoded_payload(&mut self, bytes: &[u8]) -> crate::ast::StringPayload {

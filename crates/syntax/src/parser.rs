@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::lexer::{LexEnd, Lexed, Lexer};
+use crate::lexer::{LexEnd, LexOutput, Lexed, Lexer};
 use crate::name::{Interner, Name};
 use crate::name_resolution::Resolution;
 use crate::span::{LineIndex, Span};
@@ -26,8 +26,6 @@ pub struct ParseError(Box<ParseErrorData>);
 pub struct ParsedProgram {
     pub stmts: StmtIdRange,
     pub arenas: NodeArenas,
-    #[cfg(test)]
-    pub(crate) test_source: Box<[u8]>,
 }
 
 impl ParseError {
@@ -75,7 +73,6 @@ pub struct Parser<'a> {
     // owner. The live lexer-backed path resolves ranges directly from source.
     doc_texts: std::cell::RefCell<rustc_hash::FxHashMap<DocCommentRanges, Arc<str>>>,
     source: Option<&'a [u8]>,
-    source_backed_strings: bool,
     // Independent cursors through token kinds, sparse payloads, and docs.
     pub(crate) pos: usize,
     payload_pos: usize,
@@ -256,9 +253,6 @@ pub(crate) enum NameKind {
     Constant,
 }
 
-/// How many tokens past the current one the parser holds.
-pub(crate) const LOOKAHEAD: usize = 8;
-
 /// The labels seen and the `goto` targets met so far in one function-like
 /// body.
 #[derive(Default)]
@@ -305,35 +299,6 @@ pub(crate) struct MemberStart {
     pub(crate) consts: usize,
 }
 
-fn names_for_tokens(tokens: &[Token], keyword_raw: &[(usize, String)]) -> Box<[Name]> {
-    let mut names = Vec::new();
-    let mut seen = rustc_hash::FxHashSet::default();
-    let raw_by_token: std::collections::HashMap<usize, &str> = keyword_raw
-        .iter()
-        .map(|(index, spelling)| (*index, spelling.as_str()))
-        .collect();
-    for (index, token) in tokens.iter().enumerate() {
-        let name = match token {
-            Token::Variable(name) | Token::Identifier(name) => Some(name.clone()),
-            Token::Keyword(keyword) => Some(
-                Interner::global().name(
-                    raw_by_token
-                        .get(&index)
-                        .copied()
-                        .unwrap_or_else(|| keyword.as_str()),
-                ),
-            ),
-            _ => None,
-        };
-        if let Some(name) = name
-            && seen.insert(name.clone())
-        {
-            names.push(name);
-        }
-    }
-    names.into_boxed_slice()
-}
-
 fn fold_doc_text<'a>(docs: impl Iterator<Item = &'a str>) -> Arc<str> {
     let bodies = docs
         .map(|doc| doc.trim().trim_start_matches("/**").trim_end_matches("*/"))
@@ -350,9 +315,8 @@ impl<'a> Parser<'a> {
         let mut docs = Vec::new();
         for (token, span, raw) in tokens {
             match token {
-                Token::DocComment(text) => docs.push(crate::token::DocEntry {
-                    before: u32::try_from(lexed_tokens.len())
-                        .expect("token stream exceeds u32 indexes"),
+                Token::DocComment(text) => docs.push(crate::lexer::LexedDoc {
+                    before: lexed_tokens.len(),
                     span,
                     text,
                 }),
@@ -365,54 +329,26 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let names = names_for_tokens(&lexed_tokens, &keyword_raw);
-        let stream = TokenStream::from_lexed_parts(
-            lexed_tokens,
+        Parser::from_lexed(Lexed {
+            tokens: lexed_tokens,
             spans,
             keyword_raw,
             docs,
-            Arc::default(),
-            names,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            crate::lexer::FileFacts::default(),
-        );
-        Parser::<'static>::from_token_stream(stream)
+            line_index: Arc::default(),
+        })
     }
 
     /// A parser of legacy lexer output, retained while readers migrate.
     pub fn from_lexed(lexed: Lexed) -> Parser<'static> {
-        let Lexed {
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index,
-        } = lexed;
-        let names = names_for_tokens(&tokens, &keyword_raw);
-        let docs = docs
-            .into_iter()
-            .map(|doc| crate::token::DocEntry {
-                before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
-                span: doc.span,
-                text: doc.text,
-            })
-            .collect();
-        Parser::<'static>::from_token_stream(TokenStream::from_lexed_parts(
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index,
-            names,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            crate::lexer::FileFacts::default(),
-        ))
+        Parser::<'static>::from_token_stream(TokenStream::from_lexed_parts(LexOutput {
+            lexed,
+            comments: Vec::new(),
+            ignore_marks: Vec::new(),
+            warnings: Vec::new(),
+            facts: crate::lexer::FileFacts::default(),
+            names: Box::default(),
+            decoded_bytes: Vec::new(),
+        }))
     }
 
     /// Parses an already lexed flat stream.
@@ -421,7 +357,6 @@ impl<'a> Parser<'a> {
             stream,
             NodeArenas::default(),
             None,
-            false,
         )
     }
 
@@ -432,7 +367,6 @@ impl<'a> Parser<'a> {
         stream: TokenStream,
         arenas: NodeArenas,
         source: Option<&'a [u8]>,
-        source_backed_strings: bool,
         scratch: ParserScratch,
         tracks_name_ids: bool,
     ) -> Parser<'a> {
@@ -440,7 +374,6 @@ impl<'a> Parser<'a> {
             stream,
             arenas,
             source,
-            source_backed_strings,
             scratch,
             tracks_name_ids,
         )
@@ -449,7 +382,7 @@ impl<'a> Parser<'a> {
     /// A parser that consumes the lexer's complete flat stream.
     pub fn from_lexer(lexer: Lexer<'a>) -> Parser<'a> {
         let stream = lexer.with_source_backed_strings(false).lex_token_stream();
-        Self::from_token_stream_with_node_arenas(stream, NodeArenas::default(), None, false)
+        Self::from_token_stream_with_node_arenas(stream, NodeArenas::default(), None)
     }
 
     pub(crate) fn from_lexer_with_node_arenas(
@@ -458,14 +391,12 @@ impl<'a> Parser<'a> {
         tracks_name_ids: bool,
     ) -> Parser<'a> {
         let source = lexer.source_bytes();
-        let source_backed_strings = lexer.source_backed_strings();
         node_arenas.clear_preserving_bases();
         lexer.set_decoded_bytes_base(node_arenas.decoded_bytes_base);
         Self::from_token_stream_with_node_arenas_and_scratch(
             lexer.lex_token_stream(),
             node_arenas,
             Some(source),
-            source_backed_strings,
             ParserScratch::default(),
             tracks_name_ids,
         )
@@ -475,14 +406,12 @@ impl<'a> Parser<'a> {
         token_stream: TokenStream,
         node_arenas: NodeArenas,
         source: Option<&'a [u8]>,
-        source_backed_strings: bool,
     ) -> Parser<'a> {
         let tracks_name_ids = !token_stream.names.is_empty();
         Self::from_token_stream_with_node_arenas_and_scratch(
             token_stream,
             node_arenas,
             source,
-            source_backed_strings,
             ParserScratch::default(),
             tracks_name_ids,
         )
@@ -492,7 +421,6 @@ impl<'a> Parser<'a> {
         mut token_stream: TokenStream,
         mut node_arenas: NodeArenas,
         source: Option<&'a [u8]>,
-        source_backed_strings: bool,
         mut scratch: ParserScratch,
         tracks_name_ids: bool,
     ) -> Parser<'a> {
@@ -510,7 +438,6 @@ impl<'a> Parser<'a> {
             recorder: std::cell::RefCell::default(),
             doc_texts: std::cell::RefCell::default(),
             source,
-            source_backed_strings,
             pos: 0,
             payload_pos: 0,
             doc_pos: 0,
@@ -644,10 +571,6 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn remember_name_id(&mut self, id: Option<crate::name::NameId>) {
         self.last_name_id = id;
-    }
-
-    pub(crate) fn into_lex_end(mut self) -> Option<LexEnd> {
-        self.take_lex_end(true)
     }
 
     /// Returns cleared transient buffers to their owner while preserving
@@ -1434,12 +1357,6 @@ impl Parser<'_> {
         })
     }
 
-    pub(crate) fn stmt_node_mut(&self, id: StmtId) -> std::cell::RefMut<'_, StmtNode> {
-        std::cell::RefMut::map(self.node_arenas.borrow_mut(), |arenas| {
-            arenas.stmt_mut(id).expect("parser statement id exists")
-        })
-    }
-
     /// Updates the parallel span when parsing later extends a node's span.
     pub(crate) fn set_expr_span(&self, id: ExprId, span: Span) {
         let index = u32::from(id.into_raw()) - self.expr_span_base;
@@ -1495,8 +1412,6 @@ impl Parser<'_> {
         Ok(ParsedProgram {
             stmts,
             arenas: self.take_node_arenas(),
-            #[cfg(test)]
-            test_source: Box::default(),
         })
     }
 

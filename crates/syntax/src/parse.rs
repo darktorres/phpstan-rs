@@ -33,7 +33,6 @@ pub fn parse_expression_into_arenas(
         stream,
         fragment,
         Some(source),
-        false,
         crate::parser::ParserScratch::default(),
         false,
     );
@@ -238,10 +237,11 @@ pub fn parse_watching<'a>(
         names,
         watch,
         NodeArenas::default(),
-        true,
-        true,
-        None,
-        None,
+        Keep {
+            compact_arenas: true,
+            retain_file_data: true,
+        },
+        Reuse::Fresh,
     )
 }
 
@@ -261,10 +261,11 @@ pub fn parse_watching_with_scratch<'a>(
         names,
         watch,
         arenas,
-        false,
-        true,
-        Some(scratch),
-        None,
+        Keep {
+            compact_arenas: false,
+            retain_file_data: true,
+        },
+        Reuse::Arenas(scratch),
     )
 }
 
@@ -274,21 +275,19 @@ pub fn parse_watching_with_worker_scratch<'a>(
     source: impl Into<Source<'a>>,
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
-    arenas: &mut NodeArenas,
-    tokens: &mut crate::token::TokenStream,
-    lexer_scratch: &mut crate::lexer::LexerScratch,
-    parser_scratch: &mut crate::parser::ParserScratch,
+    scratch: WorkerScratch<'_>,
 ) -> Result<ParsedFile, ParseError> {
-    let node_arenas = std::mem::take(arenas);
+    let node_arenas = std::mem::take(scratch.arenas);
     parse_watching_in_arenas(
         source,
         names,
         watch,
         node_arenas,
-        false,
-        true,
-        Some(arenas),
-        Some((tokens, lexer_scratch, parser_scratch)),
+        Keep {
+            compact_arenas: false,
+            retain_file_data: true,
+        },
+        Reuse::Worker(scratch),
     )
 }
 
@@ -309,11 +308,53 @@ pub fn parse_watching_transient_with_scratch<'a>(
         names,
         watch,
         arenas,
-        false,
-        false,
-        Some(scratch),
-        None,
+        Keep {
+            compact_arenas: false,
+            retain_file_data: false,
+        },
+        Reuse::Arenas(scratch),
     )
+}
+
+/// The buffers a worker keeps between files: the node arenas, the token
+/// tables and the lexer's and parser's temporaries.
+pub struct WorkerScratch<'s> {
+    pub arenas: &'s mut NodeArenas,
+    pub tokens: &'s mut crate::token::TokenStream,
+    pub lexer: &'s mut crate::lexer::LexerScratch,
+    pub parser: &'s mut crate::parser::ParserScratch,
+}
+
+/// What a parse keeps of its input and of its arenas.
+struct Keep {
+    /// Whether the arenas are trimmed to what they hold.
+    compact_arenas: bool,
+    /// Whether the file's source bytes and name table stay with the result.
+    retain_file_data: bool,
+}
+
+/// The buffers a parse reuses, which it gives back when the parse fails.
+enum Reuse<'s> {
+    Fresh,
+    Arenas(&'s mut NodeArenas),
+    Worker(WorkerScratch<'s>),
+}
+
+impl<'s> Reuse<'s> {
+    fn give_back(&mut self, arenas: NodeArenas) {
+        match self {
+            Reuse::Fresh => {}
+            Reuse::Arenas(scratch) => **scratch = arenas,
+            Reuse::Worker(scratch) => *scratch.arenas = arenas,
+        }
+    }
+
+    fn worker(&mut self) -> Option<&mut WorkerScratch<'s>> {
+        match self {
+            Reuse::Worker(scratch) => Some(scratch),
+            _ => None,
+        }
+    }
 }
 
 fn parse_watching_in_arenas<'a>(
@@ -321,15 +362,13 @@ fn parse_watching_in_arenas<'a>(
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
     mut arenas: NodeArenas,
-    compact_arenas: bool,
-    retain_file_data: bool,
-    mut scratch: Option<&mut NodeArenas>,
-    mut worker_scratch: Option<(
-        &mut crate::token::TokenStream,
-        &mut crate::lexer::LexerScratch,
-        &mut crate::parser::ParserScratch,
-    )>,
+    keep: Keep,
+    mut reuse: Reuse<'_>,
 ) -> Result<ParsedFile, ParseError> {
+    let Keep {
+        compact_arenas,
+        retain_file_data,
+    } = keep;
     let source = source.into();
     let source_bytes: Arc<[u8]> = if retain_file_data {
         match source {
@@ -353,29 +392,26 @@ fn parse_watching_in_arenas<'a>(
     // reads them, even for transient parses. The table is released with the
     // worker token buffer after parsing when ParsedFile does not retain it.
     let source = lexer.source_bytes();
-    let source_backed_strings = lexer.source_backed_strings();
     lexer.set_decoded_bytes_base(arenas.decoded_bytes_base);
-    let token_stream = match worker_scratch.as_mut() {
-        Some((tokens, lexer_scratch, _)) => lexer.lex_token_stream_with_worker_scratch(
-            std::mem::take(tokens),
-            lexer_scratch,
+    let token_stream = match reuse.worker() {
+        Some(worker) => lexer.lex_token_stream_with_worker_scratch(
+            std::mem::take(worker.tokens),
+            worker.lexer,
         ),
         None => lexer.lex_token_stream(),
     };
-    let mut parser = match worker_scratch.as_mut() {
-        Some((_, _, parser_scratch)) => Parser::from_token_stream_with_scratch(
+    let mut parser = match reuse.worker() {
+        Some(worker) => Parser::from_token_stream_with_scratch(
             token_stream,
             arenas,
             Some(source),
-            source_backed_strings,
-            std::mem::take(parser_scratch),
+            std::mem::take(worker.parser),
             retain_file_data,
         ),
         None => Parser::from_token_stream_with_scratch(
             token_stream,
             arenas,
             Some(source),
-            source_backed_strings,
             crate::parser::ParserScratch::default(),
             retain_file_data,
         ),
@@ -405,22 +441,18 @@ fn parse_watching_in_arenas<'a>(
     } = parser
         .take_lex_end(retain_file_data)
         .expect("a parser of a lexer ends with the lexer's record");
-    if let Some((tokens, _, parser_scratch)) = worker_scratch.as_mut() {
-        **tokens = parser.take_token_stream();
-        **parser_scratch = parser.take_scratch();
+    if let Some(worker) = reuse.worker() {
+        *worker.tokens = parser.take_token_stream();
+        *worker.parser = parser.take_scratch();
     }
     if let Some(error) = warnings.iter().find(|w| w.is_error) {
-        if let Some(scratch) = scratch.as_deref_mut() {
-            *scratch = arenas;
-        }
+        reuse.give_back(arenas);
         return Err(ParseError::new(error.message.clone(), error.span));
     }
     let stmts = match (parsed_stmts, parse_error) {
         (Some(stmts), None) => stmts,
         (_, Some(error)) => {
-            if let Some(scratch) = scratch {
-                *scratch = arenas;
-            }
+            reuse.give_back(arenas);
             return Err(error);
         }
         _ => unreachable!("parser result carries either a program or an error"),

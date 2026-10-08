@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::StringPayload;
-use crate::lexer::{FileFacts, IgnoreMark, LexWarning};
+use crate::lexer::{FileFacts, IgnoreMark, LexOutput, LexWarning, Lexed};
 use crate::name::{Name, NameId, name_id};
 use crate::span::{LineIndex, Span};
 
@@ -315,81 +315,33 @@ impl TokenStream {
         self.names.get(u32::from(id.into_raw()) as usize)
     }
 
-    /// Builds a stream from flat tables emitted during lexing.
-    pub fn from_parts(
-        kinds: Vec<TokenKind>,
-        spans: Vec<Span>,
-        payloads: Vec<TokenPayloadEntry>,
-        docs: Vec<DocEntry>,
-        keyword_raw: Vec<(u32, String)>,
-        line_index: Arc<LineIndex>,
-        names: Vec<Name>,
-        decoded_bytes: Vec<u8>,
-        comments: Vec<(Span, String)>,
-        ignore_marks: Vec<IgnoreMark>,
-        warnings: Vec<LexWarning>,
-        facts: FileFacts,
-    ) -> Self {
-        assert_eq!(kinds.len(), spans.len(), "token kinds and spans are aligned");
-        Self {
-            kinds,
-            spans,
-            payloads,
-            docs,
-            keyword_raw,
-            line_index,
-            names,
-            decoded_bytes,
+    /// The flat stream of the legacy lexer output: each token split into its
+    /// kind and payload, the doc comments keyed by the token they precede.
+    /// An output with no name table gets the names its tokens use.
+    pub fn from_lexed_parts(output: LexOutput) -> Self {
+        let LexOutput {
+            lexed:
+                Lexed {
+                    tokens,
+                    spans,
+                    keyword_raw,
+                    docs,
+                    line_index,
+                },
             comments,
             ignore_marks,
             warnings,
             facts,
-        }
-    }
-
-    pub fn from_lexed_parts(
-        tokens: Vec<Token>,
-        spans: Vec<Span>,
-        keyword_raw: Vec<(usize, String)>,
-        docs: Vec<DocEntry>,
-        line_index: Arc<LineIndex>,
-        names: Box<[Name]>,
-        decoded_bytes: Vec<u8>,
-        comments: Vec<(Span, String)>,
-        ignore_marks: Vec<IgnoreMark>,
-        warnings: Vec<LexWarning>,
-        facts: FileFacts,
-    ) -> Self {
+            names,
+            decoded_bytes,
+        } = output;
         assert_eq!(tokens.len(), spans.len(), "token kinds and spans are aligned");
         let names = if names.is_empty() {
-            let mut collected = Vec::new();
-            let mut seen = rustc_hash::FxHashSet::default();
-            let raw_by_token: std::collections::HashMap<usize, &str> = keyword_raw
-                .iter()
-                .map(|(index, spelling)| (*index, spelling.as_str()))
-                .collect();
-            for (index, token) in tokens.iter().enumerate() {
-                let name = match token {
-                    Token::Variable(name) | Token::Identifier(name) => Some(name.clone()),
-                    Token::Keyword(keyword) => Some(
-                        crate::name::Interner::global().name(
-                            raw_by_token
-                                .get(&index)
-                                .copied()
-                                .unwrap_or_else(|| keyword.as_str()),
-                        ),
-                    ),
-                    _ => None,
-                };
-                if let Some(name) = name && seen.insert(name.clone()) {
-                    collected.push(name);
-                }
-            }
-            collected
+            names_for_tokens(&tokens, &keyword_raw).into_vec()
         } else {
             names.into_vec()
         };
-        let by_name: std::collections::HashMap<Name, NameId> = names
+        let by_name: rustc_hash::FxHashMap<Name, NameId> = names
             .iter()
             .cloned()
             .enumerate()
@@ -409,14 +361,24 @@ impl TokenStream {
                 });
             }
         }
-        Self::from_parts(
+        Self {
             kinds,
             spans,
             payloads,
-            docs,
-            keyword_raw.into_iter().map(|(i, raw)|
-                (u32::try_from(i).expect("token stream exceeds u32 indexes"), raw)
-            ).collect(),
+            docs: docs
+                .into_iter()
+                .map(|doc| DocEntry {
+                    before: u32::try_from(doc.before).expect("token stream exceeds u32 indexes"),
+                    span: doc.span,
+                    text: doc.text,
+                })
+                .collect(),
+            keyword_raw: keyword_raw
+                .into_iter()
+                .map(|(index, raw)| {
+                    (u32::try_from(index).expect("token stream exceeds u32 indexes"), raw)
+                })
+                .collect(),
             line_index,
             names,
             decoded_bytes,
@@ -424,8 +386,39 @@ impl TokenStream {
             ignore_marks,
             warnings,
             facts,
-        )
+        }
     }
+}
+
+/// The distinct names the tokens use, in first-use order: variables and
+/// identifiers as they are, keywords as spelled.
+pub(crate) fn names_for_tokens(tokens: &[Token], keyword_raw: &[(usize, String)]) -> Box<[Name]> {
+    let mut names = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
+    let raw_by_token: rustc_hash::FxHashMap<usize, &str> = keyword_raw
+        .iter()
+        .map(|(index, spelling)| (*index, spelling.as_str()))
+        .collect();
+    for (index, token) in tokens.iter().enumerate() {
+        let name = match token {
+            Token::Variable(name) | Token::Identifier(name) => Some(name.clone()),
+            Token::Keyword(keyword) => Some(
+                crate::name::Interner::global().name(
+                    raw_by_token
+                        .get(&index)
+                        .copied()
+                        .unwrap_or_else(|| keyword.as_str()),
+                ),
+            ),
+            _ => None,
+        };
+        if let Some(name) = name
+            && seen.insert(name.clone())
+        {
+            names.push(name);
+        }
+    }
+    names.into_boxed_slice()
 }
 
 impl Token {

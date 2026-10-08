@@ -14,13 +14,12 @@
 //! an identity comparison cannot allow.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
-use rustc_hash::FxHasher;
+use rustc_hash::{FxHashMap, FxHasher};
 
 /// An index into one parsed file's distinct-name table.
 pub type NameId = la_arena::Idx<Name>;
@@ -53,7 +52,7 @@ pub struct CacheNameEncoder(Rc<RefCell<CacheNameEncoderData>>);
 
 #[derive(Default)]
 struct CacheNameEncoderData {
-    indexes: HashMap<String, u32>,
+    indexes: FxHashMap<String, u32>,
     names: Vec<String>,
 }
 
@@ -104,6 +103,10 @@ impl CacheNameTable {
 
     pub fn len(&self) -> usize {
         self.texts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.texts.is_empty()
     }
 
     pub fn name(&self, index: u32) -> Option<Name> {

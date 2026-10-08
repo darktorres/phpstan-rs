@@ -413,8 +413,9 @@ impl<'a> Lexer<'a> {
         let off = |i: usize| abs_base + offsets.map_or(i, |m| m[i.min(m.len() - 1)]);
         let mut i = 0;
 
+        // `flush!(last)` ends the scan, so it leaves the chunk state as it is.
         macro_rules! flush {
-            () => {
+            (last) => {
                 if source_literal_nonempty || decoded_literal_start.is_some() {
                     let span = self.span(off(literal_start), off(i));
                     let payload = match decoded_literal_start {
@@ -424,9 +425,12 @@ impl<'a> Lexer<'a> {
                         None => StringPayload::Source(span),
                     };
                     parts.push(StringPart::Literal(payload, span));
-                    source_literal_nonempty = false;
-                    decoded_literal_start = None;
                 }
+            };
+            () => {
+                flush!(last);
+                source_literal_nonempty = false;
+                decoded_literal_start = None;
             };
         }
 
@@ -809,7 +813,7 @@ impl<'a> Lexer<'a> {
                 source_literal_nonempty = true;
             }
         }
-        flush!();
+        flush!(last);
 
         if parts.is_empty() {
             let at = self.offset(off(0));
