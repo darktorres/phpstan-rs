@@ -52,7 +52,6 @@ impl SyntheticNodeScratch {
         let offset = self.next_expr.get();
         let raw = SYNTHETIC_EXPR_ID_START
             .checked_add(offset)
-            .filter(|id| *id <= SYNTHETIC_EXPR_ID_END)
             .expect("checker synthetic expression ID space exhausted");
         self.next_expr.set(offset + 1);
         let mut spans = self.spans.borrow_mut();

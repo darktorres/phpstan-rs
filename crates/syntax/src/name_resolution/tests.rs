@@ -59,11 +59,10 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
             arena::walk_catch_clause(self, arenas, c);
         }
         fn visit_type_hint(&mut self, arenas: &NodeArenas, h: &TypeHint) {
-            if let TypeHintKind::Name(n) = &h.kind {
-                if let Some(name) = arenas.qualified_name(n) {
+            if let TypeHintKind::Name(n) = &h.kind
+                && let Some(name) = arenas.qualified_name(n) {
                     self.push(name);
                 }
-            }
         }
     }
     let program = parse(src);
@@ -163,7 +162,7 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
     for_each_in_context_ids(
         &program.arenas,
         program.statements(),
-        |arenas, stmt, _| match &stmt.kind {
+        |_arenas, stmt, _| match &stmt.kind {
             StmtKind::ClassDecl(c) => names.push(Some(
                 program.arenas.class_decl(c.clone()).namespaced_name.clone(),
             )),

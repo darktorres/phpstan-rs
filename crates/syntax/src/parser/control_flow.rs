@@ -37,7 +37,7 @@ impl Parser<'_> {
         self.expect(&Token::Colon)?;
         let list_start = self.begin_stmt_list();
         let parsed = (|| {
-            while !self.check(&Token::Keyword(end_kw.clone())) && !self.at_eof() {
+            while !self.check(&Token::Keyword(end_kw)) && !self.at_eof() {
                 if let Some(stmt) = self.parse_statement(true)? {
                     self.push_stmt_list_item(stmt);
                 }

@@ -1,7 +1,6 @@
 //! Parsed statements and expressions reserve indices in their typed arenas.
 
 use super::super::*;
-use super::helpers::*;
 use crate::ast::NodeArenas;
 use crate::visit::arena::{self, Visitor};
 
@@ -24,7 +23,7 @@ struct Ids {
 
 impl Visitor for Ids {
     fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
-        let Some(stmt) = arenas.stmt(id) else {
+        let Some(_stmt) = arenas.stmt(id) else {
             return;
         };
         self.statements.push((
@@ -36,7 +35,7 @@ impl Visitor for Ids {
         arena::walk_stmt(self, arenas, id);
     }
     fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
-        let Some(expr) = arenas.expr(id) else {
+        let Some(_expr) = arenas.expr(id) else {
             return;
         };
         self.expressions.push((

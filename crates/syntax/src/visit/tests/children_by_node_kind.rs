@@ -1,7 +1,6 @@
 //! Tests for `any_child_expr` and `any_child_stmt`, covering each AST node kind's
 //! set of exposed children.
 
-use super::super::*;
 use super::helpers::*;
 use crate::visit::arena;
 

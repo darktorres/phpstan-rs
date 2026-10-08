@@ -226,7 +226,7 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm])> Visitor
         if !self.in_expressions {
             return;
         }
-        let Some(expr) = arenas.expr(id) else {
+        let Some(_expr) = arenas.expr(id) else {
             return;
         };
         if let Some((name, value)) = define_call(arenas, id) {

@@ -273,7 +273,7 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
                 if item.by_ref {
                     out.push('&');
                 }
-                write_expr(out, arenas, &item.value);
+                write_expr(out, arenas, item.value);
             });
             out.push(']');
         }
@@ -534,11 +534,10 @@ fn write_expr_unguarded(out: &mut String, arenas: &NodeArenas, e: &ExprNode) {
         }
         ExprKind::NewAnonymousClass(class) => {
             out.push_str("new class");
-            if let Some(class) = arenas.anonymous_class(*class) {
-                if !arenas.args(class.args.clone()).is_empty() {
+            if let Some(class) = arenas.anonymous_class(*class)
+                && !arenas.args(class.args.clone()).is_empty() {
                     write_args(out, arenas, class.args.clone());
                 }
-            }
             out.push_str("\n{\n}");
         }
         ExprKind::Yield(key, value) => {

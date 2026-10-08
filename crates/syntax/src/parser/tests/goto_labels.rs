@@ -104,8 +104,8 @@ impl Visitor for Check {
         let Some(expr) = arenas.expr(id) else {
             return;
         };
-        if let ExprKind::Closure(closure) = &expr.kind {
-            if let Some(crate::ast::ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
+        if let ExprKind::Closure(closure) = &expr.kind
+            && let Some(crate::ast::ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
                 self.compare(
                     arenas,
                     "closure",
@@ -113,7 +113,6 @@ impl Visitor for Check {
                     &closure.goto_labels,
                 );
             }
-        }
         arena::walk_expr(self, arenas, id);
     }
 

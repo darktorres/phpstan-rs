@@ -142,7 +142,7 @@ impl Walk<'_, '_> {
                     }
                 }
                 StmtKind::FunctionDecl(id) => {
-                    let Some(f) = self.parsed.arenas.function(id.clone()) else {
+                    let Some(f) = self.parsed.arenas.function(*id) else {
                         continue;
                     };
                     let name = declared(&f.namespaced_name);
@@ -175,7 +175,7 @@ impl Walk<'_, '_> {
         let ExprKind::Call(callee, args) = &e.kind else {
             return;
         };
-        let Some(callee) = self.parsed.expr(callee.clone()) else {
+        let Some(callee) = self.parsed.expr(*callee) else {
             return;
         };
         let ExprKind::Name(function) = &callee.kind else {

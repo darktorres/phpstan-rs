@@ -340,8 +340,8 @@ fn parse_watching_in_arenas<'a>(
         Arc::from([])
     };
     arenas.decoded_bytes_base = 0;
-    let mut lexer = Lexer::from_source(source).with_source_backed_strings(retain_file_data);
-    let mut lexer = match watch {
+    let lexer = Lexer::from_source(source).with_source_backed_strings(retain_file_data);
+    let lexer = match watch {
         Some(watch) => lexer.watching(watch),
         None => lexer,
     };
@@ -418,7 +418,7 @@ fn parse_watching_in_arenas<'a>(
     let stmts = match (parsed_stmts, parse_error) {
         (Some(stmts), None) => stmts,
         (_, Some(error)) => {
-            if let Some(scratch) = scratch.as_deref_mut() {
+            if let Some(scratch) = scratch {
                 *scratch = arenas;
             }
             return Err(error);

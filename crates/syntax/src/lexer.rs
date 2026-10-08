@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use crate::name::{Interner, Name, NameCache, NameId};
 use crate::span::{LineIndex, Span};
 pub use crate::token::DocEntry;
-use crate::token::{Keyword, Token, TokenPayloadEntry, TokenStream};
+use crate::token::{Keyword, Token, TokenStream};
 use std::sync::Arc;
 
 mod strings;
@@ -875,7 +875,7 @@ impl<'a> Lexer<'a> {
 
     pub(crate) fn drain_decoded_bytes_to(&mut self, destination: &mut Vec<u8>) {
         let len = self.decoded_bytes.len();
-        destination.extend(self.decoded_bytes.drain(..));
+        destination.append(&mut self.decoded_bytes);
         self.decoded_base = self
             .decoded_base
             .checked_add(u32::try_from(len).expect("decoded byte vector exhausted"))

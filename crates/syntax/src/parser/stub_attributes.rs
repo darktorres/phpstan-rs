@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::name::Name;
-use crate::parser::{NameKind, ParseError, Parser};
+use crate::parser::{NameKind, Parser};
 use crate::span::Span;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

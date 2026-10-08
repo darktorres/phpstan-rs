@@ -40,7 +40,7 @@ impl TokenKind {
         let last = TokenKind::KwEndSwitch as u8;
         (first..=last)
             .contains(&kind)
-            .then(|| KEYWORDS[usize::from(kind - first)].1.clone())
+            .then(|| KEYWORDS[usize::from(kind - first)].1)
     }
 }
 
@@ -703,7 +703,7 @@ impl Keyword {
         spelling
             .as_bytes()
             .eq_ignore_ascii_case(bytes)
-            .then(|| keyword.clone())
+            .then_some(*keyword)
     }
 
     /// The inverse of `try_from_str` - needed because most of these keywords
@@ -1006,14 +1006,14 @@ mod keyword_lookup_tests {
             assert_eq!(keyword.as_str(), word);
             assert_eq!(
                 Keyword::try_from_bytes(word.to_ascii_uppercase().as_bytes()),
-                Some(keyword.clone()),
+                Some(keyword),
                 "{word} in capitals"
             );
             let mut mixed = word.to_string();
             mixed[..1].make_ascii_uppercase();
             assert_eq!(
                 Keyword::try_from_bytes(mixed.as_bytes()),
-                Some(keyword.clone()),
+                Some(keyword),
                 "{mixed}"
             );
             // One byte short, one byte long, one byte changed.
@@ -1040,7 +1040,7 @@ mod keyword_tests {
         KEYWORDS
             .iter()
             .find(|(spelling, _)| spelling.as_bytes().eq_ignore_ascii_case(bytes))
-            .map(|(_, keyword)| keyword.clone())
+            .map(|(_, keyword)| *keyword)
     }
 
     #[test]

@@ -3023,7 +3023,7 @@ pub fn literal_string_value<'a>(
     crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
             let bytes = arenas.string_bytes(s)?;
-            std::str::from_utf8(&bytes)
+            std::str::from_utf8(bytes)
                 .ok()
                 .map(std::borrow::Cow::Borrowed)
         }
@@ -3034,6 +3034,56 @@ pub fn literal_string_value<'a>(
         }
         _ => None,
     })
+}
+
+/// Whether `name` (without its `$`) is one of PHP's superglobals.
+pub fn is_superglobal(name: &str) -> bool {
+    matches!(
+        name,
+        "GLOBALS"
+            | "_GET"
+            | "_POST"
+            | "_REQUEST"
+            | "_SERVER"
+            | "_SESSION"
+            | "_COOKIE"
+            | "_FILES"
+            | "_ENV"
+            | "argv"
+            | "argc"
+    )
+}
+
+/// Whether `name` is a PHP or PHPDoc keyword type rather than a class name.
+pub fn is_primitive_type_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "int"
+            | "integer"
+            | "float"
+            | "double"
+            | "real"
+            | "string"
+            | "bool"
+            | "boolean"
+            | "array"
+            | "object"
+            | "mixed"
+            | "void"
+            | "never"
+            | "noreturn"
+            | "never-return"
+            | "never-returns"
+            | "no-return"
+            | "null"
+            | "true"
+            | "false"
+            | "self"
+            | "static"
+            | "parent"
+            | "callable"
+            | "iterable"
+    )
 }
 
 #[cfg(test)]
@@ -3483,54 +3533,4 @@ mod arena_tests {
         );
         arenas.shrink_to_fit();
     }
-}
-
-/// Whether `name` (without its `$`) is one of PHP's superglobals.
-pub fn is_superglobal(name: &str) -> bool {
-    matches!(
-        name,
-        "GLOBALS"
-            | "_GET"
-            | "_POST"
-            | "_REQUEST"
-            | "_SERVER"
-            | "_SESSION"
-            | "_COOKIE"
-            | "_FILES"
-            | "_ENV"
-            | "argv"
-            | "argc"
-    )
-}
-
-/// Whether `name` is a PHP or PHPDoc keyword type rather than a class name.
-pub fn is_primitive_type_name(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "int"
-            | "integer"
-            | "float"
-            | "double"
-            | "real"
-            | "string"
-            | "bool"
-            | "boolean"
-            | "array"
-            | "object"
-            | "mixed"
-            | "void"
-            | "never"
-            | "noreturn"
-            | "never-return"
-            | "never-returns"
-            | "no-return"
-            | "null"
-            | "true"
-            | "false"
-            | "self"
-            | "static"
-            | "parent"
-            | "callable"
-            | "iterable"
-    )
 }

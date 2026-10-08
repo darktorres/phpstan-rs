@@ -588,7 +588,7 @@ pub fn walk_expr_in_scope<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, i
 pub fn any_child_expr(
     arenas: &NodeArenas,
     id: ExprId,
-    mut f: impl FnMut(ExprId, &ExprNode) -> bool,
+    f: impl FnMut(ExprId, &ExprNode) -> bool,
 ) -> bool {
     struct Children<F> {
         f: F,
@@ -623,7 +623,7 @@ pub fn for_each_child_expr(arenas: &NodeArenas, id: ExprId, mut f: impl FnMut(Ex
 pub fn any_child_stmt(
     arenas: &NodeArenas,
     id: StmtId,
-    mut f: impl FnMut(StmtId, &StmtNode) -> bool,
+    f: impl FnMut(StmtId, &StmtNode) -> bool,
 ) -> bool {
     struct Children<F> {
         f: F,
@@ -708,7 +708,7 @@ pub fn body_contains_yield(arenas: &NodeArenas, stmts: &[StmtId]) -> bool {
 pub fn any_expr_in_body(
     arenas: &NodeArenas,
     stmts: &[StmtId],
-    mut pred: impl FnMut(&ExprNode) -> bool,
+    pred: impl FnMut(&ExprNode) -> bool,
 ) -> bool {
     struct Find<F> {
         pred: F,
