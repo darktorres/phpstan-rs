@@ -205,12 +205,21 @@ impl Registry {
             })
     }
 
+    /// Drops the memoized deferred result of `class`: it was resolved from
+    /// the overlay as it stood, and a write to that overlay makes it stale.
+    pub(crate) fn invalidate_deferred_class_result(&mut self, class: super::ClassId) {
+        if let Some(cell) = self.deferred_class_results.get_mut(&class) {
+            *cell = std::sync::OnceLock::new();
+        }
+    }
+
     pub(crate) fn set_property_result(
         &mut self,
         class: super::ClassId,
         name: Name,
         property: Arc<PropertyReflection>,
     ) {
+        self.invalidate_deferred_class_result(class);
         assert!(
             self.ensure_property_topology(class),
             "property result class is active"
@@ -337,6 +346,7 @@ impl Registry {
         method: super::MethodRef,
         signature: FunctionReflection,
     ) {
+        self.invalidate_deferred_class_result(method.class());
         self.class_method_results
             .insert(method, std::sync::Arc::new(super::Lazy::decoded(signature)));
     }
@@ -347,6 +357,7 @@ impl Registry {
         signature: std::sync::Arc<super::Lazy<FunctionReflection>>,
     ) -> bool {
         use std::collections::hash_map::Entry;
+        self.invalidate_deferred_class_result(method.class());
         match self.class_method_results.entry(method) {
             Entry::Vacant(entry) => {
                 entry.insert(signature);

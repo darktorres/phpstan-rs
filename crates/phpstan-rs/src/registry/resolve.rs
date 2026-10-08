@@ -1037,11 +1037,18 @@ impl Registry {
         let mut method_results = Vec::new();
         for name in info.methods.keys() {
             let current = info.methods.get(name).expect("method key exists");
+            // An overlay entry is the effective signature, derived from this
+            // declaration; it is resolved below, and the declaration's own
+            // copy must not shadow it.
+            let slot = self.member_slot(class_name, name)?;
+            let method = MethodRef::new(class_id, slot);
+            if self.class_method_results.contains_key(&method) {
+                continue;
+            }
             let mut resolved = current.clone();
             resolve_signature(&mut resolved);
             if resolved != *current {
-                let slot = self.member_slot(class_name, name)?;
-                method_results.push((MethodRef::new(class_id, slot), resolved));
+                method_results.push((method, resolved));
             }
         }
         for (method, current) in self.raw_method_results_for_class(class_id) {

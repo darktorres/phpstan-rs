@@ -40,6 +40,33 @@ fn a_return_type_is_inherited_from_an_interface_when_the_implementor_has_no_own_
 }
 
 #[test]
+fn inherited_phpdoc_overlays_win_over_a_deferred_method_snapshot() {
+    let r = build_registry(
+        r#"<?php
+            class DeferredConfig { public const VALUES = ['first', 'second']; }
+            interface DeferredFactory {
+                /** @return value-of<DeferredConfig::VALUES> */
+                public function make(): string;
+            }
+            class DeferredFactoryImpl implements DeferredFactory {
+                /** @param value-of<DeferredConfig::VALUES> $seed */
+                public function make(string $seed = 'first'): string { return $seed; }
+            }
+            "#,
+    );
+
+    let sig = method(&r, "DeferredFactoryImpl", "make");
+    assert_eq!(
+        sig.return_type,
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+    );
+    assert_eq!(
+        sig.params[0].ty,
+        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+    );
+}
+
+#[test]
 fn a_param_type_is_inherited_from_an_interface_and_ty_native_is_left_alone() {
     let r = build_registry(
         r#"<?php

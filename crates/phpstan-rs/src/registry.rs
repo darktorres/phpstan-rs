@@ -651,6 +651,7 @@ impl Registry {
     }
 
     pub(crate) fn set_class_const_type(&mut self, id: ClassId, slot: usize, ty: Type) {
+        self.invalidate_deferred_class_result(id);
         self.class_const_types.insert((id, slot), ty.clone());
         let entries = self.class_const_types_by_id.entry(id).or_default();
         if let Some((_, previous)) = entries.iter_mut().find(|(existing, _)| *existing == slot) {
@@ -726,6 +727,7 @@ impl Registry {
             }
             names[composed_slot] = Some(name);
         }
+        self.invalidate_deferred_class_result(id);
         self.class_constant_results.insert((id, slot), constant);
     }
 
