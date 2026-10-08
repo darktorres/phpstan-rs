@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 use types::Name;
 use types::UnionAll as _;
 
+use crate::checker::shared_scope::array_root;
 use crate::checker::{CalleeLabel, Checker, Locals, purge_stale_narrowing_for_var};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use syntax::ast::*;
@@ -82,6 +83,40 @@ impl<'a> Checker<'a> {
         resolved: &[Option<&ExprNode>],
         locals: &mut Locals,
     ) {
+        // What is passed by reference may be written through the reference
+        // from then on.
+        match sig {
+            None => {
+                for arg in args {
+                    if let Some(name) = array_root(arenas, arg.value) {
+                        locals.expose(&name);
+                    }
+                }
+            }
+            Some(sig) => {
+                for (i, slot) in resolved.iter().enumerate() {
+                    let Some(arg_expr) = slot else {
+                        continue;
+                    };
+                    let param = sig
+                        .params()
+                        .get(i)
+                        .or_else(|| sig.params().last().filter(|p| p.variadic()));
+                    if param.is_some_and(|p| p.by_ref())
+                        && let Some(name) = array_root(arenas, arg_expr.id)
+                    {
+                        locals.expose(&name);
+                    }
+                }
+                if sig.params().iter().any(|p| p.by_ref()) {
+                    for arg in args.iter().filter(|arg| arg.spread) {
+                        if let Some(name) = array_root(arenas, arg.value) {
+                            locals.expose(&name);
+                        }
+                    }
+                }
+            }
+        }
         {
             let mut empty_dims = self.by_ref_empty_dim_args.borrow_mut();
             for (i, arg) in args.iter().enumerate() {

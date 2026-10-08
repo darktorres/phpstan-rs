@@ -63,6 +63,15 @@ type GuardedMemberSet = imbl::GenericHashSet<
 type ReinitializedPropertySet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
+// Variables a reference to the variable or to one of its elements may exist
+// for on this control-flow path, so a call may write through it: branches
+// merge by union.
+type ExposedVariableSet = imbl::GenericHashSet<
+    syntax::name::Name,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 // `name -> (target_key, ExprId)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
 // `condition_alias_shape`/`condition_alias_targets` in `checker/

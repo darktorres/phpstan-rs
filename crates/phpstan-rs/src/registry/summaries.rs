@@ -1541,7 +1541,7 @@ impl Summarizer {
 /// Whether `e` is a call writing variables whose names it computes:
 /// `extract()`, and `parse_str()` and `mb_parse_str()` with no array to
 /// write.
-fn writes_computed_variables(arenas: &NodeArenas, id: ExprId) -> bool {
+pub(crate) fn writes_computed_variables(arenas: &NodeArenas, id: ExprId) -> bool {
     let Some(e) = arenas.expr(id) else {
         return false;
     };
@@ -1567,7 +1567,7 @@ fn writes_computed_variables(arenas: &NodeArenas, id: ExprId) -> bool {
 }
 
 /// Whether a destructuring takes a reference to an element, at any depth.
-fn destructures_by_ref(arenas: &NodeArenas, items: &DestructureItemRange) -> bool {
+pub(crate) fn destructures_by_ref(arenas: &NodeArenas, items: &DestructureItemRange) -> bool {
     arenas.destructure_items(items).iter().any(|item| {
         item.by_ref
             || item.target.as_ref().is_some_and(|target| {

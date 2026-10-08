@@ -12,7 +12,9 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
-use crate::registry::summaries::{BodySummary, Place, Step};
+use crate::registry::summaries::{
+    BodySummary, Place, Step, destructures_by_ref, writes_computed_variables,
+};
 
 /// See the module's doc comment.
 #[derive(Default)]
@@ -45,6 +47,14 @@ pub(crate) struct SharedScope {
     /// `isset` or `empty`, or an assignment's target: no other code can
     /// reach those objects.
     pub(crate) unescaped: FxHashSet<Name>,
+    /// The variables a reference to the variable or to one of its elements
+    /// may exist for, wherever in the scope it is taken: a by-reference
+    /// parameter, an `&` binding, a by-reference array item, `foreach`
+    /// subject or destructuring.
+    pub(crate) exposed: FxHashSet<Name>,
+    /// Any variable may be exposed: the scope computes a variable's name,
+    /// extracts into its variables or includes a file.
+    pub(crate) all_exposed: bool,
 }
 
 impl SharedScope {
@@ -73,6 +83,28 @@ impl SharedScope {
         let mut scan = Scan::default();
         scan.visit_expr(arenas, body);
         scan.finish(None, false)
+    }
+
+    /// The scope's by-reference parameters are exposed.
+    pub(crate) fn expose_parameters(&mut self, params: &[Param]) {
+        for param in params.iter().filter(|param| param.by_ref) {
+            self.exposed.insert(param.name.name.clone());
+        }
+    }
+
+    /// Whether the array (or string) variable `name` is a value no other
+    /// code can write: not shared, and no reference to it or to an element
+    /// of it is taken in the scope.
+    pub(crate) fn is_private(&self, name: &Name) -> bool {
+        !self.top_level
+            && !self.any_global
+            && !self.all_exposed
+            && **name != *"this"
+            && !self.globals.contains(name)
+            && !self.statics.contains(name)
+            && !self.references.contains_key(name)
+            && !self.captured.contains(name)
+            && !self.exposed.contains(name)
     }
 
     /// Whether no variable of the scope is shared.
@@ -105,6 +137,8 @@ struct Scan {
     captured: FxHashSet<Name>,
     held: FxHashMap<Name, Held>,
     escaped: FxHashSet<Name>,
+    exposed: FxHashSet<Name>,
+    all_exposed: bool,
 }
 
 impl Scan {
@@ -142,6 +176,24 @@ impl Scan {
             captured: self.captured,
             closures,
             unescaped,
+            exposed: self.exposed,
+            all_exposed: self.all_exposed,
+        }
+    }
+
+    /// A reference to the variable `id` is, or to an element of it, is taken.
+    fn expose(&mut self, arenas: &NodeArenas, id: ExprId) {
+        match array_root(arenas, id) {
+            Some(name) => {
+                self.exposed.insert(name);
+            }
+            None => {
+                // A reference to an unnamed place exposes the variables it
+                // is made of; one to a property or call result exposes none.
+                if root_is_computed(arenas, id) {
+                    self.all_exposed = true;
+                }
+            }
         }
     }
 
@@ -196,6 +248,30 @@ impl Scan {
             _ => self.visit_expr(arenas, id),
         }
     }
+}
+
+/// The variable `id` is, or the one an element of it is: `$a`, `$a['k']`,
+/// `$a[$k][0]`.
+pub(crate) fn array_root(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
+    let e = arenas.expr(arenas.peeled(id)?)?;
+    syntax::stack::guard(|| match &e.kind {
+        ExprKind::Variable(name) => Some(name.clone()),
+        ExprKind::Index(base, _) => array_root(arenas, *base),
+        _ => None,
+    })
+}
+
+/// Whether the variable `id` is, or the one an element of it is, has a
+/// computed name (`$$n`, `${'a' . $b}`).
+fn root_is_computed(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(e) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+        return false;
+    };
+    syntax::stack::guard(|| match &e.kind {
+        ExprKind::DynamicVariable(_) => true,
+        ExprKind::Index(base, _) => root_is_computed(arenas, *base),
+        _ => false,
+    })
 }
 
 /// What the scope made or wrote that `e` evaluates to.
@@ -261,6 +337,17 @@ impl Visitor for Scan {
                 body,
             } => {
                 self.visit_expr(arenas, *subject);
+                if *by_ref
+                    || arenas
+                        .peeled(*value)
+                        .and_then(|id| arenas.expr(id))
+                        .is_some_and(|value| match &value.kind {
+                            ExprKind::Destructure(items, _) => destructures_by_ref(arenas, items),
+                            _ => false,
+                        })
+                {
+                    self.expose(arenas, *subject);
+                }
                 if let Some(key) = key {
                     self.assign(arenas, *key, Held::Other);
                 }
@@ -295,10 +382,22 @@ impl Visitor for Scan {
                 self.visit_expr(arenas, *name);
             }
             ExprKind::Assign(lhs, rhs) => {
+                if arenas
+                    .peeled(*lhs)
+                    .and_then(|id| arenas.expr(id))
+                    .is_some_and(|target| match &target.kind {
+                        ExprKind::Destructure(items, _) => destructures_by_ref(arenas, items),
+                        _ => false,
+                    })
+                {
+                    self.expose(arenas, *rhs);
+                }
                 self.assign(arenas, *lhs, held_by(arenas, *rhs));
                 self.visit_expr(arenas, *rhs);
             }
             ExprKind::AssignRef(lhs, rhs) => {
+                self.expose(arenas, *lhs);
+                self.expose(arenas, *rhs);
                 match arenas.peeled(*lhs).and_then(|id| arenas.expr(id)) {
                     Some(ExprNode {
                         kind: ExprKind::Variable(name),
@@ -340,6 +439,24 @@ impl Visitor for Scan {
                 }
             }
             ExprKind::Empty(item) => self.kept(arenas, *item),
+            ExprKind::ArrayLiteral(items) => {
+                for item in arenas.array_items(items.clone()) {
+                    if item.by_ref {
+                        self.expose(arenas, item.value);
+                    }
+                }
+                arena::walk_expr(self, arenas, id);
+            }
+            ExprKind::DynamicVariable(_) | ExprKind::Eval(_) | ExprKind::Include(..) => {
+                self.all_exposed = true;
+                arena::walk_expr(self, arenas, id);
+            }
+            ExprKind::Call(..) => {
+                if writes_computed_variables(arenas, id) {
+                    self.all_exposed = true;
+                }
+                arena::walk_expr(self, arenas, id);
+            }
             // A closure's body is a scope of its own; what it captures leaves
             // this one.
             ExprKind::Closure(closure_id) => {

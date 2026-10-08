@@ -55,6 +55,7 @@ pub(crate) struct Locals {
     guarded_methods: GuardedMemberSet,
     guarded_properties: GuardedMemberSet,
     clone_reinitialized: ReinitializedPropertySet,
+    exposed: ExposedVariableSet,
     condition_aliases: ConditionAliasMap,
     branch_implied_facts: BranchImpliedFactsMap,
     query_builder_aliases: QueryBuilderAliasMap,
@@ -124,6 +125,7 @@ impl Locals {
             guarded_methods: GuardedMemberSet::default(),
             guarded_properties: GuardedMemberSet::default(),
             clone_reinitialized: ReinitializedPropertySet::default(),
+            exposed: ExposedVariableSet::default(),
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
@@ -557,6 +559,7 @@ impl Locals {
             guarded_methods: GuardedMemberSet::default(),
             guarded_properties: GuardedMemberSet::default(),
             clone_reinitialized: ReinitializedPropertySet::default(),
+            exposed: ExposedVariableSet::default(),
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
@@ -667,6 +670,24 @@ impl Locals {
     pub(crate) fn clone_reinitialized_mut(&mut self) -> &mut ReinitializedPropertySet {
         self.touch();
         &mut self.clone_reinitialized
+    }
+
+    pub(crate) fn exposed(&self) -> &ExposedVariableSet {
+        &self.exposed
+    }
+
+    pub(crate) fn exposed_mut(&mut self) -> &mut ExposedVariableSet {
+        self.touch();
+        &mut self.exposed
+    }
+
+    /// From here on, a call may write through a reference to `name` or to
+    /// one of its elements.
+    pub(crate) fn expose(&mut self, name: &syntax::name::Name) {
+        if !self.exposed.contains(name) {
+            self.touch();
+            self.exposed.insert(name.clone());
+        }
     }
 
     pub(crate) fn condition_aliases(&self) -> &ConditionAliasMap {

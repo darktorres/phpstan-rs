@@ -422,6 +422,11 @@ pub(crate) fn merge_scopes(
         .clone_reinitialized()
         .clone()
         .union(else_locals.clone_reinitialized().clone());
+    // Exposed on either path is possibly exposed.
+    *merged.exposed_mut() = then_locals
+        .exposed()
+        .clone()
+        .union(else_locals.exposed().clone());
     // A condition alias only survives a merge point when both incoming
     // branches still
     // agree on the exact same stored condition ID - ID equality is a

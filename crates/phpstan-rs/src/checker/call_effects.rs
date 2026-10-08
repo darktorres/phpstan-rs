@@ -468,6 +468,9 @@ impl Checker<'_> {
         {
             return false;
         }
+        if prop.is_none() && self.private_array(base, scope, locals) {
+            return false;
+        }
         if anything {
             return true;
         }
@@ -486,6 +489,33 @@ impl Checker<'_> {
             } => names(written) && self.may_hold(&base_ty, class.as_deref()),
             Storage::Static { .. } | Storage::Global(_) | Storage::StaticVar { .. } => false,
         })
+    }
+
+    /// Whether the element facts of the value at `base` rest on arrays and
+    /// strings held by a variable no other code can reach: a value no call
+    /// writes, unless a reference to the variable or to an element of it was
+    /// taken.
+    fn private_array(&self, base: LocalKey, scope: &SharedScope, locals: &Locals) -> bool {
+        let mut key = base;
+        loop {
+            let Some(ty) = self.key_type(key, locals) else {
+                return false;
+            };
+            if !ty
+                .union_members()
+                .iter()
+                .all(|member| member.is_array().yes() || member.is_string().yes())
+            {
+                return false;
+            }
+            match locals.data(key) {
+                KeyData::Var(name) => {
+                    return scope.is_private(&name) && !locals.exposed().contains(&name);
+                }
+                KeyData::Index { base, .. } | KeyData::VarIndex { base, .. } => key = base,
+                _ => return false,
+            }
+        }
     }
 
     /// Whether `storages` may write the static property `prop` named through

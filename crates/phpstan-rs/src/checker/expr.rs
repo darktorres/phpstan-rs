@@ -4588,20 +4588,21 @@ impl<'a> Checker<'a> {
                     GotoState::new(goto_labels.clone()),
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(arenas, body);
-                let enclosing_scope =
-                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
-                        closure: true,
-                        ..crate::checker::shared_scope::SharedScope::of(
-                            arenas,
-                            body,
-                            uses,
-                            Some((
-                                self.current_class.as_deref().map(Name::from),
-                                Name::from("{closure}"),
-                            )),
-                            false,
-                        )
-                    });
+                let mut closure_scope = crate::checker::shared_scope::SharedScope {
+                    closure: true,
+                    ..crate::checker::shared_scope::SharedScope::of(
+                        arenas,
+                        body,
+                        uses,
+                        Some((
+                            self.current_class.as_deref().map(Name::from),
+                            Name::from("{closure}"),
+                        )),
+                        false,
+                    )
+                };
+                closure_scope.expose_parameters(params);
+                let enclosing_scope = self.enter_shared_scope(closure_scope);
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`
                 // bails in `ParameterOutAssignedTypeRule`/
@@ -4886,15 +4887,16 @@ impl<'a> Checker<'a> {
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
                 self.check_generator_return_type(declared_return.as_ref(), self.expr_span(e.id));
-                let enclosing_scope =
-                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
-                        closure: true,
-                        ..crate::checker::shared_scope::SharedScope::of_arrow_function(
-                            self.syntax_arenas()
-                                .expect("arrow checks require the syntax tree owner"),
-                            body.id,
-                        )
-                    });
+                let mut arrow_scope = crate::checker::shared_scope::SharedScope {
+                    closure: true,
+                    ..crate::checker::shared_scope::SharedScope::of_arrow_function(
+                        self.syntax_arenas()
+                            .expect("arrow checks require the syntax tree owner"),
+                        body.id,
+                    )
+                };
+                arrow_scope.expose_parameters(params);
+                let enclosing_scope = self.enter_shared_scope(arrow_scope);
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.leave_shared_scope(enclosing_scope);
                 self.current_function_is_generator = previous_generator_flag;
