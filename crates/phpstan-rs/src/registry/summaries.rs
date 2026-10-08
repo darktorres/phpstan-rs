@@ -15,6 +15,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
+use types::Type;
+
+use crate::registry::name_context::resolve_names_in_type;
 
 use crate::registry::fresh::{FreshCall, FreshReturns};
 use crate::registry::retention::{ParamUse, ParamUses};
@@ -51,6 +54,8 @@ pub(crate) enum Narrowing {
     /// The variable holds, when it holds an object, one of these classes:
     /// `$x instanceof C`.
     Instance(Box<[QualifiedName]>),
+    /// The variable holds a value of this type, as an inline `@var` says.
+    Declared(Type),
 }
 
 /// What a place starts from.
@@ -321,6 +326,8 @@ pub(crate) enum Origin {
     Constant(QualifiedName),
     /// A class constant (an enum case too), the class as written.
     ClassConstant(QualifiedName, Name),
+    /// A value of this type, as an inline `@var` says.
+    Declared(Type),
 }
 
 impl Origin {
@@ -616,7 +623,7 @@ pub(crate) enum PairTarget {
     Class(QualifiedName),
 }
 
-impl Summarizer {
+impl Summarizer<'_> {
     /// The callable `e` names, when the body wrote one.
     fn callable(&mut self, arenas: &NodeArenas, id: ExprId) -> Option<Callable> {
         let id = arenas.peeled(id)?;
@@ -862,13 +869,27 @@ impl BodySummary {
                 )
             })
             .collect();
-        BodySummary::of(arenas, &running)
+        BodySummary::of_function_in(arenas, &[], &running, Some(stmts))
     }
 
     /// The summary of the body of a function with the parameters `params`:
     /// a constructor's assigns each property it promotes, first.
     pub fn of_function(arenas: &NodeArenas, params: &[Param], body: &[StmtId]) -> BodySummary {
-        let mut walk = Summarizer::default();
+        BodySummary::of_function_in(arenas, params, body, None)
+    }
+
+    /// `of_function` for a body in a file whose statements are `file`, which
+    /// gives the names its inline `@var` tags are written in.
+    pub fn of_function_in(
+        arenas: &NodeArenas,
+        params: &[Param],
+        body: &[StmtId],
+        file: Option<&[StmtId]>,
+    ) -> BodySummary {
+        let mut walk = Summarizer {
+            names: file,
+            ..Summarizer::default()
+        };
         for param in params.iter().filter(|param| param.promotion.is_some()) {
             walk.implicit_on(
                 Some(vec![Origin::Place(Place::root(Root::This))]),
@@ -1103,7 +1124,7 @@ struct Enclosing {
 }
 
 #[derive(Default)]
-struct Summarizer {
+struct Summarizer<'a> {
     // How many closures and arrow functions the walk is inside: they are
     // not run by being made, so their statements are no part of the body's
     // purity.
@@ -1127,6 +1148,12 @@ struct Summarizer {
     // What the guards around the code the walk is in show of variables of
     // the scope it is in, the innermost last.
     narrowed: Vec<(Name, Narrowing)>,
+    // The statements of the file the body is in, to find the names its
+    // inline `@var` tags are written in; `None` where they are not read.
+    names: Option<&'a [StmtId]>,
+    // The inline `@var` tags of the statement the walk is in that assign
+    // their variable there: the type it is taken to hold.
+    declared: Vec<(Name, Type)>,
 }
 
 const READ: u8 = 1;
@@ -1134,7 +1161,7 @@ const WRITE: u8 = 2;
 const ISSET: u8 = 4;
 const UNSET: u8 = 8;
 
-impl Summarizer {
+impl Summarizer<'_> {
     fn finish(self) -> BodySummary {
         BodySummary {
             purity: (!self.impure).then(|| self.purity_calls.into_boxed_slice()),
@@ -1495,16 +1522,86 @@ impl Summarizer {
         mark
     }
 
-    /// The statements of a list in order: what a statement that leaves
-    /// unless a condition holds shows of the rest of the list.
+    /// The variables the inline `@var` tags of the statement `id` give a
+    /// type, with it.
+    fn inline_var_tags(&self, arenas: &NodeArenas, id: StmtId) -> Vec<(Name, Type)> {
+        let Some(file) = self.names else {
+            return Vec::new();
+        };
+        let (Some(stmt), Some(span)) = (arenas.stmt(id), arenas.stmt_span(id)) else {
+            return Vec::new();
+        };
+        if matches!(
+            stmt.kind,
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::GlobalConst(_)
+        ) {
+            return Vec::new();
+        }
+        let Some(site) = arenas.doc_site(span.start) else {
+            return Vec::new();
+        };
+        if !site.text.contains("var") {
+            return Vec::new();
+        }
+        let tags = crate::checker::var_tag_nodes(&site.text);
+        if tags.is_empty() {
+            return Vec::new();
+        }
+        let names = syntax::name_resolution::context_at_ids(arenas, file, span.start);
+        let unnamed = tags.iter().filter(|(name, _)| name.is_none()).count();
+        let target = assigned_variable(arenas, id);
+        let mut out = Vec::new();
+        for (name, node) in tags.iter() {
+            let name = match name {
+                Some(name) => Name::from(name.trim_start_matches('$')),
+                None if unnamed == 1 => match &target {
+                    Some(target) => target.clone(),
+                    None => continue,
+                },
+                None => continue,
+            };
+            let ty = resolve_names_in_type(crate::registry::parse_type_node(node), &names);
+            out.push((name, ty));
+        }
+        out
+    }
+
+    /// The statements of a list in order: what an inline `@var` tag gives a
+    /// variable holds from its statement on, and what a statement that
+    /// leaves unless a condition holds shows of the rest of the list.
     fn walk_list(&mut self, arenas: &NodeArenas, stmts: &[StmtId]) {
         let mark = self.narrowed.len();
         for (at, &id) in stmts.iter().enumerate() {
+            let rest: Vec<Node> = stmts[at + 1..]
+                .iter()
+                .map(|&stmt| Node::Stmt(stmt))
+                .collect();
+            let mut from_here = Vec::new();
+            let mut after = Vec::new();
+            let tags = self.inline_var_tags(arenas, id);
+            if !tags.is_empty() {
+                let written = written_in(arenas, &[Node::Stmt(id)]);
+                let target = assigned_variable(arenas, id);
+                for (name, ty) in tags {
+                    if !written.contains(&name) {
+                        from_here.push((name, Narrowing::Declared(ty)));
+                    } else if target.as_ref() == Some(&name) {
+                        self.declared.push((name.clone(), ty.clone()));
+                        after.push((name, Narrowing::Declared(ty)));
+                    }
+                }
+            }
+            let mut region = vec![Node::Stmt(id)];
+            region.extend(rest.iter().copied());
+            self.narrow(arenas, from_here, &region);
             self.visit_stmt(arenas, id);
+            self.declared.clear();
+            self.narrow(arenas, after, &rest);
             let Some(StmtKind::If(branch)) = arenas.stmt(id).map(|stmt| &stmt.kind) else {
                 continue;
             };
-            let region: Vec<Node> = stmts[at..].iter().map(|&stmt| Node::Stmt(stmt)).collect();
+            let mut region = vec![Node::Stmt(id)];
+            region.extend(rest);
             self.narrow(arenas, after_if(arenas, branch), &region);
         }
         self.narrowed.truncate(mark);
@@ -1694,7 +1791,7 @@ impl Summarizer {
     }
 }
 
-impl Summarizer {
+impl Summarizer<'_> {
     /// Records the include `id` as a call of the file it names. The file
     /// runs in this scope, so it may assign any variable of it.
     fn record_include(&mut self, id: ExprId) {
@@ -1958,6 +2055,19 @@ fn plain_variable(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
     }
 }
 
+/// The variable the statement `id` assigns, when it is an expression
+/// statement doing only that.
+fn assigned_variable(arenas: &NodeArenas, id: StmtId) -> Option<Name> {
+    let StmtKind::Expression(e) = &arenas.stmt(id)?.kind else {
+        return None;
+    };
+    let e = arenas.peeled(*e).and_then(|id| arenas.expr(id))?;
+    match &e.kind {
+        ExprKind::Assign(lhs, _) => plain_variable(arenas, *lhs),
+        _ => None,
+    }
+}
+
 /// The global function a call names, lowercased, with its arguments.
 fn called_function(arenas: &NodeArenas, id: ExprId) -> Option<(String, &[Arg])> {
     let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
@@ -2148,7 +2258,7 @@ fn after_if(arenas: &NodeArenas, branch: &IfStmt) -> Vec<(Name, Narrowing)> {
         .collect()
 }
 
-impl Visitor for Summarizer {
+impl Visitor for Summarizer<'_> {
     fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
         let mut nested = Reassigned(&mut self.scope.reassigned);
         arena::walk_function_decl(&mut nested, arenas, function);
@@ -2349,7 +2459,13 @@ impl Visitor for Summarizer {
             match &e.kind {
                 ExprKind::Assign(lhs, rhs) => {
                     let made = self.made_by(arenas, *rhs);
-                    let origins = self.origins(arenas, *rhs);
+                    let mut origins = self.origins(arenas, *rhs);
+                    if let Some(name) = plain_variable(arenas, *lhs)
+                        && let Some((_, ty)) =
+                            self.declared.iter().find(|(tagged, _)| *tagged == name)
+                    {
+                        origins = Some(vec![Origin::Declared(ty.clone())]);
+                    }
                     if matches!(
                         arenas
                             .peeled(*lhs)
@@ -2680,6 +2796,7 @@ syntax::canonical_struct!(Place {
 syntax::canonical_enum!(Narrowing {
     NoObject,
     Instance(classes),
+    Declared(ty),
 });
 
 syntax::canonical_enum!(Root {
@@ -2756,6 +2873,7 @@ syntax::canonical_enum!(Origin {
     Caught(classes),
     Constant(name),
     ClassConstant(class, constant),
+    Declared(ty),
 });
 
 syntax::canonical_enum!(ArgAt {

@@ -3873,6 +3873,16 @@ impl<'r> Level<'r> {
                 .any(|(bound, _)| bound.as_ref().is_none_or(|bound| bound.as_str() == name))
     }
 
+    /// Whether a value of the type `ty`, as an inline `@var` gives it, holds
+    /// objects of classes known only: it can be taken as written.
+    fn known_type(&self, ty: &Type) -> bool {
+        element_classes(ty).is_some_and(|classes| {
+            classes
+                .iter()
+                .all(|class| self.registry.lookup_class(class).is_some())
+        })
+    }
+
     /// The object the variable `name` holds where a guard shows
     /// `narrowing` of it.
     fn narrowed_holder(&self, name: &Name, narrowing: Option<&Narrowing>) -> Holder {
@@ -3882,6 +3892,8 @@ impl<'r> Level<'r> {
         };
         match narrowing {
             Narrowing::NoObject => Holder::Classes(Vec::new()),
+            Narrowing::Declared(ty) if self.known_type(ty) => holder_of(ty),
+            Narrowing::Declared(_) => held,
             Narrowing::Instance(classes) => {
                 let mut named = Vec::new();
                 for class in classes.iter() {
@@ -3986,6 +3998,8 @@ impl<'r> Level<'r> {
             Origin::NoObject | Origin::Arithmetic | Origin::Closure => {
                 (Holder::Classes(Vec::new()), false)
             }
+            Origin::Declared(ty) if self.known_type(ty) => (holder_of(ty), false),
+            Origin::Declared(_) => (Holder::Unknown, false),
             Origin::Place(place) if matches!(place.root, Root::This) && place.steps.is_empty() => {
                 (self.value_holder(&place.root, None, &[]), true)
             }
@@ -4310,18 +4324,17 @@ impl<'r> Level<'r> {
         // has them: an array of objects holds objects its own holder, the
         // object it is, does not name.
         let typed: Option<Vec<Type>> = match root {
-            Root::Variable(Some(name))
-                if !self.made.contains_key(name.as_str())
-                    && !matches!(
-                        narrowing.filter(|_| self.stable(name)),
-                        Some(Narrowing::Instance(_))
-                    ) =>
-            {
-                match self.params.get(name.as_str()) {
-                    Some(Declared::Param { ty, .. }) => Some(vec![(*ty).clone()]),
-                    _ => None,
+            Root::Variable(Some(name)) => match narrowing.filter(|_| self.stable(name)) {
+                Some(Narrowing::Declared(ty)) if self.known_type(ty) => Some(vec![ty.clone()]),
+                Some(Narrowing::Instance(_)) => None,
+                _ if !self.made.contains_key(name.as_str()) => {
+                    match self.params.get(name.as_str()) {
+                        Some(Declared::Param { ty, .. }) => Some(vec![(*ty).clone()]),
+                        _ => None,
+                    }
                 }
-            }
+                _ => None,
+            },
             Root::Static(class, Some(prop)) => self.static_types(class, prop),
             _ => None,
         };

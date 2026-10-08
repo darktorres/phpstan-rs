@@ -1033,6 +1033,7 @@ mod oop;
 mod operators;
 mod phpdoc_type_compat;
 mod phpdoc_unresolvable;
+pub(crate) use phpdoc_unresolvable::var_tag_nodes;
 pub(crate) mod phpstan_api;
 mod pipe_operator;
 mod predefined_constants;

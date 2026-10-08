@@ -420,14 +420,17 @@ impl FileBodies {
         unsets: bool,
         registers: bool,
     ) -> FileBodies {
-        struct Collect {
+        struct Collect<'a> {
             bodies: FxHashMap<Span, Body>,
             hooks: FxHashMap<Span, Hooks>,
             // Whether the next function declaration visited is a method.
             method: bool,
             in_expressions: bool,
+            // The file's statements, when a doc comment in it may carry an
+            // inline `@var`.
+            file: Option<&'a [StmtId]>,
         }
-        impl Collect {
+        impl Collect<'_> {
             fn hooks(
                 &mut self,
                 arenas: &NodeArenas,
@@ -452,7 +455,7 @@ impl FileBodies {
                 }
             }
         }
-        impl ArenaVisitor for Collect {
+        impl ArenaVisitor for Collect<'_> {
             fn visit_expr(&mut self, arenas: &NodeArenas, expr: ExprId) {
                 if self.in_expressions {
                     arena::walk_expr(self, arenas, expr);
@@ -486,10 +489,11 @@ impl FileBodies {
                     self.bodies.insert(
                         function.name.span,
                         Body {
-                            summary: Arc::new(BodySummary::of_function(
+                            summary: Arc::new(BodySummary::of_function_in(
                                 arenas,
                                 arenas.params(function.params.clone()),
                                 arenas.stmt_ids(&body.stmts),
+                                self.file,
                             )),
                             flow: is_method.then(|| {
                                 Arc::new(InitFlow::of(
@@ -509,6 +513,11 @@ impl FileBodies {
             hooks: FxHashMap::default(),
             method: false,
             in_expressions,
+            file: arenas
+                .doc_sites
+                .iter()
+                .any(|site| site.text.contains("var"))
+                .then_some(stmts),
         };
         arena::walk_stmts(&mut collect, arenas, stmts);
         FileBodies {
