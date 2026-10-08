@@ -508,6 +508,25 @@ impl Checker<'_> {
         self.forget_what_an_operation_may_change(&ty, is_this(self, operand), operation, locals);
     }
 
+    /// Forgets the variables the include `at` may write: the file it
+    /// includes assigns them in this scope.
+    pub(crate) fn forget_variables_an_include_writes(&self, at: ExprId, locals: &mut Locals) {
+        let writes = self
+            .registry
+            .include_writes(self.current_file_id, u32::from(at.into_raw()));
+        let written: Vec<Name> = locals
+            .variables()
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(|name| **name != *"this" && writes.may_write(name))
+            .collect();
+        for name in written {
+            purge_stale_narrowing_for_var(locals, &name);
+            locals.insert_var(&name, Type::mixed());
+            locals.clear_native_var(&name);
+        }
+    }
+
     /// Forgets what `effect` may have written.
     pub(crate) fn forget_effect(&self, effect: &Effect, locals: &mut Locals) {
         let scope = Rc::clone(&self.shared_scope);

@@ -2234,6 +2234,8 @@ impl Project {
         // changed too, which `stale` has no use for.
         if let Some(before) = &before {
             self.walk_affected(&mut walk, self.registry.changed_global_variables(before));
+            walk.affected
+                .extend(self.registry.files_with_changed_include_writes(before));
         }
         walk.affected
             .into_iter()

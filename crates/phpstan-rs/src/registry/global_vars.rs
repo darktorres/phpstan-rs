@@ -174,6 +174,28 @@ pub(in crate::registry) struct GlobalScopes {
     /// The scope each file's top level runs in, when it runs in a global one.
     scope_of: FxHashMap<FileId, u32>,
     scopes: Vec<GlobalScope>,
+    /// What each include may write to the variables of the scope it is in,
+    /// by the file it is in and its place there.
+    include_writes: FxHashMap<(FileId, u32), IncludeWrites>,
+}
+
+/// The variables of the including scope an `include` may write: the ones
+/// the included files' top levels write or bind, or any when the file is not
+/// known or runs code that names variables by computing them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IncludeWrites {
+    Any,
+    Names(Vec<Name>),
+}
+
+impl IncludeWrites {
+    /// Whether the variable `name` may be written.
+    pub(crate) fn may_write(&self, name: &str) -> bool {
+        match self {
+            IncludeWrites::Any => true,
+            IncludeWrites::Names(names) => names.iter().any(|written| **written == *name),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -293,6 +315,8 @@ pub(in crate::registry) struct StagedSite {
 struct IncludeSite {
     top_level: bool,
     suffix: Option<String>,
+    /// The include expression, by its id in the file.
+    at: u32,
 }
 
 /// What one file's walk found: its sites, and its include sites.
@@ -302,6 +326,8 @@ pub(in crate::registry) struct FileSites {
     include_sites: Vec<IncludeSite>,
     dynamic_top_level: bool,
     dynamic_function: bool,
+    /// The variables the file's top level writes or binds by name, sorted.
+    top_level_names: Vec<Name>,
 }
 
 /// An assigned value, as far as its type can be said before the registry
@@ -428,6 +454,9 @@ pub struct GlobalFacts {
     /// from a function.
     #[serde(default)]
     dynamic_function: bool,
+    /// The variables the file's top level binds with `global` or `static`.
+    #[serde(default)]
+    bound_top_level: Vec<Name>,
 }
 
 impl GlobalFacts {
@@ -455,6 +484,18 @@ impl GlobalFacts {
             include_sites: self.include_sites.clone(),
             dynamic_top_level: self.dynamic_top_level,
             dynamic_function: self.dynamic_function,
+            top_level_names: {
+                let mut names: Vec<Name> = self
+                    .sites
+                    .iter()
+                    .filter(|site| site.top_level)
+                    .map(|site| site.name.clone())
+                    .chain(self.bound_top_level.iter().cloned())
+                    .collect();
+                names.sort_unstable();
+                names.dedup();
+                names
+            },
         }
     }
 }
@@ -581,6 +622,7 @@ impl Registry {
                 .collect(),
             ..GlobalScopes::default()
         };
+        scopes.include_writes = self.include_writes_of(&graph);
         for (id, ..) in files {
             scopes.function_dynamic |= self.global_sites[id].dynamic_function;
             if self.global_sites[id].dynamic_top_level
@@ -623,6 +665,91 @@ impl Registry {
             .collect();
         self.global_variables = global_variables;
         self.global_scopes = Arc::new(scopes);
+    }
+
+    /// What each include of the loaded files may write to the variables of
+    /// the scope it is in: what the top levels of the files it reaches write,
+    /// through the includes those make at their top levels.
+    fn include_writes_of(&self, graph: &IncludeGraph) -> FxHashMap<(FileId, u32), IncludeWrites> {
+        let mut reached: FxHashMap<FileId, IncludeWrites> = FxHashMap::default();
+        let mut out: FxHashMap<(FileId, u32), IncludeWrites> = FxHashMap::default();
+        for (&(source, at), target) in &graph.targets {
+            let writes = match target {
+                None => IncludeWrites::Any,
+                Some(target) => reached
+                    .entry(*target)
+                    .or_insert_with(|| self.top_level_writes_from(*target, graph))
+                    .clone(),
+            };
+            out.insert((source, at), writes);
+        }
+        out
+    }
+
+    /// What the top level of `start` writes, and of every file it includes
+    /// at its top level, and so on.
+    fn top_level_writes_from(&self, start: FileId, graph: &IncludeGraph) -> IncludeWrites {
+        let mut names: Vec<Name> = Vec::new();
+        let mut seen: FxHashSet<FileId> = FxHashSet::default();
+        let mut queue = vec![start];
+        while let Some(file) = queue.pop() {
+            if !seen.insert(file) {
+                continue;
+            }
+            let Some(sites) = self.global_sites.get(&file) else {
+                return IncludeWrites::Any;
+            };
+            if sites.dynamic_top_level {
+                return IncludeWrites::Any;
+            }
+            names.extend(sites.top_level_names.iter().cloned());
+            for include in sites
+                .include_sites
+                .iter()
+                .filter(|include| include.top_level)
+            {
+                match graph.targets.get(&(file, include.at)) {
+                    Some(Some(target)) => queue.push(*target),
+                    _ => return IncludeWrites::Any,
+                }
+            }
+        }
+        names.sort_unstable();
+        names.dedup();
+        IncludeWrites::Names(names)
+    }
+
+    /// What the include at `at` in `file` may write to the variables of the
+    /// scope it is in.
+    pub(crate) fn include_writes(&self, file: Option<FileId>, at: u32) -> &IncludeWrites {
+        static ANY: IncludeWrites = IncludeWrites::Any;
+        file.and_then(|file| self.global_scopes.include_writes.get(&(file, at)))
+            .unwrap_or(&ANY)
+    }
+
+    /// The files with an include that may write other variables than it did
+    /// in `before`.
+    pub(crate) fn files_with_changed_include_writes(
+        &self,
+        before: &ResolvedSnapshot,
+    ) -> Vec<FileId> {
+        let (now, was) = (
+            &self.global_scopes.include_writes,
+            &before.global_scopes.include_writes,
+        );
+        let mut files: Vec<FileId> = now
+            .iter()
+            .filter(|(key, writes)| was.get(key) != Some(writes))
+            .map(|((file, _), _)| *file)
+            .chain(
+                was.keys()
+                    .filter(|key| !now.contains_key(key))
+                    .map(|(file, _)| *file),
+            )
+            .collect();
+        files.sort_unstable();
+        files.dedup();
+        files
     }
 
     /// The names whose fact in some global scope differs from what `before`
@@ -676,6 +803,9 @@ struct IncludeGraph {
     /// The scopes some top-level include of which names no single file, so
     /// any file's top level may run in them.
     open: FxHashSet<u32>,
+    /// The file each include names, by the file it is in and its place
+    /// there; `None` when it names no single loaded file.
+    targets: FxHashMap<(FileId, u32), Option<FileId>>,
 }
 
 /// Resolves the include graph: the files whose own
@@ -719,7 +849,7 @@ fn resolve_global_scope_files(
     // Each include site is resolved independently against the filename
     // index. The resulting relation is ID-addressed before the serial graph
     // bookkeeping and reachability walk.
-    let resolved_edges: Vec<(FileId, Option<FileId>, bool)> = include_sites
+    let resolved_edges: Vec<(FileId, u32, Option<FileId>, bool)> = include_sites
         .par_iter()
         .map(|(source, site)| {
             let target = site.suffix.as_deref().and_then(|suffix| {
@@ -737,11 +867,13 @@ fn resolve_global_scope_files(
                 // previous exact-one-match rule without allocating a Vec.
                 matches.next().is_none().then_some(target)
             });
-            (*source, target, site.top_level)
+            (*source, site.at, target, site.top_level)
         })
         .collect();
 
-    for (source, target, top_level) in resolved_edges {
+    let mut targets: FxHashMap<(FileId, u32), Option<FileId>> = FxHashMap::default();
+    for (source, at, target, top_level) in resolved_edges {
+        targets.insert((source, at), target);
         let Some(target) = target else {
             if top_level {
                 unresolved.insert(source);
@@ -817,6 +949,7 @@ fn resolve_global_scope_files(
         global_scope,
         component,
         open,
+        targets,
     }
 }
 
@@ -972,7 +1105,21 @@ impl Visitor for Scope<'_> {
                     self.unset(arenas, *target);
                 }
             }
+            StmtKind::StaticVar(vars) if self.top_level => {
+                for var in arenas.static_vars(vars.clone()) {
+                    self.out.bound_top_level.push(var.name.name.clone());
+                }
+            }
             StmtKind::Global(vars) => {
+                if self.top_level {
+                    for name in arenas
+                        .global_vars(vars.clone())
+                        .iter()
+                        .filter_map(GlobalVar::name)
+                    {
+                        self.out.bound_top_level.push(name.clone());
+                    }
+                }
                 if !self.top_level
                     && arenas
                         .global_vars(vars.clone())
@@ -1036,6 +1183,7 @@ impl Visitor for Scope<'_> {
                 self.out.include_sites.push(IncludeSite {
                     top_level: self.top_level,
                     suffix: resolve_include_target_suffix(arenas, *target),
+                    at: u32::from(id.into_raw()),
                 });
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
@@ -1663,6 +1811,7 @@ syntax::canonical_struct!(GlobalFacts {
     include_sites,
     dynamic_top_level,
     dynamic_function,
+    bound_top_level,
 });
 
 syntax::canonical_struct!(SiteFact {
@@ -1671,7 +1820,11 @@ syntax::canonical_struct!(SiteFact {
     contribution,
 });
 
-syntax::canonical_struct!(IncludeSite { top_level, suffix });
+syntax::canonical_struct!(IncludeSite {
+    top_level,
+    suffix,
+    at
+});
 
 syntax::canonical_enum!(ContributionFact {
     Mixed,
@@ -1706,6 +1859,7 @@ syntax::canonical_struct!(FileSites {
     include_sites,
     dynamic_top_level,
     dynamic_function,
+    top_level_names,
 });
 
 syntax::canonical_struct!(StagedSite {
@@ -1739,4 +1893,9 @@ syntax::canonical_struct!(GlobalScopes {
     function_dynamic,
     scope_of,
     scopes,
+    include_writes,
+});
+syntax::canonical_enum!(IncludeWrites {
+    Any,
+    Names(names),
 });
