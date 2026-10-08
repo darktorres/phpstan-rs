@@ -167,8 +167,16 @@ impl SiteContribution {
 /// of the top levels of the files that share it.
 #[derive(Debug, Clone, Default)]
 pub(in crate::registry) struct GlobalScopes {
-    /// What the function bodies write after their own `global`.
+    /// What the function bodies write after their own `global`, and what
+    /// the closures written at a file's top level write to the variables
+    /// they capture by reference.
     function_facts: NameMap<GlobalAccumulator>,
+    /// The part of `function_facts` that is not a closure's write through
+    /// a capture.
+    plain_function_facts: NameMap<GlobalAccumulator>,
+    /// The closure writes through a capture, by the file whose top level
+    /// wrote the closure.
+    capture_facts: NameMap<FxHashMap<FileId, GlobalAccumulator>>,
     /// Some function body writes globals whose names it computes.
     function_dynamic: bool,
     /// The scope each file's top level runs in, when it runs in a global one.
@@ -247,6 +255,19 @@ impl GlobalScopes {
                 out.insert(name.clone());
             }
         }
+        for name in self
+            .capture_facts
+            .keys()
+            .chain(before.capture_facts.keys())
+            .chain(self.plain_function_facts.keys())
+            .chain(before.plain_function_facts.keys())
+        {
+            if self.capture_facts.get(name) != before.capture_facts.get(name)
+                || self.plain_function_facts.get(name) != before.plain_function_facts.get(name)
+            {
+                out.insert(name.clone());
+            }
+        }
         if self.function_dynamic != before.function_dynamic {
             all(&mut out);
         }
@@ -290,12 +311,36 @@ impl GlobalScopes {
         {
             return everywhere.get(name).cloned();
         }
-        let (own, anywhere) = (scope.facts.get(name), self.function_facts.get(name));
+        let (own, anywhere) = (
+            scope.facts.get(name),
+            self.functions_write(name, Some(file)),
+        );
         Some(match (own, anywhere) {
             (None, None) => return None,
-            (Some(only), None) | (None, Some(only)) => only.clone().finish(),
-            (Some(own), Some(anywhere)) => own.merged(anywhere).finish(),
+            (Some(only), None) => only.clone().finish(),
+            (None, Some(only)) => only.finish(),
+            (Some(own), Some(anywhere)) => own.merged(&anywhere).finish(),
         })
+    }
+
+    /// What the functions write to the global `name`: their own writes after
+    /// `global`, and the closures' writes through a capture, except those of
+    /// closures written at the top level of `except`, whose scope follows
+    /// them itself.
+    fn functions_write(&self, name: &str, except: Option<FileId>) -> Option<GlobalAccumulator> {
+        let Some(except) = except else {
+            return self.function_facts.get(name).cloned();
+        };
+        let mut found = self.plain_function_facts.get(name).cloned();
+        for (file, written) in self.capture_facts.get(name).into_iter().flatten() {
+            if *file != except {
+                found = Some(match found {
+                    Some(found) => found.merged(written),
+                    None => written.clone(),
+                });
+            }
+        }
+        found
     }
 }
 
@@ -306,6 +351,9 @@ impl GlobalScopes {
 #[derive(Debug, Clone)]
 pub(in crate::registry) struct StagedSite {
     gate: Option<FileId>,
+    /// The file whose top level wrote the closure this site is in, for a
+    /// write to a variable the closure captures by reference.
+    capture_of: Option<FileId>,
     name: Name,
     contribution: SiteContribution,
 }
@@ -480,6 +528,11 @@ fn takes_by_ref(sig: &crate::registry::FunctionReflection, at: &ArgAt) -> bool {
 struct SiteFact {
     /// A file's own top level, whose include-graph gate is the file's.
     top_level: bool,
+    /// A write in a closure written at a file's top level to a variable the
+    /// closure captures by reference: the scope that wrote the closure
+    /// already knows what it writes.
+    #[serde(default)]
+    by_capture: bool,
     name: Name,
     contribution: ContributionFact,
 }
@@ -523,6 +576,7 @@ impl GlobalFacts {
                 .filter_map(|site| {
                     Some(StagedSite {
                         gate: site.top_level.then_some(id),
+                        capture_of: site.by_capture.then_some(id),
                         name: site.name.clone(),
                         contribution: site.contribution.resolve(registry, methods)?,
                     })
@@ -685,6 +739,24 @@ impl Registry {
                     Some(gate) => Some(&mut scopes.scopes[graph.component[gate] as usize].facts),
                     None => None,
                 };
+                if own.is_none() {
+                    match site.capture_of {
+                        Some(file) => site.contribution.clone().apply(
+                            scopes
+                                .capture_facts
+                                .entry(site.name.clone())
+                                .or_default()
+                                .entry(file)
+                                .or_default(),
+                        ),
+                        None => site.contribution.clone().apply(
+                            scopes
+                                .plain_function_facts
+                                .entry(site.name.clone())
+                                .or_default(),
+                        ),
+                    }
+                }
                 let scoped = match own {
                     Some(facts) => facts,
                     None => &mut scopes.function_facts,
@@ -861,20 +933,30 @@ impl Registry {
 
     /// What the functions that bind the global `name` may write to it, when
     /// any does.
-    pub(crate) fn global_written_by_functions(&self, name: &str) -> Option<Type> {
+    pub(crate) fn global_written_by_functions(
+        &self,
+        name: &str,
+        top_level_of: Option<FileId>,
+    ) -> Option<Type> {
         self.global_scopes
-            .function_facts
-            .get(name)
-            .map(|written| written.clone().finish())
+            .functions_write(name, top_level_of)
+            .map(GlobalAccumulator::finish)
     }
 
     /// Whether code of the loaded program that is not known may write the
     /// global `name`: a function body binds it or writes it by name, or
     /// writes a global it computes the name of.
-    pub(crate) fn code_may_write_global(&self, name: &str) -> bool {
+    ///
+    /// The writes of a closure written at the top level of `top_level_of`
+    /// through a variable it captures by reference are left out: the scope
+    /// that wrote the closure follows them itself.
+    pub(crate) fn code_may_write_global(&self, name: &str, top_level_of: Option<FileId>) -> bool {
         syntax::ast::is_superglobal(name)
             || self.global_scopes.function_dynamic
-            || self.global_scopes.function_facts.contains_key(name)
+            || self
+                .global_scopes
+                .functions_write(name, top_level_of)
+                .is_some()
     }
 
     /// What the global variable `name` may hold where the top level of
@@ -1102,7 +1184,7 @@ fn resolve_include_target_suffix(arenas: &NodeArenas, id: ExprId) -> Option<Stri
 /// already, potentially, the real global scope).
 fn walk_top_level(arenas: &NodeArenas, stmts: &[StmtId], out: &mut GlobalFacts) {
     let empty = NameSet::default();
-    walk_scope(arenas, stmts, true, &empty, out);
+    walk_scope(arenas, stmts, true, &empty, &empty, out);
 }
 
 /// Walks one function/method/closure body - `global_names` is the
@@ -1115,7 +1197,14 @@ fn walk_top_level(arenas: &NodeArenas, stmts: &[StmtId], out: &mut GlobalFacts) 
 /// include-graph check the way file top level is.
 fn walk_function_body(arenas: &NodeArenas, stmts: &[StmtId], out: &mut GlobalFacts) {
     let global_names = collect_global_names(arenas, stmts);
-    walk_scope(arenas, stmts, false, &global_names, out);
+    walk_scope(
+        arenas,
+        stmts,
+        false,
+        &global_names,
+        &NameSet::default(),
+        out,
+    );
 }
 
 /// Every name a `global` statement in this body imports. A nested
@@ -1162,14 +1251,19 @@ fn walk_scope(
     stmts: &[StmtId],
     top_level: bool,
     global_names: &NameSet,
+    captured: &NameSet,
     out: &mut GlobalFacts,
 ) {
+    let cursor = out.sites.len();
     let mut scope = Scope {
         top_level,
         global_names,
+        captured,
+        cursor,
         out,
     };
     arena::walk_stmts(&mut scope, arenas, stmts);
+    scope.mark_captures();
 }
 
 /// One scope's walk: a nested function, method or closure body is walked
@@ -1177,6 +1271,11 @@ fn walk_scope(
 struct Scope<'r> {
     top_level: bool,
     global_names: &'r NameSet,
+    /// The variables this closure body captures by reference from the top
+    /// level of the file that wrote the closure.
+    captured: &'r NameSet,
+    /// The first site this scope has not looked at yet.
+    cursor: usize,
     out: &'r mut GlobalFacts,
 }
 
@@ -1185,18 +1284,22 @@ impl Visitor for Scope<'_> {
         let Some(stmt) = arenas.stmt(id) else { return };
         match &stmt.kind {
             StmtKind::FunctionDecl(id) => {
+                self.mark_captures();
                 if let Some(function) = arenas.function(*id) {
                     walk_function_body(arenas, function.body_stmts(arenas), self.out);
                 }
+                self.skip_nested();
                 return;
             }
             StmtKind::ClassDecl(c) => {
                 let c = arenas.class_decl(c.clone());
+                self.mark_captures();
                 if let Some(def) = arenas.class(c.def) {
                     for method in arenas.methods(def.methods.clone()) {
                         walk_function_body(arenas, method.function.body_stmts(arenas), self.out);
                     }
                 }
+                self.skip_nested();
                 return;
             }
             StmtKind::Foreach {
@@ -1248,6 +1351,7 @@ impl Visitor for Scope<'_> {
                         && self.is_site(&var.name)
                     {
                         self.out.sites.push(SiteFact {
+                            by_capture: false,
                             top_level: self.top_level,
                             name: var.name.clone(),
                             contribution: ContributionFact::Mixed,
@@ -1269,14 +1373,20 @@ impl Visitor for Scope<'_> {
                 if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*id) {
                     let body = arenas.stmt_ids(&closure.body);
                     let mut names = collect_global_names(arenas, body);
+                    let mut captured = NameSet::default();
                     for used in arenas.closure_uses(&closure.uses) {
                         if used.by_ref
                             && (self.top_level || self.global_names.contains(&used.name.name))
                         {
+                            if self.top_level && !names.contains(&used.name.name) {
+                                captured.insert(used.name.name.clone());
+                            }
                             names.insert(used.name.name.clone());
                         }
                     }
-                    walk_scope(arenas, body, false, &names, self.out);
+                    self.mark_captures();
+                    walk_scope(arenas, body, false, &names, &captured, self.out);
+                    self.skip_nested();
                 }
                 return;
             }
@@ -1284,23 +1394,30 @@ impl Visitor for Scope<'_> {
                 let Some(class) = arenas.anonymous_class(*id) else {
                     return;
                 };
+                self.mark_captures();
                 if let Some(def) = arenas.class(class.def) {
                     for method in arenas.methods(def.methods.clone()) {
                         walk_function_body(arenas, method.function.body_stmts(arenas), self.out);
                     }
                 }
+                self.skip_nested();
                 return;
             }
             // An arrow function's body is a scope of its own, which takes
             // the variables around it by value.
             ExprKind::ArrowFn(_) => {
                 let names = NameSet::default();
+                self.mark_captures();
+                let cursor = self.out.sites.len();
                 let mut inner = Scope {
                     top_level: false,
                     global_names: &names,
+                    captured: &names,
+                    cursor,
                     out: &mut *self.out,
                 };
                 arena::walk_expr(&mut inner, arenas, id);
+                self.skip_nested();
                 return;
             }
             ExprKind::Include(_, target) => {
@@ -1375,6 +1492,24 @@ impl Visitor for Scope<'_> {
 }
 
 impl Scope<'_> {
+    /// Marks the sites found since the last look that write a variable the
+    /// closure captures by reference.
+    fn mark_captures(&mut self) {
+        if !self.captured.is_empty() {
+            for site in &mut self.out.sites[self.cursor..] {
+                if !site.top_level && self.captured.contains(&site.name) {
+                    site.by_capture = true;
+                }
+            }
+        }
+        self.cursor = self.out.sites.len();
+    }
+
+    /// Passes the sites a nested body added, which are its own.
+    fn skip_nested(&mut self) {
+        self.cursor = self.out.sites.len();
+    }
+
     fn is_site(&self, name: &str) -> bool {
         self.top_level || self.global_names.contains(name)
     }
@@ -1392,6 +1527,7 @@ impl Scope<'_> {
         };
         match &expr.kind {
             ExprKind::Variable(name) if self.is_site(name) => self.out.sites.push(SiteFact {
+                by_capture: false,
                 top_level: self.top_level,
                 name: name.clone(),
                 contribution: ContributionFact::Mixed,
@@ -1401,6 +1537,7 @@ impl Scope<'_> {
                     && self.is_site(name)
                 {
                     self.out.sites.push(SiteFact {
+                        by_capture: false,
                         top_level: self.top_level,
                         name: name.clone(),
                         contribution: ContributionFact::FieldMixed(key),
@@ -1461,6 +1598,7 @@ impl Scope<'_> {
         }
         for name in self.global_names {
             self.out.sites.push(SiteFact {
+                by_capture: false,
                 top_level: false,
                 name: name.clone(),
                 contribution: ContributionFact::Mixed,
@@ -1486,6 +1624,7 @@ impl Scope<'_> {
             Under::Other => return true,
         };
         self.out.sites.push(SiteFact {
+            by_capture: false,
             top_level: self.top_level,
             name,
             contribution,
@@ -1507,6 +1646,7 @@ impl Scope<'_> {
         };
         match &expr.kind {
             ExprKind::Variable(name) if self.top_level => self.out.sites.push(SiteFact {
+                by_capture: false,
                 top_level: true,
                 name: name.clone(),
                 contribution: null,
@@ -1516,6 +1656,7 @@ impl Scope<'_> {
                     && self.is_site(name)
                 {
                     self.out.sites.push(SiteFact {
+                        by_capture: false,
                         top_level: self.top_level,
                         name: name.clone(),
                         contribution: ContributionFact::FieldMixed(key),
@@ -1566,6 +1707,7 @@ impl Scope<'_> {
             };
             if self.is_site(name) {
                 self.out.sites.push(SiteFact {
+                    by_capture: false,
                     top_level: self.top_level,
                     name: name.clone(),
                     contribution: ContributionFact::ByRefArgument {
@@ -1630,6 +1772,7 @@ fn handle_assignment_target(
                 ContributionFact::Whole(static_value(arenas, rhs.id))
             };
             out.sites.push(SiteFact {
+                by_capture: false,
                 top_level,
                 name: name.clone(),
                 contribution,
@@ -1650,6 +1793,7 @@ fn handle_assignment_target(
                     ContributionFact::Field(key_str, static_value(arenas, rhs.id))
                 };
                 out.sites.push(SiteFact {
+                    by_capture: false,
                     top_level,
                     name: name.clone(),
                     contribution,
@@ -1668,6 +1812,7 @@ fn handle_assignment_target(
                 // elsewhere before this arm existed (confirmed via a
                 // piwigo16 corpus diff, not hypothesized).
                 out.sites.push(SiteFact {
+                    by_capture: false,
                     top_level,
                     name: name.clone(),
                     contribution: ContributionFact::FieldMixed(key_str),
@@ -1944,6 +2089,7 @@ syntax::canonical_struct!(GlobalFacts {
 
 syntax::canonical_struct!(SiteFact {
     top_level,
+    by_capture,
     name,
     contribution,
 });
@@ -1992,6 +2138,7 @@ syntax::canonical_struct!(FileSites {
 
 syntax::canonical_struct!(StagedSite {
     gate,
+    capture_of,
     name,
     contribution,
 });
@@ -2018,6 +2165,8 @@ syntax::canonical_struct!(GlobalScope {
 
 syntax::canonical_struct!(GlobalScopes {
     function_facts,
+    plain_function_facts,
+    capture_facts,
     function_dynamic,
     scope_of,
     scopes,

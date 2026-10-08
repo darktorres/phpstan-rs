@@ -605,7 +605,10 @@ impl Checker<'_> {
                     .unwrap_or_else(Type::mixed),
                 Shared::TopLevel { global, named } => {
                     let written = named
-                        .then(|| self.registry.global_written_by_functions(global.as_str()))
+                        .then(|| {
+                            self.registry
+                                .global_written_by_functions(global.as_str(), self.current_file_id)
+                        })
                         .flatten();
                     match (locals.get_var(&name), written) {
                         (Some(held), Some(written)) => {
@@ -787,9 +790,9 @@ impl Checker<'_> {
         let mut out: Vec<(Name, Shared)> = Vec::new();
         // Code of the loaded program writes a global only where a function
         // body writes it or binds it.
-        let global_written = |name: &Name| {
+        let global_written = |name: &Name, top_level_of: Option<FileId>| {
             arbitrary
-                || (anything && self.registry.code_may_write_global(name))
+                || (anything && self.registry.code_may_write_global(name, top_level_of))
                 || storages.iter().any(|storage| match storage {
                     Storage::Global(None) => true,
                     Storage::Global(Some(global)) => global == name,
@@ -797,7 +800,7 @@ impl Checker<'_> {
                 })
         };
         for name in &scope.globals {
-            if global_written(name) {
+            if global_written(name, None) {
                 out.push((name.clone(), Shared::Global(name.clone())));
             }
         }
@@ -807,7 +810,8 @@ impl Checker<'_> {
             let global = scope.top_level
                 || scope.any_global
                 || (is_superglobal(&name) && *name != *"GLOBALS");
-            if global && global_written(&name) {
+            let top_level_of = scope.top_level.then_some(self.current_file_id).flatten();
+            if global && global_written(&name, top_level_of) {
                 let shared = if scope.top_level {
                     Shared::TopLevel {
                         global: name.clone(),
