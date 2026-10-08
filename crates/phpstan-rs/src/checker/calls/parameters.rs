@@ -351,7 +351,7 @@ impl<'a> Checker<'a> {
     /// array the type can be has, its string key naming the parameter;
     /// an optional position with no string key is skipped. `None` when
     /// the type is not constant arrays.
-    fn unpacked_constant_array_arguments<'e>(
+    fn unpacked_constant_array_arguments(
         &self,
         arenas: &NodeArenas,
         arg: &Arg,

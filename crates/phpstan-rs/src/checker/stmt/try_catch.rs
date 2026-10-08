@@ -6,6 +6,13 @@ use syntax::span::Span;
 use syntax::visit::arena::{self, Visitor};
 use types::Type;
 
+/// The parts of a `try` statement.
+pub(crate) struct TryStatement<'s> {
+    pub(crate) body: StmtIdRange,
+    pub(crate) catches: &'s [CatchClause],
+    pub(crate) finally: &'s Option<StmtIdRange>,
+}
+
 impl<'a> Checker<'a> {
     /// Whether some value of type `thrown` can be an instance of one of
     /// `caught`. An unknown class on either side may be.
@@ -45,13 +52,16 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_try(
         &mut self,
         arenas: &NodeArenas,
-        body: StmtIdRange,
-        catches: &[CatchClause],
-        finally: &Option<StmtIdRange>,
+        statement: TryStatement<'_>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
     ) -> Completion {
+        let TryStatement {
+            body,
+            catches,
+            finally,
+        } = statement;
         // `finally`'s own real entry scope is never just the try body's
         // full-completion state (merged with each non-terminating
         // catch's own end state, computed below into `locals` before

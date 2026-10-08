@@ -22,9 +22,7 @@ pub(crate) fn property_hook_set_type(
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> Option<Type> {
-    let Some(param) = hooks.and_then(|h| h.set.as_ref()?.param.as_ref()) else {
-        return None;
-    };
+    let param = hooks.and_then(|h| h.set.as_ref()?.param.as_ref())?;
     let declared = declared_type(None, param.type_hint.as_ref(), arenas, template_params, ctx);
     Some(declared.ty)
 }

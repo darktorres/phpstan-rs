@@ -16,9 +16,7 @@ impl<'a> Checker<'a> {
         e: &ExprNode,
         locals: &Locals,
     ) -> Option<bool> {
-        let Some(arenas) = self.syntax_arenas() else {
-            return None;
-        };
+        let arenas = self.syntax_arenas()?;
         if should_skip_constant_condition(arenas, e) {
             return None;
         }

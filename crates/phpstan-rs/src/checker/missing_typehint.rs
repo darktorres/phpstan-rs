@@ -157,21 +157,6 @@ fn resolved_type_mentions_explicit_mixed(ty: &Type) -> bool {
     ty.is_explicit_mixed() || ty.any_child(resolved_type_mentions_explicit_mixed)
 }
 
-#[cfg(test)]
-mod resolved_explicit_mixed_tests {
-    use super::resolved_type_mentions_explicit_mixed;
-    use types::Type;
-
-    #[test]
-    fn detects_explicit_mixed_in_nested_resolved_types() {
-        let documented = Type::array(Type::string(), Type::explicit_mixed());
-        let inferred = Type::array(Type::string(), Type::mixed());
-
-        assert!(resolved_type_mentions_explicit_mixed(&documented));
-        assert!(!resolved_type_mentions_explicit_mixed(&inferred));
-    }
-}
-
 /// The "no type specified at all" case each of the six rules below leads
 /// with - `ty` resolved to plain `Mixed` (this project's stand-in for
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
@@ -570,5 +555,20 @@ impl<'a> Checker<'a> {
             &return_ty,
             return_explicit_mixed,
         );
+    }
+}
+
+#[cfg(test)]
+mod resolved_explicit_mixed_tests {
+    use super::resolved_type_mentions_explicit_mixed;
+    use types::Type;
+
+    #[test]
+    fn detects_explicit_mixed_in_nested_resolved_types() {
+        let documented = Type::array(Type::string(), Type::explicit_mixed());
+        let inferred = Type::array(Type::string(), Type::mixed());
+
+        assert!(resolved_type_mentions_explicit_mixed(&documented));
+        assert!(!resolved_type_mentions_explicit_mixed(&inferred));
     }
 }

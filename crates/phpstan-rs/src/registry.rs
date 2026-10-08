@@ -159,19 +159,20 @@ fn differs<V: PartialEq>(now: Option<&V>, before: Option<&Detached<V>>) -> bool 
     }
 }
 
+/// A function's name, its declaration and its resolved result, as a
+/// snapshot keeps them.
+type FunctionSnapshot = (
+    Name,
+    Option<Detached<FunctionReflection>>,
+    Option<FunctionReflection>,
+);
+
 /// What `Registry::end_declaration_changes` returns.
 pub(crate) struct ResolvedSnapshot {
     // Keep the identities selected by the scope. Names are needed only when
     // a changed declaration is converted to a dependency key.
     class_ids: FxHashSet<ClassId>,
-    functions: FxHashMap<
-        FnId,
-        (
-            Name,
-            Option<Detached<FunctionReflection>>,
-            Option<FunctionReflection>,
-        ),
-    >,
+    functions: FxHashMap<FnId, FunctionSnapshot>,
     class_results: FxHashMap<ClassId, (Name, ClassResultOverlay)>,
     effects: FxHashMap<effects::EffectId, (Option<effects::DeclKey>, effects::Settled)>,
     global_variables: syntax::name::NameMap<Type>,
@@ -1287,9 +1288,10 @@ impl Registry {
                         .class_ids
                         .get(name.as_str())
                         .is_some_and(|id| snapshot_class_ids.contains(id)))
-                    && let Some(old_id) = old_id {
-                        snapshot_class_ids.insert(*old_id);
-                    }
+                    && let Some(old_id) = old_id
+                {
+                    snapshot_class_ids.insert(*old_id);
+                }
             }
             if let Some(names) = body_scope.class_keys() {
                 for name in names {
@@ -1304,14 +1306,7 @@ impl Registry {
             .iter()
             .map(|(name, id)| (*id, name.clone()))
             .collect();
-        let functions_before: FxHashMap<
-            FnId,
-            (
-                Name,
-                Option<Detached<FunctionReflection>>,
-                Option<FunctionReflection>,
-            ),
-        > = snapshot_function_ids
+        let functions_before: FxHashMap<FnId, FunctionSnapshot> = snapshot_function_ids
             .into_iter()
             .filter_map(|id| {
                 let name = active_function_names.get(&id).cloned().or_else(|| {
@@ -1400,7 +1395,7 @@ impl Registry {
         };
         if scope.is_all() {
             self.stub_effect_results.clear();
-        self.stub_holding_classes.clear();
+            self.stub_holding_classes.clear();
             self.class_const_types.clear();
             self.class_const_types_by_id.clear();
             self.function_results.clear();

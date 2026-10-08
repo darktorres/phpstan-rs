@@ -1945,9 +1945,7 @@ impl ClassReflection {
                 let v = arenas.expr(c.value?)?;
                 let ty = match &v.kind {
                     ExprKind::Literal(Literal::String(s)) => {
-                        let Some(bytes) = arenas.string_bytes(s) else {
-                            return None;
-                        };
+                        let bytes = arenas.string_bytes(s)?;
                         let value = syntax::php_string::PhpString::from_bytes(
                             std::sync::Arc::<[u8]>::from(bytes),
                         );

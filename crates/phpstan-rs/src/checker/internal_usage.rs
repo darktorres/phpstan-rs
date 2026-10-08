@@ -29,7 +29,7 @@
 use crate::checker::Checker;
 use crate::registry::{ConstantReflection, FunctionReflection, PropertyReflection};
 use syntax::ast::TypeHint;
-use syntax::ast::{ClassKind, FunctionDecl, Param};
+use syntax::ast::{ClassKind, Param};
 use syntax::span::Span;
 use types::Name;
 use types::Type;
@@ -475,36 +475,6 @@ impl<'a> Checker<'a> {
             span,
             0,
             format!("traitUse.internal{type_word}"),
-        );
-    }
-
-    /// `param`/`return` native type-hints for the
-    /// `@internal` class-name-usage check - operates on each param's and
-    /// the return's native type-hint text only (`resolve_type_hint`,
-    /// not the docblock-merged type any `sig`-based lookup would give),
-    /// matching real PHPStan's own `FunctionDefinitionCheck` exactly
-    /// (there is no `ClassNameUsageLocation` for a `@param`/`@return`
-    /// PHPDoc tag's own type at all). Named functions/methods only - see
-    /// `check_internal_param_and_return_types_raw` for the shared core
-    /// this and the closure/arrow-fn call sites both delegate to.
-    pub(crate) fn check_internal_param_and_return_types(
-        &mut self,
-        f: &FunctionDecl,
-        class_name: Option<&str>,
-        label: &str,
-    ) {
-        let syntax_owner = self.syntax_tree_owner();
-        let params = syntax_owner
-            .as_ref()
-            .map(|owner| owner.arenas().params(f.params.clone()))
-            .unwrap_or_default();
-        self.check_internal_param_and_return_types_raw(
-            params,
-            f.return_type.as_ref(),
-            f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
-            class_name.is_some(),
-            class_name,
-            label,
         );
     }
 

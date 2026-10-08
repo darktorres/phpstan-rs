@@ -204,13 +204,6 @@ impl SyntaxTree {
         self.source.get(span.start as usize..span.end as usize)
     }
 
-    pub(crate) fn doc_comment_text<'a>(
-        &'a self,
-        ranges: &'a syntax::ast::DocCommentRanges,
-    ) -> Option<std::borrow::Cow<'a, str>> {
-        ranges.text(&self.source)
-    }
-
     #[allow(dead_code)] // Used by file-scoped NameId readers in row 9.3.
     pub(crate) fn name(&self, id: syntax::name::NameId) -> Option<&Name> {
         self.names.get(u32::from(id.into_raw()) as usize)
@@ -219,14 +212,6 @@ impl SyntaxTree {
     #[allow(dead_code)] // Used by file-scoped NameId readers in row 9.3.
     pub(crate) fn ident_name(&self, ident: &syntax::ast::Ident) -> Option<&Name> {
         self.name(ident.name_id?)
-    }
-
-    pub(crate) fn expr_span(&self, id: syntax::ast::ExprId) -> Option<Span> {
-        self.arenas.expr_span(id)
-    }
-
-    pub(crate) fn stmt_span(&self, id: syntax::ast::StmtId) -> Option<Span> {
-        self.arenas.stmt_span(id)
     }
 
     /// Makes a cloneable syntax owner for completion probes that append
@@ -734,6 +719,16 @@ pub struct ProjectSettings {
     pub overlays: crate::assertion_tables::OverlaySettings,
     pub sql_reflection: Option<sql::config::SqlReflectionConfig>,
     pub sql_schema: Option<sql::schema::SchemaCatalog>,
+}
+
+/// Where `Project::insert_numbered_file` puts a file.
+pub(crate) struct NumberedFile<'a> {
+    pub(crate) id: FileId,
+    pub(crate) path: &'a Path,
+    /// Whether the file is one that is checked.
+    pub(crate) analyzed: bool,
+    /// The class and function numbers each of its declarations takes.
+    pub(crate) declaration_ids: Vec<(Option<u32>, Option<u32>)>,
 }
 
 impl Project {
@@ -1352,18 +1347,21 @@ impl Project {
         self.files.path(id)
     }
 
-    /// `install_parsed_file`, for the file `id` numbers `path` as, `len`
+    /// `install_parsed_file`, for the file `place` numbers as it says, `len`
     /// bytes long: `source` is empty unless the project keeps the text.
     pub(crate) fn insert_numbered_file(
         &mut self,
-        id: FileId,
-        path: &Path,
+        place: NumberedFile<'_>,
         parsed: ParsedFile,
         source: String,
         len: usize,
-        analyzed: bool,
-        declaration_ids: Vec<(Option<u32>, Option<u32>)>,
     ) {
+        let NumberedFile {
+            id,
+            path,
+            analyzed,
+            declaration_ids,
+        } = place;
         self.begin_declaration_changes();
         let load_order = self.next_load_order;
         self.next_load_order += 1;
@@ -3840,7 +3838,7 @@ fn parse_with_ignores<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<Parsed, ParseError> {
-    parse_recording(path, source, names, None, None, None)
+    parse_recording(path, source, names, None, None)
 }
 
 /// What a file's parse gives that `ParsedFile` does not keep, recorded for
@@ -3860,33 +3858,18 @@ fn parse_recording<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
-    scratch: Option<&mut syntax::ast::NodeArenas>,
-    worker_scratch: Option<(
-        &mut syntax::token::TokenStream,
-        &mut syntax::lexer::LexerScratch,
-        &mut syntax::parser::ParserScratch,
-    )>,
+    scratch: Option<syntax::WorkerScratch<'_>>,
 ) -> Result<Parsed, ParseError> {
-    let mut parsed = match (scratch, worker_scratch) {
-        (Some(node_scratch), Some((tokens, lexer, parser))) => syntax::parse_watching_with_worker_scratch(
-            source,
-            names,
-            Some(&WATCHED),
-            node_scratch,
-            tokens,
-            lexer,
-            parser,
-        )?,
-        (Some(scratch), None) => {
-            // Registry declarations are built from the parsed tree before
-            // it may be dropped. `DocCommentRanges` now refer into the
-            // owning file's source, so even a scratch parse must retain
-            // those bytes until `file_declarations::collect` has copied
-            // their resolved types and tags into registry-owned values.
-            syntax::parse_watching_with_scratch(source, names, Some(&WATCHED), scratch)?
+    let mut parsed = match scratch {
+        // Registry declarations are built from the parsed tree before it
+        // may be dropped. `DocCommentRanges` refer into the owning file's
+        // source, so even a scratch parse retains those bytes until
+        // `file_declarations::collect` has copied their resolved types and
+        // tags into registry-owned values.
+        Some(scratch) => {
+            syntax::parse_watching_with_worker_scratch(source, names, Some(&WATCHED), scratch)?
         }
-        (None, None) => syntax::parse_watching(source, names, Some(&WATCHED))?,
-        (None, Some(_)) => unreachable!("worker scratch requires node arena scratch"),
+        None => syntax::parse_watching(source, names, Some(&WATCHED))?,
     };
     let ignores = ignore_comments::scan_parsed(&parsed);
     let ast = parsed.stmts;
@@ -4050,7 +4033,6 @@ pub(crate) fn parse_file_recording<'a>(
         record,
         Origin::Path(Arc::from(path)),
         None,
-        None,
     )
 }
 
@@ -4070,27 +4052,6 @@ pub(crate) fn parse_file_recording_with_file_id<'a>(
         record,
         Origin::File(file_id),
         None,
-        None,
-    )
-}
-
-pub(crate) fn parse_file_with_names_and_file_id_and_scratch<'a>(
-    path: &Path,
-    source: impl Into<syntax::Source<'a>>,
-    is_stub: bool,
-    names: Option<&mut syntax::name::NameCache>,
-    file_id: FileId,
-    scratch: &mut syntax::ast::NodeArenas,
-) -> Result<ParsedFile, ParseError> {
-    parse_file_recording_with_origin(
-        path,
-        source,
-        is_stub,
-        names,
-        None,
-        Origin::File(file_id),
-        Some(scratch),
-        None,
     )
 }
 
@@ -4100,10 +4061,7 @@ pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
     is_stub: bool,
     names: Option<&mut syntax::name::NameCache>,
     file_id: FileId,
-    node_scratch: &mut syntax::ast::NodeArenas,
-    token_scratch: &mut syntax::token::TokenStream,
-    lexer_scratch: &mut syntax::lexer::LexerScratch,
-    parser_scratch: &mut syntax::parser::ParserScratch,
+    scratch: syntax::WorkerScratch<'_>,
 ) -> Result<ParsedFile, ParseError> {
     parse_file_recording_with_origin(
         path,
@@ -4112,8 +4070,7 @@ pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
         names,
         None,
         Origin::File(file_id),
-        Some(node_scratch),
-        Some((token_scratch, lexer_scratch, parser_scratch)),
+        Some(scratch),
     )
 }
 
@@ -4124,12 +4081,7 @@ fn parse_file_recording_with_origin<'a>(
     names: Option<&mut syntax::name::NameCache>,
     record: Option<&mut ParseRecord>,
     origin: Origin,
-    scratch: Option<&mut syntax::ast::NodeArenas>,
-    worker_scratch: Option<(
-        &mut syntax::token::TokenStream,
-        &mut syntax::lexer::LexerScratch,
-        &mut syntax::parser::ParserScratch,
-    )>,
+    scratch: Option<syntax::WorkerScratch<'_>>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let content_hash = source::ContentHash::of_source(source);
@@ -4140,7 +4092,7 @@ fn parse_file_recording_with_origin<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_recording(path, source, names, record, scratch, worker_scratch)?;
+    } = parse_recording(path, source, names, record, scratch)?;
     let ast = tree.statements();
     let file_declarations::FileDeclarations {
         functions,

@@ -56,14 +56,12 @@ fn inherited_phpdoc_overlays_win_over_a_deferred_method_snapshot() {
     );
 
     let sig = method(&r, "DeferredFactoryImpl", "make");
-    assert_eq!(
-        sig.return_type,
-        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+    let expected = r.relation().union(
+        Type::string_literal("first".into()),
+        Type::string_literal("second".into()),
     );
-    assert_eq!(
-        sig.params[0].ty,
-        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
-    );
+    assert_eq!(sig.return_type, expected);
+    assert_eq!(sig.params[0].ty, expected);
 }
 
 #[test]

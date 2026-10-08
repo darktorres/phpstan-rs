@@ -314,6 +314,7 @@ impl Keys {
     }
 
     /// The name `i` as text.
+    #[cfg(test)]
     fn text(&self, i: usize) -> &str {
         match self {
             Keys::Stored { names, .. } => names
@@ -493,12 +494,15 @@ impl<V> Base<V> {
 pub(crate) struct Lazy<V> {
     value: OnceLock<V>,
     // The entry encoded, with what decodes it; `None` once built decoded.
-    encoded: Option<(
-        Arc<Vec<u8>>,
-        Decoder<V>,
-        Option<syntax::name::CacheNameTable>,
-    )>,
+    encoded: Option<EncodedEntry<V>>,
 }
+
+/// The bytes of a stored entry, what decodes them and the names they use.
+type EncodedEntry<V> = (
+    Arc<Vec<u8>>,
+    Decoder<V>,
+    Option<syntax::name::CacheNameTable>,
+);
 
 impl<V: Clone> Clone for Lazy<V> {
     fn clone(&self) -> Lazy<V> {
@@ -924,9 +928,10 @@ impl<V: Clone> NameTable<V> {
             for i in 0..base.len() {
                 let name = base.name(i);
                 if !self.hidden.contains(name.lower())
-                    && let Some(value) = base.value_shared(i) {
-                        all.push((name.clone(), Arc::clone(value)));
-                    }
+                    && let Some(value) = base.value_shared(i)
+                {
+                    all.push((name.clone(), Arc::clone(value)));
+                }
             }
         }
         all.extend(std::mem::take(&mut self.entries));
@@ -964,9 +969,10 @@ impl<'a, V> Iterator for Iter<'a, V> {
         for i in positions {
             let name = base.name(i);
             if !self.hidden.contains(name.lower())
-                && let Some(value) = base.value(i) {
-                    return Some((name, value));
-                }
+                && let Some(value) = base.value(i)
+            {
+                return Some((name, value));
+            }
         }
         None
     }
@@ -995,9 +1001,10 @@ impl<V: Clone> IntoIterator for NameTable<V> {
             for i in 0..base.len() {
                 let name = base.name(i);
                 if !self.hidden.contains(name.lower())
-                    && let Some(value) = base.value(i) {
-                        all.push((name.clone(), value.clone()));
-                    }
+                    && let Some(value) = base.value(i)
+                {
+                    all.push((name.clone(), value.clone()));
+                }
             }
         }
         all.extend(self.entries.into_iter().map(|(name, value)| {
@@ -1282,11 +1289,10 @@ fn try_decode_entry<V: serde::de::DeserializeOwned>(
     names: Option<&syntax::name::CacheNameTable>,
 ) -> Result<V, String> {
     let decode = || super::stub_cache::decode(bytes);
-    let decoded = match names {
+    match names {
         Some(names) => syntax::name::with_cache_name_table(names, decode),
         None => decode(),
-    };
-    decoded
+    }
 }
 
 /// Bytes serialized as one byte string.

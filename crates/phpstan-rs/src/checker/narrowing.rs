@@ -453,9 +453,7 @@ impl<'a> Checker<'a> {
         branch_true: bool,
     ) -> Option<(LocalKey, Type)> {
         if branch_true && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind {
-            let Some(arenas) = self.syntax_arenas() else {
-                return None;
-            };
+            let arenas = self.syntax_arenas()?;
             let (Some(l_expr), Some(r_expr)) = (arenas.expr(*l), arenas.expr(*r)) else {
                 return None;
             };
@@ -2115,9 +2113,7 @@ fn condition_operand<'e>(
     arenas: &'e NodeArenas,
     e: &'e ExprNode,
 ) -> Option<(&'e ExprNode, Option<&'e ExprNode>)> {
-    let Some(peeled) = arenas.peeled(e.id).and_then(|id| arenas.expr(id)) else {
-        return None;
-    };
+    let peeled = arenas.peeled(e.id).and_then(|id| arenas.expr(id))?;
     match &peeled.kind {
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
             match (arenas.expr(*lhs), arenas.expr(*rhs)) {

@@ -10,6 +10,14 @@ use types::UnionAll as _;
 
 use types::{self, Shape, ShapeField, ShapeKey, Type};
 
+/// The object a method is called on: the expression, its class and the
+/// type arguments the class has there.
+struct ObjectReceiver<'r> {
+    expr: &'r ExprNode,
+    class: &'r types::Name,
+    type_args: &'r [Type],
+}
+
 impl<'a> Checker<'a> {
     /// The declaring class/`PropertyReflection` pair for `prop` on `base_ty`,
     /// used by `ExprKind::PropertyAccess`'s own visibility/`@internal`/
@@ -573,7 +581,15 @@ impl<'a> Checker<'a> {
                 return match self.class_argument_return(arenas, class, method, args, locals) {
                     Some(ty) => ty,
                     None => self.object_method_call_return_type(
-                        arenas, recv, class, type_args, method, args, locals,
+                        arenas,
+                        ObjectReceiver {
+                            expr: recv,
+                            class,
+                            type_args,
+                        },
+                        method,
+                        args,
+                        locals,
                     ),
                 };
             }
@@ -652,13 +668,16 @@ impl<'a> Checker<'a> {
     fn object_method_call_return_type(
         &self,
         arenas: &NodeArenas,
-        recv: &ExprNode,
-        class: &types::Name,
-        type_args: &[Type],
+        receiver: ObjectReceiver<'_>,
         method: &str,
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        let ObjectReceiver {
+            expr: recv,
+            class,
+            type_args,
+        } = receiver;
         if method == "createQuery"
             && self.settings.doctrine
             && self

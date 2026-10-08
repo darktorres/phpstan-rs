@@ -85,14 +85,9 @@ fn print_registry_dump(
         duplicate_class_sites,
         use_sites,
         member_index,
-        // The trees last read again for checks.
-        ast_cache: _,
         include_probes,
         escapes,
         named_argument_calls,
-        next_project_class_local: _,
-        next_project_function_local: _,
-        path_ranks: _,
         ..
     } = project;
     crate::file_id::printing_paths(files.paths_by_id(), || {

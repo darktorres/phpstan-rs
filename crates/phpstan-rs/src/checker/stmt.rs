@@ -34,6 +34,7 @@ mod loops;
 mod new_exception_discarded;
 mod switch;
 mod try_catch;
+use try_catch::TryStatement;
 
 /// What a block has found of its statements so far.
 #[derive(Clone, Default)]
@@ -1151,7 +1152,7 @@ impl<'a> Checker<'a> {
                     .expect("foreach body belongs to its file owner");
                 let at_least_once = self.check_foreach(
                     subject,
-                    key.as_deref(),
+                    key,
                     value,
                     *by_ref,
                     body,
@@ -1182,9 +1183,11 @@ impl<'a> Checker<'a> {
             } => {
                 completion = self.check_try(
                     arenas,
-                    body.clone(),
-                    arenas.catch_clauses(catches.clone()),
-                    finally,
+                    TryStatement {
+                        body: body.clone(),
+                        catches: arenas.catch_clauses(catches.clone()),
+                        finally,
+                    },
                     locals,
                     declared_return,
                     label,

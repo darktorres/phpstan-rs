@@ -324,9 +324,8 @@ impl Registry {
         resolved.chain(
             self.class_method_results
                 .iter()
-                .filter_map(move |(method, signature)| {
-                    (method.class() == class).then(|| (*method, signature.get()))
-                }),
+                .filter(move |(method, _)| method.class() == class)
+                .map(|(method, signature)| (*method, signature.get())),
         )
     }
 
@@ -336,9 +335,8 @@ impl Registry {
     ) -> impl Iterator<Item = (super::MethodRef, &FunctionReflection)> {
         self.class_method_results
             .iter()
-            .filter_map(move |(method, signature)| {
-                (method.class() == class).then(|| (*method, signature.get()))
-            })
+            .filter(move |(method, _)| method.class() == class)
+            .map(|(method, signature)| (*method, signature.get()))
     }
 
     pub(crate) fn set_method_result(

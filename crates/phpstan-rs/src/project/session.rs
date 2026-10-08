@@ -33,7 +33,7 @@ use crate::{ext, ignore_errors};
 use super::DEFAULT_SCAN_EXCLUDED_DIR_NAMES;
 use super::file_cache;
 use super::source::{ContentHash, Overlay};
-use super::{ParsedFile, Project, ProjectSettings};
+use super::{NumberedFile, ParsedFile, Project, ProjectSettings};
 use composer::dir_table::DirTable;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder, LevelCutoff};
 
@@ -162,6 +162,18 @@ struct LoadState {
     /// The bytes of the file the thread is parsing, kept for the next.
     buf: Vec<u8>,
     dirs: rustc_hash::FxHashMap<Vec<u8>, Placed>,
+}
+
+/// How `read_and_parse_file` treats one file.
+struct ParseOptions {
+    /// Whether the file may be read from and stored in the per-file cache,
+    /// which a context file may.
+    cacheable: bool,
+    /// Whether its use sites are indexed with its parse.
+    index_use_sites: bool,
+    /// Whether the parse takes the thread's node arenas, which a file that
+    /// keeps its tree can't give back.
+    reuse_scratch: bool,
 }
 
 /// The states of a load's threads, one for each thread of the pool, kept
@@ -1329,10 +1341,12 @@ impl Session {
                 &placed.absolute,
                 self.is_stub_at(&placed.absolute),
                 state,
-                context && !held && !keeps_tree,
-                index_use_sites,
+                ParseOptions {
+                    cacheable: context && !held && !keeps_tree,
+                    index_use_sites,
+                    reuse_scratch: !keeps_tree,
+                },
                 file_id,
-                !keeps_tree,
             );
             if let Read::Loaded(file) = &mut read {
                 shared.index_use_sites(&mut file.parsed, &file.source);
@@ -1355,20 +1369,20 @@ impl Session {
         })
     }
 
-    /// `cacheable` is whether the file may be read from and stored in the
-    /// per-file cache, which a context file may; `index_use_sites` is
-    /// whether its use sites are indexed with its parse.
     fn read_and_parse_file(
         &self,
         path: &Path,
         absolute: &Path,
         is_stub: bool,
         state: &mut LoadState,
-        cacheable: bool,
-        index_use_sites: bool,
+        options: ParseOptions,
         file_id: FileId,
-        reuse_scratch: bool,
     ) -> Read {
+        let ParseOptions {
+            cacheable,
+            index_use_sites,
+            reuse_scratch,
+        } = options;
         let LoadState {
             names,
             buf,
@@ -1416,6 +1430,12 @@ impl Session {
         } else {
             &mut local_arenas
         };
+        let scratch = syntax::WorkerScratch {
+            arenas: node_scratch,
+            tokens,
+            lexer,
+            parser,
+        };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match text {
             Ok(text) => super::parse_file_with_names_and_file_id_and_worker_scratch(
                 path,
@@ -1423,10 +1443,7 @@ impl Session {
                 is_stub,
                 Some(names),
                 file_id,
-                node_scratch,
-                tokens,
-                lexer,
-                parser,
+                scratch,
             ),
             Err(_) => super::parse_file_with_names_and_file_id_and_worker_scratch(
                 path,
@@ -1434,10 +1451,7 @@ impl Session {
                 is_stub,
                 Some(names),
                 file_id,
-                node_scratch,
-                tokens,
-                lexer,
-                parser,
+                scratch,
             ),
         })) else {
             return Read::Unread;
@@ -2087,13 +2101,15 @@ impl Session {
                     } = *file;
                     note_lex_warnings(path, &parsed);
                     project.insert_numbered_file(
-                        id,
-                        path,
+                        NumberedFile {
+                            id,
+                            path,
+                            analyzed: false,
+                            declaration_ids,
+                        },
                         parsed,
                         source,
                         len,
-                        false,
-                        declaration_ids,
                     )
                 }
                 Read::Unparsed(failure) => {
@@ -2125,13 +2141,15 @@ impl Session {
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;
                     project.insert_numbered_file(
-                        id,
-                        path,
+                        NumberedFile {
+                            id,
+                            path,
+                            analyzed: true,
+                            declaration_ids,
+                        },
                         parsed,
                         source,
                         len,
-                        true,
-                        declaration_ids,
                     )
                 }
                 Read::Unparsed(failure) => {

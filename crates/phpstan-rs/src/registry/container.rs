@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn sections_read_back_where_they_were_written() {
-        let reader = Reader::new(file()).ok().expect("a whole file reads");
+        let reader = Reader::new(file()).expect("a whole file reads");
         assert_eq!(&reader.buffer()[reader.section("one").unwrap()], b"first");
         assert_eq!(&reader.buffer()[reader.section("two").unwrap()], b"");
         assert!(reader.section("three").is_err());

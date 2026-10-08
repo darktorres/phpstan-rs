@@ -181,7 +181,6 @@ fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span
     let syntax_owner = tree.parsed_file_for_completion();
     let registry = project.registry();
     let mut w = Walker {
-        arenas,
         syntax_owner,
         registry,
         anchor,
@@ -244,7 +243,6 @@ enum ScopeFrame {
 }
 
 struct Walker<'a> {
-    arenas: &'a NodeArenas,
     syntax_owner: std::sync::Arc<syntax::ParsedFile>,
     registry: &'a Registry,
     anchor: Anchor,

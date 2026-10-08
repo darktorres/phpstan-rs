@@ -99,6 +99,10 @@ impl BuiltDecl {
     }
 }
 
+/// A class of the PHPStan sources as `record_phpstan_class_files_batch` takes
+/// it: its content hash, its order, its name and its file.
+type PhpstanClassFile = (u64, u32, Name, std::path::PathBuf);
+
 impl Registry {
     /// `pub(crate)` for the same reason as `flatten_traits` - lets
     /// `Project` index one file's statements into an already-built
@@ -638,7 +642,7 @@ impl Registry {
 
                 groups
                     .into_iter()
-                    .map(|((kind, _), mut entries)| {
+                    .filter_map(|((kind, _), mut entries)| {
                         entries.sort_unstable_by_key(|entry| entry.0);
                         let name = match &entries[0].1 {
                             BuiltDecl::Class { name, .. } | BuiltDecl::Function { name, .. } => {
@@ -661,13 +665,8 @@ impl Registry {
                         }
 
                         if kind == b'c' {
-                            let Some(id) = isolated.class_ids.get(&name).copied() else {
-                                return None;
-                            };
-                            let Some(declaration) = isolated.class_declarations.get(&id).cloned()
-                            else {
-                                return None;
-                            };
+                            let id = isolated.class_ids.get(&name).copied()?;
+                            let declaration = isolated.class_declarations.get(&id).cloned()?;
                             Some(Update::Class {
                                 name: name.clone(),
                                 id,
@@ -678,14 +677,8 @@ impl Registry {
                                 changed: isolated.changed.classes.contains(name.lower()),
                             })
                         } else {
-                            let Some(id) = isolated.function_ids.get(&name).copied() else {
-                                return None;
-                            };
-                            let Some(declaration) =
-                                isolated.function_declarations.get(&id).cloned()
-                            else {
-                                return None;
-                            };
+                            let id = isolated.function_ids.get(&name).copied()?;
+                            let declaration = isolated.function_declarations.get(&id).cloned()?;
                             let folded = function_key(name.as_str());
                             Some(Update::Function {
                                 name: name.clone(),
@@ -702,7 +695,6 @@ impl Registry {
                             })
                         }
                     })
-                    .flatten()
                     .collect()
             })
             .collect();
@@ -787,10 +779,12 @@ impl Registry {
     }
 
     fn isolated_class_slot(&self, name: &Name) -> Registry {
-        let mut isolated = Registry::default();
-        isolated.php_versions = self.php_versions;
-        isolated.id_generation = self.id_generation;
-        isolated.resolved_declarations = self.resolved_declarations;
+        let mut isolated = Registry {
+            php_versions: self.php_versions,
+            id_generation: self.id_generation,
+            resolved_declarations: self.resolved_declarations,
+            ..Registry::default()
+        };
         if let Some(id) = self.class_ids.get(name).copied() {
             isolated.class_ids.insert(name.clone(), id);
             if let Some(declaration) = self.classes.get_shared(name) {
@@ -816,10 +810,12 @@ impl Registry {
     }
 
     fn isolated_function_slot(&self, name: &Name) -> Registry {
-        let mut isolated = Registry::default();
-        isolated.php_versions = self.php_versions;
-        isolated.id_generation = self.id_generation;
-        isolated.resolved_declarations = self.resolved_declarations;
+        let mut isolated = Registry {
+            php_versions: self.php_versions,
+            id_generation: self.id_generation,
+            resolved_declarations: self.resolved_declarations,
+            ..Registry::default()
+        };
         let folded = function_key(name.as_str());
         if let Some(id) = self.function_ids.get(name).copied() {
             isolated.function_ids.insert(name.clone(), id);
@@ -1015,16 +1011,13 @@ impl Registry {
     /// Records PHPStan declarations from a full load. Entries are grouped
     /// by their own name hash, reduced in source load order within each
     /// shard, then applied as independent name updates.
-    pub(crate) fn record_phpstan_class_files_batch(
-        &mut self,
-        declarations: Vec<(u64, u32, Name, std::path::PathBuf)>,
-    ) {
+    pub(crate) fn record_phpstan_class_files_batch(&mut self, declarations: Vec<PhpstanClassFile>) {
         use rayon::prelude::*;
         use std::hash::{Hash, Hasher};
 
         const SHARDS: usize = 32;
         const SHARD_BITS: u32 = 5;
-        let per_worker: Vec<[Vec<(u64, u32, Name, std::path::PathBuf)>; SHARDS]> = declarations
+        let per_worker: Vec<[Vec<PhpstanClassFile>; SHARDS]> = declarations
             .into_par_iter()
             .fold(
                 || std::array::from_fn(|_| Vec::new()),
@@ -1037,8 +1030,7 @@ impl Registry {
                 },
             )
             .collect();
-        let mut buckets: [Vec<(u64, u32, Name, std::path::PathBuf)>; SHARDS] =
-            std::array::from_fn(|_| Vec::new());
+        let mut buckets: [Vec<PhpstanClassFile>; SHARDS] = std::array::from_fn(|_| Vec::new());
         for mut worker_buckets in per_worker {
             for (bucket, worker_bucket) in buckets.iter_mut().zip(&mut worker_buckets) {
                 bucket.append(worker_bucket);

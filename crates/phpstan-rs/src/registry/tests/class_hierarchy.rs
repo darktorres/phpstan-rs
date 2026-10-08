@@ -431,8 +431,10 @@ fn class_deferred_generic_types_are_results_not_declaration_writes() {
             class ContractUser implements GenericContract {}
             "#,
     );
-    let expected =
-        Type::string_literal("first".into()).union(Type::string_literal("second".into()));
+    let expected = registry.relation().union(
+        Type::string_literal("first".into()),
+        Type::string_literal("second".into()),
+    );
 
     assert!(registry.class_by_name("Bounded").unwrap().template_bounds["T"].contains_deferred());
     assert_eq!(

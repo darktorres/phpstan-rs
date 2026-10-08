@@ -37,13 +37,22 @@ type ImportedTypeClassUpdate = (
     ClassMethodResults,
 );
 type VisibleClassConstTypes = OrderedNameMap<Type>;
+/// A `@method` tag: its name, signature and whether it is static.
+type MethodTag = (Name, FunctionReflection, bool);
+/// A method a `@method` tag adds to a class.
+type TaggedMethod = (MethodRef, MethodEntry, FunctionReflection);
+/// A class constant's slot in a class and the type resolved for it.
+type ConstantTypeUpdate = (ClassId, usize, Type);
 type VisibleClassConstEntries = OrderedNameMap<(Name, Type)>;
+
+/// The constant types being resolved, in order, and the ones found in a cycle.
+type ConstantTypeWalk = (Vec<(String, String)>, FxHashSet<(String, String)>);
 
 thread_local! {
     /// Constant type references are followed while resolving `value-of`.
     /// Keep the active path so every member of a recursive component reads
     /// as `never`, independent of which member was requested first.
-    static RESOLVING_CONSTANT_TYPES: RefCell<(Vec<(String, String)>, FxHashSet<(String, String)>)> =
+    static RESOLVING_CONSTANT_TYPES: RefCell<ConstantTypeWalk> =
         RefCell::new((Vec::new(), FxHashSet::default()));
 }
 
@@ -402,50 +411,49 @@ impl Registry {
     /// table after the parallel collection.
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
-        let tagged_classes: Vec<(Name, Vec<(Name, FunctionReflection, bool)>)> = self
+        let tagged_classes: Vec<(Name, Vec<MethodTag>)> = self
             .scoped_class_names()
-            .into_iter()
+            .iter()
             .filter_map(|class_name| {
-                let class_id = self.class_ids.get(&class_name).copied()?;
+                let class_id = self.class_ids.get(class_name).copied()?;
                 let info = self.class_by_id(class_id)?;
                 (!info.method_tags.is_empty())
                     .then(|| (Name::from(class_name.as_str()), info.method_tags.clone()))
             })
             .collect();
         let registry: &Registry = self;
-        let resolved: Vec<(ClassId, Vec<(MethodRef, MethodEntry, FunctionReflection)>)> =
-            tagged_classes
-                .into_par_iter()
-                .with_min_len(crate::registry::PASS_CHUNK)
-                .filter_map(|(class_name, tags)| {
-                    let class_id = *registry.class_ids.get(&class_name)?;
-                    let mut methods = Vec::new();
-                    let mut next_slot = registry.member_entries(&class_name).count();
-                    let mut added_names = FoldedMap::default();
-                    for (name, sig, is_static) in tags {
-                        if registry.member_slot(&class_name, &name).is_none()
-                            && !added_names.contains_key(&name)
-                        {
-                            let slot = u16::try_from(next_slot)
-                                .expect("class method slot space exhausted");
-                            next_slot += 1;
-                            added_names.insert(name.clone(), ());
-                            methods.push((
-                                MethodRef::new(class_id, slot),
-                                MethodEntry {
-                                    name,
-                                    is_abstract: false,
-                                    is_final: false,
-                                    is_static,
-                                    is_final_by_phpdoc: false,
-                                },
-                                sig,
-                            ));
-                        }
+        let resolved: Vec<(ClassId, Vec<TaggedMethod>)> = tagged_classes
+            .into_par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter_map(|(class_name, tags)| {
+                let class_id = *registry.class_ids.get(&class_name)?;
+                let mut methods = Vec::new();
+                let mut next_slot = registry.member_entries(&class_name).count();
+                let mut added_names = FoldedMap::default();
+                for (name, sig, is_static) in tags {
+                    if registry.member_slot(&class_name, &name).is_none()
+                        && !added_names.contains_key(&name)
+                    {
+                        let slot =
+                            u16::try_from(next_slot).expect("class method slot space exhausted");
+                        next_slot += 1;
+                        added_names.insert(name.clone(), ());
+                        methods.push((
+                            MethodRef::new(class_id, slot),
+                            MethodEntry {
+                                name,
+                                is_abstract: false,
+                                is_final: false,
+                                is_static,
+                                is_final_by_phpdoc: false,
+                            },
+                            sig,
+                        ));
                     }
-                    Some((class_id, methods))
-                })
-                .collect();
+                }
+                Some((class_id, methods))
+            })
+            .collect();
         for (class_id, methods) in resolved {
             for (method, entry, signature) in methods {
                 debug_assert_eq!(self.add_member_entry(class_id, entry), Some(method));
@@ -1189,7 +1197,7 @@ impl Registry {
                         .filter_map(|name| self.class_ids.get(name).copied())
                         .collect();
                     let registry: &Registry = self;
-                    let resolved: Vec<(ClassId, Vec<(ClassId, usize, Type)>)> = class_ids
+                    let resolved: Vec<(ClassId, Vec<ConstantTypeUpdate>)> = class_ids
                         .par_iter()
                         .with_min_len(crate::registry::PASS_CHUNK)
                         .filter_map(|&class_id| {
@@ -2145,6 +2153,8 @@ fn visible_class_const_entries(registry: &Registry, fqn: &str) -> VisibleClassCo
     consts
 }
 
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn matching_class_const_entry_types(
     consts: &VisibleClassConstEntries,
     pattern: &str,
@@ -2235,6 +2245,8 @@ fn bind_class_const_self(ty: Type, class: &str, own_consts: &VisibleClassConstTy
 /// hold a further own-class reference (`A = self::B`), so each
 /// substitution is walked again. A repeated constant is a cycle and reads
 /// as `never`.
+// Declared types are joined while the class hierarchy is being built.
+#[allow(clippy::disallowed_methods)]
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,

@@ -13,7 +13,7 @@ use crate::restricted_symbols::{
 };
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
-use syntax::ast::{Arg, ClassKind, ExprNode, FunctionDecl, NodeArenas, Param};
+use syntax::ast::{Arg, ClassKind, ExprNode, NodeArenas, Param};
 use syntax::span::Span;
 use types::Name;
 use types::Type;
@@ -907,27 +907,6 @@ impl<'a> Checker<'a> {
                 ClassUsageLocation::Other,
             );
         }
-    }
-
-    /// `check_internal_param_and_return_types`'s own restricted-symbols
-    /// sibling - named functions/methods only, delegating to `check_
-    /// restricted_param_and_return_types_raw` below.
-    pub(crate) fn check_restricted_param_and_return_types(
-        &mut self,
-        f: &FunctionDecl,
-        class_name: Option<&str>,
-    ) {
-        let syntax_owner = self.syntax_tree_owner();
-        let params = syntax_owner
-            .as_ref()
-            .map(|owner| owner.arenas().params(f.params.clone()))
-            .unwrap_or_default();
-        self.check_restricted_param_and_return_types_raw(
-            params,
-            f.return_type.as_ref(),
-            f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
-            class_name,
-        );
     }
 
     /// `param`/`return` native type-hint coverage - the third and last

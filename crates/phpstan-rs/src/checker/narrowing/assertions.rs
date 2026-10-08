@@ -133,9 +133,7 @@ impl<'a> Checker<'a> {
             if item.spread || item.key.is_some() {
                 return None;
             }
-            let Some(value) = arenas.expr(item.value) else {
-                return None;
-            };
+            let value = arenas.expr(item.value)?;
             let ty = match &value.kind {
                 ExprKind::Literal(_) => self.infer_expr(value, locals),
                 ExprKind::ArrayLiteral(inner) if arenas.array_items(inner.clone()).is_empty() => {

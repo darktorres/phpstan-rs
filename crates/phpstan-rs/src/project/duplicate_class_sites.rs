@@ -58,40 +58,6 @@ impl DuplicateClassSites {
             is_stub,
         });
     }
-
-    /// Mirrors `DuplicateFunctionSites::remove_declarations`'s own shape
-    /// exactly.
-    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_classes: &[Name]) {
-        for name in removed_classes {
-            if let Some(sites) = self.sites.get_mut(name.as_str()) {
-                sites.retain(|s| s.path != path);
-                if sites.is_empty() {
-                    self.sites.remove(name.as_str());
-                }
-            }
-        }
-    }
-
-    /// The files declaring `name`.
-    pub(crate) fn paths_of(&self, name: &str) -> impl Iterator<Item = &Path> {
-        self.sites
-            .get(name)
-            .into_iter()
-            .flatten()
-            .map(|site| site.path.as_path())
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<ClassDeclSite>)> {
-        self.sites.iter()
-    }
-
-    /// Mirrors `DuplicateFunctionSites::merge`'s own doc comment/shape
-    /// exactly.
-    pub(crate) fn merge(&mut self, other: DuplicateClassSites) {
-        for (name, sites) in other.sites {
-            self.sites.entry(name).or_default().extend(sites);
-        }
-    }
 }
 
 /// Project-wide class declaration sites addressed by FileId. The cached,

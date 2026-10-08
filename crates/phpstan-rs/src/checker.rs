@@ -1221,27 +1221,10 @@ impl<'a> Checker<'a> {
             })
     }
 
-    /// The root statements for the file-local IDs used by this checker.
-    pub(crate) fn syntax_statements(&self) -> Option<&[syntax::ast::StmtId]> {
-        self.syntax_tree
-            .or(self.syntax_tree_owned.as_deref())
-            .map(crate::project::SyntaxTree::statements)
-            .or_else(|| {
-                self.syntax_file_owned
-                    .as_deref()
-                    .map(syntax::ParsedFile::statements)
-            })
-    }
-
     /// The lines of the file to check, for its diagnostics' lines and
     /// columns.
     pub fn with_line_index(mut self, line_index: &Arc<LineIndex>) -> Self {
         self.line_index = Arc::clone(line_index);
-        self
-    }
-
-    pub(crate) fn with_source(mut self, source: &'a [u8]) -> Self {
-        self.syntax_source = Some(source);
         self
     }
 

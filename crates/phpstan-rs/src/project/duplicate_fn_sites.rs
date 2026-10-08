@@ -65,51 +65,6 @@ impl DuplicateFunctionSites {
                 .map(|hint| hint.to_string_with(arenas)),
         });
     }
-
-    /// Filters each name's own `Vec` down by `path` rather than a flat
-    /// `.remove()` - one function name here can legitimately have sites in several
-    /// different files at once, so removing `path`'s own contribution
-    /// must leave every other file's site(s) for that same name intact.
-    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_functions: &[Name]) {
-        for name in removed_functions {
-            if let Some(sites) = self.sites.get_mut(name.as_str()) {
-                sites.retain(|s| s.path != path);
-                if sites.is_empty() {
-                    self.sites.remove(name.as_str());
-                }
-            }
-        }
-    }
-
-    /// The files declaring `name`.
-    pub(crate) fn paths_of(&self, name: &str) -> impl Iterator<Item = &Path> {
-        self.sites
-            .get(name)
-            .into_iter()
-            .flatten()
-            .map(|site| site.path.as_path())
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<FnDeclSite>)> {
-        self.sites.iter()
-    }
-
-    /// Absorbs `other`'s own sites into `self` - correct regardless of
-    /// which file's own per-file `DuplicateFunctionSites` `self`/`other`
-    /// each hold, since every site already carries its own `path` and
-    /// `record`'s own append-only `Vec` per name never depends on
-    /// insertion order (unlike `Registry::insert_built_decl`'s FQN-
-    /// collision resolution - there is no such collision here, every
-    /// unconditional declaration is kept, not just a winner). Lets
-    /// `check_project.rs`'s parallel parse stage build one
-    /// `DuplicateFunctionSites` per file concurrently and merge them all
-    /// sequentially afterward, instead of calling `index` once per file
-    /// inside the sequential insert loop.
-    pub(crate) fn merge(&mut self, other: DuplicateFunctionSites) {
-        for (name, sites) in other.sites {
-            self.sites.entry(name).or_default().extend(sites);
-        }
-    }
 }
 
 /// Project-wide duplicate declarations keyed by stable file ids. Parsed

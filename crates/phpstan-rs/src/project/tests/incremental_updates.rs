@@ -1080,8 +1080,10 @@ fn a_parent_constant_result_change_rechecks_a_child_signature_consumer() {
         project.registry().class_by_name("ChildType").unwrap(),
         &original_declaration
     );
-    let expected =
-        types::Type::string_literal("a".into()).union(types::Type::string_literal("b".into()));
+    let expected = project.registry().relation().union(
+        types::Type::string_literal("a".into()),
+        types::Type::string_literal("b".into()),
+    );
     assert_eq!(
         project
             .registry()

@@ -74,11 +74,8 @@ impl TypedCall<'_, '_> {
     fn closure_effect(&self, e: &ExprNode) -> Option<Effect> {
         let arenas = self.checker.syntax_arenas()?;
         let mut id = arenas.peeled(e.id)?;
-        loop {
-            match &arenas.expr(id)?.kind {
-                ExprKind::Assign(_, rhs) => id = arenas.peeled(*rhs)?,
-                _ => break,
-            }
+        while let ExprKind::Assign(_, rhs) = &arenas.expr(id)?.kind {
+            id = arenas.peeled(*rhs)?;
         }
         matches!(
             &arenas.expr(id)?.kind,

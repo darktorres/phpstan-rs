@@ -114,7 +114,10 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
     assert!(value_of_declaration.params[0].ty.contains_deferred());
     assert_eq!(
         registry.lookup_function("accepts_value").unwrap().params[0].ty,
-        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+        registry.relation().union(
+            Type::string_literal("first".into()),
+            Type::string_literal("second".into())
+        )
     );
     assert_eq!(
         registry
@@ -138,7 +141,10 @@ fn function_signature_results_survive_freeze_and_cache_round_trip() {
     );
     assert_eq!(
         back.lookup_function("accepts_value").unwrap().params[0].ty,
-        Type::string_literal("first".into()).union(Type::string_literal("second".into()))
+        back.relation().union(
+            Type::string_literal("first".into()),
+            Type::string_literal("second".into())
+        )
     );
 }
 
@@ -368,8 +374,10 @@ fn class_deferred_generic_type_results_survive_cache_round_trip() {
             class ContractUser implements GenericContract {}
             "#,
     );
-    let expected =
-        Type::string_literal("first".into()).union(Type::string_literal("second".into()));
+    let expected = registry.relation().union(
+        Type::string_literal("first".into()),
+        Type::string_literal("second".into()),
+    );
     let back = round_trip(&registry);
 
     assert!(back.class_by_name("Bounded").unwrap().template_bounds["T"].contains_deferred());
