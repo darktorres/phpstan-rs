@@ -516,3 +516,121 @@ fn a_bare_top_level_append_contributes_nothing() {
         other => panic!("expected no contribution from a bare append, got: {other:?}"),
     }
 }
+
+/// What the global `name` may hold where the top level of the `index`th file
+/// of `sources` runs, as text.
+fn scoped(registry: &Registry, index: usize, name: &str) -> Option<String> {
+    registry
+        .global_in_scope_of(Some(crate::file_id::FileId::new(index)), name)
+        .map(|ty| ty.to_string())
+}
+
+#[test]
+fn files_that_share_no_include_have_scopes_of_their_own() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x';"),
+        ("b.php", "<?php $mode = 1;"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("'x'"));
+    assert_eq!(scoped(&registry, 1, "mode").as_deref(), Some("1"));
+    assert_eq!(
+        global_type(&registry, "mode")
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("'x'|1")
+    );
+}
+
+#[test]
+fn files_joined_by_a_top_level_include_share_a_scope() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x'; include 'b.php';"),
+        ("b.php", "<?php $mode = 1;"),
+        ("c.php", "<?php $mode = true;"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("'x'|1"));
+    assert_eq!(scoped(&registry, 1, "mode").as_deref(), Some("'x'|1"));
+    assert_eq!(scoped(&registry, 2, "mode").as_deref(), Some("true"));
+}
+
+#[test]
+fn a_function_that_binds_a_global_writes_it_in_every_scope() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x';"),
+        ("b.php", "<?php function f() { global $mode; $mode = 1; }"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("'x'|1"));
+}
+
+#[test]
+fn a_scope_with_an_include_naming_no_single_file_is_written_by_every_file() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x'; include $path;"),
+        ("b.php", "<?php $mode = 1;"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("'x'|1"));
+    assert_eq!(scoped(&registry, 1, "mode").as_deref(), Some("1"));
+}
+
+#[test]
+fn a_file_only_included_from_a_function_has_no_scope_of_its_own() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x';"),
+        ("b.php", "<?php function f() { include 'a.php'; }"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode"), None);
+}
+
+fn changed_scope_names(before: &[(&str, &str)], now: &[(&str, &str)]) -> Vec<String> {
+    let (before, now) = (build_with_files(before), build_with_files(now));
+    let mut names: Vec<String> = now
+        .global_scopes
+        .changed_names(
+            &before.global_scopes,
+            &[before.global_variables(), now.global_variables()],
+        )
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_change_in_one_scope_names_only_the_globals_it_changes() {
+    let names = changed_scope_names(
+        &[
+            ("a.php", "<?php $mode = 'x'; $keep = 1;"),
+            ("b.php", "<?php $mode = 1;"),
+        ],
+        &[
+            ("a.php", "<?php $mode = 'x'; $keep = 1;"),
+            ("b.php", "<?php $mode = true;"),
+        ],
+    );
+    assert_eq!(names, ["mode"]);
+}
+
+#[test]
+fn nothing_changes_when_the_scopes_do_not() {
+    let files = [
+        ("a.php", "<?php $mode = 'x';"),
+        ("b.php", "<?php $mode = 1;"),
+    ];
+    assert!(changed_scope_names(&files, &files).is_empty());
+}
+
+#[test]
+fn a_scope_that_gains_an_include_naming_no_file_changes_every_global() {
+    let names = changed_scope_names(
+        &[
+            ("a.php", "<?php $mode = 'x';"),
+            ("b.php", "<?php $other = 1;"),
+        ],
+        &[
+            ("a.php", "<?php $mode = 'x'; include $path;"),
+            ("b.php", "<?php $other = 1;"),
+        ],
+    );
+    assert_eq!(names, ["mode", "other"]);
+}

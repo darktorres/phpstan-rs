@@ -147,6 +147,9 @@ struct Collector {
     track_outside: bool,
     // How many function and method bodies the walk is inside.
     body_depth: usize,
+    // How many function and method declarations the walk is inside, whether
+    // or not their bodies are told apart.
+    function_depth: usize,
     ctx: NameContext,
     // The doc comments of the classes and functions being walked,
     // innermost last: their template parameters are names that are not
@@ -196,6 +199,7 @@ impl Collector {
             outside: FxHashSet::default(),
             track_outside,
             body_depth: 0,
+            function_depth: 0,
             ctx: NameContext::default(),
             templates: Vec::new(),
         }
@@ -309,6 +313,7 @@ impl Visitor for Collector {
     }
 
     fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
+        self.function_depth += 1;
         self.doc_names(arenas, function.doc_comment.as_ref());
         self.templates.push(Collector::templates_of(
             arenas,
@@ -332,6 +337,7 @@ impl Visitor for Collector {
             arena::walk_function_decl(self, arenas, function);
         }
         self.templates.pop();
+        self.function_depth -= 1;
     }
 
     fn visit_class_def(&mut self, arenas: &NodeArenas, class: &ClassDef) {
@@ -375,6 +381,11 @@ impl Visitor for Collector {
     fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(expr) = arenas.expr(id) else { return };
         match &expr.kind {
+            // At a file's top level every variable is a global, whose type
+            // other code may change.
+            ExprKind::Variable(name) if self.function_depth == 0 => {
+                self.names.insert(RefKey::global_variable(name));
+            }
             ExprKind::Name(name) => {
                 if let Some(name) = arenas.qualified_name(name) {
                     self.add_name(name, NameKind::Constant);

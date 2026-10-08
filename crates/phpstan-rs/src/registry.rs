@@ -176,6 +176,7 @@ pub(crate) struct ResolvedSnapshot {
     class_results: FxHashMap<ClassId, (Name, ClassResultOverlay)>,
     effects: FxHashMap<effects::EffectId, (Option<effects::DeclKey>, effects::Settled)>,
     global_variables: syntax::name::NameMap<Type>,
+    global_scopes: Arc<global_vars::GlobalScopes>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -560,6 +561,10 @@ pub struct Registry {
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]
     global_sites: FxHashMap<crate::file_id::FileId, global_vars::FileSites>,
+    // What the global variables may hold where each file's top level runs,
+    // by the files that share one global scope.
+    #[serde(skip)]
+    global_scopes: Arc<global_vars::GlobalScopes>,
 }
 
 impl Registry {
@@ -1391,6 +1396,7 @@ impl Registry {
                 .map(|(id, settled)| (id.clone(), (registry.effect_decl_key(id), settled.clone())))
                 .collect(),
             global_variables: registry.global_variables().clone(),
+            global_scopes: Arc::clone(&registry.global_scopes),
             class_results: class_results_before.clone(),
         };
         if scope.is_all() {
@@ -2138,7 +2144,9 @@ impl Registry {
             .keys()
             .chain(self.global_variables.keys())
             .filter(|name| before.global_variables.get(*name) != self.global_variables.get(*name))
-            .map(|name| crate::deps::RefKey::global_variable(name))
+            .cloned()
+            .chain(self.changed_global_scope_names(before))
+            .map(|name| crate::deps::RefKey::global_variable(&name))
             .collect()
     }
 

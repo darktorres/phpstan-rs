@@ -227,6 +227,9 @@ pub(crate) fn is_this(checker: &Checker<'_>, e: &ExprNode) -> bool {
 enum Shared {
     /// To what the global of this name may hold.
     Global(Name),
+    /// To what the global of this name may hold in the global scope the
+    /// file's top level runs in.
+    TopLevel(Name),
     /// To anything: a static variable.
     Anything,
     /// To what the place it refers to may hold, by its declaration.
@@ -526,6 +529,10 @@ impl Checker<'_> {
                     .get(global.as_str())
                     .cloned()
                     .unwrap_or_else(Type::mixed),
+                Shared::TopLevel(global) => self
+                    .registry
+                    .global_in_scope_of(self.current_file_id, global.as_str())
+                    .unwrap_or_else(Type::mixed),
                 Shared::Anything => Type::mixed(),
                 Shared::Reference(place) => self.place_type(&place),
                 Shared::Captured => match (locals.get_var(&name), self.captured_types.get(&name)) {
@@ -710,7 +717,12 @@ impl Checker<'_> {
                 || scope.any_global
                 || (is_superglobal(&name) && *name != *"GLOBALS");
             if global && global_written(&name) {
-                out.push((name.clone(), Shared::Global(name)));
+                let shared = if scope.top_level {
+                    Shared::TopLevel(name.clone())
+                } else {
+                    Shared::Global(name.clone())
+                };
+                out.push((name, shared));
             }
         }
         let own_function = |class: &Option<Name>, function: &Name| {

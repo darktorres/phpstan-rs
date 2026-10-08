@@ -523,6 +523,7 @@ impl CanonicalOver for Registry {
             unset_properties,
             stream_wrappers,
             global_sites,
+            global_scopes,
         } = self;
         p.node(
             "Registry",
@@ -664,6 +665,7 @@ impl CanonicalOver for Registry {
                 ("unset_properties", unset_properties),
                 ("stream_wrappers", stream_wrappers),
                 ("global_sites", global_sites),
+                ("global_scopes", global_scopes),
             ],
         );
     }
@@ -706,6 +708,7 @@ canonical_struct!(Registry {
     unset_properties,
     stream_wrappers,
     global_sites,
+    global_scopes,
 } skip {
     id_generation,
     purity_results,

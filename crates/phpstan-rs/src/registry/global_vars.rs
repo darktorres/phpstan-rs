@@ -29,14 +29,16 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::registry::infer_const_type;
 use crate::registry::summaries::ArgAt;
 use syntax::ast::{
-    BinOp, ClosurePayload, ExprId, ExprKind, GlobalVar, Literal, NodeArenas,
-    QualifiedName, StaticTarget, StmtId, StmtKind, UnaryOp,
+    BinOp, ClosurePayload, ExprId, ExprKind, GlobalVar, Literal, NodeArenas, QualifiedName,
+    StaticTarget, StmtId, StmtKind, UnaryOp,
 };
 use syntax::visit::arena::{self, Visitor};
 
 use types::{Name, Shape, Type};
 
-use super::Registry;
+use std::sync::Arc;
+
+use super::{Registry, ResolvedSnapshot};
 use crate::file_id::FileId;
 
 /// Mirrors `types::MAX_UNION_MEMBERS`'s own naming style -
@@ -49,7 +51,7 @@ const MAX_GLOBAL_SHAPE_FIELDS: usize = 64;
 /// `ArrayShape` field-by-field, or folding a plain `Type` through
 /// `Type::union` (the object/`Mixed` case), or both at once (a genuine
 /// object/array conflict, resolved in `finish`).
-#[derive(Default)]
+#[derive(Debug, Default, Clone, PartialEq)]
 struct GlobalAccumulator {
     shape_fields: Vec<(String, Type, bool)>,
     shape_overflowed: bool,
@@ -78,6 +80,23 @@ impl GlobalAccumulator {
             Some(existing) => Type::union(existing, ty),
             None => ty,
         });
+    }
+
+    /// What both accumulated.
+    fn merged(&self, other: &GlobalAccumulator) -> GlobalAccumulator {
+        let mut both = GlobalAccumulator {
+            shape_fields: self.shape_fields.clone(),
+            shape_overflowed: self.shape_overflowed,
+            other: self.other.clone(),
+        };
+        for (key, ty, _) in &other.shape_fields {
+            both.add_shape_field(key.clone(), ty.clone());
+        }
+        both.shape_overflowed |= other.shape_overflowed;
+        if let Some(ty) = &other.other {
+            both.add_other(ty.clone());
+        }
+        both
     }
 
     fn has_shape(&self) -> bool {
@@ -140,6 +159,113 @@ impl SiteContribution {
                 }
             }
         }
+    }
+}
+
+/// What the global variables may hold where each file's top level runs: the
+/// writes code that runs from anywhere may make, and, per global scope, those
+/// of the top levels of the files that share it.
+#[derive(Debug, Clone, Default)]
+pub(in crate::registry) struct GlobalScopes {
+    /// What the function bodies write after their own `global`.
+    function_facts: NameMap<GlobalAccumulator>,
+    /// The scope each file's top level runs in, when it runs in a global one.
+    scope_of: FxHashMap<FileId, u32>,
+    scopes: Vec<GlobalScope>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GlobalScope {
+    /// Some top-level include names no single file: the scope may be
+    /// written by any file's top level.
+    open: bool,
+    /// What the top levels of the files that share it write.
+    facts: NameMap<GlobalAccumulator>,
+}
+
+impl GlobalScopes {
+    /// The global scopes by their lowest file, with the files in each.
+    fn by_first_file(&self) -> FxHashMap<FileId, (Vec<FileId>, &GlobalScope)> {
+        let mut members: FxHashMap<u32, Vec<FileId>> = FxHashMap::default();
+        for (file, scope) in &self.scope_of {
+            members.entry(*scope).or_default().push(*file);
+        }
+        members
+            .into_iter()
+            .map(|(scope, mut files)| {
+                files.sort_unstable();
+                (files[0], (files, &self.scopes[scope as usize]))
+            })
+            .collect()
+    }
+
+    /// The names whose fact in some scope differs from `before`'s:
+    /// `everywhere` are those the whole program has one for, in either.
+    pub(in crate::registry) fn changed_names(
+        &self,
+        before: &GlobalScopes,
+        everywhere: &[&NameMap<Type>],
+    ) -> Vec<Name> {
+        let mut out: FxHashSet<Name> = FxHashSet::default();
+        let all = |out: &mut FxHashSet<Name>| {
+            for names in everywhere {
+                out.extend(names.keys().cloned());
+            }
+        };
+        for name in self
+            .function_facts
+            .keys()
+            .chain(before.function_facts.keys())
+        {
+            if self.function_facts.get(name) != before.function_facts.get(name) {
+                out.insert(name.clone());
+            }
+        }
+        let (now, was) = (self.by_first_file(), before.by_first_file());
+        for first in now.keys().chain(was.keys()) {
+            match (was.get(first), now.get(first)) {
+                (Some((a_files, a)), Some((b_files, b)))
+                    if a_files == b_files && a.open == b.open =>
+                {
+                    for name in a.facts.keys().chain(b.facts.keys()) {
+                        if a.facts.get(name) != b.facts.get(name) {
+                            out.insert(name.clone());
+                        }
+                    }
+                }
+                (a, b) => {
+                    for scope in [a, b].into_iter().flatten().map(|(_, scope)| scope) {
+                        if scope.open {
+                            all(&mut out);
+                        }
+                        out.extend(scope.facts.keys().cloned());
+                    }
+                    if let (Some((_, a)), Some((_, b))) = (a, b)
+                        && a.open != b.open
+                    {
+                        all(&mut out);
+                    }
+                }
+            }
+        }
+        out.into_iter().collect()
+    }
+
+    /// What the global variable `name` may hold in the scope the top level
+    /// of `file` runs in, after code that is not known ran: the type of
+    /// everything that may write it there. `None` when `file` is not known
+    /// to run in a global scope of its own or `name` is written nowhere.
+    fn fact(&self, file: FileId, name: &str, everywhere: &NameMap<Type>) -> Option<Type> {
+        let scope = &self.scopes[*self.scope_of.get(&file)? as usize];
+        if scope.open || syntax::ast::is_superglobal(name) {
+            return everywhere.get(name).cloned();
+        }
+        let (own, anywhere) = (scope.facts.get(name), self.function_facts.get(name));
+        Some(match (own, anywhere) {
+            (None, None) => return None,
+            (Some(only), None) | (None, Some(only)) => only.clone().finish(),
+            (Some(own), Some(anywhere)) => own.merged(anywhere).finish(),
+        })
     }
 }
 
@@ -421,16 +547,33 @@ impl Registry {
                     .map(move |site| (*id, site))
             })
             .collect();
-        let global_scope_files = resolve_global_scope_files(files, &include_sites);
+        let graph = resolve_global_scope_files(files, &include_sites);
 
         let mut accumulators: NameMap<GlobalAccumulator> = NameMap::default();
+        let mut scopes = GlobalScopes {
+            scope_of: graph.component.clone(),
+            scopes: (0..graph.component.values().map(|n| n + 1).max().unwrap_or(0))
+                .map(|n| GlobalScope {
+                    open: graph.open.contains(&n),
+                    facts: NameMap::default(),
+                })
+                .collect(),
+            ..GlobalScopes::default()
+        };
         for (id, ..) in files {
             for site in &self.global_sites[id].sites {
-                if let Some(gate) = &site.gate
-                    && !global_scope_files.contains(gate)
-                {
-                    continue;
-                }
+                let own = match &site.gate {
+                    Some(gate) if !graph.global_scope.contains(gate) => continue,
+                    Some(gate) => Some(&mut scopes.scopes[graph.component[gate] as usize].facts),
+                    None => None,
+                };
+                let scoped = match own {
+                    Some(facts) => facts,
+                    None => &mut scopes.function_facts,
+                };
+                site.contribution
+                    .clone()
+                    .apply(scoped.entry(site.name.clone()).or_default());
                 site.contribution
                     .clone()
                     .apply(accumulators.entry(site.name.clone()).or_default());
@@ -451,12 +594,47 @@ impl Registry {
             })
             .collect();
         self.global_variables = global_variables;
+        self.global_scopes = Arc::new(scopes);
+    }
+
+    /// The names whose fact in some global scope differs from what `before`
+    /// had.
+    pub(crate) fn changed_global_scope_names(&self, before: &ResolvedSnapshot) -> Vec<Name> {
+        self.global_scopes.changed_names(
+            &before.global_scopes,
+            &[&before.global_variables, &self.global_variables],
+        )
+    }
+
+    /// What the global variable `name` may hold where the top level of
+    /// `file` runs, after code that is not known ran: what every site that
+    /// may write it there says, or the whole program's when `file`'s global
+    /// scope is not known.
+    pub(crate) fn global_in_scope_of(&self, file: Option<FileId>, name: &str) -> Option<Type> {
+        match file {
+            Some(file) if self.global_scopes.scope_of.contains_key(&file) => {
+                self.global_scopes.fact(file, name, &self.global_variables)
+            }
+            _ => self.global_variables.get(name).cloned(),
+        }
     }
 }
 
-/// Resolves the include graph and returns the set of file paths whose own
+/// What the include graph says of the files' top levels.
+struct IncludeGraph {
+    /// The files whose own top level runs in the real global scope.
+    global_scope: FxHashSet<FileId>,
+    /// The global scope each of those shares, numbered: files joined by a
+    /// top-level include run in one.
+    component: FxHashMap<FileId, u32>,
+    /// The scopes some top-level include of which names no single file, so
+    /// any file's top level may run in them.
+    open: FxHashSet<u32>,
+}
+
+/// Resolves the include graph: the files whose own
 /// top level genuinely runs in real global scope on at least one resolved
-/// path - see the module doc comment. A file with no resolved incoming
+/// path, and which of them share a scope - see the module doc comment. A file with no resolved incoming
 /// edges at all (including every file this corpus's own dynamic includes
 /// only ever reach) defaults to included, matching today's behavior; a
 /// file whose only resolved incoming edges are all from inside a function
@@ -464,7 +642,7 @@ impl Registry {
 fn resolve_global_scope_files(
     files: &[(FileId, &Path, &GlobalFacts)],
     include_sites: &[(FileId, &IncludeSite)],
-) -> FxHashSet<FileId> {
+) -> IncludeGraph {
     // Each file's path with `/` separators, grouped by file name: an
     // include's target can only be a file of its last segment's name.
     // Normalize paths independently, then index borrowed names and paths.
@@ -489,34 +667,41 @@ fn resolve_global_scope_files(
     // includers were all inside a function, exactly backwards from the
     // "excluded" outcome that shape is supposed to get).
     let mut has_any_incoming: FxHashSet<FileId> = FxHashSet::default();
+    // The files with a top-level include that names no single file.
+    let mut unresolved: FxHashSet<FileId> = FxHashSet::default();
 
     // Each include site is resolved independently against the filename
     // index. The resulting relation is ID-addressed before the serial graph
     // bookkeeping and reachability walk.
-    let resolved_edges: Vec<(FileId, FileId, bool)> = include_sites
+    let resolved_edges: Vec<(FileId, Option<FileId>, bool)> = include_sites
         .par_iter()
-        .filter_map(|(source, site)| {
-            let suffix = site.suffix.as_deref()?;
-            if suffix.is_empty() {
-                return None;
-            }
-            let suffix = suffix.trim_start_matches('/');
-            let name = suffix.rsplit('/').next().unwrap_or_default();
-            let mut matches = by_file_name
-                .get(name)?
-                .iter()
-                .filter(|(_, text)| text_ends_with_suffix(text, suffix));
-            let (target, _) = *matches.next()?;
-            // An ambiguous suffix is not a resolved edge, matching the
-            // previous exact-one-match rule without allocating a Vec.
-            matches
-                .next()
-                .is_none()
-                .then_some((*source, target, site.top_level))
+        .map(|(source, site)| {
+            let target = site.suffix.as_deref().and_then(|suffix| {
+                if suffix.is_empty() {
+                    return None;
+                }
+                let suffix = suffix.trim_start_matches('/');
+                let name = suffix.rsplit('/').next().unwrap_or_default();
+                let mut matches = by_file_name
+                    .get(name)?
+                    .iter()
+                    .filter(|(_, text)| text_ends_with_suffix(text, suffix));
+                let (target, _) = *matches.next()?;
+                // An ambiguous suffix is not a resolved edge, matching the
+                // previous exact-one-match rule without allocating a Vec.
+                matches.next().is_none().then_some(target)
+            });
+            (*source, target, site.top_level)
         })
         .collect();
 
     for (source, target, top_level) in resolved_edges {
+        let Some(target) = target else {
+            if top_level {
+                unresolved.insert(source);
+            }
+            continue;
+        };
         has_any_incoming.insert(target);
         if top_level {
             top_level_edges.entry(source).or_default().push(target);
@@ -528,23 +713,65 @@ fn resolve_global_scope_files(
     // excluded, not defaulted to included; reached only through an
     // unresolved/dynamic include has no edge recorded at all, so it still
     // defaults to included, same as today.
-    let mut result: FxHashSet<FileId> = FxHashSet::default();
+    let mut global_scope: FxHashSet<FileId> = FxHashSet::default();
     let mut queue: Vec<FileId> = Vec::new();
     for (id, ..) in files {
-        if !has_any_incoming.contains(id) && result.insert(*id) {
+        if !has_any_incoming.contains(id) && global_scope.insert(*id) {
             queue.push(*id);
         }
     }
     while let Some(current) = queue.pop() {
         if let Some(targets) = top_level_edges.get(&current) {
             for target in targets {
-                if result.insert(*target) {
+                if global_scope.insert(*target) {
                     queue.push(*target);
                 }
             }
         }
     }
-    result
+
+    // The files that share one global scope: those joined by a top-level
+    // include, whichever file includes which.
+    let mut parents: FxHashMap<FileId, FileId> = global_scope.iter().map(|&id| (id, id)).collect();
+    fn root(parents: &mut FxHashMap<FileId, FileId>, id: FileId) -> FileId {
+        let mut at = id;
+        while parents[&at] != at {
+            let up = parents[&parents[&at]];
+            parents.insert(at, up);
+            at = up;
+        }
+        at
+    }
+    let mut edges: Vec<(&FileId, &FileId)> = top_level_edges
+        .iter()
+        .flat_map(|(source, targets)| targets.iter().map(move |target| (source, target)))
+        .filter(|(source, target)| global_scope.contains(*source) && global_scope.contains(*target))
+        .collect();
+    edges.sort_unstable();
+    for (source, target) in edges {
+        let (a, b) = (root(&mut parents, *source), root(&mut parents, *target));
+        if a != b {
+            parents.insert(a.max(b), a.min(b));
+        }
+    }
+    let mut ids: FxHashMap<FileId, u32> = FxHashMap::default();
+    let mut component: FxHashMap<FileId, u32> = FxHashMap::default();
+    let mut ordered: Vec<FileId> = global_scope.iter().copied().collect();
+    ordered.sort_unstable();
+    for id in ordered {
+        let top = root(&mut parents, id);
+        let next = ids.len() as u32;
+        component.insert(id, *ids.entry(top).or_insert(next));
+    }
+    let open = unresolved
+        .iter()
+        .filter_map(|id| component.get(id).copied())
+        .collect();
+    IncludeGraph {
+        global_scope,
+        component,
+        open,
+    }
 }
 
 fn text_ends_with_suffix(path: &str, suffix: &str) -> bool {
@@ -1219,3 +1446,17 @@ syntax::canonical_enum!(SiteContribution {
 });
 
 syntax::canonical_struct!(FieldContribution { key, ty });
+
+syntax::canonical_struct!(GlobalAccumulator {
+    shape_fields,
+    shape_overflowed,
+    other,
+});
+
+syntax::canonical_struct!(GlobalScope { open, facts });
+
+syntax::canonical_struct!(GlobalScopes {
+    function_facts,
+    scope_of,
+    scopes,
+});
