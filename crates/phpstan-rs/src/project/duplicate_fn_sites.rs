@@ -30,6 +30,7 @@ pub(crate) struct FnDeclSite {
 /// declaration is never tracked (see `record`).
 #[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
 pub(crate) struct DuplicateFunctionSites {
+    #[serde(serialize_with = "syntax::canonical::serialize_in_key_order")]
     sites: FxHashMap<String, Vec<FnDeclSite>>,
 }
 

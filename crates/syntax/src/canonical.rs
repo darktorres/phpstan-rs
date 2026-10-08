@@ -904,6 +904,23 @@ impl Canonical for Span {
     }
 }
 
+/// Serialises a hash map with its entries in key order, so that two maps of
+/// the same entries encode to the same bytes whatever order each was filled
+/// in. For `#[serde(serialize_with = ...)]`.
+pub fn serialize_in_key_order<K, V, S>(
+    map: &rustc_hash::FxHashMap<K, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    K: Ord + serde::Serialize,
+    V: serde::Serialize,
+    S: serde::Serializer,
+{
+    let mut entries: Vec<(&K, &V)> = map.iter().collect();
+    entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    serializer.collect_map(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

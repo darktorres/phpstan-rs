@@ -1020,8 +1020,12 @@ impl<V: PartialEq> PartialEq for NameMap<V> {
 impl<V: serde::Serialize> serde::Serialize for NameMap<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (name, value) in self.iter() {
+        // The table's order depends on how it was filled, which two maps
+        // of the same entries need not share; the encoding does not.
+        let mut entries: Vec<(&Name, &V)> = self.iter().collect();
+        entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let mut map = serializer.serialize_map(Some(entries.len()))?;
+        for (name, value) in entries {
             map.serialize_entry(name, value)?;
         }
         map.end()
@@ -1146,7 +1150,9 @@ impl Extend<Name> for NameSet {
 
 impl serde::Serialize for NameSet {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.iter())
+        let mut names: Vec<&Name> = self.iter().collect();
+        names.sort_unstable();
+        serializer.collect_seq(names)
     }
 }
 
@@ -1485,8 +1491,12 @@ impl<V> Extend<(Name, V)> for FoldedMap<V> {
 impl<V: serde::Serialize> serde::Serialize for FoldedMap<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (name, value) in self.iter() {
+        // The table's order depends on how it was filled, which two maps
+        // of the same entries need not share; the encoding does not.
+        let mut entries: Vec<(&Name, &V)> = self.iter().collect();
+        entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let mut map = serializer.serialize_map(Some(entries.len()))?;
+        for (name, value) in entries {
             map.serialize_entry(name, value)?;
         }
         map.end()
@@ -1929,5 +1939,38 @@ mod tests {
         for r in &results[1..] {
             assert!(Arc::ptr_eq(&results[0].0, &r.0));
         }
+    }
+
+    #[test]
+    fn maps_of_the_same_entries_encode_alike_whatever_order_they_were_filled_in() {
+        let names: Vec<Name> = (0..200).map(|n| Name::from(format!("case{n}"))).collect();
+        let mut forward = NameMap::default();
+        let mut backward = NameMap::default();
+        let mut forward_set = NameSet::default();
+        let mut backward_set = NameSet::default();
+        let mut folded_forward = FoldedMap::default();
+        let mut folded_backward = FoldedMap::default();
+        for (n, name) in names.iter().enumerate() {
+            forward.insert(name.clone(), n);
+            forward_set.insert(name.clone());
+            folded_forward.insert(name.clone(), n);
+        }
+        for (n, name) in names.iter().enumerate().rev() {
+            backward.insert(name.clone(), n);
+            backward_set.insert(name.clone());
+            folded_backward.insert(name.clone(), n);
+        }
+        assert_eq!(
+            serde_json::to_string(&forward).unwrap(),
+            serde_json::to_string(&backward).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&forward_set).unwrap(),
+            serde_json::to_string(&backward_set).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&folded_forward).unwrap(),
+            serde_json::to_string(&folded_backward).unwrap()
+        );
     }
 }

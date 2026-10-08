@@ -33,6 +33,7 @@ pub(crate) struct ClassDeclSite {
 /// didn't).
 #[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
 pub(crate) struct DuplicateClassSites {
+    #[serde(serialize_with = "syntax::canonical::serialize_in_key_order")]
     sites: FxHashMap<String, Vec<ClassDeclSite>>,
 }
 
