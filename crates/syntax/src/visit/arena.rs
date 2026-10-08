@@ -10,6 +10,13 @@ pub trait Visitor {
         walk_stmt(self, arenas, id);
     }
 
+    /// A list of statements run in order: a block, a body.
+    fn visit_stmts(&mut self, arenas: &NodeArenas, stmts: &[StmtId]) {
+        for &stmt in stmts {
+            self.visit_stmt(arenas, stmt);
+        }
+    }
+
     fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         walk_expr(self, arenas, id);
     }
@@ -80,9 +87,7 @@ pub trait Visitor {
 }
 
 pub fn walk_stmts<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, stmts: &[StmtId]) {
-    for &stmt in stmts {
-        v.visit_stmt(arenas, stmt);
-    }
+    v.visit_stmts(arenas, stmts);
 }
 
 pub fn walk_stmt<V: Visitor + ?Sized>(v: &mut V, arenas: &NodeArenas, id: StmtId) {

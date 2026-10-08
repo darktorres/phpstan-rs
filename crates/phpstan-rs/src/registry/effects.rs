@@ -50,7 +50,7 @@ use crate::file_id::FileId;
 use crate::registry::bodies::BodySource;
 use crate::registry::summaries::{
     Access, ArgAt, Binding, BodySummary, CallWrites, Callable, Callee, ClosureFacts, Made,
-    Operation, Origin, PairTarget, Place, Receiver, Root, Step, WriteFacts,
+    Narrowing, Operation, Origin, PairTarget, Place, Receiver, Root, Step, WriteFacts,
 };
 use crate::registry::{
     FunctionReflection, NameMap, PropertyReflection, Registry, is_non_overridable,
@@ -3208,6 +3208,28 @@ impl<'r> Resolve<'r> {
         }
     }
 
+    /// The variables that may be written while a scope of the body runs, by
+    /// another: the names of the by-reference parameters and of the
+    /// variables a closure takes by reference.
+    fn aliased(
+        &self,
+        params: &'r [crate::registry::function_sig::ParameterReflection],
+    ) -> FxHashSet<&'r str> {
+        let mut names: FxHashSet<&'r str> = params
+            .iter()
+            .filter(|p| p.by_ref)
+            .map(|p| p.name.as_ref())
+            .collect();
+        for closure in self.summary.closures.iter() {
+            for (name, by_ref) in closure.captures.iter().flatten() {
+                if *by_ref {
+                    names.insert(name.as_str());
+                }
+            }
+        }
+        names
+    }
+
     /// Each scope's level: the body's, then each closure's in the order the
     /// summary lists them; the variables `lost` names at a scope are written
     /// anything there.
@@ -3218,7 +3240,8 @@ impl<'r> Resolve<'r> {
     ) -> Vec<Level<'r>> {
         let facts = &self.summary.writes;
         let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
-        let mut level = self.level(facts, &lost[0], facts.bindings.iter().collect());
+        let aliased = self.aliased(sig_params);
+        let mut level = self.level(facts, &lost[0], &aliased, facts.bindings.iter().collect());
         if !facts.computed {
             level.params = sig_params
                 .iter()
@@ -3278,7 +3301,8 @@ impl<'r> Resolve<'r> {
         let mut levels = vec![level];
         for (index, closure) in self.summary.closures.iter().enumerate() {
             let parent = closure.within.map_or(0, |within| within as usize + 1);
-            let mut level = self.closure_level(closure, &levels[parent], &lost[index + 1]);
+            let mut level =
+                self.closure_level(closure, &levels[parent], &lost[index + 1], &aliased);
             if index == 0 && closure.captures.is_none() {
                 level.outer = self.captured;
             }
@@ -3293,6 +3317,7 @@ impl<'r> Resolve<'r> {
         closure: &'r ClosureFacts,
         parent: &Level<'r>,
         lost: &FxHashSet<&'r str>,
+        aliased: &FxHashSet<&'r str>,
     ) -> Level<'r> {
         let facts = &closure.facts;
         let reassigned = |name: &str| facts.reassigned.iter().any(|n| n.as_str() == name);
@@ -3387,7 +3412,7 @@ impl<'r> Resolve<'r> {
                 }
             }
         }
-        let mut level = self.level(facts, lost, bindings);
+        let mut level = self.level(facts, lost, aliased, bindings);
         level.closure = true;
         // What a closure writes of a variable it shares by reference with a
         // file's top level, the file's scope has.
@@ -3414,6 +3439,7 @@ impl<'r> Resolve<'r> {
         &self,
         facts: &'r WriteFacts,
         lost: &FxHashSet<&'r str>,
+        aliased: &FxHashSet<&'r str>,
         bindings: Vec<&'r (Option<Name>, Binding)>,
     ) -> Level<'r> {
         let origins = if facts.computed {
@@ -3441,6 +3467,8 @@ impl<'r> Resolve<'r> {
             solved: Default::default(),
             closure: false,
             bindings,
+            lost: lost.clone(),
+            aliased: aliased.clone(),
             runs: Default::default(),
             params_run: Default::default(),
             outer: None,
@@ -3493,6 +3521,11 @@ struct Level<'r> {
     // What its variables are bound to: its own bindings and, for a variable
     // a closure takes by reference, those of the code that wrote it.
     bindings: Vec<&'r (Option<Name>, Binding)>,
+    // The variables written anything here, by what the calls reach.
+    lost: FxHashSet<&'r str>,
+    // The variables another scope may write while this one runs: those taken
+    // by reference, by a parameter or a closure.
+    aliased: FxHashSet<&'r str>,
     // The closures its calls run, each with its `$this`.
     runs: std::cell::RefCell<Vec<(u32, Transfer)>>,
     // The declaration's parameters whose arguments its calls run.
@@ -3539,7 +3572,7 @@ impl CallContext for Level<'_> {
 
     fn argument(&self, _: &ArgAt, place: Option<&Place>) -> Holder {
         match place {
-            Some(place) => self.value_holder(&place.root, &place.steps),
+            Some(place) => self.value_holder(&place.root, place.narrowing.as_ref(), &place.steps),
             None => Holder::Unknown,
         }
     }
@@ -3824,6 +3857,60 @@ impl<'r> Level<'r> {
         }
     }
 
+    /// Whether nothing but the code of this scope, in the order it is
+    /// written, writes the variable `name`: a guard on it holds until the
+    /// scope writes it.
+    fn stable(&self, name: &Name) -> bool {
+        let name = name.as_str();
+        !self.facts.computed
+            && !self.file_scope
+            && !self.lost.contains(name)
+            && !self.aliased.contains(name)
+            && !self.shared_with_file.contains(&name)
+            && !self
+                .bindings
+                .iter()
+                .any(|(bound, _)| bound.as_ref().is_none_or(|bound| bound.as_str() == name))
+    }
+
+    /// The object the variable `name` holds where a guard shows
+    /// `narrowing` of it.
+    fn narrowed_holder(&self, name: &Name, narrowing: Option<&Narrowing>) -> Holder {
+        let held = self.variable_holder(name);
+        let Some(narrowing) = narrowing.filter(|_| self.stable(name)) else {
+            return held;
+        };
+        match narrowing {
+            Narrowing::NoObject => Holder::Classes(Vec::new()),
+            Narrowing::Instance(classes) => {
+                let mut named = Vec::new();
+                for class in classes.iter() {
+                    match named_classes(self.registry, self.class, class) {
+                        Some(found) => named.extend(found),
+                        None => return held,
+                    }
+                }
+                match held {
+                    Holder::Made(_) => held,
+                    Holder::Classes(own) if !own.is_empty() => {
+                        let mut found = Vec::new();
+                        for own in &own {
+                            for class in &named {
+                                found.push(if self.registry.is_subclass_of(own, class) {
+                                    own.clone()
+                                } else {
+                                    class.clone()
+                                });
+                            }
+                        }
+                        Holder::Classes(sorted_classes(found))
+                    }
+                    _ => Holder::Classes(sorted_classes(named)),
+                }
+            }
+        }
+    }
+
     /// The object a parameter declared as `declared` holds.
     fn declared(&self, declared: &Declared<'_>) -> Holder {
         match declared {
@@ -3900,9 +3987,12 @@ impl<'r> Level<'r> {
                 (Holder::Classes(Vec::new()), false)
             }
             Origin::Place(place) if matches!(place.root, Root::This) && place.steps.is_empty() => {
-                (self.value_holder(&place.root, &[]), true)
+                (self.value_holder(&place.root, None, &[]), true)
             }
-            Origin::Place(place) => (self.value_holder(&place.root, &place.steps), false),
+            Origin::Place(place) => (
+                self.value_holder(&place.root, place.narrowing.as_ref(), &place.steps),
+                false,
+            ),
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::New(Some(class)) => (
                 Holder::Made(Some(
@@ -4133,7 +4223,7 @@ impl<'r> Level<'r> {
                 out.insert(Storage::Own(prop.clone()));
                 return;
             }
-            match self.value_holder(&place.root, &place.steps[..at]) {
+            match self.value_holder(&place.root, place.narrowing.as_ref(), &place.steps[..at]) {
                 Holder::Made(_) => {}
                 Holder::Unknown => out.insert(Storage::Property {
                     class: None,
@@ -4196,6 +4286,7 @@ impl<'r> Level<'r> {
                     let through = Place {
                         root: target.root.clone(),
                         steps: steps.into_boxed_slice(),
+                        narrowing: None,
                     };
                     self.place_storages(&through, out, depth + 1);
                 }
@@ -4214,12 +4305,18 @@ impl<'r> Level<'r> {
 
     /// The object at `root` and `steps` may be, by the declared types along
     /// the way.
-    fn value_holder(&self, root: &Root, steps: &[Step]) -> Holder {
+    fn value_holder(&self, root: &Root, narrowing: Option<&Narrowing>, steps: &[Step]) -> Holder {
         // The declared types of the value the place starts from, when it
         // has them: an array of objects holds objects its own holder, the
         // object it is, does not name.
         let typed: Option<Vec<Type>> = match root {
-            Root::Variable(Some(name)) if !self.made.contains_key(name.as_str()) => {
+            Root::Variable(Some(name))
+                if !self.made.contains_key(name.as_str())
+                    && !matches!(
+                        narrowing.filter(|_| self.stable(name)),
+                        Some(Narrowing::Instance(_))
+                    ) =>
+            {
                 match self.params.get(name.as_str()) {
                     Some(Declared::Param { ty, .. }) => Some(vec![(*ty).clone()]),
                     _ => None,
@@ -4233,7 +4330,7 @@ impl<'r> Level<'r> {
                 Some(class) => Holder::Classes(vec![Name::from(class)]),
                 None => Holder::Unknown,
             },
-            Root::Variable(Some(name)) => self.variable_holder(name),
+            Root::Variable(Some(name)) => self.narrowed_holder(name, narrowing),
             Root::Static(class, Some(prop)) => self.static_holder(class, prop),
             // A superglobal is an array of strings, files or session values
             // PHP itself fills.

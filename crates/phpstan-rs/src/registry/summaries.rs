@@ -39,6 +39,18 @@ pub(crate) enum PurityCall {
 pub(crate) struct Place {
     pub(crate) root: Root,
     pub(crate) steps: Box<[Step]>,
+    /// What a guard around the place shows of the variable it starts from.
+    pub(crate) narrowing: Option<Narrowing>,
+}
+
+/// What a guard shows of a variable in the code it guards.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Narrowing {
+    /// The variable holds no object: `is_array($x)`, `$x === null`.
+    NoObject,
+    /// The variable holds, when it holds an object, one of these classes:
+    /// `$x instanceof C`.
+    Instance(Box<[QualifiedName]>),
 }
 
 /// What a place starts from.
@@ -74,6 +86,7 @@ impl Place {
         Place {
             root,
             steps: Box::new([]),
+            narrowing: None,
         }
     }
 
@@ -89,6 +102,7 @@ impl Place {
         Place {
             root: self.root,
             steps: steps.into_boxed_slice(),
+            narrowing: self.narrowing,
         }
     }
 
@@ -1110,6 +1124,9 @@ struct Summarizer {
     // id, when not only a read (`READ`, `WRITE`, `ISSET`,
     // `UNSET`).
     accesses: FxHashMap<ExprId, u8>,
+    // What the guards around the code the walk is in show of variables of
+    // the scope it is in, the innermost last.
+    narrowed: Vec<(Name, Narrowing)>,
 }
 
 const READ: u8 = 1;
@@ -1172,7 +1189,9 @@ impl Summarizer {
             shared,
         });
         let within = self.current.replace(id);
+        let narrowed = std::mem::take(&mut self.narrowed);
         walk(self);
+        self.narrowed = narrowed;
         let Some(enclosing) = self.enclosing.pop() else {
             unreachable!("pushed above");
         };
@@ -1267,6 +1286,11 @@ impl Summarizer {
         let Some(place) = Place::of(arenas, target) else {
             return;
         };
+        let place = if place.steps.is_empty() {
+            place
+        } else {
+            self.narrow_place(place)
+        };
         match (&place.root, &*place.steps) {
             (Root::Variable(Some(name)), []) => self.note_variable(name.clone(), made, origins),
             (Root::Variable(None), []) => self.write_computed(),
@@ -1351,9 +1375,173 @@ impl Summarizer {
             .push(Place::root(Root::This).then(Step::Property(Some(property.clone()))));
     }
 
+    /// The narrowing of the variable `name` where the walk is, if any.
+    fn narrowing_of(&self, name: &Name) -> Option<&Narrowing> {
+        self.narrowed
+            .iter()
+            .rev()
+            .find(|(narrowed, _)| narrowed == name)
+            .map(|(_, narrowing)| narrowing)
+    }
+
+    /// `place`, with what the guards around the walk show of its variable.
+    fn narrow_place(&self, mut place: Place) -> Place {
+        if let Root::Variable(Some(name)) = &place.root
+            && place.narrowing.is_none()
+        {
+            place.narrowing = self.narrowing_of(name).cloned();
+        }
+        place
+    }
+
+    fn narrow_origin(&self, origin: Origin) -> Origin {
+        match origin {
+            Origin::Place(place) => Origin::Place(self.narrow_place(place)),
+            Origin::Returned(callee) => Origin::Returned(self.narrow_callee(callee)),
+            other => other,
+        }
+    }
+
+    fn narrow_callee(&self, callee: Callee) -> Callee {
+        match callee {
+            Callee::Method { receiver, method } => Callee::Method {
+                receiver: self.narrow_receiver(receiver),
+                method,
+            },
+            Callee::Implicit { on, operation } => Callee::Implicit {
+                on: on.map(|on| {
+                    on.into_vec()
+                        .into_iter()
+                        .map(|origin| self.narrow_origin(origin))
+                        .collect()
+                }),
+                operation,
+            },
+            other => other,
+        }
+    }
+
+    fn narrow_receiver(&self, receiver: Receiver) -> Receiver {
+        match receiver {
+            Receiver::Variable(name) if self.narrowing_of(&name).is_some() => {
+                Receiver::Origins(Box::new([Origin::Place(
+                    self.narrow_place(Place::root(Root::Variable(Some(name)))),
+                )]))
+            }
+            Receiver::Origins(origins) => Receiver::Origins(
+                origins
+                    .into_vec()
+                    .into_iter()
+                    .map(|origin| self.narrow_origin(origin))
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
+
+    /// Where the value `id` comes from, as far as the guards around the
+    /// walk show.
+    fn origins(&self, arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
+        let origins = origins_of(arenas, id)?;
+        Some(if self.narrowed.is_empty() {
+            origins
+        } else {
+            origins
+                .into_iter()
+                .map(|origin| self.narrow_origin(origin))
+                .collect()
+        })
+    }
+
+    /// The object `id` is, as far as the guards around the walk show.
+    fn receiver(&self, arenas: &NodeArenas, id: ExprId) -> Receiver {
+        let receiver = receiver(arenas, id);
+        if self.narrowed.is_empty() {
+            receiver
+        } else {
+            self.narrow_receiver(receiver)
+        }
+    }
+
+    /// The place `id` names, read, as far as the guards around the walk
+    /// show.
+    fn place_read(&self, arenas: &NodeArenas, id: ExprId) -> Option<Place> {
+        let place = Place::of(arenas, id)?;
+        Some(if self.narrowed.is_empty() {
+            place
+        } else {
+            self.narrow_place(place)
+        })
+    }
+
+    /// Takes `facts` as shown of the variables they name, for as long as the
+    /// walk is in `region`, but for those written in it; the length to cut
+    /// `narrowed` back to when it leaves.
+    fn narrow(
+        &mut self,
+        arenas: &NodeArenas,
+        facts: Vec<(Name, Narrowing)>,
+        region: &[Node],
+    ) -> usize {
+        let mark = self.narrowed.len();
+        if !facts.is_empty() {
+            let written = written_in(arenas, region);
+            self.narrowed.extend(
+                facts
+                    .into_iter()
+                    .filter(|(name, _)| !written.contains(name)),
+            );
+        }
+        mark
+    }
+
+    /// The statements of a list in order: what a statement that leaves
+    /// unless a condition holds shows of the rest of the list.
+    fn walk_list(&mut self, arenas: &NodeArenas, stmts: &[StmtId]) {
+        let mark = self.narrowed.len();
+        for (at, &id) in stmts.iter().enumerate() {
+            self.visit_stmt(arenas, id);
+            let Some(StmtKind::If(branch)) = arenas.stmt(id).map(|stmt| &stmt.kind) else {
+                continue;
+            };
+            let region: Vec<Node> = stmts[at..].iter().map(|&stmt| Node::Stmt(stmt)).collect();
+            self.narrow(arenas, after_if(arenas, branch), &region);
+        }
+        self.narrowed.truncate(mark);
+    }
+
+    /// An `if` chain: each condition and body sees what the earlier
+    /// conditions being false and its own being true show.
+    fn walk_if(&mut self, arenas: &NodeArenas, branch: &IfStmt) {
+        let mark = self.narrowed.len();
+        let chain = branches(arenas, branch);
+        for (at, &(cond, body)) in chain.iter().enumerate() {
+            self.visit_expr(arenas, cond);
+            let inner = self.narrow(
+                arenas,
+                guards(arenas, cond, true),
+                &[Node::Expr(cond), Node::Stmt(body)],
+            );
+            self.visit_stmt(arenas, body);
+            self.narrowed.truncate(inner);
+            let mut later: Vec<Node> = vec![Node::Expr(cond)];
+            later.extend(
+                chain[at + 1..]
+                    .iter()
+                    .flat_map(|&(cond, body)| [Node::Expr(cond), Node::Stmt(body)]),
+            );
+            later.extend(branch.else_branch.map(Node::Stmt));
+            self.narrow(arenas, guards(arenas, cond, false), &later);
+        }
+        if let Some(body) = branch.else_branch {
+            self.visit_stmt(arenas, body);
+        }
+        self.narrowed.truncate(mark);
+    }
+
     /// An operation PHP may run code of the value `operand` for.
     fn implicit(&mut self, arenas: &NodeArenas, operand: ExprId, operation: Operation) {
-        self.implicit_on(origins_of(arenas, operand), operation);
+        self.implicit_on(self.origins(arenas, operand), operation);
     }
 
     /// An operation PHP may run code of a value from `on` for, from
@@ -1397,7 +1585,7 @@ impl Summarizer {
         access: u8,
         element: bool,
     ) {
-        let on = origins_of(arenas, base);
+        let on = self.origins(arenas, base);
         for (bit, kind) in [
             (READ, Access::Read),
             (WRITE, Access::Write),
@@ -1467,7 +1655,7 @@ impl Summarizer {
             if let Some(callable) = self.callable(arenas, arg.value) {
                 callables.push((at.clone(), callable));
             }
-            if let Some(place) = Place::of(arenas, arg.value) {
+            if let Some(place) = self.place_read(arenas, arg.value) {
                 places.push((at, place));
             } else if holds_no_object(arenas, arg.value) {
                 objectless.push(at);
@@ -1566,7 +1754,7 @@ impl Summarizer {
                 self.call(
                     arenas,
                     Callee::Method {
-                        receiver: receiver(arenas, *recv),
+                        receiver: self.receiver(arenas, *recv),
                         method: Some(method.name.clone()),
                     },
                     args.clone(),
@@ -1575,7 +1763,7 @@ impl Summarizer {
             ExprKind::DynamicMethodCall(recv, _, args, _) => self.call(
                 arenas,
                 Callee::Method {
-                    receiver: receiver(arenas, *recv),
+                    receiver: self.receiver(arenas, *recv),
                     method: None,
                 },
                 args.clone(),
@@ -1740,6 +1928,226 @@ fn receiver(arenas: &NodeArenas, id: ExprId) -> Receiver {
     }
 }
 
+/// A node of code a narrowing is looked for writes in.
+#[derive(Clone, Copy)]
+enum Node {
+    Expr(ExprId),
+    Stmt(StmtId),
+}
+
+/// The variables written anywhere in `nodes`, closures and declarations
+/// nested in them too.
+fn written_in(arenas: &NodeArenas, nodes: &[Node]) -> FxHashSet<Name> {
+    let mut written = FxHashSet::default();
+    let mut walk = Reassigned(&mut written);
+    for node in nodes {
+        match *node {
+            Node::Expr(id) => walk.visit_expr(arenas, id),
+            Node::Stmt(id) => walk.visit_stmt(arenas, id),
+        }
+    }
+    written
+}
+
+/// The variable the expression `id` is, when it is a plain one.
+fn plain_variable(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
+    let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    match &e.kind {
+        ExprKind::Variable(v) if **v != *"this" && !is_superglobal(v) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+/// The global function a call names, lowercased, with its arguments.
+fn called_function(arenas: &NodeArenas, id: ExprId) -> Option<(String, &[Arg])> {
+    let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    let ExprKind::Call(callee, args) = &e.kind else {
+        return None;
+    };
+    let callee = arenas.peeled(*callee).and_then(|id| arenas.expr(id))?;
+    let ExprKind::Name(name) = &callee.kind else {
+        return None;
+    };
+    let name = arenas.qualified_name(name)?;
+    let written = name.written.trim_start_matches('\\');
+    Some((written.to_ascii_lowercase(), arenas.args(args.clone())))
+}
+
+/// What the condition `id` shows of the variables it tests when it is true,
+/// or when it is false for `!positive`.
+fn guards(arenas: &NodeArenas, id: ExprId, positive: bool) -> Vec<(Name, Narrowing)> {
+    let Some(e) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+        return Vec::new();
+    };
+    syntax::stack::guard(|| match &e.kind {
+        ExprKind::Unary(UnaryOp::Not, inner) => guards(arenas, *inner, !positive),
+        ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, left, right) if positive => {
+            let mut out = guards(arenas, *left, true);
+            out.extend(guards(arenas, *right, true));
+            out
+        }
+        ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, left, right) if !positive => {
+            let mut out = guards(arenas, *left, false);
+            out.extend(guards(arenas, *right, false));
+            out
+        }
+        ExprKind::Instanceof(subject, InstanceofTarget::Name(range)) if positive => {
+            match plain_variable(arenas, *subject) {
+                Some(name) => vec![(
+                    name,
+                    Narrowing::Instance(arenas.qualified_names(range).to_vec().into_boxed_slice()),
+                )],
+                None => Vec::new(),
+            }
+        }
+        // Equal in kind and value to a literal, which is no object.
+        ExprKind::Binary(op @ (BinOp::Identical | BinOp::NotIdentical), left, right)
+            if positive == (*op == BinOp::Identical) =>
+        {
+            let literal = |id: ExprId| {
+                arenas
+                    .peeled(id)
+                    .and_then(|id| arenas.expr(id))
+                    .is_some_and(|e| matches!(e.kind, ExprKind::Literal(_)))
+            };
+            let variable = match (literal(*left), literal(*right)) {
+                (true, false) => plain_variable(arenas, *right),
+                (false, true) => plain_variable(arenas, *left),
+                _ => None,
+            };
+            variable.map_or_else(Vec::new, |name| vec![(name, Narrowing::NoObject)])
+        }
+        ExprKind::Call(..) => {
+            let Some((function, args)) = called_function(arenas, e.id) else {
+                return Vec::new();
+            };
+            let subject = args
+                .first()
+                .filter(|arg| !arg.spread && arg.name.is_none())
+                .and_then(|arg| plain_variable(arenas, arg.value));
+            let Some(subject) = subject else {
+                return Vec::new();
+            };
+            match function.as_str() {
+                "is_array" | "is_string" | "is_int" | "is_integer" | "is_long" | "is_float"
+                | "is_double" | "is_bool" | "is_null" | "is_numeric" | "is_scalar"
+                | "is_resource"
+                    if positive =>
+                {
+                    vec![(subject, Narrowing::NoObject)]
+                }
+                "is_object" if !positive => vec![(subject, Narrowing::NoObject)],
+                "is_a" | "is_subclass_of" if positive => {
+                    let class = args
+                        .get(1)
+                        .filter(|arg| !arg.spread && arg.name.is_none())
+                        .and_then(|arg| literal_string_value(arenas, arg.value));
+                    let Some(class) = class else {
+                        return Vec::new();
+                    };
+                    let class = class.trim_start_matches('\\');
+                    if class.is_empty() {
+                        return Vec::new();
+                    }
+                    let name = QualifiedName {
+                        written: Name::from(class),
+                        resolved: ResolvedName::Exact(Name::from(class)),
+                        span: arenas
+                            .expr_span(e.id)
+                            .expect("expression has a parallel span"),
+                    };
+                    vec![(subject, Narrowing::Instance(Box::new([name])))]
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    })
+}
+
+/// Whether control never goes on past the statement `id`.
+fn leaves(arenas: &NodeArenas, id: StmtId) -> bool {
+    let Some(stmt) = arenas.stmt(id) else {
+        return false;
+    };
+    syntax::stack::guard(|| match &stmt.kind {
+        StmtKind::Return(_)
+        | StmtKind::Throw(_)
+        | StmtKind::Break(_)
+        | StmtKind::Continue(_)
+        | StmtKind::Goto(_) => true,
+        StmtKind::Expression(e) => arenas
+            .peeled(*e)
+            .and_then(|id| arenas.expr(id))
+            .is_some_and(|e| matches!(e.kind, ExprKind::Exit(..) | ExprKind::Throw(_))),
+        StmtKind::Block(stmts) => arenas
+            .stmt_ids(stmts)
+            .iter()
+            .any(|&stmt| leaves(arenas, stmt)),
+        StmtKind::If(branch) => {
+            branch
+                .else_branch
+                .is_some_and(|branch| leaves(arenas, branch))
+                && leaves(arenas, branch.then_branch)
+                && arenas
+                    .elseifs(branch.elseifs.clone())
+                    .iter()
+                    .all(|elseif| leaves(arenas, elseif.body))
+        }
+        _ => false,
+    })
+}
+
+/// The `(condition, body)` pairs of an `if` chain, in order.
+fn branches(arenas: &NodeArenas, branch: &IfStmt) -> Vec<(ExprId, StmtId)> {
+    std::iter::once((branch.cond, branch.then_branch))
+        .chain(
+            arenas
+                .elseifs(branch.elseifs.clone())
+                .iter()
+                .map(|elseif| (elseif.cond, elseif.body)),
+        )
+        .collect()
+}
+
+/// What the code after the `if` statement `branch` may take as shown,
+/// whichever way control gets there: what every way that does not leave
+/// shows.
+fn after_if(arenas: &NodeArenas, branch: &IfStmt) -> Vec<(Name, Narrowing)> {
+    let mut ways: Vec<Vec<(Name, Narrowing)>> = Vec::new();
+    let mut before: Vec<(Name, Narrowing)> = Vec::new();
+    for (cond, body) in branches(arenas, branch) {
+        if !leaves(arenas, body) {
+            let mut way = before.clone();
+            way.extend(guards(arenas, cond, true));
+            ways.push(way);
+        }
+        before.extend(guards(arenas, cond, false));
+    }
+    match branch.else_branch {
+        Some(body) if leaves(arenas, body) => {}
+        _ => ways.push(before),
+    }
+    let mut ways = ways.into_iter();
+    let Some(first) = ways.next() else {
+        return Vec::new();
+    };
+    let others: Vec<Vec<String>> = ways
+        .map(|way| {
+            way.iter()
+                .map(|(name, narrowing)| format!("{name}:{}", syntax::canonical::print(narrowing)))
+                .collect()
+        })
+        .collect();
+    first
+        .into_iter()
+        .filter(|(name, narrowing)| {
+            let key = format!("{name}:{}", syntax::canonical::print(narrowing));
+            others.iter().all(|way| way.contains(&key))
+        })
+        .collect()
+}
+
 impl Visitor for Summarizer {
     fn visit_function_decl(&mut self, arenas: &NodeArenas, function: &FunctionDecl) {
         let mut nested = Reassigned(&mut self.scope.reassigned);
@@ -1776,6 +2184,10 @@ impl Visitor for Summarizer {
                 .push(Place::root(Root::Variable(Some(name))));
         }
         arena::walk_catch_clause(self, arenas, clause);
+    }
+
+    fn visit_stmts(&mut self, arenas: &NodeArenas, stmts: &[StmtId]) {
+        self.walk_list(arenas, stmts);
     }
 
     fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
@@ -1831,7 +2243,7 @@ impl Visitor for Summarizer {
                     by_ref,
                     ..
                 } => {
-                    let source = origins_of(arenas, *subject);
+                    let source = self.origins(arenas, *subject);
                     self.implicit_on(
                         source.clone(),
                         Operation::Iterate {
@@ -1890,7 +2302,22 @@ impl Visitor for Summarizer {
                 }
                 _ => {}
             }
-            arena::walk_stmt(self, arenas, id);
+            match &stmt.kind {
+                StmtKind::If(branch) => self.walk_if(arenas, branch),
+                StmtKind::While { cond, body } => {
+                    self.visit_expr(arenas, *cond);
+                    let mark = self.narrow(
+                        arenas,
+                        guards(arenas, *cond, true),
+                        &[Node::Expr(*cond), Node::Stmt(*body)],
+                    );
+                    self.visit_stmt(arenas, *body);
+                    self.narrowed.truncate(mark);
+                }
+                // Control may come in at a label from where no guard held.
+                StmtKind::Label(_) => self.narrowed.clear(),
+                _ => arena::walk_stmt(self, arenas, id),
+            }
         })
     }
 
@@ -1922,7 +2349,7 @@ impl Visitor for Summarizer {
             match &e.kind {
                 ExprKind::Assign(lhs, rhs) => {
                     let made = self.made_by(arenas, *rhs);
-                    let origins = origins_of(arenas, *rhs);
+                    let origins = self.origins(arenas, *rhs);
                     if matches!(
                         arenas
                             .peeled(*lhs)
@@ -1955,7 +2382,7 @@ impl Visitor for Summarizer {
                 ExprKind::CompoundAssign(op, lhs, rhs) => {
                     let origins = match op {
                         BinOp::Concat => Some(vec![Origin::NoObject]),
-                        BinOp::Coalesce => origins_of(arenas, *rhs),
+                        BinOp::Coalesce => self.origins(arenas, *rhs),
                         _ => Some(vec![Origin::Arithmetic]),
                     };
                     self.write(arenas, *lhs, None, origins);
@@ -2138,6 +2565,34 @@ impl Visitor for Summarizer {
                     });
                     arena::walk_expr(self, arenas, *call);
                 }
+                ExprKind::Binary(
+                    op @ (BinOp::And | BinOp::LogicalAnd | BinOp::Or | BinOp::LogicalOr),
+                    left,
+                    right,
+                ) => {
+                    self.visit_expr(arenas, *left);
+                    let and = matches!(op, BinOp::And | BinOp::LogicalAnd);
+                    let mark = self.narrow(
+                        arenas,
+                        guards(arenas, *left, and),
+                        &[Node::Expr(*left), Node::Expr(*right)],
+                    );
+                    self.visit_expr(arenas, *right);
+                    self.narrowed.truncate(mark);
+                }
+                ExprKind::Ternary(cond, then, otherwise) => {
+                    self.visit_expr(arenas, *cond);
+                    for (branch, positive) in [(*then, true), (Some(*otherwise), false)] {
+                        let Some(branch) = branch else { continue };
+                        let mark = self.narrow(
+                            arenas,
+                            guards(arenas, *cond, positive),
+                            &[Node::Expr(*cond), Node::Expr(branch)],
+                        );
+                        self.visit_expr(arenas, branch);
+                        self.narrowed.truncate(mark);
+                    }
+                }
                 _ => arena::walk_expr(self, arenas, id),
             }
         })
@@ -2151,23 +2606,42 @@ struct Reassigned<'a>(&'a mut FxHashSet<Name>);
 impl Visitor for Reassigned<'_> {
     fn visit_expr(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(e) = arenas.expr(id) else { return };
-        if let ExprKind::Assign(lhs, _)
-        | ExprKind::AssignRef(lhs, _)
-        | ExprKind::CompoundAssign(_, lhs, _) = &e.kind
-        {
-            collect_assigned(arenas, *lhs, self.0);
+        match &e.kind {
+            ExprKind::Assign(lhs, _)
+            | ExprKind::AssignRef(lhs, _)
+            | ExprKind::CompoundAssign(_, lhs, _)
+            | ExprKind::Unary(
+                UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
+                lhs,
+            ) => collect_assigned(arenas, *lhs, self.0),
+            _ => {}
         }
         arena::walk_expr(self, arenas, id);
     }
 
     fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
         let Some(stmt) = arenas.stmt(id) else { return };
-        if let StmtKind::Foreach { key, value, .. } = &stmt.kind {
-            for target in key.iter().copied().chain([*value]) {
-                collect_assigned(arenas, target, self.0);
+        match &stmt.kind {
+            StmtKind::Foreach { key, value, .. } => {
+                for target in key.iter().copied().chain([*value]) {
+                    collect_assigned(arenas, target, self.0);
+                }
             }
+            StmtKind::Unset(targets) => {
+                for &target in arenas.expr_ids(targets) {
+                    collect_assigned(arenas, target, self.0);
+                }
+            }
+            _ => {}
         }
         arena::walk_stmt(self, arenas, id);
+    }
+
+    fn visit_catch_clause(&mut self, arenas: &NodeArenas, clause: &CatchClause) {
+        if let Some(var) = &clause.var {
+            self.0.insert(var.name.clone());
+        }
+        arena::walk_catch_clause(self, arenas, clause);
     }
 }
 
@@ -2197,7 +2671,16 @@ syntax::canonical_enum!(PurityCall {
     New(class),
 });
 
-syntax::canonical_struct!(Place { root, steps });
+syntax::canonical_struct!(Place {
+    root,
+    steps,
+    narrowing
+});
+
+syntax::canonical_enum!(Narrowing {
+    NoObject,
+    Instance(classes),
+});
 
 syntax::canonical_enum!(Root {
     This,
