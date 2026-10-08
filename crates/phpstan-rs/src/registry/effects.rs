@@ -1508,6 +1508,7 @@ impl Registry {
             member: member.clone(),
             summary,
             value: None,
+            captured: None,
         };
         resolve.run(&key, Some(sig))
     }
@@ -1534,6 +1535,7 @@ impl Registry {
             member: Name::from(format!("${property}::{}", if set { "set" } else { "get" })),
             summary,
             value: value.map(|value| (value.as_str(), ty)),
+            captured: None,
         };
         resolve.run(&key, None)
     }
@@ -2105,7 +2107,9 @@ impl Reach<'_> {
                                 .iter()
                                 .find(|(at, _)| at == arg)
                                 .map(|(_, place)| place);
-                            if position.elements {
+                            if place.is_none() && call.objectless.contains(arg) {
+                                Holder::Classes(Vec::new())
+                            } else if position.elements {
                                 self.ctx.elements(arg, place)
                             } else {
                                 self.ctx.argument(arg, place)
@@ -2716,7 +2720,12 @@ impl Registry {
     /// caller's, an object of `class`: what it writes itself, what the
     /// closures it runs may write, and what the calls it makes may write, as
     /// settled.
-    pub(crate) fn closure_effect(&self, summary: &BodySummary, class: Option<&str>) -> Effect {
+    pub(crate) fn closure_effect(
+        &self,
+        summary: &BodySummary,
+        class: Option<&str>,
+        captured: Option<&dyn Fn(&str) -> Option<Holder>>,
+    ) -> Effect {
         let holder = DeclKey {
             class: class.map(str::to_ascii_lowercase),
             member: String::new(),
@@ -2727,6 +2736,7 @@ impl Registry {
             member: Name::from("{closure}"),
             summary,
             value: None,
+            captured,
         };
         let classified: FxHashMap<EffectId, IdClassification<'_>> = resolve
             .run(&holder, None)
@@ -2812,6 +2822,9 @@ struct Resolve<'r> {
     // A `set` hook's parameter, by its name and the type of what it is
     // passed.
     value: Option<(&'r str, &'r Type)>,
+    // What the code that wrote the closure this summary is of knows of the
+    // object a variable it captures by value holds.
+    captured: Option<&'r dyn Fn(&str) -> Option<Holder>>,
 }
 
 /// What each of a scope's calls reaches, and the places its calls may write
@@ -2934,10 +2947,13 @@ impl<'r> Resolve<'r> {
                 .iter()
                 .filter(|p| !lost[0].contains(p.name.as_ref()))
                 .map(|p| {
-                    let held = if p.by_ref {
+                    // What a reference refers to may be written an object by
+                    // an alias, unless the declared type holds none.
+                    let held = holder_of(&p.ty);
+                    let held = if p.by_ref && !matches!(&held, Holder::Classes(c) if c.is_empty()) {
                         Holder::Unknown
                     } else {
-                        holder_of(&p.ty)
+                        held
                     };
                     (p.name.as_ref(), held)
                 })
@@ -2946,6 +2962,18 @@ impl<'r> Resolve<'r> {
                 && !lost[0].contains(name)
             {
                 level.base.insert(name, holder_of(ty));
+            }
+            if let Some(held) = self.captured
+                && let Some(closure) = self.summary.closures.first()
+                && let Some(captures) = &closure.captures
+            {
+                for (name, _) in captures.iter().filter(|(_, by_ref)| !by_ref) {
+                    if !lost[0].contains(name.as_str())
+                        && let Some(holder) = held(name)
+                    {
+                        level.base.insert(name.as_str(), holder);
+                    }
+                }
             }
         }
         let mut levels = vec![level];
@@ -3182,6 +3210,22 @@ impl CallContext for Level<'_> {
         match place {
             Some(place) => self.value_holder(&place.root, &place.steps),
             None => Holder::Unknown,
+        }
+    }
+
+    fn elements(&self, at: &ArgAt, place: Option<&Place>) -> Holder {
+        if let Some(place) = place
+            && let Some(name) = place_variable(place)
+            && !self.made.contains_key(name.as_str())
+            && let Some(Declared::Param { ty, .. }) = self.params.get(name.as_str())
+        {
+            return elements_holder_of(ty);
+        }
+        match self.argument(at, place) {
+            none @ Holder::Classes(_) if matches!(&none, Holder::Classes(c) if c.is_empty()) => {
+                none
+            }
+            _ => Holder::Unknown,
         }
     }
 
@@ -3531,6 +3575,30 @@ impl<'r> Level<'r> {
             ),
             Origin::New(None) | Origin::Anonymous(None) => (Holder::Made(None), false),
             Origin::Anonymous(Some(name)) => (Holder::Made(Some(vec![name.clone()])), false),
+            Origin::Constant(name) => {
+                let (primary, fallback) = name.candidates();
+                let found = registry
+                    .global_constants()
+                    .get(primary)
+                    .or_else(|| fallback.and_then(|name| registry.global_constants().get(name)));
+                (found.map_or(Holder::Unknown, holder_of), false)
+            }
+            Origin::ClassConstant(class, constant) => {
+                let Some(classes) = named_classes(registry, self.class, class) else {
+                    return (Holder::Unknown, false);
+                };
+                let mut found = Vec::new();
+                for class in &classes {
+                    let Some(ty) = registry.lookup_const_type(class, constant) else {
+                        return (Holder::Unknown, false);
+                    };
+                    match holder_of(ty) {
+                        Holder::Classes(held) => found.extend(held),
+                        _ => return (Holder::Unknown, false),
+                    }
+                }
+                (Holder::Classes(found), false)
+            }
             Origin::Caught(classes) => {
                 let mut found = Vec::new();
                 for class in classes.iter() {
@@ -3807,7 +3875,8 @@ impl<'r> Level<'r> {
             | Root::Global(_)
             | Root::Value => Holder::Unknown,
         };
-        if steps.is_empty() {
+        // A value that holds no object at any depth has none in a part of it.
+        if steps.is_empty() || matches!(&start, Holder::Classes(classes) if classes.is_empty()) {
             return start;
         }
         let (Holder::Classes(classes) | Holder::Made(Some(classes))) = start else {

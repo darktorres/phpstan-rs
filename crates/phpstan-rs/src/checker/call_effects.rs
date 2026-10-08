@@ -63,6 +63,12 @@ impl TypedCall<'_, '_> {
         holder_of(&self.checker.infer_expr(e, self.locals))
     }
 
+    /// What the scope knows of the object the variable `name` holds, for a
+    /// closure that captures it by value.
+    fn captured_holder(&self) -> impl Fn(&str) -> Option<Holder> + '_ {
+        |name| self.locals.get_var(name).map(holder_of)
+    }
+
     /// What running `e` may write, when it is a closure, an arrow function
     /// or a first-class callable, there or assigned there.
     fn closure_effect(&self, e: &ExprNode) -> Option<Effect> {
@@ -80,7 +86,11 @@ impl TypedCall<'_, '_> {
         )
         .then(|| {
             let summary = BodySummary::of_closure(arenas, id);
-            self.checker.registry.closure_effect(&summary, self.class())
+            self.checker.registry.closure_effect(
+                &summary,
+                self.class(),
+                Some(&self.captured_holder()),
+            )
         })
     }
 
@@ -90,7 +100,11 @@ impl TypedCall<'_, '_> {
         let closures = self.checker.shared_scope.closures.get(name)?;
         let mut effect = Effect::nothing();
         for closure in closures {
-            effect.join(&self.checker.registry.closure_effect(closure, self.class()));
+            effect.join(&self.checker.registry.closure_effect(
+                closure,
+                self.class(),
+                Some(&self.captured_holder()),
+            ));
             if effect.is_anything() {
                 break;
             }
@@ -322,6 +336,7 @@ impl Checker<'_> {
             },
             arguments: Box::new([]),
             places: Box::new([]),
+            objectless: Box::new([]),
             callables: Box::new([]),
         };
         let effect = {

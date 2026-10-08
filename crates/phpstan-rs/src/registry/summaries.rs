@@ -291,6 +291,10 @@ pub(crate) enum Origin {
     Closure,
     /// An exception a `catch` caught, of one of the classes.
     Caught(Box<[QualifiedName]>),
+    /// A global constant.
+    Constant(QualifiedName),
+    /// A class constant (an enum case too), the class as written.
+    ClassConstant(QualifiedName, Name),
 }
 
 impl Origin {
@@ -308,6 +312,15 @@ impl Origin {
             Origin::NoObject | Origin::Arithmetic | Origin::Closure
         )
     }
+}
+
+/// Whether the value `id` is no object and holds none at any depth.
+fn holds_no_object(arenas: &NodeArenas, id: ExprId) -> bool {
+    let Some(e) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+        return false;
+    };
+    !matches!(e.kind, ExprKind::ArrayLiteral(_))
+        && origins_of(arenas, id).is_some_and(|origins| origins.iter().all(Origin::runs_nothing))
 }
 
 /// Where the value `e` evaluates to comes from; `None` when that is not
@@ -443,6 +456,22 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
             ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
                 vec![Origin::Closure]
             }
+            ExprKind::Name(name) => {
+                let name = arenas.qualified_name(name)?;
+                let written = name.written.trim_start_matches('\\');
+                // A magic constant is a string or an integer.
+                if written.len() > 4 && written.starts_with("__") && written.ends_with("__") {
+                    vec![Origin::NoObject]
+                } else {
+                    vec![Origin::Constant(name.clone())]
+                }
+            }
+            ExprKind::ClassConstFetch(StaticTarget::Name(class), constant) => {
+                vec![Origin::ClassConstant(
+                    (**class).clone(),
+                    constant.name.clone(),
+                )]
+            }
             ExprKind::Grouping(_)
             | ExprKind::ErrorSuppress(_)
             | ExprKind::Destructure(..)
@@ -450,7 +479,6 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
             | ExprKind::DynamicStaticCall(..)
             | ExprKind::ClassConstFetch(..)
             | ExprKind::DynamicClassConstFetch(..)
-            | ExprKind::Name(_)
             | ExprKind::Eval(_)
             | ExprKind::Include(..)
             | ExprKind::Yield(..)
@@ -636,6 +664,9 @@ pub(crate) struct CallWrites {
     /// Where each argument is passed.
     pub(crate) arguments: Box<[ArgAt]>,
     pub(crate) places: Box<[(ArgAt, Place)]>,
+    /// The arguments that are no place and hold no object at any depth: a
+    /// literal, a constant, a `::class` name.
+    pub(crate) objectless: Box<[ArgAt]>,
     pub(crate) callables: Box<[(ArgAt, Callable)]>,
 }
 
@@ -1309,6 +1340,7 @@ impl Summarizer {
             callee,
             arguments: Box::new([]),
             places: Box::new([]),
+            objectless: Box::new([]),
             callables: Box::new([]),
         });
     }
@@ -1381,6 +1413,7 @@ impl Summarizer {
         let mut spread = false;
         let mut arguments = Vec::new();
         let mut places = Vec::new();
+        let mut objectless = Vec::new();
         let mut callables = Vec::new();
         for (at, arg) in args.iter().enumerate() {
             spread |= arg.spread;
@@ -1395,12 +1428,15 @@ impl Summarizer {
             }
             if let Some(place) = Place::of(arenas, arg.value) {
                 places.push((at, place));
+            } else if holds_no_object(arenas, arg.value) {
+                objectless.push(at);
             }
         }
         self.scope.calls.push(CallWrites {
             callee,
             arguments: arguments.into_boxed_slice(),
             places: places.into_boxed_slice(),
+            objectless: objectless.into_boxed_slice(),
             callables: callables.into_boxed_slice(),
         });
     }
@@ -2159,6 +2195,8 @@ syntax::canonical_enum!(Origin {
     Anonymous(name),
     Closure,
     Caught(classes),
+    Constant(name),
+    ClassConstant(class, constant),
 });
 
 syntax::canonical_enum!(ArgAt {
@@ -2182,6 +2220,7 @@ syntax::canonical_struct!(CallWrites {
     callee,
     arguments,
     places,
+    objectless,
     callables,
 });
 
