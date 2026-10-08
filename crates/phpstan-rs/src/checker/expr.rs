@@ -58,6 +58,14 @@ fn bare_name_literal_type(name: &str) -> Type {
         "true" => Type::bool_literal(true),
         "false" => Type::bool_literal(false),
         "null" => Type::null(),
+        // The parser leaves a magic constant a bare name; its value is a
+        // string, or the line, whatever the source around it.
+        "__dir__" | "__file__" => {
+            Type::string().with_string_accessory(types::AccessoryKind::NonEmptyString)
+        }
+        "__function__" | "__method__" | "__class__" | "__trait__" | "__namespace__"
+        | "__property__" => Type::string(),
+        "__line__" => Type::int_range(Some(1), None),
         _ => Type::mixed(),
     }
 }
@@ -4611,7 +4619,7 @@ impl<'a> Checker<'a> {
                     closure: true,
                     ..crate::checker::shared_scope::SharedScope::of(
                         self.registry,
-            arenas,
+                        arenas,
                         body,
                         uses,
                         Some((

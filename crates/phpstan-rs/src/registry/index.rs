@@ -1310,10 +1310,9 @@ fn define_constant(
     // exists purely so the declaration type-checks, and was never meant
     // to be read literally. This project has no dedicated magic-constant
     // `ExprNode` kind (a bare `__DIR__`/`__LINE__`/... reference parses as
-    // an ordinary `ExprKind::Name`, already `mixed` via
-    // `bare_name_literal_type`'s default arm) - excluding them here
-    // protects that existing, already-correct "don't know" behavior
-    // from being overwritten by the stub's placeholder.
+    // an ordinary `ExprKind::Name`, typed by `bare_name_literal_type`) -
+    // excluding them here protects that from being overwritten by the
+    // stub's placeholder.
     if [
         "__DIR__",
         "__FILE__",
