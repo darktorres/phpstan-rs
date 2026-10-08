@@ -3314,7 +3314,7 @@ struct Level<'r> {
     // For an arrow function or a first-class callable, which take every
     // variable around them by value: what the code that wrote it knows of
     // the object a variable it does not write holds.
-    outer: Option<&'r dyn Fn(&str) -> Option<Holder>>,
+    outer: Option<CapturedHolders<'r>>,
 }
 
 impl CallContext for Level<'_> {

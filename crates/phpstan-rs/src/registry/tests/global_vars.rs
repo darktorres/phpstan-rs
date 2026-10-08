@@ -634,3 +634,46 @@ fn a_scope_that_gains_an_include_naming_no_file_changes_every_global() {
     );
     assert_eq!(names, ["mode", "other"]);
 }
+
+#[test]
+fn a_function_writing_an_element_of_globals_adds_a_site() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x';"),
+        ("b.php", "<?php function f() { $GLOBALS['mode'] = 1; }"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("'x'|1"));
+}
+
+#[test]
+fn a_function_unsetting_an_element_of_globals_adds_a_site() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x';"),
+        ("b.php", "<?php function f() { unset($GLOBALS['mode']); }"),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("'x'|null"));
+}
+
+#[test]
+fn a_function_extracting_into_what_it_imports_writes_it() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x';"),
+        (
+            "b.php",
+            "<?php function f(array $a) { global $mode; extract($a); }",
+        ),
+    ]);
+    assert_eq!(scoped(&registry, 0, "mode").as_deref(), Some("mixed"));
+}
+
+#[test]
+fn a_top_level_extract_makes_every_variable_of_its_scope_unbounded() {
+    let registry = build_with_files(&[
+        ("a.php", "<?php $mode = 'x'; extract($_GET);"),
+        ("b.php", "<?php $mode = 1;"),
+    ]);
+    assert_eq!(
+        scoped(&registry, 0, "mode"),
+        global_type(&registry, "mode").map(ToString::to_string)
+    );
+    assert_eq!(scoped(&registry, 1, "mode").as_deref(), Some("1"));
+}
