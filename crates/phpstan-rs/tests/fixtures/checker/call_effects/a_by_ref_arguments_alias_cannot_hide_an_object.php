@@ -14,6 +14,7 @@ final class Writer
     }
 }
 
+/** @param array<int, mixed> $items */
 function stash(array &$items): void
 {
     $items[] = new Writer();
@@ -36,6 +37,7 @@ function anArrayNothingFilledHoldsNoObject(): void
     assertType('1', Writer::$seen);
 }
 
+/** @param array<int, mixed> $items */
 function aByRefParameterTheBodyFilledMayHoldAnObject(array &$items): void
 {
     $items[] = new Writer();
