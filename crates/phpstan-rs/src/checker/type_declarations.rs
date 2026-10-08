@@ -132,7 +132,7 @@ impl<'a> Checker<'a> {
         let Some(shape) = shape(hint, arenas) else {
             return;
         };
-        self.check_type_version_support(&shape, position, span);
+        self.check_type_version_support(hint, arenas, &shape, position, span);
         match shape {
             Shape::Single(atom) => self.check_type_position(atom, position, span),
             Shape::Nullable(inner) => {
@@ -184,7 +184,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_type_version_support(&mut self, shape: &Shape, position: TypePosition, span: Span) {
+    fn check_type_version_support(
+        &mut self,
+        hint: &TypeHint,
+        arenas: &syntax::ast::NodeArenas,
+        shape: &Shape,
+        position: TypePosition,
+        span: Span,
+    ) {
         if self.registry.php_versions.is_none() {
             return;
         }
@@ -288,7 +295,10 @@ impl<'a> Checker<'a> {
                 "null"
             };
             self.report_type_declaration(
-                format!("Standalone {which} types are supported only on PHP 8.2 and later."),
+                format!(
+                    "Type {} uses {which} as a standalone type, which is supported only on PHP 8.2 and later.",
+                    hint.to_string_with(arenas)
+                ),
                 span,
                 format!("{which}Type.standaloneNotSupported"),
             );
