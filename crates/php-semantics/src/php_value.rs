@@ -82,6 +82,12 @@ impl PhpState {
         }
     }
 
+    /// Remove a variable binding without invalidating a reference cell that
+    /// may still be reachable through another local or an array element.
+    pub fn unset_local(&mut self, name: &[u8]) {
+        self.locals.remove(&Bytes(name.to_vec()));
+    }
+
     pub fn bind_reference(&mut self, left: Bytes, right: Bytes) {
         let reference = match self.locals.get(&right) {
             Some(Binding::Reference(id)) => *id,
@@ -328,6 +334,26 @@ mod tests {
                 .unwrap(),
             Some(PhpValue::Int(3))
         );
+    }
+
+    #[test]
+    fn reference_rebinding_and_unset_preserve_remaining_aliases() {
+        let mut state = PhpState::new();
+        state.set_local(b("left"), PhpValue::Int(1));
+        state.set_local(b("right"), PhpValue::Int(2));
+        state.bind_reference(b("alias"), b("left"));
+        state.bind_reference(b("alias"), b("right"));
+        state.set_local(b("left"), PhpValue::Int(3));
+
+        assert_eq!(state.local(b"left"), Some(PhpValue::Int(3)));
+        assert_eq!(state.local(b"alias"), Some(PhpValue::Int(2)));
+        assert_eq!(state.local(b"right"), Some(PhpValue::Int(2)));
+
+        state.unset_local(b"right");
+        assert_eq!(state.local(b"right"), None);
+        assert_eq!(state.local(b"alias"), Some(PhpValue::Int(2)));
+        state.set_local(b("alias"), PhpValue::Int(4));
+        assert_eq!(state.local(b"alias"), Some(PhpValue::Int(4)));
     }
 
     #[test]
