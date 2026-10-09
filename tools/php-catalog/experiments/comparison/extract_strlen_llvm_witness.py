@@ -207,7 +207,7 @@ def main() -> None:
     if re.search(r"store ptr %\d+, ptr %\d+", weak_function) is None:
         raise SystemExit("weak string parser no longer writes the parsed string through dest")
     if re.search(
-        r"%\d+ = load ptr, ptr %12,[^\n]*\n\s*store ptr %\d+, ptr %\d+",
+        r"(%\d+) = load ptr, ptr %12,[^\n]*\n\s*store ptr %\d+, ptr \1(?:, align \d+)?",
         weak_function,
     ) is None:
         raise SystemExit("weak string parser no longer writes its parsed string to the dest argument")
