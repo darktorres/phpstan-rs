@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v6 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Fifty-seven
+explicit exceptional continuations and host-supplied joins/widening. Fifty-eight
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
