@@ -188,6 +188,23 @@ mod embedded_catalog_tests {
                 0xe6, 0x91, 0x95, 0x05,
             ])
         );
+        let source_id = source_record.id().expect("source evidence encodes");
+        let llvm_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| record.rule_version.0 == b"php-8.5.4-clang-21.1.8-strlen-return-v1")
+            .expect("strlen Return has linked-module evidence");
+        assert_eq!(llvm_record.kind, EvidenceKind::SourceTransfer);
+        assert!(llvm_record.dependencies.contains(&source_id));
+        assert_eq!(
+            llvm_record.source_digest,
+            Digest([
+                0xe3, 0x42, 0x7c, 0xe8, 0x1f, 0x98, 0xf9, 0xa0, 0x4d, 0xb3, 0xe0, 0x4c, 0xe8, 0x22,
+                0xc3, 0xe0, 0xf1, 0xc7, 0x31, 0x13, 0x7f, 0x0d, 0x63, 0xe0, 0x44, 0x0f, 0x86, 0x2b,
+                0x1e, 0x61, 0xc9, 0x3e,
+            ])
+        );
         let exact = target_set_from_php_releases(Some(PhpReleaseRange::new(
             PhpRelease::new(8, 5, 4),
             PhpRelease::new(8, 5, 4),
@@ -197,7 +214,10 @@ mod embedded_catalog_tests {
         assert!(selection.uncovered.is_empty());
         assert_eq!(selection.variants[0].applicability, Applicability::Yes);
         assert!(selection.variants[0].graph.coverage.iter().any(|coverage| {
-            coverage.domain == Domain::Return && matches!(coverage.coverage, Coverage::Closed)
+            coverage.domain == Domain::Return
+                && matches!(coverage.coverage, Coverage::Closed)
+                && coverage.evidence.contains(&source_id)
+                && coverage.evidence.contains(&llvm_record.id().unwrap())
         }));
 
         let minor = target_set_from_php_releases(Some(PhpReleaseRange::new(

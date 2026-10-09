@@ -8,10 +8,15 @@ use php_semantics::{
 use sha2::{Digest as _, Sha256};
 
 fn main() {
-    let source_path = env::args_os()
-        .nth(1)
+    let mut args = env::args_os().skip(1);
+    let source_path = args
+        .next()
         .map(std::path::PathBuf::from)
         .expect("pass the locked PHP 8.5.4 Zend/zend_builtin_functions.c path");
+    let witness_path = args
+        .next()
+        .map(std::path::PathBuf::from)
+        .expect("pass the extracted zif_strlen LLVM witness JSON path");
     let source = fs::read(&source_path).expect("read pinned strlen source");
     let source_digest: [u8; 32] = Sha256::digest(&source).into();
     let source_text = std::str::from_utf8(&source).expect("PHP source is UTF-8");
@@ -35,7 +40,7 @@ fn main() {
         source_text[strlen_start..function_end].contains("RETVAL_LONG(ZSTR_LEN(s));"),
         "strlen source no longer returns the byte length of its parsed string"
     );
-    let evidence = EvidenceRecord {
+    let source_evidence = EvidenceRecord {
         kind: EvidenceKind::SourceTransfer,
         source_digest: Digest(source_digest),
         site: Some(Bytes(
@@ -45,7 +50,63 @@ fn main() {
         assumptions: vec![],
         dependencies: vec![],
     };
-    let evidence_id = evidence.id().expect("evidence encodes");
+    let source_evidence_id = source_evidence.id().expect("source evidence encodes");
+    let witness: serde_json::Value =
+        serde_json::from_slice(&fs::read(&witness_path).expect("read linked LLVM witness"))
+            .expect("LLVM witness is JSON");
+    assert_eq!(witness["schema"], 1, "unsupported LLVM witness schema");
+    assert_eq!(
+        witness["source"]["sha256"].as_str(),
+        Some("0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"),
+        "LLVM witness refers to a different source file"
+    );
+    assert_eq!(witness["source"]["return_line"].as_u64(), Some(382));
+    assert_eq!(
+        witness["compiler"].as_str(),
+        Some("Ubuntu clang version 21.1.8 (6ubuntu1)")
+    );
+    assert_eq!(
+        witness["mapping"]["zend_string_length_field_index"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(witness["mapping"]["loaded_as"].as_str(), Some("i64"));
+    for fact in [
+        "debug_line_matches_source_return",
+        "stored_as_return_zval_payload",
+        "parameter_failure_path_present",
+    ] {
+        assert_eq!(
+            witness["mapping"][fact].as_bool(),
+            Some(true),
+            "missing LLVM witness fact: {fact}"
+        );
+    }
+    let module_digest = decode_digest(
+        witness["linked_bitcode"]["sha256"]
+            .as_str()
+            .expect("linked bitcode digest"),
+    );
+    assert_eq!(
+        module_digest,
+        [
+            0xe3, 0x42, 0x7c, 0xe8, 0x1f, 0x98, 0xf9, 0xa0, 0x4d, 0xb3, 0xe0, 0x4c, 0xe8, 0x22,
+            0xc3, 0xe0, 0xf1, 0xc7, 0x31, 0x13, 0x7f, 0x0d, 0x63, 0xe0, 0x44, 0x0f, 0x86, 0x2b,
+            0x1e, 0x61, 0xc9, 0x3e,
+        ],
+        "linked module differs from the measured PHP 8.5.4 Clang profile"
+    );
+    let llvm_evidence = EvidenceRecord {
+        kind: EvidenceKind::SourceTransfer,
+        source_digest: Digest(module_digest),
+        site: Some(Bytes(
+            b"php-cli.bc:zif_strlen:line-382:_zend_string.field[2]->return-zval.i64".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-return-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![source_evidence_id],
+    };
+    let llvm_evidence_id = llvm_evidence.id().expect("LLVM evidence encodes");
+    let return_evidence = vec![source_evidence_id, llvm_evidence_id];
     let graph = BehaviorGraph {
         schema_major: SCHEMA_MAJOR,
         entry: 0,
@@ -76,7 +137,11 @@ fn main() {
                 },
                 precision: Precision::Exact,
                 dependencies: vec![],
-                evidence: vec![evidence_id],
+                evidence: if domain == Domain::Return {
+                    return_evidence.clone()
+                } else {
+                    vec![source_evidence_id]
+                },
                 assumptions: vec![],
             })
             .collect(),
@@ -104,8 +169,21 @@ fn main() {
             id: graph_id,
             graph,
         }],
-        evidence: vec![(evidence_id, evidence)],
+        evidence: vec![
+            (source_evidence_id, source_evidence),
+            (llvm_evidence_id, llvm_evidence),
+        ],
     };
     manifest.validate().expect("generated manifest validates");
     println!("{}", manifest.to_json().expect("manifest is JSON"));
+}
+
+fn decode_digest(text: &str) -> [u8; 32] {
+    assert_eq!(text.len(), 64, "digest must contain 64 hexadecimal digits");
+    let mut digest = [0; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16)
+            .expect("digest contains only hexadecimal digits");
+    }
+    digest
 }

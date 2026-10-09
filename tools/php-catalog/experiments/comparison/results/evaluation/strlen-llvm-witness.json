@@ -1,0 +1,30 @@
+{
+  "compiler": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+  "ir_witness": [
+    "call void @zend_wrong_parameter_error(i32 noundef %182, i32 noundef %183, ptr noundef %184, i32 noundef %185, ptr noundef %186), !dbg !59",
+    "%192 = getelementptr inbounds nuw %struct._zend_string, ptr %191, i32 0, i32 2, !dbg !60",
+    "%193 = load i64, ptr %192, align 8, !dbg !60",
+    "store i64 %193, ptr %195, align 8, !dbg !60"
+  ],
+  "linked_bitcode": {
+    "extracted_bitcode_sha256": "bf6696c0e9952198988cbdaa765b88d409e57ce25d9538877ea9d535dbf8922e",
+    "extracted_ir_sha256": "9e5f1e2bfe8ae4bb40dd318359d013210ab168dc157ae08186fbf5018f19a5ee",
+    "function": "zif_strlen",
+    "sha256": "e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e"
+  },
+  "mapping": {
+    "debug_line_matches_source_return": true,
+    "loaded_as": "i64",
+    "parameter_failure_path_present": true,
+    "stored_as_return_zval_payload": true,
+    "zend_string_length_field_index": 2
+  },
+  "schema": 1,
+  "source": {
+    "expression": "RETVAL_LONG(ZSTR_LEN(s))",
+    "function": "zif_strlen",
+    "path": "Zend/zend_builtin_functions.c",
+    "return_line": 382,
+    "sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+  }
+}
