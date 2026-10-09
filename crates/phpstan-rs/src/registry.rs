@@ -35,6 +35,7 @@ mod per_class;
 mod property_topology;
 pub mod provenance;
 mod purity;
+mod reach_memo;
 pub mod reflection_attribute;
 mod relation;
 mod resolve;
@@ -87,14 +88,15 @@ pub(crate) use effects::{
 pub(crate) use file_decls::{FileDecls, FileMember};
 pub(crate) use guard::{Guard, GuardExpr};
 pub(crate) use ids::{ClassId, FnId, IdSource, MethodRef, PropertyRef};
-pub(crate) use per_class::PerClass;
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
+pub(crate) use per_class::PerClass;
 use property_topology::PropertyTopology;
 pub(crate) use provenance::Origin;
 pub use provenance::Provenance;
 pub(crate) use purity::{PurityResults, collect_impure_points, is_non_overridable};
+pub(crate) use reach_memo::ReachMemo;
 pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
 pub(crate) use type_node::{mentions_mixed, parse_type_node};
 
@@ -271,6 +273,10 @@ pub struct Registry {
     id_generation: u32,
     #[serde(skip)]
     relation_generation: Option<u64>,
+    /// The answers to the hierarchy queries of effect resolution for the
+    /// graph as it is; emptied whenever the graph can change.
+    #[serde(skip)]
+    reach_memo: ReachMemo,
     #[serde(skip)]
     purity_results: PurityResults,
     // Signatures completed by finishing passes, keyed by declaration ID.
@@ -1234,6 +1240,7 @@ impl Registry {
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
         self.relation_generation = None;
+        self.reach_memo = ReachMemo::default();
         self.deferred_types_ready = false;
         self.deferred_function_results.clear();
         self.deferred_class_results.clear();
@@ -1247,6 +1254,7 @@ impl Registry {
     pub(crate) fn advance_relation_generation(&mut self) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         self.relation_generation = Some(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        self.reach_memo = ReachMemo::default();
     }
 
     /// Whether the finishing passes have resolved declarations that are

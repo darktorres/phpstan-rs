@@ -1174,6 +1174,7 @@ impl Registry {
             running_code.insert(Name::from(name), owners);
         }
         self.builtin_methods_running_code = running_code;
+        self.reach_memo = super::ReachMemo::default();
         let registry: &Registry = self;
         let functions: Vec<(&Name, &FunctionReflection)> = registry
             .own_functions_by_id()
@@ -1375,8 +1376,8 @@ impl Registry {
     /// descendant's, or `__call`'s where there is none.
     pub(crate) fn virtual_method_effect(&self, class: &str, method: &str) -> Effect {
         let mut effect = Effect::nothing();
-        for owner in self.implementations(class, method) {
-            effect.join(&self.settled_effect(&owner));
+        for owner in self.implementations(class, method).iter() {
+            effect.join(&self.settled_effect(owner));
             if effect.is_anything() {
                 break;
             }
@@ -1387,7 +1388,14 @@ impl Registry {
     /// The declarations a call of `method` on an object that may be of
     /// `class` may run: `class`'s and each descendant's, `__call` where a
     /// class has none, and `class`'s alone when no override can reach it.
-    fn implementations(&self, class: &str, method: &str) -> Vec<DeclKey> {
+    fn implementations(&self, class: &str, method: &str) -> Arc<[DeclKey]> {
+        self.reach_memo.implementations.get_or_compute(
+            (class.to_ascii_lowercase(), method.to_ascii_lowercase()),
+            || self.compute_implementations(class, method).into(),
+        )
+    }
+
+    fn compute_implementations(&self, class: &str, method: &str) -> Vec<DeclKey> {
         if let Some((owner, sig)) = self.lookup_method_with_owner(class, method)
             && is_non_overridable(self, class, &owner, method, sig)
         {
@@ -1395,7 +1403,9 @@ impl Registry {
         }
         let mut out: Vec<DeclKey> = Vec::new();
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
-        for candidate in std::iter::once(Name::from(class)).chain(self.subclasses(class)) {
+        for candidate in
+            std::iter::once(Name::from(class)).chain(self.subclasses_shared(class).iter().cloned())
+        {
             let key = match self.lookup_method_with_owner(&candidate, method) {
                 Some((owner, sig)) => self.reached(&owner, method, sig),
                 None => match self.lookup_method_with_owner(&candidate, "__call") {
@@ -1609,11 +1619,18 @@ impl Registry {
     /// the builtin's methods is taken as `receiver` resolves it, which may
     /// be an ancestor's, and from each class below `receiver` declaring it
     /// with a body.
-    fn overrides_of_builtin(&self, receiver: &str, builtin: &str) -> Vec<DeclKey> {
+    fn overrides_of_builtin(&self, receiver: &str, builtin: &str) -> Arc<[DeclKey]> {
+        self.reach_memo.overrides_of_builtin.get_or_compute(
+            (receiver.to_ascii_lowercase(), builtin.to_ascii_lowercase()),
+            || self.compute_overrides_of_builtin(receiver, builtin).into(),
+        )
+    }
+
+    fn compute_overrides_of_builtin(&self, receiver: &str, builtin: &str) -> Vec<DeclKey> {
         if self.class(builtin).is_none() {
             return Vec::new();
         }
-        let below = self.subclasses(receiver);
+        let below = self.subclasses_shared(receiver);
         let below_lower: FxHashSet<&str> = below.iter().map(Name::lower).collect();
         let mut out = Vec::new();
         for method in self.method_names(builtin) {
@@ -1665,7 +1682,15 @@ impl Registry {
     /// Every loaded declaration of `method` with a body, and every `__call`
     /// and `__callStatic`, and the builtin ones that run code passed to
     /// them: what a call on an object or a class not known may run.
-    fn methods_named(&self, method: &str) -> Vec<DeclKey> {
+    fn methods_named(&self, method: &str) -> Arc<[DeclKey]> {
+        self.reach_memo
+            .methods_named
+            .get_or_compute(method.to_ascii_lowercase(), || {
+                self.compute_methods_named(method).into()
+            })
+    }
+
+    fn compute_methods_named(&self, method: &str) -> Vec<DeclKey> {
         let mut out: Vec<DeclKey> = Vec::new();
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
         let declaring = self
@@ -1699,8 +1724,8 @@ impl Registry {
     /// What calling `method` on an object of a class not known may write.
     pub(crate) fn method_effect_by_name(&self, method: &str) -> Effect {
         let mut effect = Effect::nothing();
-        for key in self.methods_named(method) {
-            effect.join(&self.settled_effect(&key));
+        for key in self.methods_named(method).iter() {
+            effect.join(&self.settled_effect(key));
             if effect.is_anything() {
                 break;
             }
@@ -1710,6 +1735,7 @@ impl Registry {
 
     pub(crate) fn rebuild_methods_by_name(&mut self) {
         self.methods_by_name = Arc::new(methods_by_name(self));
+        self.reach_memo = super::ReachMemo::default();
     }
 
     /// The names (lowercased) of the builtin methods that run code passed to
@@ -2355,7 +2381,8 @@ impl Reach<'_> {
                 out.extend(
                     registry
                         .overrides_of_builtin(receiver, owner)
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|key| (key, transfer.clone())),
                 );
             }
@@ -2444,10 +2471,10 @@ impl Reach<'_> {
             Holder::Classes(classes) if classes.iter().all(has_method) => classes
                 .iter()
                 .flat_map(|class| {
-                    registry
-                        .implementations(class, method)
-                        .into_iter()
-                        .map(|key| (key, Transfer::Other(Some(class.clone()))))
+                    let keys = registry.implementations(class, method);
+                    keys.iter()
+                        .map(|key| (key.clone(), Transfer::Other(Some(class.clone()))))
+                        .collect::<Vec<_>>()
                 })
                 .collect(),
             Holder::Made(Some(classes)) if classes.iter().all(has_method) => classes
@@ -2457,7 +2484,8 @@ impl Reach<'_> {
                 .collect(),
             _ => registry
                 .methods_named(method)
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(|key| (key, Transfer::Other(None)))
                 .collect(),
         }
@@ -2573,7 +2601,8 @@ impl Reach<'_> {
                             out.extend(
                                 registry
                                     .implementations(class, method)
-                                    .into_iter()
+                                    .iter()
+                                    .cloned()
                                     .map(|key| (key, transfer(Some(class)))),
                             );
                         }
@@ -2590,7 +2619,8 @@ impl Reach<'_> {
                         for class in classes {
                             out.extend(
                                 self.every_method(class)
-                                    .into_iter()
+                                    .iter()
+                                    .cloned()
                                     .map(|key| (key, transfer(Some(class)))),
                             );
                         }
@@ -2599,7 +2629,8 @@ impl Reach<'_> {
                         out.extend(
                             self.registry
                                 .methods_named(method)
-                                .into_iter()
+                                .iter()
+                                .cloned()
                                 .map(|key| (key, transfer(None))),
                         );
                     }
@@ -2612,7 +2643,8 @@ impl Reach<'_> {
                 None => self
                     .registry
                     .methods_named(method.as_ref()?)
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|key| (key, Transfer::Static))
                     .collect(),
             },
@@ -2963,11 +2995,22 @@ impl Reach<'_> {
 
     /// Every method an object of `class`, or of a descendant, has: what a
     /// call with a computed name may run.
-    fn every_method(&self, class: &str) -> Vec<DeclKey> {
+    fn every_method(&self, class: &str) -> Arc<[DeclKey]> {
+        self.registry
+            .reach_memo
+            .every_method
+            .get_or_compute(class.to_ascii_lowercase(), || {
+                self.compute_every_method(class).into()
+            })
+    }
+
+    fn compute_every_method(&self, class: &str) -> Vec<DeclKey> {
         let registry = self.registry;
         let mut out = Vec::new();
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
-        for candidate in std::iter::once(Name::from(class)).chain(registry.subclasses(class)) {
+        for candidate in std::iter::once(Name::from(class))
+            .chain(registry.subclasses_shared(class).iter().cloned())
+        {
             let Some(owners) = registry.method_owners(candidate.as_str()) else {
                 continue;
             };
@@ -3003,7 +3046,8 @@ impl Reach<'_> {
             let Some(method) = method else {
                 out.extend(
                     self.every_method(target)
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|key| (key, Transfer::Static)),
                 );
                 continue;
@@ -4109,7 +4153,7 @@ impl<'r> Level<'r> {
                         // `__call`, or a method of a class below.
                         _ => {
                             let mut found = Holder::Classes(Vec::new());
-                            for key in registry.implementations(class, method) {
+                            for key in registry.implementations(class, method).iter() {
                                 let Some((owner, sig)) = key.class.as_deref().and_then(|owner| {
                                     registry.lookup_method_with_owner(owner, &key.member)
                                 }) else {

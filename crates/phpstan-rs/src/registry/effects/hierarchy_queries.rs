@@ -98,11 +98,11 @@ const SHAPES: &str = r#"<?php
 fn an_overridable_method_reaches_each_override_below() {
     let registry = registry(SHAPES);
     assert_eq!(
-        names(registry.implementations("Base", "name")),
+        names(registry.implementations("Base", "name").to_vec()),
         ["base::name", "tiny::name"]
     );
     assert_eq!(
-        names(registry.implementations("Base", "area")),
+        names(registry.implementations("Base", "area").to_vec()),
         ["base::area", "circle::area"]
     );
 }
@@ -111,11 +111,11 @@ fn an_overridable_method_reaches_each_override_below() {
 fn a_method_nothing_overrides_reaches_only_itself() {
     let registry = registry(SHAPES);
     assert_eq!(
-        names(registry.implementations("Circle", "area")),
+        names(registry.implementations("Circle", "area").to_vec()),
         ["circle::area"]
     );
     assert_eq!(
-        names(registry.implementations("Tiny", "name")),
+        names(registry.implementations("Tiny", "name").to_vec()),
         ["tiny::name"]
     );
 }
@@ -124,7 +124,7 @@ fn a_method_nothing_overrides_reaches_only_itself() {
 fn a_missing_method_reaches_the_call_method_of_each_class() {
     let registry = registry(SHAPES);
     assert_eq!(
-        names(registry.implementations("Magic", "missing")),
+        names(registry.implementations("Magic", "missing").to_vec()),
         ["magic::__call"]
     );
     assert!(registry.implementations("Square", "missing").is_empty());
@@ -134,11 +134,11 @@ fn a_missing_method_reaches_the_call_method_of_each_class() {
 fn a_name_on_an_unknown_object_reaches_every_declaration_and_every_call_method() {
     let registry = registry(SHAPES);
     assert_eq!(
-        names(registry.methods_named("area")),
+        names(registry.methods_named("area").to_vec()),
         ["base::area", "circle::area", "magic::__call", "shape::area"]
     );
     assert_eq!(
-        names(registry.methods_named("NAME")),
+        names(registry.methods_named("NAME").to_vec()),
         ["base::name", "magic::__call", "tiny::name"]
     );
 }
@@ -147,11 +147,11 @@ fn a_name_on_an_unknown_object_reaches_every_declaration_and_every_call_method()
 fn the_overrides_of_a_builtin_are_taken_as_the_receiver_resolves_them() {
     let registry = registry(SHAPES);
     assert_eq!(
-        names(registry.overrides_of_builtin("Base", "Shape")),
+        names(registry.overrides_of_builtin("Base", "Shape").to_vec()),
         ["base::area", "circle::area"]
     );
     assert_eq!(
-        names(registry.overrides_of_builtin("Circle", "Shape")),
+        names(registry.overrides_of_builtin("Circle", "Shape").to_vec()),
         ["circle::area"]
     );
     assert!(registry.overrides_of_builtin("Base", "Missing").is_empty());
@@ -183,7 +183,7 @@ const GRAPH: &str = r#"<?php
 "#;
 
 fn all_implementations(registry: &Registry, class: &str, method: &str) -> Vec<String> {
-    let found = names(registry.implementations(class, method));
+    let found = names(registry.implementations(class, method).to_vec());
     assert_eq!(
         found,
         names(registry.reference_implementations(class, method))
@@ -230,7 +230,7 @@ fn a_method_only_a_tag_declares_reaches_the_call_method() {
         all_implementations(&registry, "Tagged", "ghost"),
         ["tagged::__call"]
     );
-    let found = names(registry.methods_named("GHOST"));
+    let found = names(registry.methods_named("GHOST").to_vec());
     assert_eq!(found, names(registry.reference_methods_named("GHOST")));
     assert_eq!(found, ["tagged::__call"]);
 }
@@ -238,7 +238,7 @@ fn a_method_only_a_tag_declares_reaches_the_call_method() {
 #[test]
 fn method_names_differing_in_case_are_the_same_method() {
     let registry = registry(GRAPH);
-    let found = names(registry.methods_named("dothing"));
+    let found = names(registry.methods_named("dothing").to_vec());
     assert_eq!(found, names(registry.reference_methods_named("dothing")));
     assert_eq!(
         found,
@@ -259,13 +259,13 @@ fn every_method_of_a_class_and_the_classes_below_it() {
     };
     for class in ["Both", "Root", "Greeter", "Row", "Missing"] {
         assert_eq!(
-            names(reach.every_method(class)),
+            names(reach.every_method(class).to_vec()),
             names(reach.reference_every_method(class)),
             "{class}"
         );
     }
     assert_eq!(
-        names(reach.every_method("Both")),
+        names(reach.every_method("Both").to_vec()),
         ["both::root", "subboth::root"]
     );
     assert!(reach.every_method("Missing").is_empty());
@@ -282,17 +282,17 @@ fn the_overrides_of_an_interface_are_the_receivers_methods() {
         ("Both", "Missing"),
     ] {
         assert_eq!(
-            names(registry.overrides_of_builtin(receiver, builtin)),
+            names(registry.overrides_of_builtin(receiver, builtin).to_vec()),
             names(registry.reference_overrides_of_builtin(receiver, builtin)),
             "{receiver} {builtin}"
         );
     }
     assert_eq!(
-        names(registry.overrides_of_builtin("Both", "Root")),
+        names(registry.overrides_of_builtin("Both", "Root").to_vec()),
         ["both::root", "subboth::root"]
     );
     assert_eq!(
-        names(registry.overrides_of_builtin("SubBoth", "Root")),
+        names(registry.overrides_of_builtin("SubBoth", "Root").to_vec()),
         ["subboth::root"]
     );
 }
@@ -387,4 +387,22 @@ fn a_target_set_keeps_each_target_once_in_the_order_added() {
     // A name in another case is the same declaration.
     set.push(method_key(&Name::from("c1"), "M"), Transfer::Other(None));
     assert_eq!(set.into_vec(), expected);
+}
+
+#[test]
+fn an_answer_is_computed_once_and_dropped_when_the_graph_can_change() {
+    let mut registry = registry(SHAPES);
+    let first = registry.implementations("Shape", "area");
+    assert!(Arc::ptr_eq(
+        &first,
+        &registry.implementations("sHAPE", "AREA")
+    ));
+    assert!(Arc::ptr_eq(
+        &registry.subclasses_shared("Shape"),
+        &registry.subclasses_shared("shape")
+    ));
+    registry.advance_relation_generation();
+    let second = registry.implementations("Shape", "area");
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert_eq!(*first, *second);
 }

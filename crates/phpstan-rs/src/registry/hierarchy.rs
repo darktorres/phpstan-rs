@@ -343,7 +343,8 @@ impl Registry {
         signature: std::sync::Arc<super::Lazy<FunctionReflection>>,
     ) -> bool {
         self.invalidate_deferred_class_result(method.class());
-        self.class_method_results.insert_if_absent(method, signature)
+        self.class_method_results
+            .insert_if_absent(method, signature)
     }
 
     pub(crate) fn method_is_abstract(&self, class: &str, method: &str) -> bool {
@@ -662,16 +663,30 @@ impl Registry {
     /// Every class-like extending or implementing `class`, directly or
     /// transitively - `is_subclass_of`'s converse, without `class`.
     pub(crate) fn subclasses(&self, class: &str) -> Vec<Name> {
+        self.descendants(class, false).to_vec()
+    }
+
+    /// `subclasses`, computed once for the graph as it is.
+    pub(crate) fn subclasses_shared(&self, class: &str) -> Arc<[Name]> {
         self.descendants(class, false)
     }
 
     /// `subclasses`, and every class-like using `class` as a trait or
     /// descending from one that does - `all_ancestor_names`'s converse.
     pub(crate) fn inheritors(&self, class: &str) -> Vec<Name> {
-        self.descendants(class, true)
+        self.descendants(class, true).to_vec()
     }
 
-    fn descendants(&self, class: &str, with_traits: bool) -> Vec<Name> {
+    fn descendants(&self, class: &str, with_traits: bool) -> Arc<[Name]> {
+        self.reach_memo
+            .descendants
+            .get_or_compute((class.to_ascii_lowercase(), with_traits), || {
+                self.walk_descendants(class, with_traits)
+            })
+    }
+
+    /// The classes below `class`, found by walking the graph.
+    pub(crate) fn walk_descendants(&self, class: &str, with_traits: bool) -> Arc<[Name]> {
         let mut seen: FxHashSet<String> = FxHashSet::default();
         seen.insert(class.to_ascii_lowercase());
         let mut result = Vec::new();
@@ -690,7 +705,7 @@ impl Registry {
                 }
             }
         }
-        result
+        result.into()
     }
 
     /// Is `class` (or any ancestor it `extends`) tagged
