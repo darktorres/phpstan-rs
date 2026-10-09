@@ -304,8 +304,8 @@ impl Settled {
 /// a key with them in any case finds the declaration.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DeclKey {
-    pub(in crate::registry) class: Option<String>,
-    pub(in crate::registry) member: String,
+    pub(in crate::registry) class: Option<Arc<str>>,
+    pub(in crate::registry) member: Arc<str>,
 }
 
 /// The kind of synthetic property hook represented by a property slot.
@@ -437,8 +437,8 @@ impl DeclKey {
     /// The key of the top level of `file`.
     fn file(file: FileId) -> DeclKey {
         DeclKey {
-            class: Some(FILE_CLASS.to_string()),
-            member: file.index().to_string(),
+            class: Some(FILE_CLASS.into()),
+            member: file.index().to_string().into(),
         }
     }
 
@@ -446,8 +446,8 @@ impl DeclKey {
     /// arbitrary content.
     fn unresolved_include() -> DeclKey {
         DeclKey {
-            class: Some(FILE_CLASS.to_string()),
-            member: "unresolved".to_string(),
+            class: Some(FILE_CLASS.into()),
+            member: "unresolved".into(),
         }
     }
 
@@ -464,7 +464,7 @@ impl DeclKey {
     fn closure(&self, index: u32) -> DeclKey {
         DeclKey {
             class: self.class.clone(),
-            member: format!("{}{{closure#{index}}}", self.member),
+            member: format!("{}{{closure#{index}}}", self.member).into(),
         }
     }
 
@@ -473,7 +473,7 @@ impl DeclKey {
     fn builtin_name(&self) -> String {
         match &self.class {
             Some(class) => format!("{class}::{}", self.member),
-            None => self.member.clone(),
+            None => self.member.to_string(),
         }
     }
 }
@@ -486,7 +486,7 @@ fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
     Some((
         DeclKey {
             class: key.class.clone(),
-            member: key.member[..start].to_string(),
+            member: key.member[..start].into(),
         },
         ordinal,
     ))
@@ -495,14 +495,14 @@ fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
 fn function_key(name: &str) -> DeclKey {
     DeclKey {
         class: None,
-        member: name.to_ascii_lowercase(),
+        member: name.to_ascii_lowercase().into(),
     }
 }
 
 fn method_key(class: &str, method: &str) -> DeclKey {
     DeclKey {
-        class: Some(class.to_ascii_lowercase()),
-        member: method.to_ascii_lowercase(),
+        class: Some(class.to_ascii_lowercase().into()),
+        member: method.to_ascii_lowercase().into(),
     }
 }
 
@@ -527,8 +527,8 @@ fn hook_member(property: Option<&str>, set: bool) -> String {
 /// `set`.
 fn hook_key(class: &str, property: &str, set: bool) -> DeclKey {
     DeclKey {
-        class: Some(class.to_ascii_lowercase()),
-        member: hook_member(Some(property), set),
+        class: Some(class.to_ascii_lowercase().into()),
+        member: hook_member(Some(property), set).into(),
     }
 }
 
@@ -894,7 +894,7 @@ fn passes_arguments(callee: &Callee, key: &DeclKey) -> bool {
     ) {
         return false;
     }
-    if key.member != "__call" && key.member != "__callstatic" {
+    if &*key.member != "__call" && &*key.member != "__callstatic" {
         return true;
     }
     match callee {
@@ -1069,7 +1069,7 @@ impl Registry {
         match key.class.as_deref() {
             None => self
                 .function_ids
-                .get(key.member.as_str())
+                .get(&*key.member)
                 .copied()
                 .map_or_else(|| EffectId::Named(key.clone()), EffectId::Function),
             Some(class) if key.member.starts_with('$') => {
@@ -1079,7 +1079,7 @@ impl Registry {
                         (true, PropertyHookKind::Set),
                     ]
                     .into_iter()
-                    .find(|(set, _)| hook_member(Some(property), *set) == key.member)
+                    .find(|(set, _)| hook_member(Some(property), *set) == *key.member)
                     .map(|(_, kind)| (property, kind))
                 });
                 let Some((property, kind)) = hook else {
@@ -1095,7 +1095,7 @@ impl Registry {
             }
             Some(class) => {
                 let method = self.class_ids.get(class).and_then(|id| {
-                    self.member_slot(class, key.member.as_str())
+                    self.member_slot(class, &key.member)
                         .map(|slot| crate::registry::MethodRef::new(*id, slot))
                 });
                 method.map_or_else(|| EffectId::Named(key.clone()), EffectId::Method)
@@ -1280,10 +1280,10 @@ impl Registry {
     fn declaration_effect(&self, key: &DeclKey) -> Effect {
         match &key.class {
             Some(class) => {
-                if self.class(class.as_str()).is_none() {
+                if self.class(class).is_none() {
                     return Effect::anything();
                 }
-                let Some(sig) = self.lookup_own_method(class, key.member.as_str()) else {
+                let Some(sig) = self.lookup_own_method(class, &key.member) else {
                     return Effect::anything();
                 };
                 if sig.is_stub {
@@ -1294,7 +1294,7 @@ impl Registry {
                     Effect::anything()
                 }
             }
-            None => match self.lookup_function(key.member.as_str()) {
+            None => match self.lookup_function(&key.member) {
                 Some(sig) if sig.is_stub => self.stub_effect(key, sig),
                 _ => Effect::anything(),
             },
@@ -1322,7 +1322,7 @@ impl Registry {
     fn declaration(&self, key: &DeclKey) -> Option<&FunctionReflection> {
         match &key.class {
             Some(class) => self.lookup_method(class, &key.member),
-            None => self.lookup_function(key.member.as_str()),
+            None => self.lookup_function(&key.member),
         }
     }
 
@@ -2342,7 +2342,7 @@ impl Reach<'_> {
         // A method of a class whose objects run what they were made with may
         // run anything; the constructor that is making one runs what the
         // table says it runs, and nothing of what it keeps.
-        if key.member != "__construct"
+        if &*key.member != "__construct"
             && match &entry {
                 Some(name) => builtin_runs::holding(name),
                 None => key
@@ -2374,7 +2374,7 @@ impl Reach<'_> {
                 Transfer::Same => self.ctx.class().map(Name::from).into_iter().collect(),
                 Transfer::Other(Some(class)) => vec![class.clone()],
                 Transfer::Other(None) | Transfer::Made | Transfer::Static => {
-                    vec![Name::from(owner.as_str())]
+                    vec![Name::from(&**owner)]
                 }
             };
             for receiver in &receivers {
@@ -3089,8 +3089,8 @@ impl Registry {
         captured: Option<CapturedHolders<'_>>,
     ) -> Effect {
         let holder = DeclKey {
-            class: class.map(str::to_ascii_lowercase),
-            member: String::new(),
+            class: class.map(|class| class.to_ascii_lowercase().into()),
+            member: "".into(),
         };
         let resolve = Resolve {
             registry: self,

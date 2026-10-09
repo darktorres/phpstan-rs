@@ -17,7 +17,7 @@ fn names(keys: impl IntoIterator<Item = DeclKey>) -> Vec<String> {
         .into_iter()
         .map(|key| match key.class {
             Some(class) => format!("{class}::{}", key.member),
-            None => key.member,
+            None => key.member.to_string(),
         })
         .collect();
     out.sort();
