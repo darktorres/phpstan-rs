@@ -28,6 +28,20 @@ $copy = [1]; $other = $copy; $other[0] = 2;
 ensure($copy === [1], 'array-copy');
 $cell = 1; $copy = [&$cell]; $other = $copy; $other[0] = 2;
 ensure($cell === 2 && $copy === [2], 'shared-reference-cell');
+$normalCell = 0; $normalSource = []; $normalSource['value'] =& $normalCell;
+$normalCopy = $normalSource;
+$normalResult = (function (&$value): int { $value = 3; return 7; })($normalCopy['value']);
+ensure($normalResult === 7 && $normalCell === 3 && $normalCopy['value'] === 3, 'array-ref-copy-normal-callback');
+$throwCell = 0; $throwSource = []; $throwSource['value'] =& $throwCell;
+$throwCopy = $throwSource; $cleanupValue = null;
+try {
+    try {
+        (function (&$value): void { $value = 4; throw new RuntimeException('callback'); })($throwCopy['value']);
+    } finally {
+        $cleanupValue = $throwCopy['value'];
+    }
+} catch (RuntimeException $e) {}
+ensure($throwCell === 4 && $throwCopy['value'] === 4 && $cleanupValue === 4, 'array-ref-copy-throw-cleanup');
 $coercions = 0;
 $stringable = new class($coercions) implements Stringable {
     private int $calls;
