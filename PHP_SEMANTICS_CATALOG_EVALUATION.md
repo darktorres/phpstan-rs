@@ -188,14 +188,16 @@ so it does not close F00 or substitute for independent review.
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 
 This audit found additional evaluation work beyond the earlier compiler/framework
-comparison: F00/F01 need reviewed contract and closure evidence; F02 needs
-source-to-graph linkage and normal/CALL behavior comparisons; F03 needs a
-working native summary/bridge path; F04 needs PhpFlowIR composition; F05 needs
-actual builtin-call execution; and F06 needs end-to-end cost and solver evidence.
-The concrete next dependency is to define and review the observable-trace
-contract, then use one locked 8.5.4 builtin slice to drive native import through
-graph validation and a checker call. Until that exists, producer/solver choice
-remains provisional.
+comparison. The minimum F04 value/reference fixture task is complete, but its
+broader C22 lowering work remains. F00 needs independent contract review; F01
+needs broader branch fixtures and a calibrated host; F02 needs configured
+implicit-operation mapping plus source-derived graph linkage beyond the single
+`strlen` return witness; F03 needs a working native summary/bridge path; F05
+needs stateful checker integration across effects and exceptions; and F06 needs
+same-slice precision, cost, and solver evidence. The next dependency is an
+independently reviewed observable-trace contract, followed by one locked 8.5.4
+builtin slice driven from native import through graph validation and a checker
+call. Until that exists, producer/solver choice remains provisional.
 
 This is the full remaining Phase F evaluation set, not the full project-plan
 implementation. The plan's later phases (0–4) also retain their own open tasks

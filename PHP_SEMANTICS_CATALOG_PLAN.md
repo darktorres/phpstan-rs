@@ -7,7 +7,9 @@ compiler/framework campaign level. Stock and compact-layout SVF both hit the
 enforced 10 GiB limit on the actual minimal CLI link. Layout adaptation alone
 does not satisfy the reuse gate; copy/initializer misses and coverage-aware
 native capsules need investigation before further full-profile retries. CIR
-emission succeeded for only 44/523 C units. No Phase F task is DONE.
+emission succeeded for only 44/523 C units. The minimum F04 value/reference
+fixture set is complete; the Phase F gate remains open because F00–F03, F05,
+and F06 still lack their required closure evidence.
 
 This replaces the earlier outline and the catalog architecture in `PROFILE_DRILL_PIWIGO_20G.md`. The optimization ledger's scheduling remains unchanged: implementation of the deferred catalog is a separate project after O3 unless the user changes that order. The task sequence in §15 is this feature's implementation order, not a continuation of the optimization ledger.
 
