@@ -155,6 +155,7 @@ impl Type {
     }
 
     /// A union's members, or this type alone.
+    #[inline]
     pub fn union_members(&self) -> &[Type] {
         match self.repr() {
             Repr::Union(members) | Repr::BenevolentUnion(members) => members,
@@ -320,6 +321,7 @@ impl Type {
     /// Whether a `value-of`, `key-of`, offset access or class-constant
     /// reference, left for the registry to resolve, stands anywhere in
     /// this type.
+    #[inline]
     pub fn contains_deferred(&self) -> bool {
         self.0.flags() & crate::HAS_DEFERRED != 0
     }
@@ -811,6 +813,7 @@ impl Type {
     }
 
     /// PHPStan's `isNull()`.
+    #[inline]
     pub fn is_null(&self) -> TrinaryLogic {
         self.structural(Structural::Null)
     }
@@ -929,6 +932,7 @@ impl Type {
     }
 
     /// PHPStan's `isObject()`.
+    #[inline]
     pub fn is_object(&self) -> TrinaryLogic {
         self.structural(Structural::Object)
     }
@@ -1078,6 +1082,7 @@ impl Type {
     /// arguments: an object's, or an enum case's enum (with none, an
     /// enum case being an object of its enum). `None` for any other
     /// type.
+    #[inline]
     pub fn as_object(&self) -> Option<(&crate::Name, &[Type])> {
         match self.repr() {
             Repr::Object(class, args) => Some((class, args)),

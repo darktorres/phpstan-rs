@@ -204,27 +204,32 @@ impl Name {
     }
 
     /// `text_hash` of the name's text, made when the name was.
+    #[inline]
     pub fn text_hash(&self) -> u64 {
         self.0.hash
     }
 
     /// `folded_hash` of the name's text, made when the name was.
+    #[inline]
     pub fn folded_hash(&self) -> u64 {
         self.0.folded_hash
     }
 
+    #[inline]
     pub fn as_str(&self) -> &str {
         &self.0.text
     }
 
     /// Whether the two are one allocation: names of the same text that an
     /// interner made while one was alive are.
+    #[inline]
     pub fn same_allocation(&self, other: &Name) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
     /// The name in ASCII lowercase, PHP's key for class, function and
     /// method names.
+    #[inline]
     pub fn lower(&self) -> &str {
         self.0.lower.as_deref().unwrap_or(&self.0.text)
     }
@@ -363,11 +368,11 @@ impl serde::Serialize for Name {
 
 impl<'de> serde::Deserialize<'de> for Name {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Name, D::Error> {
-        if let Some(CacheNameContext::Decode(table)) =
-            CACHE_NAME_CONTEXT.with(|context| context.borrow().clone())
-        {
-            struct Index(CacheNameTable);
-            impl serde::de::Visitor<'_> for Index {
+        let decoding = CACHE_NAME_CONTEXT
+            .with(|context| matches!(&*context.borrow(), Some(CacheNameContext::Decode(_))));
+        if decoding {
+            struct Index<'t>(&'t CacheNameTable);
+            impl serde::de::Visitor<'_> for Index<'_> {
                 type Value = Name;
 
                 fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -380,7 +385,13 @@ impl<'de> serde::Deserialize<'de> for Name {
                     })
                 }
             }
-            return deserializer.deserialize_u32(Index(table));
+            return CACHE_NAME_CONTEXT.with(|context| {
+                let context = context.borrow();
+                let Some(CacheNameContext::Decode(table)) = &*context else {
+                    unreachable!("the context was a decoder a moment ago")
+                };
+                deserializer.deserialize_u32(Index(table))
+            });
         }
 
         struct Text;

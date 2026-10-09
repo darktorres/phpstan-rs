@@ -625,6 +625,7 @@ impl NodeArenas {
     }
 
     /// Reads a committed argument list from this file's arena.
+    #[inline]
     pub fn args(&self, range: ArgRange) -> &[Arg] {
         &self.args[local_range(range, self.args_base)]
     }
@@ -845,6 +846,7 @@ impl NodeArenas {
     }
 
     /// Resolves a single-name range used by compact expression variants.
+    #[inline]
     pub fn qualified_name(&self, range: &QualifiedNameRange) -> Option<&QualifiedName> {
         self.qualified_names(range).first()
     }
@@ -1129,6 +1131,7 @@ impl NodeArenas {
     }
 
     /// Looks up an expression in this file's expression arena.
+    #[inline]
     pub fn expr(&self, id: ExprId) -> Option<&ExprNode> {
         arena_get(&self.exprs, id, self.expr_base)
     }
@@ -1140,6 +1143,7 @@ impl NodeArenas {
     }
 
     /// Looks up a statement in this file's statement arena.
+    #[inline]
     pub fn stmt(&self, id: StmtId) -> Option<&StmtNode> {
         arena_get(&self.stmts, id, self.stmt_base)
     }
@@ -1152,6 +1156,7 @@ impl NodeArenas {
 
     /// Follows grouping and error-suppression wrappers to the expression
     /// they contain.
+    #[inline]
     pub fn peeled(&self, mut id: ExprId) -> Option<ExprId> {
         loop {
             match &self.expr(id)?.kind {
@@ -1162,6 +1167,7 @@ impl NodeArenas {
     }
 
     /// Looks up an expression's source span by its file-local arena id.
+    #[inline]
     pub fn expr_span(&self, id: ExprId) -> Option<Span> {
         let local = u32::from(id.into_raw()).checked_sub(self.expr_base)?;
         self.expr_spans.get(local as usize).copied()

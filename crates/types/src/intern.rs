@@ -68,6 +68,7 @@ impl Form<'_> {
         }
     }
 
+    #[inline]
     fn is_form_of(&self, stored: &Repr) -> bool {
         match self {
             Form::Owned(repr) => exact_eq(stored, &repr.as_ref()),
