@@ -169,6 +169,25 @@ mod embedded_catalog_tests {
     #[test]
     fn embedded_strlen_artifact_is_patch_exact_and_leaves_other_targets_uncovered() {
         let catalog = embedded_catalog();
+        let manifest = catalog.manifest();
+        let source_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| {
+                record.site.as_ref().is_some_and(|site| {
+                    site.0 == b"Zend/zend_builtin_functions.c:ZEND_FUNCTION(strlen):ZSTR_LEN(s)"
+                })
+            })
+            .expect("strlen entry retains its source transfer evidence");
+        assert_eq!(
+            source_record.source_digest,
+            Digest([
+                0x0d, 0x44, 0x77, 0x17, 0x0a, 0x78, 0x54, 0x01, 0x31, 0x89, 0x3a, 0x8c, 0xfc, 0xa2,
+                0xb9, 0xd1, 0x03, 0x3c, 0x79, 0xea, 0xb7, 0x54, 0xf9, 0xca, 0x3d, 0x85, 0xe0, 0x5a,
+                0xe6, 0x91, 0x95, 0x05,
+            ])
+        );
         let exact = target_set_from_php_releases(Some(PhpReleaseRange::new(
             PhpRelease::new(8, 5, 4),
             PhpRelease::new(8, 5, 4),

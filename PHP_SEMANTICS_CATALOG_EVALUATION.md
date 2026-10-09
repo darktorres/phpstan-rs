@@ -72,7 +72,10 @@ effects, callbacks, or exceptional state.
 The checker uses it only when every configured target scenario is definitely
 covered, and falls back on uncovered or Maybe-applicable ranges. This is
 concrete F05 progress, but it does not satisfy the full C24/C25 architecture
-or eliminate legacy effect handling.
+or eliminate legacy effect handling. A direct sentinel on the normal PHP
+8.5.4 runtime returns `0`, `3`, and `2` for `strlen("")`, `strlen("abc")`,
+and `strlen("é")`, respectively, confirming byte-length behavior. This is
+normal-runtime evidence only; it does not compare the CALL VM.
 
 The latest full run on October 9, 2026 (`cargo test -p phpstan-rs -p
 phpstan-rs-types -p phpstan-rs-semantics`) passes, including 1,201 checker
