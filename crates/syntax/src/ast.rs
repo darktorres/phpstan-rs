@@ -2268,7 +2268,7 @@ impl StaticTarget {
 /// what it refers to given the file's `namespace` and `use` statements
 /// (resolved by the parser as it reads the name). Derefs to the name as
 /// written.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct QualifiedName {
     pub written: Name,
     pub resolved: ResolvedName,
@@ -2276,7 +2276,7 @@ pub struct QualifiedName {
 }
 
 /// What a [`QualifiedName`] refers to.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ResolvedName {
     /// `self`, `parent` or `static`, a keyword type, or a name the
     /// resolution pass has not seen.

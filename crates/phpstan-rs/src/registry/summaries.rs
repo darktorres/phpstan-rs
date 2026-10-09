@@ -12,6 +12,7 @@
 //!   assigns anywhere, on `$this` or on a variable it made an instance of.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::hash::{Hash, Hasher};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
@@ -38,7 +39,7 @@ pub(crate) enum PurityCall {
 
 /// Where a write lands, as the body wrote it: a root, and the properties
 /// and elements walked from it, the root's first.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Place {
     pub(crate) root: Root,
     pub(crate) steps: Box<[Step]>,
@@ -59,7 +60,7 @@ pub(crate) enum Narrowing {
 }
 
 /// What a place starts from.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Root {
     /// `$this`.
     This,
@@ -78,7 +79,7 @@ pub(crate) enum Root {
 }
 
 /// One step from a place's root.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Step {
     /// `->p`; `None` for a computed name.
     Property(Option<Name>),
@@ -207,7 +208,7 @@ impl Made {
 }
 
 /// The object a method is called on, as far as the body shows it.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Receiver {
     /// `$this`.
     This,
@@ -225,7 +226,7 @@ pub(crate) enum Receiver {
 }
 
 /// What a call is to.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Callee {
     Function(QualifiedName),
     /// `$receiver->method()`; `None` for a computed method name.
@@ -268,7 +269,7 @@ pub(crate) enum Callee {
 }
 
 /// An operation on a value through which PHP may run the value's code.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Operation {
     /// An access to the property of the name, `None` for a computed one:
     /// `__get`, `__set`, `__isset` or `__unset` where it is magic.
@@ -291,7 +292,7 @@ pub(crate) enum Operation {
 }
 
 /// What an access does with a property or an element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Access {
     Read,
     Write,
@@ -328,6 +329,79 @@ pub(crate) enum Origin {
     ClassConstant(QualifiedName, Name),
     /// A value of this type, as an inline `@var` says.
     Declared(Type),
+}
+
+impl PartialEq for Narrowing {
+    fn eq(&self, other: &Narrowing) -> bool {
+        match (self, other) {
+            (Narrowing::NoObject, Narrowing::NoObject) => true,
+            (Narrowing::Instance(a), Narrowing::Instance(b)) => a == b,
+            (Narrowing::Declared(a), Narrowing::Declared(b)) => {
+                a.canonical_text() == b.canonical_text()
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Narrowing {}
+
+impl Hash for Narrowing {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Narrowing::NoObject => {}
+            Narrowing::Instance(classes) => classes.hash(state),
+            Narrowing::Declared(ty) => ty.canonical_text().hash(state),
+        }
+    }
+}
+
+impl PartialEq for Origin {
+    fn eq(&self, other: &Origin) -> bool {
+        match (self, other) {
+            (Origin::NoObject, Origin::NoObject)
+            | (Origin::Arithmetic, Origin::Arithmetic)
+            | (Origin::Closure, Origin::Closure) => true,
+            (Origin::Place(a), Origin::Place(b)) => a == b,
+            (Origin::Returned(a), Origin::Returned(b)) => a == b,
+            (Origin::New(a), Origin::New(b)) => a == b,
+            (Origin::Anonymous(a), Origin::Anonymous(b)) => a == b,
+            (Origin::Caught(a), Origin::Caught(b)) => a == b,
+            (Origin::Constant(a), Origin::Constant(b)) => a == b,
+            (Origin::ClassConstant(a, x), Origin::ClassConstant(b, y)) => a == b && x == y,
+            (Origin::Declared(a), Origin::Declared(b)) => a.canonical_text() == b.canonical_text(),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Origin {}
+
+impl Hash for Origin {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Origin::NoObject | Origin::Arithmetic | Origin::Closure => {}
+            Origin::Place(place) => place.hash(state),
+            Origin::Returned(callee) => callee.hash(state),
+            Origin::New(class) => class.hash(state),
+            Origin::Anonymous(name) => name.hash(state),
+            Origin::Caught(classes) => classes.hash(state),
+            Origin::Constant(name) => name.hash(state),
+            Origin::ClassConstant(class, constant) => {
+                class.hash(state);
+                constant.hash(state);
+            }
+            Origin::Declared(ty) => ty.canonical_text().hash(state),
+        }
+    }
+}
+
+fn hash_of(value: &impl Hash) -> u64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Origin {
@@ -1114,8 +1188,11 @@ struct Scope {
     computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
-    // The operations listed in `calls`, as printed.
-    implicit: FxHashSet<String>,
+    // The positions in `calls` of the implicit operations listed there,
+    // found by structure.
+    implicit: hashbrown::HashTable<u32>,
+    #[cfg(debug_assertions)]
+    implicit_printed: FxHashSet<String>,
 }
 
 impl Scope {
@@ -1133,14 +1210,7 @@ impl Scope {
         let mut origins: Vec<(Name, Box<[Origin]>)> = self
             .origins
             .into_iter()
-            .filter_map(|(name, origins)| {
-                let mut seen = FxHashSet::default();
-                let origins: Box<[Origin]> = origins?
-                    .into_iter()
-                    .filter(|origin| seen.insert(syntax::canonical::print(origin)))
-                    .collect();
-                Some((name, origins))
-            })
+            .filter_map(|(name, origins)| Some((name, distinct_origins(origins?))))
             .collect();
         origins.sort_by(|a, b| a.0.cmp(&b.0));
         WriteFacts {
@@ -1154,6 +1224,25 @@ impl Scope {
             calls: self.calls.into_boxed_slice(),
         }
     }
+}
+
+/// `origins` without the repeats, in order.
+fn distinct_origins(origins: Vec<Origin>) -> Box<[Origin]> {
+    let mut kept: Vec<Origin> = Vec::with_capacity(origins.len());
+    let mut seen: hashbrown::HashTable<u32> = hashbrown::HashTable::with_capacity(origins.len());
+    #[cfg(debug_assertions)]
+    let mut printed: FxHashSet<String> = FxHashSet::default();
+    for origin in origins {
+        let hash = hash_of(&origin);
+        let new = seen.find(hash, |&at| kept[at as usize] == origin).is_none();
+        #[cfg(debug_assertions)]
+        assert_eq!(new, printed.insert(syntax::canonical::print(&origin)));
+        if new {
+            seen.insert_unique(hash, kept.len() as u32, |&at| hash_of(&kept[at as usize]));
+            kept.push(origin);
+        }
+    }
+    kept.into_boxed_slice()
 }
 
 /// A scope the walk is inside of, while it walks a closure written in it.
@@ -1738,17 +1827,38 @@ impl Summarizer<'_> {
         {
             return;
         }
+        let hash = hash_of(&(on.as_deref(), &operation));
+        let calls = &self.scope.calls;
+        let implicit = |at: u32| match calls.get(at as usize).map(|call| &call.callee) {
+            Some(Callee::Implicit {
+                on: held,
+                operation: held_operation,
+            }) => held.as_deref() == on.as_deref() && *held_operation == operation,
+            _ => false,
+        };
+        let new = self.scope.implicit.find(hash, |&at| implicit(at)).is_none();
         let callee = Callee::Implicit {
             on: on.map(Vec::into_boxed_slice),
             operation,
         };
-        if !self
-            .scope
-            .implicit
-            .insert(syntax::canonical::print(&callee))
-        {
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            new,
+            self.scope
+                .implicit_printed
+                .insert(syntax::canonical::print(&callee))
+        );
+        if !new {
             return;
         }
+        let at = self.scope.calls.len() as u32;
+        let calls = &self.scope.calls;
+        self.scope.implicit.insert_unique(hash, at, |&at| {
+            match calls.get(at as usize).map(|call| &call.callee) {
+                Some(Callee::Implicit { on, operation }) => hash_of(&(on.as_deref(), operation)),
+                _ => 0,
+            }
+        });
         self.scope.calls.push(CallWrites {
             callee,
             arguments: Box::new([]),
@@ -2329,19 +2439,18 @@ fn after_if(arenas: &NodeArenas, branch: &IfStmt) -> Vec<(Name, Narrowing)> {
     let Some(first) = ways.next() else {
         return Vec::new();
     };
-    let others: Vec<Vec<String>> = ways
+    let others: Vec<FxHashSet<(&Name, &Narrowing)>> = ways
+        .as_slice()
+        .iter()
         .map(|way| {
             way.iter()
-                .map(|(name, narrowing)| format!("{name}:{}", syntax::canonical::print(narrowing)))
+                .map(|(name, narrowing)| (name, narrowing))
                 .collect()
         })
         .collect();
     first
         .into_iter()
-        .filter(|(name, narrowing)| {
-            let key = format!("{name}:{}", syntax::canonical::print(narrowing));
-            others.iter().all(|way| way.contains(&key))
-        })
+        .filter(|(name, narrowing)| others.iter().all(|way| way.contains(&(name, narrowing))))
         .collect()
 }
 
