@@ -196,6 +196,10 @@ update, `cargo test -p phpstan-rs` also passes:
 1,201 library tests, 3 binary tests, 45 CLI tests, plus file-cache, LSP-exit,
 scaling, stub-index, and version integration suites. `cargo check -p phpstan-rs`,
 edited-file rustfmt, and `git diff --check` pass.
+The weak/strict `strlen()` binding change is committed as `abb60829`; all seven
+`strlen_` gate fixtures and the updated 1,201-test checker library suite pass.
+This verifies explicit and magic `Stringable` acceptance in weak mode, union
+handling, strict-mode rejection, and non-Stringable rejection.
 
 ## Phase F gate-by-gate status
 
