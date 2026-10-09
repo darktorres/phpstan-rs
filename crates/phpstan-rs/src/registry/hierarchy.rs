@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use syntax::name::NameSet;
-use syntax::name::{FoldedMap, Name, NameMap};
+use syntax::name::{FoldKey, FoldedMap, Name, NameMap};
 
 use rayon::prelude::*;
 
@@ -284,13 +284,7 @@ impl Registry {
 
     pub(crate) fn method_result(&self, method: super::MethodRef) -> Option<&FunctionReflection> {
         self.deferred_class_result(method.class())
-            .and_then(|results| {
-                results
-                    .methods
-                    .iter()
-                    .find(|(candidate, _)| *candidate == method)
-                    .map(|(_, signature)| signature)
-            })
+            .and_then(|results| results.method(method))
             .or_else(|| {
                 self.class_method_results
                     .get(&method)
@@ -985,11 +979,13 @@ impl Registry {
         self.member_entries(class).map(|entry| &entry.name)
     }
 
-    pub(crate) fn lookup_own_method<K: TableKey + ?Sized>(
+    pub(crate) fn lookup_own_method<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
         &self,
         class: &K,
-        method: &str,
+        method: &M,
     ) -> Option<&FunctionReflection> {
+        // Three tables are asked for the name: its hash is read once.
+        let method = &syntax::name::Hashed::new(method);
         let (_, id) = self.class_ids.get_with_name(class)?;
         let id = *id;
         let info = self.class_by_id(id);

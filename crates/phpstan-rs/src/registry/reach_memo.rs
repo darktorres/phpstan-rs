@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effects::{DeclKey, EffectId, HookDeclaration, ImplicitKey, OperationKey, Transfer};
+use super::effects::{
+    DeclKey, EffectId, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer,
+};
 
 const SHARDS: usize = 16;
 
@@ -36,6 +38,26 @@ impl<K: Hash + Eq, V: Clone> OnceMap<K, V> {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             Arc::clone(map.entry(key).or_default())
+        };
+        cell.get_or_init(compute).clone()
+    }
+
+    /// `get_or_compute` for a key asked by reference: it is copied only when
+    /// no thread has made its value.
+    pub(crate) fn get_or_compute_ref<Q>(&self, key: &Q, compute: impl FnOnce() -> V) -> V
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
+    {
+        let shard = FxBuildHasher.hash_one(key) as usize % SHARDS;
+        let cell = {
+            let mut map = self.shards[shard]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match map.get(key) {
+                Some(cell) => Arc::clone(cell),
+                None => Arc::clone(map.entry(key.to_owned()).or_default()),
+            }
         };
         cell.get_or_init(compute).clone()
     }
@@ -74,6 +96,13 @@ pub(crate) struct ReachMemo {
     pub(crate) stub_holds_code: OnceMap<String, bool>,
     pub(crate) builtins: OnceMap<DeclKey, bool>,
     pub(crate) effect_ids: OnceMap<DeclKey, EffectId>,
+    /// Whether a shared set (by address; the cell keeps the set alive) holds
+    /// a declaration run with the caller's own `$this`.
+    pub(crate) shared_scoped: OnceMap<usize, (SharedTargets, bool)>,
+    /// What a shared set runs once its builtins are replaced by what they
+    /// run, by address and, for a set that depends on it, the calling
+    /// class; none when a builtin may run code not known.
+    pub(crate) shared_runs: OnceMap<(usize, Option<String>), (SharedTargets, Option<IdTargets>)>,
 }
 
 impl std::fmt::Debug for ReachMemo {

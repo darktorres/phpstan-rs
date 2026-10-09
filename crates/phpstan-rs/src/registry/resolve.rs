@@ -24,10 +24,37 @@ pub(crate) type ClassMethodResults = Vec<(MethodRef, FunctionReflection)>;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DeferredClassResults {
+    /// Ordered by slot.
     pub(crate) methods: ClassMethodResults,
     pub(crate) constants: DeferredClassConstantTypes,
     pub(crate) properties: ClassPropertyResults,
     pub(crate) types: ClassTypeResults,
+}
+
+impl DeferredClassResults {
+    pub(crate) fn new(
+        mut methods: ClassMethodResults,
+        constants: DeferredClassConstantTypes,
+        properties: ClassPropertyResults,
+        types: ClassTypeResults,
+    ) -> Self {
+        methods.sort_by_key(|(method, _)| method.slot());
+        DeferredClassResults {
+            methods,
+            constants,
+            properties,
+            types,
+        }
+    }
+
+    /// The result of `method`, a method of the class these are of.
+    pub(crate) fn method(&self, method: MethodRef) -> Option<&FunctionReflection> {
+        let at = self
+            .methods
+            .binary_search_by_key(&method.slot(), |(held, _)| held.slot())
+            .ok()?;
+        Some(&self.methods[at].1)
+    }
 }
 type ImportedTypeClassUpdate = (
     ClassId,
@@ -738,12 +765,7 @@ impl Registry {
                     let name = self.class_name_by_id(id)?.clone();
                     let (methods, constants, properties, types) =
                         self.resolved_deferred_class(&name)?;
-                    DeferredClassResults {
-                        methods,
-                        constants,
-                        properties,
-                        types,
-                    }
+                    DeferredClassResults::new(methods, constants, properties, types)
                 } else {
                     self.deferred_class_result(id)?.clone()
                 };
@@ -837,12 +859,9 @@ impl Registry {
         types::mark_relation_answers_provisional();
         let result = self.class_name_by_id(id).and_then(|name| {
             let (methods, constants, properties, types) = self.resolved_deferred_class(name)?;
-            Some(DeferredClassResults {
-                methods,
-                constants,
-                properties,
-                types,
-            })
+            Some(DeferredClassResults::new(
+                methods, constants, properties, types,
+            ))
         });
         RESOLVING_DEFERRED_CLASSES.with(|resolving| {
             resolving.borrow_mut().remove(&id);

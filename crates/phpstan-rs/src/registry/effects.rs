@@ -39,7 +39,8 @@
 //! after its property (`hook_member`).
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::hash::BuildHasher;
+use std::sync::{Arc, Mutex};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -476,6 +477,7 @@ impl PartialEq for DeclKey {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
             && (self.member_is_shared(other)
+                || (self.class.as_deref() == other.class.as_deref() && self.member == other.member)
                 || (self as &dyn DeclQuery) == (other as &dyn DeclQuery))
     }
 }
@@ -566,10 +568,40 @@ fn function_key(name: &str) -> DeclKey {
 }
 
 fn method_key(class: &str, method: &str) -> DeclKey {
-    DeclKey::new(
-        Some(class.to_ascii_lowercase().into()),
-        method.to_ascii_lowercase().into(),
-    )
+    DeclKey::new(Some(lowered_text(class)), lowered_text(method))
+}
+
+/// `text` lowercased, held once for every key that names it, so keys of
+/// one declaration share their strings and building one allocates nothing
+/// once its names are known.
+fn lowered_text(text: &str) -> Arc<str> {
+    const SHARDS: usize = 16;
+    const STACK: usize = 128;
+    static HELD: [Mutex<FxHashSet<Arc<str>>>; SHARDS] =
+        [const { Mutex::new(FxHashSet::with_hasher(rustc_hash::FxBuildHasher)) }; SHARDS];
+    let mut stack = [0u8; STACK];
+    let owned;
+    let lower: &str = if !text.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        text
+    } else if text.len() <= STACK {
+        let bytes = &mut stack[..text.len()];
+        bytes.copy_from_slice(text.as_bytes());
+        bytes.make_ascii_lowercase();
+        std::str::from_utf8(bytes).expect("lowercasing ASCII keeps UTF-8")
+    } else {
+        owned = text.to_ascii_lowercase();
+        &owned
+    };
+    let shard = rustc_hash::FxBuildHasher.hash_one(lower) as usize % SHARDS;
+    let mut held = HELD[shard]
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(found) = held.get(lower) {
+        return Arc::clone(found);
+    }
+    let made: Arc<str> = lower.into();
+    held.insert(Arc::clone(&made));
+    made
 }
 
 /// The name a hook of the property `property`, its `set` hook when `set`,
@@ -578,8 +610,10 @@ fn method_key(class: &str, method: &str) -> DeclKey {
 /// names differ only in case keep apart. `None` for any property's, which
 /// only the index of names (`methods_by_name`) lists.
 fn hook_member(property: Option<&str>, set: bool) -> String {
-    let mut member = String::from("$");
-    for c in property.unwrap_or_default().chars() {
+    let property = property.unwrap_or_default();
+    let mut member = String::with_capacity(property.len() + 8);
+    member.push('$');
+    for c in property.chars() {
         if c.is_ascii_uppercase() {
             member.push('^');
         }
@@ -593,7 +627,7 @@ fn hook_member(property: Option<&str>, set: bool) -> String {
 /// `set`.
 fn hook_key(class: &str, property: &str, set: bool) -> DeclKey {
     DeclKey::new(
-        Some(class.to_ascii_lowercase().into()),
+        Some(lowered_text(class)),
         hook_member(Some(property), set).into(),
     )
 }
@@ -931,10 +965,17 @@ struct Classification<'r> {
     /// body and, when it takes the call's arguments as its own, the call
     /// (`sites`).
     calls: Vec<(DeclKey, Transfer, Option<u32>)>,
+    /// The declarations calls run that no call's arguments reach, found
+    /// once for every body that asks the same.
+    sets: Vec<IdTargets>,
     sites: Vec<Site<'r>>,
     /// The parameters whose argument the body runs itself.
     runs: Vec<Condition>,
 }
+
+/// A set of declarations, by id, each with what its own `$this` is to the
+/// caller.
+pub(in crate::registry) type IdTargets = Arc<[(EffectId, Transfer)]>;
 
 /// The same classification after resolving all declaration edges to IDs,
 /// ready for the fixed-point worklist.
@@ -942,6 +983,7 @@ struct Classification<'r> {
 struct IdClassification<'r> {
     own: Effect,
     calls: Vec<(EffectId, Transfer, Option<u32>)>,
+    sets: Vec<IdTargets>,
     sites: Vec<IdSite<'r>>,
     runs: Vec<Condition>,
 }
@@ -971,6 +1013,7 @@ impl Classification<'_> {
         Classification {
             own,
             calls: Vec::new(),
+            sets: Vec::new(),
             sites: Vec::new(),
             runs: Vec::new(),
         }
@@ -1176,7 +1219,7 @@ fn classification_by_id<'r>(
         registry
             .reach_memo
             .effect_ids
-            .get_or_compute(key.clone(), || registry.effect_id_for(key))
+            .get_or_compute_ref(key, || registry.effect_id_for(key))
     };
     let calls = classification
         .calls
@@ -1212,6 +1255,7 @@ fn classification_by_id<'r>(
         IdClassification {
             own: classification.own,
             calls,
+            sets: classification.sets,
             sites,
             runs: classification.runs,
         },
@@ -1446,7 +1490,7 @@ impl Registry {
                 if self.class(&**class).is_none() {
                     return Effect::anything();
                 }
-                let Some(sig) = self.lookup_own_method(&**class, &key.member) else {
+                let Some(sig) = self.lookup_own_method(&**class, &*key.member) else {
                     return Effect::anything();
                 };
                 if sig.is_stub {
@@ -1667,7 +1711,7 @@ impl Registry {
     fn builtin_entry(&self, key: &DeclKey) -> Option<Arc<str>> {
         self.reach_memo
             .builtin_entries
-            .get_or_compute(key.clone(), || self.compute_builtin_entry(key))
+            .get_or_compute_ref(key, || self.compute_builtin_entry(key))
     }
 
     fn compute_builtin_entry(&self, key: &DeclKey) -> Option<Arc<str>> {
@@ -1804,7 +1848,7 @@ impl Registry {
         let is_builtin = self
             .reach_memo
             .builtins
-            .get_or_compute(key.clone(), || self.builtin(key).is_some());
+            .get_or_compute_ref(key, || self.builtin(key).is_some());
         if is_builtin { self.builtin(key) } else { None }
     }
 
@@ -2080,8 +2124,18 @@ fn settle(
     let mut callers: FxHashMap<&EffectId, Vec<&EffectId>> = FxHashMap::default();
     for (key, classification) in classified {
         let caller = key;
-        for (callee, _, _) in &classification.calls {
-            if classified.contains_key(callee) {
+        let set_callees = classification
+            .sets
+            .iter()
+            .flat_map(|set| set.iter())
+            .map(|(callee, _)| callee);
+        for callee in classification
+            .calls
+            .iter()
+            .map(|(callee, _, _)| callee)
+            .chain(set_callees)
+        {
+            if let Some((callee, _)) = classified.get_key_value(callee) {
                 callers.entry(callee).or_default().push(caller);
             }
         }
@@ -2099,6 +2153,13 @@ fn settle(
         for key in &wave {
             queued.remove(*key);
         }
+        // What each distinct set of declarations adds to a caller, read once
+        // for every caller of the wave that holds it.
+        let set_joins: FxHashMap<usize, std::sync::OnceLock<SetJoin>> = wave
+            .iter()
+            .flat_map(|key| classified[*key].sets.iter())
+            .map(|set| (set_address(set), std::sync::OnceLock::new()))
+            .collect();
         let updates: Vec<(&EffectId, Settled, Vec<EffectId>)> = wave
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
@@ -2115,7 +2176,11 @@ fn settle(
                     Some(found) => std::borrow::Cow::Borrowed(found),
                     None => std::borrow::Cow::Owned(outside(callee)),
                 };
-                for (callee, transfer, site) in &classification.calls {
+                let calls = classification
+                    .calls
+                    .iter()
+                    .map(|(callee, transfer, site)| (callee, transfer, *site));
+                for (callee, transfer, site) in calls {
                     let found = get(callee);
                     now.effect.join_transferred(&found.effect, transfer);
                     for condition in &found.runs {
@@ -2141,6 +2206,18 @@ fn settle(
                     }
                     if now.effect.is_anything() {
                         break;
+                    }
+                }
+                for set in &classification.sets {
+                    if now.effect.is_anything() {
+                        break;
+                    }
+                    let joined =
+                        set_joins[&set_address(set)].get_or_init(|| SetJoin::of(set, &get));
+                    now.effect.join(&joined.effect);
+                    now.runs.extend(joined.runs.iter().cloned());
+                    if joined.unknown {
+                        now.effect = Effect::unknown();
                     }
                 }
                 Some((key, now, read))
@@ -2174,6 +2251,49 @@ fn settle(
         }
     }
     settled
+}
+
+/// Where a set of declarations is held, which names it.
+fn set_address(set: &IdTargets) -> usize {
+    set.as_ptr() as usize
+}
+
+/// What a caller holding a set of declarations adds to its own effect: what
+/// each may write, as its own `$this` is to the caller, and the conditions
+/// of the closures among them; and whether one runs a parameter's argument,
+/// which no call passes.
+struct SetJoin {
+    effect: Effect,
+    runs: BTreeSet<Condition>,
+    unknown: bool,
+}
+
+impl SetJoin {
+    fn of<'g>(
+        set: &IdTargets,
+        get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
+    ) -> SetJoin {
+        let mut joined = SetJoin {
+            effect: Effect::nothing(),
+            runs: BTreeSet::new(),
+            unknown: false,
+        };
+        for (callee, transfer) in set.iter() {
+            let found = get(callee);
+            joined.effect.join_transferred(&found.effect, transfer);
+            for condition in &found.runs {
+                if callee.is_closure() {
+                    joined.runs.insert(condition.through(transfer));
+                } else {
+                    joined.unknown = true;
+                }
+            }
+            if joined.effect.is_anything() {
+                break;
+            }
+        }
+        joined
+    }
 }
 
 /// Adds to `into` what a callee (`callee`, its own `$this` what `transfer`
@@ -3811,6 +3931,7 @@ impl<'r> Resolve<'r> {
             origins,
             base: FxHashMap::default(),
             solved: Default::default(),
+            origin_holders: Default::default(),
             closure: false,
             bindings,
             lost: lost.clone(),
@@ -3862,6 +3983,9 @@ struct Level<'r> {
     // The object each variable of `origins` may hold, found once; filled
     // while it is found.
     solved: std::cell::RefCell<Option<FxHashMap<&'r str, Holder>>>,
+    // What each origin the scope's calls ask about holds, by where the origin
+    // is: the scope does not change while its calls are read.
+    origin_holders: std::cell::RefCell<FxHashMap<*const Origin, (Holder, bool)>>,
     // A closure's scope, which may be bound to any class's.
     closure: bool,
     // What its variables are bound to: its own bindings and, for a variable
@@ -3980,7 +4104,7 @@ impl CallContext for Level<'_> {
         let mut holder = Holder::Classes(Vec::new());
         let (mut this, mut other) = (false, false);
         for origin in origins {
-            let (found, same) = self.origin_holder(origin);
+            let (found, same) = self.operand_origin(origin);
             if same {
                 this = true;
             } else if found != Holder::Classes(Vec::new()) {
@@ -3997,6 +4121,24 @@ impl CallContext for Level<'_> {
 }
 
 impl<'r> Level<'r> {
+    /// What `origin`, one of a call's operand, holds, found once: the solved
+    /// variables it reads do not change after the scope is solved.
+    fn operand_origin(&self, origin: &Origin) -> (Holder, bool) {
+        if matches!(
+            origin,
+            Origin::NoObject | Origin::Arithmetic | Origin::Closure
+        ) {
+            return (Holder::Classes(Vec::new()), false);
+        }
+        let at: *const Origin = origin;
+        if let Some(found) = self.origin_holders.borrow().get(&at) {
+            return found.clone();
+        }
+        let found = self.origin_holder(origin);
+        self.origin_holders.borrow_mut().insert(at, found.clone());
+        found
+    }
+
     /// Notes that a call runs the variable `name`, its `$this` what
     /// `transfer` says, when it holds a parameter's argument all through the
     /// scope; whether it does.
@@ -4064,6 +4206,7 @@ impl<'r> Level<'r> {
             ctx: self,
         };
         let mut calls: Vec<(DeclKey, Transfer, Option<u32>)> = Vec::new();
+        let mut sets: Vec<IdTargets> = Vec::new();
         let mut sites: Vec<Site<'r>> = Vec::new();
         // The declarations run with no call's arguments, each once.
         let mut siteless: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
@@ -4072,14 +4215,20 @@ impl<'r> Level<'r> {
         let mut taken: FxHashSet<usize> = FxHashSet::default();
         for (call, targets) in facts.calls.iter().zip(reached) {
             let mut site: Option<u32> = None;
-            let entries: Box<dyn Iterator<Item = (DeclKey, Transfer)>> = match targets {
-                Targets::List(list) => Box::new(list.into_iter()),
+            let entries = match targets {
+                Targets::List(list) => list,
                 Targets::Shared(list) => {
                     debug_assert!(call.arguments.is_empty() && call.places.is_empty());
                     if !taken.insert(Arc::as_ptr(&list).cast::<(DeclKey, Transfer)>() as usize) {
                         continue;
                     }
-                    Box::new((0..list.len()).map(move |at| list[at].clone()))
+                    let Some(set) = self.shared_runs(&reach, list, call) else {
+                        return Classification::unknown();
+                    };
+                    if !set.is_empty() {
+                        sets.push(set);
+                    }
+                    continue;
                 }
             };
             for (key, transfer) in entries {
@@ -4125,9 +4274,57 @@ impl<'r> Level<'r> {
         Classification {
             own,
             calls,
+            sets,
             sites,
             runs: self.params_run.take(),
         }
+    }
+
+    /// What the shared set `list`, run by calls that pass no arguments,
+    /// runs once each builtin in it is replaced by what it runs, by id;
+    /// found once for every scope that asks the same.
+    fn shared_runs(
+        &self,
+        reach: &Reach<'_>,
+        list: SharedTargets,
+        call: &CallWrites,
+    ) -> Option<IdTargets> {
+        let registry = self.registry;
+        let memo = &registry.reach_memo;
+        let address = Arc::as_ptr(&list).cast::<(DeclKey, Transfer)>() as usize;
+        let (_, scoped) = memo.shared_scoped.get_or_compute(address, || {
+            let scoped = list.iter().any(|(_, transfer)| *transfer == Transfer::Same);
+            (Arc::clone(&list), scoped)
+        });
+        let class = if scoped {
+            self.class().map(str::to_owned)
+        } else {
+            None
+        };
+        let (_, runs) = memo.shared_runs.get_or_compute((address, class), || {
+            let runs = (|| {
+                let mut out: Vec<(EffectId, Transfer)> = Vec::new();
+                let mut seen: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
+                let id_of = |key: &DeclKey| {
+                    memo.effect_ids
+                        .get_or_compute_ref(key, || registry.effect_id_for(key))
+                };
+                for (key, transfer) in list.iter() {
+                    if let Some(sig) = registry.builtin_once(key) {
+                        for (key, transfer) in reach.builtin_runs(key, sig, transfer, call)? {
+                            if seen.insert((key.clone(), transfer.clone())) {
+                                out.push((id_of(&key), transfer));
+                            }
+                        }
+                    } else if seen.insert((key.clone(), transfer.clone())) {
+                        out.push((id_of(key), transfer.clone()));
+                    }
+                }
+                Some(IdTargets::from(out))
+            })();
+            (Arc::clone(&list), runs)
+        });
+        runs
     }
 
     /// What each argument of `call` runs when it is called, where the scope

@@ -1298,6 +1298,33 @@ impl<T: FoldKey + ?Sized> FoldKey for &T {
     }
 }
 
+/// A key whose hash is read once, for a lookup that asks several maps.
+pub struct Hashed<'a, K: FoldKey + ?Sized> {
+    key: &'a K,
+    hash: u64,
+}
+
+impl<'a, K: FoldKey + ?Sized> Hashed<'a, K> {
+    pub fn new(key: &'a K) -> Self {
+        Hashed {
+            hash: key.fold_hash(),
+            key,
+        }
+    }
+}
+
+impl<K: FoldKey + ?Sized> FoldKey for Hashed<'_, K> {
+    fn fold_hash(&self) -> u64 {
+        self.hash
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        self.key.is_folded_eq(stored)
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        self.key.eq_text_ignoring_case(stored)
+    }
+}
+
 /// Values by a name that ignores ASCII case: an entry keeps the spelling it
 /// was inserted with, and a lookup by a `Name` reads the hash the name
 /// holds, while one by text hashes it as it is, in any case.
