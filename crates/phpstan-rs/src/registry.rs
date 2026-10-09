@@ -31,6 +31,7 @@ mod name_context;
 mod name_map;
 mod name_table;
 mod packed;
+mod per_class;
 mod property_topology;
 pub mod provenance;
 mod purity;
@@ -86,6 +87,7 @@ pub(crate) use effects::{
 pub(crate) use file_decls::{FileDecls, FileMember};
 pub(crate) use guard::{Guard, GuardExpr};
 pub(crate) use ids::{ClassId, FnId, IdSource, MethodRef, PropertyRef};
+pub(crate) use per_class::PerClass;
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
@@ -488,14 +490,14 @@ pub struct Registry {
     // Methods introduced by traits or mixins, keyed by the class that has
     // the local MethodRef. ClassReflection.methods remains as-built.
     #[serde(skip)]
-    pub(crate) class_method_results: FxHashMap<MethodRef, Arc<Lazy<FunctionReflection>>>,
+    pub(crate) class_method_results: PerClass<MethodRef, Arc<Lazy<FunctionReflection>>>,
     #[serde(skip)]
     class_method_results_cache: NameTable<Members<FunctionReflection>>,
     // Hook facts inherited by a redeclared property, keyed by the class
     // declaration that owns the completed property. The underlying
     // PropertyReflection remains the as-built declaration.
     #[serde(skip)]
-    pub(crate) class_property_results: FxHashMap<PropertyRef, Arc<PropertyReflection>>,
+    pub(crate) class_property_results: PerClass<PropertyRef, Arc<PropertyReflection>>,
     #[serde(skip)]
     class_property_results_cache: NameTable<Vec<(Name, Arc<PropertyReflection>)>>,
     #[serde(skip)]
@@ -1092,11 +1094,9 @@ impl Registry {
             self.class_constant_results
                 .retain(|(class, _), _| *class != id);
             self.class_constant_names.remove(&id);
-            self.class_method_results
-                .retain(|method, _| method.class() != id);
+            self.class_method_results.remove_class(id);
             self.class_member_topology.remove(&id);
-            self.class_property_results
-                .retain(|property, _| property.class() != id);
+            self.class_property_results.remove_class(id);
             self.class_property_topology.remove(&id);
             self.class_type_results.remove(&id);
             self.imported_type_aliases.remove(&id);
@@ -1478,11 +1478,11 @@ impl Registry {
         self.class_constant_names
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_method_results
-            .retain(|method, _| !changed_class_ids.contains(&method.class()));
+            .retain_classes(|id| !changed_class_ids.contains(&id));
         self.class_member_topology
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_property_results
-            .retain(|property, _| !changed_class_ids.contains(&property.class()));
+            .retain_classes(|id| !changed_class_ids.contains(&id));
         self.imported_type_aliases
             .retain(|id, _| !changed_class_ids.contains(id));
         self.class_type_results
@@ -2406,11 +2406,11 @@ impl Registry {
             return self.class_method_results_cache.clone();
         }
         let mut results: NameTable<Members<FunctionReflection>> = NameTable::default();
-        for (method, signature) in &self.class_method_results {
+        for (method, signature) in self.class_method_results.iter() {
             let Some(class_name) = self.class_name_by_id(method.class()) else {
                 continue;
             };
-            let Some(entry) = self.member_entry_by_ref(*method) else {
+            let Some(entry) = self.member_entry_by_ref(method) else {
                 continue;
             };
             results
@@ -2438,11 +2438,11 @@ impl Registry {
             return self.class_property_results_cache.clone();
         }
         let mut results: NameTable<Vec<(Name, Arc<PropertyReflection>)>> = NameTable::default();
-        for (property_ref, property) in &self.class_property_results {
+        for (property_ref, property) in self.class_property_results.iter() {
             let Some(class_name) = self.class_name_by_id(property_ref.class()) else {
                 continue;
             };
-            let Some(property_name) = self.property_name_by_ref(*property_ref) else {
+            let Some(property_name) = self.property_name_by_ref(property_ref) else {
                 continue;
             };
             results
@@ -2690,26 +2690,15 @@ impl Registry {
             .drain()
             .map(|(id, names)| (id.with_generation(generation), names))
             .collect();
-        base.class_method_results = base
-            .class_method_results
-            .drain()
-            .map(|(method, signature)| {
-                (
-                    MethodRef::new(method.class().with_generation(generation), method.slot()),
-                    signature,
-                )
-            })
-            .collect();
+        base.class_method_results
+            .retag_classes(|id| id.with_generation(generation));
         base.class_member_topology = base
             .class_member_topology
             .drain()
             .map(|(id, topology)| (id.with_generation(generation), topology))
             .collect();
-        base.class_property_results = base
-            .class_property_results
-            .drain()
-            .map(|(property, value)| (property.with_generation(generation), value))
-            .collect();
+        base.class_property_results
+            .retag_classes(|id| id.with_generation(generation));
         base.class_property_topology = base
             .class_property_topology
             .drain()

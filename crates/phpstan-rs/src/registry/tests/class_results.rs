@@ -16,7 +16,7 @@ fn reference_methods(registry: &Registry, class: ClassId) -> Vec<(MethodRef, usi
             .class_method_results
             .iter()
             .filter(|(method, _)| method.class() == class)
-            .map(|(method, signature)| (*method, std::ptr::from_ref(signature.get()) as usize)),
+            .map(|(method, signature)| (method, std::ptr::from_ref(signature.get()) as usize)),
     );
     out.sort();
     out
@@ -38,7 +38,7 @@ fn reference_properties(registry: &Registry, class: ClassId) -> Vec<(PropertyRef
             .class_property_results
             .iter()
             .filter(|(property, _)| property.class() == class)
-            .map(|(property, value)| (*property, Arc::as_ptr(value) as usize)),
+            .map(|(property, value)| (property, Arc::as_ptr(value) as usize)),
     );
     out.sort();
     out

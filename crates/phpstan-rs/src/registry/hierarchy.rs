@@ -185,24 +185,14 @@ impl Registry {
                             .map(|reference| (reference, property))
                     })
             });
-        resolved.chain(
-            self.class_property_results
-                .iter()
-                .filter_map(move |(property, value)| {
-                    (property.class() == class).then_some((*property, value))
-                }),
-        )
+        resolved.chain(self.class_property_results.of_class(class))
     }
 
     pub(crate) fn raw_property_results_for_class(
         &self,
         class: super::ClassId,
     ) -> impl Iterator<Item = (super::PropertyRef, &Arc<PropertyReflection>)> {
-        self.class_property_results
-            .iter()
-            .filter_map(move |(property, value)| {
-                (property.class() == class).then_some((*property, value))
-            })
+        self.class_property_results.of_class(class)
     }
 
     /// Drops the memoized deferred result of `class`: it was resolved from
@@ -323,9 +313,8 @@ impl Registry {
             });
         resolved.chain(
             self.class_method_results
-                .iter()
-                .filter(move |(method, _)| method.class() == class)
-                .map(|(method, signature)| (*method, signature.get())),
+                .of_class(class)
+                .map(|(method, signature)| (method, signature.get())),
         )
     }
 
@@ -334,9 +323,8 @@ impl Registry {
         class: super::ClassId,
     ) -> impl Iterator<Item = (super::MethodRef, &FunctionReflection)> {
         self.class_method_results
-            .iter()
-            .filter(move |(method, _)| method.class() == class)
-            .map(|(method, signature)| (*method, signature.get()))
+            .of_class(class)
+            .map(|(method, signature)| (method, signature.get()))
     }
 
     pub(crate) fn set_method_result(
@@ -354,15 +342,8 @@ impl Registry {
         method: super::MethodRef,
         signature: std::sync::Arc<super::Lazy<FunctionReflection>>,
     ) -> bool {
-        use std::collections::hash_map::Entry;
         self.invalidate_deferred_class_result(method.class());
-        match self.class_method_results.entry(method) {
-            Entry::Vacant(entry) => {
-                entry.insert(signature);
-                true
-            }
-            Entry::Occupied(_) => false,
-        }
+        self.class_method_results.insert_if_absent(method, signature)
     }
 
     pub(crate) fn method_is_abstract(&self, class: &str, method: &str) -> bool {
