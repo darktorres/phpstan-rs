@@ -183,6 +183,42 @@ impl Effect {
         }
     }
 
+    /// Adds what `other` writes when called with `transfer`, as
+    /// `self.join(&other.transferred(transfer))` does, without building the
+    /// transferred effect.
+    pub(crate) fn join_transferred(&mut self, other: &Effect, transfer: &Transfer) -> bool {
+        let Some(added) = &other.0 else {
+            return self.join(&Effect::anything());
+        };
+        let Some(storages) = &mut self.0 else {
+            return false;
+        };
+        let before = storages.len();
+        for storage in added {
+            match (storage, transfer) {
+                (Storage::Own(prop), Transfer::Other(class)) => {
+                    storages.insert(Storage::Property {
+                        class: class.clone(),
+                        prop: prop.clone(),
+                    });
+                }
+                (Storage::Own(_), Transfer::Made) => {}
+                (Storage::Own(prop), Transfer::Static) => {
+                    storages.insert(Storage::Property {
+                        class: None,
+                        prop: prop.clone(),
+                    });
+                }
+                (storage, _) => {
+                    if !storages.contains(storage) {
+                        storages.insert(storage.clone());
+                    }
+                }
+            }
+        }
+        storages.len() != before
+    }
+
     /// This effect, written by a call whose callee's own `$this` is the
     /// object `transfer` says.
     pub(crate) fn transferred(&self, transfer: &Transfer) -> Effect {
@@ -2076,12 +2112,12 @@ fn settle(
                 let mut now = before.clone();
                 let mut read: Vec<EffectId> = Vec::new();
                 let get = |callee: &EffectId| match settled.get(callee) {
-                    Some(found) => found.clone(),
-                    None => outside(callee),
+                    Some(found) => std::borrow::Cow::Borrowed(found),
+                    None => std::borrow::Cow::Owned(outside(callee)),
                 };
                 for (callee, transfer, site) in &classification.calls {
                     let found = get(callee);
-                    now.effect.join(&found.effect.transferred(transfer));
+                    now.effect.join_transferred(&found.effect, transfer);
                     for condition in &found.runs {
                         if callee.is_closure() {
                             // What a closure the body wrote runs of the body's
@@ -2145,13 +2181,13 @@ fn settle(
 /// as `site`, the call, passes it: `get` gives what a declaration may write,
 /// and `read` gets each one read.
 #[allow(clippy::too_many_arguments)]
-fn run_passed(
+fn run_passed<'g>(
     registry: &Registry,
     site: Option<&IdSite<'_>>,
     callee: &EffectId,
     transfer: &Transfer,
     condition: &Condition,
-    get: &impl Fn(&EffectId) -> Settled,
+    get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
     into: &mut Settled,
     read: &mut Vec<EffectId>,
 ) {
@@ -2187,7 +2223,7 @@ fn run_passed(
     for (run, own) in runs {
         let bound = condition.bound(transfer, own);
         let found = get(run);
-        into.effect.join(&found.effect.transferred(&bound));
+        into.effect.join_transferred(&found.effect, &bound);
         if run.is_closure() {
             for inner in &found.runs {
                 into.runs.insert(inner.through(&bound));
@@ -3352,7 +3388,7 @@ impl Registry {
                 },
                 None => {
                     let settled = self.settled(&key);
-                    effect.join(&settled.effect.transferred(&transfer));
+                    effect.join_transferred(&settled.effect, &transfer);
                     let mut runs = Vec::new();
                     for condition in &settled.runs {
                         let passing = if passes_arguments(&call.callee, &key) {
@@ -3380,7 +3416,7 @@ impl Registry {
                 }
             };
             for (run, bound) in runs {
-                effect.join(&self.settled_effect(&run).transferred(&bound));
+                effect.join_transferred(&self.settled_effect(&run), &bound);
             }
             if effect.is_anything() {
                 break;
@@ -4799,6 +4835,49 @@ syntax::canonical_enum!(Storage {
 mod hierarchy_queries;
 #[cfg(test)]
 mod reference;
+
+#[cfg(test)]
+mod join_transferred_tests {
+    use super::*;
+
+    #[test]
+    fn joining_a_transferred_effect_is_joining_the_effect_transferred() {
+        let name = |text: &str| Some(Name::from(text));
+        let storages = Effect(Some(BTreeSet::from([
+            Storage::Own(name("a")),
+            Storage::Own(None),
+            Storage::Global(name("g")),
+            Storage::Static {
+                class: name("c"),
+                prop: name("p"),
+            },
+        ])));
+        let bases = [
+            Effect::nothing(),
+            Effect(Some(BTreeSet::from([Storage::Global(name("h"))]))),
+            Effect::anything(),
+        ];
+        let transfers = [
+            Transfer::Same,
+            Transfer::Other(name("k")),
+            Transfer::Other(None),
+            Transfer::Made,
+            Transfer::Static,
+        ];
+        for other in [&storages, &Effect::nothing(), &Effect::anything()] {
+            for base in &bases {
+                for transfer in &transfers {
+                    let mut expected = base.clone();
+                    let expected_grew = expected.join(&other.transferred(transfer));
+                    let mut got = base.clone();
+                    let grew = got.join_transferred(other, transfer);
+                    assert_eq!(got, expected);
+                    assert_eq!(grew, expected_grew);
+                }
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod effect_id_tests {
