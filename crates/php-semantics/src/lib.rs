@@ -196,12 +196,32 @@ pub enum Terminator {
     Throw(Operand),
     Fatal(Operand),
     Suspend(Operand),
+    Resume,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     pub events: Vec<Event>,
     pub terminator: Terminator,
+    pub exceptional: ExceptionalSuccessors,
+}
+
+impl Block {
+    pub fn new(events: Vec<Event>, terminator: Terminator) -> Self {
+        Self {
+            events,
+            terminator,
+            exceptional: ExceptionalSuccessors::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExceptionalSuccessors {
+    pub php_throw: Option<u32>,
+    pub native_unwind: Option<u32>,
+    pub fatal: Option<u32>,
+    pub suspended: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,6 +246,7 @@ pub enum GraphError {
     OpenWithoutReason(Domain),
     UnresolvedValue,
     EventWithoutOutcome,
+    ResumeWithoutPendingOutcome,
 }
 
 impl BehaviorGraph {
@@ -248,11 +269,21 @@ impl BehaviorGraph {
             return Err(GraphError::InvalidEntry(self.entry));
         }
         for (i, block) in self.blocks.iter().enumerate() {
-            let successors: Vec<u32> = match block.terminator {
+            let mut successors: Vec<u32> = match block.terminator {
                 Terminator::Goto(n) => vec![n],
                 Terminator::Branch { yes, no, .. } => vec![yes, no],
                 _ => vec![],
             };
+            successors.extend(
+                [
+                    block.exceptional.php_throw,
+                    block.exceptional.native_unwind,
+                    block.exceptional.fatal,
+                    block.exceptional.suspended,
+                ]
+                .into_iter()
+                .flatten(),
+            );
             for successor in successors {
                 if successor as usize >= self.blocks.len() {
                     return Err(GraphError::InvalidSuccessor {
@@ -271,11 +302,21 @@ impl BehaviorGraph {
             }
             colors[id as usize] = 1;
             let block = &graph.blocks[id as usize];
-            let next = match block.terminator {
+            let mut next = match block.terminator {
                 Terminator::Goto(n) => vec![n],
                 Terminator::Branch { yes, no, .. } => vec![yes, no],
                 _ => vec![],
             };
+            next.extend(
+                [
+                    block.exceptional.php_throw,
+                    block.exceptional.native_unwind,
+                    block.exceptional.fatal,
+                    block.exceptional.suspended,
+                ]
+                .into_iter()
+                .flatten(),
+            );
             for child in next {
                 visit(child, graph, colors)?;
             }
@@ -335,8 +376,17 @@ pub enum Truth {
 pub enum Exit<V, S> {
     Normal { value: Option<V>, state: S },
     PhpThrow { value: V, state: S },
+    NativeUnwind { value: V, state: S },
     Fatal { value: V, state: S },
     Suspended { value: V, state: S },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingOutcome<V> {
+    PhpThrow(V),
+    NativeUnwind(V),
+    Fatal(V),
+    Suspended(V),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -351,6 +401,7 @@ pub struct Evaluation<V, S> {
 pub enum EventExit<V, S> {
     Normal { result: Option<(u32, V)>, state: S },
     PhpThrow { value: V, state: S },
+    NativeUnwind { value: V, state: S },
     Fatal { value: V, state: S },
     Suspended { value: V, state: S },
 }
@@ -395,14 +446,19 @@ pub fn evaluate<H: SemanticHost>(
     host: &mut H,
 ) -> Result<Evaluation<H::Value, H::State>, GraphError> {
     graph.validate()?;
-    let mut work = vec![(graph.entry, initial, Vec::<(u32, H::Value)>::new())];
+    let mut work = vec![(
+        graph.entry,
+        initial,
+        Vec::<(u32, H::Value)>::new(),
+        None::<PendingOutcome<H::Value>>,
+    )];
     let mut exits = Vec::new();
-    while let Some((block_id, state, results)) = work.pop() {
+    while let Some((block_id, state, results, pending)) = work.pop() {
         let block = &graph.blocks[block_id as usize];
-        let mut paths = vec![(state, results)];
+        let mut paths = vec![(state, results, pending)];
         for event in &block.events {
             let mut next = Vec::new();
-            for (state, values) in paths {
+            for (state, values, pending) in paths {
                 let outcomes = host.event(event, arguments, receiver, &values, state);
                 if outcomes.is_empty() {
                     return Err(GraphError::EventWithoutOutcome);
@@ -415,32 +471,71 @@ pub fn evaluate<H: SemanticHost>(
                                 next_values.retain(|(existing, _)| *existing != id);
                                 next_values.push((id, value));
                             }
-                            next.push((state, next_values));
+                            next.push((state, next_values, pending.clone()));
                         }
                         EventExit::PhpThrow { value, state } => {
-                            exits.push(Exit::PhpThrow { value, state })
+                            if let Some(to) = block.exceptional.php_throw {
+                                work.push((
+                                    to,
+                                    state,
+                                    values.clone(),
+                                    Some(PendingOutcome::PhpThrow(value)),
+                                ));
+                            } else {
+                                exits.push(Exit::PhpThrow { value, state });
+                            }
+                        }
+                        EventExit::NativeUnwind { value, state } => {
+                            if let Some(to) = block.exceptional.native_unwind {
+                                work.push((
+                                    to,
+                                    state,
+                                    values.clone(),
+                                    Some(PendingOutcome::NativeUnwind(value)),
+                                ));
+                            } else {
+                                exits.push(Exit::NativeUnwind { value, state });
+                            }
                         }
                         EventExit::Fatal { value, state } => {
-                            exits.push(Exit::Fatal { value, state })
+                            if let Some(to) = block.exceptional.fatal {
+                                work.push((
+                                    to,
+                                    state,
+                                    values.clone(),
+                                    Some(PendingOutcome::Fatal(value)),
+                                ));
+                            } else {
+                                exits.push(Exit::Fatal { value, state });
+                            }
                         }
                         EventExit::Suspended { value, state } => {
-                            exits.push(Exit::Suspended { value, state })
+                            if let Some(to) = block.exceptional.suspended {
+                                work.push((
+                                    to,
+                                    state,
+                                    values.clone(),
+                                    Some(PendingOutcome::Suspended(value)),
+                                ));
+                            } else {
+                                exits.push(Exit::Suspended { value, state });
+                            }
                         }
                     }
                 }
             }
             paths = next;
         }
-        for (state, results) in paths {
+        for (state, results, pending) in paths {
             match &block.terminator {
-                Terminator::Goto(to) => work.push((*to, state, results)),
+                Terminator::Goto(to) => work.push((*to, state, results, pending)),
                 Terminator::Branch { predicate, yes, no } => {
                     match host.test(predicate, arguments, receiver, &results, &state) {
-                        Truth::Yes => work.push((*yes, state, results)),
-                        Truth::No => work.push((*no, state, results)),
+                        Truth::Yes => work.push((*yes, state, results, pending)),
+                        Truth::No => work.push((*no, state, results, pending)),
                         Truth::Maybe => {
-                            work.push((*yes, state.clone(), results.clone()));
-                            work.push((*no, state, results));
+                            work.push((*yes, state.clone(), results.clone(), pending.clone()));
+                            work.push((*no, state, results, pending));
                         }
                     }
                 }
@@ -458,20 +553,45 @@ pub fn evaluate<H: SemanticHost>(
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
-                    exits.push(Exit::PhpThrow { value, state });
+                    if let Some(to) = block.exceptional.php_throw {
+                        work.push((to, state, results, Some(PendingOutcome::PhpThrow(value))));
+                    } else {
+                        exits.push(Exit::PhpThrow { value, state });
+                    }
                 }
                 Terminator::Fatal(value) => {
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
-                    exits.push(Exit::Fatal { value, state });
+                    if let Some(to) = block.exceptional.fatal {
+                        work.push((to, state, results, Some(PendingOutcome::Fatal(value))));
+                    } else {
+                        exits.push(Exit::Fatal { value, state });
+                    }
                 }
                 Terminator::Suspend(value) => {
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
-                    exits.push(Exit::Suspended { value, state });
+                    if let Some(to) = block.exceptional.suspended {
+                        work.push((to, state, results, Some(PendingOutcome::Suspended(value))));
+                    } else {
+                        exits.push(Exit::Suspended { value, state });
+                    }
                 }
+                Terminator::Resume => match pending {
+                    Some(PendingOutcome::PhpThrow(value)) => {
+                        exits.push(Exit::PhpThrow { value, state })
+                    }
+                    Some(PendingOutcome::NativeUnwind(value)) => {
+                        exits.push(Exit::NativeUnwind { value, state })
+                    }
+                    Some(PendingOutcome::Fatal(value)) => exits.push(Exit::Fatal { value, state }),
+                    Some(PendingOutcome::Suspended(value)) => {
+                        exits.push(Exit::Suspended { value, state })
+                    }
+                    None => return Err(GraphError::ResumeWithoutPendingOutcome),
+                },
             }
         }
     }
@@ -489,6 +609,7 @@ mod tests {
     struct Host {
         throw_invoke: bool,
         both_invoke_outcomes: bool,
+        native_unwind_invoke: bool,
     }
     impl SemanticHost for Host {
         type Value = String;
@@ -547,6 +668,12 @@ mod tests {
                     result: result_id, ..
                 } => {
                     state.push("invoke".into());
+                    if self.native_unwind_invoke {
+                        return vec![EventExit::NativeUnwind {
+                            value: "native exception".into(),
+                            state,
+                        }];
+                    }
                     if self.throw_invoke {
                         return vec![EventExit::PhpThrow {
                             value: "exception".into(),
@@ -576,7 +703,7 @@ mod tests {
         BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
             entry: 0,
-            blocks: vec![Block { events, terminator }],
+            blocks: vec![Block::new(events, terminator)],
             coverage: Domain::ALL
                 .into_iter()
                 .map(|domain| DomainCoverage {
@@ -677,6 +804,113 @@ mod tests {
             vec![Exit::PhpThrow {
                 value: "exception".into(),
                 state: vec!["write".into(), "invoke".into()]
+            }]
+        );
+    }
+
+    #[test]
+    fn pending_callback_throw_runs_cleanup_then_resumes() {
+        let mut g = graph(
+            vec![
+                Event::Write {
+                    storage: Operand::Argument(0),
+                    value: Operand::Literal(Bytes(b"before".to_vec())),
+                },
+                Event::Invoke {
+                    callable: Operand::Argument(1),
+                    arguments: vec![],
+                    result: 4,
+                },
+                Event::Write {
+                    storage: Operand::Argument(0),
+                    value: Operand::Literal(Bytes(b"after".to_vec())),
+                },
+            ],
+            Terminator::Return(None),
+        );
+        g.blocks[0].exceptional.php_throw = Some(1);
+        g.blocks.push(Block::new(
+            vec![Event::Write {
+                storage: Operand::Argument(0),
+                value: Operand::Literal(Bytes(b"cleanup".to_vec())),
+            }],
+            Terminator::Resume,
+        ));
+        let mut host = Host {
+            throw_invoke: true,
+            ..Host::default()
+        };
+        let exits = evaluate(
+            &g,
+            &["slot".into(), "callback".into()],
+            &receiver(),
+            vec![],
+            &mut host,
+        )
+        .unwrap()
+        .exits;
+        assert_eq!(
+            exits,
+            vec![Exit::PhpThrow {
+                value: "exception".into(),
+                state: vec!["write".into(), "invoke".into(), "write".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn cleanup_return_overrides_pending_throw() {
+        let mut g = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 1,
+            }],
+            Terminator::Return(None),
+        );
+        g.blocks[0].exceptional.php_throw = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Return(Some(Operand::Literal(Bytes(b"cleanup-return".to_vec())))),
+        ));
+        let mut host = Host {
+            throw_invoke: true,
+            ..Host::default()
+        };
+        let exits = evaluate(&g, &["callback".into()], &receiver(), vec![], &mut host)
+            .unwrap()
+            .exits;
+        assert_eq!(
+            exits,
+            vec![Exit::Normal {
+                value: Some("cleanup-return".into()),
+                state: vec!["invoke".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn native_unwind_remains_distinct_from_php_throw() {
+        let g = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 1,
+            }],
+            Terminator::Return(None),
+        );
+        let mut host = Host {
+            native_unwind_invoke: true,
+            ..Host::default()
+        };
+        let exits = evaluate(&g, &["native".into()], &receiver(), vec![], &mut host)
+            .unwrap()
+            .exits;
+        assert_eq!(
+            exits,
+            vec![Exit::NativeUnwind {
+                value: "native exception".into(),
+                state: vec!["invoke".into()],
             }]
         );
     }
