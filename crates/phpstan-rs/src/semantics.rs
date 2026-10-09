@@ -219,6 +219,18 @@ mod embedded_catalog_tests {
                 && coverage.evidence.contains(&source_id)
                 && coverage.evidence.contains(&llvm_record.id().unwrap())
         }));
+        assert!(
+            selection.variants[0]
+                .graph
+                .coverage
+                .iter()
+                .filter(|coverage| coverage.domain != Domain::Return)
+                .all(|coverage| {
+                    matches!(coverage.coverage, Coverage::Open { .. })
+                        && coverage.evidence.contains(&source_id)
+                        && coverage.evidence.contains(&llvm_record.id().unwrap())
+                })
+        );
 
         let minor = target_set_from_php_releases(Some(PhpReleaseRange::new(
             PhpRelease::new(8, 5, 0),

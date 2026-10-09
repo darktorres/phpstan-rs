@@ -1,6 +1,70 @@
 {
   "compiler": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+  "configured_implicit_operations": [
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_wrong_parameters_count_error",
+      "operation": "parameter_count_error"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_flf_parse_arg_str_slow",
+      "operation": "flf_strictness_gate"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_parse_arg_str_slow",
+      "operation": "general_strictness_gate"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_wrong_parameter_error",
+      "operation": "type_error"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_parse_arg_str_weak",
+      "operation": "weak_string_parse"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "_convert_to_string",
+      "operation": "weak_string_conversion"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_null_arg_deprecated",
+      "operation": "nullable_string_diagnostic"
+    }
+  ],
+  "helper_witnesses": {
+    "zend_flf_parse_arg_str_slow": {
+      "calls": [
+        "zend_parse_arg_str_weak"
+      ],
+      "extracted_bitcode_sha256": "7c8680beb855471b7cc08c1080fb5c7b80a113cc9fe5ade09c1de6bc7842eeeb",
+      "extracted_ir_sha256": "0ddd5c2e42104b0f8a20c529c0c065c6b814d742558247220e5ea305e3b70a33"
+    },
+    "zend_parse_arg_str_slow": {
+      "calls": [
+        "zend_parse_arg_str_weak"
+      ],
+      "extracted_bitcode_sha256": "1e5941516861ab82f5c732756df2f77153b7419bb8e77a936c8a075d84e768a9",
+      "extracted_ir_sha256": "2c46955ac23c0675a3c6eb42e97a1a61c1270aaf579271e64973b463e4750a0d"
+    },
+    "zend_parse_arg_str_weak": {
+      "calls": [
+        "_convert_to_string",
+        "zend_null_arg_deprecated"
+      ],
+      "extracted_bitcode_sha256": "05ee2e8b8e687ff8f7cac706255f22c1b1a3eed50596610019a8a4b17fe1f254",
+      "extracted_ir_sha256": "adfb034c20bf18547951a3da1d9c723f6f74bf4640bef98f6573e34cf0f53b93"
+    }
+  },
   "ir_witness": [
+    "call void @zend_wrong_parameters_count_error(i32 noundef %64, i32 noundef %65), !dbg !14",
+    "%148 = call zeroext i1 @zend_flf_parse_arg_str_slow(ptr noundef %145, ptr noundef %146, i32 noundef %147) #2, !dbg !50",
+    "%153 = call zeroext i1 @zend_parse_arg_str_slow(ptr noundef %150, ptr noundef %151, i32 noundef %152) #2, !dbg !55",
     "call void @zend_wrong_parameter_error(i32 noundef %182, i32 noundef %183, ptr noundef %184, i32 noundef %185, ptr noundef %186), !dbg !59",
     "%192 = getelementptr inbounds nuw %struct._zend_string, ptr %191, i32 0, i32 2, !dbg !60",
     "%193 = load i64, ptr %192, align 8, !dbg !60",
@@ -23,6 +87,20 @@
   "source": {
     "expression": "RETVAL_LONG(ZSTR_LEN(s))",
     "function": "zif_strlen",
+    "parameter_parse_lines": [
+      {
+        "line": 378,
+        "text": "ZEND_PARSE_PARAMETERS_START(1, 1)"
+      },
+      {
+        "line": 379,
+        "text": "Z_PARAM_STR(s)"
+      },
+      {
+        "line": 380,
+        "text": "ZEND_PARSE_PARAMETERS_END();"
+      }
+    ],
     "path": "Zend/zend_builtin_functions.c",
     "return_line": 382,
     "sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"

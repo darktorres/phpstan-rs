@@ -81,6 +81,44 @@ fn main() {
             "missing LLVM witness fact: {fact}"
         );
     }
+    let parse_lines = witness["source"]["parameter_parse_lines"]
+        .as_array()
+        .expect("parameter-parse source lines");
+    assert_eq!(parse_lines.len(), 3);
+    let implicit_operations = witness["configured_implicit_operations"]
+        .as_array()
+        .expect("configured implicit-operation mapping");
+    let expected_operations = [
+        ("parameter_count_error", "zend_wrong_parameters_count_error"),
+        ("flf_strictness_gate", "zend_flf_parse_arg_str_slow"),
+        ("general_strictness_gate", "zend_parse_arg_str_slow"),
+        ("type_error", "zend_wrong_parameter_error"),
+        ("weak_string_parse", "zend_parse_arg_str_weak"),
+        ("weak_string_conversion", "_convert_to_string"),
+        ("nullable_string_diagnostic", "zend_null_arg_deprecated"),
+    ];
+    for (operation, callee) in expected_operations {
+        assert!(
+            implicit_operations.iter().any(|item| {
+                item["operation"].as_str() == Some(operation)
+                    && item["llvm_callee"].as_str() == Some(callee)
+                    && item["catalog_domain"].as_str() == Some("open")
+            }),
+            "missing configured implicit-operation mapping: {operation}"
+        );
+    }
+    for (function, callee) in [
+        ("zend_flf_parse_arg_str_slow", "zend_parse_arg_str_weak"),
+        ("zend_parse_arg_str_slow", "zend_parse_arg_str_weak"),
+        ("zend_parse_arg_str_weak", "_convert_to_string"),
+        ("zend_parse_arg_str_weak", "zend_null_arg_deprecated"),
+    ] {
+        assert!(
+            witness["helper_witnesses"][function]["calls"]
+                .as_array()
+                .is_some_and(|calls| calls.iter().any(|call| call.as_str() == Some(callee)))
+        );
+    }
     let module_digest = decode_digest(
         witness["linked_bitcode"]["sha256"]
             .as_str()
@@ -140,7 +178,7 @@ fn main() {
                 evidence: if domain == Domain::Return {
                     return_evidence.clone()
                 } else {
-                    vec![source_evidence_id]
+                    vec![source_evidence_id, llvm_evidence_id]
                 },
                 assumptions: vec![],
             })
