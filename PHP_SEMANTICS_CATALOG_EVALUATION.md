@@ -180,6 +180,20 @@ cache invalidation, and end-to-end resource/regression gates. They are gated on
 the Phase F slice and cannot yet be meaningfully accepted by the current tests.
 The workspace test suite passing does not close those plan items.
 
+Plan-wide status check: Phase F is still open, and none of the Phase 0–9 phase
+gates has acceptance evidence sufficient to mark it DONE. The outstanding rows
+are C00–C62: baseline/schema durability (C00–C05); native capture/import/link
+resolution (C06–C11); the analysis kernel and pointer/summary closure (C12–C19);
+target configuration and the real checker slice (C20–C27); native API and
+return-rule migration (C28–C33); PHP body summaries and shared consumers
+(C34–C40); implicit language behavior (C41–C47); artifact/cache/operational
+hardening (C48–C52); historical, platform, and extension profiles (C53–C58);
+and final correctness/resource acceptance and removal of duplicate authorities
+(C59–C62). Some have partial experiments or scaffolding, but each phase gate
+still needs its own required artifact and validation. These phases are not an
+additional compiler-choice campaign; they are the implementation and acceptance
+work that follows the feasibility decision.
+
 ## Findings that change the decision
 
 **Stock SVF and the compact-layout adaptation both fail the 10 GiB resource gate
