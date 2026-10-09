@@ -62,6 +62,8 @@ pub(crate) struct ReachMemo {
     pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
     pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
     /// The id a declaration's key stands for in the effects pass.
+    /// Whether a declaration is a builtin's.
+    pub(crate) builtins: OnceMap<DeclKey, bool>,
     pub(crate) effect_ids: OnceMap<DeclKey, EffectId>,
 }
 

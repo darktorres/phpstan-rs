@@ -1685,6 +1685,15 @@ impl Registry {
         self.declaration(key).filter(|sig| sig.is_stub)
     }
 
+    /// `builtin`, with the question whether `key` is one asked once.
+    fn builtin_once(&self, key: &DeclKey) -> Option<&FunctionReflection> {
+        let is_builtin = self
+            .reach_memo
+            .builtins
+            .get_or_compute(key.clone(), || self.builtin(key).is_some());
+        if is_builtin { self.builtin(key) } else { None }
+    }
+
     /// The methods with a body overriding one of the builtin class
     /// `builtin`'s that an object of `receiver` or of a class below it may
     /// run: what a method of the builtin may run on its own object. Each of
@@ -3975,7 +3984,7 @@ impl<'r> Level<'r> {
                 // A builtin writes what the code it runs writes: what is
                 // passed to it, and what of its object a class extending it
                 // declares.
-                if let Some(sig) = self.registry.builtin(&key) {
+                if let Some(sig) = self.registry.builtin_once(&key) {
                     let Some(runs) = reach.builtin_runs(&key, sig, &transfer, call) else {
                         return Classification::unknown();
                     };
