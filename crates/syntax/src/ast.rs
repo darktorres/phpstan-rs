@@ -2307,6 +2307,14 @@ impl QualifiedName {
         }
     }
 
+    /// The class this names, as `resolved_class`, as the name it holds.
+    pub fn resolved_class_name(&self) -> Option<&Name> {
+        match &self.resolved {
+            ResolvedName::Exact(name) => Some(name),
+            _ => None,
+        }
+    }
+
     /// Whether this is `keyword` (`self`, `parent` or `static`), which
     /// PHP reads in any case.
     pub fn is_keyword(&self, keyword: &str) -> bool {

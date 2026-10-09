@@ -149,7 +149,7 @@ impl Reach<'_> {
                 registry.subclasses(class)
             };
             for candidate in std::iter::once(class).chain(below.iter()) {
-                for method in self.implicit_methods(candidate, operation) {
+                for &method in self.implicit_methods(candidate, operation).iter() {
                     if let Some(key) = self.implicit_method(candidate, method) {
                         reference_push(out, key, transfer(Some(class)));
                     }

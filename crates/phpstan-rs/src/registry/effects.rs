@@ -40,13 +40,14 @@
 
 use crate::registry::TableKey;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::effect_table::{EffectIx, TransferIx, TransferTable};
-use super::reach_memo::SharedTargets;
+use super::reach_memo::{ReturnedKey, SharedTargets, StaticTarget};
 use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
 
@@ -1293,7 +1294,7 @@ pub(crate) struct ImplicitKey {
     operation: OperationKey,
     /// Whether it is the hooks alone that are asked about.
     hooks: Option<bool>,
-    scope: Option<String>,
+    scope: Option<Name>,
     rebindable: bool,
 }
 
@@ -2838,6 +2839,11 @@ pub(crate) trait CallContext {
     /// Whether the calling code is a closure's, which may be bound to any
     /// class's scope.
     fn rebindable(&self) -> bool;
+    /// The lowercase name of the class the calling code belongs to.
+    fn scope_name(&self) -> Option<Name> {
+        self.class()
+            .map(|class| Name::from(class).lowered().clone())
+    }
 }
 
 /// What a call may run that its caller may have written.
@@ -2881,7 +2887,7 @@ fn named_classes(
             .chain(registry.subclasses(own))
             .collect()
     } else {
-        class.resolved_class().map(Name::from).into_iter().collect()
+        class.resolved_class_name().cloned().into_iter().collect()
     })
 }
 
@@ -3350,7 +3356,7 @@ impl Reach<'_> {
             same,
             operation: OperationKey::of(operation),
             hooks,
-            scope: self.ctx.class().map(str::to_ascii_lowercase),
+            scope: self.ctx.scope_name(),
             rebindable: self.ctx.rebindable(),
         };
         let memo = &self.registry.reach_memo.implicit;
@@ -3373,6 +3379,16 @@ impl Reach<'_> {
             key.rebindable = false;
         }
         let list = memo.get_or_compute(key, || {
+            if hooks.is_empty() && matches!(holder, Holder::Unknown | Holder::Made(None)) {
+                let shared = self.unknown_targets(&holder, same, operation);
+                #[cfg(debug_assertions)]
+                {
+                    let mut pushed = TargetSet::default();
+                    self.implicit_targets(&holder, same, operation, &mut pushed, &mut Vec::new());
+                    debug_assert_eq!(pushed.into_vec()[..], shared[..]);
+                }
+                return Some(shared);
+            }
             let mut out = TargetSet::default();
             for (key, transfer) in hooks.iter() {
                 out.push(key.clone(), transfer.clone());
@@ -3484,16 +3500,44 @@ impl Reach<'_> {
     /// The declarations PHP runs for `operation` on an object of any class,
     /// each once.
     fn unknown_implicit_keys(&self, operation: &Operation) -> Arc<[DeclKey]> {
-        let compute = || self.compute_unknown_implicit_keys(operation).into();
-        match OperationKey::of(operation) {
-            // A property's also asks what the scope sees.
-            OperationKey(0, ..) => compute(),
-            key => self
-                .registry
-                .reach_memo
-                .unknown_implicit
-                .get_or_compute(key, compute),
+        self.registry
+            .reach_memo
+            .unknown_implicit
+            .get_or_compute(self.unknown_scope(operation), || {
+                self.compute_unknown_implicit_keys(operation).into()
+            })
+    }
+
+    /// What the declarations PHP runs for `operation` on an object of any
+    /// class depend on: the operation and, for a property's, which the scope
+    /// sees.
+    fn unknown_scope(&self, operation: &Operation) -> (OperationKey, Option<Name>, bool) {
+        if matches!(operation, Operation::Property(..)) {
+            (
+                OperationKey::of(operation),
+                self.ctx.scope_name(),
+                self.ctx.rebindable(),
+            )
+        } else {
+            (OperationKey::of(operation), None, false)
         }
+    }
+
+    /// The declarations PHP runs for `operation` on an object of any class,
+    /// each with the `$this` the holder says, found once for the calls that
+    /// ask the same.
+    fn unknown_targets(&self, holder: &Holder, same: bool, operation: &Operation) -> SharedTargets {
+        let transfer = implicit_transfer(holder, same, operation, None);
+        let (operation_key, scope, rebindable) = self.unknown_scope(operation);
+        self.registry.reach_memo.unknown_targets.get_or_compute(
+            (operation_key, scope, rebindable, transfer.clone()),
+            || {
+                self.unknown_implicit_keys(operation)
+                    .iter()
+                    .map(|key| (key.clone(), transfer.clone()))
+                    .collect()
+            },
+        )
     }
 
     fn compute_unknown_implicit_keys(&self, operation: &Operation) -> Vec<DeclKey> {
@@ -3563,7 +3607,7 @@ impl Reach<'_> {
                 registry.subclasses(class)
             };
             for candidate in std::iter::once(class).chain(below.iter()) {
-                for method in self.implicit_methods(candidate, operation) {
+                for &method in self.implicit_methods(candidate, operation).iter() {
                     if let Some(key) = self.implicit_method(candidate, method) {
                         out.push(key, transfer(Some(class)));
                     }
@@ -3601,7 +3645,18 @@ impl Reach<'_> {
 
     /// The methods PHP calls for `operation` on an object of exactly
     /// `class`.
-    fn implicit_methods(&self, class: &Name, operation: &Operation) -> Vec<&'static Name> {
+    fn implicit_methods(&self, class: &Name, operation: &Operation) -> Arc<[&'static Name]> {
+        // Only a property's depends on the scope that asks.
+        if matches!(operation, Operation::Property(..)) {
+            return self.compute_implicit_methods(class, operation).into();
+        }
+        self.registry.reach_memo.implicit_methods.get_or_compute(
+            (class.lowered().clone(), OperationKey::of(operation)),
+            || self.compute_implicit_methods(class, operation).into(),
+        )
+    }
+
+    fn compute_implicit_methods(&self, class: &Name, operation: &Operation) -> Vec<&'static Name> {
         let registry = self.registry;
         let known = well_known();
         match operation {
@@ -3649,6 +3704,15 @@ impl Reach<'_> {
     /// `class` itself: none when the class has no body for it, or only a
     /// `@method` tag or an abstract method declares it.
     fn implicit_method(&self, class: &Name, method: &Name) -> Option<DeclKey> {
+        self.registry
+            .reach_memo
+            .implicit_method
+            .get_or_compute((class.lowered().clone(), method.lowered().clone()), || {
+                self.compute_implicit_method(class, method)
+            })
+    }
+
+    fn compute_implicit_method(&self, class: &Name, method: &Name) -> Option<DeclKey> {
         let registry = self.registry;
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
         let (_, _, info) = registry.class(&owner)?;
@@ -3914,7 +3978,7 @@ impl<'r> Resolve<'r> {
         // What each call reaches depends on the variables' types, and which
         // variables a call writes by reference on what it reaches: both are
         // found again until no variable is lost.
-        let mut lost: Vec<FxHashSet<&'r str>> = vec![FxHashSet::default(); scopes];
+        let mut lost: Vec<Rc<FxHashSet<&'r str>>> = vec![Rc::default(); scopes];
         let (levels, reached) = loop {
             let levels = self.levels(sig, &lost);
             let reached: Vec<Reached<'r>> = levels.iter().map(Level::reach).collect();
@@ -3952,13 +4016,14 @@ impl<'r> Resolve<'r> {
     fn lose(
         &self,
         levels: &[Level<'r>],
-        lost: &mut [FxHashSet<&'r str>],
+        lost: &mut [Rc<FxHashSet<&'r str>>],
         mut at: usize,
         name: &'r str,
     ) -> bool {
         let mut grew = false;
         loop {
-            if lost[at].insert(name) {
+            if !lost[at].contains(name) {
+                Rc::make_mut(&mut lost[at]).insert(name);
                 let level = &levels[at];
                 grew |= level.params.contains_key(name)
                     || level.made.contains_key(name)
@@ -4008,11 +4073,11 @@ impl<'r> Resolve<'r> {
     fn levels(
         &self,
         sig: Option<&'r FunctionReflection>,
-        lost: &[FxHashSet<&'r str>],
+        lost: &[Rc<FxHashSet<&'r str>>],
     ) -> Vec<Level<'r>> {
         let facts = &self.summary.writes;
         let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
-        let aliased = self.aliased(sig_params);
+        let aliased = Rc::new(self.aliased(sig_params));
         let mut level = self.level(facts, &lost[0], &aliased, facts.bindings.iter().collect());
         if !facts.computed {
             level.params = sig_params
@@ -4088,8 +4153,8 @@ impl<'r> Resolve<'r> {
         &self,
         closure: &'r ClosureFacts,
         parent: &Level<'r>,
-        lost: &FxHashSet<&'r str>,
-        aliased: &FxHashSet<&'r str>,
+        lost: &Rc<FxHashSet<&'r str>>,
+        aliased: &Rc<FxHashSet<&'r str>>,
     ) -> Level<'r> {
         let facts = &closure.facts;
         let reassigned = |name: &str| facts.reassigned.iter().any(|n| n.as_str() == name);
@@ -4210,8 +4275,8 @@ impl<'r> Resolve<'r> {
     fn level(
         &self,
         facts: &'r WriteFacts,
-        lost: &FxHashSet<&'r str>,
-        aliased: &FxHashSet<&'r str>,
+        lost: &Rc<FxHashSet<&'r str>>,
+        aliased: &Rc<FxHashSet<&'r str>>,
         bindings: Vec<&'r (Option<Name>, Binding)>,
     ) -> Level<'r> {
         let origins = if facts.computed {
@@ -4240,12 +4305,26 @@ impl<'r> Resolve<'r> {
             origin_holders: Default::default(),
             closure: false,
             bindings,
-            lost: lost.clone(),
-            aliased: aliased.clone(),
+            lost: Rc::clone(lost),
+            aliased: Rc::clone(aliased),
             runs: Default::default(),
             params_run: Default::default(),
             outer: None,
+            class_name: std::cell::OnceCell::new(),
+            this_holder: std::cell::OnceCell::new(),
         }
+    }
+}
+
+/// Whether the object a value from `origin` holds depends on what a variable
+/// of the scope holds.
+fn reads_variables(origin: &Origin) -> bool {
+    match origin {
+        Origin::Place(place) => matches!(place.root, Root::Variable(Some(_))),
+        Origin::Returned(Callee::Method { receiver, .. }) => {
+            matches!(receiver, Receiver::Variable(_) | Receiver::Origins(_))
+        }
+        _ => false,
     }
 }
 
@@ -4298,10 +4377,10 @@ struct Level<'r> {
     // a closure takes by reference, those of the code that wrote it.
     bindings: Vec<&'r (Option<Name>, Binding)>,
     // The variables written anything here, by what the calls reach.
-    lost: FxHashSet<&'r str>,
+    lost: Rc<FxHashSet<&'r str>>,
     // The variables another scope may write while this one runs: those taken
     // by reference, by a parameter or a closure.
-    aliased: FxHashSet<&'r str>,
+    aliased: Rc<FxHashSet<&'r str>>,
     // The closures its calls run, each with its `$this`.
     runs: std::cell::RefCell<Vec<(u32, Transfer)>>,
     // The declaration's parameters whose arguments its calls run.
@@ -4310,11 +4389,19 @@ struct Level<'r> {
     // variable around them by value: what the code that wrote it knows of
     // the object a variable it does not write holds.
     outer: Option<CapturedHolders<'r>>,
+    // The name of the class and the holder of its `$this`, made when first
+    // asked.
+    class_name: std::cell::OnceCell<Option<Name>>,
+    this_holder: std::cell::OnceCell<Holder>,
 }
 
 impl CallContext for Level<'_> {
     fn class(&self) -> Option<&str> {
         self.class
+    }
+
+    fn scope_name(&self) -> Option<Name> {
+        self.class_name().map(|class| class.lowered().clone())
     }
 
     fn file(&self) -> Option<FileId> {
@@ -4326,13 +4413,7 @@ impl CallContext for Level<'_> {
     fn receiver(&self, receiver: &Receiver) -> (Holder, bool) {
         let registry = self.registry;
         match receiver {
-            Receiver::This => (
-                match self.class {
-                    Some(class) => Holder::listed(vec![Name::from(class)]),
-                    None => Holder::Unknown,
-                },
-                true,
-            ),
+            Receiver::This => (self.this_holder(), true),
             Receiver::ThisProperty(prop) => (
                 self.class
                     .and_then(|class| registry.lookup_property(class, prop))
@@ -4427,6 +4508,23 @@ impl CallContext for Level<'_> {
 }
 
 impl<'r> Level<'r> {
+    /// The name of the class the scope belongs to.
+    fn class_name(&self) -> Option<&Name> {
+        self.class_name
+            .get_or_init(|| self.class.map(Name::from))
+            .as_ref()
+    }
+
+    /// The holder of the scope's own `$this`.
+    fn this_holder(&self) -> Holder {
+        self.this_holder
+            .get_or_init(|| match self.class_name() {
+                Some(class) => Holder::listed(vec![class.clone()]),
+                None => Holder::Unknown,
+            })
+            .clone()
+    }
+
     /// What `origin`, one of a call's operand, holds, found once: the solved
     /// variables it reads do not change after the scope is solved.
     fn operand_origin(&self, origin: &Origin) -> (Holder, bool) {
@@ -4818,19 +4916,50 @@ impl<'r> Level<'r> {
     /// again until none grows. Each starts as no object, and is read as
     /// found so far while the others are found.
     fn solve(&self) {
+        #[cfg(debug_assertions)]
+        let reference = {
+            self.solve_rounds(false);
+            self.solved.borrow_mut().take()
+        };
+        self.solve_rounds(true);
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(reference, *self.solved.borrow());
+    }
+
+    /// `solve`; `split` finds once what the origins that read no variable
+    /// hold, and takes again only the others in each round.
+    fn solve_rounds(&self, split: bool) {
         let start: FxHashMap<&'r str, Holder> = self
             .origins
             .keys()
             .map(|&name| (name, Holder::none()))
             .collect();
         *self.solved.borrow_mut() = Some(start);
+        // Per variable: what it held before the scope wrote it joined with
+        // what the origins that read no variable hold, and the others.
+        let parts: Vec<(&'r str, Holder, Vec<&'r Origin>)> = self
+            .origins
+            .iter()
+            .map(|(&name, origins)| {
+                let mut fixed = self.base.get(name).cloned().unwrap_or(Holder::none());
+                let mut variable = Vec::new();
+                for origin in origins.iter() {
+                    if split && !reads_variables(origin) {
+                        fixed = fixed.join(self.origin_holder(origin).0);
+                    } else {
+                        variable.push(origin);
+                    }
+                }
+                (name, fixed, variable)
+            })
+            .collect();
         // A holder grows at most to any object; a chain of variables this
         // long has not settled.
         for _ in 0..16 {
             let mut grew = false;
-            for (&name, origins) in &self.origins {
-                let mut held = self.base.get(name).cloned().unwrap_or(Holder::none());
-                for origin in origins.iter() {
+            for (name, fixed, variable) in &parts {
+                let mut held = fixed.clone();
+                for origin in variable {
                     held = held.join(self.origin_holder(origin).0);
                 }
                 let held = match held {
@@ -4926,6 +5055,72 @@ impl<'r> Level<'r> {
     /// The object what a call of `callee` returns may be, by the return
     /// types its targets declare.
     fn returned_holder(&self, callee: &Callee) -> Holder {
+        let Some(key) = self.returned_key(callee) else {
+            return self.compute_returned_holder(callee);
+        };
+        let held = self
+            .registry
+            .reach_memo
+            .returned
+            .get_or_compute(key, || self.compute_returned_holder(callee));
+        debug_assert_eq!(held, self.compute_returned_holder(callee));
+        held
+    }
+
+    /// What the holder a call of `callee` returns depends on, when that is
+    /// no more than the registry and the scope's class: not the call's
+    /// place in the code, nor a variable.
+    fn returned_key(&self, callee: &Callee) -> Option<ReturnedKey> {
+        match callee {
+            Callee::Method {
+                receiver: Receiver::This,
+                method: Some(method),
+            } => Some(ReturnedKey::ThisMethod {
+                class: self.class_name()?.clone(),
+                method: method.clone(),
+            }),
+            Callee::Method {
+                receiver: Receiver::ThisProperty(property),
+                method: Some(method),
+            } => Some(ReturnedKey::ThisPropertyMethod {
+                class: self.class_name()?.clone(),
+                property: property.clone(),
+                method: method.clone(),
+            }),
+            Callee::Static {
+                class: Some(class),
+                method: Some(method),
+            } => {
+                let (target, own) = if class.is_keyword("self") {
+                    (StaticTarget::SelfKeyword, self.class_name().cloned())
+                } else if class.is_keyword("parent") {
+                    (StaticTarget::Parent, self.class_name().cloned())
+                } else if class.is_keyword("static") {
+                    (StaticTarget::StaticKeyword, self.class_name().cloned())
+                } else {
+                    (
+                        StaticTarget::Named(class.resolved_class_name().cloned()),
+                        None,
+                    )
+                };
+                Some(ReturnedKey::Static {
+                    target,
+                    method: method.clone(),
+                    own,
+                })
+            }
+            Callee::ParentHook {
+                property,
+                set: false,
+            } => Some(ReturnedKey::ParentHook {
+                property: property.clone(),
+                class: self.class_name()?.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    fn compute_returned_holder(&self, callee: &Callee) -> Holder {
         let registry = self.registry;
         match callee {
             Callee::Function(name) => match registry.resolve_function(name) {

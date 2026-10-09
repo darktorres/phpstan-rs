@@ -10,7 +10,9 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
 use super::effect_table::{EffectIx, EffectTable, TransferTable};
-use super::effects::{DeclKey, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer};
+use super::effects::{
+    DeclKey, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer,
+};
 
 const SHARDS: usize = 16;
 
@@ -62,6 +64,40 @@ impl<K: Hash + Eq, V: Clone> OnceMap<K, V> {
     }
 }
 
+/// What a call's returned holder depends on, when that is no more than the
+/// registry and the class the scope belongs to.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ReturnedKey {
+    ThisMethod {
+        class: Name,
+        method: Name,
+    },
+    ThisPropertyMethod {
+        class: Name,
+        property: Name,
+        method: Name,
+    },
+    Static {
+        target: StaticTarget,
+        method: Name,
+        /// The class the scope belongs to, for a target that reads it.
+        own: Option<Name>,
+    },
+    ParentHook {
+        property: Name,
+        class: Name,
+    },
+}
+
+/// The class a static call names.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) enum StaticTarget {
+    SelfKeyword,
+    Parent,
+    StaticKeyword,
+    Named(Option<Name>),
+}
+
 /// The declarations a call runs, each with its transfer, shared by the
 /// calls that ask the same.
 pub(crate) type SharedTargets = Arc<[(DeclKey, Transfer)]>;
@@ -79,9 +115,20 @@ pub(crate) struct ReachMemo {
     /// not known.
     /// What an operation runs on an object of any class, but for a
     /// property's.
-    pub(crate) unknown_implicit: OnceMap<OperationKey, Arc<[DeclKey]>>,
+    pub(crate) unknown_implicit: OnceMap<(OperationKey, Option<Name>, bool), Arc<[DeclKey]>>,
+    /// The same with the `$this` each runs with.
+    pub(crate) unknown_targets:
+        OnceMap<(OperationKey, Option<Name>, bool, Transfer), SharedTargets>,
     pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
     pub(crate) methods_named: OnceMap<Name, Arc<[DeclKey]>>,
+    /// The declaration PHP runs calling a method on an object of exactly a
+    /// class, by their lowercase names.
+    pub(crate) implicit_method: OnceMap<(Name, Name), Option<DeclKey>>,
+    /// The holder a call returns, by what it depends on.
+    pub(crate) returned: OnceMap<ReturnedKey, Holder>,
+    /// The methods PHP calls for an operation but a property's on an object
+    /// of exactly a class.
+    pub(crate) implicit_methods: OnceMap<(Name, OperationKey), Arc<[&'static Name]>>,
     /// Whether a declaration is a builtin's.
     /// The table row a builtin declaration is looked up under.
     pub(crate) builtin_entries: OnceMap<DeclKey, Option<Arc<str>>>,
