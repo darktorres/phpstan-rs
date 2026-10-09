@@ -85,5 +85,23 @@
   "limits": [
     "Profiles are TAILCALL and CALL, not the separate GCC Hybrid/CALL pair.",
     "Positive runtime witnesses corroborate modeled paths; unobserved behavior remains open."
-  ]
+  ],
+  "strict_fixture": {
+    "path": "tools/php-catalog/experiments/comparison/runtime-strict.php",
+    "sha256": "1a9c01c3c5871971ecdbc6429e60bdc850d1863f8dcee13ceb518f78393f7c29",
+    "command": "php -n runtime-strict.php",
+    "sentinel": "strict-stringable-rejected-without-cast",
+    "tailcall_output": "tools/php-catalog/experiments/comparison/results/runtime/php-tailcall-strict-reference.out",
+    "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-strict-reference.out",
+    "output_sha256": "d6fde347fe91211ecee32a9ddb3d92bcaf4abeecce0e54b5f21822d45f2f4aa9"
+  },
+  "strict_result": {
+    "exit_code": 0,
+    "output_files_identical": true,
+    "strict_types": 1,
+    "type_error": true,
+    "tostring_called": false,
+    "tailcall_binary_sha256": "abc41b0be90d2e9d1d744f2c53600c5f6a7e48af09bbd3ffc4eda382ce9236b5",
+    "call_binary_sha256": "866ee99f4de2644b3d28e45dfc2071a5a3926a65b04ab3127baef312102684af"
+  }
 }
