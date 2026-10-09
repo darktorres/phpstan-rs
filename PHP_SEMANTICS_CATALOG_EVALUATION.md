@@ -53,8 +53,9 @@ integrated with PhpFlowIR or callback exception flow.
 
 The full `cargo test -p phpstan-rs -p phpstan-rs-semantics` run passes: 1,194
 checker library tests, 58 checker binary/integration tests, and 39 semantic
-tests. Separate `cargo check -p phpstan-rs` also passes. The newest semantic
-regressions reject marking a reachable return domain not applicable and
+tests. After that full run, a focused suite passes all 40 semantic tests and
+`cargo check -p phpstan-rs` passes again. The newest regressions reject
+inapplicable coverage for reachable and composed invocation domains, and
 preserve fatal and suspension as distinct exits. This validates integration
 with the present checker build; it does not establish catalog execution at
 builtin call sites.
@@ -69,7 +70,7 @@ so it does not close F00 or substitute for independent review.
 | Gate | Evidence established | Remaining evaluation before closure |
 |---|---|---|
 | F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; independently check evaluator post-fixpoints. |
-| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist/widening fixtures, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add fatal/suspend/branching callback and loop-growth cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
+| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist/widening fixtures, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback and loop-growth cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect source/layout metadata and witnesses to graph entries. Current compiler import and runtime observation are not semantic graph coverage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |

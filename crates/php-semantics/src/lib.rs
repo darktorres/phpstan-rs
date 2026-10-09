@@ -962,8 +962,16 @@ pub fn evaluate<H: SemanticHost>(
                     return Err(GraphError::EventWithoutOutcome);
                 }
                 for outcome in outcomes {
-                    if matches!(event, Event::Invoke { .. }) && outcome.coverage().is_empty() {
-                        return Err(GraphError::InvalidComposedCoverage);
+                    if matches!(event, Event::Invoke { .. }) {
+                        let coverage = outcome.coverage();
+                        if coverage.is_empty()
+                            || coverage
+                                .iter()
+                                .find(|item| item.domain == Domain::Invocation)
+                                .is_none_or(|item| matches!(item.coverage, Coverage::NotApplicable))
+                        {
+                            return Err(GraphError::InvalidComposedCoverage);
+                        }
                     }
                     match outcome {
                         EventExit::Normal {
@@ -1266,6 +1274,7 @@ mod tests {
         nested_open: Option<Domain>,
         incomplete_nested_coverage: bool,
         omit_nested_coverage: bool,
+        invocation_not_applicable: bool,
     }
     impl SemanticHost for Host {
         type Value = String;
@@ -1339,6 +1348,13 @@ mod tests {
                 } => {
                     state.push("invoke".into());
                     let mut coverage = composed_coverage(self.nested_open);
+                    if self.invocation_not_applicable {
+                        coverage
+                            .iter_mut()
+                            .find(|item| item.domain == Domain::Invocation)
+                            .unwrap()
+                            .coverage = Coverage::NotApplicable;
+                    }
                     if self.incomplete_nested_coverage {
                         coverage.pop();
                     }
@@ -1721,6 +1737,26 @@ mod tests {
         );
         let mut host = Host {
             omit_nested_coverage: true,
+            ..Host::default()
+        };
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::InvalidComposedCoverage)
+        );
+    }
+
+    #[test]
+    fn invoked_child_cannot_mark_invocation_not_applicable() {
+        let graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 0,
+            }],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        let mut host = Host {
+            invocation_not_applicable: true,
             ..Host::default()
         };
         assert_eq!(
