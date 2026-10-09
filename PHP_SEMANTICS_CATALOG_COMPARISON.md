@@ -70,7 +70,7 @@ LLVM includes destruction on the Linux landing-pad path and on the Windows clean
 
 Source CFG could be repaired using additional exception/lifetime lowering, but that would recreate behavior already emitted by the compiler and add another correctness obligation. Maximum churn favors the compiler's execution graph plus source metadata here.
 
-In the initial LLVM/Clang build without CIR enabled, CIR flags were recognized but each import reported `action unknown not compiled in`. The extended evaluation then built the combined CIR-enabled toolchain: the actual campaign emitted CIR for only 44/523 C units and failed all four cleanup/dispatch fixtures, so this pinned CIR configuration cannot cover the locked profile. A different CIR revision would need its own feature and exception/ABI comparison. [CIR build requirements](https://llvm.github.io/clangir/GettingStarted/build-install.html)
+In the initial LLVM/Clang build without CIR enabled, CIR flags were recognized but each import reported `action unknown not compiled in`. The extended evaluation then built the combined CIR-enabled toolchain: the actual campaign emitted CIR for only 44/523 C units and failed all four cleanup/dispatch fixtures. Of those 44 outputs, 36 lowered to LLVM IR that passed `opt-21` verification; eight hit CIR-to-LLVM backend assertions. Thus only 36/523 units (6.9%) reached verified LLVM IR, still inadequate for the locked profile, and verifier success does not establish semantic equivalence. A different CIR revision would need its own feature and exception/ABI comparison. [CIR build requirements](https://llvm.github.io/clangir/GettingStarted/build-install.html)
 
 ## Framework results
 

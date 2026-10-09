@@ -141,8 +141,16 @@ it is neither a demand summary nor a closure certificate.
   unsupported forms include static assertions (246 first diagnostics), explicit
   pointer casts (89), function-to-pointer decay (34), and ptrdiff (31). The
   successful files total 11.8 MB, but were not passed through a separate CIR
-  verifier or semantic analyzer. This compiler is not a viable full-profile
-  producer in the tested configuration.
+  verifier or semantic analyzer during the emission campaign. A follow-up
+  lowered all 44 emitted units through Clang's CIR-to-LLVM path: 36 produced
+  LLVM IR and all 36 passed `opt-21 -passes=verify`; the other eight hit a
+  CIR-to-LLVM backend assertion (LLVMFunctionType conversion), with no timeouts
+  or resource kills. The largest unit (`ext/lexbor/lexbor/encoding/multi.c`)
+  took about 245 CPU seconds and peaked at 302 MiB. This improves confidence in
+  the subset that emits CIR, but 36/523 units (6.9%) is far short of profile
+  coverage, and verifier success does not establish behavioral equivalence or
+  CIR source-semantic completeness. CIR is not a viable full-profile producer
+  in the tested configuration.
 - **Clang CFG/dataflow:** the first comparison's exceptional-destructor omission,
   C rejection by FlowSensitive, and diagnostic-analyzer cutoff findings remain.
   No complete summary adapter was implemented during this extension.
@@ -163,6 +171,10 @@ records all 523 unit commands and hashes for each emitted GIMPLE/CFG/EH dump.
 [The CIR campaign summary](tools/php-catalog/experiments/comparison/results/evaluation/cir-campaign.json)
 records every input, exact compiler command, exit status, diagnostic, resource
 result, source hash, and emitted artifact hash.
+[The CIR lowering summary](tools/php-catalog/experiments/comparison/results/evaluation/cir-lowering.json)
+records the follow-up LLVM lowering and verifier result for each emitted unit;
+the replay script is
+[evaluate_cir_lowering.py](tools/php-catalog/experiments/comparison/evaluate_cir_lowering.py).
 Raw CIR outputs/logs, GCC dumps, configured source trees, and binaries remain in
 `/home/torres/.cache/php-catalog-evaluation`; the report names that location so
 those files can be matched to the checked-in hashes.
