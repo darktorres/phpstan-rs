@@ -39,7 +39,6 @@
 //! after its property (`hook_member`).
 
 use std::collections::BTreeSet;
-use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 
 use rayon::prelude::*;
@@ -571,14 +570,14 @@ fn method_key(class: &str, method: &str) -> DeclKey {
     DeclKey::new(Some(lowered_text(class)), lowered_text(method))
 }
 
-/// `text` lowercased, held once for every key that names it, so keys of
-/// one declaration share their strings and building one allocates nothing
-/// once its names are known.
+/// `text` lowercased, held once per thread for every key that names it, so
+/// keys of one declaration share their strings and building one allocates
+/// nothing once its names are known.
 fn lowered_text(text: &str) -> Arc<str> {
-    const SHARDS: usize = 16;
+    thread_local! {
+        static HELD: std::cell::RefCell<FxHashSet<Arc<str>>> = std::cell::RefCell::default();
+    }
     const STACK: usize = 128;
-    static HELD: [Mutex<FxHashSet<Arc<str>>>; SHARDS] =
-        [const { Mutex::new(FxHashSet::with_hasher(rustc_hash::FxBuildHasher)) }; SHARDS];
     let mut stack = [0u8; STACK];
     let owned;
     let lower: &str = if !text.bytes().any(|byte| byte.is_ascii_uppercase()) {
@@ -592,16 +591,14 @@ fn lowered_text(text: &str) -> Arc<str> {
         owned = text.to_ascii_lowercase();
         &owned
     };
-    let shard = rustc_hash::FxBuildHasher.hash_one(lower) as usize % SHARDS;
-    let mut held = HELD[shard]
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(found) = held.get(lower) {
-        return Arc::clone(found);
-    }
-    let made: Arc<str> = lower.into();
-    held.insert(Arc::clone(&made));
-    made
+    HELD.with_borrow_mut(|held| {
+        if let Some(found) = held.get(lower) {
+            return Arc::clone(found);
+        }
+        let made: Arc<str> = lower.into();
+        held.insert(Arc::clone(&made));
+        made
+    })
 }
 
 /// The name a hook of the property `property`, its `set` hook when `set`,
@@ -975,7 +972,48 @@ struct Classification<'r> {
 
 /// A set of declarations, by id, each with what its own `$this` is to the
 /// caller.
-pub(in crate::registry) type IdTargets = Arc<[(EffectId, Transfer)]>;
+pub(in crate::registry) type IdTargets = Arc<IdTargetSet>;
+
+/// The declarations of a set by id, and what the set adds to a caller as of
+/// the wave of `settle` that last asked.
+#[derive(Debug)]
+pub(in crate::registry) struct IdTargetSet {
+    entries: Vec<(EffectId, Transfer)>,
+    joined: Mutex<(u64, Option<Arc<SetJoin>>)>,
+}
+
+impl IdTargetSet {
+    fn new(entries: Vec<(EffectId, Transfer)>) -> Self {
+        IdTargetSet {
+            entries,
+            joined: Mutex::new((0, None)),
+        }
+    }
+
+    /// What the set adds to a caller, read from the settled snapshot of the
+    /// wave `wave` (a number no other wave has) once for every caller.
+    fn joined<'g>(
+        &self,
+        wave: u64,
+        get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
+    ) -> Arc<SetJoin> {
+        let mut held = self
+            .joined
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if held.0 == wave
+            && let Some(joined) = &held.1
+        {
+            return Arc::clone(joined);
+        }
+        let joined = Arc::new(SetJoin::of(&self.entries, get));
+        *held = (wave, Some(Arc::clone(&joined)));
+        joined
+    }
+}
+
+/// The numbers of the waves of every `settle`.
+static WAVES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// The same classification after resolving all declaration edges to IDs,
 /// ready for the fixed-point worklist.
@@ -2127,7 +2165,7 @@ fn settle(
         let set_callees = classification
             .sets
             .iter()
-            .flat_map(|set| set.iter())
+            .flat_map(|set| set.entries.iter())
             .map(|(callee, _)| callee);
         for callee in classification
             .calls
@@ -2153,13 +2191,7 @@ fn settle(
         for key in &wave {
             queued.remove(*key);
         }
-        // What each distinct set of declarations adds to a caller, read once
-        // for every caller of the wave that holds it.
-        let set_joins: FxHashMap<usize, std::sync::OnceLock<SetJoin>> = wave
-            .iter()
-            .flat_map(|key| classified[*key].sets.iter())
-            .map(|set| (set_address(set), std::sync::OnceLock::new()))
-            .collect();
+        let wave_number = WAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let updates: Vec<(&EffectId, Settled, Vec<EffectId>)> = wave
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
@@ -2212,8 +2244,7 @@ fn settle(
                     if now.effect.is_anything() {
                         break;
                     }
-                    let joined =
-                        set_joins[&set_address(set)].get_or_init(|| SetJoin::of(set, &get));
+                    let joined = set.joined(wave_number, &get);
                     now.effect.join(&joined.effect);
                     now.runs.extend(joined.runs.iter().cloned());
                     if joined.unknown {
@@ -2253,15 +2284,11 @@ fn settle(
     settled
 }
 
-/// Where a set of declarations is held, which names it.
-fn set_address(set: &IdTargets) -> usize {
-    set.as_ptr() as usize
-}
-
 /// What a caller holding a set of declarations adds to its own effect: what
 /// each may write, as its own `$this` is to the caller, and the conditions
 /// of the closures among them; and whether one runs a parameter's argument,
 /// which no call passes.
+#[derive(Debug)]
 struct SetJoin {
     effect: Effect,
     runs: BTreeSet<Condition>,
@@ -2270,7 +2297,7 @@ struct SetJoin {
 
 impl SetJoin {
     fn of<'g>(
-        set: &IdTargets,
+        set: &[(EffectId, Transfer)],
         get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
     ) -> SetJoin {
         let mut joined = SetJoin {
@@ -2278,7 +2305,7 @@ impl SetJoin {
             runs: BTreeSet::new(),
             unknown: false,
         };
-        for (callee, transfer) in set.iter() {
+        for (callee, transfer) in set {
             let found = get(callee);
             joined.effect.join_transferred(&found.effect, transfer);
             for condition in &found.runs {
@@ -4225,7 +4252,7 @@ impl<'r> Level<'r> {
                     let Some(set) = self.shared_runs(&reach, list, call) else {
                         return Classification::unknown();
                     };
-                    if !set.is_empty() {
+                    if !set.entries.is_empty() {
                         sets.push(set);
                     }
                     continue;
@@ -4239,9 +4266,11 @@ impl<'r> Level<'r> {
                     let Some(runs) = reach.builtin_runs(&key, sig, &transfer, call) else {
                         return Classification::unknown();
                     };
-                    for (key, transfer) in runs {
-                        if siteless.insert((key.clone(), transfer.clone())) {
-                            calls.push((key, transfer, None));
+                    for run in runs {
+                        // A run already noted is dropped without a copy.
+                        if !siteless.contains(&run) {
+                            siteless.insert(run.clone());
+                            calls.push((run.0, run.1, None));
                         }
                     }
                     continue;
@@ -4253,8 +4282,14 @@ impl<'r> Level<'r> {
                         sites.len() as u32 - 1
                     })
                 });
-                if at.is_some() || siteless.insert((key.clone(), transfer.clone())) {
+                if at.is_some() {
                     calls.push((key, transfer, at));
+                    continue;
+                }
+                let run = (key, transfer);
+                if !siteless.contains(&run) {
+                    siteless.insert(run.clone());
+                    calls.push((run.0, run.1, None));
                 }
             }
         }
@@ -4320,7 +4355,7 @@ impl<'r> Level<'r> {
                         out.push((id_of(key), transfer.clone()));
                     }
                 }
-                Some(IdTargets::from(out))
+                Some(IdTargets::new(IdTargetSet::new(out)))
             })();
             (Arc::clone(&list), runs)
         });

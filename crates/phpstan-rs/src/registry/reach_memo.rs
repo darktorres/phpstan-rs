@@ -102,7 +102,8 @@ pub(crate) struct ReachMemo {
     /// What a shared set runs once its builtins are replaced by what they
     /// run, by address and, for a set that depends on it, the calling
     /// class; none when a builtin may run code not known.
-    pub(crate) shared_runs: OnceMap<(usize, Option<String>), (SharedTargets, Option<IdTargets>)>,
+    pub(in crate::registry) shared_runs:
+        OnceMap<(usize, Option<String>), (SharedTargets, Option<IdTargets>)>,
 }
 
 impl std::fmt::Debug for ReachMemo {
