@@ -12,10 +12,8 @@ name = "php_semantics"
 base64.workspace = true
 postcard.workspace = true
 serde.workspace = true
-sha2.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

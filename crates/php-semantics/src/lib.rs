@@ -14,8 +14,8 @@ mod catalog;
 mod php_value;
 mod target;
 pub use catalog::{
-    Catalog, CatalogEntry, CatalogError, EntryKey, EvidenceKind, EvidenceRecord, Projection,
-    Selection,
+    Catalog, CatalogEntry, CatalogError, CatalogManifest, EntryKey, EvidenceKind, EvidenceRecord,
+    GraphRecord, Projection, Selection,
 };
 pub use php_value::{
     ArrayId, ArrayKey, Binding, ObjectId, PhpState, PhpValue, ReferenceId, StateError,

@@ -89,7 +89,7 @@ impl EvidenceRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogEntry {
     pub key: EntryKey,
     pub graph: Digest,
@@ -102,6 +102,90 @@ pub enum CatalogError {
     DuplicateEntry(EntryKey),
     ConflictingEvidence(Digest),
     MissingEvidence(Digest),
+    DigestMismatch(Digest),
+    UnsupportedManifest(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphRecord {
+    pub id: Digest,
+    pub graph: BehaviorGraph,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogManifest {
+    pub schema_major: u32,
+    pub entries: Vec<CatalogEntry>,
+    pub graphs: Vec<GraphRecord>,
+    pub evidence: Vec<(Digest, EvidenceRecord)>,
+}
+
+impl CatalogManifest {
+    pub fn canonical_digest(&self) -> Result<Digest, postcard::Error> {
+        Ok(Digest(Sha256::digest(postcard::to_allocvec(self)?).into()))
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn validate(&self) -> Result<(), CatalogError> {
+        if self.schema_major != crate::SCHEMA_MAJOR {
+            return Err(CatalogError::UnsupportedManifest(self.schema_major));
+        }
+        let mut graph_ids = Vec::new();
+        for record in &self.graphs {
+            if record
+                .graph
+                .canonical_digest()
+                .map_err(|_| CatalogError::GraphEncoding)?
+                != record.id
+            {
+                return Err(CatalogError::DigestMismatch(record.id));
+            }
+            record.graph.validate().map_err(CatalogError::Graph)?;
+            if graph_ids.contains(&record.id) {
+                return Err(CatalogError::DigestMismatch(record.id));
+            }
+            graph_ids.push(record.id);
+        }
+        let mut entry_keys = Vec::new();
+        for entry in &self.entries {
+            if entry.key != entry.key.normalized() || entry_keys.contains(&entry.key) {
+                return Err(CatalogError::DuplicateEntry(entry.key.clone()));
+            }
+            if !graph_ids.contains(&entry.graph) {
+                return Err(CatalogError::DigestMismatch(entry.graph));
+            }
+            entry_keys.push(entry.key.clone());
+        }
+        let mut evidence_ids = Vec::new();
+        for (id, record) in &self.evidence {
+            if record.id().map_err(|_| CatalogError::GraphEncoding)? != *id
+                || evidence_ids.contains(id)
+            {
+                return Err(CatalogError::DigestMismatch(*id));
+            }
+            evidence_ids.push(*id);
+        }
+        for record in &self.graphs {
+            for item in &record.graph.coverage {
+                for id in item.evidence.iter().chain(item.assumptions.iter()) {
+                    if !evidence_ids.contains(id) {
+                        return Err(CatalogError::MissingEvidence(*id));
+                    }
+                }
+            }
+        }
+        for (_, record) in &self.evidence {
+            for dependency in &record.dependencies {
+                if !evidence_ids.contains(dependency) {
+                    return Err(CatalogError::MissingEvidence(*dependency));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -179,6 +263,26 @@ impl Catalog {
     }
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn manifest(&self) -> CatalogManifest {
+        CatalogManifest {
+            schema_major: crate::SCHEMA_MAJOR,
+            entries: self.entries.values().cloned().collect(),
+            graphs: self
+                .graphs
+                .iter()
+                .map(|(id, graph)| GraphRecord {
+                    id: *id,
+                    graph: graph.clone(),
+                })
+                .collect(),
+            evidence: self
+                .evidence
+                .iter()
+                .map(|(id, record)| (*id, record.clone()))
+                .collect(),
+        }
     }
 }
 
@@ -283,6 +387,32 @@ mod tests {
                 .coverage
                 .coverage,
             Coverage::Closed
+        );
+    }
+
+    #[test]
+    fn canonical_manifest_round_trips_and_rejects_tampered_graph_identity() {
+        let mut catalog = Catalog::default();
+        let evidence = catalog.add_evidence(evidence_record()).unwrap();
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph(evidence))
+            .unwrap();
+        let manifest = catalog.manifest();
+        manifest.validate().unwrap();
+        let json = manifest.to_json().unwrap();
+        assert!(json.contains("\"base64\""));
+        let decoded: CatalogManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, manifest);
+        assert_eq!(
+            decoded.canonical_digest().unwrap(),
+            manifest.canonical_digest().unwrap()
+        );
+
+        let mut tampered = manifest;
+        tampered.graphs[0].id = Digest([0; 32]);
+        assert_eq!(
+            tampered.validate(),
+            Err(CatalogError::DigestMismatch(Digest([0; 32])))
         );
     }
 }
