@@ -2213,6 +2213,10 @@ impl<'a> Checker<'a> {
             let evaluation =
                 php_semantics::evaluate(variant.graph, &arguments, &receiver, (), &mut host)
                     .ok()?;
+            evaluation
+                .post_fixpoint
+                .validate(variant.graph, &host)
+                .ok()?;
             if !matches!(
                 evaluation
                     .coverage
