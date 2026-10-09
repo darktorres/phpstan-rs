@@ -76,9 +76,9 @@ backs the PHP-specific host. PhpFlow covers local assignment, unset, reference
 binding, and literal-key array get/set. Graph fixtures verify copy isolation
 and object identity through evaluation; another binds a reference before
 callback writes on normal and throwing paths. Missing array keys remain open
-transfers rather than modeled PHP diagnostics. F04 remains OPEN: key coercion,
-object properties, and the full value/reference product are not yet composed
-through flow instructions. An exact-entry catalog API validates
+transfers rather than modeled PHP diagnostics. These fixtures now satisfy the
+Phase F minimum F04 evidence. Full key coercion, object properties, and
+syntax-to-flow lowering remain C22 implementation work. An exact-entry catalog API validates
 evidence, supports ASCII symbol matching, projection, and explanation lookup.
 Catalog manifests also have a validated JSON ingestion API that checks
 artifacts before installing runtime indexes; callback modeling remains bounded.
@@ -170,7 +170,7 @@ so it does not close F00 or substitute for independent review.
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, graph-bound candidate containment plus persisted transfer/exit/coverage replay, and fail-closed handling of result IDs defined on only some predecessor paths are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add broader branching callback cases; replace the toy host with calibrated domains and validate host transfer behavior against source-derived fixtures. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` rule is generated only from the exact locked translation unit and checks its source transfer site. | Complete configured implicit-operation mapping for the locked slice; connect actual imported compiler/source/layout metadata and witnesses to graph entries. The source-checked return rule remains manually translated and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
-| F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and run array copy/mutation/read plus object assignment through graph instructions. A copied array containing a reference observes callback writes on normal return and cleanup-resumed throw paths (57 semantic tests). Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | Add object-property and PHP key-coercion/diagnostic operations; continue toward complete product state and source-derived lowering. |
+| F04 — PhpFlowIR/value domain | **Phase F minimum fixture set complete.** PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and execute array copy/mutation/read plus object assignment through graph instructions. A copied array containing a reference observes callback writes on normal return and cleanup-resumed throw paths (57 semantic tests). Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | No remaining Phase F fixture is identified. Broader key coercion, object properties, and syntax-to-flow lowering remain C22 phase work. |
 | F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 
@@ -362,7 +362,8 @@ it is neither a demand summary nor a closure certificate.
   target selection, and real checker integration remain unimplemented.
 
 There is **no accepted production solver** and no generated closed PHP
-BehaviorGraph. None of F00–F06 should be marked DONE from this checkpoint.
+BehaviorGraph. F04's minimum fixture task is satisfied, but F00, F01, F02, F03,
+F05, and F06 remain open, so the Phase F gate as a whole is not complete.
 
 ## Evidence and resume instructions
 
