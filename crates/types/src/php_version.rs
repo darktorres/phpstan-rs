@@ -370,6 +370,9 @@ pub enum PhpFeature {
     /// of this version. `PhpVersion::deprecatesImplicitlyFloatConversionToInt`
     /// (`InvalidKeyInArrayItemRule`'s own `AllowedArrayKeysTypes`).
     DeprecatesFloatArrayKey,
+    /// Passing null to a non-nullable scalar parameter of an internal
+    /// function is deprecated, while retaining coercive behavior.
+    DeprecatesNullToInternalScalarParameter,
     /// A `null` array key implicitly coercing to the empty string.
     /// Deprecated as of this version.
     /// `PhpVersion::deprecatesNullArrayOffset` (`InvalidKeyInArrayItemRule`'s
@@ -591,6 +594,7 @@ impl PhpFeature {
             FinalClassConstants
             | ArrayUnpackingWithStringKeys
             | DeprecatesFloatArrayKey
+            | DeprecatesNullToInternalScalarParameter
             | PureIntersectionTypes
             | SerializableRequiresMagicMethods
             | FirstClassCallables

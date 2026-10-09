@@ -333,6 +333,27 @@ impl<'a> Checker<'a> {
                             )
                             .yes()
                 });
+            let null_to_string_is_deprecated = weak_strlen_string_coercion
+                && arg_ty
+                    .union_members()
+                    .iter()
+                    .any(|member| member.is_null().yes())
+                && self
+                    .registry
+                    .php_supports_somewhere(PhpFeature::DeprecatesNullToInternalScalarParameter)
+                    == Some(true);
+            if null_to_string_is_deprecated {
+                self.report(
+                    format!(
+                        "Passing null to parameter #{} (${}) of function strlen is deprecated.",
+                        i + 1,
+                        param.name()
+                    ),
+                    argument.span,
+                    0,
+                    "argument.nullDeprecated",
+                );
+            }
             if let Some(from) = self.rejected_from(&param_ty, &arg_ty)
                 && !weak_string_value_accepted
             {

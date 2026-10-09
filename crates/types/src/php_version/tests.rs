@@ -102,6 +102,10 @@ fn thresholds_match_real_phpstans_own_phpversion_class() {
         PhpVersion::new(8, 1)
     );
     assert_eq!(
+        PhpFeature::DeprecatesNullToInternalScalarParameter.threshold(),
+        PhpVersion::new(8, 1)
+    );
+    assert_eq!(
         PhpFeature::ArrayUnpackingWithStringKeys.threshold(),
         PhpVersion::new(8, 1)
     );
