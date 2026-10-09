@@ -1232,7 +1232,7 @@ impl Registry {
     /// built.
     pub(crate) fn begin_declaration_changes(&mut self) {
         self.relation_generation = None;
-        self.reach_memo = ReachMemo::default();
+        self.reach_memo.reset();
         self.deferred_types_ready = false;
         self.deferred_function_results.clear();
         self.deferred_class_results.clear();
@@ -1246,7 +1246,7 @@ impl Registry {
     pub(crate) fn advance_relation_generation(&mut self) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         self.relation_generation = Some(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-        self.reach_memo = ReachMemo::default();
+        self.reach_memo.reset();
     }
 
     /// Whether the finishing passes have resolved declarations that are

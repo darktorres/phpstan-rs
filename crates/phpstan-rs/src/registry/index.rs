@@ -627,7 +627,7 @@ impl Registry {
             .into_par_iter()
             .map(|mut entries| {
                 entries.sort_unstable_by_key(|entry| entry.0);
-                let mut groups: FxHashMap<(u8, String), Vec<Input>> = FxHashMap::default();
+                let mut groups: FxHashMap<(u8, Name), Vec<Input>> = FxHashMap::default();
                 for entry in entries {
                     let (kind, name) = match &entry.1 {
                         BuiltDecl::Class { name, .. } => (b'c', name),
@@ -635,7 +635,7 @@ impl Registry {
                         BuiltDecl::GlobalConst { .. } => unreachable!(),
                     };
                     groups
-                        .entry((kind, name.lower().to_owned()))
+                        .entry((kind, name.lowered().clone()))
                         .or_default()
                         .push(entry);
                 }
@@ -770,13 +770,18 @@ impl Registry {
         }
     }
 
+    /// An empty registry that reads declarations as this one does.
+    #[allow(clippy::field_reassign_with_default)]
+    fn isolated_base(&self) -> Registry {
+        let mut isolated = Registry::default();
+        isolated.php_versions = self.php_versions;
+        isolated.id_generation = self.id_generation;
+        isolated.resolved_declarations = self.resolved_declarations;
+        isolated
+    }
+
     fn isolated_class_slot(&self, name: &Name) -> Registry {
-        let mut isolated = Registry {
-            php_versions: self.php_versions,
-            id_generation: self.id_generation,
-            resolved_declarations: self.resolved_declarations,
-            ..Registry::default()
-        };
+        let mut isolated = self.isolated_base();
         if let Some(id) = self.class_ids.get(name).copied() {
             isolated.class_ids.insert(name.clone(), id);
             if let Some(declaration) = self.classes.get_shared(name) {
@@ -799,12 +804,7 @@ impl Registry {
     }
 
     fn isolated_function_slot(&self, name: &Name) -> Registry {
-        let mut isolated = Registry {
-            php_versions: self.php_versions,
-            id_generation: self.id_generation,
-            resolved_declarations: self.resolved_declarations,
-            ..Registry::default()
-        };
+        let mut isolated = self.isolated_base();
         let folded = function_key(name.as_str());
         if let Some(id) = self.function_ids.get(name).copied() {
             isolated.function_ids.insert(name.clone(), id);

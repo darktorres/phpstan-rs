@@ -1544,7 +1544,7 @@ impl Registry {
             running_code.insert(Name::from(name), owners);
         }
         self.builtin_methods_running_code = running_code;
-        self.reach_memo = super::ReachMemo::default();
+        self.reach_memo.reset();
         let registry: &Registry = self;
         let functions: Vec<(&Name, &FunctionReflection)> = registry
             .own_functions_by_id()
@@ -2178,7 +2178,7 @@ impl Registry {
 
     pub(crate) fn rebuild_methods_by_name(&mut self) {
         self.methods_by_name = Arc::new(methods_by_name(self));
-        self.reach_memo = super::ReachMemo::default();
+        self.reach_memo.reset();
     }
 
     /// The names (lowercased) of the builtin methods that run code passed to

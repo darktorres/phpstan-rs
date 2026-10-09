@@ -16,16 +16,32 @@ use super::effects::{
 
 const SHARDS: usize = 16;
 
+type Shards<K, V> = [Mutex<FxHashMap<K, Arc<OnceLock<V>>>>; SHARDS];
+
 /// A map from a key to a value computed once.
 pub(crate) struct OnceMap<K, V> {
-    shards: [Mutex<FxHashMap<K, Arc<OnceLock<V>>>>; SHARDS],
+    shards: OnceLock<Box<Shards<K, V>>>,
 }
 
 impl<K, V> Default for OnceMap<K, V> {
     fn default() -> Self {
         Self {
-            shards: std::array::from_fn(|_| Mutex::new(FxHashMap::default())),
+            shards: OnceLock::new(),
         }
+    }
+}
+
+impl<K, V> OnceMap<K, V> {
+    /// Whether any key has been asked.
+    pub(crate) fn is_used(&self) -> bool {
+        self.shards.get().is_some()
+    }
+
+    /// The shards, made when the map is first used, so a registry that
+    /// never asks a memo does not allocate its tables.
+    fn shards(&self) -> &Shards<K, V> {
+        self.shards
+            .get_or_init(|| Box::new(std::array::from_fn(|_| Mutex::new(FxHashMap::default()))))
     }
 }
 
@@ -35,7 +51,7 @@ impl<K: Hash + Eq, V: Clone> OnceMap<K, V> {
     pub(crate) fn get_or_compute(&self, key: K, compute: impl FnOnce() -> V) -> V {
         let shard = FxBuildHasher.hash_one(&key) as usize % SHARDS;
         let cell = {
-            let mut map = self.shards[shard]
+            let mut map = self.shards()[shard]
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             Arc::clone(map.entry(key).or_default())
@@ -52,7 +68,7 @@ impl<K: Hash + Eq, V: Clone> OnceMap<K, V> {
     {
         let shard = FxBuildHasher.hash_one(key) as usize % SHARDS;
         let cell = {
-            let mut map = self.shards[shard]
+            let mut map = self.shards()[shard]
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             match map.get(key) {
@@ -101,6 +117,23 @@ pub(crate) enum StaticTarget {
 /// The declarations a call runs, each with its transfer, shared by the
 /// calls that ask the same.
 pub(crate) type SharedTargets = Arc<[(DeclKey, Transfer)]>;
+
+impl ReachMemo {
+    /// Replaces the memo with an empty one. A memo that holds the answers
+    /// of a pass is freed on a thread of its own, so the next pass does not
+    /// wait for its tables to be freed.
+    pub(crate) fn reset(&mut self) {
+        let old = std::mem::take(self);
+        if old.implementations.is_used()
+            || old.methods_named.is_used()
+            || old.implicit.is_used()
+            || old.effect_ixs.is_used()
+            || old.builtin_base.is_used()
+        {
+            std::thread::spawn(move || drop(old));
+        }
+    }
+}
 
 /// The memoised queries, keyed by lowercased names.
 #[derive(Default)]
