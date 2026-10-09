@@ -253,6 +253,8 @@ pub enum GraphError {
     OpenDomainWithoutUnknown(Domain),
     MissingEvidence(Domain),
     OpenWithoutReason(Domain),
+    UnknownTransferWithoutReason,
+    UnknownTransferWithoutOpenCoverage(Domain),
     UnresolvedValue,
     EventWithoutOutcome,
     ResumeWithoutPendingOutcome,
@@ -345,17 +347,30 @@ impl BehaviorGraph {
                 return Err(GraphError::MissingCoverage(domain));
             }
         }
-        let unknown_domains: Vec<Domain> = self
+        let unknown_events: Vec<&Event> = self
             .blocks
             .iter()
             .enumerate()
             .filter(|(i, _)| colors[*i] == 2)
             .flat_map(|(_, block)| block.events.iter())
+            .filter(|event| matches!(event, Event::Unknown { .. }))
+            .collect();
+        let unknown_domains: Vec<Domain> = unknown_events
+            .iter()
             .flat_map(|event| match event {
-                Event::Unknown { domains, .. } => domains.clone(),
-                _ => Vec::new(),
+                Event::Unknown { domains, reason } => {
+                    if reason.0.is_empty() || domains.is_empty() {
+                        vec![]
+                    } else {
+                        domains.clone()
+                    }
+                }
+                _ => unreachable!(),
             })
             .collect();
+        if unknown_events.iter().any(|event| matches!(event, Event::Unknown { domains, reason } if domains.is_empty() || reason.0.is_empty())) {
+            return Err(GraphError::UnknownTransferWithoutReason);
+        }
         for item in &self.coverage {
             if matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty()) {
                 return Err(GraphError::OpenWithoutReason(item.domain));
@@ -367,6 +382,15 @@ impl BehaviorGraph {
                 && !unknown_domains.contains(&item.domain)
             {
                 return Err(GraphError::OpenDomainWithoutUnknown(item.domain));
+            }
+        }
+        for domain in unknown_domains {
+            if !self
+                .coverage
+                .iter()
+                .any(|item| item.domain == domain && matches!(item.coverage, Coverage::Open { .. }))
+            {
+                return Err(GraphError::UnknownTransferWithoutOpenCoverage(domain));
             }
         }
         Ok(())
@@ -1315,6 +1339,12 @@ mod tests {
             .position(|c| c.domain == Domain::UserWrite)
             .unwrap();
         graph.coverage[index] = open_coverage(Domain::UserWrite, b"opaque call");
+        let index = graph
+            .coverage
+            .iter()
+            .position(|c| c.domain == Domain::Return)
+            .unwrap();
+        graph.coverage[index] = open_coverage(Domain::Return, b"opaque call");
         let mut host = Host::default();
         let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
         assert_eq!(evaluation.coverage, graph.coverage);
@@ -1473,5 +1503,43 @@ mod tests {
             evaluate(&g, &[], &receiver(), vec![], &mut host),
             Err(GraphError::UnresolvedValue)
         );
+    }
+
+    #[test]
+    fn unknown_transfer_cannot_be_marked_closed_or_reasonless() {
+        let graph_with_unknown = |reason: &[u8]| {
+            graph(
+                vec![Event::Unknown {
+                    domains: vec![Domain::Return],
+                    reason: Bytes(reason.to_vec()),
+                }],
+                Terminator::Return(None),
+            )
+        };
+        let mut g = graph_with_unknown(b"unknown body");
+        assert_eq!(
+            g.validate(),
+            Err(GraphError::UnknownTransferWithoutOpenCoverage(
+                Domain::Return
+            ))
+        );
+        let index = g
+            .coverage
+            .iter()
+            .position(|c| c.domain == Domain::Return)
+            .unwrap();
+        g.coverage[index] = open_coverage(Domain::Return, b"unknown body");
+        let mut event_graph = graph_with_unknown(b"");
+        let index = event_graph
+            .coverage
+            .iter()
+            .position(|c| c.domain == Domain::Return)
+            .unwrap();
+        event_graph.coverage[index] = open_coverage(Domain::Return, b"unknown body");
+        assert_eq!(
+            event_graph.validate(),
+            Err(GraphError::UnknownTransferWithoutReason)
+        );
+        assert_eq!(g.validate(), Ok(()));
     }
 }
