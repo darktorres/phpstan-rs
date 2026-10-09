@@ -238,7 +238,6 @@ pub enum GraphError {
     Empty,
     InvalidEntry(u32),
     InvalidSuccessor { block: u32, successor: u32 },
-    Cycle(u32),
     DuplicateCoverage(Domain),
     MissingCoverage(Domain),
     OpenDomainWithoutUnknown(Domain),
@@ -296,8 +295,7 @@ impl BehaviorGraph {
         let mut colors = vec![0u8; self.blocks.len()];
         fn visit(id: u32, graph: &BehaviorGraph, colors: &mut [u8]) -> Result<(), GraphError> {
             match colors[id as usize] {
-                1 => return Err(GraphError::Cycle(id)),
-                2 => return Ok(()),
+                1 | 2 => return Ok(()),
                 _ => {}
             }
             colors[id as usize] = 1;
@@ -407,8 +405,8 @@ pub enum EventExit<V, S> {
 }
 
 pub trait SemanticHost {
-    type Value: Clone;
-    type State: Clone;
+    type Value: Clone + PartialEq;
+    type State: Clone + PartialEq;
 
     fn resolve(
         &self,
@@ -433,11 +431,185 @@ pub trait SemanticHost {
         results: &[(u32, Self::Value)],
         state: Self::State,
     ) -> Vec<EventExit<Self::Value, Self::State>>;
+    fn unknown_value(&self) -> Self::Value;
+    fn join_value(&self, left: Self::Value, right: Self::Value) -> Self::Value;
+    fn widen_value(&self, old: Self::Value, next: Self::Value) -> Self::Value;
+    fn value_subsumes(&self, broad: &Self::Value, narrow: &Self::Value) -> bool;
+    fn join_state(&self, left: Self::State, right: Self::State) -> Self::State;
+    fn widen_state(&self, old: Self::State, next: Self::State) -> Self::State;
+    fn state_subsumes(&self, broad: &Self::State, narrow: &Self::State) -> bool;
 }
 
 /// Execute a finite graph with a finite host-provided state join. Cycles are
-/// rejected here: production loop evaluation must provide explicit widening;
-/// this seed evaluator must never silently truncate an unfinished worklist.
+/// evaluated with host joins and widening after three growing updates. The
+/// host's transfer, join, widening, and subsumption methods must be monotone.
+#[derive(Debug, Clone)]
+struct Frame<V, S> {
+    block: u32,
+    state: S,
+    results: Vec<(u32, V)>,
+    pending: Option<PendingOutcome<V>>,
+    growing_updates: u32,
+}
+
+fn pending_kind<V>(pending: &Option<PendingOutcome<V>>) -> u8 {
+    match pending {
+        None => 0,
+        Some(PendingOutcome::PhpThrow(_)) => 1,
+        Some(PendingOutcome::NativeUnwind(_)) => 2,
+        Some(PendingOutcome::Fatal(_)) => 3,
+        Some(PendingOutcome::Suspended(_)) => 4,
+    }
+}
+
+fn merge_pending<H: SemanticHost>(
+    host: &H,
+    left: Option<PendingOutcome<H::Value>>,
+    right: Option<PendingOutcome<H::Value>>,
+    widen: bool,
+) -> Option<PendingOutcome<H::Value>> {
+    let merge = |a, b| {
+        if widen {
+            host.widen_value(a, b)
+        } else {
+            host.join_value(a, b)
+        }
+    };
+    match (left, right) {
+        (None, None) => None,
+        (Some(PendingOutcome::PhpThrow(a)), Some(PendingOutcome::PhpThrow(b))) => {
+            Some(PendingOutcome::PhpThrow(merge(a, b)))
+        }
+        (Some(PendingOutcome::NativeUnwind(a)), Some(PendingOutcome::NativeUnwind(b))) => {
+            Some(PendingOutcome::NativeUnwind(merge(a, b)))
+        }
+        (Some(PendingOutcome::Fatal(a)), Some(PendingOutcome::Fatal(b))) => {
+            Some(PendingOutcome::Fatal(merge(a, b)))
+        }
+        (Some(PendingOutcome::Suspended(a)), Some(PendingOutcome::Suspended(b))) => {
+            Some(PendingOutcome::Suspended(merge(a, b)))
+        }
+        _ => unreachable!("frames of distinct pending-outcome kind are not joined"),
+    }
+}
+
+fn merge_results<H: SemanticHost>(
+    host: &H,
+    left: &[(u32, H::Value)],
+    right: &[(u32, H::Value)],
+    widen: bool,
+) -> Vec<(u32, H::Value)> {
+    let mut ids: Vec<u32> = left.iter().chain(right).map(|(id, _)| *id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .map(|id| {
+            let a = left
+                .iter()
+                .find(|(key, _)| *key == id)
+                .map(|(_, value)| value.clone());
+            let b = right
+                .iter()
+                .find(|(key, _)| *key == id)
+                .map(|(_, value)| value.clone());
+            let unknown = host.unknown_value();
+            let value = match (a, b) {
+                (Some(a), Some(b)) if widen => host.widen_value(a, b),
+                (Some(a), Some(b)) => host.join_value(a, b),
+                (Some(a), None) if widen => host.widen_value(a, unknown),
+                (None, Some(b)) if widen => host.widen_value(unknown, b),
+                (Some(a), None) => host.join_value(a, unknown),
+                (None, Some(b)) => host.join_value(unknown, b),
+                (None, None) => unreachable!(),
+            };
+            (id, value)
+        })
+        .collect()
+}
+
+fn frame_subsumes<H: SemanticHost>(
+    host: &H,
+    broad: &Frame<H::Value, H::State>,
+    narrow: &Frame<H::Value, H::State>,
+) -> bool {
+    if !host.state_subsumes(&broad.state, &narrow.state)
+        || pending_kind(&broad.pending) != pending_kind(&narrow.pending)
+    {
+        return false;
+    }
+    let pending_values = match (&broad.pending, &narrow.pending) {
+        (None, None) => true,
+        (Some(PendingOutcome::PhpThrow(a)), Some(PendingOutcome::PhpThrow(b)))
+        | (Some(PendingOutcome::NativeUnwind(a)), Some(PendingOutcome::NativeUnwind(b)))
+        | (Some(PendingOutcome::Fatal(a)), Some(PendingOutcome::Fatal(b)))
+        | (Some(PendingOutcome::Suspended(a)), Some(PendingOutcome::Suspended(b))) => {
+            host.value_subsumes(a, b)
+        }
+        _ => false,
+    };
+    pending_values
+        && broad.results.len() == narrow.results.len()
+        && narrow.results.iter().all(|(id, value)| {
+            broad
+                .results
+                .iter()
+                .find(|(other, _)| other == id)
+                .is_some_and(|(_, broad_value)| host.value_subsumes(broad_value, value))
+        })
+}
+
+fn enqueue<H: SemanticHost>(
+    host: &H,
+    frame: Frame<H::Value, H::State>,
+    records: &mut Vec<Frame<H::Value, H::State>>,
+    by_block: &mut [Vec<usize>],
+    queue: &mut Vec<usize>,
+) {
+    let index = by_block[frame.block as usize]
+        .iter()
+        .copied()
+        .find(|&i| pending_kind(&records[i].pending) == pending_kind(&frame.pending));
+    let Some(index) = index else {
+        let index = records.len();
+        by_block[frame.block as usize].push(index);
+        records.push(frame);
+        queue.push(index);
+        return;
+    };
+    if frame_subsumes(host, &records[index], &frame) {
+        return;
+    }
+    let old = &records[index];
+    let widen = old.growing_updates >= 3;
+    let mut merged = Frame {
+        block: old.block,
+        state: if widen {
+            host.widen_state(old.state.clone(), frame.state)
+        } else {
+            host.join_state(old.state.clone(), frame.state)
+        },
+        results: merge_results(host, &old.results, &frame.results, widen),
+        pending: merge_pending(host, old.pending.clone(), frame.pending, widen),
+        growing_updates: old.growing_updates + 1,
+    };
+    if merged.state == old.state && merged.results == old.results && merged.pending == old.pending {
+        return;
+    }
+    if widen {
+        merged.growing_updates = old.growing_updates + 1;
+    }
+    records[index] = merged;
+    if !queue.contains(&index) {
+        queue.push(index);
+    }
+}
+
+fn push_exit<V: PartialEq, S: PartialEq>(exits: &mut Vec<Exit<V, S>>, exit: Exit<V, S>) {
+    if !exits.contains(&exit) {
+        exits.push(exit);
+    }
+}
+
 pub fn evaluate<H: SemanticHost>(
     graph: &BehaviorGraph,
     arguments: &[H::Value],
@@ -446,16 +618,23 @@ pub fn evaluate<H: SemanticHost>(
     host: &mut H,
 ) -> Result<Evaluation<H::Value, H::State>, GraphError> {
     graph.validate()?;
-    let mut work = vec![(
-        graph.entry,
-        initial,
-        Vec::<(u32, H::Value)>::new(),
-        None::<PendingOutcome<H::Value>>,
-    )];
+    let initial_frame = Frame {
+        block: graph.entry,
+        state: initial,
+        results: Vec::<(u32, H::Value)>::new(),
+        pending: None,
+        growing_updates: 0,
+    };
+    let mut records = vec![initial_frame];
+    let mut by_block = vec![Vec::new(); graph.blocks.len()];
+    by_block[graph.entry as usize].push(0);
+    let mut queue = vec![0usize];
     let mut exits = Vec::new();
-    while let Some((block_id, state, results, pending)) = work.pop() {
+    while let Some(frame_id) = queue.pop() {
+        let frame = records[frame_id].clone();
+        let block_id = frame.block;
         let block = &graph.blocks[block_id as usize];
-        let mut paths = vec![(state, results, pending)];
+        let mut paths = vec![(frame.state, frame.results, frame.pending)];
         for event in &block.events {
             let mut next = Vec::new();
             for (state, values, pending) in paths {
@@ -475,50 +654,78 @@ pub fn evaluate<H: SemanticHost>(
                         }
                         EventExit::PhpThrow { value, state } => {
                             if let Some(to) = block.exceptional.php_throw {
-                                work.push((
-                                    to,
-                                    state,
-                                    values.clone(),
-                                    Some(PendingOutcome::PhpThrow(value)),
-                                ));
+                                enqueue(
+                                    host,
+                                    Frame {
+                                        block: to,
+                                        state,
+                                        results: values.clone(),
+                                        pending: Some(PendingOutcome::PhpThrow(value)),
+                                        growing_updates: 0,
+                                    },
+                                    &mut records,
+                                    &mut by_block,
+                                    &mut queue,
+                                );
                             } else {
-                                exits.push(Exit::PhpThrow { value, state });
+                                push_exit(&mut exits, Exit::PhpThrow { value, state });
                             }
                         }
                         EventExit::NativeUnwind { value, state } => {
                             if let Some(to) = block.exceptional.native_unwind {
-                                work.push((
-                                    to,
-                                    state,
-                                    values.clone(),
-                                    Some(PendingOutcome::NativeUnwind(value)),
-                                ));
+                                enqueue(
+                                    host,
+                                    Frame {
+                                        block: to,
+                                        state,
+                                        results: values.clone(),
+                                        pending: Some(PendingOutcome::NativeUnwind(value)),
+                                        growing_updates: 0,
+                                    },
+                                    &mut records,
+                                    &mut by_block,
+                                    &mut queue,
+                                );
                             } else {
-                                exits.push(Exit::NativeUnwind { value, state });
+                                push_exit(&mut exits, Exit::NativeUnwind { value, state });
                             }
                         }
                         EventExit::Fatal { value, state } => {
                             if let Some(to) = block.exceptional.fatal {
-                                work.push((
-                                    to,
-                                    state,
-                                    values.clone(),
-                                    Some(PendingOutcome::Fatal(value)),
-                                ));
+                                enqueue(
+                                    host,
+                                    Frame {
+                                        block: to,
+                                        state,
+                                        results: values.clone(),
+                                        pending: Some(PendingOutcome::Fatal(value)),
+                                        growing_updates: 0,
+                                    },
+                                    &mut records,
+                                    &mut by_block,
+                                    &mut queue,
+                                );
                             } else {
-                                exits.push(Exit::Fatal { value, state });
+                                push_exit(&mut exits, Exit::Fatal { value, state });
                             }
                         }
                         EventExit::Suspended { value, state } => {
                             if let Some(to) = block.exceptional.suspended {
-                                work.push((
-                                    to,
-                                    state,
-                                    values.clone(),
-                                    Some(PendingOutcome::Suspended(value)),
-                                ));
+                                enqueue(
+                                    host,
+                                    Frame {
+                                        block: to,
+                                        state,
+                                        results: values.clone(),
+                                        pending: Some(PendingOutcome::Suspended(value)),
+                                        growing_updates: 0,
+                                    },
+                                    &mut records,
+                                    &mut by_block,
+                                    &mut queue,
+                                );
                             } else {
-                                exits.push(Exit::Suspended { value, state });
+                                push_exit(&mut exits, Exit::Suspended { value, state });
                             }
                         }
                     }
@@ -528,14 +735,74 @@ pub fn evaluate<H: SemanticHost>(
         }
         for (state, results, pending) in paths {
             match &block.terminator {
-                Terminator::Goto(to) => work.push((*to, state, results, pending)),
+                Terminator::Goto(to) => enqueue(
+                    host,
+                    Frame {
+                        block: *to,
+                        state,
+                        results,
+                        pending,
+                        growing_updates: 0,
+                    },
+                    &mut records,
+                    &mut by_block,
+                    &mut queue,
+                ),
                 Terminator::Branch { predicate, yes, no } => {
                     match host.test(predicate, arguments, receiver, &results, &state) {
-                        Truth::Yes => work.push((*yes, state, results, pending)),
-                        Truth::No => work.push((*no, state, results, pending)),
+                        Truth::Yes => enqueue(
+                            host,
+                            Frame {
+                                block: *yes,
+                                state,
+                                results,
+                                pending,
+                                growing_updates: 0,
+                            },
+                            &mut records,
+                            &mut by_block,
+                            &mut queue,
+                        ),
+                        Truth::No => enqueue(
+                            host,
+                            Frame {
+                                block: *no,
+                                state,
+                                results,
+                                pending,
+                                growing_updates: 0,
+                            },
+                            &mut records,
+                            &mut by_block,
+                            &mut queue,
+                        ),
                         Truth::Maybe => {
-                            work.push((*yes, state.clone(), results.clone(), pending.clone()));
-                            work.push((*no, state, results, pending));
+                            enqueue(
+                                host,
+                                Frame {
+                                    block: *yes,
+                                    state: state.clone(),
+                                    results: results.clone(),
+                                    pending: pending.clone(),
+                                    growing_updates: 0,
+                                },
+                                &mut records,
+                                &mut by_block,
+                                &mut queue,
+                            );
+                            enqueue(
+                                host,
+                                Frame {
+                                    block: *no,
+                                    state,
+                                    results,
+                                    pending,
+                                    growing_updates: 0,
+                                },
+                                &mut records,
+                                &mut by_block,
+                                &mut queue,
+                            );
                         }
                     }
                 }
@@ -547,16 +814,28 @@ pub fn evaluate<H: SemanticHost>(
                                 .ok_or(GraphError::UnresolvedValue)
                         })
                         .transpose()?;
-                    exits.push(Exit::Normal { value, state });
+                    push_exit(&mut exits, Exit::Normal { value, state });
                 }
                 Terminator::Throw(value) => {
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
                     if let Some(to) = block.exceptional.php_throw {
-                        work.push((to, state, results, Some(PendingOutcome::PhpThrow(value))));
+                        enqueue(
+                            host,
+                            Frame {
+                                block: to,
+                                state,
+                                results,
+                                pending: Some(PendingOutcome::PhpThrow(value)),
+                                growing_updates: 0,
+                            },
+                            &mut records,
+                            &mut by_block,
+                            &mut queue,
+                        );
                     } else {
-                        exits.push(Exit::PhpThrow { value, state });
+                        push_exit(&mut exits, Exit::PhpThrow { value, state });
                     }
                 }
                 Terminator::Fatal(value) => {
@@ -564,9 +843,21 @@ pub fn evaluate<H: SemanticHost>(
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
                     if let Some(to) = block.exceptional.fatal {
-                        work.push((to, state, results, Some(PendingOutcome::Fatal(value))));
+                        enqueue(
+                            host,
+                            Frame {
+                                block: to,
+                                state,
+                                results,
+                                pending: Some(PendingOutcome::Fatal(value)),
+                                growing_updates: 0,
+                            },
+                            &mut records,
+                            &mut by_block,
+                            &mut queue,
+                        );
                     } else {
-                        exits.push(Exit::Fatal { value, state });
+                        push_exit(&mut exits, Exit::Fatal { value, state });
                     }
                 }
                 Terminator::Suspend(value) => {
@@ -574,21 +865,35 @@ pub fn evaluate<H: SemanticHost>(
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
                     if let Some(to) = block.exceptional.suspended {
-                        work.push((to, state, results, Some(PendingOutcome::Suspended(value))));
+                        enqueue(
+                            host,
+                            Frame {
+                                block: to,
+                                state,
+                                results,
+                                pending: Some(PendingOutcome::Suspended(value)),
+                                growing_updates: 0,
+                            },
+                            &mut records,
+                            &mut by_block,
+                            &mut queue,
+                        );
                     } else {
-                        exits.push(Exit::Suspended { value, state });
+                        push_exit(&mut exits, Exit::Suspended { value, state });
                     }
                 }
                 Terminator::Resume => match pending {
                     Some(PendingOutcome::PhpThrow(value)) => {
-                        exits.push(Exit::PhpThrow { value, state })
+                        push_exit(&mut exits, Exit::PhpThrow { value, state })
                     }
                     Some(PendingOutcome::NativeUnwind(value)) => {
-                        exits.push(Exit::NativeUnwind { value, state })
+                        push_exit(&mut exits, Exit::NativeUnwind { value, state })
                     }
-                    Some(PendingOutcome::Fatal(value)) => exits.push(Exit::Fatal { value, state }),
+                    Some(PendingOutcome::Fatal(value)) => {
+                        push_exit(&mut exits, Exit::Fatal { value, state })
+                    }
                     Some(PendingOutcome::Suspended(value)) => {
-                        exits.push(Exit::Suspended { value, state })
+                        push_exit(&mut exits, Exit::Suspended { value, state })
                     }
                     None => return Err(GraphError::ResumeWithoutPendingOutcome),
                 },
@@ -610,6 +915,7 @@ mod tests {
         throw_invoke: bool,
         both_invoke_outcomes: bool,
         native_unwind_invoke: bool,
+        maybe_always: bool,
     }
     impl SemanticHost for Host {
         type Value = String;
@@ -642,7 +948,13 @@ mod tests {
             _: &Vec<String>,
         ) -> Truth {
             match p {
-                Predicate::Always => Truth::Yes,
+                Predicate::Always => {
+                    if self.maybe_always {
+                        Truth::Maybe
+                    } else {
+                        Truth::Yes
+                    }
+                }
                 Predicate::IsLiteral { value, expected } => {
                     match self.resolve(value, args, receiver, results) {
                         Some(v) if v.as_bytes() == expected.0 => Truth::Yes,
@@ -696,6 +1008,28 @@ mod tests {
             }
             let _ = (args, receiver);
             vec![EventExit::Normal { result, state }]
+        }
+
+        fn unknown_value(&self) -> String {
+            "<unknown>".into()
+        }
+        fn join_value(&self, a: String, b: String) -> String {
+            if a == b { a } else { "<unknown>".into() }
+        }
+        fn widen_value(&self, _old: String, _next: String) -> String {
+            "<unknown>".into()
+        }
+        fn value_subsumes(&self, broad: &String, narrow: &String) -> bool {
+            broad == narrow || broad == "<unknown>"
+        }
+        fn join_state(&self, a: Vec<String>, b: Vec<String>) -> Vec<String> {
+            if a == b { a } else { vec!["<joined>".into()] }
+        }
+        fn widen_state(&self, _old: Vec<String>, _next: Vec<String>) -> Vec<String> {
+            vec!["<joined>".into()]
+        }
+        fn state_subsumes(&self, broad: &Vec<String>, narrow: &Vec<String>) -> bool {
+            broad == narrow || broad == &["<joined>".to_string()]
         }
     }
 
@@ -984,9 +1318,47 @@ mod tests {
     }
 
     #[test]
-    fn cyclic_graph_is_rejected_instead_of_truncated() {
-        let graph = graph(vec![], Terminator::Goto(0));
-        assert_eq!(graph.validate(), Err(GraphError::Cycle(0)));
+    fn cyclic_graph_reaches_a_stable_widened_exit() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Write {
+                        storage: Operand::Argument(0),
+                        value: Operand::Literal(Bytes(b"loop".to_vec())),
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::Always,
+                        yes: 0,
+                        no: 1,
+                    },
+                ),
+                Block::new(vec![], Terminator::Return(None)),
+            ],
+            coverage: Domain::ALL
+                .into_iter()
+                .map(|domain| DomainCoverage {
+                    domain,
+                    coverage: Coverage::NotApplicable,
+                    precision: Precision::Exact,
+                    evidence: vec![Digest([1; 32])],
+                    assumptions: vec![],
+                })
+                .collect(),
+        };
+        let mut host = Host {
+            maybe_always: true,
+            ..Host::default()
+        };
+        let result = evaluate(&graph, &["x".into()], &receiver(), vec![], &mut host).unwrap();
+        assert!(
+            result
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::Normal { .. }))
+        );
+        assert!(result.exits.len() <= 2);
     }
 
     #[test]
