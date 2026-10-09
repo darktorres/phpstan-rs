@@ -84,11 +84,11 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    one batch of items 0-14 (0b, 7a-7h, 12a-12f) for every hotspot of the
    9071f48f callgrind profile. Status: in progress; the Baseline step
    is done (off 54.13 G, warm 42.14 G, cold-with-store 56.24 G; `strace` says
-   no `memmap2`), items 0, 0b, 1, 2, 3, 4, 5, 7a, 7b, 7c and 7d are committed (3 covers
+   no `memmap2`), items 0, 0b, 1, 2, 3, 4, 5, 7a, 7b, 7c, 7d and 7e are committed (3 covers
    `EffectTable`/`TransferTable` handles, `Classification` and `IdTargetSet` over
    them, and the dense `settle`; still open from items 3, 6, 7b and 7c (7c landed lazy memo shards, the move-free isolated base and off-thread memo drops; the one-registry-per-bucket reset with its exhaustive destructure and oracle waits for the end-of-batch drill to show what `Registry::default` and its drop still cost) (7b's dense cells and `PerClass` landed; its target-carries-signature, slot-iteration and `methods_by_name` rows ride with D and item 8): by-id target
    memos for `call_targets` (D), the per-handle builtin bit, the `Settlements`
-   use by Y). Resume at item 7e (item 6's dense `settle` landed with 3). Verification runs once, after item 14.
+   use by Y). Resume at item 7f (item 6's dense `settle` landed with 3). Verification runs once, after item 14.
 2. Then **level 8's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
    finds beyond what the optimization needs, validated together (the

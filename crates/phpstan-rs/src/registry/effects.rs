@@ -39,6 +39,7 @@
 //! after its property (`hook_member`).
 
 use crate::registry::TableKey;
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -101,7 +102,7 @@ pub(crate) enum Storage {
 
 /// What code may write: a set of storages, or anything.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct Effect(Option<BTreeSet<Storage>>);
+pub(crate) struct Effect(Option<Arc<BTreeSet<Storage>>>);
 
 impl Default for Effect {
     fn default() -> Effect {
@@ -111,7 +112,7 @@ impl Default for Effect {
 
 impl Effect {
     pub(crate) fn nothing() -> Effect {
-        Effect(Some(BTreeSet::new()))
+        Effect(Some(Arc::default()))
     }
 
     pub(crate) fn anything() -> Effect {
@@ -121,7 +122,7 @@ impl Effect {
     /// What a call may write that runs code the analysis cannot resolve: any
     /// code of the loaded program.
     pub(crate) fn unknown() -> Effect {
-        Effect(Some(BTreeSet::from([Storage::Unknown])))
+        Effect(Some(Arc::new(BTreeSet::from([Storage::Unknown]))))
     }
 
     /// Whether it may write anything the code of the loaded program may, or
@@ -141,20 +142,20 @@ impl Effect {
     /// What running the closure `closure` writes of the variables it
     /// captures by reference.
     pub(crate) fn captured(closure: u32, vars: impl IntoIterator<Item = Name>) -> Effect {
-        Effect(Some(
+        Effect(Some(Arc::new(
             vars.into_iter()
                 .map(|var| Storage::Captured { closure, var })
                 .collect(),
-        ))
+        )))
     }
 
     pub(crate) fn is_nothing(&self) -> bool {
-        self.0.as_ref().is_some_and(BTreeSet::is_empty)
+        self.0.as_ref().is_some_and(|storages| storages.is_empty())
     }
 
     /// The storages written, when they are known.
     pub(crate) fn storages(&self) -> Option<&BTreeSet<Storage>> {
-        self.0.as_ref()
+        self.0.as_deref()
     }
 
     /// This effect of a method, called on an object that may be of `class`
@@ -166,7 +167,7 @@ impl Effect {
 
     fn insert(&mut self, storage: Storage) {
         if let Some(storages) = &mut self.0 {
-            storages.insert(storage);
+            Arc::make_mut(storages).insert(storage);
         }
     }
 
@@ -179,9 +180,11 @@ impl Effect {
                 true
             }
             (Some(storages), Some(added)) => {
-                let before = storages.len();
-                storages.extend(added.iter().cloned());
-                storages.len() != before
+                if Arc::ptr_eq(storages, added) || added.iter().all(|s| storages.contains(s)) {
+                    return false;
+                }
+                Arc::make_mut(storages).extend(added.iter().cloned());
+                true
             }
         }
     }
@@ -196,30 +199,26 @@ impl Effect {
         let Some(storages) = &mut self.0 else {
             return false;
         };
-        let before = storages.len();
-        for storage in added {
-            match (storage, transfer) {
-                (Storage::Own(prop), Transfer::Other(class)) => {
-                    storages.insert(Storage::Property {
-                        class: class.clone(),
-                        prop: prop.clone(),
-                    });
-                }
-                (Storage::Own(_), Transfer::Made) => {}
-                (Storage::Own(prop), Transfer::Static) => {
-                    storages.insert(Storage::Property {
-                        class: None,
-                        prop: prop.clone(),
-                    });
-                }
-                (storage, _) => {
-                    if !storages.contains(storage) {
-                        storages.insert(storage.clone());
-                    }
-                }
+        let mut changed = false;
+        for storage in added.iter() {
+            let produced = match (storage, transfer) {
+                (Storage::Own(prop), Transfer::Other(class)) => Cow::Owned(Storage::Property {
+                    class: class.clone(),
+                    prop: prop.clone(),
+                }),
+                (Storage::Own(_), Transfer::Made) => continue,
+                (Storage::Own(prop), Transfer::Static) => Cow::Owned(Storage::Property {
+                    class: None,
+                    prop: prop.clone(),
+                }),
+                (storage, _) => Cow::Borrowed(storage),
+            };
+            if !storages.contains(&*produced) {
+                Arc::make_mut(storages).insert(produced.into_owned());
+                changed = true;
             }
         }
-        storages.len() != before
+        changed
     }
 
     /// This effect, written by a call whose callee's own `$this` is the
@@ -228,8 +227,13 @@ impl Effect {
         let Some(storages) = &self.0 else {
             return Effect::anything();
         };
+        if matches!(transfer, Transfer::Same)
+            || !storages.iter().any(|s| matches!(s, Storage::Own(_)))
+        {
+            return self.clone();
+        }
         let mut out = BTreeSet::new();
-        for storage in storages {
+        for storage in storages.iter() {
             match (storage, transfer) {
                 (Storage::Own(prop), Transfer::Other(class)) => {
                     out.insert(Storage::Property {
@@ -249,7 +253,7 @@ impl Effect {
                 }
             }
         }
-        Effect(Some(out))
+        Effect(Some(Arc::new(out)))
     }
 }
 
@@ -567,6 +571,9 @@ impl DeclKey {
 /// Splits a synthetic closure name into the caller declaration and the
 /// body's ordinal within it. Closure names are created only by `closure`.
 fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
+    if !key.member.ends_with('}') {
+        return None;
+    }
     let start = key.member.rfind("{closure#")?;
     let ordinal = key.member[start + 9..].strip_suffix('}')?.parse().ok()?;
     Some((
@@ -1428,6 +1435,12 @@ impl Registry {
         )
     }
 
+    /// The settled effect of the declaration `key`, when the pass found one.
+    fn settled_of(&self, key: &DeclKey) -> Option<&Settled> {
+        self.effects
+            .get(self.reach_memo.effects.id(self.effect_ix(key)))
+    }
+
     pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
         if let Some(file) = key.file_id() {
             return EffectId::File(file);
@@ -1675,7 +1688,7 @@ impl Registry {
 
     /// What a call to the declaration `key` may write, as settled.
     fn settled(&self, key: &DeclKey) -> Settled {
-        match self.effects.get(&self.effect_id_for(key)) {
+        match self.settled_of(key) {
             Some(settled) => settled.clone(),
             None => Settled::of(self.declaration_effect(key)),
         }
@@ -1684,7 +1697,7 @@ impl Registry {
     /// What a call to the declaration `key` whose arguments are not known
     /// may write, as settled.
     fn settled_effect(&self, key: &DeclKey) -> Effect {
-        match self.effects.get(&self.effect_id_for(key)) {
+        match self.settled_of(key) {
             Some(settled) => settled.unconditional(),
             None => self.declaration_effect(key),
         }
@@ -1934,10 +1947,9 @@ impl Registry {
     /// seen, nothing when its doc declares it pure and it takes no code;
     /// anything otherwise.
     fn stub_effect(&self, key: &DeclKey, sig: &FunctionReflection) -> Effect {
-        let id = self.effect_id_for(key);
         let runs_code = self
             .stub_effect_results
-            .get(&id)
+            .get(self.reach_memo.effects.id(self.effect_ix(key)))
             .copied()
             .unwrap_or_else(|| self.stub_runs_code(key, sig));
         if runs_code {
@@ -3502,8 +3514,13 @@ impl Reach<'_> {
             Holder::Made(Some(classes)) => (Some(classes), true),
             Holder::Unknown | Holder::Made(None) => (None, false),
         };
-        let member = hook_member(property.map(Name::as_str), set);
-        for declaring in registry.classes_declaring(&member) {
+        let member = registry
+            .reach_memo
+            .hook_members
+            .get_or_compute((property.cloned(), set), || {
+                Name::from(hook_member(property.map(Name::as_str), set))
+            });
+        for declaring in registry.classes_declaring(member.as_str()) {
             if registry.class(declaring).is_none() {
                 continue;
             }
@@ -5630,7 +5647,7 @@ mod join_transferred_tests {
     #[test]
     fn joining_a_transferred_effect_is_joining_the_effect_transferred() {
         let name = |text: &str| Some(Name::from(text));
-        let storages = Effect(Some(BTreeSet::from([
+        let storages = Effect(Some(Arc::new(BTreeSet::from([
             Storage::Own(name("a")),
             Storage::Own(None),
             Storage::Global(name("g")),
@@ -5638,10 +5655,10 @@ mod join_transferred_tests {
                 class: name("c"),
                 prop: name("p"),
             },
-        ])));
+        ]))));
         let bases = [
             Effect::nothing(),
-            Effect(Some(BTreeSet::from([Storage::Global(name("h"))]))),
+            Effect(Some(Arc::new(BTreeSet::from([Storage::Global(name("h"))])))),
             Effect::anything(),
         ];
         let transfers = [

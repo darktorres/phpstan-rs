@@ -145,6 +145,7 @@ pub(crate) struct ReachMemo {
     pub(crate) every_method: OnceMap<Name, Arc<[DeclKey]>>,
     pub(super) builtin_base: OnceMap<(DeclKey, Transfer, Option<Name>), Option<Arc<BuiltinBase>>>,
     pub(crate) wrapper_runs: OnceMap<&'static str, Arc<[(DeclKey, Transfer)]>>,
+    pub(crate) hook_members: OnceMap<(Option<Name>, bool), Name>,
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
     /// What an operation runs, by `ImplicitKey`; none when it may run code
     /// not known.

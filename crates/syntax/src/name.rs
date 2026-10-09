@@ -279,6 +279,9 @@ impl PartialOrd for Name {
 impl Ord for Name {
     /// By text, as the text's `Ord` compares.
     fn cmp(&self, other: &Name) -> std::cmp::Ordering {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return std::cmp::Ordering::Equal;
+        }
         self.0.text.cmp(&other.0.text)
     }
 }
