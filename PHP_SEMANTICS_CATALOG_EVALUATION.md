@@ -266,6 +266,17 @@ produces byte-identical checked-in JSON. The embedded-artifact assertion now
 requires the new closed Diagnostic evidence and preserves open status for every
 other non-Return domain. The full `phpstan-rs` library suite passes (1,202/1,202).
 
+On October 9, 2026, the source-to-artifact chain was replayed from the cached
+PHP source at commit `e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03`, linked
+`php-cli.bc`, the paired TAILCALL/CALL runtime witness, and the checked-in
+manifest. LLVM witness extraction and `build_strlen_catalog` completed, and the
+regenerated manifest matched byte for byte (SHA-256
+`928106923b27db0ed4ee7069d6f5e1dca86284545760189a3162dfcf20c9b8f2`). The
+optimized fixture command `cargo test --profile gate -p phpstan-rs --test
+fixtures -- strlen_` passed all 14 selected fixtures. This confirms the
+replayable narrow Return/Diagnostic path; it does not close the other native
+domains or validate a demand summary.
+
 A later optimized gate-profile run of `cargo test --profile gate -p phpstan-rs
 -p phpstan-rs-types -p phpstan-rs-semantics` did not pass as a whole: 1,198 of
 1,202 checker library tests passed, while four unrelated project/registry
