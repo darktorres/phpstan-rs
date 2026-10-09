@@ -26,7 +26,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 3;
+pub const SCHEMA_MAJOR: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -193,13 +193,13 @@ pub enum Event {
         arguments: Vec<Operand>,
         result: u32,
     },
-    /// PHP value/reference operations executed by the PHP-specific host.
-    PhpFlow {
-        instruction: PhpFlowInstruction,
-    },
     Unknown {
         domains: Vec<Domain>,
         reason: Bytes,
+    },
+    /// PHP value/reference operations executed by the PHP-specific host.
+    PhpFlow {
+        instruction: PhpFlowInstruction,
     },
 }
 
@@ -553,7 +553,7 @@ pub enum Truth {
     Maybe,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Exit<V, S> {
     Normal { value: Option<V>, state: S },
     PhpThrow { value: V, state: S },
@@ -562,7 +562,7 @@ pub enum Exit<V, S> {
     Suspended { value: V, state: S },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingOutcome<V> {
     PhpThrow(V),
     NativeUnwind(V),
@@ -572,7 +572,7 @@ pub enum PendingOutcome<V> {
 
 /// One abstract state entering a graph block, or a transfer result offered to
 /// a successor during evaluator discovery.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CertifiedFrame<V, S> {
     pub block: u32,
     pub state: S,
@@ -580,15 +580,18 @@ pub struct CertifiedFrame<V, S> {
     pub pending: Option<PendingOutcome<V>>,
 }
 
-/// Candidate transfers and the final per-block solution used by a
-/// post-fixpoint containment check. It allows a publication boundary to
-/// recheck recorded candidate containment and graph identity, but does not
-/// independently reconstruct or certify that the candidate list is complete.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Replayable inputs, the final per-block invariant, and the observable exits
+/// used by an independent one-step post-fixpoint validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PostFixpointCertificate<V, S> {
     pub graph_digest: Digest,
+    pub initial: CertifiedFrame<V, S>,
+    pub arguments: Vec<V>,
+    pub receiver: V,
     pub solution: Vec<CertifiedFrame<V, S>>,
     pub candidates: Vec<CertifiedFrame<V, S>>,
+    pub exits: Vec<Exit<V, S>>,
+    pub coverage: Vec<DomainCoverage>,
 }
 
 impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
@@ -603,7 +606,10 @@ impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
         if graph_digest != self.graph_digest {
             return Err(GraphError::CertificateGraphMismatch);
         }
-        for frame in self.solution.iter().chain(&self.candidates) {
+        for frame in std::iter::once(&self.initial)
+            .chain(self.solution.iter())
+            .chain(&self.candidates)
+        {
             if frame.block as usize >= graph.blocks.len() {
                 return Err(GraphError::InvalidCertificateBlock(frame.block));
             }
@@ -616,6 +622,71 @@ impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
             });
             if !covered {
                 return Err(GraphError::NonPostFixpoint(candidate.block));
+            }
+        }
+        if !self.solution.iter().any(|record| {
+            record.block == self.initial.block
+                && pending_kind(&record.pending) == pending_kind(&self.initial.pending)
+                && certified_frame_subsumes(host, record, &self.initial)
+        }) {
+            return Err(GraphError::NonPostFixpoint(self.initial.block));
+        }
+        let mut replayed_coverage = graph.coverage.clone();
+        for frame in &self.solution {
+            let (successors, exits) = replay_certificate_frame(
+                graph,
+                host,
+                &self.arguments,
+                &self.receiver,
+                frame,
+                &mut replayed_coverage,
+            )?;
+            for successor in successors {
+                let covered = self.solution.iter().any(|record| {
+                    record.block == successor.block
+                        && pending_kind(&record.pending) == pending_kind(&successor.pending)
+                        && certified_frame_subsumes(host, record, &successor)
+                });
+                if !covered {
+                    return Err(GraphError::NonPostFixpoint(successor.block));
+                }
+            }
+            for exit in exits {
+                if !self
+                    .exits
+                    .iter()
+                    .any(|record| exit_subsumes(host, record, &exit))
+                {
+                    return Err(GraphError::NonPostFixpoint(frame.block));
+                }
+            }
+        }
+        if self.coverage.len() != Domain::ALL.len()
+            || self.coverage.iter().enumerate().any(|(index, item)| {
+                self.coverage[..index]
+                    .iter()
+                    .any(|previous| previous.domain == item.domain)
+            })
+        {
+            return Err(GraphError::InvalidComposedCoverage);
+        }
+        if self.coverage.iter().any(|item| {
+            item.evidence.is_empty()
+                || matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty())
+        }) {
+            return Err(GraphError::InvalidComposedCoverage);
+        }
+        validate_domain_dependencies(&self.coverage)?;
+        for replayed in &replayed_coverage {
+            let Some(certified) = self
+                .coverage
+                .iter()
+                .find(|item| item.domain == replayed.domain)
+            else {
+                return Err(GraphError::InvalidComposedCoverage);
+            };
+            if !coverage_subsumes(certified, replayed) {
+                return Err(GraphError::InvalidComposedCoverage);
             }
         }
         Ok(())
@@ -694,7 +765,7 @@ pub trait SemanticHost {
         state: &Self::State,
     ) -> Truth;
     fn event(
-        &mut self,
+        &self,
         event: &Event,
         arguments: &[Self::Value],
         receiver: &Self::Value,
@@ -996,6 +1067,306 @@ fn certified_frame<V: Clone, S: Clone>(frame: &Frame<V, S>) -> CertifiedFrame<V,
     }
 }
 
+fn exit_subsumes<H: SemanticHost>(
+    host: &H,
+    broad: &Exit<H::Value, H::State>,
+    narrow: &Exit<H::Value, H::State>,
+) -> bool {
+    match (broad, narrow) {
+        (
+            Exit::Normal {
+                value: a,
+                state: sa,
+            },
+            Exit::Normal {
+                value: b,
+                state: sb,
+            },
+        ) => {
+            let value_covered = match (a, b) {
+                (None, None) => true,
+                (Some(a), Some(b)) => host.value_subsumes(a, b),
+                _ => false,
+            };
+            value_covered && host.state_subsumes(sa, sb)
+        }
+        (
+            Exit::PhpThrow {
+                value: a,
+                state: sa,
+            },
+            Exit::PhpThrow {
+                value: b,
+                state: sb,
+            },
+        )
+        | (
+            Exit::NativeUnwind {
+                value: a,
+                state: sa,
+            },
+            Exit::NativeUnwind {
+                value: b,
+                state: sb,
+            },
+        )
+        | (
+            Exit::Fatal {
+                value: a,
+                state: sa,
+            },
+            Exit::Fatal {
+                value: b,
+                state: sb,
+            },
+        )
+        | (
+            Exit::Suspended {
+                value: a,
+                state: sa,
+            },
+            Exit::Suspended {
+                value: b,
+                state: sb,
+            },
+        ) => host.value_subsumes(a, b) && host.state_subsumes(sa, sb),
+        _ => false,
+    }
+}
+
+fn coverage_subsumes(broad: &DomainCoverage, narrow: &DomainCoverage) -> bool {
+    if broad.domain != narrow.domain
+        || precision_rank(broad.precision) < precision_rank(narrow.precision)
+    {
+        return false;
+    }
+    let status_covers = match (&broad.coverage, &narrow.coverage) {
+        (Coverage::Open { reasons: broad }, Coverage::Open { reasons: narrow }) => {
+            narrow.iter().all(|reason| broad.contains(reason))
+        }
+        (Coverage::Open { reasons }, _) => !reasons.is_empty(),
+        (Coverage::Closed, Coverage::Closed)
+        | (Coverage::NotApplicable, Coverage::NotApplicable) => true,
+        _ => false,
+    };
+    status_covers
+        && narrow
+            .evidence
+            .iter()
+            .all(|item| broad.evidence.contains(item))
+        && narrow
+            .assumptions
+            .iter()
+            .all(|item| broad.assumptions.contains(item))
+        && narrow
+            .dependencies
+            .iter()
+            .all(|item| broad.dependencies.contains(item))
+}
+
+/// Independently replays one invariant frame through the graph's events and
+/// terminator. Every produced successor and observable exit must be covered
+/// by the persisted certificate.
+fn replay_certificate_frame<H: SemanticHost>(
+    graph: &BehaviorGraph,
+    host: &H,
+    arguments: &[H::Value],
+    receiver: &H::Value,
+    frame: &CertifiedFrame<H::Value, H::State>,
+    replayed_coverage: &mut Vec<DomainCoverage>,
+) -> Result<
+    (
+        Vec<CertifiedFrame<H::Value, H::State>>,
+        Vec<Exit<H::Value, H::State>>,
+    ),
+    GraphError,
+> {
+    let block = &graph.blocks[frame.block as usize];
+    let mut paths = vec![(
+        frame.state.clone(),
+        frame.results.clone(),
+        frame.pending.clone(),
+    )];
+    let mut successors = Vec::new();
+    let mut exits = Vec::new();
+    for event in &block.events {
+        let mut next = Vec::new();
+        for (state, values, pending) in paths {
+            let outcomes = host.event(event, arguments, receiver, &values, state);
+            if outcomes.is_empty() {
+                return Err(GraphError::EventWithoutOutcome);
+            }
+            for outcome in outcomes {
+                if matches!(event, Event::Invoke { .. }) {
+                    let coverage = outcome.coverage();
+                    if coverage.is_empty()
+                        || coverage
+                            .iter()
+                            .find(|item| item.domain == Domain::Invocation)
+                            .is_none_or(|item| matches!(item.coverage, Coverage::NotApplicable))
+                    {
+                        return Err(GraphError::InvalidComposedCoverage);
+                    }
+                }
+                merge_coverage(replayed_coverage, outcome.coverage())?;
+                match outcome {
+                    EventExit::Normal { result, state, .. } => {
+                        let mut next_values = values.clone();
+                        if let Some((id, value)) = result {
+                            next_values.retain(|(existing, _)| *existing != id);
+                            next_values.push((id, value));
+                        }
+                        next.push((state, next_values, pending.clone()));
+                    }
+                    EventExit::PhpThrow { value, state, .. } => {
+                        if let Some(to) = block.exceptional.php_throw {
+                            successors.push(CertifiedFrame {
+                                block: to,
+                                state,
+                                results: values.clone(),
+                                pending: Some(PendingOutcome::PhpThrow(value)),
+                            });
+                        } else {
+                            exits.push(Exit::PhpThrow { value, state });
+                        }
+                    }
+                    EventExit::NativeUnwind { value, state, .. } => {
+                        if let Some(to) = block.exceptional.native_unwind {
+                            successors.push(CertifiedFrame {
+                                block: to,
+                                state,
+                                results: values.clone(),
+                                pending: Some(PendingOutcome::NativeUnwind(value)),
+                            });
+                        } else {
+                            exits.push(Exit::NativeUnwind { value, state });
+                        }
+                    }
+                    EventExit::Fatal { value, state, .. } => {
+                        if let Some(to) = block.exceptional.fatal {
+                            successors.push(CertifiedFrame {
+                                block: to,
+                                state,
+                                results: values.clone(),
+                                pending: Some(PendingOutcome::Fatal(value)),
+                            });
+                        } else {
+                            exits.push(Exit::Fatal { value, state });
+                        }
+                    }
+                    EventExit::Suspended { value, state, .. } => {
+                        if let Some(to) = block.exceptional.suspended {
+                            successors.push(CertifiedFrame {
+                                block: to,
+                                state,
+                                results: values.clone(),
+                                pending: Some(PendingOutcome::Suspended(value)),
+                            });
+                        } else {
+                            exits.push(Exit::Suspended { value, state });
+                        }
+                    }
+                }
+            }
+        }
+        paths = next;
+    }
+    for (state, results, pending) in paths {
+        match &block.terminator {
+            Terminator::Goto(to) => successors.push(CertifiedFrame {
+                block: *to,
+                state,
+                results,
+                pending,
+            }),
+            Terminator::Branch { predicate, yes, no } => {
+                let target = |truth| match truth {
+                    Truth::Yes => vec![*yes],
+                    Truth::No => vec![*no],
+                    Truth::Maybe => vec![*yes, *no],
+                };
+                for to in target(host.test(predicate, arguments, receiver, &results, &state)) {
+                    successors.push(CertifiedFrame {
+                        block: to,
+                        state: state.clone(),
+                        results: results.clone(),
+                        pending: pending.clone(),
+                    });
+                }
+            }
+            Terminator::Return(value) => {
+                let value = value
+                    .as_ref()
+                    .map(|operand| {
+                        host.resolve(operand, arguments, receiver, &results)
+                            .ok_or(GraphError::UnresolvedValue)
+                    })
+                    .transpose()?;
+                exits.push(Exit::Normal { value, state });
+            }
+            Terminator::Throw(operand) => {
+                let value = host
+                    .resolve(operand, arguments, receiver, &results)
+                    .ok_or(GraphError::UnresolvedValue)?;
+                if let Some(to) = block.exceptional.php_throw {
+                    successors.push(CertifiedFrame {
+                        block: to,
+                        state,
+                        results,
+                        pending: Some(PendingOutcome::PhpThrow(value)),
+                    });
+                } else {
+                    exits.push(Exit::PhpThrow { value, state });
+                }
+            }
+            Terminator::Fatal(operand) => {
+                let value = host
+                    .resolve(operand, arguments, receiver, &results)
+                    .ok_or(GraphError::UnresolvedValue)?;
+                if let Some(to) = block.exceptional.fatal {
+                    successors.push(CertifiedFrame {
+                        block: to,
+                        state,
+                        results,
+                        pending: Some(PendingOutcome::Fatal(value)),
+                    });
+                } else {
+                    exits.push(Exit::Fatal { value, state });
+                }
+            }
+            Terminator::Suspend(operand) => {
+                let value = host
+                    .resolve(operand, arguments, receiver, &results)
+                    .ok_or(GraphError::UnresolvedValue)?;
+                if let Some(to) = block.exceptional.suspended {
+                    successors.push(CertifiedFrame {
+                        block: to,
+                        state,
+                        results,
+                        pending: Some(PendingOutcome::Suspended(value)),
+                    });
+                } else {
+                    exits.push(Exit::Suspended { value, state });
+                }
+            }
+            Terminator::Resume => match pending {
+                Some(PendingOutcome::PhpThrow(value)) => {
+                    exits.push(Exit::PhpThrow { value, state })
+                }
+                Some(PendingOutcome::NativeUnwind(value)) => {
+                    exits.push(Exit::NativeUnwind { value, state })
+                }
+                Some(PendingOutcome::Fatal(value)) => exits.push(Exit::Fatal { value, state }),
+                Some(PendingOutcome::Suspended(value)) => {
+                    exits.push(Exit::Suspended { value, state })
+                }
+                None => return Err(GraphError::ResumeWithoutPendingOutcome),
+            },
+        }
+    }
+    Ok((successors, exits))
+}
+
 fn enqueue<H: SemanticHost>(
     host: &H,
     frame: Frame<H::Value, H::State>,
@@ -1078,6 +1449,7 @@ pub fn evaluate<H: SemanticHost>(
         pending: None,
         growing_updates: 0,
     };
+    let initial_certificate_frame = certified_frame(&initial_frame);
     let mut records = vec![initial_frame];
     let mut by_block = vec![Vec::new(); graph.blocks.len()];
     by_block[graph.entry as usize].push(0);
@@ -1416,14 +1788,6 @@ pub fn evaluate<H: SemanticHost>(
             }
         }
     }
-    let post_fixpoint = PostFixpointCertificate {
-        graph_digest: graph
-            .canonical_digest()
-            .map_err(|_| GraphError::CanonicalEncodingFailed)?,
-        solution: records.iter().map(certified_frame).collect(),
-        candidates: transfer_candidates.iter().map(certified_frame).collect(),
-    };
-    post_fixpoint.validate(graph, host)?;
     if evaluation_precision != Precision::Exact {
         for item in &mut evaluation_coverage {
             if !matches!(item.coverage, Coverage::NotApplicable) {
@@ -1433,6 +1797,19 @@ pub fn evaluate<H: SemanticHost>(
             }
         }
     }
+    let post_fixpoint = PostFixpointCertificate {
+        graph_digest: graph
+            .canonical_digest()
+            .map_err(|_| GraphError::CanonicalEncodingFailed)?,
+        initial: initial_certificate_frame,
+        arguments: arguments.to_vec(),
+        receiver: receiver.clone(),
+        solution: records.iter().map(certified_frame).collect(),
+        candidates: transfer_candidates.iter().map(certified_frame).collect(),
+        exits: exits.clone(),
+        coverage: evaluation_coverage.clone(),
+    };
+    post_fixpoint.validate(graph, host)?;
     Ok(Evaluation {
         exits,
         coverage: evaluation_coverage,
@@ -1535,7 +1912,7 @@ mod tests {
             }
         }
         fn event(
-            &mut self,
+            &self,
             event: &Event,
             args: &[String],
             receiver: &String,
@@ -1727,8 +2104,16 @@ mod tests {
     ) -> PostFixpointCertificate<String, Vec<String>> {
         PostFixpointCertificate {
             graph_digest: graph.canonical_digest().unwrap(),
+            initial: solution
+                .first()
+                .map(certified_frame)
+                .expect("test solution"),
+            arguments: vec![],
+            receiver: receiver(),
             solution: solution.iter().map(certified_frame).collect(),
             candidates: candidates.iter().map(certified_frame).collect(),
+            exits: vec![],
+            coverage: graph.coverage.clone(),
         }
     }
     fn coverage_for(applicable: &[Domain]) -> Vec<DomainCoverage> {
@@ -1948,6 +2333,17 @@ mod tests {
                 .coverage
                 .iter()
                 .all(|coverage| matches!(coverage.coverage, Coverage::Open { .. }))
+        );
+        let mut falsely_closed = evaluation.post_fixpoint.clone();
+        falsely_closed
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .coverage = Coverage::Closed;
+        assert_eq!(
+            falsely_closed.validate(&graph, &host),
+            Err(GraphError::InvalidComposedCoverage)
         );
     }
 
@@ -2691,6 +3087,26 @@ mod tests {
         let mut host = Host::default();
         let result = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
         result.post_fixpoint.validate(&graph, &host).unwrap();
+
+        let encoded = serde_json::to_vec(&result.post_fixpoint).unwrap();
+        let persisted: PostFixpointCertificate<String, Vec<String>> =
+            serde_json::from_slice(&encoded).unwrap();
+        persisted.validate(&graph, &host).unwrap();
+
+        let mut omitted = persisted.clone();
+        omitted.solution.retain(|frame| frame.block != 1);
+        omitted.candidates.retain(|frame| frame.block != 1);
+        assert_eq!(
+            omitted.validate(&graph, &host),
+            Err(GraphError::NonPostFixpoint(1))
+        );
+
+        let mut missing_exit = persisted.clone();
+        missing_exit.exits.clear();
+        assert_eq!(
+            missing_exit.validate(&graph, &host),
+            Err(GraphError::NonPostFixpoint(1))
+        );
 
         let mut incomplete = result.post_fixpoint.clone();
         incomplete

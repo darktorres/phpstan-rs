@@ -433,7 +433,7 @@ impl SemanticHost for PhpFlowHost {
     }
 
     fn event(
-        &mut self,
+        &self,
         event: &Event,
         arguments: &[PhpValue],
         receiver: &PhpValue,

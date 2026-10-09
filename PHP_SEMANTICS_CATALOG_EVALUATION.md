@@ -8,7 +8,7 @@ framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
 as `2b6afb95`.
 
 Phase F implementation is now underway. A checker-independent
-`crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
+`crates/php-semantics` seed contains schema v4 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
 explicit exceptional continuations and host-supplied joins/widening. Fifty-two
@@ -28,26 +28,29 @@ normal/throw states; an unknown callback havocs tracked state, emits normal,
 PHP-throw, native-unwind, fatal, and suspension paths, and opens all effect
 domains. Reads and unsupported operations also remain open. The evaluator rejects host join or widening results
 that fail to subsume both incoming states/results; state-loss, result-loss,
-and widening-loss fixtures cover that guard. A post-worklist validation pass
-checks that each recorded transfer candidate is covered by the completed
-block solution. The returned certificate binds to the canonical graph digest
-and can be revalidated at a publication boundary; fixtures reject a dropped
-state, result, or pending-throw candidate and reject reuse with a changed
-graph. It checks the discovery run's recorded candidates; it neither proves
-candidate-list completeness nor independently re-executes transfer semantics
-from a persisted certificate.
+and widening-loss fixtures cover that guard. A serializable certificate binds
+the graph digest, initial state/arguments/receiver, solution, exits, and merged
+coverage. Its separate one-step replayer checks every transfer from each
+invariant frame, every observable exit, and that persisted coverage is no
+narrower than replayed coverage. Round-trip
+fixtures reject an omitted successor, omitted exit, dropped state/result/
+pending outcome, and changed graph. Replay still trusts the supplied host's
+semantic transfer functions; it does not establish that those functions match
+PHP source behavior.
 Domain projections now include transitive coverage
 dependencies, validation rejects closed domains that depend on open domains or
 on uncertified closed cycles, and evaluation propagates open child domains
 through parent dependencies. These are foundation tests only: loop widening
-has a small interval-like fixture, not a calibrated production domain; the
-post-worklist check is not the independent post-fixpoint certificate required
-by the plan. The checker
+has a small interval-like fixture, not a calibrated production domain, and the
+replayer trusts the host's transfer semantics. The checker
 bridge currently uses a narrow type-only host for `strlen()` and does not model
 effect state, callback invocation, or exception integration. F00/F01 remain
 OPEN. Composed host event outcomes now carry
 per-domain coverage, precision, evidence, and assumptions; evaluation merges
 those records so an open child opens the corresponding closed parent domain.
+Schema major 4 adds PHP value/reference flow instructions and regenerates the
+embedded `strlen()` manifest so its schema and canonical digests match the new
+wire format; v3 manifests are rejected explicitly.
 Canonical manifests now validate graph
 and evidence digests and round-trip byte strings through explicit base64 JSON.
 A shared target-set primitive distinguishes exact releases from minor ranges,
@@ -132,16 +135,15 @@ After the full run, a targeted CLI config round-trip also passes with
 `php_version = "8.5.4"`, exercising config parsing through session creation and
 the normal checker invocation.
 
-After adding the graph-bound post-fixpoint certificate API, `cargo test -p
-phpstan-rs` passed on October 9, 2026: 1,201 library tests, 3 binary tests,
-45 CLI tests, and the file-cache, scaling, stub-index, and version integration
-suites. The separate `cargo test -p phpstan-rs-semantics` run now passes all 48
-semantic tests, including a counterexample that rejects a closed return
-refinement depending on an open callback-throw domain. `cargo check -p
-phpstan-rs` passes after this fixture. This verifies that the production checker
-still consumes the new evaluation result shape and that the public certificate
-rejects tampered recorded transfers; it does not verify independent candidate
-completeness.
+After the replayable certificate and schema-v4 embedded artifact landed,
+`cargo test -p phpstan-rs` passed on October 9, 2026: 1,201 library tests, 3
+binary tests, 45 CLI tests, and the file-cache, scaling, stub-index, and version
+integration suites. `cargo test -p phpstan-rs-semantics` passes all 52 tests,
+including persisted certificate replay, omitted-successor/exit counterexamples,
+and rejection of falsely closed replay coverage. The targeted embedded-catalog
+checker test also passes. Schema v4 was necessary because adding a PHP flow event
+changes the serialized graph format; regenerating the embedded manifest removed
+a digest mismatch that the first full checker run caught.
 
 ## Phase F gate-by-gate status
 
@@ -152,8 +154,8 @@ so it does not close F00 or substitute for independent review.
 
 | Gate | Evidence established | Remaining evaluation before closure |
 |---|---|---|
-| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. A graph-bound certificate can be revalidated and rejects omitted recorded transfer states, results, and pending outcomes. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; validate transfer-list completeness by independently replaying a persisted certificate. |
-| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, and graph-bound candidate containment validation are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and an independent persisted-certificate post-fixpoint validator. |
+| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. A serialized graph-bound certificate replays each invariant frame and validates successor/exit completeness plus coverage non-narrowing. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; validate that the supplied host transfer functions match PHP-source behavior. |
+| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, and graph-bound candidate containment plus persisted transfer/exit/coverage replay are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and validate host transfer behavior against source-derived fixtures. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Complete configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and run local reference binding plus callback writes/normal/throw through the shared evaluator (52 semantic tests). Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | Expand flow instructions for array/object operations and compose the full value/reference product with callback and exceptional state; exercise copy/reference/object behavior through flow instructions. |

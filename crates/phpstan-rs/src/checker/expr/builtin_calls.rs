@@ -66,7 +66,7 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
     }
 
     fn event(
-        &mut self,
+        &self,
         event: &php_semantics::Event,
         _arguments: &[Type],
         _receiver: &Type,
