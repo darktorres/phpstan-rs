@@ -232,13 +232,17 @@ independently reviewed observable-trace contract, followed by one locked 8.5.4
 builtin slice driven from native import through graph validation and a checker
 call. Until that exists, producer/solver choice remains provisional.
 
-The current PTA cannot close that gap by itself: its reporting helpers expose
-known function targets separately from fallback flags, and no catalog graph
-builder consumes either result. Reusing it would require a demand-oriented
-summary adapter plus an explicit rule that prevents a known-target list from
-being treated as exhaustive when `data` or `anything` is set. That integration
-and its post-fixpoint validation remain unimplemented; the audit is not a
-finding that the existing PTA is unsound for its current reporting purpose.
+The current PTA cannot close that gap by itself. The analysis is private to the
+`php-catalog` binary crate and returns a text report; `php-semantics` has no
+dependency on it or machine-readable target/coverage interface. Internally,
+each call site does retain `data` and `anything` fallback flags alongside
+points-to targets, but the report counts those flags separately and lists known
+function targets without a per-target completeness record. Reuse therefore
+needs an explicit artifact boundary and a demand-oriented summary adapter,
+including a rule that never treats known targets as exhaustive while either
+fallback flag is set. No such adapter or native post-fixpoint validation is
+implemented. This is an integration limitation, not a finding that the
+existing PTA is unsound for its current reporting purpose.
 
 An additional F05 implementation step in `master3` makes exact-8.5.4 weak-mode
 null deprecation a typed graph event. Argument checking obtains both that
