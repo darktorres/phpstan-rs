@@ -3527,13 +3527,14 @@ impl Reach<'_> {
         operation: &Operation,
     ) -> Option<Targets> {
         let (holder, same) = self.ctx.operand(on);
+        let (scope, rebindable) = (self.ctx.scope_name(), self.ctx.rebindable());
         let scoped = |hooks: Option<bool>| ImplicitKey {
             holder: holder.clone(),
             same,
             operation: OperationKey::of(operation),
             hooks,
-            scope: self.ctx.scope_name(),
-            rebindable: self.ctx.rebindable(),
+            scope: scope.clone(),
+            rebindable,
         };
         let memo = &self.registry.reach_memo.implicit;
         // The hooks the scope sees come first, and are found alone: most
@@ -4184,8 +4185,16 @@ impl<'r> Resolve<'r> {
         // variables a call writes by reference on what it reaches: both are
         // found again until no variable is lost.
         let mut lost: Vec<Rc<FxHashSet<&'r str>>> = vec![Rc::default(); scopes];
+        // What each parameter is declared to hold does not depend on what a
+        // round loses.
+        let param_holders: Vec<Holder> = match sig {
+            Some(sig) if !self.summary.writes.computed => {
+                sig.params.iter().map(|p| holder_of(&p.ty)).collect()
+            }
+            _ => Vec::new(),
+        };
         let (levels, reached) = loop {
-            let levels = self.levels(sig, &lost);
+            let levels = self.levels(sig, &lost, &param_holders);
             let reached: Vec<Reached<'r>> = levels.iter().map(Level::reach).collect();
             let mut grew = false;
             for (at, found) in reached.iter().enumerate() {
@@ -4279,6 +4288,7 @@ impl<'r> Resolve<'r> {
         &self,
         sig: Option<&'r FunctionReflection>,
         lost: &[Rc<FxHashSet<&'r str>>],
+        param_holders: &[Holder],
     ) -> Vec<Level<'r>> {
         let facts = &self.summary.writes;
         let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
@@ -4309,15 +4319,15 @@ impl<'r> Resolve<'r> {
                 .collect();
             level.base = sig_params
                 .iter()
-                .filter(|p| !lost[0].contains(p.name.as_ref()))
-                .map(|p| {
+                .zip(param_holders)
+                .filter(|(p, _)| !lost[0].contains(p.name.as_ref()))
+                .map(|(p, held)| {
                     // What a reference refers to may be written an object by
                     // an alias, unless the declared type holds none.
-                    let held = holder_of(&p.ty);
-                    let held = if p.by_ref && !matches!(&held, Holder::Classes(c) if c.is_empty()) {
+                    let held = if p.by_ref && !matches!(held, Holder::Classes(c) if c.is_empty()) {
                         Holder::Unknown
                     } else {
-                        held
+                        held.clone()
                     };
                     (p.name.as_ref(), held)
                 })
@@ -4340,7 +4350,8 @@ impl<'r> Resolve<'r> {
                 }
             }
         }
-        let mut levels = vec![level];
+        let mut levels = Vec::with_capacity(1 + self.summary.closures.len());
+        levels.push(level);
         for (index, closure) in self.summary.closures.iter().enumerate() {
             let parent = closure.within.map_or(0, |within| within as usize + 1);
             let mut level =
@@ -4388,10 +4399,10 @@ impl<'r> Resolve<'r> {
         // An arrow function and a first-class callable take every variable
         // but their parameters, so one the code around them holds nothing
         // made in may hold anything in them, even after they write it.
-        let captures: Vec<(&'r str, bool)> = match &closure.captures {
+        let captures: Vec<(&'r str, bool, Option<&'r Name>)> = match &closure.captures {
             Some(captures) => captures
                 .iter()
-                .map(|(name, by_ref)| (name.as_str(), *by_ref))
+                .map(|(name, by_ref)| (name.as_str(), *by_ref, Some(name)))
                 .collect(),
             None => {
                 let mut names: Vec<&'r str> = parent
@@ -4407,14 +4418,23 @@ impl<'r> Resolve<'r> {
                     .collect();
                 names.sort_unstable();
                 names.dedup();
-                names.into_iter().map(|name| (name, false)).collect()
+                names.into_iter().map(|name| (name, false, None)).collect()
             }
         };
-        for &(name, by_ref) in &captures {
+        base.reserve(captures.len());
+        for &(name, by_ref, named) in &captures {
             if lost.contains(name) {
                 continue;
             }
-            base.insert(name, parent.variable_holder(&Name::from(name)));
+            let interned;
+            let variable = match named {
+                Some(named) => named,
+                None => {
+                    interned = Name::from(name);
+                    &interned
+                }
+            };
+            base.insert(name, parent.variable_holder(variable));
             if let Some(declared) = parent.params.get(name)
                 && !reassigned(name)
             {
@@ -4448,7 +4468,7 @@ impl<'r> Resolve<'r> {
                 if let Some(held) = held
                     && !is_param(name)
                     && !lost.contains(name)
-                    && !captures.iter().any(|&(captured, _)| captured == name)
+                    && !captures.iter().any(|&(captured, ..)| captured == name)
                 {
                     made.insert(name, held.clone());
                 }
@@ -4461,10 +4481,10 @@ impl<'r> Resolve<'r> {
         level.file_scope = false;
         level.shared_with_file = captures
             .iter()
-            .filter(|&&(name, by_ref)| {
+            .filter(|&&(name, by_ref, _)| {
                 by_ref && (parent.file_scope || parent.shared_with_file.contains(&name))
             })
-            .map(|&(name, _)| name)
+            .map(|&(name, ..)| name)
             .collect();
         if !facts.computed {
             level.params = params;
@@ -4487,12 +4507,16 @@ impl<'r> Resolve<'r> {
         let origins = if facts.computed {
             FxHashMap::default()
         } else {
-            facts
-                .origins
-                .iter()
-                .map(|(name, origins)| (name.as_str(), &origins[..]))
-                .filter(|(name, _)| !lost.contains(name))
-                .collect()
+            let mut origins =
+                FxHashMap::with_capacity_and_hasher(facts.origins.len(), Default::default());
+            origins.extend(
+                facts
+                    .origins
+                    .iter()
+                    .map(|(name, origins)| (name.as_str(), &origins[..]))
+                    .filter(|(name, _)| !lost.contains(name)),
+            );
+            origins
         };
         Level {
             registry: self.registry,
@@ -4748,8 +4772,36 @@ impl<'r> Level<'r> {
             return found.clone();
         }
         let found = self.origin_holder(origin);
-        self.origin_holders.borrow_mut().insert(at, found.clone());
+        let mut holders = self.origin_holders.borrow_mut();
+        if holders.is_empty() {
+            holders.reserve(self.origin_count());
+        }
+        holders.insert(at, found.clone());
         found
+    }
+
+    /// How many origins the scope's variables and calls name: the most
+    /// `operand_origin` can be asked about.
+    fn origin_count(&self) -> usize {
+        let calls: usize = self
+            .facts
+            .calls
+            .iter()
+            .map(|call| match &call.callee {
+                Callee::Implicit { on, .. } => on.as_deref().map_or(0, <[Origin]>::len),
+                Callee::Method {
+                    receiver: Receiver::Origins(origins),
+                    ..
+                } => origins.len(),
+                _ => 0,
+            })
+            .sum();
+        calls
+            + self
+                .origins
+                .values()
+                .map(|origins| origins.len())
+                .sum::<usize>()
     }
 
     /// Notes that a call runs the variable `name`, its `$this` what
