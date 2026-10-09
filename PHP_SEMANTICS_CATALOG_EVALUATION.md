@@ -239,8 +239,9 @@ reuses the call memo. The artifact builder validates the paired runtime witness
 and records it as diagnostic evidence. Fourteen focused `strlen_` checker
 fixtures pass, including exact-patch weak and strict routing; all 58
 `phpstan-rs-semantics` unit tests pass. Checker unit coverage verifies that
-same-span narrowings keep separate memo entries and that a file change clears
-them. Other target ranges
+same-span narrowings keep separate memo entries, preserve distinct diagnostic
+outcomes as well as returns, and clear on a file change. Its targeted gate
+profile test passes. Other target ranges
 retain their legacy diagnostic fallback, and the remaining effects/throws still
 do not share this graph evaluation, so F05 remains open. Re-running the catalog
 builder with the locked PHP source, LLVM witness, and paired runtime evidence

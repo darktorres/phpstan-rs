@@ -16,13 +16,16 @@ fn checker() -> Checker<'static> {
 fn same_span_keeps_distinct_argument_states_and_file_change_clears_them() {
     let mut checker = checker();
     let span = syntax::span::Span::default();
-    let string_argument = vec![Type::string_literal("abc".into())];
+    let null_argument = vec![Type::null()];
     let int_argument = vec![Type::int_literal(7)];
-    let string_result = Type::int_literal(3);
+    let null_result = Type::int_literal(0);
     let int_result = Type::int_range(Some(0), None);
-    let string_evaluation = CatalogCallEvaluation {
-        return_type: string_result.clone(),
-        diagnostics: vec![],
+    let null_evaluation = CatalogCallEvaluation {
+        return_type: null_result.clone(),
+        diagnostics: vec![(
+            php_semantics::DiagnosticKind::NullToInternalScalarParameterDeprecated,
+            0,
+        )],
         diagnostics_closed: true,
     };
     let int_evaluation = CatalogCallEvaluation {
@@ -31,26 +34,35 @@ fn same_span_keeps_distinct_argument_states_and_file_change_clears_them() {
         diagnostics_closed: true,
     };
 
-    checker.remember_catalog_return_type(span, string_argument.clone(), string_evaluation);
+    checker.remember_catalog_return_type(span, null_argument.clone(), null_evaluation);
     checker.remember_catalog_return_type(span, int_argument.clone(), int_evaluation);
 
     assert_eq!(
         checker
-            .cached_catalog_return_type(span, &string_argument)
+            .cached_catalog_return_type(span, &null_argument)
             .map(|evaluation| evaluation.return_type),
-        Some(string_result)
+        Some(null_result)
+    );
+    assert_eq!(
+        checker
+            .cached_catalog_return_type(span, &null_argument)
+            .map(|evaluation| evaluation.diagnostics),
+        Some(vec![(
+            php_semantics::DiagnosticKind::NullToInternalScalarParameterDeprecated,
+            0,
+        )])
     );
     assert_eq!(
         checker
             .cached_catalog_return_type(span, &int_argument)
-            .map(|evaluation| evaluation.return_type),
-        Some(int_result)
+            .map(|evaluation| (evaluation.return_type, evaluation.diagnostics)),
+        Some((int_result, vec![]))
     );
 
     checker.set_current_file(std::path::Path::new("first.php"));
     assert!(
         checker
-            .cached_catalog_return_type(span, &string_argument)
+            .cached_catalog_return_type(span, &null_argument)
             .is_none()
     );
     assert!(
