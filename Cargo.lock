@@ -1674,6 +1674,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "phpstan-rs-semantics"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "phpstan-rs-sql"
 version = "0.1.0"
 dependencies = [
