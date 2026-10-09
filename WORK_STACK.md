@@ -80,6 +80,12 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    leaves 30 rows that need the parametric-summary work (EG.15-EG.20, design
    in the plan's Appendix B.3, decision pending); E2 (perf) starts only after
    E1.V.3. It runs before the final validation, V.0.
+   **E2 part 2 (perf)** has its plan in `PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md`:
+   one batch of items 0-14 (0b, 7a-7h, 12a-12f) for every hotspot of the
+   9071f48f callgrind profile (42.2 G warm). Status: planned, nothing built.
+   Resume at its Baseline step (cache-off callgrind of the 9071f48f binary,
+   needs the user's go), then item 0 (land the uncommitted `registry/effects.rs`
+   edits). Verification runs once, after item 14.
 2. Then **level 8's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
    finds beyond what the optimization needs, validated together (the
