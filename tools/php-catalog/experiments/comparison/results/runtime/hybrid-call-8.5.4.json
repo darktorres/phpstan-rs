@@ -5,11 +5,11 @@
   "fixtures": [
     {
       "path": "tools/php-catalog/experiments/comparison/runtime.php",
-      "sha256": "2d54dbe713fa3ec157191c41f1eed2ad157bdcd1f15079c9518e5b2c2449569e",
-      "sentinels_passed": 15,
+      "sha256": "9b38a3ea63cf5cf42e7dc553924f38fab4046d2297011b03a144c2270f5d38cc",
+      "sentinels_passed": 13,
       "hybrid_output": "tools/php-catalog/experiments/comparison/results/runtime/php-hybrid-vm.out",
       "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-vm.out",
-      "output_sha256": "99f1940149f9d1c1db591b584669db89ec0d8c990a8d9b3ade27a3266e817912"
+      "output_sha256": "2bd72db611daeac4b383eed0b0352ac80581ab6c7e58e8cb13a8b505f9411c04"
     },
     {
       "path": "campaign/php-vm-strlen-sentinel.php",
@@ -59,7 +59,7 @@
   "result": {
     "exit_code": 0,
     "output_files_identical": true,
-    "runtime_php_sentinels_passed": 15,
+    "runtime_php_sentinels_passed": 13,
     "runtime_php_sentinels": [
       "empty-map",
       "null-map",
@@ -70,8 +70,6 @@
       "scalar-return",
       "array-copy",
       "shared-reference-cell",
-      "array-ref-copy-normal-callback",
-      "array-ref-copy-throw-cleanup",
       "string-coercion-callback",
       "stream-read-result",
       "stream-wrapper-dispatch",
