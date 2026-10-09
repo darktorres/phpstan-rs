@@ -12,12 +12,17 @@ use sha2::{Digest as _, Sha256};
 
 mod catalog;
 mod php_value;
+mod target;
 pub use catalog::{
     Catalog, CatalogEntry, CatalogError, EntryKey, EvidenceKind, EvidenceRecord, Projection,
     Selection,
 };
 pub use php_value::{
     ArrayId, ArrayKey, Binding, ObjectId, PhpState, PhpValue, ReferenceId, StateError,
+};
+pub use target::{
+    Applicability, ReleaseVersion, TargetError, TargetPredicate, TargetScenario, TargetSelection,
+    TargetSet, VersionRange,
 };
 
 pub const SCHEMA_MAJOR: u32 = 1;
