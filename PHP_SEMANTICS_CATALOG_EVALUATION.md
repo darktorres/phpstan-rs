@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Forty-five
+explicit exceptional continuations and host-supplied joins/widening. Forty-six
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -24,8 +24,8 @@ and loop convergence. The evaluator rejects host join or widening results
 that fail to subsume both incoming states/results; state-loss, result-loss,
 and widening-loss fixtures cover that guard. A post-worklist validation pass
 checks that each recorded transfer candidate is covered by the completed
-block solution; a dropped-candidate regression rejects a non-post-fixpoint
-record. This validates the discovery run's recorded transfers, not an
+block solution; dropped state, result, and pending-throw candidates are
+rejected as non-post-fixpoints. This validates the discovery run's recorded transfers, not an
 independent re-execution of transfer semantics from a persisted certificate.
 Domain projections now include transitive coverage
 dependencies, validation rejects closed domains that depend on open domains or

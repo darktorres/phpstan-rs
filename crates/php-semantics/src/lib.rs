@@ -2367,6 +2367,40 @@ mod tests {
     }
 
     #[test]
+    fn post_fixpoint_validator_rejects_a_dropped_result_or_pending_throw() {
+        let host = Host::default();
+        let empty_solution = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![],
+            pending: None,
+            growing_updates: 0,
+        };
+        let result_candidate = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![(3, "callback result".into())],
+            pending: None,
+            growing_updates: 0,
+        };
+        assert_eq!(
+            validate_post_fixpoint(&host, &[empty_solution.clone()], &[result_candidate]),
+            Err(GraphError::NonPostFixpoint(0))
+        );
+        let throw_candidate = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![],
+            pending: Some(PendingOutcome::PhpThrow("exception".into())),
+            growing_updates: 0,
+        };
+        assert_eq!(
+            validate_post_fixpoint(&host, &[empty_solution], &[throw_candidate]),
+            Err(GraphError::NonPostFixpoint(0))
+        );
+    }
+
+    #[test]
     fn evaluator_rejects_a_widening_that_drops_a_reachable_state() {
         let graph = BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
