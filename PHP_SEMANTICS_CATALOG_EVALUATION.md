@@ -11,14 +11,15 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Forty-seven
+explicit exceptional continuations and host-supplied joins/widening. Forty-eight
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
 cleanup/resumption, cleanup return overriding a pending throw, native unwind
 separation, domain-masked unknown transfers with consistency checks, total
 coverage/evidence validation, composed-child coverage propagation and rejection
-of incomplete composed coverage, unresolved-return rejection, state-sensitive
+of incomplete composed coverage, unresolved-return rejection, rejection of a
+closed return refinement with an open throw dependency, state-sensitive
 post-invocation predicates, conservative handling of unsupported predicates,
 and loop convergence. The evaluator rejects host join or widening results
 that fail to subsume both incoming states/results; state-loss, result-loss,
@@ -120,6 +121,17 @@ close the broader catalog execution or effect-integration obligations.
 After the full run, a targeted CLI config round-trip also passes with
 `php_version = "8.5.4"`, exercising config parsing through session creation and
 the normal checker invocation.
+
+After adding the graph-bound post-fixpoint certificate API, `cargo test -p
+phpstan-rs` passed on October 9, 2026: 1,201 library tests, 3 binary tests,
+45 CLI tests, and the file-cache, scaling, stub-index, and version integration
+suites. The separate `cargo test -p phpstan-rs-semantics` run now passes all 48
+semantic tests, including a counterexample that rejects a closed return
+refinement depending on an open callback-throw domain. `cargo check -p
+phpstan-rs` passes after this fixture. This verifies that the production checker
+still consumes the new evaluation result shape and that the public certificate
+rejects tampered recorded transfers; it does not verify independent candidate
+completeness.
 
 ## Phase F gate-by-gate status
 

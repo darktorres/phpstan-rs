@@ -590,6 +590,40 @@ mod tests {
     }
 
     #[test]
+    fn closed_return_refinement_cannot_drop_an_open_throw_path() {
+        let mut catalog = Catalog::default();
+        let evidence = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(evidence);
+        graph.blocks[0].events.push(Event::Unknown {
+            domains: vec![Domain::PhpThrow],
+            reason: Bytes(b"callback may throw".to_vec()),
+        });
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::PhpThrow);
+        let throws = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::PhpThrow)
+            .unwrap();
+        throws.coverage = Coverage::Open {
+            reasons: vec![Bytes(b"callback may throw".to_vec())],
+        };
+
+        assert_eq!(
+            catalog.add_entry(function(b"core", b"map"), graph),
+            Err(CatalogError::Graph(GraphError::ClosedDomainDependsOnOpen {
+                domain: Domain::Return,
+                dependency: Domain::PhpThrow,
+            }))
+        );
+    }
+
+    #[test]
     fn graph_rejects_cyclic_closed_domain_dependencies_without_a_certificate() {
         let mut catalog = Catalog::default();
         let id = catalog.add_evidence(evidence_record()).unwrap();
