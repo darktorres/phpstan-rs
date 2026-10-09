@@ -975,11 +975,38 @@ fn implicit_method_names(operation: &Operation) -> Vec<&'static str> {
     }
 }
 
-/// Adds `key`, run with its own `$this` what `transfer` says, to `out`
-/// once.
-fn push_target(out: &mut Vec<(DeclKey, Transfer)>, key: DeclKey, transfer: Transfer) {
-    if !out.iter().any(|(k, t)| *k == key && *t == transfer) {
-        out.push((key, transfer));
+/// The declarations a call runs, each with what its own `$this` is to the
+/// caller, in the order they were first added and once each.
+#[derive(Default)]
+pub(super) struct TargetSet {
+    list: Vec<(DeclKey, Transfer)>,
+    /// Every entry of `list`, kept once the list is long enough for a scan
+    /// to cost more than a hash.
+    seen: FxHashSet<(DeclKey, Transfer)>,
+}
+
+impl TargetSet {
+    /// Entries a scan is cheaper than a hash for.
+    const SCANNED: usize = 12;
+
+    /// Adds `key`, run with its own `$this` what `transfer` says, once.
+    pub(super) fn push(&mut self, key: DeclKey, transfer: Transfer) {
+        if self.list.len() < Self::SCANNED {
+            if !self.list.iter().any(|(k, t)| *k == key && *t == transfer) {
+                self.list.push((key, transfer));
+            }
+            return;
+        }
+        if self.seen.is_empty() {
+            self.seen.extend(self.list.iter().cloned());
+        }
+        if self.seen.insert((key.clone(), transfer.clone())) {
+            self.list.push((key, transfer));
+        }
+    }
+
+    pub(super) fn into_vec(self) -> Vec<(DeclKey, Transfer)> {
+        self.list
     }
 }
 
@@ -2627,12 +2654,12 @@ impl Reach<'_> {
             }
             Callee::Implicit { on, operation } => {
                 let (holder, same) = self.ctx.operand(on.as_deref());
-                let mut out = Vec::new();
+                let mut out = TargetSet::default();
                 if let Some((property, set, iterate)) = hook_access(operation) {
                     self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
                 }
                 self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
-                out
+                out.into_vec()
             }
             // The file's top level runs in the including code's scope, as its
             // own `$this`; a file that is not known is code of any content.
@@ -2677,7 +2704,7 @@ impl Reach<'_> {
         property: Option<&Name>,
         set: bool,
         iterate: bool,
-        out: &mut Vec<(DeclKey, Transfer)>,
+        out: &mut TargetSet,
     ) {
         let registry = self.registry;
         let transfer = |class: Option<&Name>| implicit_transfer(holder, same, operation, class);
@@ -2750,7 +2777,7 @@ impl Reach<'_> {
                 }
                 let key = hook_key(declaring, name, set);
                 let Some(classes) = classes else {
-                    push_target(out, key, transfer(None));
+                    out.push(key, transfer(None));
                     continue;
                 };
                 for (class, related) in classes.iter().zip(&related) {
@@ -2769,7 +2796,7 @@ impl Reach<'_> {
                         None => false,
                     };
                     if reached {
-                        push_target(out, key.clone(), transfer(Some(class)));
+                        out.push(key.clone(), transfer(Some(class)));
                     }
                 }
             }
@@ -2788,7 +2815,7 @@ impl Reach<'_> {
         holder: &Holder,
         same: bool,
         operation: &Operation,
-        out: &mut Vec<(DeclKey, Transfer)>,
+        out: &mut TargetSet,
         iterators: &mut Vec<Holder>,
     ) -> Option<()> {
         let registry = self.registry;
@@ -2813,7 +2840,7 @@ impl Reach<'_> {
                             continue;
                         }
                         if let Some(key) = self.implicit_method(class, method) {
-                            push_target(out, key, transfer(None));
+                            out.push(key, transfer(None));
                         }
                     }
                 }
@@ -2834,7 +2861,7 @@ impl Reach<'_> {
             for candidate in std::iter::once(class).chain(below.iter()) {
                 for method in self.implicit_methods(candidate, operation) {
                     if let Some(key) = self.implicit_method(candidate, method) {
-                        push_target(out, key, transfer(Some(class)));
+                        out.push(key, transfer(Some(class)));
                     }
                 }
                 if !matches!(operation, Operation::Iterate { .. })

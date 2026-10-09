@@ -4,6 +4,13 @@
 
 use super::*;
 
+/// Adds `key` with `transfer` to `out` once, by scanning it.
+fn reference_push(out: &mut Vec<(DeclKey, Transfer)>, key: DeclKey, transfer: Transfer) {
+    if !out.iter().any(|(k, t)| *k == key && *t == transfer) {
+        out.push((key, transfer));
+    }
+}
+
 impl Registry {
     pub(super) fn reference_implementations(&self, class: &str, method: &str) -> Vec<DeclKey> {
         if let Some((owner, sig)) = self.lookup_method_with_owner(class, method)
@@ -126,7 +133,7 @@ impl Reach<'_> {
                             continue;
                         }
                         if let Some(key) = self.implicit_method(class, method) {
-                            push_target(out, key, transfer(None));
+                            reference_push(out, key, transfer(None));
                         }
                     }
                 }
@@ -144,7 +151,7 @@ impl Reach<'_> {
             for candidate in std::iter::once(class).chain(below.iter()) {
                 for method in self.implicit_methods(candidate, operation) {
                     if let Some(key) = self.implicit_method(candidate, method) {
-                        push_target(out, key, transfer(Some(class)));
+                        reference_push(out, key, transfer(Some(class)));
                     }
                 }
                 if !matches!(operation, Operation::Iterate { .. })

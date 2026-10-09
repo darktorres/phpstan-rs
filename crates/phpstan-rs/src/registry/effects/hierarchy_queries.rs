@@ -69,10 +69,10 @@ fn implicit(registry: &Registry, holder: &Holder, operation: &Operation) -> Vec<
         registry,
         ctx: &NoContext,
     };
-    let (mut found, mut expected) = (Vec::new(), Vec::new());
+    let (mut found, mut expected) = (TargetSet::default(), Vec::new());
     reach.implicit_targets(holder, false, operation, &mut found, &mut Vec::new());
     reach.reference_implicit_targets(holder, false, operation, &mut expected, &mut Vec::new());
-    let (found, expected) = (target_names(found), target_names(expected));
+    let (found, expected) = (target_names(found.into_vec()), target_names(expected));
     assert_eq!(found, expected);
     found
 }
@@ -364,4 +364,27 @@ fn an_operation_on_classes_reaches_the_hooks_of_each_class_and_those_below() {
             implicit(&registry, &holder, &operation);
         }
     }
+}
+
+#[test]
+fn a_target_set_keeps_each_target_once_in_the_order_added() {
+    let mut set = TargetSet::default();
+    let mut expected: Vec<(DeclKey, Transfer)> = Vec::new();
+    for round in 0..3 {
+        for n in 0..40 {
+            let key = method_key(&Name::from(format!("C{n}")), "m");
+            let transfer = if n % 3 == 0 {
+                Transfer::Same
+            } else {
+                Transfer::Other(None)
+            };
+            set.push(key.clone(), transfer.clone());
+            if round == 0 {
+                expected.push((key, transfer));
+            }
+        }
+    }
+    // A name in another case is the same declaration.
+    set.push(method_key(&Name::from("c1"), "M"), Transfer::Other(None));
+    assert_eq!(set.into_vec(), expected);
 }
