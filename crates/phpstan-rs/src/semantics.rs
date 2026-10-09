@@ -167,5 +167,15 @@ mod tests {
         assert_eq!(targets.scenarios[0].release, VersionRange::minor(8, 4));
         assert_eq!(targets.scenarios[1].release, VersionRange::minor(8, 5));
         assert_eq!(targets.scenarios[2].release, VersionRange::minor(8, 6));
+
+        let only_85 = TargetPredicate {
+            release: Some(VersionRange::minor(8, 5)),
+            ..TargetPredicate::any()
+        };
+        let selection = targets.select(&only_85);
+        assert_eq!(selection.applicable.len(), 1);
+        assert_eq!(selection.applicable[0].0.release, VersionRange::minor(8, 5));
+        assert_eq!(selection.uncovered.len(), 2);
+        assert_eq!(selection.uncovered[1].release, VersionRange::minor(8, 6));
     }
 }
