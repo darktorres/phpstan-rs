@@ -46,6 +46,7 @@ use std::sync::{Arc, Mutex};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::{SmallVec, smallvec};
 
 use super::effect_table::{ByRefParams, EffectIx, TransferIx, TransferTable};
 use super::reach_memo::{ReturnedKey, SharedTargets, StaticTarget};
@@ -826,11 +827,11 @@ pub(super) struct BuiltinBase {
 /// shared by the calls that ask the same, and what its arguments add.
 pub(super) struct BuiltinRuns {
     prefix: Arc<[Run]>,
-    added: Vec<Run>,
+    added: RunList,
 }
 
 impl BuiltinRuns {
-    fn of(added: Vec<Run>) -> Self {
+    fn of(added: RunList) -> Self {
         BuiltinRuns {
             prefix: Arc::from([]),
             added,
@@ -1185,7 +1186,7 @@ struct Site<'r> {
 /// these parameters of its own.
 #[derive(Debug)]
 struct Passed {
-    runs: Vec<Run>,
+    runs: RunList,
     params: Vec<Condition>,
 }
 
@@ -1195,7 +1196,7 @@ enum Passing<'c> {
     Argument(&'c ArgAt),
     /// Nothing: the parameter's default runs these, called; none when the
     /// parameter is required, since the call throws.
-    Default(Vec<Run>),
+    Default(RunList),
     /// Not known.
     Unknown,
 }
@@ -1228,13 +1229,13 @@ fn passes_arguments(callee: &Callee, key: &DeclKey) -> bool {
 
 /// The function `text` names, called: none when it names no function, since
 /// the call throws.
-fn function_named(registry: &Registry, text: &str) -> Vec<Run> {
+fn function_named(registry: &Registry, text: &str) -> RunList {
     match registry.lookup_function_with_name(text.trim_start_matches('\\')) {
-        Some((declared, _)) => vec![(
+        Some((declared, _)) => smallvec![(
             registry.effect_ix(&function_key(declared)),
             TransferTable::STATIC,
         )],
-        None => Vec::new(),
+        None => RunList::new(),
     }
 }
 
@@ -1342,11 +1343,17 @@ fn implicit_method_names(operation: &Operation) -> Vec<&'static Name> {
 /// A declaration run with what its own `$this` is to the caller, by handle.
 pub(super) type Run = (EffectIx, TransferIx);
 
+/// The runs of one call: most reach one to three declarations.
+pub(super) type RunList = SmallVec<[Run; 4]>;
+
+/// The classes of a holder before it is shared; most name one.
+pub(crate) type NameList = SmallVec<[Name; 4]>;
+
 /// The declarations a call runs, each with what its own `$this` is to the
 /// caller, in the order they were first added and once each.
 #[derive(Default)]
 pub(super) struct TargetSet {
-    list: Vec<Run>,
+    list: RunList,
     /// Every entry of `list`, kept once the list is long enough for a scan
     /// to cost more than a hash.
     seen: FxHashSet<Run>,
@@ -1372,8 +1379,12 @@ impl TargetSet {
         }
     }
 
-    pub(super) fn into_vec(self) -> Vec<Run> {
+    pub(super) fn into_list(self) -> RunList {
         self.list
+    }
+
+    pub(super) fn into_shared(self) -> SharedTargets {
+        Arc::from(&self.list[..])
     }
 }
 
@@ -1729,13 +1740,13 @@ impl Registry {
             return Passing::Unknown;
         }
         if !param.has_default {
-            return Passing::Default(Vec::new());
+            return Passing::Default(RunList::new());
         }
         let Some(default) = &param.default_ty else {
             return Passing::Unknown;
         };
         if default.is_null().yes() {
-            return Passing::Default(Vec::new());
+            return Passing::Default(RunList::new());
         }
         match default
             .string_literal_value()
@@ -2060,7 +2071,7 @@ impl Registry {
     /// registered as a wrapper declares, run as the wrapper's own object.
     fn wrapper_runs(&self, method: &'static str) -> Arc<[Run]> {
         self.reach_memo.wrapper_runs.get_or_compute(method, || {
-            let mut out: Vec<Run> = Vec::new();
+            let mut out = RunList::new();
             for class in self
                 .classes_declaring(method)
                 .filter(|class| self.may_be_registered_wrapper(class))
@@ -2072,7 +2083,7 @@ impl Registry {
                     ));
                 }
             }
-            out.into()
+            Arc::from(&out[..])
         })
     }
 
@@ -2447,27 +2458,49 @@ fn settle(
     // A declaration's effect only ever grows, and grows only when one it is
     // made of does: every declaration is joined once, and again only when a
     // declaration it calls, or one an argument it passes runs, has grown.
-    let mut callers: Vec<Vec<u32>> = vec![Vec::new(); classified.len()];
-    for (pos, (_, classification)) in classified.iter().enumerate() {
-        if !live(pos) {
-            continue;
-        }
+    let callees_of = |classification: &'_ Classification<'_>| {
         let set_callees = classification
             .sets
             .iter()
             .flat_map(|set| set.entries.iter())
-            .map(|(callee, _)| callee);
-        for callee in classification
+            .map(|(callee, _)| *callee);
+        classification
             .calls
             .iter()
-            .map(|(callee, _, _)| callee)
+            .map(|(callee, _, _)| *callee)
             .chain(set_callees)
-        {
-            if let Some(callee) = slots.get(*callee) {
-                let list = &mut callers[callee];
-                if list.last() != Some(&(pos as u32)) {
-                    list.push(pos as u32);
+            .filter_map(|callee| slots.get(callee))
+            .collect::<SmallVec<[usize; 8]>>()
+    };
+    let mut callers: Vec<Vec<u32>> = vec![Vec::new(); classified.len()];
+    {
+        // Each list is sized once, from the callers counted in a first pass
+        // that skips a caller's repeats the way the second does.
+        let mut counts = vec![0u32; classified.len()];
+        let mut last = vec![u32::MAX; classified.len()];
+        for (pos, (_, classification)) in classified.iter().enumerate() {
+            if !live(pos) {
+                continue;
+            }
+            for callee in callees_of(classification) {
+                if last[callee] != pos as u32 {
+                    last[callee] = pos as u32;
+                    counts[callee] += 1;
                 }
+            }
+        }
+        for (list, count) in callers.iter_mut().zip(counts) {
+            list.reserve_exact(count as usize);
+        }
+    }
+    for (pos, (_, classification)) in classified.iter().enumerate() {
+        if !live(pos) {
+            continue;
+        }
+        for callee in callees_of(classification) {
+            let list = &mut callers[callee];
+            if list.last() != Some(&(pos as u32)) {
+                list.push(pos as u32);
             }
         }
     }
@@ -2488,7 +2521,7 @@ fn settle(
             queued[*pos as usize] = false;
         }
         let wave_number = WAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let updates: Vec<(u32, Settled, Vec<EffectIx>)> = {
+        let updates: Vec<(u32, Settled, SmallVec<[EffectIx; 4]>)> = {
             let get = |callee: EffectIx| match slots
                 .get(callee)
                 .and_then(|pos| settled[pos].as_ref())
@@ -2508,7 +2541,7 @@ fn settle(
                         return None;
                     }
                     let mut now = before.clone();
-                    let mut read: Vec<EffectIx> = Vec::new();
+                    let mut read: SmallVec<[EffectIx; 4]> = SmallVec::new();
                     for &(callee, transfer, site) in &classification.calls {
                         let found = get(callee);
                         let transfer = transfers.get(transfer);
@@ -2640,7 +2673,7 @@ fn run_passed<'g>(
     condition: &Condition,
     get: &impl Fn(EffectIx) -> std::borrow::Cow<'g, Settled>,
     into: &mut Settled,
-    read: &mut Vec<EffectIx>,
+    read: &mut SmallVec<[EffectIx; 4]>,
 ) {
     let Some(site) = site else {
         into.effect = Effect::unknown();
@@ -2700,9 +2733,9 @@ fn run_passed<'g>(
 
 /// The classes `ty` may be an object of: `Some` with each one named, `None`
 /// when it may be an object of a class not named (`object`, `mixed`).
-pub(crate) fn object_classes(ty: &Type) -> Option<Vec<Name>> {
+pub(crate) fn object_classes(ty: &Type) -> Option<NameList> {
     let members = ty.union_members();
-    let mut classes = Vec::with_capacity(members.len());
+    let mut classes = NameList::new();
     for member in members {
         if let Some((class, _)) = member.as_object() {
             classes.push(Name::from(class));
@@ -2716,8 +2749,8 @@ pub(crate) fn object_classes(ty: &Type) -> Option<Vec<Name>> {
 /// The classes of the objects a value of type `ty` may hold, in the arrays
 /// it is or holds to any depth: `Some` with each one named, `None` when one
 /// may be of a class not named (`object`, `mixed`, an iterable).
-pub(crate) fn element_classes(ty: &Type) -> Option<Vec<Name>> {
-    fn collect(ty: &Type, out: &mut Vec<Name>, depth: u32) -> Option<()> {
+pub(crate) fn element_classes(ty: &Type) -> Option<NameList> {
+    fn collect(ty: &Type, out: &mut NameList, depth: u32) -> Option<()> {
         if depth > 8 {
             return None;
         }
@@ -2732,7 +2765,7 @@ pub(crate) fn element_classes(ty: &Type) -> Option<Vec<Name>> {
         }
         Some(())
     }
-    let mut classes = Vec::new();
+    let mut classes = NameList::new();
     collect(ty, &mut classes, 0)?;
     Some(classes)
 }
@@ -2769,8 +2802,13 @@ impl Holder {
     }
 
     /// The holder of an object of one of `classes`, in the order given.
-    pub(crate) fn listed(classes: Vec<Name>) -> Holder {
-        Holder::Classes(classes.into())
+    pub(crate) fn listed(classes: NameList) -> Holder {
+        Holder::Classes(shared_names(classes))
+    }
+
+    /// The holder of an object of `class`.
+    pub(crate) fn single(class: Name) -> Holder {
+        Holder::Classes(Arc::from([class]))
     }
 
     /// The object a value either holder describes may be.
@@ -2793,10 +2831,32 @@ impl Holder {
 }
 
 /// `classes` in one order, each once, as PHP compares class names.
-fn sorted_classes(mut classes: Vec<Name>) -> Arc<[Name]> {
+fn sorted_classes(mut classes: NameList) -> Arc<[Name]> {
     classes.sort_unstable_by(|a, b| a.lower().cmp(b.lower()));
     classes.dedup_by(|a, b| a.eq_ignore_case(b));
-    classes.into()
+    shared_names(classes)
+}
+
+/// `classes` as a shared list: the list of no class is one allocation for
+/// all, and a list of one or two moves its names in without a vector.
+fn shared_names(classes: NameList) -> Arc<[Name]> {
+    let mut names = classes.into_iter();
+    match (names.next(), names.next()) {
+        (None, _) => Holder::none_classes(),
+        (Some(a), None) => Arc::from([a]),
+        (Some(a), Some(b)) => {
+            let rest = names.len();
+            if rest == 0 {
+                Arc::from([a, b])
+            } else {
+                let mut all = Vec::with_capacity(2 + rest);
+                all.push(a);
+                all.push(b);
+                all.extend(names);
+                all.into()
+            }
+        }
+    }
 }
 
 /// The classes of two lists in one, as `sorted_classes` has them; a list
@@ -2816,7 +2876,7 @@ fn merged_classes(a: Arc<[Name]>, b: Arc<[Name]>) -> Arc<[Name]> {
     if ordered(&b) && holds(&b, &a) {
         return b;
     }
-    let mut all = Vec::with_capacity(a.len() + b.len());
+    let mut all = NameList::with_capacity(a.len() + b.len());
     all.extend(a.iter().cloned());
     all.extend(b.iter().cloned());
     sorted_classes(all)
@@ -2937,11 +2997,11 @@ fn named_classes(
     registry: &Registry,
     own: Option<&Name>,
     class: &QualifiedName,
-) -> Option<Vec<Name>> {
+) -> Option<NameList> {
     Some(if class.is_keyword("self") {
-        vec![own?.clone()]
+        smallvec![own?.clone()]
     } else if class.is_keyword("parent") {
-        vec![
+        smallvec![
             registry
                 .class_references_by_name(own?.as_str())?
                 .extends
@@ -2969,12 +3029,7 @@ impl Reach<'_> {
     /// called, each with what its own `$this` is to the caller, `transfer`
     /// for a closure the caller wrote; `None` when it may run code not
     /// known. What the caller wrote is noted (`CallContext::runs_written`).
-    fn argument_runs(
-        &self,
-        call: &CallWrites,
-        at: &ArgAt,
-        transfer: &Transfer,
-    ) -> Option<Vec<Run>> {
+    fn argument_runs(&self, call: &CallWrites, at: &ArgAt, transfer: &Transfer) -> Option<RunList> {
         // A spread argument is an array of arguments.
         if matches!(at, ArgAt::Spread) {
             return None;
@@ -2996,7 +3051,7 @@ impl Reach<'_> {
                     callable,
                     place,
                 };
-                self.ctx.runs_written(written, transfer).then(Vec::new)
+                self.ctx.runs_written(written, transfer).then(RunList::new)
             }
             Some(callable) => self.callable_targets(callable),
         }
@@ -3035,7 +3090,7 @@ impl Reach<'_> {
         }
         let base = base?;
         let runs: &[(Position, BuiltinRun)] = &base.runs;
-        let mut out: Vec<Run> = Vec::new();
+        let mut out = RunList::new();
         // Each parameter a callable is passed at runs it.
         for (at, param) in sig.params.iter().enumerate() {
             let at = at as u32;
@@ -3099,7 +3154,9 @@ impl Reach<'_> {
                     };
                     out.extend(self.method_targets_on(&holder, method));
                 }
-                BuiltinRun::Wrapper(method) => out.extend(registry.wrapper_runs(method).iter()),
+                BuiltinRun::Wrapper(method) => {
+                    out.extend(registry.wrapper_runs(method).iter().copied())
+                }
             }
         }
         Some(BuiltinRuns {
@@ -3198,7 +3255,7 @@ impl Reach<'_> {
     /// the method, and every loaded declaration of it otherwise, since the
     /// method may run on an object the first one gave back. Nothing for a
     /// value that is no object.
-    fn method_targets_on(&self, holder: &Holder, method: &str) -> Vec<Run> {
+    fn method_targets_on(&self, holder: &Holder, method: &str) -> RunList {
         let registry = self.registry;
         let transfers = &registry.reach_memo.transfers;
         let has_method = |class: &Name| {
@@ -3206,15 +3263,20 @@ impl Reach<'_> {
                 || registry.lookup_method(class, &well_known().call).is_some()
         };
         match holder {
-            Holder::Classes(classes) if classes.is_empty() => Vec::new(),
-            Holder::Classes(classes) if classes.iter().all(has_method) => classes
-                .iter()
-                .flat_map(|class| {
+            Holder::Classes(classes) if classes.is_empty() => RunList::new(),
+            Holder::Classes(classes) if classes.iter().all(has_method) => {
+                let mut out = RunList::new();
+                for class in classes.iter() {
                     let transfer = transfers.intern(&Transfer::Other(Some(class.clone())));
-                    let ixs = registry.implementation_ixs(class, method);
-                    ixs.iter().map(|&ix| (ix, transfer)).collect::<Vec<_>>()
-                })
-                .collect(),
+                    out.extend(
+                        registry
+                            .implementation_ixs(class, method)
+                            .iter()
+                            .map(|&ix| (ix, transfer)),
+                    );
+                }
+                out
+            }
             Holder::Made(Some(classes)) if classes.iter().all(has_method) => classes
                 .iter()
                 .filter_map(|class| self.exact_method(class, method))
@@ -3229,7 +3291,7 @@ impl Reach<'_> {
     }
 
     /// The declarations a callable the body names runs.
-    fn callable_targets(&self, callable: &Callable) -> Option<Vec<Run>> {
+    fn callable_targets(&self, callable: &Callable) -> Option<RunList> {
         let registry = self.registry;
         match callable {
             // What the caller wrote is found where it is passed.
@@ -3299,7 +3361,7 @@ impl Reach<'_> {
     /// The declarations a call may run, each with what its callee's own
     /// `$this` is to the caller; `None` when it may run code not known.
     /// `call` is the call, when the callee is not a callable's.
-    fn call_targets(&self, callee: &Callee, call: Option<&CallWrites>) -> Option<Vec<Run>> {
+    fn call_targets(&self, callee: &Callee, call: Option<&CallWrites>) -> Option<RunList> {
         let registry = self.registry;
         let transfers = &registry.reach_memo.transfers;
         Some(match callee {
@@ -3308,18 +3370,18 @@ impl Reach<'_> {
                     let declared = registry
                         .lookup_function_with_name(resolved)
                         .map_or(resolved, |(declared, _)| declared);
-                    vec![(
+                    smallvec![(
                         registry.effect_ix(&function_key(declared)),
                         TransferTable::STATIC,
                     )]
                 }
                 // A call to no function throws.
-                None => Vec::new(),
+                None => RunList::new(),
             },
             Callee::Method {
                 receiver: Receiver::Variable(name),
                 method: Some(method),
-            } if self.runs_held_closure(name, method, call) => Vec::new(),
+            } if self.runs_held_closure(name, method, call) => RunList::new(),
             Callee::Method { receiver, method } => {
                 let (holder, same) = self.ctx.receiver(receiver);
                 let transfer = |class: Option<&Name>| {
@@ -3331,7 +3393,7 @@ impl Reach<'_> {
                         Transfer::Other(class.cloned())
                     })
                 };
-                let mut out = Vec::new();
+                let mut out = RunList::new();
                 match (&holder, method) {
                     (Holder::Classes(classes), Some(method)) => {
                         for class in classes.iter() {
@@ -3393,7 +3455,7 @@ impl Reach<'_> {
                         named_classes(self.registry, self.ctx.own_class().as_ref(), class)
                             .unwrap_or_default()
                     }
-                    None => Vec::new(),
+                    None => NameList::new(),
                 };
                 classes
                     .iter()
@@ -3424,17 +3486,17 @@ impl Reach<'_> {
                 if !self.ctx.runs_written(written, &Transfer::Same) {
                     return None;
                 }
-                Vec::new()
+                RunList::new()
             }
             Callee::Written(ids) => {
                 if !self.ctx.runs_written(Written::Callee(ids), &Transfer::Same) {
                     return None;
                 }
-                Vec::new()
+                RunList::new()
             }
             Callee::Implicit { on, operation } => self
                 .implicit_call_targets(on.as_deref(), operation)?
-                .into_vec(),
+                .into_list(),
             // The file's top level runs in the including code's scope, as its
             // own `$this`; a file that is not known is code of any content.
             Callee::Include(at) => {
@@ -3447,7 +3509,7 @@ impl Reach<'_> {
                     Some(target) => DeclKey::file(target),
                     None => DeclKey::unresolved_include(),
                 };
-                vec![(registry.effect_ix(&key), TransferTable::SAME)]
+                smallvec![(registry.effect_ix(&key), TransferTable::SAME)]
             }
             Callee::ParentHook { property, set } => {
                 let parent = registry
@@ -3495,7 +3557,7 @@ impl Reach<'_> {
                 .get_or_compute(scoped(Some(true)), || {
                     let mut out = TargetSet::default();
                     self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
-                    Some(out.into_vec().into())
+                    Some(out.into_shared())
                 })
                 .unwrap_or_default(),
             None => SharedTargets::default(),
@@ -3512,7 +3574,7 @@ impl Reach<'_> {
                 {
                     let mut pushed = TargetSet::default();
                     self.implicit_targets(&holder, same, operation, &mut pushed, &mut Vec::new());
-                    debug_assert_eq!(pushed.into_vec()[..], shared[..]);
+                    debug_assert_eq!(pushed.into_list()[..], shared[..]);
                 }
                 return Some(shared);
             }
@@ -3521,7 +3583,7 @@ impl Reach<'_> {
                 out.push(*run);
             }
             self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
-            Some(out.into_vec().into())
+            Some(out.into_shared())
         })?;
         Some(Targets::Shared(list))
     }
@@ -3922,7 +3984,7 @@ impl Reach<'_> {
     /// class's own, and `__callStatic` or `__call` where there is none. A
     /// non-static method reached from the body's own class or an ancestor
     /// of it runs on the caller's `$this`.
-    fn static_targets(&self, class: &QualifiedName, method: Option<&Name>) -> Option<Vec<Run>> {
+    fn static_targets(&self, class: &QualifiedName, method: Option<&Name>) -> Option<RunList> {
         let registry = self.registry;
         let classes = named_classes(registry, self.ctx.own_class().as_ref(), class)?;
         let forwards_from = |target: &str| {
@@ -3930,7 +3992,7 @@ impl Reach<'_> {
                 own.eq_ignore_ascii_case(target) || registry.is_subclass_of(own, target)
             })
         };
-        let mut out = Vec::new();
+        let mut out = RunList::new();
         for target in &classes {
             let Some(method) = method else {
                 out.extend(
@@ -4035,7 +4097,7 @@ impl Registry {
                 None => {
                     let settled = self.settled_by_ix(ix);
                     effect.join_transferred(&settled.effect, transfer);
-                    let mut runs: Vec<Run> = Vec::new();
+                    let mut runs = RunList::new();
                     for condition in &settled.runs {
                         let passing = if passes_arguments(&call.callee, key) {
                             self.passing(call, key, condition.at)
@@ -4099,7 +4161,7 @@ type Reached<'r> = Option<(Vec<Targets>, Vec<&'r Place>)>;
 
 /// What one call reaches.
 enum Targets {
-    List(Vec<Run>),
+    List(RunList),
     /// What an operation runs, found once for every call asking the same.
     Shared(SharedTargets),
 }
@@ -4113,10 +4175,10 @@ impl Targets {
         list.iter().map(|(ix, _)| *ix)
     }
 
-    fn into_vec(self) -> Vec<Run> {
+    fn into_list(self) -> RunList {
         match self {
             Targets::List(list) => list,
-            Targets::Shared(list) => list.to_vec(),
+            Targets::Shared(list) => RunList::from_slice(&list),
         }
     }
 }
@@ -4702,7 +4764,7 @@ impl<'r> Level<'r> {
     fn this_holder(&self) -> Holder {
         self.this_holder
             .get_or_init(|| match self.class_name() {
-                Some(class) => Holder::listed(vec![class.clone()]),
+                Some(class) => Holder::single(class.clone()),
                 None => Holder::Unknown,
             })
             .clone()
@@ -5010,11 +5072,9 @@ impl<'r> Level<'r> {
     fn variable_holder(&self, name: &Name) -> Holder {
         if let Some(made) = self.made.get(name.as_str()) {
             return match made {
-                Made::Object(Some(class)) => Holder::Made(Some(
-                    named_classes(self.registry, self.class_name(), class)
-                        .unwrap_or_default()
-                        .into(),
-                )),
+                Made::Object(Some(class)) => Holder::Made(Some(shared_names(
+                    named_classes(self.registry, self.class_name(), class).unwrap_or_default(),
+                ))),
                 Made::Object(None) => Holder::Made(None),
                 Made::Closure(_) => Holder::Made(Some(vec![Name::from("Closure")].into())),
             };
@@ -5083,7 +5143,7 @@ impl<'r> Level<'r> {
             Narrowing::Declared(ty) if self.known_type(ty) => holder_of(ty),
             Narrowing::Declared(_) => held,
             Narrowing::Instance(classes) => {
-                let mut named = Vec::new();
+                let mut named = NameList::new();
                 for class in classes.iter() {
                     match named_classes(self.registry, self.class_name(), class) {
                         Some(found) => named.extend(found),
@@ -5093,7 +5153,7 @@ impl<'r> Level<'r> {
                 match held {
                     Holder::Made(_) => held,
                     Holder::Classes(own) if !own.is_empty() => {
-                        let mut found = Vec::new();
+                        let mut found = NameList::new();
                         for own in own.iter() {
                             for class in &named {
                                 found.push(if self.registry.is_subclass_of(own, class) {
@@ -5116,7 +5176,7 @@ impl<'r> Level<'r> {
         match declared {
             Declared::Param { ty, .. } => holder_of(ty),
             Declared::Classes(Some(classes)) => {
-                let mut found = Vec::new();
+                let mut found = NameList::new();
                 for class in *classes {
                     match named_classes(self.registry, self.class_name(), class) {
                         Some(named) => found.extend(named),
@@ -5181,9 +5241,11 @@ impl<'r> Level<'r> {
                     held = held.join(self.origin_holder(origin).0);
                 }
                 let held = match held {
-                    Holder::Classes(classes) => Holder::Classes(sorted_classes(classes.to_vec())),
+                    Holder::Classes(classes) => {
+                        Holder::Classes(sorted_classes(classes.iter().cloned().collect()))
+                    }
                     Holder::Made(Some(classes)) => {
-                        Holder::Made(Some(sorted_classes(classes.to_vec())))
+                        Holder::Made(Some(sorted_classes(classes.iter().cloned().collect())))
                     }
                     other => other,
                 };
@@ -5224,11 +5286,9 @@ impl<'r> Level<'r> {
             ),
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::New(Some(class)) => (
-                Holder::Made(Some(
-                    named_classes(registry, self.class_name(), class)
-                        .unwrap_or_default()
-                        .into(),
-                )),
+                Holder::Made(Some(shared_names(
+                    named_classes(registry, self.class_name(), class).unwrap_or_default(),
+                ))),
                 false,
             ),
             Origin::New(None) | Origin::Anonymous(None) => (Holder::Made(None), false),
@@ -5245,7 +5305,7 @@ impl<'r> Level<'r> {
                 let Some(classes) = named_classes(registry, self.class_name(), class) else {
                     return (Holder::Unknown, false);
                 };
-                let mut found = Vec::new();
+                let mut found = NameList::new();
                 for class in classes.iter() {
                     let Some(ty) = registry.lookup_const_type(class, constant) else {
                         return (Holder::Unknown, false);
@@ -5258,7 +5318,7 @@ impl<'r> Level<'r> {
                 (Holder::listed(found), false)
             }
             Origin::Caught(classes) => {
-                let mut found = Vec::new();
+                let mut found = NameList::new();
                 for class in classes.iter() {
                     match named_classes(registry, self.class_name(), class) {
                         Some(named) => found.extend(named),
@@ -5446,7 +5506,7 @@ impl<'r> Level<'r> {
 
     /// The object a static property holds, by its declared type.
     fn static_holder(&self, class: &QualifiedName, prop: &Name) -> Holder {
-        let mut classes = Vec::new();
+        let mut classes = NameList::new();
         for (owner, _) in self.static_property_owners(class, Some(prop)) {
             let Some(owner) = owner else {
                 return Holder::Unknown;
@@ -5676,7 +5736,7 @@ impl<'r> Level<'r> {
                 (Step::Property(None), _) | (Step::Element, None) => return Holder::Unknown,
             });
         }
-        let mut found = Vec::new();
+        let mut found = NameList::new();
         for ty in reached.into_iter().flatten() {
             match object_classes(&ty) {
                 Some(classes) => found.extend(classes),

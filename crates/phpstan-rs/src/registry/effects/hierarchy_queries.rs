@@ -72,7 +72,7 @@ fn implicit(registry: &Registry, holder: &Holder, operation: &Operation) -> Vec<
     let (mut found, mut expected) = (TargetSet::default(), Vec::new());
     reach.implicit_targets(holder, false, operation, &mut found, &mut Vec::new());
     reach.reference_implicit_targets(holder, false, operation, &mut expected, &mut Vec::new());
-    let found = found.into_vec().into_iter().map(|(ix, transfer)| {
+    let found = found.into_list().into_iter().map(|(ix, transfer)| {
         (
             registry.effect_key(ix).clone(),
             registry.transfer_of(transfer).clone(),
@@ -394,7 +394,7 @@ fn a_target_set_keeps_each_target_once_in_the_order_added() {
     }
     // A name in another case is the same declaration.
     set.push(registry.effect_run(&method_key(&Name::from("c1"), "M"), &Transfer::Other(None)));
-    assert_eq!(set.into_vec(), expected);
+    assert_eq!(set.into_list().to_vec(), expected);
 }
 
 #[test]
@@ -471,4 +471,34 @@ fn a_handle_gives_back_its_declaration_and_whether_it_is_a_builtin() {
             registry.builtin(key).is_some()
         );
     }
+}
+
+#[test]
+fn a_shared_name_list_keeps_its_names_in_order_whatever_its_length() {
+    for count in 0..8 {
+        let names: NameList = (0..count).map(|n| Name::from(format!("C{n}"))).collect();
+        let shared = shared_names(names.clone());
+        assert_eq!(&shared[..], &names[..], "{count} names");
+    }
+    assert!(Arc::ptr_eq(
+        &shared_names(NameList::new()),
+        &Holder::none_classes()
+    ));
+    assert_eq!(
+        Holder::single(Name::from("A")),
+        Holder::listed(smallvec![Name::from("A")])
+    );
+}
+
+#[test]
+fn a_target_set_shares_the_list_it_holds() {
+    let registry = registry(GRAPH);
+    let mut set = TargetSet::default();
+    for n in 0..20 {
+        let key = method_key(&Name::from("Both"), &format!("m{}", n % 15));
+        set.push(registry.effect_run(&key, &Transfer::Other(None)));
+    }
+    let list = set.list.clone();
+    assert_eq!(list.len(), 15);
+    assert_eq!(&set.into_shared()[..], &list[..]);
 }
