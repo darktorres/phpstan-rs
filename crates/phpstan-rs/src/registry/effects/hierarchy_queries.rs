@@ -1,6 +1,7 @@
 //! The hierarchy queries effect resolution runs, on small class hierarchies:
 //! what a call may reach through overrides, `__call`, `@method` tags and a
-//! builtin's methods. Results are compared as sorted `class::member` names.
+//! builtin's methods. Results are compared as sorted `class::member` names,
+//! and with the direct versions in `reference`.
 
 use super::*;
 use syntax::{lexer::Lexer, parser::Parser};
@@ -22,6 +23,62 @@ fn names(keys: impl IntoIterator<Item = DeclKey>) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+struct NoContext;
+
+impl CallContext for NoContext {
+    fn class(&self) -> Option<&str> {
+        None
+    }
+    fn file(&self) -> Option<FileId> {
+        None
+    }
+    fn receiver(&self, _: &Receiver) -> (Holder, bool) {
+        (Holder::Unknown, false)
+    }
+    fn argument(&self, _: &ArgAt, _: Option<&Place>) -> Holder {
+        Holder::Unknown
+    }
+    fn runs_written(&self, _: Written<'_>, _: &Transfer) -> bool {
+        false
+    }
+    fn operand(&self, _: Option<&[Origin]>) -> (Holder, bool) {
+        (Holder::Unknown, false)
+    }
+    fn rebindable(&self) -> bool {
+        false
+    }
+}
+
+fn target_names(targets: impl IntoIterator<Item = (DeclKey, Transfer)>) -> Vec<String> {
+    let mut out: Vec<String> = targets
+        .into_iter()
+        .map(|(key, transfer)| {
+            let key = names([key]).remove(0);
+            format!("{key} {transfer:?}")
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn implicit(registry: &Registry, holder: &Holder, operation: &Operation) -> Vec<String> {
+    let reach = Reach {
+        registry,
+        ctx: &NoContext,
+    };
+    let (mut found, mut expected) = (Vec::new(), Vec::new());
+    reach.implicit_targets(holder, false, operation, &mut found, &mut Vec::new());
+    reach.reference_implicit_targets(holder, false, operation, &mut expected, &mut Vec::new());
+    let (found, expected) = (target_names(found), target_names(expected));
+    assert_eq!(found, expected);
+    found
+}
+
+fn classes(names: &[&str]) -> Holder {
+    Holder::Classes(names.iter().map(|name| Name::from(*name)).collect())
 }
 
 const SHAPES: &str = r#"<?php
@@ -98,4 +155,213 @@ fn the_overrides_of_a_builtin_are_taken_as_the_receiver_resolves_them() {
         ["circle::area"]
     );
     assert!(registry.overrides_of_builtin("Base", "Missing").is_empty());
+}
+
+const GRAPH: &str = r#"<?php
+    interface Root { public function root(): int; }
+    interface Left extends Root {}
+    interface Right extends Root {}
+    class Both implements Left, Right { public function root(): int { return 1; } }
+    class SubBoth extends Both { public function root(): int { return 2; } }
+    trait Greets { public function greet(): string { return 'hi'; } }
+    class Greeter { use Greets; }
+    class LoudGreeter extends Greeter { public function greet(): string { return 'HI'; } }
+    /** @method int ghost() */
+    class Tagged { public function __call($name, $arguments) {} }
+    class Row implements IteratorAggregate {
+        public function getIterator(): Iterator { return new RowIt(); }
+    }
+    class RowIt implements Iterator {
+        public function current(): mixed { return 1; }
+        public function key(): mixed { return 1; }
+        public function next(): void {}
+        public function rewind(): void {}
+        public function valid(): bool { return false; }
+    }
+    class Mixed_Case { public function DoThing() {} }
+    class sub_case extends MIXED_CASE { public function DOTHING() {} }
+"#;
+
+fn all_implementations(registry: &Registry, class: &str, method: &str) -> Vec<String> {
+    let found = names(registry.implementations(class, method));
+    assert_eq!(
+        found,
+        names(registry.reference_implementations(class, method))
+    );
+    found
+}
+
+#[test]
+fn an_interface_diamond_reaches_each_implementation_once() {
+    let registry = registry(GRAPH);
+    assert_eq!(
+        all_implementations(&registry, "Root", "root"),
+        ["both::root", "root::root", "subboth::root"]
+    );
+    assert_eq!(
+        all_implementations(&registry, "Left", "root"),
+        ["both::root", "root::root", "subboth::root"]
+    );
+    assert_eq!(
+        all_implementations(&registry, "Both", "root"),
+        ["both::root", "subboth::root"]
+    );
+}
+
+#[test]
+fn a_trait_method_is_reached_as_the_using_class_declares_it() {
+    let registry = registry(GRAPH);
+    let found = all_implementations(&registry, "Greeter", "greet");
+    assert!(
+        found.contains(&"loudgreeter::greet".to_string()),
+        "{found:?}"
+    );
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(
+        all_implementations(&registry, "LoudGreeter", "greet"),
+        ["loudgreeter::greet"]
+    );
+}
+
+#[test]
+fn a_method_only_a_tag_declares_reaches_the_call_method() {
+    let registry = registry(GRAPH);
+    assert_eq!(
+        all_implementations(&registry, "Tagged", "ghost"),
+        ["tagged::__call"]
+    );
+    let found = names(registry.methods_named("GHOST"));
+    assert_eq!(found, names(registry.reference_methods_named("GHOST")));
+    assert_eq!(found, ["tagged::__call"]);
+}
+
+#[test]
+fn method_names_differing_in_case_are_the_same_method() {
+    let registry = registry(GRAPH);
+    let found = names(registry.methods_named("dothing"));
+    assert_eq!(found, names(registry.reference_methods_named("dothing")));
+    assert_eq!(
+        found,
+        ["mixed_case::dothing", "sub_case::dothing", "tagged::__call"]
+    );
+    assert_eq!(
+        all_implementations(&registry, "MIXED_CASE", "DOTHING"),
+        ["mixed_case::dothing", "sub_case::dothing"]
+    );
+}
+
+#[test]
+fn every_method_of_a_class_and_the_classes_below_it() {
+    let registry = registry(GRAPH);
+    let reach = Reach {
+        registry: &registry,
+        ctx: &NoContext,
+    };
+    for class in ["Both", "Root", "Greeter", "Row", "Missing"] {
+        assert_eq!(
+            names(reach.every_method(class)),
+            names(reach.reference_every_method(class)),
+            "{class}"
+        );
+    }
+    assert_eq!(
+        names(reach.every_method("Both")),
+        ["both::root", "subboth::root"]
+    );
+    assert!(reach.every_method("Missing").is_empty());
+}
+
+#[test]
+fn the_overrides_of_an_interface_are_the_receivers_methods() {
+    let registry = registry(GRAPH);
+    for (receiver, builtin) in [
+        ("Both", "Root"),
+        ("SubBoth", "Root"),
+        ("Left", "Root"),
+        ("Row", "Root"),
+        ("Both", "Missing"),
+    ] {
+        assert_eq!(
+            names(registry.overrides_of_builtin(receiver, builtin)),
+            names(registry.reference_overrides_of_builtin(receiver, builtin)),
+            "{receiver} {builtin}"
+        );
+    }
+    assert_eq!(
+        names(registry.overrides_of_builtin("Both", "Root")),
+        ["both::root", "subboth::root"]
+    );
+    assert_eq!(
+        names(registry.overrides_of_builtin("SubBoth", "Root")),
+        ["subboth::root"]
+    );
+}
+
+#[test]
+fn an_aggregate_is_iterated_through_the_iterator_it_gives() {
+    let registry = registry(GRAPH);
+    let found = implicit(
+        &registry,
+        &classes(&["Row"]),
+        &Operation::Iterate { keys: true },
+    );
+    assert!(
+        found
+            .iter()
+            .any(|name| name.starts_with("row::getiterator")),
+        "{found:?}"
+    );
+    assert!(
+        found.iter().any(|name| name.starts_with("rowit::current")),
+        "{found:?}"
+    );
+    let found = implicit(
+        &registry,
+        &classes(&["RowIt"]),
+        &Operation::Iterate { keys: false },
+    );
+    assert!(
+        found.iter().all(|name| !name.starts_with("rowit::key")),
+        "{found:?}"
+    );
+    assert!(
+        found.iter().any(|name| name.starts_with("rowit::valid")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn an_operation_on_an_unknown_object_reaches_every_class_with_the_hook() {
+    let registry = registry(SHAPES);
+    let found = implicit(&registry, &Holder::Unknown, &Operation::String);
+    assert!(
+        found.iter().all(|name| name.contains("__tostring")),
+        "{found:?}"
+    );
+    implicit(&registry, &Holder::Unknown, &Operation::Destroy);
+    implicit(
+        &registry,
+        &Holder::Made(None),
+        &Operation::Iterate { keys: true },
+    );
+}
+
+#[test]
+fn an_operation_on_classes_reaches_the_hooks_of_each_class_and_those_below() {
+    let registry = registry(GRAPH);
+    for operation in [
+        Operation::String,
+        Operation::Destroy,
+        Operation::Clone { with: true },
+        Operation::Element(Access::Read),
+        Operation::Property(None, Access::Write),
+    ] {
+        for holder in [
+            classes(&["Both"]),
+            classes(&["Greeter", "Tagged"]),
+            Holder::Made(Some(vec![Name::from("Both")])),
+        ] {
+            implicit(&registry, &holder, &operation);
+        }
+    }
 }
