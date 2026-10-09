@@ -1,0 +1,87 @@
+[
+  {
+    "name": "impl-emit",
+    "command": [
+      "clang-21",
+      "-O0",
+      "-Xclang",
+      "-disable-O0-optnone",
+      "-g",
+      "-fno-discard-value-names",
+      "-c",
+      "-emit-llvm",
+      "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/external_impl.c",
+      "-o",
+      "/tmp/php-catalog-comparison/reproduced/external-comparison/impl.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0456,
+    "sampled_group_peak_bytes": 1638400,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 89448,
+    "user_seconds": 0.01,
+    "system_seconds": 0.01,
+    "exit_status": 0
+  },
+  {
+    "name": "external-link",
+    "command": [
+      "llvm-link-21",
+      "/tmp/php-catalog-comparison/final/external-promoted.bc",
+      "/tmp/php-catalog-comparison/reproduced/external-comparison/impl.bc",
+      "-o",
+      "/tmp/php-catalog-comparison/reproduced/external-comparison/linked.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0436,
+    "sampled_group_peak_bytes": 1642496,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 55596,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0,
+    "exit_status": 0
+  },
+  {
+    "name": "missing-with-blackhole",
+    "command": [
+      "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "-dfs",
+      "-query=funptr",
+      "-stat",
+      "-print-query-pts",
+      "-blk",
+      "/tmp/php-catalog-comparison/final/external-promoted.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0454,
+    "sampled_group_peak_bytes": 1642496,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 27728,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0,
+    "exit_status": 0
+  },
+  {
+    "name": "complete-source",
+    "command": [
+      "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "-dfs",
+      "-query=funptr",
+      "-stat",
+      "-print-query-pts",
+      "/tmp/php-catalog-comparison/reproduced/external-comparison/linked.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.044,
+    "sampled_group_peak_bytes": 1642496,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 27816,
+    "user_seconds": 0.01,
+    "system_seconds": 0.0,
+    "exit_status": 0
+  }
+]

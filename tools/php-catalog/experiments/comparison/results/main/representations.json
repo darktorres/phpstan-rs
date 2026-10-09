@@ -1,0 +1,2305 @@
+[
+  {
+    "unit": "dispatch",
+    "backend": "ast",
+    "definitions": 14,
+    "source_sha256": "620e7b0c27bb13de24762d50ba7c52bc653667423eace1d198f99e51b867ea97",
+    "artifact_bytes": 16930,
+    "functions": [
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 5,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "scalar",
+        "type": "int (int)"
+      },
+      {
+        "block_count": 10,
+        "direct_calls": 0,
+        "edges": 12,
+        "elements": 28,
+        "entry": 9,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "array_callback",
+        "type": "void (Callback, int *, size_t)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 10,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "by_reference",
+        "type": "void (int *, int *)"
+      },
+      {
+        "block_count": 5,
+        "direct_calls": 2,
+        "edges": 5,
+        "elements": 24,
+        "entry": 4,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "exception_cleanup",
+        "type": "int (Callback, int *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 9,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "owner_dispatch",
+        "type": "void (Owner *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 10,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "retain",
+        "type": "void (Callback, int *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 7,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "trigger",
+        "type": "void (void)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 1,
+        "edges": 2,
+        "elements": 10,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "copy_payload",
+        "type": "void (Payload *, Payload *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 1,
+        "edges": 2,
+        "elements": 17,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "copied_dispatch",
+        "type": "void (Payload *, int *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 2,
+        "edges": 2,
+        "elements": 20,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "unknown_copy",
+        "type": "void (Payload *, Payload *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 2,
+        "edges": 2,
+        "elements": 24,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "ordered_dispatch",
+        "type": "void (int *)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "callback",
+            "offset_bits": 0,
+            "type": "Callback"
+          },
+          {
+            "name": "argument",
+            "offset_bits": 64,
+            "type": "int *"
+          }
+        ],
+        "name": "Owner",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "bytes",
+            "offset_bits": 0,
+            "type": "char[65536]"
+          },
+          {
+            "name": "callback",
+            "offset_bits": 524288,
+            "type": "Callback"
+          }
+        ],
+        "name": "Payload",
+        "size_bytes": 65544
+      }
+    ]
+  },
+  {
+    "unit": "dispatch",
+    "backend": "llvm",
+    "definitions": 14,
+    "source_sha256": "620e7b0c27bb13de24762d50ba7c52bc653667423eace1d198f99e51b867ea97",
+    "artifact_bytes": 13532,
+    "functions": [
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 5,
+        "indirect_calls": 0,
+        "name": "scalar"
+      },
+      {
+        "block_count": 8,
+        "direct_calls": 0,
+        "edges": 10,
+        "elements": 31,
+        "indirect_calls": 1,
+        "name": "array_callback"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 9,
+        "indirect_calls": 0,
+        "name": "by_reference"
+      },
+      {
+        "block_count": 4,
+        "direct_calls": 2,
+        "edges": 4,
+        "elements": 22,
+        "indirect_calls": 1,
+        "name": "exception_cleanup"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 10,
+        "indirect_calls": 1,
+        "name": "owner_dispatch"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 9,
+        "indirect_calls": 0,
+        "name": "retain"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 4,
+        "indirect_calls": 1,
+        "name": "trigger"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 1,
+        "edges": 0,
+        "elements": 8,
+        "indirect_calls": 0,
+        "name": "copy_payload"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 1,
+        "edges": 0,
+        "elements": 12,
+        "indirect_calls": 1,
+        "name": "copied_dispatch"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 2,
+        "edges": 0,
+        "elements": 12,
+        "indirect_calls": 0,
+        "name": "unknown_copy"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 2,
+        "edges": 0,
+        "elements": 13,
+        "indirect_calls": 0,
+        "name": "ordered_dispatch"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "cleanup",
+    "backend": "ast",
+    "definitions": 2,
+    "source_sha256": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6",
+    "artifact_bytes": 2255,
+    "functions": [
+      {
+        "block_count": 8,
+        "direct_calls": 4,
+        "edges": 11,
+        "elements": 22,
+        "entry": 7,
+        "exit": 0,
+        "implicit_dtors": 1,
+        "indirect_calls": 0,
+        "name": "cleanup",
+        "type": "void (void)"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "cleanup",
+    "backend": "llvm",
+    "definitions": 3,
+    "source_sha256": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6",
+    "artifact_bytes": 4665,
+    "functions": [
+      {
+        "block_count": 12,
+        "direct_calls": 10,
+        "edges": 14,
+        "elements": 37,
+        "indirect_calls": 0,
+        "name": "cleanup"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "external",
+    "backend": "ast",
+    "definitions": 4,
+    "source_sha256": "2439d24265d02cff6372e99ac3509285e8fd866b28c7605cd0e622f32fb57be7",
+    "artifact_bytes": 1552,
+    "functions": [
+      {
+        "block_count": 3,
+        "direct_calls": 1,
+        "edges": 2,
+        "elements": 16,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "external_write_entry",
+        "type": "void (int *)"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "external",
+    "backend": "llvm",
+    "definitions": 4,
+    "source_sha256": "2439d24265d02cff6372e99ac3509285e8fd866b28c7605cd0e622f32fb57be7",
+    "artifact_bytes": 951,
+    "functions": [
+      {
+        "block_count": 1,
+        "direct_calls": 1,
+        "edges": 0,
+        "elements": 9,
+        "indirect_calls": 1,
+        "name": "external_write_entry"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "platform",
+    "backend": "ast",
+    "definitions": 4,
+    "source_sha256": "b316602c2af8976c72257ea0bbccfe02669eaf167ba223094e949245026c06f7",
+    "artifact_bytes": 6281,
+    "functions": [
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 10,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "statement_expression",
+        "type": "int (int)"
+      },
+      {
+        "block_count": 10,
+        "direct_calls": 0,
+        "edges": 12,
+        "elements": 24,
+        "entry": 9,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "computed_goto",
+        "type": "void (unsigned int)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 0,
+        "edges": 2,
+        "elements": 6,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "atomic_read",
+        "type": "int (_Atomic(int) *)"
+      },
+      {
+        "block_count": 7,
+        "direct_calls": 2,
+        "edges": 8,
+        "elements": 17,
+        "entry": 6,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "bailout_entry",
+        "type": "int (void **, int)"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "platform",
+    "backend": "llvm",
+    "definitions": 4,
+    "source_sha256": "b316602c2af8976c72257ea0bbccfe02669eaf167ba223094e949245026c06f7",
+    "artifact_bytes": 6210,
+    "functions": [
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 12,
+        "indirect_calls": 0,
+        "name": "statement_expression"
+      },
+      {
+        "block_count": 7,
+        "direct_calls": 2,
+        "edges": 8,
+        "elements": 20,
+        "indirect_calls": 0,
+        "name": "computed_goto"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 0,
+        "edges": 0,
+        "elements": 8,
+        "indirect_calls": 0,
+        "name": "atomic_read"
+      },
+      {
+        "block_count": 6,
+        "direct_calls": 2,
+        "edges": 6,
+        "elements": 21,
+        "indirect_calls": 0,
+        "name": "bailout_entry"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "php-array",
+    "backend": "ast",
+    "definitions": 1042,
+    "source_sha256": "0455a443b7a56d88911153d97ce984acc6398d01deaaa8ff8ac90c84d7550114",
+    "artifact_bytes": 526016,
+    "functions": [
+      {
+        "block_count": 111,
+        "direct_calls": 45,
+        "edges": 161,
+        "elements": 943,
+        "entry": 110,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 1,
+        "name": "zif_count",
+        "type": "void (zend_execute_data *, zval *)"
+      },
+      {
+        "block_count": 3,
+        "direct_calls": 1,
+        "edges": 2,
+        "elements": 11,
+        "entry": 2,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_usort",
+        "type": "void (zend_execute_data *, zval *)"
+      },
+      {
+        "block_count": 114,
+        "direct_calls": 45,
+        "edges": 165,
+        "elements": 897,
+        "entry": 113,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_array_walk",
+        "type": "void (zend_execute_data *, zval *)"
+      },
+      {
+        "block_count": 177,
+        "direct_calls": 63,
+        "edges": 255,
+        "elements": 1541,
+        "entry": 176,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_array_filter",
+        "type": "void (zend_execute_data *, zval *)"
+      },
+      {
+        "block_count": 311,
+        "direct_calls": 94,
+        "edges": 424,
+        "elements": 2529,
+        "entry": 310,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_array_map",
+        "type": "void (zend_execute_data *, zval *)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "value",
+            "offset_bits": 0,
+            "type": "zend_value"
+          },
+          {
+            "name": "u1",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+          },
+          {
+            "name": "u2",
+            "offset_bits": 96,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+          }
+        ],
+        "name": "_zval_struct",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "u",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+          },
+          {
+            "name": "nTableMask",
+            "offset_bits": 96,
+            "type": "uint32_t"
+          },
+          {
+            "name": "",
+            "offset_bits": 128,
+            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+          },
+          {
+            "name": "nNumUsed",
+            "offset_bits": 192,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNumOfElements",
+            "offset_bits": 224,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nTableSize",
+            "offset_bits": 256,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nInternalPointer",
+            "offset_bits": 288,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNextFreeElement",
+            "offset_bits": 320,
+            "type": "zend_long"
+          },
+          {
+            "name": "pDestructor",
+            "offset_bits": 384,
+            "type": "dtor_func_t"
+          }
+        ],
+        "name": "_zend_array",
+        "size_bytes": 56
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "val",
+            "offset_bits": 64,
+            "type": "zval"
+          },
+          {
+            "name": "sources",
+            "offset_bits": 192,
+            "type": "zend_property_info_source_list"
+          }
+        ],
+        "name": "_zend_reference",
+        "size_bytes": 32
+      },
+      {
+        "fields": [
+          {
+            "name": "offset",
+            "offset_bits": 0,
+            "type": "int"
+          },
+          {
+            "name": "free_obj",
+            "offset_bits": 64,
+            "type": "zend_object_free_obj_t"
+          },
+          {
+            "name": "dtor_obj",
+            "offset_bits": 128,
+            "type": "zend_object_dtor_obj_t"
+          },
+          {
+            "name": "clone_obj",
+            "offset_bits": 192,
+            "type": "zend_object_clone_obj_t"
+          },
+          {
+            "name": "clone_obj_with",
+            "offset_bits": 256,
+            "type": "zend_object_clone_obj_with_t"
+          },
+          {
+            "name": "read_property",
+            "offset_bits": 320,
+            "type": "zend_object_read_property_t"
+          },
+          {
+            "name": "write_property",
+            "offset_bits": 384,
+            "type": "zend_object_write_property_t"
+          },
+          {
+            "name": "read_dimension",
+            "offset_bits": 448,
+            "type": "zend_object_read_dimension_t"
+          },
+          {
+            "name": "write_dimension",
+            "offset_bits": 512,
+            "type": "zend_object_write_dimension_t"
+          },
+          {
+            "name": "get_property_ptr_ptr",
+            "offset_bits": 576,
+            "type": "zend_object_get_property_ptr_ptr_t"
+          },
+          {
+            "name": "has_property",
+            "offset_bits": 640,
+            "type": "zend_object_has_property_t"
+          },
+          {
+            "name": "unset_property",
+            "offset_bits": 704,
+            "type": "zend_object_unset_property_t"
+          },
+          {
+            "name": "has_dimension",
+            "offset_bits": 768,
+            "type": "zend_object_has_dimension_t"
+          },
+          {
+            "name": "unset_dimension",
+            "offset_bits": 832,
+            "type": "zend_object_unset_dimension_t"
+          },
+          {
+            "name": "get_properties",
+            "offset_bits": 896,
+            "type": "zend_object_get_properties_t"
+          },
+          {
+            "name": "get_method",
+            "offset_bits": 960,
+            "type": "zend_object_get_method_t"
+          },
+          {
+            "name": "get_constructor",
+            "offset_bits": 1024,
+            "type": "zend_object_get_constructor_t"
+          },
+          {
+            "name": "get_class_name",
+            "offset_bits": 1088,
+            "type": "zend_object_get_class_name_t"
+          },
+          {
+            "name": "cast_object",
+            "offset_bits": 1152,
+            "type": "zend_object_cast_t"
+          },
+          {
+            "name": "count_elements",
+            "offset_bits": 1216,
+            "type": "zend_object_count_elements_t"
+          },
+          {
+            "name": "get_debug_info",
+            "offset_bits": 1280,
+            "type": "zend_object_get_debug_info_t"
+          },
+          {
+            "name": "get_closure",
+            "offset_bits": 1344,
+            "type": "zend_object_get_closure_t"
+          },
+          {
+            "name": "get_gc",
+            "offset_bits": 1408,
+            "type": "zend_object_get_gc_t"
+          },
+          {
+            "name": "do_operation",
+            "offset_bits": 1472,
+            "type": "zend_object_do_operation_t"
+          },
+          {
+            "name": "compare",
+            "offset_bits": 1536,
+            "type": "zend_object_compare_t"
+          },
+          {
+            "name": "get_properties_for",
+            "offset_bits": 1600,
+            "type": "zend_object_get_properties_for_t"
+          }
+        ],
+        "name": "_zend_object_handlers",
+        "size_bytes": 208
+      }
+    ]
+  },
+  {
+    "unit": "php-array",
+    "backend": "llvm",
+    "definitions": 208,
+    "source_sha256": "0455a443b7a56d88911153d97ce984acc6398d01deaaa8ff8ac90c84d7550114",
+    "artifact_bytes": 363032,
+    "functions": [
+      {
+        "block_count": 87,
+        "direct_calls": 22,
+        "edges": 119,
+        "elements": 562,
+        "indirect_calls": 1,
+        "name": "zif_count"
+      },
+      {
+        "block_count": 1,
+        "direct_calls": 1,
+        "edges": 0,
+        "elements": 8,
+        "indirect_calls": 0,
+        "name": "zif_usort"
+      },
+      {
+        "block_count": 83,
+        "direct_calls": 13,
+        "edges": 116,
+        "elements": 510,
+        "indirect_calls": 0,
+        "name": "zif_array_walk"
+      },
+      {
+        "block_count": 125,
+        "direct_calls": 23,
+        "edges": 172,
+        "elements": 792,
+        "indirect_calls": 0,
+        "name": "zif_array_filter"
+      },
+      {
+        "block_count": 257,
+        "direct_calls": 56,
+        "edges": 322,
+        "elements": 1668,
+        "indirect_calls": 0,
+        "name": "zif_array_map"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "php-type",
+    "backend": "ast",
+    "definitions": 870,
+    "source_sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505",
+    "artifact_bytes": 42735,
+    "functions": [
+      {
+        "block_count": 53,
+        "direct_calls": 19,
+        "edges": 75,
+        "elements": 452,
+        "entry": 52,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_strlen",
+        "type": "void (zend_execute_data *, zval *)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "value",
+            "offset_bits": 0,
+            "type": "zend_value"
+          },
+          {
+            "name": "u1",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+          },
+          {
+            "name": "u2",
+            "offset_bits": 96,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+          }
+        ],
+        "name": "_zval_struct",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "u",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+          },
+          {
+            "name": "nTableMask",
+            "offset_bits": 96,
+            "type": "uint32_t"
+          },
+          {
+            "name": "",
+            "offset_bits": 128,
+            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+          },
+          {
+            "name": "nNumUsed",
+            "offset_bits": 192,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNumOfElements",
+            "offset_bits": 224,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nTableSize",
+            "offset_bits": 256,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nInternalPointer",
+            "offset_bits": 288,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNextFreeElement",
+            "offset_bits": 320,
+            "type": "zend_long"
+          },
+          {
+            "name": "pDestructor",
+            "offset_bits": 384,
+            "type": "dtor_func_t"
+          }
+        ],
+        "name": "_zend_array",
+        "size_bytes": 56
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "val",
+            "offset_bits": 64,
+            "type": "zval"
+          },
+          {
+            "name": "sources",
+            "offset_bits": 192,
+            "type": "zend_property_info_source_list"
+          }
+        ],
+        "name": "_zend_reference",
+        "size_bytes": 32
+      },
+      {
+        "fields": [
+          {
+            "name": "offset",
+            "offset_bits": 0,
+            "type": "int"
+          },
+          {
+            "name": "free_obj",
+            "offset_bits": 64,
+            "type": "zend_object_free_obj_t"
+          },
+          {
+            "name": "dtor_obj",
+            "offset_bits": 128,
+            "type": "zend_object_dtor_obj_t"
+          },
+          {
+            "name": "clone_obj",
+            "offset_bits": 192,
+            "type": "zend_object_clone_obj_t"
+          },
+          {
+            "name": "clone_obj_with",
+            "offset_bits": 256,
+            "type": "zend_object_clone_obj_with_t"
+          },
+          {
+            "name": "read_property",
+            "offset_bits": 320,
+            "type": "zend_object_read_property_t"
+          },
+          {
+            "name": "write_property",
+            "offset_bits": 384,
+            "type": "zend_object_write_property_t"
+          },
+          {
+            "name": "read_dimension",
+            "offset_bits": 448,
+            "type": "zend_object_read_dimension_t"
+          },
+          {
+            "name": "write_dimension",
+            "offset_bits": 512,
+            "type": "zend_object_write_dimension_t"
+          },
+          {
+            "name": "get_property_ptr_ptr",
+            "offset_bits": 576,
+            "type": "zend_object_get_property_ptr_ptr_t"
+          },
+          {
+            "name": "has_property",
+            "offset_bits": 640,
+            "type": "zend_object_has_property_t"
+          },
+          {
+            "name": "unset_property",
+            "offset_bits": 704,
+            "type": "zend_object_unset_property_t"
+          },
+          {
+            "name": "has_dimension",
+            "offset_bits": 768,
+            "type": "zend_object_has_dimension_t"
+          },
+          {
+            "name": "unset_dimension",
+            "offset_bits": 832,
+            "type": "zend_object_unset_dimension_t"
+          },
+          {
+            "name": "get_properties",
+            "offset_bits": 896,
+            "type": "zend_object_get_properties_t"
+          },
+          {
+            "name": "get_method",
+            "offset_bits": 960,
+            "type": "zend_object_get_method_t"
+          },
+          {
+            "name": "get_constructor",
+            "offset_bits": 1024,
+            "type": "zend_object_get_constructor_t"
+          },
+          {
+            "name": "get_class_name",
+            "offset_bits": 1088,
+            "type": "zend_object_get_class_name_t"
+          },
+          {
+            "name": "cast_object",
+            "offset_bits": 1152,
+            "type": "zend_object_cast_t"
+          },
+          {
+            "name": "count_elements",
+            "offset_bits": 1216,
+            "type": "zend_object_count_elements_t"
+          },
+          {
+            "name": "get_debug_info",
+            "offset_bits": 1280,
+            "type": "zend_object_get_debug_info_t"
+          },
+          {
+            "name": "get_closure",
+            "offset_bits": 1344,
+            "type": "zend_object_get_closure_t"
+          },
+          {
+            "name": "get_gc",
+            "offset_bits": 1408,
+            "type": "zend_object_get_gc_t"
+          },
+          {
+            "name": "do_operation",
+            "offset_bits": 1472,
+            "type": "zend_object_do_operation_t"
+          },
+          {
+            "name": "compare",
+            "offset_bits": 1536,
+            "type": "zend_object_compare_t"
+          },
+          {
+            "name": "get_properties_for",
+            "offset_bits": 1600,
+            "type": "zend_object_get_properties_for_t"
+          }
+        ],
+        "name": "_zend_object_handlers",
+        "size_bytes": 208
+      }
+    ]
+  },
+  {
+    "unit": "php-type",
+    "backend": "llvm",
+    "definitions": 76,
+    "source_sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505",
+    "artifact_bytes": 23222,
+    "functions": [
+      {
+        "block_count": 33,
+        "direct_calls": 7,
+        "edges": 45,
+        "elements": 241,
+        "indirect_calls": 0,
+        "name": "zif_strlen"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "php-session",
+    "backend": "ast",
+    "definitions": 925,
+    "source_sha256": "b07b15d55c4b435f96a041ba07ae3a740261e2b04c1d69700af80e1fb1f5dad2",
+    "artifact_bytes": 357724,
+    "functions": [
+      {
+        "block_count": 313,
+        "direct_calls": 183,
+        "edges": 432,
+        "elements": 2806,
+        "entry": 312,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_session_set_save_handler",
+        "type": "void (zend_execute_data *, zval *)"
+      },
+      {
+        "block_count": 93,
+        "direct_calls": 35,
+        "edges": 131,
+        "elements": 746,
+        "entry": 92,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "zif_session_start",
+        "type": "void (zend_execute_data *, zval *)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "value",
+            "offset_bits": 0,
+            "type": "zend_value"
+          },
+          {
+            "name": "u1",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+          },
+          {
+            "name": "u2",
+            "offset_bits": 96,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+          }
+        ],
+        "name": "_zval_struct",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "u",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+          },
+          {
+            "name": "nTableMask",
+            "offset_bits": 96,
+            "type": "uint32_t"
+          },
+          {
+            "name": "",
+            "offset_bits": 128,
+            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+          },
+          {
+            "name": "nNumUsed",
+            "offset_bits": 192,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNumOfElements",
+            "offset_bits": 224,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nTableSize",
+            "offset_bits": 256,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nInternalPointer",
+            "offset_bits": 288,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNextFreeElement",
+            "offset_bits": 320,
+            "type": "zend_long"
+          },
+          {
+            "name": "pDestructor",
+            "offset_bits": 384,
+            "type": "dtor_func_t"
+          }
+        ],
+        "name": "_zend_array",
+        "size_bytes": 56
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "val",
+            "offset_bits": 64,
+            "type": "zval"
+          },
+          {
+            "name": "sources",
+            "offset_bits": 192,
+            "type": "zend_property_info_source_list"
+          }
+        ],
+        "name": "_zend_reference",
+        "size_bytes": 32
+      },
+      {
+        "fields": [
+          {
+            "name": "offset",
+            "offset_bits": 0,
+            "type": "int"
+          },
+          {
+            "name": "free_obj",
+            "offset_bits": 64,
+            "type": "zend_object_free_obj_t"
+          },
+          {
+            "name": "dtor_obj",
+            "offset_bits": 128,
+            "type": "zend_object_dtor_obj_t"
+          },
+          {
+            "name": "clone_obj",
+            "offset_bits": 192,
+            "type": "zend_object_clone_obj_t"
+          },
+          {
+            "name": "clone_obj_with",
+            "offset_bits": 256,
+            "type": "zend_object_clone_obj_with_t"
+          },
+          {
+            "name": "read_property",
+            "offset_bits": 320,
+            "type": "zend_object_read_property_t"
+          },
+          {
+            "name": "write_property",
+            "offset_bits": 384,
+            "type": "zend_object_write_property_t"
+          },
+          {
+            "name": "read_dimension",
+            "offset_bits": 448,
+            "type": "zend_object_read_dimension_t"
+          },
+          {
+            "name": "write_dimension",
+            "offset_bits": 512,
+            "type": "zend_object_write_dimension_t"
+          },
+          {
+            "name": "get_property_ptr_ptr",
+            "offset_bits": 576,
+            "type": "zend_object_get_property_ptr_ptr_t"
+          },
+          {
+            "name": "has_property",
+            "offset_bits": 640,
+            "type": "zend_object_has_property_t"
+          },
+          {
+            "name": "unset_property",
+            "offset_bits": 704,
+            "type": "zend_object_unset_property_t"
+          },
+          {
+            "name": "has_dimension",
+            "offset_bits": 768,
+            "type": "zend_object_has_dimension_t"
+          },
+          {
+            "name": "unset_dimension",
+            "offset_bits": 832,
+            "type": "zend_object_unset_dimension_t"
+          },
+          {
+            "name": "get_properties",
+            "offset_bits": 896,
+            "type": "zend_object_get_properties_t"
+          },
+          {
+            "name": "get_method",
+            "offset_bits": 960,
+            "type": "zend_object_get_method_t"
+          },
+          {
+            "name": "get_constructor",
+            "offset_bits": 1024,
+            "type": "zend_object_get_constructor_t"
+          },
+          {
+            "name": "get_class_name",
+            "offset_bits": 1088,
+            "type": "zend_object_get_class_name_t"
+          },
+          {
+            "name": "cast_object",
+            "offset_bits": 1152,
+            "type": "zend_object_cast_t"
+          },
+          {
+            "name": "count_elements",
+            "offset_bits": 1216,
+            "type": "zend_object_count_elements_t"
+          },
+          {
+            "name": "get_debug_info",
+            "offset_bits": 1280,
+            "type": "zend_object_get_debug_info_t"
+          },
+          {
+            "name": "get_closure",
+            "offset_bits": 1344,
+            "type": "zend_object_get_closure_t"
+          },
+          {
+            "name": "get_gc",
+            "offset_bits": 1408,
+            "type": "zend_object_get_gc_t"
+          },
+          {
+            "name": "do_operation",
+            "offset_bits": 1472,
+            "type": "zend_object_do_operation_t"
+          },
+          {
+            "name": "compare",
+            "offset_bits": 1536,
+            "type": "zend_object_compare_t"
+          },
+          {
+            "name": "get_properties_for",
+            "offset_bits": 1600,
+            "type": "zend_object_get_properties_for_t"
+          }
+        ],
+        "name": "_zend_object_handlers",
+        "size_bytes": 208
+      }
+    ]
+  },
+  {
+    "unit": "php-session",
+    "backend": "llvm",
+    "definitions": 116,
+    "source_sha256": "b07b15d55c4b435f96a041ba07ae3a740261e2b04c1d69700af80e1fb1f5dad2",
+    "artifact_bytes": 758894,
+    "functions": [
+      {
+        "block_count": 1149,
+        "direct_calls": 440,
+        "edges": 1523,
+        "elements": 6061,
+        "indirect_calls": 0,
+        "name": "zif_session_set_save_handler"
+      },
+      {
+        "block_count": 92,
+        "direct_calls": 26,
+        "edges": 121,
+        "elements": 489,
+        "indirect_calls": 0,
+        "name": "zif_session_start"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "php-session-user",
+    "backend": "ast",
+    "definitions": 786,
+    "source_sha256": "abbf3e6efd4585f859b5846b294fff204567fc88ce5b69515a4a621a75cd4b35",
+    "artifact_bytes": 73012,
+    "functions": [
+      {
+        "block_count": 22,
+        "direct_calls": 5,
+        "edges": 28,
+        "elements": 120,
+        "entry": 21,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "ps_call_handler",
+        "type": "void (zval *, int, zval *, zval *)"
+      },
+      {
+        "block_count": 27,
+        "direct_calls": 12,
+        "edges": 34,
+        "elements": 218,
+        "entry": 26,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "ps_open_user",
+        "type": "zend_result (void **, const char *, const char *)"
+      },
+      {
+        "block_count": 12,
+        "direct_calls": 8,
+        "edges": 15,
+        "elements": 121,
+        "entry": 11,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "ps_close_user",
+        "type": "zend_result (void **)"
+      },
+      {
+        "block_count": 14,
+        "direct_calls": 8,
+        "edges": 17,
+        "elements": 132,
+        "entry": 13,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "ps_read_user",
+        "type": "zend_result (void **, zend_string *, zend_string **, zend_long)"
+      },
+      {
+        "block_count": 16,
+        "direct_calls": 8,
+        "edges": 19,
+        "elements": 171,
+        "entry": 15,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 0,
+        "name": "ps_write_user",
+        "type": "zend_result (void **, zend_string *, zend_string *, zend_long)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "value",
+            "offset_bits": 0,
+            "type": "zend_value"
+          },
+          {
+            "name": "u1",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+          },
+          {
+            "name": "u2",
+            "offset_bits": 96,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+          }
+        ],
+        "name": "_zval_struct",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "u",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+          },
+          {
+            "name": "nTableMask",
+            "offset_bits": 96,
+            "type": "uint32_t"
+          },
+          {
+            "name": "",
+            "offset_bits": 128,
+            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+          },
+          {
+            "name": "nNumUsed",
+            "offset_bits": 192,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNumOfElements",
+            "offset_bits": 224,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nTableSize",
+            "offset_bits": 256,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nInternalPointer",
+            "offset_bits": 288,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNextFreeElement",
+            "offset_bits": 320,
+            "type": "zend_long"
+          },
+          {
+            "name": "pDestructor",
+            "offset_bits": 384,
+            "type": "dtor_func_t"
+          }
+        ],
+        "name": "_zend_array",
+        "size_bytes": 56
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "val",
+            "offset_bits": 64,
+            "type": "zval"
+          },
+          {
+            "name": "sources",
+            "offset_bits": 192,
+            "type": "zend_property_info_source_list"
+          }
+        ],
+        "name": "_zend_reference",
+        "size_bytes": 32
+      },
+      {
+        "fields": [
+          {
+            "name": "offset",
+            "offset_bits": 0,
+            "type": "int"
+          },
+          {
+            "name": "free_obj",
+            "offset_bits": 64,
+            "type": "zend_object_free_obj_t"
+          },
+          {
+            "name": "dtor_obj",
+            "offset_bits": 128,
+            "type": "zend_object_dtor_obj_t"
+          },
+          {
+            "name": "clone_obj",
+            "offset_bits": 192,
+            "type": "zend_object_clone_obj_t"
+          },
+          {
+            "name": "clone_obj_with",
+            "offset_bits": 256,
+            "type": "zend_object_clone_obj_with_t"
+          },
+          {
+            "name": "read_property",
+            "offset_bits": 320,
+            "type": "zend_object_read_property_t"
+          },
+          {
+            "name": "write_property",
+            "offset_bits": 384,
+            "type": "zend_object_write_property_t"
+          },
+          {
+            "name": "read_dimension",
+            "offset_bits": 448,
+            "type": "zend_object_read_dimension_t"
+          },
+          {
+            "name": "write_dimension",
+            "offset_bits": 512,
+            "type": "zend_object_write_dimension_t"
+          },
+          {
+            "name": "get_property_ptr_ptr",
+            "offset_bits": 576,
+            "type": "zend_object_get_property_ptr_ptr_t"
+          },
+          {
+            "name": "has_property",
+            "offset_bits": 640,
+            "type": "zend_object_has_property_t"
+          },
+          {
+            "name": "unset_property",
+            "offset_bits": 704,
+            "type": "zend_object_unset_property_t"
+          },
+          {
+            "name": "has_dimension",
+            "offset_bits": 768,
+            "type": "zend_object_has_dimension_t"
+          },
+          {
+            "name": "unset_dimension",
+            "offset_bits": 832,
+            "type": "zend_object_unset_dimension_t"
+          },
+          {
+            "name": "get_properties",
+            "offset_bits": 896,
+            "type": "zend_object_get_properties_t"
+          },
+          {
+            "name": "get_method",
+            "offset_bits": 960,
+            "type": "zend_object_get_method_t"
+          },
+          {
+            "name": "get_constructor",
+            "offset_bits": 1024,
+            "type": "zend_object_get_constructor_t"
+          },
+          {
+            "name": "get_class_name",
+            "offset_bits": 1088,
+            "type": "zend_object_get_class_name_t"
+          },
+          {
+            "name": "cast_object",
+            "offset_bits": 1152,
+            "type": "zend_object_cast_t"
+          },
+          {
+            "name": "count_elements",
+            "offset_bits": 1216,
+            "type": "zend_object_count_elements_t"
+          },
+          {
+            "name": "get_debug_info",
+            "offset_bits": 1280,
+            "type": "zend_object_get_debug_info_t"
+          },
+          {
+            "name": "get_closure",
+            "offset_bits": 1344,
+            "type": "zend_object_get_closure_t"
+          },
+          {
+            "name": "get_gc",
+            "offset_bits": 1408,
+            "type": "zend_object_get_gc_t"
+          },
+          {
+            "name": "do_operation",
+            "offset_bits": 1472,
+            "type": "zend_object_do_operation_t"
+          },
+          {
+            "name": "compare",
+            "offset_bits": 1536,
+            "type": "zend_object_compare_t"
+          },
+          {
+            "name": "get_properties_for",
+            "offset_bits": 1600,
+            "type": "zend_object_get_properties_for_t"
+          }
+        ],
+        "name": "_zend_object_handlers",
+        "size_bytes": 208
+      }
+    ]
+  },
+  {
+    "unit": "php-session-user",
+    "backend": "llvm",
+    "definitions": 11,
+    "source_sha256": "abbf3e6efd4585f859b5846b294fff204567fc88ce5b69515a4a621a75cd4b35",
+    "artifact_bytes": 146847,
+    "functions": [
+      {
+        "block_count": 216,
+        "direct_calls": 80,
+        "edges": 282,
+        "elements": 1035,
+        "indirect_calls": 0,
+        "name": "ps_open_user"
+      },
+      {
+        "block_count": 11,
+        "direct_calls": 6,
+        "edges": 13,
+        "elements": 54,
+        "indirect_calls": 0,
+        "name": "ps_close_user"
+      },
+      {
+        "block_count": 12,
+        "direct_calls": 2,
+        "edges": 15,
+        "elements": 100,
+        "indirect_calls": 0,
+        "name": "ps_read_user"
+      },
+      {
+        "block_count": 11,
+        "direct_calls": 3,
+        "edges": 12,
+        "elements": 97,
+        "indirect_calls": 0,
+        "name": "ps_write_user"
+      },
+      {
+        "block_count": 18,
+        "direct_calls": 4,
+        "edges": 21,
+        "elements": 70,
+        "indirect_calls": 0,
+        "name": "ps_call_handler"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "php-invoke",
+    "backend": "ast",
+    "definitions": 828,
+    "source_sha256": "4356788d4cbf80fa69c1e485b6210020d8132135e14b6ba41246089c001fc4a0",
+    "artifact_bytes": 310528,
+    "functions": [
+      {
+        "block_count": 393,
+        "direct_calls": 142,
+        "edges": 543,
+        "elements": 2474,
+        "entry": 392,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 4,
+        "name": "zend_call_function",
+        "type": "zend_result (zend_fcall_info *, zend_fcall_info_cache *)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "value",
+            "offset_bits": 0,
+            "type": "zend_value"
+          },
+          {
+            "name": "u1",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+          },
+          {
+            "name": "u2",
+            "offset_bits": 96,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+          }
+        ],
+        "name": "_zval_struct",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "u",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+          },
+          {
+            "name": "nTableMask",
+            "offset_bits": 96,
+            "type": "uint32_t"
+          },
+          {
+            "name": "",
+            "offset_bits": 128,
+            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+          },
+          {
+            "name": "nNumUsed",
+            "offset_bits": 192,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNumOfElements",
+            "offset_bits": 224,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nTableSize",
+            "offset_bits": 256,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nInternalPointer",
+            "offset_bits": 288,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNextFreeElement",
+            "offset_bits": 320,
+            "type": "zend_long"
+          },
+          {
+            "name": "pDestructor",
+            "offset_bits": 384,
+            "type": "dtor_func_t"
+          }
+        ],
+        "name": "_zend_array",
+        "size_bytes": 56
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "val",
+            "offset_bits": 64,
+            "type": "zval"
+          },
+          {
+            "name": "sources",
+            "offset_bits": 192,
+            "type": "zend_property_info_source_list"
+          }
+        ],
+        "name": "_zend_reference",
+        "size_bytes": 32
+      },
+      {
+        "fields": [
+          {
+            "name": "offset",
+            "offset_bits": 0,
+            "type": "int"
+          },
+          {
+            "name": "free_obj",
+            "offset_bits": 64,
+            "type": "zend_object_free_obj_t"
+          },
+          {
+            "name": "dtor_obj",
+            "offset_bits": 128,
+            "type": "zend_object_dtor_obj_t"
+          },
+          {
+            "name": "clone_obj",
+            "offset_bits": 192,
+            "type": "zend_object_clone_obj_t"
+          },
+          {
+            "name": "clone_obj_with",
+            "offset_bits": 256,
+            "type": "zend_object_clone_obj_with_t"
+          },
+          {
+            "name": "read_property",
+            "offset_bits": 320,
+            "type": "zend_object_read_property_t"
+          },
+          {
+            "name": "write_property",
+            "offset_bits": 384,
+            "type": "zend_object_write_property_t"
+          },
+          {
+            "name": "read_dimension",
+            "offset_bits": 448,
+            "type": "zend_object_read_dimension_t"
+          },
+          {
+            "name": "write_dimension",
+            "offset_bits": 512,
+            "type": "zend_object_write_dimension_t"
+          },
+          {
+            "name": "get_property_ptr_ptr",
+            "offset_bits": 576,
+            "type": "zend_object_get_property_ptr_ptr_t"
+          },
+          {
+            "name": "has_property",
+            "offset_bits": 640,
+            "type": "zend_object_has_property_t"
+          },
+          {
+            "name": "unset_property",
+            "offset_bits": 704,
+            "type": "zend_object_unset_property_t"
+          },
+          {
+            "name": "has_dimension",
+            "offset_bits": 768,
+            "type": "zend_object_has_dimension_t"
+          },
+          {
+            "name": "unset_dimension",
+            "offset_bits": 832,
+            "type": "zend_object_unset_dimension_t"
+          },
+          {
+            "name": "get_properties",
+            "offset_bits": 896,
+            "type": "zend_object_get_properties_t"
+          },
+          {
+            "name": "get_method",
+            "offset_bits": 960,
+            "type": "zend_object_get_method_t"
+          },
+          {
+            "name": "get_constructor",
+            "offset_bits": 1024,
+            "type": "zend_object_get_constructor_t"
+          },
+          {
+            "name": "get_class_name",
+            "offset_bits": 1088,
+            "type": "zend_object_get_class_name_t"
+          },
+          {
+            "name": "cast_object",
+            "offset_bits": 1152,
+            "type": "zend_object_cast_t"
+          },
+          {
+            "name": "count_elements",
+            "offset_bits": 1216,
+            "type": "zend_object_count_elements_t"
+          },
+          {
+            "name": "get_debug_info",
+            "offset_bits": 1280,
+            "type": "zend_object_get_debug_info_t"
+          },
+          {
+            "name": "get_closure",
+            "offset_bits": 1344,
+            "type": "zend_object_get_closure_t"
+          },
+          {
+            "name": "get_gc",
+            "offset_bits": 1408,
+            "type": "zend_object_get_gc_t"
+          },
+          {
+            "name": "do_operation",
+            "offset_bits": 1472,
+            "type": "zend_object_do_operation_t"
+          },
+          {
+            "name": "compare",
+            "offset_bits": 1536,
+            "type": "zend_object_compare_t"
+          },
+          {
+            "name": "get_properties_for",
+            "offset_bits": 1600,
+            "type": "zend_object_get_properties_for_t"
+          }
+        ],
+        "name": "_zend_object_handlers",
+        "size_bytes": 208
+      }
+    ]
+  },
+  {
+    "unit": "php-invoke",
+    "backend": "llvm",
+    "definitions": 56,
+    "source_sha256": "4356788d4cbf80fa69c1e485b6210020d8132135e14b6ba41246089c001fc4a0",
+    "artifact_bytes": 217607,
+    "functions": [
+      {
+        "block_count": 271,
+        "direct_calls": 58,
+        "edges": 369,
+        "elements": 2063,
+        "indirect_calls": 4,
+        "name": "zend_call_function"
+      }
+    ],
+    "layouts": []
+  },
+  {
+    "unit": "php-streams",
+    "backend": "ast",
+    "definitions": 857,
+    "source_sha256": "45cd1d8de65c68e6de1ceb7c2a8f50acc09181be2e1b2cb82aa63829fa413e77",
+    "artifact_bytes": 119720,
+    "functions": [
+      {
+        "block_count": 88,
+        "direct_calls": 20,
+        "edges": 134,
+        "elements": 604,
+        "entry": 87,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 2,
+        "name": "_php_stream_free",
+        "type": "int (php_stream *, int)"
+      },
+      {
+        "block_count": 88,
+        "direct_calls": 31,
+        "edges": 135,
+        "elements": 642,
+        "entry": 87,
+        "exit": 0,
+        "implicit_dtors": 0,
+        "indirect_calls": 3,
+        "name": "_php_stream_open_wrapper_ex",
+        "type": "php_stream *(const char *, const char *, int, zend_string **, php_stream_context *)"
+      }
+    ],
+    "layouts": [
+      {
+        "fields": [
+          {
+            "name": "value",
+            "offset_bits": 0,
+            "type": "zend_value"
+          },
+          {
+            "name": "u1",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+          },
+          {
+            "name": "u2",
+            "offset_bits": 96,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+          }
+        ],
+        "name": "_zval_struct",
+        "size_bytes": 16
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "u",
+            "offset_bits": 64,
+            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+          },
+          {
+            "name": "nTableMask",
+            "offset_bits": 96,
+            "type": "uint32_t"
+          },
+          {
+            "name": "",
+            "offset_bits": 128,
+            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+          },
+          {
+            "name": "nNumUsed",
+            "offset_bits": 192,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNumOfElements",
+            "offset_bits": 224,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nTableSize",
+            "offset_bits": 256,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nInternalPointer",
+            "offset_bits": 288,
+            "type": "uint32_t"
+          },
+          {
+            "name": "nNextFreeElement",
+            "offset_bits": 320,
+            "type": "zend_long"
+          },
+          {
+            "name": "pDestructor",
+            "offset_bits": 384,
+            "type": "dtor_func_t"
+          }
+        ],
+        "name": "_zend_array",
+        "size_bytes": 56
+      },
+      {
+        "fields": [
+          {
+            "name": "gc",
+            "offset_bits": 0,
+            "type": "zend_refcounted_h"
+          },
+          {
+            "name": "val",
+            "offset_bits": 64,
+            "type": "zval"
+          },
+          {
+            "name": "sources",
+            "offset_bits": 192,
+            "type": "zend_property_info_source_list"
+          }
+        ],
+        "name": "_zend_reference",
+        "size_bytes": 32
+      },
+      {
+        "fields": [
+          {
+            "name": "offset",
+            "offset_bits": 0,
+            "type": "int"
+          },
+          {
+            "name": "free_obj",
+            "offset_bits": 64,
+            "type": "zend_object_free_obj_t"
+          },
+          {
+            "name": "dtor_obj",
+            "offset_bits": 128,
+            "type": "zend_object_dtor_obj_t"
+          },
+          {
+            "name": "clone_obj",
+            "offset_bits": 192,
+            "type": "zend_object_clone_obj_t"
+          },
+          {
+            "name": "clone_obj_with",
+            "offset_bits": 256,
+            "type": "zend_object_clone_obj_with_t"
+          },
+          {
+            "name": "read_property",
+            "offset_bits": 320,
+            "type": "zend_object_read_property_t"
+          },
+          {
+            "name": "write_property",
+            "offset_bits": 384,
+            "type": "zend_object_write_property_t"
+          },
+          {
+            "name": "read_dimension",
+            "offset_bits": 448,
+            "type": "zend_object_read_dimension_t"
+          },
+          {
+            "name": "write_dimension",
+            "offset_bits": 512,
+            "type": "zend_object_write_dimension_t"
+          },
+          {
+            "name": "get_property_ptr_ptr",
+            "offset_bits": 576,
+            "type": "zend_object_get_property_ptr_ptr_t"
+          },
+          {
+            "name": "has_property",
+            "offset_bits": 640,
+            "type": "zend_object_has_property_t"
+          },
+          {
+            "name": "unset_property",
+            "offset_bits": 704,
+            "type": "zend_object_unset_property_t"
+          },
+          {
+            "name": "has_dimension",
+            "offset_bits": 768,
+            "type": "zend_object_has_dimension_t"
+          },
+          {
+            "name": "unset_dimension",
+            "offset_bits": 832,
+            "type": "zend_object_unset_dimension_t"
+          },
+          {
+            "name": "get_properties",
+            "offset_bits": 896,
+            "type": "zend_object_get_properties_t"
+          },
+          {
+            "name": "get_method",
+            "offset_bits": 960,
+            "type": "zend_object_get_method_t"
+          },
+          {
+            "name": "get_constructor",
+            "offset_bits": 1024,
+            "type": "zend_object_get_constructor_t"
+          },
+          {
+            "name": "get_class_name",
+            "offset_bits": 1088,
+            "type": "zend_object_get_class_name_t"
+          },
+          {
+            "name": "cast_object",
+            "offset_bits": 1152,
+            "type": "zend_object_cast_t"
+          },
+          {
+            "name": "count_elements",
+            "offset_bits": 1216,
+            "type": "zend_object_count_elements_t"
+          },
+          {
+            "name": "get_debug_info",
+            "offset_bits": 1280,
+            "type": "zend_object_get_debug_info_t"
+          },
+          {
+            "name": "get_closure",
+            "offset_bits": 1344,
+            "type": "zend_object_get_closure_t"
+          },
+          {
+            "name": "get_gc",
+            "offset_bits": 1408,
+            "type": "zend_object_get_gc_t"
+          },
+          {
+            "name": "do_operation",
+            "offset_bits": 1472,
+            "type": "zend_object_do_operation_t"
+          },
+          {
+            "name": "compare",
+            "offset_bits": 1536,
+            "type": "zend_object_compare_t"
+          },
+          {
+            "name": "get_properties_for",
+            "offset_bits": 1600,
+            "type": "zend_object_get_properties_for_t"
+          }
+        ],
+        "name": "_zend_object_handlers",
+        "size_bytes": 208
+      }
+    ]
+  },
+  {
+    "unit": "php-streams",
+    "backend": "llvm",
+    "definitions": 76,
+    "source_sha256": "45cd1d8de65c68e6de1ceb7c2a8f50acc09181be2e1b2cb82aa63829fa413e77",
+    "artifact_bytes": 122615,
+    "functions": [
+      {
+        "block_count": 83,
+        "direct_calls": 19,
+        "edges": 126,
+        "elements": 495,
+        "indirect_calls": 2,
+        "name": "_php_stream_free"
+      },
+      {
+        "block_count": 130,
+        "direct_calls": 43,
+        "edges": 194,
+        "elements": 621,
+        "indirect_calls": 3,
+        "name": "_php_stream_open_wrapper_ex"
+      }
+    ],
+    "layouts": []
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "header-0",
+    "command": [
+      "/tmp/php-catalog-comparison/native-probe-ready",
+      "ast",
+      "owner_dispatch",
+      "/tmp/php-catalog-comparison/reproduced/headers/unit.c"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0431,
+    "sampled_group_peak_bytes": 1642496,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 82520,
+    "user_seconds": 0.01,
+    "system_seconds": 0.01,
+    "exit_status": 0
+  },
+  {
+    "name": "header-1",
+    "command": [
+      "/tmp/php-catalog-comparison/native-probe-ready",
+      "ast",
+      "owner_dispatch",
+      "/tmp/php-catalog-comparison/reproduced/headers/unit.c"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0439,
+    "sampled_group_peak_bytes": 1642496,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 83024,
+    "user_seconds": 0.01,
+    "system_seconds": 0.01,
+    "exit_status": 0
+  }
+]

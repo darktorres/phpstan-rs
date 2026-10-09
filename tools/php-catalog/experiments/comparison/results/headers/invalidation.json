@@ -1,0 +1,47 @@
+[
+  {
+    "source_sha256": "79ebed9f34ccc79be90895bff8ff5729e0bfdd954ea346c3e0dbc3450a1d534c",
+    "header_sha256": "0c2385609e40a7f245065f09d3b3b588dadaa902f530f978160dbf9471534f93",
+    "layout": {
+      "fields": [
+        {
+          "name": "callback",
+          "offset_bits": 0,
+          "type": "Callback"
+        },
+        {
+          "name": "argument",
+          "offset_bits": 64,
+          "type": "int *"
+        }
+      ],
+      "name": "Owner",
+      "size_bytes": 16
+    }
+  },
+  {
+    "source_sha256": "79ebed9f34ccc79be90895bff8ff5729e0bfdd954ea346c3e0dbc3450a1d534c",
+    "header_sha256": "dea93d6b684711e2d43bdd111655b0fb207241fd6449e0d0a750abc31146f25f",
+    "layout": {
+      "fields": [
+        {
+          "name": "prefix",
+          "offset_bits": 0,
+          "type": "char[16]"
+        },
+        {
+          "name": "callback",
+          "offset_bits": 128,
+          "type": "Callback"
+        },
+        {
+          "name": "argument",
+          "offset_bits": 192,
+          "type": "int *"
+        }
+      ],
+      "name": "Owner",
+      "size_bytes": 32
+    }
+  }
+]

@@ -1,0 +1,330 @@
+
+*********General Stats***************
+################ (program : php-invoke-promoted.bc)###############
+AddrsNum            399
+BBWith2Succ         572
+BBWith3Succ         3
+CallsNum            41
+ConstArrayObj       0
+ConstStructObj      0
+ConstantObj         0
+CopysNum            427
+FIObjNum            199
+FSObjNum            36
+FunctionObjs        198
+GepsNum             1286
+GlobalObjs          11
+HeapObjs            1
+IndCallSites        9
+LoadsNum            910
+MaxStructSize       226
+NonPtrObj           225
+ReturnsNum          32
+StackObjs           25
+StoresNum           338
+TotalCallSite       479
+TotalFieldObjects   124
+TotalObjects        360
+TotalPTASVFStmts    2637
+TotalPointers       8086
+TotalSVFStmts       7151
+VarArrayObj         8
+VarStructObj        21
+----------------Time and memory stats--------------------
+LLVMIRTime          0.059727
+SVFIRTime           0.10519
+SymbolTableTime     0.006544
+#######################################################
+
+*********PTACallGraph Stats (Andersen analysis)***************
+################ (program : php-invoke-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           472
+TotalNode           198
+#######################################################
+
+*********Andersen Pointer Analysis Stats***************
+################ (program : php-invoke-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgIn/OutAddrEdge   0.136831
+AvgIn/OutCopyEdge   0.701989
+AvgIn/OutEdge       1.0631
+AvgIn/OutLoadEdge   0.16941
+AvgIn/OutStoreEdge  0.0548697
+AvgPtsSetSize       0.105731
+AvgTopLvlPtsSize    0.303673
+CollapseTime        0
+CopyGepTime         0
+LoadStoreTime       0
+MemoryUsageVmrss    9084
+MemoryUsageVmsize   8948
+SCCDetectTime       0
+SCCMergeTime        0
+TotalTime           0.040961
+UpdateCGTime        0
+----------------Numbers stats----------------------------
+AddrProcessed       399
+CopyProcessed       68
+DummyFieldPtrs      7
+FieldObjs           124
+GepProcessed        399
+IndCallSites        9
+IndEdgeSolved       0
+LoadProcessed       205
+LocalVarInRecur     0
+MaxInAddrEdge       1
+MaxInCopyEdge       7
+MaxInLoadEdge       4
+MaxInStoreEdge      2
+MaxNodesInSCC       11
+MaxOutAddrEdge      165
+MaxOutCopyEdge      244
+MaxOutLoadEdge      31
+MaxOutStoreEdge     30
+MaxPtsSetSize       4
+MemObjects          360
+NodesInCycles       72
+NullPointer         522
+NumOfAddrs          399
+NumOfCGEdge         2701
+NumOfCGNode         3259
+NumOfCopys          788
+NumOfFieldExpand    0
+NumOfGeps           1259
+NumOfLoads          494
+NumOfSCCDetect      3
+NumOfSFRs           0
+NumOfStores         160
+NumOfValidNode      2916
+NumOfValidObjNode   285
+Pointers            8086
+PointsToBlkPtr      0
+PointsToConstPtr    3
+SolveIterations     3
+StoreProcessed      81
+TotalCycleNum       27
+TotalObjects        360
+TotalPWCCycleNum    1
+TotalPointers       8086
+#######################################################
+
+****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
+################ (program : php-invoke-promoted.bc)###############
+UniquePointsToSets       372
+TotalUnions              921
+PropertyUnions           905
+UniqueUnions             5
+LookupUnions             1
+PreemptiveUnions         10
+TotalComplements         9671
+PropertyComplements      9671
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       327
+PropertyIntersections    327
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+
+*********Memory SSA Statistics***************
+################ (program : php-invoke-promoted.bc)###############
+----------------Time and memory stats--------------------
+AverageRegSize      1.36364
+GenMUCHITime        0.002155
+GenRegionTime       0.005366
+InsertPHITime       0.00015
+SSARenameTime       0.002112
+TotalMSSATime       0.010059
+----------------Numbers stats----------------------------
+BBHasMSSAPhi        39
+CSChiNode           18
+CSHasChi            13
+CSHasMu             32
+CSMuNode            68
+FunEntryChi         151
+FunHasEntryChi      37
+FunHasRetMu         55
+FunRetMu            151
+LoadHasMu           497
+LoadMuNode          190
+MSSAPhi             66
+MaxRegSize          5
+MemRegions          77
+StoreChiNode        78
+StoreHasChi         158
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : php-invoke-promoted.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          0.00072
+AvgWeight           1.21979
+ConnDirEdgeTime     0
+ConnIndEdgeTime     0.000945
+OptTime             0
+TLNodeTime          0
+TotalTime           0.001674
+----------------Numbers stats----------------------------
+ActualIn            68
+ActualOut           18
+ActualParam         348
+ActualRet           185
+Addr                399
+AvgInDegree         1
+AvgIndInDeg         1
+AvgIndOutDeg        1
+AvgOutDegree        1
+Copy                2
+DirectCallEdge      72
+DirectEdge          3047
+DirectRetEdge       19
+FormalIn            151
+FormalOut           151
+FormalParam         73
+FormalRet           18
+Gep                 1286
+IndCallEdge         108
+IndRetEdge          34
+IndirectEdge        778
+IndirectEdgeLabels  949
+Load                497
+MSSAPhi             66
+MaxInDegree         10
+MaxIndInDeg         5
+MaxIndOutDeg        23
+MaxOutDegree        244
+PHI                 243
+Store               161
+TotalEdge           3825
+TotalNode           3667
+#######################################################
+
+*********PTACallGraph Stats (DDA analysis)***************
+################ (program : php-invoke-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           472
+TotalNode           198
+#######################################################
+
+*********SVFG SCC Stat***************
+################ (program : php-invoke-promoted.bc)###############
+----------------Numbers stats----------------------------
+CallEdgeInCycle     0
+DirEdgeInCycle      76
+EdgeInCycle         96
+IndEdgeInCycle      20
+InsenCallEdge       0
+InsenRetEdge        0
+MaxNodeInCycle      7
+NodeInCycle         87
+RetEdgeInCycle      0
+TotalCallEdge       180
+TotalCycle          33
+TotalDirEdge        3047
+TotalEdge           3825
+TotalIndEdge        778
+TotalNode           3667
+TotalRetEdge        53
+#######################################################
+
+****Demand-Driven Pointer Analysis Statistics****
+
+************************
+################ (program : php-invoke-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgCPtsSize         0
+AvgDPMAtLoc         1
+AvgPtsSize          0
+AvgTimePerQuery     4.88889e-06
+MemoryUsageVmrss    0
+MemoryUsageVmsize   0
+TotalBKCondTime     6.42859e-313
+TotalQueryTime      4.4e-05
+----------------Numbers stats----------------------------
+IndEdgeSolved       0
+MaxCPtsSize         0
+MaxCxtPerQuery      0
+MaxDPMAtLoc         1
+MaxPathPerQuery     0
+MaxPtsSize          0
+NumOfDPM            9
+NumOfInfePath       0
+NumOfMustAA         0
+NumOfNullPtr        9
+NumOfOOBQuery       9
+NumOfQuery          9
+NumOfSU             0
+NumOfStep           18
+NumOfStepInCycle    0
+NumOfStore          161
+NumOfStoreSU        0
+PointsToBlkPtr      0
+PointsToConstPtr    0
+#######################################################
+
+****Persistent Points-To Cache Statistics: DDA bitvector****
+################ (program : php-invoke-promoted.bc)###############
+UniquePointsToSets       1
+TotalUnions              27
+PropertyUnions           27
+UniqueUnions             0
+LookupUnions             0
+PreemptiveUnions         0
+TotalComplements         0
+PropertyComplements      0
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       0
+PropertyIntersections    0
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+=================================================
+Total virtual callsites: 0
+Total analyzed virtual callsites: 0
+Indirect call map size: 0
+Precise callsites: 0
+Zero target callsites: 0
+One target callsites: 0
+Two target callsites: 0
+More than two target callsites: 0
+=================================================
+##<> Source Loc: { "ln": 94, "cl": 3, "fl": "Zend/zend_execute_API.c" }
+Ptr 365 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 102, "cl": 3, "fl": "Zend/zend_execute_API.c" }
+Ptr 2007 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1010, "cl": 3, "fl": "Zend/zend_execute_API.c" }
+Ptr 4413 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1023, "cl": 4, "fl": "Zend/zend_execute_API.c" }
+Ptr 4454 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1025, "cl": 4, "fl": "Zend/zend_execute_API.c" }
+Ptr 4460 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1057, "cl": 5, "fl": "Zend/zend_execute_API.c" }
+Ptr 4594 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1272, "cl": 7, "fl": "Zend/zend_execute_API.c" }
+Ptr 6181 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1351, "cl": 17, "fl": "Zend/zend_execute_API.c" }
+Ptr 6809 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1514, "cl": 3, "fl": "Zend/zend_execute_API.c" }
+Ptr 8138 		PointsTo: {empty}
+

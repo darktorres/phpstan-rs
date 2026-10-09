@@ -1,0 +1,28 @@
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:48:5: warning: main -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   48 | int main(void) {
+      |     ^          ~
+   49 |   int value = 0;
+      |   ~~~~~~~~~~~~~~
+   50 |   Callback cb = increment;
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~
+   51 |   array_callback(cb, &value, 1);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   52 |   by_reference(&value, &value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   53 |   exception_cleanup(cb, &value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   54 |   Owner owner = {increment, &value}; owner_dispatch(&owner);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |   retain(increment, &value); trigger();
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |   Payload src = {{0}, increment}; copied_dispatch(&src, &value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   57 |   Payload dst; unknown_copy(&dst, &src);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   58 |   ordered_dispatch(&value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~
+   59 |   return scalar(value);
+      |   ~~~~~~~~~~~~~~~~~~~~~
+   60 | }
+      | ~
+1 warning generated.

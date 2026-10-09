@@ -1,0 +1,18 @@
+[
+  {
+    "name": "php-normal-build",
+    "command": [
+      "make",
+      "-j2"
+    ],
+    "cwd": "/tmp/php-catalog-comparison/php-src",
+    "elapsed_seconds": 188.0829,
+    "sampled_group_peak_bytes": 472788992,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 444396,
+    "user_seconds": 240.3,
+    "system_seconds": 114.04,
+    "exit_status": 0
+  }
+]

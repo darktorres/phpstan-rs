@@ -1,0 +1,36 @@
+[
+  {
+    "name": "php-normal",
+    "command": [
+      "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+      "-n",
+      "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/runtime.php"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0501,
+    "sampled_group_peak_bytes": 0,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 13352,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0,
+    "exit_status": 0
+  },
+  {
+    "name": "php-call",
+    "command": [
+      "/tmp/php-catalog-comparison/php-src-call/sapi/cli/php",
+      "-n",
+      "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/runtime.php"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 0.0444,
+    "sampled_group_peak_bytes": 0,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 13132,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0,
+    "exit_status": 0
+  }
+]

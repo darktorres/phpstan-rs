@@ -1,0 +1,18 @@
+[
+  {
+    "name": "php-call-build",
+    "command": [
+      "make",
+      "-j2"
+    ],
+    "cwd": "/tmp/php-catalog-comparison/php-src-call",
+    "elapsed_seconds": 165.0551,
+    "sampled_group_peak_bytes": 338518016,
+    "exit_code": 2,
+    "stopped": null,
+    "max_rss_kib": 210688,
+    "user_seconds": 201.84,
+    "system_seconds": 110.37,
+    "exit_status": 2
+  }
+]

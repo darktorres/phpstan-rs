@@ -1,0 +1,454 @@
+{
+  "clang_cfg_unwind_bypasses_destructor": true,
+  "llvm_unwind_bypasses_destructor": false,
+  "windows_clang_cfg_unwind_bypasses_destructor": true,
+  "windows_llvm_unwind_bypasses_destructor": false,
+  "cleanup_native_normal_trace": [
+    1,
+    3,
+    2
+  ],
+  "cleanup_native_exception_trace": [
+    1,
+    2,
+    4
+  ],
+  "clang_flow_sensitive_native_c": "rejected: Can only analyze C++",
+  "clang_flow_sensitive_cpp_budget": "explicit incomplete error for every selected function",
+  "svf_buffer_growth": {
+    "64": {
+      "TotalObjects": [
+        "42",
+        "42"
+      ],
+      "TotalPointers": [
+        "193",
+        "193"
+      ],
+      "TotalSVFStmts": [
+        "139"
+      ],
+      "NumOfQuery": [
+        "5"
+      ],
+      "NumOfOOBQuery": [
+        "0"
+      ],
+      "PointsToBlkPtr": [
+        "0",
+        "0"
+      ],
+      "TotalNode": [
+        "18",
+        "204",
+        "18",
+        "204"
+      ],
+      "TotalEdge": [
+        "25",
+        "199",
+        "25",
+        "205"
+      ]
+    },
+    "65536": {
+      "TotalObjects": [
+        "42",
+        "42"
+      ],
+      "TotalPointers": [
+        "193",
+        "193"
+      ],
+      "TotalSVFStmts": [
+        "139"
+      ],
+      "NumOfQuery": [
+        "5"
+      ],
+      "NumOfOOBQuery": [
+        "0"
+      ],
+      "PointsToBlkPtr": [
+        "0",
+        "0"
+      ],
+      "TotalNode": [
+        "18",
+        "204",
+        "18",
+        "204"
+      ],
+      "TotalEdge": [
+        "25",
+        "199",
+        "25",
+        "205"
+      ]
+    },
+    "16777216": {
+      "TotalObjects": [
+        "42",
+        "42"
+      ],
+      "TotalPointers": [
+        "193",
+        "193"
+      ],
+      "TotalSVFStmts": [
+        "139"
+      ],
+      "NumOfQuery": [
+        "5"
+      ],
+      "NumOfOOBQuery": [
+        "0"
+      ],
+      "PointsToBlkPtr": [
+        "0",
+        "0"
+      ],
+      "TotalNode": [
+        "18",
+        "204",
+        "18",
+        "204"
+      ],
+      "TotalEdge": [
+        "25",
+        "199",
+        "25",
+        "205"
+      ]
+    }
+  },
+  "svf_buffer_growth_peak_mib": {
+    "size-64-dda": 28.73,
+    "size-65536-dda": 29.61,
+    "size-16777216-dda": 537.5
+  },
+  "external_callback_write": {
+    "missing_source_targets": [
+      "increment"
+    ],
+    "complete_source_targets": [
+      "decrement"
+    ],
+    "blackhole_option_repairs_missing_write": false,
+    "native_witness": "exit 0 only when decrement executes",
+    "catalog_coverage_requirement": "missing source or unvalidated contract keeps target domain open"
+  },
+  "svf_cutoffs": {
+    "dispatch": {
+      "normal": {
+        "TotalObjects": [
+          "42",
+          "42"
+        ],
+        "TotalPointers": [
+          "193",
+          "193"
+        ],
+        "TotalSVFStmts": [
+          "139"
+        ],
+        "NumOfQuery": [
+          "5"
+        ],
+        "NumOfOOBQuery": [
+          "0"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "18",
+          "204",
+          "18",
+          "204"
+        ],
+        "TotalEdge": [
+          "25",
+          "199",
+          "25",
+          "205"
+        ]
+      },
+      "budget_1": {
+        "TotalObjects": [
+          "42",
+          "42"
+        ],
+        "TotalPointers": [
+          "193",
+          "193"
+        ],
+        "TotalSVFStmts": [
+          "139"
+        ],
+        "NumOfQuery": [
+          "5"
+        ],
+        "NumOfOOBQuery": [
+          "5"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "18",
+          "204",
+          "18",
+          "204"
+        ],
+        "TotalEdge": [
+          "25",
+          "199",
+          "25",
+          "205"
+        ]
+      }
+    },
+    "external": {
+      "normal": {
+        "TotalObjects": [
+          "9",
+          "9"
+        ],
+        "TotalPointers": [
+          "41",
+          "41"
+        ],
+        "TotalSVFStmts": [
+          "26"
+        ],
+        "NumOfQuery": [
+          "1"
+        ],
+        "NumOfOOBQuery": [
+          "0"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "5",
+          "23",
+          "5",
+          "23"
+        ],
+        "TotalEdge": [
+          "3",
+          "11",
+          "3",
+          "12"
+        ]
+      },
+      "budget_1": {
+        "TotalObjects": [
+          "9",
+          "9"
+        ],
+        "TotalPointers": [
+          "41",
+          "41"
+        ],
+        "TotalSVFStmts": [
+          "26"
+        ],
+        "NumOfQuery": [
+          "1"
+        ],
+        "NumOfOOBQuery": [
+          "1"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "5",
+          "23",
+          "5",
+          "23"
+        ],
+        "TotalEdge": [
+          "3",
+          "11",
+          "3",
+          "12"
+        ]
+      }
+    },
+    "php-array": {
+      "normal": {
+        "TotalObjects": [
+          "895",
+          "895"
+        ],
+        "TotalPointers": [
+          "43540",
+          "43540"
+        ],
+        "TotalSVFStmts": [
+          "40803"
+        ],
+        "NumOfQuery": [
+          "34"
+        ],
+        "NumOfOOBQuery": [
+          "0"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "380",
+          "15856",
+          "380",
+          "15856"
+        ],
+        "TotalEdge": [
+          "2089",
+          "18292",
+          "2089",
+          "18434"
+        ]
+      },
+      "budget_1": {
+        "TotalObjects": [
+          "895",
+          "895"
+        ],
+        "TotalPointers": [
+          "43540",
+          "43540"
+        ],
+        "TotalSVFStmts": [
+          "40803"
+        ],
+        "NumOfQuery": [
+          "34"
+        ],
+        "NumOfOOBQuery": [
+          "34"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "380",
+          "15856",
+          "380",
+          "15856"
+        ],
+        "TotalEdge": [
+          "2089",
+          "18292",
+          "2089",
+          "18434"
+        ]
+      }
+    },
+    "php-invoke": {
+      "normal": {
+        "TotalObjects": [
+          "360",
+          "360"
+        ],
+        "TotalPointers": [
+          "8086",
+          "8086"
+        ],
+        "TotalSVFStmts": [
+          "7151"
+        ],
+        "NumOfQuery": [
+          "9"
+        ],
+        "NumOfOOBQuery": [
+          "0"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "198",
+          "3667",
+          "198",
+          "3667"
+        ],
+        "TotalEdge": [
+          "472",
+          "3825",
+          "472",
+          "3825"
+        ]
+      },
+      "budget_1": {
+        "TotalObjects": [
+          "360",
+          "360"
+        ],
+        "TotalPointers": [
+          "8086",
+          "8086"
+        ],
+        "TotalSVFStmts": [
+          "7151"
+        ],
+        "NumOfQuery": [
+          "9"
+        ],
+        "NumOfOOBQuery": [
+          "9"
+        ],
+        "PointsToBlkPtr": [
+          "0",
+          "0"
+        ],
+        "TotalNode": [
+          "198",
+          "3667",
+          "198",
+          "3667"
+        ],
+        "TotalEdge": [
+          "472",
+          "3825",
+          "472",
+          "3825"
+        ]
+      }
+    }
+  },
+  "identical_sequential_exports": {
+    "dispatch-ast": "97b10043b5c87796ad76c493c86805732195193b69dd92ca984985ee190a93a0",
+    "dispatch-llvm-read": "7ba71d2f9e0144456e7f286060c1ade7369f6344bdedd0eb1d0e78becfcd4c5c",
+    "cleanup-ast": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242",
+    "cleanup-llvm-read": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672",
+    "external-ast": "c6c70a668d91162e78720be720f21d15116a83c7884179286468e95e45c17d9b",
+    "external-llvm-read": "a35b8251910cc4910faa6eceaec36cfcc2de0701bfa8352d3431e86e16dbc2fc",
+    "platform-ast": "d3ef26337c7d0bf09f58cd89c77d48483d865f1d57a836c6b6c1b00f660866f9",
+    "platform-llvm-read": "80083e7aec50ca4224b95702e3e1f8a7dee80aad9465fd213ca43f257c4104a5",
+    "php-array-ast": "5987f914dee3bfdee8691918535b697964afb76a0bead4ba13ad7a4f56bfdd1f",
+    "php-array-llvm-read": "55676bfeeae657bcbd49c841d35123ba12171e031eff6875d276b104dbef1707",
+    "php-type-ast": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067",
+    "php-type-llvm-read": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f",
+    "php-session-ast": "0d364cf8d89e810f14b0d691b4f12c7363675cb97ae5b25d0f17ee1573cc5330",
+    "php-session-llvm-read": "9ab24d76d19405658c40ee3ef41e15926b4e476402a62cbc51fea79bc13974d2",
+    "php-session-user-ast": "78bffc1c83d2703076f274d89311d86bd53d7c5fa7e4e8a431a5535147ecc42f",
+    "php-session-user-llvm-read": "c98ed73e345b4eeec908e1265c05a03f7898e597a8eb2998d5dc8e0f7636612e",
+    "php-invoke-ast": "b9cdc634c3a80a7cc5e72fb4134e0e988f8a7ad9c0dbce69c3b6b2d108cc739d",
+    "php-invoke-llvm-read": "2ae5f59c4ab3f4a43895f09324b1e9fa799ac999b81b945ccde6dd91c38ec69d",
+    "php-streams-ast": "49bc5c0fb361dde3268aaf8343598745ce6eeb43a89e7b55419ac8fd234f36df",
+    "php-streams-llvm-read": "8f0221249f97bbad168d71236754c0d8984ff3c5f921546ab6c4a54d6133a95b"
+  },
+  "scope": "Representation and pointer prerequisites only; no closed PHP behavior summary or Phase F gate is certified."
+}

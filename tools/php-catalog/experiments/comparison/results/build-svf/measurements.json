@@ -1,0 +1,24 @@
+[
+  {
+    "name": "svf-build",
+    "command": [
+      "cmake",
+      "--build",
+      "/tmp/php-catalog-comparison/svf-build",
+      "--target",
+      "wpa",
+      "dvf",
+      "--parallel",
+      "2"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 628.7004,
+    "sampled_group_peak_bytes": 26488832,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 667284,
+    "user_seconds": 904.02,
+    "system_seconds": 46.61,
+    "exit_status": 0
+  }
+]

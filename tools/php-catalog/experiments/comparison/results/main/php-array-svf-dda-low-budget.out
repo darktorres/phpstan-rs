@@ -1,0 +1,434 @@
+
+*********General Stats***************
+################ (program : php-array-promoted.bc)###############
+AddrsNum            741
+BBWith2Succ         3587
+BBWith3Succ         10
+CallsNum            213
+ConstArrayObj       0
+ConstStructObj      0
+ConstantObj         0
+CopysNum            5239
+FIObjNum            382
+FSObjNum            183
+FunctionObjs        380
+GepsNum             6669
+GlobalObjs          9
+HeapObjs            1
+IndCallSites        45
+LoadsNum            4752
+MaxStructSize       226
+NonPtrObj           541
+ReturnsNum          145
+StackObjs           175
+StoresNum           1809
+TotalCallSite       2083
+TotalFieldObjects   329
+TotalObjects        895
+TotalPTASVFStmts    11359
+TotalPointers       43540
+TotalSVFStmts       40803
+VarArrayObj         25
+VarStructObj        95
+----------------Time and memory stats--------------------
+LLVMIRTime          0.304776
+SVFIRTime           0.657536
+SymbolTableTime     0.032897
+#######################################################
+
+*********PTACallGraph Stats (Andersen analysis)***************
+################ (program : php-array-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   5
+MaxNodeInCycle      1
+NodeInCycle         5
+TotalCycle          5
+TotalEdge           2089
+TotalNode           380
+#######################################################
+
+*********Andersen Pointer Analysis Stats***************
+################ (program : php-array-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgIn/OutAddrEdge   0.0635833
+AvgIn/OutCopyEdge   0.827613
+AvgIn/OutEdge       1.12219
+AvgIn/OutLoadEdge   0.170242
+AvgIn/OutStoreEdge  0.0607517
+AvgPtsSetSize       0.0608529
+AvgTopLvlPtsSize    0.235189
+CollapseTime        0
+CopyGepTime         0
+LoadStoreTime       0
+MemoryUsageVmrss    46776
+MemoryUsageVmsize   46480
+SCCDetectTime       0
+SCCMergeTime        0
+TotalTime           0.292442
+UpdateCGTime        0
+----------------Numbers stats----------------------------
+AddrProcessed       741
+CopyProcessed       275
+DummyFieldPtrs      62
+FieldObjs           329
+GepProcessed        1333
+IndCallSites        45
+IndEdgeSolved       51
+LoadProcessed       692
+LocalVarInRecur     26
+MaxInAddrEdge       1
+MaxInCopyEdge       31
+MaxInLoadEdge       8
+MaxInStoreEdge      6
+MaxNodesInSCC       12
+MaxOutAddrEdge      177
+MaxOutCopyEdge      246
+MaxOutLoadEdge      20
+MaxOutStoreEdge     49
+MaxPtsSetSize       14
+MemObjects          895
+NodesInCycles       642
+NullPointer         1969
+NumOfAddrs          741
+NumOfCGEdge         12337
+NumOfCGNode         12183
+NumOfCopys          3177
+NumOfFieldExpand    0
+NumOfGeps           6468
+NumOfLoads          1984
+NumOfSCCDetect      3
+NumOfSFRs           0
+NumOfStores         708
+NumOfValidNode      11654
+NumOfValidObjNode   733
+Pointers            43540
+PointsToBlkPtr      0
+PointsToConstPtr    42
+SolveIterations     3
+StoreProcessed      402
+TotalCycleNum       196
+TotalObjects        895
+TotalPWCCycleNum    16
+TotalPointers       43540
+#######################################################
+
+****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
+################ (program : php-array-promoted.bc)###############
+UniquePointsToSets       961
+TotalUnions              2939
+PropertyUnions           2708
+UniqueUnions             72
+LookupUnions             15
+PreemptiveUnions         144
+TotalComplements         36375
+PropertyComplements      36375
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       1620
+PropertyIntersections    1620
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+
+*********Memory SSA Statistics***************
+################ (program : php-array-promoted.bc)###############
+----------------Time and memory stats--------------------
+AverageRegSize      1.22814
+GenMUCHITime        0.014817
+GenRegionTime       0.042294
+InsertPHITime       0.00105
+SSARenameTime       0.013207
+TotalMSSATime       0.07262
+----------------Numbers stats----------------------------
+BBHasMSSAPhi        256
+CSChiNode           60
+CSHasChi            50
+CSHasMu             75
+CSMuNode            119
+FunEntryChi         390
+FunHasEntryChi      93
+FunHasRetMu         208
+FunRetMu            390
+LoadHasMu           1984
+LoadMuNode          662
+MSSAPhi             734
+MaxRegSize          14
+MemRegions          263
+StoreChiNode        405
+StoreHasChi         724
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : php-array-promoted.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          0.002905
+AvgWeight           1.15114
+ConnDirEdgeTime     0
+ConnIndEdgeTime     0.00469
+OptTime             0
+TLNodeTime          0
+TotalTime           0.007604
+----------------Numbers stats----------------------------
+ActualIn            119
+ActualOut           60
+ActualParam         2008
+ActualRet           558
+Addr                741
+AvgInDegree         1
+AvgIndInDeg         1
+AvgIndOutDeg        2
+AvgOutDegree        1
+Copy                11
+DirectCallEdge      382
+DirectEdge          14686
+DirectRetEdge       24
+FormalIn            390
+FormalOut           390
+FormalParam         422
+FormalRet           10
+Gep                 6669
+IndCallEdge         277
+IndRetEdge          198
+IndirectEdge        3606
+IndirectEdgeLabels  4151
+Load                1984
+MSSAPhi             734
+MaxInDegree         31
+MaxIndInDeg         14
+MaxIndOutDeg        19
+MaxOutDegree        405
+PHI                 1035
+Store               724
+TotalEdge           18292
+TotalNode           15856
+#######################################################
+
+*********PTACallGraph Stats (DDA analysis)***************
+################ (program : php-array-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   5
+MaxNodeInCycle      1
+NodeInCycle         5
+TotalCycle          5
+TotalEdge           2089
+TotalNode           380
+#######################################################
+
+*********SVFG SCC Stat***************
+################ (program : php-array-promoted.bc)###############
+----------------Numbers stats----------------------------
+CallEdgeInCycle     61
+DirEdgeInCycle      579
+EdgeInCycle         1643
+IndEdgeInCycle      1064
+InsenCallEdge       0
+InsenRetEdge        0
+MaxNodeInCycle      75
+NodeInCycle         1178
+RetEdgeInCycle      40
+TotalCallEdge       773
+TotalCycle          245
+TotalDirEdge        14772
+TotalEdge           18434
+TotalIndEdge        3662
+TotalNode           15856
+TotalRetEdge        250
+#######################################################
+
+****Demand-Driven Pointer Analysis Statistics****
+
+************************
+################ (program : php-array-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgCPtsSize         0.852941
+AvgDPMAtLoc         1
+AvgPtsSize          0.852941
+AvgTimePerQuery     6.02941e-06
+MemoryUsageVmrss    0
+MemoryUsageVmsize   0
+TotalBKCondTime     4.92958e-313
+TotalQueryTime      0.000205
+----------------Numbers stats----------------------------
+IndEdgeSolved       51
+MaxCPtsSize         14
+MaxCxtPerQuery      0
+MaxDPMAtLoc         1
+MaxPathPerQuery     0
+MaxPtsSize          14
+NumOfDPM            41
+NumOfInfePath       0
+NumOfMustAA         0
+NumOfNullPtr        26
+NumOfOOBQuery       34
+NumOfQuery          34
+NumOfSU             0
+NumOfStep           68
+NumOfStepInCycle    0
+NumOfStore          724
+NumOfStoreSU        0
+PointsToBlkPtr      0
+PointsToConstPtr    0
+#######################################################
+
+****Persistent Points-To Cache Statistics: DDA bitvector****
+################ (program : php-array-promoted.bc)###############
+UniquePointsToSets       7
+TotalUnions              102
+PropertyUnions           102
+UniqueUnions             0
+LookupUnions             0
+PreemptiveUnions         0
+TotalComplements         0
+PropertyComplements      0
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       0
+PropertyIntersections    0
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+=================================================
+Total virtual callsites: 1
+Total analyzed virtual callsites: 0
+Indirect call map size: 19
+Precise callsites: 0
+Zero target callsites: 0
+One target callsites: 0
+Two target callsites: 0
+More than two target callsites: 0
+=================================================
+##<> Source Loc: { "ln": 680, "cl": 20, "fl": "ext/standard/array.c" }
+Ptr 1113 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1009, "cl": 9, "fl": "ext/standard/array.c" }
+Ptr 3232 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1444, "cl": 27, "fl": "ext/standard/array.c" }
+Ptr 5909 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 1559, "cl": 18, "fl": "ext/standard/array.c" }
+Ptr 6301 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 3249, "cl": 14, "fl": "ext/standard/array.c" }
+Ptr 17137 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 3277, "cl": 14, "fl": "ext/standard/array.c" }
+Ptr 17280 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 25178 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 25451 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 26273 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 4649, "cl": 7, "fl": "ext/standard/array.c" }
+Ptr 26791 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 4650, "cl": 8, "fl": "ext/standard/array.c" }
+Ptr 26802 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 4651, "cl": 11, "fl": "ext/standard/array.c" }
+Ptr 26813 		PointsTo: {empty}
+
+##<call232> Source Loc: { "ln": 5023, "cl": 8, "fl": "ext/standard/array.c" }
+Ptr 29191 		PointsTo: { 29943 29945 29947 29949 29951 29953 29955 29957 29959 29961 29963 29965 29967 29969 }
+
+!!Target NodeID 29943	 [<php_array_reverse_data_compare_unstable> Source Loc: { "ln": 367, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29945	 [<php_array_data_compare_unstable> Source Loc: { "ln": 367, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29947	 [<php_array_reverse_data_compare_numeric_unstable> Source Loc: { "ln": 368, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29949	 [<php_array_data_compare_numeric_unstable> Source Loc: { "ln": 368, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29951	 [<php_array_reverse_data_compare_string_case_unstable> Source Loc: { "ln": 369, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29953	 [<php_array_data_compare_string_case_unstable> Source Loc: { "ln": 369, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29955	 [<php_array_reverse_data_compare_string_unstable> Source Loc: { "ln": 370, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29957	 [<php_array_data_compare_string_unstable> Source Loc: { "ln": 370, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29959	 [<php_array_reverse_natural_case_compare_unstable> Source Loc: { "ln": 373, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29961	 [<php_array_natural_case_compare_unstable> Source Loc: { "ln": 373, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29963	 [<php_array_reverse_natural_compare_unstable> Source Loc: { "ln": 372, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29965	 [<php_array_natural_compare_unstable> Source Loc: { "ln": 372, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29967	 [<php_array_reverse_data_compare_string_locale_unstable> Source Loc: { "ln": 371, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29969	 [<php_array_data_compare_string_locale_unstable> Source Loc: { "ln": 371, "file": "ext/standard/array.c" }] 
+##<intersect_data_compare_func.0> Source Loc: { "ln": 0, "cl": 0, "fl": "ext/standard/array.c" }
+Ptr 30065 		PointsTo: { 30063 30067 }
+
+!!Target NodeID 30063	 [<zval_compare> Source Loc: { "ln": 5090, "file": "ext/standard/array.c" }] 
+!!Target NodeID 30067	 [<zval_user_compare> Source Loc: { "ln": 5096, "file": "ext/standard/array.c" }] 
+##<intersect_key_compare_func.0> Source Loc: { "ln": 0, "cl": 0, "fl": "ext/standard/array.c" }
+Ptr 30425 		PointsTo: { 479 2921 30398 }
+
+!!Target NodeID 479	 [<php_array_key_compare_string> Source Loc: { "ln": 365, "file": "ext/standard/array.c" }] 
+!!Target NodeID 2921	 [<php_array_user_key_compare_unstable> Source Loc: { "ln": 926, "file": "ext/standard/array.c" }] 
+!!Target NodeID 30398	 [<php_array_key_compare_string_unstable> Source Loc: { "ln": 365, "file": "ext/standard/array.c" }] 
+##<intersect_data_compare_func.1> Source Loc: { "ln": 0, "cl": 0, "fl": "ext/standard/array.c" }
+Ptr 30426 		PointsTo: { 2884 29957 }
+
+!!Target NodeID 2884	 [<php_array_user_compare_unstable> Source Loc: { "ln": 821, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29957	 [<php_array_data_compare_string_unstable> Source Loc: { "ln": 370, "file": "ext/standard/array.c" }] 
+##<diff_data_compare_func.0> Source Loc: { "ln": 0, "cl": 0, "fl": "ext/standard/array.c" }
+Ptr 31457 		PointsTo: { 30063 30067 }
+
+!!Target NodeID 30063	 [<zval_compare> Source Loc: { "ln": 5090, "file": "ext/standard/array.c" }] 
+!!Target NodeID 30067	 [<zval_user_compare> Source Loc: { "ln": 5096, "file": "ext/standard/array.c" }] 
+##<diff_key_compare_func.0> Source Loc: { "ln": 0, "cl": 0, "fl": "ext/standard/array.c" }
+Ptr 31795 		PointsTo: { 2921 30398 }
+
+!!Target NodeID 2921	 [<php_array_user_key_compare_unstable> Source Loc: { "ln": 926, "file": "ext/standard/array.c" }] 
+!!Target NodeID 30398	 [<php_array_key_compare_string_unstable> Source Loc: { "ln": 365, "file": "ext/standard/array.c" }] 
+##<diff_data_compare_func.1> Source Loc: { "ln": 0, "cl": 0, "fl": "ext/standard/array.c" }
+Ptr 31796 		PointsTo: { 2884 29957 }
+
+!!Target NodeID 2884	 [<php_array_user_compare_unstable> Source Loc: { "ln": 821, "file": "ext/standard/array.c" }] 
+!!Target NodeID 29957	 [<php_array_data_compare_string_unstable> Source Loc: { "ln": 370, "file": "ext/standard/array.c" }] 
+##<> Source Loc: { "ln": 6030, "cl": 12, "fl": "ext/standard/array.c" }
+Ptr 33457 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 6283, "cl": 14, "fl": "ext/standard/array.c" }
+Ptr 34165 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 6306, "cl": 15, "fl": "ext/standard/array.c" }
+Ptr 34277 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 6318, "cl": 15, "fl": "ext/standard/array.c" }
+Ptr 34308 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 6356, "cl": 13, "fl": "ext/standard/array.c" }
+Ptr 34707 		PointsTo: {empty}
+
+##<op> Source Loc: { 3rd arg php_array_binop "ln": 6428, "file": "ext/standard/array.c" }
+Ptr 35188 		PointsTo: { 35180 35507 }
+
+!!Target NodeID 35180	 [<add_function> Source Loc: ] 
+!!Target NodeID 35507	 [<mul_function> Source Loc: ] 
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 35314 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 6446, "cl": 25, "fl": "ext/standard/array.c" }
+Ptr 35425 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 36569 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 37076 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 37334 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 37600 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 38939 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 39785 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 2394, "cl": 11, "fl": "Zend/zend_API.h" }
+Ptr 39908 		PointsTo: {empty}
+

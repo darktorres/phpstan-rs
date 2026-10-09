@@ -1,0 +1,92 @@
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:15:6: warning: increment -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   15 | void increment(int *value) { ++*value; }
+      |      ^                     ~~~~~~~~~~~~~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:16:6: warning: decrement -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   16 | void decrement(int *value) { --*value; }
+      |      ^                     ~~~~~~~~~~~~~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:17:5: warning: scalar -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   17 | int scalar(int x) { return x + 1; }
+      |     ^             ~~~~~~~~~~~~~~~~~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:22:6: warning: by_reference -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   22 | void by_reference(int *left, int *right) { *left = 1; *right = 2; }
+      |      ^                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:23:5: warning: exception_cleanup -> Total CFGBlocks: 5 | Unreachable CFGBlocks: 1 | Exhausted Block: no | Empty WorkList: no [debug.Stats]
+   23 | int exception_cleanup(Callback cb, int *argument) {
+      |     ^                                             ~
+   24 |   cb(argument);
+      |   ~~~~~~~~~~~~~
+   25 |   release_value(argument);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~
+   26 |   if (pending_exception) return -1;
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   27 |   observe(*argument);
+      |   ~~~~~~~~~~~~~~~~~~~
+   28 |   return 0;
+      |   ~~~~~~~~~
+   29 | }
+      | ~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:31:6: warning: retain -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   31 | void retain(Callback cb, int *argument) {
+      |      ^                                  ~
+   32 |   retained.callback = cb; retained.argument = argument;
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   33 | }
+      | ~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:34:6: warning: trigger -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   34 | void trigger(void) { retained.callback(retained.argument); }
+      |      ^             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:36:6: warning: copied_dispatch -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: no [debug.Stats]
+   36 | void copied_dispatch(Payload *src, int *argument) {
+      |      ^                                            ~
+   37 |   Payload dst; copy_payload(&dst, src); dst.callback(argument);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   38 | }
+      | ~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:39:6: warning: unknown_copy -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: yes [debug.Stats]
+   39 | void unknown_copy(Payload *dst, Payload *src) {
+      |      ^                                        ~
+   40 |   void *unknown = unread_library(src); memcpy(dst, unknown, sizeof(*dst));
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   41 | }
+      | ~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:42:6: warning: ordered_dispatch -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: no [debug.Stats]
+   42 | void ordered_dispatch(int *argument) {
+      |      ^                               ~
+   43 |   Owner owner = {increment, argument};
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   44 |   owner_dispatch(&owner);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~
+   45 |   owner.callback = decrement;
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   46 |   owner_dispatch(&owner);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~
+   47 | }
+      | ~
+/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c:48:5: warning: main -> Total CFGBlocks: 3 | Unreachable CFGBlocks: 0 | Exhausted Block: no | Empty WorkList: no [debug.Stats]
+   48 | int main(void) {
+      |     ^          ~
+   49 |   int value = 0;
+      |   ~~~~~~~~~~~~~~
+   50 |   Callback cb = increment;
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~
+   51 |   array_callback(cb, &value, 1);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   52 |   by_reference(&value, &value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   53 |   exception_cleanup(cb, &value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   54 |   Owner owner = {increment, &value}; owner_dispatch(&owner);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |   retain(increment, &value); trigger();
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |   Payload src = {{0}, increment}; copied_dispatch(&src, &value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   57 |   Payload dst; unknown_copy(&dst, &src);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   58 |   ordered_dispatch(&value);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~
+   59 |   return scalar(value);
+      |   ~~~~~~~~~~~~~~~~~~~~~
+   60 | }
+      | ~
+11 warnings generated.

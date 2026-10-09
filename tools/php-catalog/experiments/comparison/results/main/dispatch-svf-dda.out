@@ -1,0 +1,324 @@
+
+*********General Stats***************
+################ (program : dispatch-promoted.bc)###############
+AddrsNum            35
+BBWith2Succ         4
+BBWith3Succ         0
+CallsNum            18
+ConstArrayObj       0
+ConstStructObj      1
+ConstantObj         0
+CopysNum            1
+FIObjNum            20
+FSObjNum            8
+FunctionObjs        18
+GepsNum             24
+GlobalObjs          3
+HeapObjs            1
+IndCallSites        5
+LoadsNum            16
+MaxStructSize       2
+NonPtrObj           28
+ReturnsNum          2
+StackObjs           6
+StoresNum           20
+TotalCallSite       24
+TotalFieldObjects   13
+TotalObjects        42
+TotalPTASVFStmts    101
+TotalPointers       193
+TotalSVFStmts       139
+VarArrayObj         0
+VarStructObj        6
+----------------Time and memory stats--------------------
+LLVMIRTime          0.010464
+SVFIRTime           0.001239
+SymbolTableTime     0.003729
+#######################################################
+
+*********PTACallGraph Stats (Andersen analysis)***************
+################ (program : dispatch-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           25
+TotalNode           18
+#######################################################
+
+*********Andersen Pointer Analysis Stats***************
+################ (program : dispatch-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgIn/OutAddrEdge   0.265152
+AvgIn/OutCopyEdge   0.55303
+AvgIn/OutEdge       1.00758
+AvgIn/OutLoadEdge   0.0833333
+AvgIn/OutStoreEdge  0.106061
+AvgPtsSetSize       0.408511
+AvgTopLvlPtsSize    1
+CollapseTime        0
+CopyGepTime         0
+LoadStoreTime       0
+MemoryUsageVmrss    628
+MemoryUsageVmsize   396
+SCCDetectTime       0
+SCCMergeTime        0
+TotalTime           0.000798
+UpdateCGTime        0
+----------------Numbers stats----------------------------
+AddrProcessed       35
+CopyProcessed       50
+DummyFieldPtrs      4
+FieldObjs           13
+GepProcessed        22
+IndCallSites        5
+IndEdgeSolved       6
+LoadProcessed       11
+LocalVarInRecur     0
+MaxInAddrEdge       1
+MaxInCopyEdge       5
+MaxInLoadEdge       1
+MaxInStoreEdge      1
+MaxNodesInSCC       0
+MaxOutAddrEdge      8
+MaxOutCopyEdge      8
+MaxOutLoadEdge      1
+MaxOutStoreEdge     3
+MaxPtsSetSize       2
+MemObjects          42
+NodesInCycles       0
+NullPointer         2
+NumOfAddrs          35
+NumOfCGEdge         98
+NumOfCGNode         139
+NumOfCopys          49
+NumOfFieldExpand    0
+NumOfGeps           24
+NumOfLoads          11
+NumOfSCCDetect      3
+NumOfSFRs           0
+NumOfStores         14
+NumOfValidNode      132
+NumOfValidObjNode   41
+Pointers            193
+PointsToBlkPtr      0
+PointsToConstPtr    0
+SolveIterations     3
+StoreProcessed      14
+TotalCycleNum       0
+TotalObjects        42
+TotalPWCCycleNum    0
+TotalPointers       193
+#######################################################
+
+****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
+################ (program : dispatch-promoted.bc)###############
+UniquePointsToSets       46
+TotalUnions              111
+PropertyUnions           104
+UniqueUnions             2
+LookupUnions             1
+PreemptiveUnions         4
+TotalComplements         404
+PropertyComplements      404
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       31
+PropertyIntersections    31
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+
+*********Memory SSA Statistics***************
+################ (program : dispatch-promoted.bc)###############
+----------------Time and memory stats--------------------
+AverageRegSize      1.26316
+GenMUCHITime        8.9e-05
+GenRegionTime       0.000221
+InsertPHITime       2e-05
+SSARenameTime       4.5e-05
+TotalMSSATime       0.00043
+----------------Numbers stats----------------------------
+BBHasMSSAPhi        0
+CSChiNode           4
+CSHasChi            3
+CSHasMu             8
+CSMuNode            14
+FunEntryChi         25
+FunHasEntryChi      8
+FunHasRetMu         14
+FunRetMu            25
+LoadHasMu           11
+LoadMuNode          9
+MSSAPhi             0
+MaxRegSize          2
+MemRegions          19
+StoreChiNode        13
+StoreHasChi         13
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : dispatch-promoted.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          7e-05
+AvgWeight           1.12791
+ConnDirEdgeTime     0
+ConnIndEdgeTime     6.2e-05
+OptTime             0
+TLNodeTime          0
+TotalTime           0.000136
+----------------Numbers stats----------------------------
+ActualIn            14
+ActualOut           4
+ActualParam         31
+ActualRet           1
+Addr                35
+AvgInDegree         0
+AvgIndInDeg         1
+AvgIndOutDeg        1
+AvgOutDegree        0
+Copy                1
+DirectCallEdge      18
+DirectEdge          113
+DirectRetEdge       0
+FormalIn            25
+FormalOut           25
+FormalParam         18
+FormalRet           0
+Gep                 24
+IndCallEdge         18
+IndRetEdge          6
+IndirectEdge        86
+IndirectEdgeLabels  97
+Load                11
+MSSAPhi             0
+MaxInDegree         3
+MaxIndInDeg         3
+MaxIndOutDeg        3
+MaxOutDegree        8
+PHI                 0
+Store               14
+TotalEdge           199
+TotalNode           204
+#######################################################
+
+*********PTACallGraph Stats (DDA analysis)***************
+################ (program : dispatch-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           25
+TotalNode           18
+#######################################################
+
+*********SVFG SCC Stat***************
+################ (program : dispatch-promoted.bc)###############
+----------------Numbers stats----------------------------
+CallEdgeInCycle     0
+DirEdgeInCycle      0
+EdgeInCycle         0
+IndEdgeInCycle      0
+InsenCallEdge       0
+InsenRetEdge        0
+MaxNodeInCycle      0
+NodeInCycle         0
+RetEdgeInCycle      0
+TotalCallEdge       42
+TotalCycle          0
+TotalDirEdge        119
+TotalEdge           205
+TotalIndEdge        86
+TotalNode           204
+TotalRetEdge        6
+#######################################################
+
+****Demand-Driven Pointer Analysis Statistics****
+
+************************
+################ (program : dispatch-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgCPtsSize         1.2
+AvgDPMAtLoc         1.01053
+AvgPtsSize          1.2
+AvgTimePerQuery     0.0001166
+MemoryUsageVmrss    40
+MemoryUsageVmsize   132
+TotalBKCondTime     0
+TotalQueryTime      0.000583
+----------------Numbers stats----------------------------
+IndEdgeSolved       6
+MaxCPtsSize         2
+MaxCxtPerQuery      0
+MaxDPMAtLoc         2
+MaxPathPerQuery     0
+MaxPtsSize          2
+NumOfDPM            185
+NumOfInfePath       0
+NumOfMustAA         0
+NumOfNullPtr        0
+NumOfOOBQuery       0
+NumOfQuery          5
+NumOfSU             7
+NumOfStep           112
+NumOfStepInCycle    50
+NumOfStore          14
+NumOfStoreSU        7
+PointsToBlkPtr      0
+PointsToConstPtr    0
+#######################################################
+
+****Persistent Points-To Cache Statistics: DDA bitvector****
+################ (program : dispatch-promoted.bc)###############
+UniquePointsToSets       17
+TotalUnions              66
+PropertyUnions           66
+UniqueUnions             0
+LookupUnions             0
+PreemptiveUnions         0
+TotalComplements         0
+PropertyComplements      0
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       0
+PropertyIntersections    0
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+=================================================
+Total virtual callsites: 0
+Total analyzed virtual callsites: 0
+Indirect call map size: 5
+Precise callsites: 0
+Zero target callsites: 0
+One target callsites: 0
+Two target callsites: 0
+More than two target callsites: 0
+=================================================
+##<cb> Source Loc: { 0th arg array_callback "ln": 18, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }
+Ptr 39 		PointsTo: { 14 }
+
+!!Target NodeID 14	 [<increment> Source Loc: { "ln": 15, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }] 
+##<cb> Source Loc: { 0th arg exception_cleanup "ln": 23, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }
+Ptr 71 		PointsTo: { 14 }
+
+!!Target NodeID 14	 [<increment> Source Loc: { "ln": 15, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }] 
+##<> Source Loc: { "ln": 30, "cl": 37, "fl": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }
+Ptr 97 		PointsTo: { 14 22 }
+
+!!Target NodeID 14	 [<increment> Source Loc: { "ln": 15, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }] 
+!!Target NodeID 22	 [<decrement> Source Loc: { "ln": 16, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }] 
+##<> Source Loc: { "ln": 34, "cl": 22, "fl": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }
+Ptr 114 		PointsTo: { 14 }
+
+!!Target NodeID 14	 [<increment> Source Loc: { "ln": 15, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }] 
+##<> Source Loc: { "ln": 37, "cl": 41, "fl": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }
+Ptr 144 		PointsTo: { 14 }
+
+!!Target NodeID 14	 [<increment> Source Loc: { "ln": 15, "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c" }] 

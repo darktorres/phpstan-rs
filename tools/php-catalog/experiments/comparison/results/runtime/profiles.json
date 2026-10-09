@@ -1,0 +1,16 @@
+{
+  "normal": {
+    "vm_kind": "ZEND_VM_KIND_TAILCALL",
+    "config_sha256": "c009cfa89b684b50f1cfc4c9a4cd1dfa00eea0c784d8ad77f1f54461e837e98a",
+    "vm_execute_sha256": "fde5e2a4a83f787453298f3c6d9523f9c43fc19514078bd2d3a4ea7fb40c3b4e",
+    "vm_opcodes_sha256": "8057e3d0b13c0eeec3f73b68711229d2211a448e27d51bc9d3b323c9bfa37c8b",
+    "binary_sha256": "abc41b0be90d2e9d1d744f2c53600c5f6a7e48af09bbd3ffc4eda382ce9236b5"
+  },
+  "call": {
+    "vm_kind": "ZEND_VM_KIND_CALL",
+    "config_sha256": "71c8718b216fab5dbb73a066149036a35c8898e30eeb2f43f31045f02fac33ef",
+    "vm_execute_sha256": "329835b2ad8f8a01ccd36b17ec8a12fbf33bf15bbc831f2051c13bf88ada1474",
+    "vm_opcodes_sha256": "8446cf782b7b0e36b6536ac1024f353156f79a517530d0866d9ef86a3cdca0a5",
+    "binary_sha256": "866ee99f4de2644b3d28e45dfc2071a5a3926a65b04ab3127baef312102684af"
+  }
+}
