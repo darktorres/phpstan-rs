@@ -735,13 +735,7 @@ impl<'a> Checker<'a> {
         if let Some(Some(thrown)) = self.call_throw_types.remove(&target_span) {
             self.record_throw_state(thrown, locals);
         }
-        if !matches!(&target.kind, ExprKind::Variable(name) if !locals.contains_var(name)) {
-            self.forget_what_an_operation_on_may_change(
-                target,
-                crate::registry::summaries::Operation::Destroy,
-                locals,
-            );
-        }
+        self.forget_what_overwriting_may_change(target, locals);
         if let Some(key) = self.key_of_expr(locals, target) {
             purge_stale_narrowing_for(locals, key);
             locals.remove(key);

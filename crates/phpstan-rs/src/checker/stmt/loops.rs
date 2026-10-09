@@ -744,12 +744,11 @@ impl<'a> Checker<'a> {
         );
         // Each iteration overwrites the loop variables, destroying what they
         // held; a subject made where it is written dies with the loop.
-        let destroy = crate::registry::summaries::Operation::Destroy;
         if !by_ref {
-            self.forget_what_an_operation_on_may_change(value, destroy.clone(), locals);
+            self.forget_what_overwriting_may_change(value, locals);
         }
         if let Some(key) = key {
-            self.forget_what_an_operation_on_may_change(key, destroy.clone(), locals);
+            self.forget_what_overwriting_may_change(key, locals);
         }
         if matches!(
             subject.kind,
@@ -761,7 +760,12 @@ impl<'a> Checker<'a> {
                 | ExprKind::StaticCall(..)
                 | ExprKind::DynamicStaticCall(..)
         ) {
-            self.forget_what_an_operation_may_change(&element_ty, false, destroy, locals);
+            self.forget_what_an_operation_may_change(
+                &element_ty,
+                false,
+                crate::registry::summaries::Operation::Destroy,
+                locals,
+            );
         }
         let entry = locals.clone();
         self.loop_depth += 1;

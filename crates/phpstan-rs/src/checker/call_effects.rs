@@ -462,6 +462,20 @@ impl Checker<'_> {
         self.forget_effect(&effect, locals);
     }
 
+    /// After the place `target` is overwritten, what destroying the value it
+    /// held may have written is stale; a variable that holds nothing yet
+    /// destroys nothing.
+    pub(crate) fn forget_what_overwriting_may_change(
+        &self,
+        target: &ExprNode,
+        locals: &mut Locals,
+    ) {
+        if matches!(&target.kind, ExprKind::Variable(name) if !locals.contains_var(name)) {
+            return;
+        }
+        self.forget_what_an_operation_on_may_change(target, Operation::Destroy, locals);
+    }
+
     /// After the binary operator `op` on `l` and `r`, each with its type,
     /// what converting an operand to a string may have written is stale:
     /// both operands of `.`, and an operand compared loosely with one that
