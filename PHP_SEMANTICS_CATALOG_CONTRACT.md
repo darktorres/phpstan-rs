@@ -33,6 +33,8 @@ concealing an unresolved PHP callback.
 Coverage entries also name the domains required to justify each result. A
 closed result cannot depend on an open domain, and catalog projections return
 the transitive dependency closure so consumers can retain it in their query.
+During evaluation, newly open child domains propagate through these dependencies
+and widen dependent parent domains instead of leaving them closed.
 
 ## Composition rules
 
@@ -70,6 +72,7 @@ investigation; failure to observe an event cannot prove its absence.
 | An unresolved return is treated as no return or as a closed empty result. | Incomplete evaluation cannot justify excluding a return behavior. | `unresolved_return_is_an_incomplete_evaluation_not_no_return` |
 | A graph labels a domain closed while containing an unknown transfer that affects it, or supplies no coverage/evidence. | Its negative claims are unsupported by the actual transfer graph. | `unknown_transfer_cannot_be_marked_closed_or_reasonless`; `every_domain_requires_a_coverage_decision_and_evidence` |
 | A return projection ignores an open write/invocation domain that it depends on. | A projected fact is closed only when every required semantic domain is justified. | `graph_rejects_closed_return_coverage_with_open_domain_dependency`; `projection_includes_transitive_domain_dependencies` |
+| A child opens a domain required by the parent return while the parent return remains closed. | Uncertainty propagates through declared semantic dependencies. | `open_child_dependency_opens_the_parent_result_domain` |
 | Two closed domains justify each other through a dependency cycle without a fixed-point certificate. | Circular dependency metadata alone provides no independent basis for either negative claim. | `graph_rejects_cyclic_closed_domain_dependencies_without_a_certificate` |
 | A closed wrapper invokes an open child but retains its own closed return coverage, or omits child coverage entirely or by domain. | The wrapper's result may depend on child behavior, so child uncertainty must compose into the result and incomplete metadata must not default to closed. | `open_child_coverage_opens_a_closed_parent_domain`; `incomplete_child_coverage_rejects_the_evaluation`; `omitted_child_coverage_rejects_the_evaluation` |
 | A maybe-applicable target graph is selected as definitely applicable, or its uncovered remainder is dropped. | The target set includes configurations whose behavior was not established. | `target_selection_keeps_unknown_remainder_and_selects_exact_scenario`; target-module correlated-scenario tests |

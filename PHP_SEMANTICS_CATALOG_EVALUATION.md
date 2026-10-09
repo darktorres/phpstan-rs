@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v2 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Thirty-six
+explicit exceptional continuations and host-supplied joins/widening. Thirty-seven
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -21,8 +21,9 @@ coverage/evidence validation, composed-child coverage propagation and rejection
 of incomplete composed coverage, unresolved-return rejection, state-sensitive
 post-invocation predicates, conservative handling of unsupported predicates,
 and loop convergence. Domain projections now include transitive coverage
-dependencies, and validation rejects closed domains that depend on open domains
-or on uncertified closed cycles. These are
+dependencies, validation rejects closed domains that depend on open domains or
+on uncertified closed cycles, and evaluation propagates open child domains
+through parent dependencies. These are
 foundation tests only: loop widening is generic and has only a small fixture,
 with no calibrated abstract domains; the evaluator also has no catalog
 selection, target semantics, real checker host, native producer, or publication
@@ -50,8 +51,8 @@ callback exception flow.
 
 The full checker suite passed with 1,194 library tests, all checker
 binary/integration tests, and 35 semantic-crate tests after the schema and
-dependency-closure change. After adding the cycle-rejection test, all 36
-semantic-crate tests pass and `cargo check -p phpstan-rs` passes. Checker
+dependency-closure change. After adding the dependency-propagation regression,
+all 37 semantic-crate tests pass and `cargo check -p phpstan-rs` passes. Checker
 sources have not changed since the full-suite run.
 
 ## Phase F gate-by-gate status

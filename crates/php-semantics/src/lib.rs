@@ -592,6 +592,58 @@ fn precision_rank(precision: Precision) -> u8 {
     }
 }
 
+fn propagate_open_dependencies(coverage: &mut [DomainCoverage]) {
+    loop {
+        let mut changed = false;
+        for index in 0..coverage.len() {
+            if !matches!(coverage[index].coverage, Coverage::Closed) {
+                continue;
+            }
+            let dependencies = coverage[index].dependencies.clone();
+            let open_dependencies: Vec<_> = dependencies
+                .iter()
+                .filter_map(|dependency| {
+                    coverage
+                        .iter()
+                        .find(|item| item.domain == *dependency)
+                        .filter(|item| matches!(item.coverage, Coverage::Open { .. }))
+                        .cloned()
+                })
+                .collect();
+            if open_dependencies.is_empty() {
+                continue;
+            }
+            let mut reasons = Vec::new();
+            for dependency in &open_dependencies {
+                if let Coverage::Open { reasons: open } = &dependency.coverage {
+                    reasons.extend(open.iter().cloned());
+                }
+                coverage[index]
+                    .evidence
+                    .extend(dependency.evidence.iter().copied());
+                coverage[index]
+                    .assumptions
+                    .extend(dependency.assumptions.iter().copied());
+                if precision_rank(dependency.precision) > precision_rank(coverage[index].precision)
+                {
+                    coverage[index].precision = dependency.precision;
+                }
+            }
+            reasons.sort();
+            reasons.dedup();
+            coverage[index].evidence.sort();
+            coverage[index].evidence.dedup();
+            coverage[index].assumptions.sort();
+            coverage[index].assumptions.dedup();
+            coverage[index].coverage = Coverage::Open { reasons };
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
 fn merge_coverage(
     current: &mut Vec<DomainCoverage>,
     additions: &[DomainCoverage],
@@ -661,6 +713,7 @@ fn merge_coverage(
         item.assumptions.dedup();
         merged.push(item);
     }
+    propagate_open_dependencies(&mut merged);
     validate_domain_dependencies(&merged)?;
     *current = merged;
     Ok(())
@@ -1545,6 +1598,43 @@ mod tests {
         );
         assert_eq!(returned.evidence, vec![Digest([1; 32]), Digest([2; 32])]);
         assert_eq!(returned.assumptions, vec![Digest([3; 32])]);
+    }
+
+    #[test]
+    fn open_child_dependency_opens_the_parent_result_domain() {
+        let mut graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 0,
+            }],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        let returned = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        returned.coverage = Coverage::Closed;
+        returned.dependencies.push(Domain::UserWrite);
+        let mut host = Host {
+            nested_open: Some(Domain::UserWrite),
+            ..Host::default()
+        };
+
+        let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        let returned = evaluation
+            .coverage
+            .iter()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        assert_eq!(
+            returned.coverage,
+            Coverage::Open {
+                reasons: vec![Bytes(b"nested boundary".to_vec())]
+            }
+        );
+        assert!(returned.dependencies.contains(&Domain::UserWrite));
     }
 
     #[test]
