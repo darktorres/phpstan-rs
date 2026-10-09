@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Forty-four
+explicit exceptional continuations and host-supplied joins/widening. Forty-five
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -22,12 +22,18 @@ of incomplete composed coverage, unresolved-return rejection, state-sensitive
 post-invocation predicates, conservative handling of unsupported predicates,
 and loop convergence. The evaluator rejects host join or widening results
 that fail to subsume both incoming states/results; state-loss, result-loss,
-and widening-loss fixtures cover that guard. Domain projections now include transitive coverage
+and widening-loss fixtures cover that guard. A post-worklist validation pass
+checks that each recorded transfer candidate is covered by the completed
+block solution; a dropped-candidate regression rejects a non-post-fixpoint
+record. This validates the discovery run's recorded transfers, not an
+independent re-execution of transfer semantics from a persisted certificate.
+Domain projections now include transitive coverage
 dependencies, validation rejects closed domains that depend on open domains or
 on uncertified closed cycles, and evaluation propagates open child domains
 through parent dependencies. These are foundation tests only: loop widening
-has a small interval-like fixture, not a calibrated production domain; local
-join checks are not an independent post-fixpoint certificate. The checker
+has a small interval-like fixture, not a calibrated production domain; the
+post-worklist check is not the independent post-fixpoint certificate required
+by the plan. The checker
 bridge currently uses a narrow type-only host for `strlen()` and does not model
 effect state, callback invocation, or exception integration. F00/F01 remain
 OPEN. Composed host event outcomes now carry
@@ -122,8 +128,8 @@ so it does not close F00 or substitute for independent review.
 
 | Gate | Evidence established | Remaining evaluation before closure |
 |---|---|---|
-| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; independently check evaluator post-fixpoints. |
-| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
+| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. A post-worklist check now rejects recorded transfer candidates omitted by the completed block solution. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; add an independent persisted-certificate traversal that reapplies transfers. |
+| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, and post-worklist candidate containment validation are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and an independent persisted-certificate post-fixpoint validator. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, normal Hybrid runtime sentinels, and indirect-call witnesses are recorded. A normal-vs-CALL build was attempted with matched GCC/`-O0 -g` settings and JIT disabled, but the CALL build failed in generated Zend handler ABI selection before runtime comparison. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Resolve the CALL generator/compiler ABI issue and complete behavior comparison; complete configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |

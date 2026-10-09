@@ -279,6 +279,7 @@ pub enum GraphError {
     UnresolvedValue,
     EventWithoutOutcome,
     NonMonotoneJoin(u32),
+    NonPostFixpoint(u32),
     ResumeWithoutPendingOutcome,
     InvalidComposedCoverage,
 }
@@ -892,7 +893,9 @@ fn enqueue<H: SemanticHost>(
     by_block: &mut [Vec<usize>],
     queue: &mut Vec<usize>,
     precision: &mut Precision,
+    candidates: &mut Vec<Frame<H::Value, H::State>>,
 ) -> Result<(), GraphError> {
+    candidates.push(frame.clone());
     let index = by_block[frame.block as usize]
         .iter()
         .copied()
@@ -944,6 +947,28 @@ fn enqueue<H: SemanticHost>(
     Ok(())
 }
 
+/// Check the evaluator's recorded transfer candidates against the completed
+/// block states. This validation pass is separate from worklist discovery and
+/// join/widen decisions: every candidate must be contained by the final state
+/// for the same block and pending-outcome kind.
+fn validate_post_fixpoint<H: SemanticHost>(
+    host: &H,
+    records: &[Frame<H::Value, H::State>],
+    candidates: &[Frame<H::Value, H::State>],
+) -> Result<(), GraphError> {
+    for candidate in candidates {
+        let covered = records.iter().any(|record| {
+            record.block == candidate.block
+                && pending_kind(&record.pending) == pending_kind(&candidate.pending)
+                && frame_subsumes(host, record, candidate)
+        });
+        if !covered {
+            return Err(GraphError::NonPostFixpoint(candidate.block));
+        }
+    }
+    Ok(())
+}
+
 fn push_exit<V: PartialEq, S: PartialEq>(exits: &mut Vec<Exit<V, S>>, exit: Exit<V, S>) {
     if !exits.contains(&exit) {
         exits.push(exit);
@@ -971,6 +996,7 @@ pub fn evaluate<H: SemanticHost>(
     let mut queue = vec![0usize];
     let mut evaluation_precision = Precision::Exact;
     let mut exits = Vec::new();
+    let mut transfer_candidates = vec![records[0].clone()];
     let mut evaluation_coverage = graph.coverage.clone();
     while let Some(frame_id) = queue.pop() {
         let frame = records[frame_id].clone();
@@ -1030,6 +1056,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
+                                    &mut transfer_candidates,
                                 )?;
                             } else {
                                 push_exit(&mut exits, Exit::PhpThrow { value, state });
@@ -1055,6 +1082,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
+                                    &mut transfer_candidates,
                                 )?;
                             } else {
                                 push_exit(&mut exits, Exit::NativeUnwind { value, state });
@@ -1080,6 +1108,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
+                                    &mut transfer_candidates,
                                 )?;
                             } else {
                                 push_exit(&mut exits, Exit::Fatal { value, state });
@@ -1105,6 +1134,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
+                                    &mut transfer_candidates,
                                 )?;
                             } else {
                                 push_exit(&mut exits, Exit::Suspended { value, state });
@@ -1130,6 +1160,7 @@ pub fn evaluate<H: SemanticHost>(
                     &mut by_block,
                     &mut queue,
                     &mut evaluation_precision,
+                    &mut transfer_candidates,
                 )?,
                 Terminator::Branch { predicate, yes, no } => {
                     match host.test(predicate, arguments, receiver, &results, &state) {
@@ -1146,6 +1177,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
+                            &mut transfer_candidates,
                         )?,
                         Truth::No => enqueue(
                             host,
@@ -1160,6 +1192,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
+                            &mut transfer_candidates,
                         )?,
                         Truth::Maybe => {
                             enqueue(
@@ -1175,6 +1208,7 @@ pub fn evaluate<H: SemanticHost>(
                                 &mut by_block,
                                 &mut queue,
                                 &mut evaluation_precision,
+                                &mut transfer_candidates,
                             )?;
                             enqueue(
                                 host,
@@ -1189,6 +1223,7 @@ pub fn evaluate<H: SemanticHost>(
                                 &mut by_block,
                                 &mut queue,
                                 &mut evaluation_precision,
+                                &mut transfer_candidates,
                             )?;
                         }
                     }
@@ -1221,6 +1256,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
+                            &mut transfer_candidates,
                         )?;
                     } else {
                         push_exit(&mut exits, Exit::PhpThrow { value, state });
@@ -1244,6 +1280,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
+                            &mut transfer_candidates,
                         )?;
                     } else {
                         push_exit(&mut exits, Exit::Fatal { value, state });
@@ -1267,6 +1304,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
+                            &mut transfer_candidates,
                         )?;
                     } else {
                         push_exit(&mut exits, Exit::Suspended { value, state });
@@ -1290,6 +1328,7 @@ pub fn evaluate<H: SemanticHost>(
             }
         }
     }
+    validate_post_fixpoint(host, &records, &transfer_candidates)?;
     if evaluation_precision != Precision::Exact {
         for item in &mut evaluation_coverage {
             if !matches!(item.coverage, Coverage::NotApplicable) {
@@ -2298,8 +2337,32 @@ mod tests {
                 &mut by_block,
                 &mut queue,
                 &mut precision,
+                &mut Vec::new(),
             ),
             Err(GraphError::NonMonotoneJoin(0))
+        );
+    }
+
+    #[test]
+    fn post_fixpoint_validator_rejects_a_dropped_transfer_candidate() {
+        let host = Host::default();
+        let candidate = Frame {
+            block: 0,
+            state: vec!["write".into()],
+            results: vec![],
+            pending: None,
+            growing_updates: 0,
+        };
+        let incomplete_solution = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![],
+            pending: None,
+            growing_updates: 0,
+        };
+        assert_eq!(
+            validate_post_fixpoint(&host, &[incomplete_solution], &[candidate]),
+            Err(GraphError::NonPostFixpoint(0))
         );
     }
 
