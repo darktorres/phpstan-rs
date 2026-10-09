@@ -1,6 +1,7 @@
 mod accessory_and_refinement_types;
 mod array_literals_and_shapes;
 mod codemods;
+mod catalog_return_type_memo;
 mod helpers;
 mod locals_keys;
 mod method_memo;

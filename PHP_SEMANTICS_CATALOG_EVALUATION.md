@@ -238,7 +238,9 @@ span and inferred argument types for later return inference. The 12 focused
 `strlen_` checker fixtures pass, and `cargo check -p phpstan-rs` passes. This
 shares the return evaluation across the existing checker consumers; argument
 coercion/deprecation diagnostics still use the legacy parameter checker, so it
-does not yet satisfy the stateful single-evaluation gate.
+does not yet satisfy the stateful single-evaluation gate. A checker unit test
+also verifies that same-span narrowings keep separate memo entries and that a
+file change clears them; that test and `cargo check -p phpstan-rs --tests` pass.
 
 The remaining **approach-comparison** work in §2.3 is also explicit: compare
 regional and adapted pointer-service solutions on the same useful closed PHP
