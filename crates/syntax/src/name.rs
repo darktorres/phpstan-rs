@@ -1275,6 +1275,18 @@ impl FoldKey for Name {
     }
 }
 
+impl FoldKey for crate::ast::Ident {
+    fn fold_hash(&self) -> u64 {
+        self.name.fold_hash()
+    }
+    fn is_folded_eq(&self, stored: &Name) -> bool {
+        self.name.is_folded_eq(stored)
+    }
+    fn eq_text_ignoring_case(&self, stored: &[u8]) -> bool {
+        self.name.eq_text_ignoring_case(stored)
+    }
+}
+
 impl FoldKey for str {
     fn fold_hash(&self) -> u64 {
         folded_hash(self.as_bytes())

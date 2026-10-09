@@ -82,6 +82,12 @@ impl TableKey for Name {
     }
 }
 
+impl TableKey for syntax::ast::Ident {
+    fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
+        f(self.name.lower())
+    }
+}
+
 impl<T: TableKey + ?Sized> TableKey for &T {
     fn with_key<R>(&self, f: impl FnOnce(&str) -> R) -> R {
         (**self).with_key(f)

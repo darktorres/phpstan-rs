@@ -38,6 +38,7 @@
 //! class is not known. A hook's body is a declaration of its own, named
 //! after its property (`hook_member`).
 
+use crate::registry::TableKey;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -996,8 +997,8 @@ const CODE_RUNNING_PARAMETER_TYPES: [&str; 11] = [
 /// and by the name of any property's. Each name's classes are sorted, so
 /// what is made of them does not depend on the order the classes were
 /// declared in.
-fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry::ClassId>> {
-    let mut by_name: FxHashMap<String, Vec<crate::registry::ClassId>> = FxHashMap::default();
+fn methods_by_name(registry: &Registry) -> FxHashMap<Name, Vec<crate::registry::ClassId>> {
+    let mut by_name: FxHashMap<Name, Vec<crate::registry::ClassId>> = FxHashMap::default();
     for (class, class_id) in registry.class_ids.iter() {
         for method in registry.method_names(class) {
             let Some(sig) = registry.lookup_own_method(class, method) else {
@@ -1005,7 +1006,7 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry
             };
             if !sig.is_stub {
                 by_name
-                    .entry(method.to_ascii_lowercase())
+                    .entry(method.lowered().clone())
                     .or_default()
                     .push(*class_id);
             }
@@ -1022,7 +1023,7 @@ fn methods_by_name(registry: &Registry) -> FxHashMap<String, Vec<crate::registry
                     continue;
                 }
                 for member in [hook_member(Some(property), set), hook_member(None, set)] {
-                    let classes = by_name.entry(member).or_default();
+                    let classes = by_name.entry(Name::from(member)).or_default();
                     if classes.last() != Some(class_id) {
                         classes.push(*class_id);
                     }
@@ -1418,10 +1419,10 @@ impl Registry {
                 ordinal,
             };
         }
-        match key.class.as_deref() {
+        match key.class.as_ref() {
             None => self
                 .function_ids
-                .get(&*key.member)
+                .get(&key.member)
                 .copied()
                 .map_or_else(|| EffectId::Named(key.clone()), EffectId::Function),
             Some(class) if key.member.starts_with('$') => {
@@ -1630,10 +1631,10 @@ impl Registry {
     fn declaration_effect(&self, key: &DeclKey) -> Effect {
         match &key.class {
             Some(class) => {
-                if self.class(&**class).is_none() {
+                if self.class(class).is_none() {
                     return Effect::anything();
                 }
-                let Some(sig) = self.lookup_own_method(&**class, &*key.member) else {
+                let Some(sig) = self.lookup_own_method(class, &key.member) else {
                     return Effect::anything();
                 };
                 if sig.is_stub {
@@ -1671,7 +1672,7 @@ impl Registry {
     /// The declaration `key` names, when it is one.
     fn declaration(&self, key: &DeclKey) -> Option<&FunctionReflection> {
         match &key.class {
-            Some(class) => self.lookup_method(&**class, &key.member),
+            Some(class) => self.lookup_method(class, &key.member),
             None => self.lookup_function(&key.member),
         }
     }
@@ -1738,10 +1739,17 @@ impl Registry {
     /// The declarations a call of `method` on an object that may be of
     /// `class` may run: `class`'s and each descendant's, `__call` where a
     /// class has none, and `class`'s alone when no override can reach it.
-    fn implementations(&self, class: &str, method: &str) -> Arc<[DeclKey]> {
+    fn implementations(
+        &self,
+        class: &(impl KeyName + ?Sized),
+        method: &(impl KeyName + ?Sized),
+    ) -> Arc<[DeclKey]> {
         self.reach_memo.implementations.get_or_compute(
-            (class.to_ascii_lowercase(), method.to_ascii_lowercase()),
-            || self.compute_implementations(class, method).into(),
+            (class.lowered_name(), method.lowered_name()),
+            || {
+                self.compute_implementations(class.text(), method.text())
+                    .into()
+            },
         )
     }
 
@@ -1758,7 +1766,7 @@ impl Registry {
         {
             let key = match self.lookup_method_with_owner(&candidate, method) {
                 Some((owner, sig)) => self.reached(&owner, method, sig),
-                None => match self.lookup_method_with_owner(&candidate, "__call") {
+                None => match self.lookup_method_with_owner(&candidate, &well_known().call) {
                     Some((owner, _)) => method_key(&owner, &well_known().call),
                     None => continue,
                 },
@@ -1774,12 +1782,12 @@ impl Registry {
     /// method only a `@method` tag declares.
     fn reached(
         &self,
-        owner: &(impl KeyName + ?Sized),
+        owner: &(impl KeyName + TableKey + ?Sized),
         method: &(impl KeyName + ?Sized),
         sig: &FunctionReflection,
     ) -> DeclKey {
         if sig.is_magic
-            && let Some((call_owner, _)) = self.lookup_method_with_owner(owner.text(), "__call")
+            && let Some((call_owner, _)) = self.lookup_method_with_owner(owner, &well_known().call)
         {
             return method_key(&call_owner, &well_known().call);
         }
@@ -1794,9 +1802,9 @@ impl Registry {
     /// declared one to the magic methods. A closure (`rebindable`) may be
     /// bound to any class's scope, so it sees only a public one for
     /// certain.
-    fn property_magic(
+    fn property_magic<K: TableKey + ?Sized>(
         &self,
-        class: &str,
+        class: &K,
         prop: Option<&Name>,
         scope: Option<&str>,
         rebindable: bool,
@@ -1841,7 +1849,7 @@ impl Registry {
                 return None;
             }
             let parent = self
-                .class_references_by_name(owner.as_str())?
+                .class_references_by_name(&owner)?
                 .extends
                 .first()?
                 .clone();
@@ -1978,8 +1986,10 @@ impl Registry {
         self.reach_memo
             .constructors
             .get_or_init(|| {
-                self.classes_declaring("__construct")
-                    .filter_map(|class| self.lookup_method_with_owner(class, "__construct"))
+                self.classes_declaring(&well_known().construct)
+                    .filter_map(|class| {
+                        self.lookup_method_with_owner(class, &well_known().construct)
+                    })
                     .map(|(owner, _)| method_key(&owner, &well_known().construct))
                     .collect()
             })
@@ -2048,16 +2058,16 @@ impl Registry {
     }
 
     /// The ids of the loaded classes declaring `method` with a body.
-    fn declaring_ids(&self, method: &str) -> &[crate::registry::ClassId] {
+    fn declaring_ids(&self, method: &(impl KeyName + ?Sized)) -> &[crate::registry::ClassId] {
         self.methods_by_name
-            .get(&method.to_ascii_lowercase())
+            .get(&method.lowered_name())
             .map_or(&[], Vec::as_slice)
     }
 
     /// The loaded classes declaring `method` with a body.
-    fn classes_declaring(&self, method: &str) -> impl Iterator<Item = &Name> {
+    fn classes_declaring(&self, method: &(impl KeyName + ?Sized)) -> impl Iterator<Item = &Name> {
         self.methods_by_name
-            .get(&method.to_ascii_lowercase())
+            .get(&method.lowered_name())
             .into_iter()
             .flatten()
             .filter_map(|id| self.class_name_by_id(*id))
@@ -2074,11 +2084,11 @@ impl Registry {
     /// Every loaded declaration of `method` with a body, and every `__call`
     /// and `__callStatic`, and the builtin ones that run code passed to
     /// them: what a call on an object or a class not known may run.
-    fn methods_named(&self, method: &str) -> Arc<[DeclKey]> {
+    fn methods_named(&self, method: &(impl KeyName + ?Sized)) -> Arc<[DeclKey]> {
         self.reach_memo
             .methods_named
-            .get_or_compute(method.to_ascii_lowercase(), || {
-                self.compute_methods_named(method).into()
+            .get_or_compute(method.lowered_name(), || {
+                self.compute_methods_named(method.text()).into()
             })
     }
 
@@ -2630,7 +2640,7 @@ pub(crate) fn holder_of(ty: &Type) -> Holder {
 
 /// The holder of a value of the type `ty` declared on a member of `owner`,
 /// reached through an object of `class`.
-fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &str) -> Holder {
+fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &Name) -> Holder {
     let mut ty = ty.bind_static(class).bind_self(owner);
     if let Some(parent) = registry
         .class_references_by_name(owner)
@@ -2924,7 +2934,7 @@ impl Reach<'_> {
         let registry = self.registry;
         let has_method = |class: &Name| {
             registry.lookup_method(class, method).is_some()
-                || registry.lookup_method(class, "__call").is_some()
+                || registry.lookup_method(class, &well_known().call).is_some()
         };
         match holder {
             Holder::Classes(classes) if classes.is_empty() => Vec::new(),
@@ -3123,13 +3133,15 @@ impl Reach<'_> {
                 };
                 classes
                     .iter()
-                    .filter_map(|class| registry.lookup_method_with_owner(class, "__construct"))
+                    .filter_map(|class| {
+                        registry.lookup_method_with_owner(class, &well_known().construct)
+                    })
                     .map(|(owner, _)| (method_key(&owner, &well_known().construct), Transfer::Made))
                     .collect()
             }
             Callee::Anonymous(name) => name
                 .as_ref()
-                .and_then(|name| registry.lookup_method_with_owner(name, "__construct"))
+                .and_then(|name| registry.lookup_method_with_owner(name, &well_known().construct))
                 .map(|(owner, _)| (method_key(&owner, &well_known().construct), Transfer::Made))
                 .into_iter()
                 .collect(),
@@ -3250,7 +3262,7 @@ impl Reach<'_> {
         };
         let member = hook_member(property.map(Name::as_str), set);
         for declaring in registry.classes_declaring(&member) {
-            if registry.class(declaring.as_str()).is_none() {
+            if registry.class(declaring).is_none() {
                 continue;
             }
             // How an object of each of the holder's classes is one of the
@@ -3412,7 +3424,9 @@ impl Reach<'_> {
                 {
                     continue;
                 }
-                let given = match registry.lookup_method_with_owner(candidate, "getIterator") {
+                let given = match registry
+                    .lookup_method_with_owner(candidate, &well_known().get_iterator)
+                {
                     Some((owner, sig)) => {
                         declared_holder(registry, sig.return_type(), candidate, &owner)
                     }
@@ -3437,7 +3451,7 @@ impl Reach<'_> {
 
     /// The methods PHP calls for `operation` on an object of exactly
     /// `class`.
-    fn implicit_methods(&self, class: &str, operation: &Operation) -> Vec<&'static Name> {
+    fn implicit_methods(&self, class: &Name, operation: &Operation) -> Vec<&'static Name> {
         let registry = self.registry;
         let known = well_known();
         match operation {
@@ -3484,10 +3498,10 @@ impl Reach<'_> {
     /// The declaration PHP runs calling `method` on an object of exactly
     /// `class` itself: none when the class has no body for it, or only a
     /// `@method` tag or an abstract method declares it.
-    fn implicit_method(&self, class: &str, method: &Name) -> Option<DeclKey> {
+    fn implicit_method(&self, class: &Name, method: &Name) -> Option<DeclKey> {
         let registry = self.registry;
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
-        let (_, _, info) = registry.class(owner.as_str())?;
+        let (_, _, info) = registry.class(&owner)?;
         let abstract_method =
             info.kind() == ClassKind::Interface || registry.method_is_abstract(&owner, method);
         (!sig.is_magic && !abstract_method).then(|| method_key(&owner, method))
@@ -3500,19 +3514,19 @@ impl Reach<'_> {
         match registry.lookup_method_with_owner(class, method.text()) {
             Some((owner, sig)) => Some(registry.reached(&owner, method, sig)),
             None => registry
-                .lookup_method_with_owner(class, "__call")
+                .lookup_method_with_owner(class, &well_known().call)
                 .map(|(owner, _)| method_key(&owner, &well_known().call)),
         }
     }
 
     /// Every method an object of `class`, or of a descendant, has: what a
     /// call with a computed name may run.
-    fn every_method(&self, class: &str) -> Arc<[DeclKey]> {
+    fn every_method(&self, class: &(impl KeyName + ?Sized)) -> Arc<[DeclKey]> {
         self.registry
             .reach_memo
             .every_method
-            .get_or_compute(class.to_ascii_lowercase(), || {
-                self.compute_every_method(class).into()
+            .get_or_compute(class.lowered_name(), || {
+                self.compute_every_method(class.text()).into()
             })
     }
 
@@ -3523,7 +3537,7 @@ impl Reach<'_> {
         for candidate in std::iter::once(Name::from(class))
             .chain(registry.subclasses_shared(class).iter().cloned())
         {
-            let Some(owners) = registry.method_owners(candidate.as_str()) else {
+            let Some(owners) = registry.method_owners(&candidate) else {
                 continue;
             };
             for (method, owner) in owners.iter() {
@@ -4792,7 +4806,7 @@ impl<'r> Level<'r> {
                         _ => {
                             let mut found = Holder::Classes(Vec::new());
                             for key in registry.implementations(class, method).iter() {
-                                let Some((owner, sig)) = key.class.as_deref().and_then(|owner| {
+                                let Some((owner, sig)) = key.class.as_ref().and_then(|owner| {
                                     registry.lookup_method_with_owner(owner, &key.member)
                                 }) else {
                                     return Holder::Unknown;

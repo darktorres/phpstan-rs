@@ -6,6 +6,7 @@ use syntax::name::{FoldKey, FoldedMap, Name, NameMap};
 
 use rayon::prelude::*;
 
+use crate::registry::effects::KeyName;
 use crate::registry::name_table::TableKey;
 use crate::registry::{
     ClassId, ClassReflection, ConstantReflection, FunctionReflection, MethodEntry,
@@ -238,7 +239,11 @@ impl Registry {
             )
     }
 
-    pub(crate) fn member_slot<K: TableKey + ?Sized>(&self, class: &K, method: &str) -> Option<u16> {
+    pub(crate) fn member_slot<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
+        &self,
+        class: &K,
+        method: &M,
+    ) -> Option<u16> {
         self.class(class)
             .and_then(|(_, _, info)| info.member_slots.get(method).copied())
             .or_else(|| {
@@ -341,7 +346,11 @@ impl Registry {
             .insert_if_absent(method, signature)
     }
 
-    pub(crate) fn method_is_abstract<K: TableKey + ?Sized>(&self, class: &K, method: &str) -> bool {
+    pub(crate) fn method_is_abstract<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
+        &self,
+        class: &K,
+        method: &M,
+    ) -> bool {
         self.member_slot(class, method)
             .and_then(|slot| {
                 self.class_ids
@@ -422,8 +431,8 @@ impl Registry {
     /// function's dozens of read-only, post-load call sites.
     /// Whether `class` is `of` or extends or implements it, both compared
     /// as PHP compares class names, case-insensitively.
-    pub fn is_subclass_of(&self, class: &str, of: &str) -> bool {
-        if class.eq_ignore_ascii_case(of) {
+    pub fn is_subclass_of<K: TableKey + ?Sized>(&self, class: &K, of: &str) -> bool {
+        if class.with_key(|class| class.eq_ignore_ascii_case(of)) {
             return true;
         }
         let Some(ancestors) = self
@@ -656,33 +665,33 @@ impl Registry {
 
     /// Every class-like extending or implementing `class`, directly or
     /// transitively - `is_subclass_of`'s converse, without `class`.
-    pub(crate) fn subclasses(&self, class: &str) -> Vec<Name> {
+    pub(crate) fn subclasses(&self, class: &(impl KeyName + ?Sized)) -> Vec<Name> {
         self.descendants(class, false).to_vec()
     }
 
     /// `subclasses`, computed once for the graph as it is.
-    pub(crate) fn subclasses_shared(&self, class: &str) -> Arc<[Name]> {
+    pub(crate) fn subclasses_shared(&self, class: &(impl KeyName + ?Sized)) -> Arc<[Name]> {
         self.descendants(class, false)
     }
 
     /// `subclasses`, and every class-like using `class` as a trait or
     /// descending from one that does - `all_ancestor_names`'s converse.
-    pub(crate) fn inheritors(&self, class: &str) -> Vec<Name> {
+    pub(crate) fn inheritors(&self, class: &(impl KeyName + ?Sized)) -> Vec<Name> {
         self.descendants(class, true).to_vec()
     }
 
-    fn descendants(&self, class: &str, with_traits: bool) -> Arc<[Name]> {
+    fn descendants(&self, class: &(impl KeyName + ?Sized), with_traits: bool) -> Arc<[Name]> {
         self.reach_memo
             .descendants
-            .get_or_compute((class.to_ascii_lowercase(), with_traits), || {
-                self.walk_descendants(class, with_traits)
+            .get_or_compute((class.lowered_name(), with_traits), || {
+                self.walk_descendants(class.text(), with_traits)
             })
     }
 
     /// The classes below `class`, found by walking the graph.
     pub(crate) fn walk_descendants(&self, class: &str, with_traits: bool) -> Arc<[Name]> {
-        let mut seen: FxHashSet<String> = FxHashSet::default();
-        seen.insert(class.to_ascii_lowercase());
+        let mut seen: FxHashSet<Name> = FxHashSet::default();
+        seen.insert(class.lowered_name());
         let mut result = Vec::new();
         let mut stack = vec![Name::from(class)];
         while let Some(current) = stack.pop() {
@@ -693,7 +702,7 @@ impl Registry {
                 .into_iter()
                 .flatten();
             for child in children.chain(users) {
-                if seen.insert(child.to_ascii_lowercase()) {
+                if seen.insert(child.lowered().clone()) {
                     result.push(child.clone());
                     stack.push(child.clone());
                 }
@@ -1033,10 +1042,10 @@ impl Registry {
         })
     }
 
-    pub fn lookup_method<K: TableKey + ?Sized>(
+    pub fn lookup_method<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
         &self,
         class: &K,
-        method: &str,
+        method: &M,
     ) -> Option<&FunctionReflection> {
         // Real PHP resolves method calls case-insensitively, the same as
         // class and function names: the owners hold one entry for each
@@ -1101,10 +1110,10 @@ impl Registry {
     /// not globally unique - substituting an inherited method/property's
     /// `TemplateParam`s correctly requires knowing which ancestor's own
     /// template scope they belong to, not just the value found.
-    pub fn lookup_method_with_owner<K: TableKey + ?Sized>(
+    pub fn lookup_method_with_owner<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
         &self,
         class: &K,
-        method: &str,
+        method: &M,
     ) -> Option<(Name, &FunctionReflection)> {
         // See `lookup_method`.
         let (declared, owner) = self.method_owners(class)?.get_key_value(method)?;
@@ -1771,12 +1780,12 @@ impl Registry {
 
     /// Whether `class` is a class a stub declares (a PHP builtin or
     /// extension class).
-    pub(crate) fn is_builtin_class(&self, class: &str) -> bool {
+    pub(crate) fn is_builtin_class<K: TableKey + ?Sized>(&self, class: &K) -> bool {
         self.built_in_stub_classes.contains_key(class)
     }
 
     /// The function `name` names, compared case-insensitively as PHP does.
-    pub fn lookup_function(&self, name: &str) -> Option<&FunctionReflection> {
+    pub fn lookup_function<K: TableKey + ?Sized>(&self, name: &K) -> Option<&FunctionReflection> {
         self.function(name).map(|(_, _, declaration)| declaration)
     }
 

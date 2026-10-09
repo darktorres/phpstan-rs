@@ -72,9 +72,9 @@ pub(crate) type SharedTargets = Arc<[(DeclKey, Transfer)]>;
 pub(crate) struct ReachMemo {
     /// The classes below a class (with the trait users when the key says),
     /// in the order a walk of the graph finds them.
-    pub(crate) descendants: OnceMap<(String, bool), Arc<[Name]>>,
-    pub(crate) implementations: OnceMap<(String, String), Arc<[DeclKey]>>,
-    pub(crate) every_method: OnceMap<String, Arc<[DeclKey]>>,
+    pub(crate) descendants: OnceMap<(Name, bool), Arc<[Name]>>,
+    pub(crate) implementations: OnceMap<(Name, Name), Arc<[DeclKey]>>,
+    pub(crate) every_method: OnceMap<Name, Arc<[DeclKey]>>,
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
     /// What an operation runs, by `ImplicitKey`; none when it may run code
     /// not known.
@@ -82,7 +82,7 @@ pub(crate) struct ReachMemo {
     /// property's.
     pub(crate) unknown_implicit: OnceMap<OperationKey, Arc<[DeclKey]>>,
     pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
-    pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
+    pub(crate) methods_named: OnceMap<Name, Arc<[DeclKey]>>,
     /// The id a declaration's key stands for in the effects pass.
     /// Whether a declaration is a builtin's.
     /// The table row a builtin declaration is looked up under.

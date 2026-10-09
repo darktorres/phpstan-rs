@@ -570,7 +570,7 @@ pub struct Registry {
     // The loaded classes declaring each method name with a body, lowercased,
     // as the last finish found them (`registry::effects`).
     #[serde(skip)]
-    methods_by_name: Arc<FxHashMap<String, Vec<ClassId>>>,
+    methods_by_name: Arc<FxHashMap<Name, Vec<ClassId>>>,
     // The properties the loaded files unset, as the last finish found them
     // (`registry::effects`).
     #[serde(skip)]
@@ -688,7 +688,10 @@ impl Registry {
         })
     }
 
-    pub(crate) fn class_references_by_name(&self, name: &str) -> Option<ClassReferences<'_>> {
+    pub(crate) fn class_references_by_name<K: TableKey + ?Sized>(
+        &self,
+        name: &K,
+    ) -> Option<ClassReferences<'_>> {
         self.class_ids
             .get(name)
             .copied()
@@ -891,7 +894,10 @@ impl Registry {
     }
 
     /// The id and declaration selected for `name` by PHP's function-name rules.
-    pub(crate) fn function(&self, name: &str) -> Option<(FnId, &Name, &FunctionReflection)> {
+    pub(crate) fn function<K: TableKey + ?Sized>(
+        &self,
+        name: &K,
+    ) -> Option<(FnId, &Name, &FunctionReflection)> {
         let (name, id) = self.function_ids.get_with_name(name)?;
         Some((*id, name, self.function_by_id(*id)?))
     }
