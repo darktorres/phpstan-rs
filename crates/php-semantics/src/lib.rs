@@ -26,7 +26,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 4;
+pub const SCHEMA_MAJOR: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -205,9 +205,27 @@ pub enum Event {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PhpFlowInstruction {
-    Assign { destination: Bytes, source: Bytes },
-    Unset { local: Bytes },
-    BindReference { left: Bytes, right: Bytes },
+    Assign {
+        destination: Bytes,
+        source: Bytes,
+    },
+    Unset {
+        local: Bytes,
+    },
+    BindReference {
+        left: Bytes,
+        right: Bytes,
+    },
+    ArraySet {
+        array: Bytes,
+        key: ArrayKey,
+        source: Bytes,
+    },
+    ArrayGet {
+        destination: Bytes,
+        array: Bytes,
+        key: ArrayKey,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,6 +447,12 @@ impl BehaviorGraph {
                     } => vec![Domain::UserWrite],
                     Event::PhpFlow {
                         instruction: PhpFlowInstruction::BindReference { .. },
+                    } => vec![Domain::UserRead, Domain::UserWrite],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::ArraySet { .. },
+                    } => vec![Domain::UserRead, Domain::UserWrite],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::ArrayGet { .. },
                     } => vec![Domain::UserRead, Domain::UserWrite],
                     Event::Unknown { domains, .. } => domains.clone(),
                 };
@@ -2071,6 +2095,12 @@ mod tests {
                 Event::PhpFlow {
                     instruction: PhpFlowInstruction::BindReference { .. },
                 } => vec![Domain::UserRead, Domain::UserWrite],
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArraySet { .. },
+                } => vec![Domain::UserRead, Domain::UserWrite],
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayGet { .. },
+                } => vec![Domain::UserRead, Domain::UserWrite],
                 Event::Unknown { domains, .. } => domains.clone(),
             };
             for domain in required {
@@ -2290,6 +2320,72 @@ mod tests {
                 state
             },
         }));
+        evaluation.post_fixpoint.validate(&graph, &host).unwrap();
+    }
+
+    #[test]
+    fn php_flow_array_copy_and_object_identity_execute_through_graph() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![Block::new(
+                vec![
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::Assign {
+                            destination: Bytes(b"copy".to_vec()),
+                            source: Bytes(b"source".to_vec()),
+                        },
+                    },
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::ArraySet {
+                            array: Bytes(b"copy".to_vec()),
+                            key: ArrayKey::String(Bytes(b"key".to_vec())),
+                            source: Bytes(b"replacement".to_vec()),
+                        },
+                    },
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::ArrayGet {
+                            destination: Bytes(b"read_back".to_vec()),
+                            array: Bytes(b"copy".to_vec()),
+                            key: ArrayKey::String(Bytes(b"key".to_vec())),
+                        },
+                    },
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::Assign {
+                            destination: Bytes(b"object_copy".to_vec()),
+                            source: Bytes(b"object".to_vec()),
+                        },
+                    },
+                ],
+                Terminator::Return(Some(Operand::Literal(Bytes(b"done".to_vec())))),
+            )],
+            coverage: coverage_for(&[Domain::UserRead, Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = PhpFlowHost::new(Digest([12; 32]));
+        let mut initial = PhpState::new();
+        let source_array = initial.new_array();
+        initial.set_local(Bytes(b"source".to_vec()), source_array);
+        initial
+            .array_set(
+                b"source",
+                ArrayKey::String(Bytes(b"key".to_vec())),
+                PhpValue::Int(1),
+            )
+            .unwrap();
+        initial.set_local(Bytes(b"replacement".to_vec()), PhpValue::Int(2));
+        let object = initial.new_object();
+        initial.set_local(Bytes(b"object".to_vec()), object.clone());
+
+        let evaluation = evaluate(&graph, &[], &PhpValue::Unknown, initial, &mut host).unwrap();
+        let Exit::Normal { state, .. } = &evaluation.exits[0] else {
+            panic!("expected normal return");
+        };
+        assert_eq!(state.local(b"read_back"), Some(PhpValue::Int(2)));
+        assert_eq!(state.local(b"object_copy"), Some(object));
+        assert_eq!(
+            state.array_get(b"source", &ArrayKey::String(Bytes(b"key".to_vec()))),
+            Ok(Some(PhpValue::Int(1)))
+        );
         evaluation.post_fixpoint.validate(&graph, &host).unwrap();
     }
 

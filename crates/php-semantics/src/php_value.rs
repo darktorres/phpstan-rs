@@ -488,6 +488,27 @@ impl SemanticHost for PhpFlowHost {
                         state.bind_reference(left.clone(), right.clone());
                         None
                     }
+                    PhpFlowInstruction::ArraySet { array, key, source } => {
+                        match state.local(&source.0) {
+                            Some(value) => state.array_set(&array.0, key.clone(), value).err(),
+                            None => Some(StateError::MissingLocal(source.clone())),
+                        }
+                    }
+                    PhpFlowInstruction::ArrayGet {
+                        destination,
+                        array,
+                        key,
+                    } => match state.array_get(&array.0, key) {
+                        Ok(Some(value)) => {
+                            state.set_local(destination.clone(), value);
+                            None
+                        }
+                        Ok(None) => Some(StateError::MissingArrayElement {
+                            array: array.clone(),
+                            key: key.clone(),
+                        }),
+                        Err(error) => Some(error),
+                    },
                 };
                 if error.is_some() {
                     self.unmodeled_outcomes(
@@ -598,6 +619,7 @@ pub enum StateError {
     MissingLocal(Bytes),
     MissingArray(ArrayId),
     NotArray(Bytes),
+    MissingArrayElement { array: Bytes, key: ArrayKey },
 }
 
 #[cfg(test)]
