@@ -83,7 +83,9 @@ impl CacheNameEncoder {
 #[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct CacheNameTable {
-    texts: Arc<Vec<String>>,
+    buffer: Arc<Vec<u8>>,
+    /// Where each name's text lies in `buffer`.
+    ranges: Arc<Vec<(u32, u32)>>,
     names: Arc<Vec<OnceLock<Name>>>,
     // Optional opaque identity carried alongside nested lazy records. The
     // cache reader owns its meaning; syntax only preserves it in clones.
@@ -92,24 +94,40 @@ pub struct CacheNameTable {
 
 impl CacheNameTable {
     pub fn new(texts: Vec<String>) -> CacheNameTable {
-        let names = (0..texts.len()).map(|_| OnceLock::new()).collect();
+        let mut buffer = Vec::new();
+        let ranges = texts
+            .iter()
+            .map(|text| {
+                let start = buffer.len() as u32;
+                buffer.extend_from_slice(text.as_bytes());
+                (start, buffer.len() as u32)
+            })
+            .collect();
+        Self::from_buffer(Arc::new(buffer), ranges)
+    }
+
+    /// The names whose texts lie at `ranges` of `buffer`, each valid UTF-8.
+    pub fn from_buffer(buffer: Arc<Vec<u8>>, ranges: Vec<(u32, u32)>) -> CacheNameTable {
+        let names = (0..ranges.len()).map(|_| OnceLock::new()).collect();
         CacheNameTable {
-            texts: Arc::new(texts),
+            buffer,
+            ranges: Arc::new(ranges),
             names: Arc::new(names),
             context: None,
         }
     }
 
     pub fn text(&self, index: u32) -> Option<&str> {
-        self.texts.get(index as usize).map(String::as_str)
+        let (start, end) = *self.ranges.get(index as usize)?;
+        std::str::from_utf8(&self.buffer[start as usize..end as usize]).ok()
     }
 
     pub fn len(&self) -> usize {
-        self.texts.len()
+        self.ranges.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.texts.is_empty()
+        self.ranges.is_empty()
     }
 
     pub fn name(&self, index: u32) -> Option<Name> {
@@ -117,13 +135,8 @@ impl CacheNameTable {
     }
 
     pub fn interned(&self, index: u32) -> Option<&Name> {
-        let index = index as usize;
-        let text = self.texts.get(index)?;
-        Some(self.names[index].get_or_init(|| Name::from(text.as_str())))
-    }
-
-    pub fn texts(&self) -> &Arc<Vec<String>> {
-        &self.texts
+        let text = self.text(index)?;
+        Some(self.names[index as usize].get_or_init(|| Name::from(text)))
     }
 
     pub fn set_context(&mut self, context: u64) {

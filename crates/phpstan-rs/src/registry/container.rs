@@ -222,22 +222,28 @@ impl Source {
     pub(super) fn read(&self, offset: u64, len: u64) -> Result<Vec<u8>, String> {
         let len = usize::try_from(len).map_err(|_| "a cache range is too large".to_string())?;
         let mut bytes = vec![0; len];
+        self.read_into(offset, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    /// Fills `into` from the bytes at `offset`.
+    pub(super) fn read_into(&self, offset: u64, into: &mut [u8]) -> Result<(), String> {
         match self {
             Source::Memory(file) => {
                 let start = usize::try_from(offset)
                     .map_err(|_| "a cache offset is too large".to_string())?;
                 let end = start
-                    .checked_add(len)
+                    .checked_add(into.len())
                     .ok_or_else(|| "a cache range overflows the address space".to_string())?;
-                bytes.copy_from_slice(
+                into.copy_from_slice(
                     file.get(start..end)
                         .ok_or_else(|| "a cache range points outside its file".to_string())?,
                 );
             }
-            Source::File { file, .. } => read_exact_at(file, offset, &mut bytes)
+            Source::File { file, .. } => read_exact_at(file, offset, into)
                 .map_err(|error| format!("reading cache record at {offset}: {error}"))?,
         }
-        Ok(bytes)
+        Ok(())
     }
 
     pub(super) fn invalidate(&self) {
@@ -359,10 +365,11 @@ impl Reader {
 
     pub(crate) fn open(path: &Path) -> Result<Reader, Unreadable> {
         let file = Arc::new(File::open(path).map_err(|_| Unreadable::Damaged)?);
-        let file_len = file.metadata().map_err(|_| Unreadable::Damaged)?.len();
+        let metadata = file.metadata().map_err(|_| Unreadable::Damaged)?;
+        let file_len = metadata.len();
         Self::read(
             Source::File {
-                identity: file_identity(&file.metadata().map_err(|_| Unreadable::Damaged)?),
+                identity: file_identity(&metadata),
                 file,
                 path: Some(Arc::new(path.to_path_buf())),
             },
@@ -399,32 +406,37 @@ impl Reader {
         }
         let mut ordered: Vec<_> = spans.iter().collect();
         ordered.sort_unstable_by_key(|(_, span)| span.offset);
-        let mut eager_bytes = Vec::new();
+        let eager_len = ordered.iter().try_fold(0usize, |total, (_, span)| {
+            usize::try_from(span.len)
+                .ok()
+                .and_then(|len| total.checked_add(len))
+        });
+        let mut eager_bytes = vec![0; eager_len.ok_or(Unreadable::Damaged)?];
         let mut sections = FxHashMap::default();
         let mut eager_crc = crc32fast::Hasher::new();
+        let mut start = 0;
         for (name, span) in ordered {
-            let section_bytes = source
-                .read(span.offset, span.len)
+            let end = start + span.len as usize;
+            let section = &mut eager_bytes[start..end];
+            source
+                .read_into(span.offset, section)
                 .map_err(|_| Unreadable::Damaged)?;
-            eager_crc.update(&section_bytes);
-            let start = eager_bytes.len();
-            eager_bytes.extend_from_slice(&section_bytes);
-            sections.insert(name.clone(), start..eager_bytes.len());
+            eager_crc.update(section);
+            sections.insert(name.clone(), start..end);
+            start = end;
         }
         eager_crc.update(&directory);
         if sum != u64::from(eager_crc.finalize()) {
             return Err(Unreadable::Damaged);
         }
         let names_range = sections[NAMES].clone();
-        let names =
-            postcard::from_bytes::<Vec<String>>(&eager_bytes[names_range]).map_err(|error| {
-                Unreadable::Inconsistent(format!("its name table does not decode: {error}"))
-            })?;
+        let buffer = Arc::new(eager_bytes);
+        let names = name_table_of(&buffer, names_range)?;
         Ok(Reader {
-            buffer: Buffer(Arc::new(eager_bytes)),
+            buffer: Buffer(buffer),
             source,
             sections,
-            names: syntax::name::CacheNameTable::new(names),
+            names,
             decoded: Arc::default(),
         })
     }
@@ -461,6 +473,35 @@ impl Reader {
             .cloned()
             .ok_or_else(|| format!("it has no section {name}"))
     }
+}
+
+/// The names of the cache's name section, as ranges of the buffer: the
+/// section is validated as text once, and each name is cut from it where it
+/// lies.
+fn name_table_of(
+    buffer: &Arc<Vec<u8>>,
+    range: Range<usize>,
+) -> Result<syntax::name::CacheNameTable, Unreadable> {
+    let section = &buffer[range.clone()];
+    let texts = postcard::from_bytes::<Vec<&str>>(section).map_err(|error| {
+        Unreadable::Inconsistent(format!("its name table does not decode: {error}"))
+    })?;
+    let base = section.as_ptr() as usize;
+    let ranges = texts
+        .iter()
+        .map(|text| {
+            let start = range.start + (text.as_ptr() as usize - base);
+            Some((
+                u32::try_from(start).ok()?,
+                u32::try_from(start + text.len()).ok()?,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Unreadable::Damaged)?;
+    Ok(syntax::name::CacheNameTable::from_buffer(
+        Arc::clone(buffer),
+        ranges,
+    ))
 }
 
 #[cfg(unix)]

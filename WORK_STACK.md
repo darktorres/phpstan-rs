@@ -84,7 +84,7 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    one batch of items 0-14 (0b, 7a-7h, 12a-12f) for every hotspot of the
    9071f48f callgrind profile. Status: in progress; the Baseline step
    is done (off 54.13 G, warm 42.14 G, cold-with-store 56.24 G; `strace` says
-   no `memmap2`), items 0, 0b, 1, 2, 3, 4, 5, 7a, 7b, 7c, 7d, 7e and 7f are committed, each with open pieces. Every open piece is a row E2.12.1-E2.12.21 of `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`; an item counts as done only when its rows are closed. Resume at item 7g (tests running), then close E2.12.1-E2.12.2 (D and the builtin bit) before item 7h. Verification runs once, after item 14.
+   no `memmap2`), items 0, 0b, 1, 2, 3, 4, 5, 7a, 7b, 7c, 7d, 7e, 7f and 7g are committed, each with open pieces. Every open piece is a row E2.12.1-E2.12.21 of `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`; an item counts as done only when its rows are closed. 7g is committed (its open piece is E2.12.19). Resume by closing E2.12.1-E2.12.2 (D and the builtin bit), then item 7h. Verification runs once, after item 14.
 2. Then **level 8's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
    finds beyond what the optimization needs, validated together (the
