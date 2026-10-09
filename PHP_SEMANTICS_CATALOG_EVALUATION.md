@@ -94,9 +94,13 @@ compilation then failed in `Zend/zend_execute.c`: on this x86_64 host,
 `zend_vm_opcodes.h` selects `ZEND_VM_KIND_TAILCALL` when the compiler advertises
 `musttail`/`preserve_none`, while the generator's CALL output has incompatible
 handler declarations/table entries for that selected ABI. A brief attempt to
-force the selector was not a valid repair and is not evidence about runtime
-behavior. The original saved
-Hybrid executable is intact (SHA-256
+force the selector was not a valid repair. An `EXTRA_CFLAGS` override that
+disables GCC's `__has_attribute` still fails in generated handler dispatch
+with too few arguments and incompatible function-pointer types. Generating
+CALL without specialization emits undefined `$variant` warnings in
+`zend_vm_gen.php` and fails on missing helper declarations as well as handler
+dispatch. The saved and current CLI binaries are byte-identical Hybrid
+executables (SHA-256
 `5628c72ba2098d26746c77ff57880d243f249a74ded535a2ffdd0a48f7d3e0dc`), and the
 tracked PHP source files were restored. No CALL runtime output was produced;
 the VM comparison remains OPEN and needs a supported build configuration or
