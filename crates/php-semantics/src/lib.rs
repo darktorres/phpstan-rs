@@ -1377,6 +1377,54 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_host_predicate_keeps_both_branches() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![],
+                    Terminator::Branch {
+                        predicate: Predicate::Host(Bytes(b"unrecognized".to_vec())),
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"yes".to_vec())))),
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"no".to_vec())))),
+                ),
+            ],
+            coverage: Domain::ALL
+                .into_iter()
+                .map(|domain| DomainCoverage {
+                    domain,
+                    coverage: Coverage::NotApplicable,
+                    precision: Precision::Exact,
+                    evidence: vec![Digest([1; 32])],
+                    assumptions: vec![],
+                })
+                .collect(),
+        };
+        let mut host = Host::default();
+        let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        let mut values: Vec<_> = evaluation
+            .exits
+            .into_iter()
+            .map(|exit| match exit {
+                Exit::Normal { value, .. } => value.unwrap(),
+                _ => panic!("unexpected non-normal exit"),
+            })
+            .collect();
+        values.sort();
+        assert_eq!(values, vec!["no", "yes"]);
+    }
+
+    #[test]
     fn open_child_coverage_opens_a_closed_parent_domain() {
         let mut graph = graph(
             vec![Event::Invoke {

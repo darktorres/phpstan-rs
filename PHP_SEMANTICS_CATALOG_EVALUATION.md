@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v1 graph/event/domain-coverage types,
 separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Thirty-one
+explicit exceptional continuations and host-supplied joins/widening. Thirty-two
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -19,7 +19,8 @@ cleanup/resumption, cleanup return overriding a pending throw, native unwind
 separation, domain-masked unknown transfers with consistency checks, total
 coverage/evidence validation, composed-child coverage propagation and rejection
 of incomplete composed coverage, unresolved-return rejection, state-sensitive
-post-invocation predicates, and loop convergence. These are
+post-invocation predicates, conservative handling of unsupported predicates,
+and loop convergence. These are
 foundation tests only: loop widening is generic and has only a small fixture,
 with no calibrated abstract domains; the evaluator also has no catalog
 selection, target semantics, real checker host, native producer, or publication
@@ -47,7 +48,7 @@ callback exception flow.
 
 The full checker suite passed with 1,194 library tests, all checker
 binary/integration tests, and 28 semantic-crate tests before the recent
-evaluator contract tests. Now all 31 semantic-crate tests pass and
+evaluator contract tests. Now all 32 semantic-crate tests pass and
 `cargo check -p phpstan-rs` passes. Checker sources have not changed since the
 full-suite run.
 
