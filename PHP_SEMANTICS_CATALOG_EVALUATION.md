@@ -40,6 +40,11 @@ callback exception flow.
 
 ## Phase F gate-by-gate status
 
+The current [working semantic contract](PHP_SEMANTICS_CATALOG_CONTRACT.md)
+turns the design rule into observable trace and composition requirements and
+maps current tests to concrete invalid compositions. It is explicitly a draft,
+so it does not close F00 or substitute for independent review.
+
 | Gate | Evidence established | Remaining evaluation before closure |
 |---|---|---|
 | F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. | Review a single written contract for observable traces, abstract order, boundary assumptions, and return refinement. Add invalid composition counterexamples and independently check evaluator post-fixpoints. |
