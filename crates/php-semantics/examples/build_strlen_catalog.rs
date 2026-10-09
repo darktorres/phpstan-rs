@@ -69,6 +69,46 @@ fn main() {
         witness["mapping"]["zend_string_length_field_index"].as_u64(),
         Some(2)
     );
+    assert_eq!(
+        witness["target"]["triple"].as_str(),
+        Some("x86_64-pc-linux-gnu")
+    );
+    assert_eq!(
+        witness["target"]["datalayout_has_64_bit_i64"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        witness["zend_string_layout"]["length_field_index"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        witness["zend_string_layout"]["length_field_name"].as_str(),
+        Some("len")
+    );
+    assert_eq!(
+        witness["zend_string_layout"]["length_field_type"].as_str(),
+        Some("size_t")
+    );
+    assert_eq!(
+        witness["zend_string_layout"]["fields"][2]["name"].as_str(),
+        Some("len")
+    );
+    let layout_digest = decode_digest(
+        witness["zend_string_layout"]["sha256"]
+            .as_str()
+            .expect("Zend layout-header digest"),
+    );
+    let layout_evidence = EvidenceRecord {
+        kind: EvidenceKind::SourceTransfer,
+        source_digest: Digest(layout_digest),
+        site: Some(Bytes(
+            b"Zend/zend_types.h:struct _zend_string:field[2]=len:size_t".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-zend-string-layout-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![],
+    };
+    let layout_evidence_id = layout_evidence.id().expect("Zend layout evidence encodes");
     assert_eq!(witness["mapping"]["loaded_as"].as_str(), Some("i64"));
     for fact in [
         "debug_line_matches_source_return",
@@ -141,10 +181,10 @@ fn main() {
         )),
         rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-return-v1".to_vec()),
         assumptions: vec![],
-        dependencies: vec![source_evidence_id],
+        dependencies: vec![source_evidence_id, layout_evidence_id],
     };
     let llvm_evidence_id = llvm_evidence.id().expect("LLVM evidence encodes");
-    let return_evidence = vec![source_evidence_id, llvm_evidence_id];
+    let return_evidence = vec![source_evidence_id, layout_evidence_id, llvm_evidence_id];
     let graph = BehaviorGraph {
         schema_major: SCHEMA_MAJOR,
         entry: 0,
@@ -178,7 +218,7 @@ fn main() {
                 evidence: if domain == Domain::Return {
                     return_evidence.clone()
                 } else {
-                    vec![source_evidence_id, llvm_evidence_id]
+                    return_evidence.clone()
                 },
                 assumptions: vec![],
             })
@@ -209,6 +249,7 @@ fn main() {
         }],
         evidence: vec![
             (source_evidence_id, source_evidence),
+            (layout_evidence_id, layout_evidence),
             (llvm_evidence_id, llvm_evidence),
         ],
     };

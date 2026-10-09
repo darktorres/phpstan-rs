@@ -11,6 +11,9 @@ from pathlib import Path
 EXPECTED_SOURCE_SHA256 = (
     "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
 )
+EXPECTED_LAYOUT_HEADER_SHA256 = (
+    "601ed337205b2258ff0de217d40aaf38afd3a52f67a8edf0f91182414a6bcccd"
+)
 
 
 def run(command: list[str], *, input_bytes: bytes | None = None) -> bytes:
@@ -36,6 +39,28 @@ def main() -> None:
     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     if source_sha256 != EXPECTED_SOURCE_SHA256:
         raise SystemExit(f"unexpected PHP source digest: {source_sha256}")
+    layout_header = args.source.parent / "zend_types.h"
+    layout_bytes = layout_header.read_bytes()
+    layout_sha256 = hashlib.sha256(layout_bytes).hexdigest()
+    if layout_sha256 != EXPECTED_LAYOUT_HEADER_SHA256:
+        raise SystemExit(f"unexpected Zend layout header digest: {layout_sha256}")
+    layout_text = layout_bytes.decode("utf-8")
+    struct_match = re.search(r"struct _zend_string\s*\{([^}]+)\};", layout_text)
+    if struct_match is None:
+        raise SystemExit("locked Zend layout header lacks struct _zend_string")
+    fields = [
+        line.split("/*", 1)[0].strip().rstrip(";").split()
+        for line in struct_match.group(1).splitlines()
+        if line.strip() and ";" in line
+    ]
+    expected_fields = [
+        ["zend_refcounted_h", "gc"],
+        ["zend_ulong", "h"],
+        ["size_t", "len"],
+        ["char", "val[1]"],
+    ]
+    if fields != expected_fields:
+        raise SystemExit(f"unexpected _zend_string fields: {fields!r}")
     source_lines = source_bytes.decode("utf-8").splitlines()
     source_line = next(
         (index for index, line in enumerate(source_lines, 1)
@@ -82,6 +107,9 @@ def main() -> None:
     if start < 0 or end < 0:
         raise SystemExit("linked LLVM module lacks a zif_strlen definition")
     function = ir[start:end]
+    target_triple = re.search(r'^target triple = "([^"]+)"', ir, re.MULTILINE)
+    if target_triple is None or target_triple.group(1) != "x86_64-pc-linux-gnu":
+        raise SystemExit("linked module does not match the locked Linux x86-64 layout profile")
     helper_calls = {
         "parameter_count_error": "zend_wrong_parameters_count_error",
         "flf_strictness_gate": "zend_flf_parse_arg_str_slow",
@@ -157,6 +185,21 @@ def main() -> None:
             "function": "zif_strlen",
             "extracted_bitcode_sha256": hashlib.sha256(extracted).hexdigest(),
             "extracted_ir_sha256": hashlib.sha256(ir.encode()).hexdigest(),
+        },
+        "target": {
+            "triple": target_triple.group(1),
+            "datalayout_has_64_bit_i64": 'i64:64' in ir.split('target datalayout = "', 1)[1].split('"', 1)[0],
+        },
+        "zend_string_layout": {
+            "header": "Zend/zend_types.h",
+            "sha256": layout_sha256,
+            "fields": [
+                {"index": index, "type": field[0], "name": field[1]}
+                for index, field in enumerate(fields)
+            ],
+            "length_field_index": 2,
+            "length_field_name": "len",
+            "length_field_type": "size_t",
         },
         "mapping": {
             "debug_line_matches_source_return": True,

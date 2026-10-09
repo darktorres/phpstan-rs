@@ -102,14 +102,19 @@ rejects anything other than the locked translation unit, and checks that the
 emitting evidence. A Clang 21.1.8 witness extractor also checks linked
 `zif_strlen` LLVM: its debug line maps the return load to source line 382, it
 loads `_zend_string` field 2 as `i64`, and stores that value as the return zval
-payload. For the source `Z_PARAM_STR(s)` sequence, it records the configured
+payload. The pinned Zend layout header has SHA-256
+`601ed337205b2258ff0de217d40aaf38afd3a52f67a8edf0f91182414a6bcccd`; the
+extractor confirms field 2 is `size_t len` and the linked target is Linux
+x86-64. The generator records this source-layout dependency and checks that it
+agrees with the compiler access before emitting the PHP `StringByteLength`
+bridge. For the source `Z_PARAM_STR(s)` sequence, it records the configured
 parameter-count and type-error helpers, both strictness-gate paths, and the
 weak string parser's conversion and nullable-diagnostic calls from extracted
 linked helper bodies. These parameter and implicit-operation domains remain
 open in the graph; the witness is a compiler-linked inventory, not a semantic
-model for coercion or diagnostics. The embedded Return domain cites both the
-source record and an LLVM record that depends on it; open domains cite both as
-well. The witness is
+model for coercion or diagnostics. The embedded domains cite the pinned
+function source, Zend layout, and linked LLVM evidence; the LLVM record depends
+on the two source records. The witness is
 [`strlen-llvm-witness.json`](tools/php-catalog/experiments/comparison/results/evaluation/strlen-llvm-witness.json);
 its linked module SHA-256 is
 `e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e`. The report
@@ -117,7 +122,7 @@ is recreated by [extract_strlen_llvm_witness.py](tools/php-catalog/experiments/c
 linked `php-cli.bc`. Regeneration from the locked source and report is
 byte-identical to
 the checked-in schema-v6 artifact (SHA-256
-`09c0503095e64c9c6ef677c2bd9c4bc85c8abd4633fec35096cb80a1d4c4cf57`); an
+`c2a39149115c1d95d5a7617c54f3bb60818e75960ecaf06c832d319801199772`); an
 unrelated source input is rejected. It does not execute effects, callbacks, or
 exceptional state.
 The checker uses it only when every configured target scenario is definitely
@@ -188,7 +193,7 @@ so it does not close F00 or substitute for independent review.
 | F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive predicates across joins, partial result definitions, effect/throw refinement, and mismatched targets. A serialized graph-bound certificate replays each invariant frame and validates successor/exit completeness plus coverage non-narrowing. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement; validate that the supplied host transfer functions match PHP-source behavior. |
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, graph-bound candidate containment plus persisted transfer/exit/coverage replay, and fail-closed handling of result IDs defined on only some predecessor paths are implemented. Missing, partial, or duplicate invocation coverage is rejected. A PHP-host regression sends distinct normal callback results and writes through a CFG join and verifies both become unknown. | Review the reference contract fixtures against the written contract; add broader branch/callback combinations; replace the toy host with calibrated domains and validate host transfer behavior against source-derived fixtures. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` Return domain cites the exact source record and a validated Clang 21.1.8 linked-module witness for its field load and return store. The `Z_PARAM_STR` helper/call chain is inventoried from extracted LLVM functions, with parsing, conversion, and diagnostic domains left open. | Extend configured implicit-operation mapping and link more imported source/layout/call-flow evidence into graph entries. The witness is one manually translated closed return slice; the parse-helper inventory does not validate PHP coercion or diagnostics, or the broader graph against LLVM. |
-| F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
+| F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. The `strlen` field bridge joins pinned Zend layout, linked LLVM access, and a graph transfer, but does not solve native memory or interprocedural summaries. | Implement demand summaries, coverage-aware pointer consumption/fallback tracking, and validate source-derived closed native graphs with an independent post-fixpoint checker. No native demand summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | **Phase F minimum fixture set complete.** PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and execute array copy/mutation/read plus object assignment through graph instructions. A copied array containing a reference observes callback writes on normal return and cleanup-resumed throw paths (58 semantic tests). Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | No remaining Phase F fixture is identified. Broader key coercion, object properties, and syntax-to-flow lowering remain C22 phase work. |
 | F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
@@ -198,9 +203,10 @@ comparison. The minimum F04 value/reference fixture task is complete, but its
 broader C22 lowering work remains. F00 needs independent contract review; F01
 needs broader branch fixtures and a calibrated host; F02 needs configured
 implicit-operation mapping plus source-derived graph linkage beyond the single
-`strlen` return witness; F03 needs a working native summary/bridge path; F05
-needs stateful checker integration across effects and exceptions; and F06 needs
-same-slice precision, cost, and solver evidence. The next dependency is an
+`strlen` slice; F03 needs native demand summaries and pointer reuse beyond the
+direct Zend string-field bridge; F05 needs stateful checker integration across
+effects and exceptions; and F06 needs same-slice precision, cost, and solver
+evidence. The next dependency is an
 independently reviewed observable-trace contract, followed by one locked 8.5.4
 builtin slice driven from native import through graph validation and a checker
 call. Until that exists, producer/solver choice remains provisional.

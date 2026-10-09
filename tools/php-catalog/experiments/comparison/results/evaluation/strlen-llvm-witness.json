@@ -104,5 +104,38 @@
     "path": "Zend/zend_builtin_functions.c",
     "return_line": 382,
     "sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+  },
+  "target": {
+    "datalayout_has_64_bit_i64": true,
+    "triple": "x86_64-pc-linux-gnu"
+  },
+  "zend_string_layout": {
+    "fields": [
+      {
+        "index": 0,
+        "name": "gc",
+        "type": "zend_refcounted_h"
+      },
+      {
+        "index": 1,
+        "name": "h",
+        "type": "zend_ulong"
+      },
+      {
+        "index": 2,
+        "name": "len",
+        "type": "size_t"
+      },
+      {
+        "index": 3,
+        "name": "val[1]",
+        "type": "char"
+      }
+    ],
+    "header": "Zend/zend_types.h",
+    "length_field_index": 2,
+    "length_field_name": "len",
+    "length_field_type": "size_t",
+    "sha256": "601ed337205b2258ff0de217d40aaf38afd3a52f67a8edf0f91182414a6bcccd"
   }
 }

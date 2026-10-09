@@ -189,6 +189,13 @@ mod embedded_catalog_tests {
             ])
         );
         let source_id = source_record.id().expect("source evidence encodes");
+        let layout_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| record.rule_version.0 == b"php-8.5.4-zend-string-layout-v1")
+            .expect("strlen Return has Zend layout evidence");
+        let layout_id = layout_record.id().expect("layout evidence encodes");
         let llvm_record = manifest
             .evidence
             .iter()
@@ -197,6 +204,15 @@ mod embedded_catalog_tests {
             .expect("strlen Return has linked-module evidence");
         assert_eq!(llvm_record.kind, EvidenceKind::SourceTransfer);
         assert!(llvm_record.dependencies.contains(&source_id));
+        assert!(llvm_record.dependencies.contains(&layout_id));
+        assert_eq!(
+            layout_record.source_digest,
+            Digest([
+                0x60, 0x1e, 0xd3, 0x37, 0x20, 0x5b, 0x22, 0x58, 0xff, 0x0d, 0xe2, 0x17, 0xd4, 0x0a,
+                0xaf, 0x38, 0xaf, 0xd3, 0xa5, 0x2f, 0x67, 0xa8, 0xed, 0xf0, 0xf9, 0x11, 0x82, 0x41,
+                0x4a, 0x6b, 0xcc, 0xcd,
+            ])
+        );
         assert_eq!(
             llvm_record.source_digest,
             Digest([
@@ -217,6 +233,7 @@ mod embedded_catalog_tests {
             coverage.domain == Domain::Return
                 && matches!(coverage.coverage, Coverage::Closed)
                 && coverage.evidence.contains(&source_id)
+                && coverage.evidence.contains(&layout_id)
                 && coverage.evidence.contains(&llvm_record.id().unwrap())
         }));
         assert!(
