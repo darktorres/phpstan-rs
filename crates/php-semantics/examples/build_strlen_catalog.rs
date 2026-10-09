@@ -115,9 +115,25 @@ fn main() {
         "LLVM witness refers to different Zend parser source"
     );
     assert_eq!(
-        witness["parser_source"]["function"].as_str(),
-        Some("zend_parse_arg_str_weak")
+        witness["parser_source"]["functions"].as_array(),
+        Some(&vec![
+            serde_json::Value::String("zend_parse_arg_str_weak".into()),
+            serde_json::Value::String("zend_parse_arg_str_slow".into()),
+            serde_json::Value::String("zend_flf_parse_arg_str_slow".into()),
+        ])
     );
+    for required_fact in [
+        "if (UNEXPECTED(ZEND_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+        "if (UNEXPECTED(ZEND_FLF_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+    ] {
+        assert!(
+            witness["parser_source"]["contract_facts"]
+                .as_array()
+                .is_some_and(|facts| facts
+                    .iter()
+                    .any(|fact| fact.as_str() == Some(required_fact)))
+        );
+    }
     let parser_digest = decode_digest(
         witness["parser_source"]["sha256"]
             .as_str()
@@ -127,7 +143,7 @@ fn main() {
         kind: EvidenceKind::SourceTransfer,
         source_digest: Digest(parser_digest),
         site: Some(Bytes(
-            b"Zend/zend_API.c:zend_parse_arg_str_weak:Z_PARAM_STR".to_vec(),
+            b"Zend/zend_API.c:Z_PARAM_STR:strict-gates-to-weak-string-parser".to_vec(),
         )),
         rule_version: Bytes(b"php-8.5.4-zend-string-parser-source-v1".to_vec()),
         assumptions: vec![],

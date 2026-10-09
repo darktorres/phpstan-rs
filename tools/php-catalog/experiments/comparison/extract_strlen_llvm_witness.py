@@ -75,16 +75,40 @@ def main() -> None:
     if parser_start < 0 or parser_end < 0:
         raise SystemExit("locked Zend source lacks zend_parse_arg_str_weak")
     parser_body = parser_text[parser_start:parser_end]
-    parser_contract = [
+    weak_parser_contract = [
         'zend_null_arg_deprecated("string", arg_num)',
         "convert_to_string(arg);",
         "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
         "OBJ_RELEASE(zobj);",
         "*dest = Z_STR_P(arg);",
     ]
-    missing_parser_facts = [fact for fact in parser_contract if fact not in parser_body]
+    missing_parser_facts = [fact for fact in weak_parser_contract if fact not in parser_body]
     if missing_parser_facts:
         raise SystemExit(f"Zend string parser contract changed: {missing_parser_facts}")
+    strictness_by_function = {
+        "zend_parse_arg_str_slow": [
+            "if (UNEXPECTED(ZEND_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+            "return zend_parse_arg_str_weak(arg, dest, arg_num);",
+        ],
+        "zend_flf_parse_arg_str_slow": [
+            "if (UNEXPECTED(ZEND_FLF_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+            "return zend_parse_arg_str_weak(arg, dest, arg_num);",
+        ],
+    }
+    strictness_contract = []
+    for function, facts in strictness_by_function.items():
+        match = re.search(
+            rf"ZEND_API bool ZEND_FASTCALL {function}\([^\n]*\)\s*(?:/\*.*?\*/\s*)?\{{.*?\n\}}",
+            parser_text,
+            re.DOTALL,
+        )
+        if match is None:
+            raise SystemExit(f"locked Zend source lacks {function}")
+        body = match.group(0)
+        if any(fact not in body for fact in facts):
+            raise SystemExit(f"Zend strict string parser contract changed: {function}")
+        strictness_contract.extend(facts)
+    parser_contract = weak_parser_contract + strictness_contract
     source_lines = source_bytes.decode("utf-8").splitlines()
     source_line = next(
         (index for index, line in enumerate(source_lines, 1)
@@ -287,7 +311,11 @@ def main() -> None:
         "parser_source": {
             "path": "Zend/zend_API.c",
             "sha256": parser_sha256,
-            "function": "zend_parse_arg_str_weak",
+            "functions": [
+                "zend_parse_arg_str_weak",
+                "zend_parse_arg_str_slow",
+                "zend_flf_parse_arg_str_slow",
+            ],
             "contract_facts": parser_contract,
         },
         "compiler": producer.group(1),

@@ -118,9 +118,17 @@
       "convert_to_string(arg);",
       "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
       "OBJ_RELEASE(zobj);",
-      "*dest = Z_STR_P(arg);"
+      "*dest = Z_STR_P(arg);",
+      "if (UNEXPECTED(ZEND_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+      "return zend_parse_arg_str_weak(arg, dest, arg_num);",
+      "if (UNEXPECTED(ZEND_FLF_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+      "return zend_parse_arg_str_weak(arg, dest, arg_num);"
     ],
-    "function": "zend_parse_arg_str_weak",
+    "functions": [
+      "zend_parse_arg_str_weak",
+      "zend_parse_arg_str_slow",
+      "zend_flf_parse_arg_str_slow"
+    ],
     "path": "Zend/zend_API.c",
     "sha256": "ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b"
   },

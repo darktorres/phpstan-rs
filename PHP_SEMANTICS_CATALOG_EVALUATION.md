@@ -110,8 +110,9 @@ agrees with the compiler access before emitting the PHP `StringByteLength`
 bridge. For the source `Z_PARAM_STR(s)` sequence, it traces both strictness-gate
 destinations through their stored pointers to the local string slot consumed
 by the linked length load. It pins `zend_API.c` and checks source plus linked
-helper evidence for scalar conversion, nullable diagnostics, the indirect
-object cast handler, and object release. These parameter and implicit-operation
+helper evidence for both strictness-gate returns before weak parsing, scalar
+conversion, nullable diagnostics, the indirect object cast handler, and object
+release. These parameter and implicit-operation
 domains remain open in the graph; the witness records identity and data flow,
 not PHP coercion, diagnostic, effect, or exception semantics. The embedded
 domains cite the pinned function source, Zend layout, parser source, and linked
@@ -123,7 +124,7 @@ is recreated by [extract_strlen_llvm_witness.py](tools/php-catalog/experiments/c
 linked `php-cli.bc`. Regeneration from the locked source and report is
 byte-identical to
 the checked-in schema-v6 artifact (SHA-256
-`d99d4118075a42592732364d9cc7673fcb113c18725815e56c23075473908a0d`); an
+`cdde75d14942525b75529b2c122f35b325d8e91bb54c67566bf462a30203d484`); an
 unrelated source input is rejected. It does not execute effects, callbacks, or
 exceptional state.
 The checker uses it only when every configured target scenario is definitely
