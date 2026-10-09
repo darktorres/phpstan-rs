@@ -22,6 +22,13 @@ negative facts: they leave the affected domain open and retain a conservative
 unknown transfer or uncovered target remainder. Provenance identifies the
 basis of a fact; it does not prove a transfer function correct.
 
+Each event outcome carries per-domain coverage, precision, evidence, and
+assumptions for composed work. The evaluator unions evidence and assumptions,
+retains the least precise result, and opens a domain if either the enclosing
+graph or a composed outcome is open. A child marked not applicable contributes
+no semantic fact for that domain. This prevents a closed native wrapper from
+concealing an unresolved PHP callback.
+
 ## Composition rules
 
 Sequential composition passes each normal state and result into the next
@@ -56,6 +63,7 @@ investigation; failure to observe an event cannot prove its absence.
 | A native unwind is reported as a PHP throw. | It crosses a different language/ABI boundary and does not establish PHP exception state. | `native_unwind_remains_distinct_from_php_throw` |
 | An unresolved return is treated as no return or as a closed empty result. | Incomplete evaluation cannot justify excluding a return behavior. | `unresolved_return_is_an_incomplete_evaluation_not_no_return` |
 | A graph labels a domain closed while containing an unknown transfer that affects it, or supplies no coverage/evidence. | Its negative claims are unsupported by the actual transfer graph. | `unknown_transfer_cannot_be_marked_closed_or_reasonless`; `every_domain_requires_a_coverage_decision_and_evidence` |
+| A closed wrapper invokes an open child but retains its own closed return coverage, or omits a child domain entirely. | The wrapper's result may depend on child behavior, so child uncertainty must compose into the result and incomplete metadata must not default to closed. | `open_child_coverage_opens_a_closed_parent_domain`; `incomplete_child_coverage_rejects_the_evaluation` |
 | A maybe-applicable target graph is selected as definitely applicable, or its uncovered remainder is dropped. | The target set includes configurations whose behavior was not established. | `target_selection_keeps_unknown_remainder_and_selects_exact_scenario`; target-module correlated-scenario tests |
 
 These tests check structural behavior in a small evaluator host. They do not

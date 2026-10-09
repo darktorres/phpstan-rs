@@ -258,6 +258,7 @@ pub enum GraphError {
     UnresolvedValue,
     EventWithoutOutcome,
     ResumeWithoutPendingOutcome,
+    InvalidComposedCoverage,
 }
 
 impl BehaviorGraph {
@@ -431,11 +432,31 @@ pub struct Evaluation<V, S> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventExit<V, S> {
-    Normal { result: Option<(u32, V)>, state: S },
-    PhpThrow { value: V, state: S },
-    NativeUnwind { value: V, state: S },
-    Fatal { value: V, state: S },
-    Suspended { value: V, state: S },
+    Normal {
+        result: Option<(u32, V)>,
+        state: S,
+        coverage: Vec<DomainCoverage>,
+    },
+    PhpThrow {
+        value: V,
+        state: S,
+        coverage: Vec<DomainCoverage>,
+    },
+    NativeUnwind {
+        value: V,
+        state: S,
+        coverage: Vec<DomainCoverage>,
+    },
+    Fatal {
+        value: V,
+        state: S,
+        coverage: Vec<DomainCoverage>,
+    },
+    Suspended {
+        value: V,
+        state: S,
+        coverage: Vec<DomainCoverage>,
+    },
 }
 
 pub trait SemanticHost {
@@ -472,6 +493,75 @@ pub trait SemanticHost {
     fn join_state(&self, left: Self::State, right: Self::State) -> Self::State;
     fn widen_state(&self, old: Self::State, next: Self::State) -> Self::State;
     fn state_subsumes(&self, broad: &Self::State, narrow: &Self::State) -> bool;
+}
+
+fn precision_rank(precision: Precision) -> u8 {
+    match precision {
+        Precision::Exact => 0,
+        Precision::Joined => 1,
+        Precision::Widened => 2,
+    }
+}
+
+fn merge_coverage(
+    current: &mut Vec<DomainCoverage>,
+    additions: &[DomainCoverage],
+) -> Result<(), GraphError> {
+    if additions.is_empty() {
+        return Ok(());
+    }
+    let mut seen = Vec::new();
+    for item in additions {
+        if seen.contains(&item.domain) {
+            return Err(GraphError::InvalidComposedCoverage);
+        }
+        seen.push(item.domain);
+        if matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty())
+            || item.evidence.is_empty()
+        {
+            return Err(GraphError::InvalidComposedCoverage);
+        }
+    }
+    if Domain::ALL.iter().any(|domain| !seen.contains(domain)) {
+        return Err(GraphError::InvalidComposedCoverage);
+    }
+
+    let mut merged = Vec::with_capacity(Domain::ALL.len());
+    for domain in Domain::ALL {
+        let Some(mut item) = current.iter().find(|item| item.domain == domain).cloned() else {
+            return Err(GraphError::InvalidComposedCoverage);
+        };
+        let Some(addition) = additions.iter().find(|item| item.domain == domain) else {
+            merged.push(item);
+            continue;
+        };
+        item.coverage = match (item.coverage, addition.coverage.clone()) {
+            (Coverage::Open { reasons: mut left }, Coverage::Open { reasons: right }) => {
+                left.extend(right);
+                left.sort();
+                left.dedup();
+                Coverage::Open { reasons: left }
+            }
+            (Coverage::Open { reasons }, _) | (_, Coverage::Open { reasons }) => {
+                Coverage::Open { reasons }
+            }
+            (Coverage::Closed, _) | (_, Coverage::Closed) => Coverage::Closed,
+            (Coverage::NotApplicable, Coverage::NotApplicable) => Coverage::NotApplicable,
+        };
+        if precision_rank(addition.precision) > precision_rank(item.precision) {
+            item.precision = addition.precision;
+        }
+        item.evidence.extend(addition.evidence.iter().copied());
+        item.evidence.sort();
+        item.evidence.dedup();
+        item.assumptions
+            .extend(addition.assumptions.iter().copied());
+        item.assumptions.sort();
+        item.assumptions.dedup();
+        merged.push(item);
+    }
+    *current = merged;
+    Ok(())
 }
 
 /// Execute a finite graph with a finite host-provided state join. Cycles are
@@ -664,6 +754,7 @@ pub fn evaluate<H: SemanticHost>(
     by_block[graph.entry as usize].push(0);
     let mut queue = vec![0usize];
     let mut exits = Vec::new();
+    let mut evaluation_coverage = graph.coverage.clone();
     while let Some(frame_id) = queue.pop() {
         let frame = records[frame_id].clone();
         let block_id = frame.block;
@@ -678,7 +769,12 @@ pub fn evaluate<H: SemanticHost>(
                 }
                 for outcome in outcomes {
                     match outcome {
-                        EventExit::Normal { result, state } => {
+                        EventExit::Normal {
+                            result,
+                            state,
+                            coverage,
+                        } => {
+                            merge_coverage(&mut evaluation_coverage, &coverage)?;
                             let mut next_values = values.clone();
                             if let Some((id, value)) = result {
                                 next_values.retain(|(existing, _)| *existing != id);
@@ -686,7 +782,12 @@ pub fn evaluate<H: SemanticHost>(
                             }
                             next.push((state, next_values, pending.clone()));
                         }
-                        EventExit::PhpThrow { value, state } => {
+                        EventExit::PhpThrow {
+                            value,
+                            state,
+                            coverage,
+                        } => {
+                            merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.php_throw {
                                 enqueue(
                                     host,
@@ -705,7 +806,12 @@ pub fn evaluate<H: SemanticHost>(
                                 push_exit(&mut exits, Exit::PhpThrow { value, state });
                             }
                         }
-                        EventExit::NativeUnwind { value, state } => {
+                        EventExit::NativeUnwind {
+                            value,
+                            state,
+                            coverage,
+                        } => {
+                            merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.native_unwind {
                                 enqueue(
                                     host,
@@ -724,7 +830,12 @@ pub fn evaluate<H: SemanticHost>(
                                 push_exit(&mut exits, Exit::NativeUnwind { value, state });
                             }
                         }
-                        EventExit::Fatal { value, state } => {
+                        EventExit::Fatal {
+                            value,
+                            state,
+                            coverage,
+                        } => {
+                            merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.fatal {
                                 enqueue(
                                     host,
@@ -743,7 +854,12 @@ pub fn evaluate<H: SemanticHost>(
                                 push_exit(&mut exits, Exit::Fatal { value, state });
                             }
                         }
-                        EventExit::Suspended { value, state } => {
+                        EventExit::Suspended {
+                            value,
+                            state,
+                            coverage,
+                        } => {
+                            merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.suspended {
                                 enqueue(
                                     host,
@@ -936,7 +1052,7 @@ pub fn evaluate<H: SemanticHost>(
     }
     Ok(Evaluation {
         exits,
-        coverage: graph.coverage.clone(),
+        coverage: evaluation_coverage,
     })
 }
 
@@ -950,6 +1066,8 @@ mod tests {
         both_invoke_outcomes: bool,
         native_unwind_invoke: bool,
         maybe_always: bool,
+        nested_open: Option<Domain>,
+        incomplete_nested_coverage: bool,
     }
     impl SemanticHost for Host {
         type Value = String;
@@ -1014,34 +1132,54 @@ mod tests {
                     result: result_id, ..
                 } => {
                     state.push("invoke".into());
+                    let mut coverage = composed_coverage(self.nested_open);
+                    if self.incomplete_nested_coverage {
+                        coverage.pop();
+                    }
                     if self.native_unwind_invoke {
                         return vec![EventExit::NativeUnwind {
                             value: "native exception".into(),
                             state,
+                            coverage,
                         }];
                     }
                     if self.throw_invoke {
                         return vec![EventExit::PhpThrow {
                             value: "exception".into(),
                             state,
+                            coverage,
                         }];
                     }
                     result = Some((*result_id, "callback-result".into()));
                     if self.both_invoke_outcomes {
                         let throwing_state = state.clone();
                         return vec![
-                            EventExit::Normal { result, state },
+                            EventExit::Normal {
+                                result,
+                                state,
+                                coverage: coverage.clone(),
+                            },
                             EventExit::PhpThrow {
                                 value: "exception".into(),
                                 state: throwing_state,
+                                coverage,
                             },
                         ];
                     }
+                    return vec![EventExit::Normal {
+                        result,
+                        state,
+                        coverage,
+                    }];
                 }
                 Event::Unknown { domains, .. } => state.push(format!("unknown:{domains:?}")),
             }
             let _ = (args, receiver);
-            vec![EventExit::Normal { result, state }]
+            vec![EventExit::Normal {
+                result,
+                state,
+                coverage: vec![],
+            }]
         }
 
         fn unknown_value(&self) -> String {
@@ -1099,6 +1237,25 @@ mod tests {
         }
     }
 
+    fn composed_coverage(open_domain: Option<Domain>) -> Vec<DomainCoverage> {
+        Domain::ALL
+            .into_iter()
+            .map(|domain| DomainCoverage {
+                domain,
+                coverage: if Some(domain) == open_domain {
+                    Coverage::Open {
+                        reasons: vec![Bytes(b"nested boundary".to_vec())],
+                    }
+                } else {
+                    Coverage::Closed
+                },
+                precision: Precision::Exact,
+                evidence: vec![Digest([2; 32])],
+                assumptions: vec![Digest([3; 32])],
+            })
+            .collect()
+    }
+
     #[test]
     fn callback_result_and_mutation_feed_ordered_return() {
         let graph = graph(
@@ -1131,6 +1288,63 @@ mod tests {
                 value: Some("callback-result".into()),
                 state: vec!["write".into(), "invoke".into()]
             }]
+        );
+    }
+
+    #[test]
+    fn open_child_coverage_opens_a_closed_parent_domain() {
+        let mut graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 0,
+            }],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        let returned = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        returned.coverage = Coverage::Closed;
+
+        let mut host = Host {
+            nested_open: Some(Domain::Return),
+            ..Host::default()
+        };
+        let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        let returned = evaluation
+            .coverage
+            .iter()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        assert_eq!(
+            returned.coverage,
+            Coverage::Open {
+                reasons: vec![Bytes(b"nested boundary".to_vec())]
+            }
+        );
+        assert_eq!(returned.evidence, vec![Digest([1; 32]), Digest([2; 32])]);
+        assert_eq!(returned.assumptions, vec![Digest([3; 32])]);
+    }
+
+    #[test]
+    fn incomplete_child_coverage_rejects_the_evaluation() {
+        let graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 0,
+            }],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        let mut host = Host {
+            incomplete_nested_coverage: true,
+            ..Host::default()
+        };
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::InvalidComposedCoverage)
         );
     }
 
