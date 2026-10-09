@@ -191,7 +191,14 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Predicate {
     Always,
-    IsLiteral { value: Operand, expected: Bytes },
+    IsLiteral {
+        value: Operand,
+        expected: Bytes,
+    },
+    /// A typed-by-host predicate for state or target facts outside the shared
+    /// operand vocabulary. Hosts must return `Maybe` when an ID is unknown or
+    /// cannot be decided soundly.
+    Host(Bytes),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -482,6 +489,8 @@ pub trait SemanticHost {
         receiver: &Self::Value,
         results: &[(u32, Self::Value)],
     ) -> Option<Self::Value>;
+    /// Decide a graph predicate from the current arguments, results, and
+    /// state. Return `Maybe` whenever the host cannot prove either answer.
     fn test(
         &self,
         predicate: &Predicate,
@@ -1113,7 +1122,7 @@ mod tests {
             args: &[String],
             receiver: &String,
             results: &[(u32, String)],
-            _: &Vec<String>,
+            state: &Vec<String>,
         ) -> Truth {
             match p {
                 Predicate::Always => {
@@ -1130,6 +1139,14 @@ mod tests {
                         None => Truth::Maybe,
                     }
                 }
+                Predicate::Host(id) if id.0 == b"state-has-invoke" => {
+                    if state.iter().any(|event| event == "invoke") {
+                        Truth::Yes
+                    } else {
+                        Truth::No
+                    }
+                }
+                Predicate::Host(_) => Truth::Maybe,
             }
         }
         fn event(
@@ -1306,6 +1323,55 @@ mod tests {
             vec![Exit::Normal {
                 value: Some("callback-result".into()),
                 state: vec!["write".into(), "invoke".into()]
+            }]
+        );
+    }
+
+    #[test]
+    fn host_predicate_observes_callback_state_after_invocation() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![],
+                        result: 0,
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::Host(Bytes(b"state-has-invoke".to_vec())),
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"called".to_vec())))),
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"not-called".to_vec())))),
+                ),
+            ],
+            coverage: Domain::ALL
+                .into_iter()
+                .map(|domain| DomainCoverage {
+                    domain,
+                    coverage: Coverage::NotApplicable,
+                    precision: Precision::Exact,
+                    evidence: vec![Digest([1; 32])],
+                    assumptions: vec![],
+                })
+                .collect(),
+        };
+        let mut host = Host::default();
+        let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        assert_eq!(
+            evaluation.exits,
+            vec![Exit::Normal {
+                value: Some("called".to_string()),
+                state: vec!["invoke".to_string()],
             }]
         );
     }

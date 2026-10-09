@@ -60,6 +60,7 @@ investigation; failure to observe an event cannot prove its absence.
 |---|---|---|
 | A callback writes and throws, but the enclosing graph reports the old state or runs a later normal event. | The callback's pre-throw write is observable; normal continuation is unreachable on that path. | `callback_throw_preserves_prior_write_and_skips_later_events` |
 | A callback has normal and throw outcomes, but their result/state correlations are flattened into one certain result. | This invents a result on the throw path or loses a possible exit. | `callback_normal_and_throw_paths_keep_separate_results_and_states` |
+| A branch after an invocation uses the pre-call state or treats an unsupported host predicate as false. | Callback mutations precede the branch; an undecidable predicate must retain both paths. | `host_predicate_observes_callback_state_after_invocation`; unknown host predicates return `Maybe` in the reference host |
 | A pending throw enters cleanup, then cleanup returns, while the evaluator still reports the original throw. | The cleanup return overrides the pending completion. | `pending_callback_throw_runs_cleanup_then_resumes`; `cleanup_return_overrides_pending_throw` |
 | A native unwind is reported as a PHP throw. | It crosses a different language/ABI boundary and does not establish PHP exception state. | `native_unwind_remains_distinct_from_php_throw` |
 | An unresolved return is treated as no return or as a closed empty result. | Incomplete evaluation cannot justify excluding a return behavior. | `unresolved_return_is_an_incomplete_evaluation_not_no_return` |
@@ -69,7 +70,6 @@ investigation; failure to observe an event cannot prove its absence.
 
 These tests check structural behavior in a small evaluator host. They do not
 establish that the checker host, native transfers, or every PHP runtime obeys
-the contract. Before F00 closes, add composition tests for stale state guards,
-return refinement that drops effects/throws, dependency-incomplete projections,
-an open PHP callback beneath a closed native contract, and mismatched target
-scenarios; then obtain independent review.
+the contract. Before F00 closes, add composition tests for state guards across
+joins, return refinement that drops effects/throws, dependency-incomplete
+projections, and mismatched target scenarios; then obtain independent review.
