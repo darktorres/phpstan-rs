@@ -438,7 +438,9 @@ impl std::hash::Hash for DeclKey {
 
 impl PartialEq for DeclKey {
     fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash && (self as &dyn DeclQuery) == (other as &dyn DeclQuery)
+        self.hash == other.hash
+            && (self.member_is_shared(other)
+                || (self as &dyn DeclQuery) == (other as &dyn DeclQuery))
     }
 }
 
@@ -455,6 +457,16 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
 const FILE_CLASS: &str = "\0file";
 
 impl DeclKey {
+    /// Whether both keys hold the very same strings, which makes them equal.
+    fn member_is_shared(&self, other: &DeclKey) -> bool {
+        Arc::ptr_eq(&self.member, &other.member)
+            && match (&self.class, &other.class) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+
     pub(in crate::registry) fn new(class: Option<Arc<str>>, member: Arc<str>) -> DeclKey {
         let hash = decl_hash(class.as_deref(), &member);
         DeclKey {
@@ -1069,10 +1081,16 @@ fn classification_by_id<'r>(
     key: DeclKey,
     classification: Classification<'r>,
 ) -> (EffectId, IdClassification<'r>) {
+    let id_of = |key: &DeclKey| {
+        registry
+            .reach_memo
+            .effect_ids
+            .get_or_compute(key.clone(), || registry.effect_id_for(key))
+    };
     let calls = classification
         .calls
         .into_iter()
-        .map(|(key, transfer, site)| (registry.effect_id_for(&key), transfer, site))
+        .map(|(key, transfer, site)| (id_of(&key), transfer, site))
         .collect();
     let sites = classification
         .sites
@@ -1089,7 +1107,7 @@ fn classification_by_id<'r>(
                             runs: passed
                                 .runs
                                 .into_iter()
-                                .map(|(key, transfer)| (registry.effect_id_for(&key), transfer))
+                                .map(|(key, transfer)| (id_of(&key), transfer))
                                 .collect(),
                             params: passed.params,
                         },
@@ -1099,7 +1117,7 @@ fn classification_by_id<'r>(
         })
         .collect();
     (
-        registry.effect_id_for(&key),
+        id_of(&key),
         IdClassification {
             own: classification.own,
             calls,

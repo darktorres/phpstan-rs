@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effects::{DeclKey, ImplicitKey, OperationKey, Transfer};
+use super::effects::{DeclKey, EffectId, ImplicitKey, OperationKey, Transfer};
 
 const SHARDS: usize = 16;
 
@@ -61,6 +61,8 @@ pub(crate) struct ReachMemo {
     pub(crate) unknown_implicit: OnceMap<OperationKey, Arc<[DeclKey]>>,
     pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
     pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
+    /// The id a declaration's key stands for in the effects pass.
+    pub(crate) effect_ids: OnceMap<DeclKey, EffectId>,
 }
 
 impl std::fmt::Debug for ReachMemo {
