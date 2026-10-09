@@ -25,7 +25,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 2;
+pub const SCHEMA_MAJOR: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -167,6 +167,14 @@ pub enum Operand {
     Receiver,
     Result(u32),
     Literal(Bytes),
+    /// A source/model-backed integer envelope for a normal return.
+    IntRange {
+        min: Option<i64>,
+        max: Option<i64>,
+    },
+    /// PHP's byte length of a string argument, with a nonnegative range
+    /// fallback when the host cannot enumerate constant strings.
+    StringByteLength(u32),
     Unknown,
 }
 
@@ -1327,6 +1335,8 @@ mod tests {
                     .find(|(id, _)| id == i)
                     .map(|(_, v)| v.clone()),
                 Operand::Literal(v) => Some(String::from_utf8_lossy(&v.0).into_owned()),
+                Operand::IntRange { .. } => None,
+                Operand::StringByteLength(_) => None,
                 Operand::Unknown => None,
             }
         }

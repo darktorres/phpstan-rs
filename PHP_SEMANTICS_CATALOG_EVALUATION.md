@@ -8,7 +8,7 @@ framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
 as `2b6afb95`.
 
 Phase F implementation is now underway. A checker-independent
-`crates/php-semantics` seed contains schema v2 graph/event/domain-coverage types,
+`crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
 explicit exceptional continuations and host-supplied joins/widening. Forty-one
@@ -45,25 +45,46 @@ included in canonical registry identity, and converted to exact catalog target
 ranges while platform facts remain unknown. Config, registry, adapter, and CLI
 fixtures exercise `8.5.4`; `cargo check -p phpstan-rs` passes. An unset version
 maps to every language version recognized by the checker (5.3–8.5). This
-verifies target propagation only: no behavior graph is loaded or executed at a
-builtin call site, so F05 remains OPEN. The crate also
+verifies target propagation only; a separate exact-release `strlen()` slice is
+now wired into the builtin call path as described below. The crate also
 has an initial PHP value/reference state with array-copy, nested-array,
 reference-cell, and object identity tests. An exact-entry catalog API validates
 evidence, supports ASCII symbol matching, projection, and explanation lookup.
 Catalog manifests also have a validated JSON ingestion API that checks
-artifacts before installing runtime indexes; it is not yet wired to a checker
-artifact or call site. F04 remains OPEN because this state is not yet
-integrated with PhpFlowIR or callback exception flow.
+artifacts before installing runtime indexes. F04 remains OPEN because the PHP
+value/reference state is not yet integrated with PhpFlowIR or callback
+exception flow.
+
+The first embedded artifact exercises the production catalog call path for
+`strlen()` when the configured target is exactly PHP 8.5.4. The checked-in
+manifest is validated through `Catalog::from_json` at checker initialization;
+its Return projection computes exact byte lengths for up to 16 constant
+strings and otherwise produces `int<0, max>`, while all non-return domains
+remain explicitly open. Its evidence records the SHA-256 of the pinned
+`Zend/zend_builtin_functions.c` and the `ZSTR_LEN(s)` return site. That file
+is from the locked `php-8.5.4` source worktree. The Rust generator and
+the exact-release fixture cover artifact generation, selection, and call-site
+inference: under exact 8.5.4, `strlen('')` is inferred as `0`; for the
+8.5 minor range, the possibly applicable graph is left uncovered and the
+checker retains the broad legacy result. This is a manually encoded
+source-transfer rule, not an imported compiler graph; it does not execute
+effects, callbacks, or exceptional state.
+The checker uses it only when every configured target scenario is definitely
+covered, and falls back on uncovered or Maybe-applicable ranges. This is
+concrete F05 progress, but it does not satisfy the full C24/C25 architecture
+or eliminate legacy effect handling.
 
 The latest full run on October 9, 2026 (`cargo test -p phpstan-rs -p
-phpstan-rs-types -p phpstan-rs-semantics`) passes 1,200 checker library tests,
-59 checker binary/integration tests, 286 type tests, and 41 semantic tests.
-The run includes joined/widened precision propagation, exact `8.5.4` config and
-CLI acceptance, registry target conversion, and canonical identity separation
-across patches. Semantic regressions reject inapplicable coverage for reachable
-and composed invocation domains, and preserve fatal and suspension as distinct
-exits. This validates integration with the current checker build; it does not
-establish catalog execution at builtin call sites.
+phpstan-rs-types -p phpstan-rs-semantics`) passes, including 1,201 checker
+library tests, 3 checker binary tests, 45 CLI tests, 286 type tests, and 41
+semantic tests. The separate catalog fixture runs also pass for exact-patch
+literal refinement and minor-range fallback. The run includes joined/widened
+precision propagation, exact `8.5.4` config and CLI acceptance, registry target
+conversion, and canonical identity separation across patches. Semantic
+regressions reject inapplicable coverage for reachable and composed invocation
+domains, and preserve fatal and suspension as distinct exits. This validates
+the current checker build and the narrow `strlen()` call path; it does not
+close the broader catalog execution or effect-integration obligations.
 
 After the full run, a targeted CLI config round-trip also passes with
 `php_version = "8.5.4"`, exercising config parsing through session creation and
@@ -80,10 +101,10 @@ so it does not close F00 or substitute for independent review.
 |---|---|---|
 | F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; independently check evaluator post-fixpoints. |
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
-| F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect source/layout metadata and witnesses to graph entries. Current compiler import and runtime observation are not semantic graph coverage. |
+| F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |
-| F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; configured exact patch ranges now flow through project settings and registry target selection without inferring platform facts. Tests select the 8.5 variant from an 8.4–8.6 range while retaining uncovered releases and verify exact `8.5.4` preservation. | Embed/load generated catalog artifacts in the real builtin-call path, apply results exactly once, use configured platform/profile data, and verify exact/minor/range coverage plus uncovered remainder on checker fixtures. |
+| F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 
 This audit found additional evaluation work beyond the earlier compiler/framework

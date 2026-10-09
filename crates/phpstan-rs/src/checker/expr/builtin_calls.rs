@@ -8,6 +8,101 @@ use types::PhpString;
 use types::UnionAll as _;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 
+struct CatalogTypeHost;
+
+impl php_semantics::SemanticHost for CatalogTypeHost {
+    type Value = Type;
+    type State = ();
+
+    fn resolve(
+        &self,
+        operand: &php_semantics::Operand,
+        arguments: &[Type],
+        receiver: &Type,
+        results: &[(u32, Type)],
+    ) -> Option<Type> {
+        match operand {
+            php_semantics::Operand::Argument(index) => arguments.get(*index as usize).cloned(),
+            php_semantics::Operand::Receiver => Some(receiver.clone()),
+            php_semantics::Operand::Result(index) => results
+                .iter()
+                .find(|(result, _)| result == index)
+                .map(|(_, value)| value.clone()),
+            php_semantics::Operand::IntRange { min, max } => Some(Type::int_range(*min, *max)),
+            php_semantics::Operand::StringByteLength(index) => {
+                let argument = arguments.get(*index as usize)?;
+                let strings = argument.constant_strings();
+                if !strings.is_empty() && strings.len() <= 16 {
+                    let lengths: Option<Vec<_>> = strings
+                        .into_iter()
+                        .map(|value| i64::try_from(value.as_bytes().len()).ok())
+                        .collect();
+                    Some(lengths.map_or_else(
+                        || Type::int_range(Some(0), None),
+                        |lengths| {
+                            Type::union_of(lengths.into_iter().map(Type::int_literal).collect())
+                        },
+                    ))
+                } else {
+                    Some(Type::int_range(Some(0), None))
+                }
+            }
+            php_semantics::Operand::Literal(_) | php_semantics::Operand::Unknown => None,
+        }
+    }
+
+    fn test(
+        &self,
+        predicate: &php_semantics::Predicate,
+        _arguments: &[Type],
+        _receiver: &Type,
+        _results: &[(u32, Type)],
+        _state: &(),
+    ) -> php_semantics::Truth {
+        match predicate {
+            php_semantics::Predicate::Always => php_semantics::Truth::Yes,
+            _ => php_semantics::Truth::Maybe,
+        }
+    }
+
+    fn event(
+        &mut self,
+        event: &php_semantics::Event,
+        _arguments: &[Type],
+        _receiver: &Type,
+        _results: &[(u32, Type)],
+        state: (),
+    ) -> Vec<php_semantics::EventExit<Type, ()>> {
+        if matches!(event, php_semantics::Event::Unknown { .. }) {
+            vec![php_semantics::EventExit::Normal {
+                result: None,
+                state,
+                coverage: vec![],
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn unknown_value(&self) -> Type {
+        Type::mixed()
+    }
+    fn join_value(&self, left: Type, right: Type) -> Type {
+        Type::union_of(vec![left, right])
+    }
+    fn widen_value(&self, old: Type, next: Type) -> Type {
+        self.join_value(old, next)
+    }
+    fn value_subsumes(&self, broad: &Type, narrow: &Type) -> bool {
+        Relation::structural().is_super_type_of(broad, narrow).yes()
+    }
+    fn join_state(&self, _left: (), _right: ()) {}
+    fn widen_state(&self, _old: (), _next: ()) {}
+    fn state_subsumes(&self, _broad: &(), _narrow: &()) -> bool {
+        true
+    }
+}
+
 use super::{is_false_literal, is_true_literal};
 
 impl<'a> Checker<'a> {
@@ -48,6 +143,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(outcome) = self.type_check_call_outcome(arenas, name, args, locals) {
             return Type::bool_literal(outcome);
+        }
+        if let Some(catalog_return) = self.catalog_builtin_return_type(name, sig, args, locals) {
+            return catalog_return;
         }
         match name {
             // Mirrors real PHPStan's `AbsFunctionDynamicReturnTypeExtension` -
@@ -2064,6 +2162,81 @@ impl<'a> Checker<'a> {
         }
         let resolved = resolve_call_args(arenas, args, sig.params());
         self.infer_call_return_type(sig, &resolved, locals)
+    }
+
+    fn catalog_builtin_return_type(
+        &self,
+        name: &str,
+        sig: &FunctionReflection,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<Type> {
+        if name != "strlen" || !sig.is_stub() || args.len() != 1 {
+            return None;
+        }
+        let key = php_semantics::EntryKey::Function {
+            extension: php_semantics::Bytes(b"standard".to_vec()),
+            name: php_semantics::Bytes(name.as_bytes().to_vec()),
+        };
+        let targets = self.registry.semantic_target_set();
+        let selected = self.semantic_catalog.select_for_targets(&key, &targets);
+        if !selected.uncovered.is_empty()
+            || selected.variants.len() != targets.scenarios.len()
+            || selected
+                .variants
+                .iter()
+                .any(|variant| variant.applicability != php_semantics::Applicability::Yes)
+        {
+            return None;
+        }
+        let syntax_owner = self.syntax_tree_owner()?;
+        let arenas = syntax_owner.arenas();
+        let resolved = resolve_call_args(arenas, args, sig.params());
+        let arguments: Vec<Type> = resolved
+            .iter()
+            .map(|argument| {
+                argument
+                    .map(|expression| self.infer_expr(expression, locals))
+                    .unwrap_or_else(Type::mixed)
+            })
+            .collect();
+        let receiver = Type::mixed();
+        let mut returns = Vec::new();
+        for variant in selected.variants {
+            if !variant.graph.coverage.iter().any(|coverage| {
+                coverage.domain == php_semantics::Domain::Return
+                    && matches!(coverage.coverage, php_semantics::Coverage::Closed)
+            }) {
+                return None;
+            }
+            let mut host = CatalogTypeHost;
+            let evaluation =
+                php_semantics::evaluate(variant.graph, &arguments, &receiver, (), &mut host)
+                    .ok()?;
+            if !matches!(
+                evaluation
+                    .coverage
+                    .iter()
+                    .find(|coverage| coverage.domain == php_semantics::Domain::Return)?
+                    .coverage,
+                php_semantics::Coverage::Closed
+            ) {
+                return None;
+            }
+            for exit in evaluation.exits {
+                match exit {
+                    php_semantics::Exit::Normal {
+                        value: Some(value), ..
+                    } => returns.push(value),
+                    php_semantics::Exit::Normal { value: None, .. } => return None,
+                    php_semantics::Exit::PhpThrow { .. }
+                    | php_semantics::Exit::NativeUnwind { .. }
+                    | php_semantics::Exit::Fatal { .. }
+                    | php_semantics::Exit::Suspended { .. } => return None,
+                }
+            }
+        }
+        (!returns.is_empty()).then(|| Type::union_of(returns))
     }
 
     /// `get_parent_class`'s per-class answer: `class`'s registered

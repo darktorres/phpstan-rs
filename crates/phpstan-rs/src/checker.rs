@@ -298,6 +298,7 @@ type MethodMemo<'a> = FxHashMap<
 
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
+    pub(crate) semantic_catalog: &'a php_semantics::Catalog,
     // The owning file for this check's node IDs and file-local payloads.
     // Standalone checkers may not have a parsed-file owner.
     pub(crate) syntax_tree: Option<&'a crate::project::SyntaxTree>,
@@ -1172,6 +1173,13 @@ impl<'a> Checker<'a> {
         self
     }
 
+    /// Uses a separately validated catalog artifact. The default checker
+    /// already carries the checked-in first-slice catalog.
+    pub fn with_semantic_catalog(mut self, catalog: &'a php_semantics::Catalog) -> Self {
+        self.semantic_catalog = catalog;
+        self
+    }
+
     pub fn with_settings(mut self, settings: &'a settings::CheckSettings) -> Self {
         self.settings = settings;
         self
@@ -1396,6 +1404,7 @@ impl<'a> Checker<'a> {
             std::sync::LazyLock::new(Default::default);
         Checker {
             registry,
+            semantic_catalog: crate::semantics::embedded_catalog(),
             syntax_tree: None,
             syntax_tree_owned: None,
             syntax_file_owned: None,

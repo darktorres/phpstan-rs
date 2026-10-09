@@ -3,6 +3,19 @@
 
 pub use php_semantics::*;
 
+/// The first reviewed/source-linked behavior artifact shipped with the
+/// checker. Runtime ingestion still passes through `Catalog::from_json`,
+/// which validates its schema and evidence graph before any call can use it.
+pub(crate) fn embedded_catalog() -> &'static Catalog {
+    static CATALOG: std::sync::LazyLock<Catalog> = std::sync::LazyLock::new(|| {
+        Catalog::from_json(include_str!(
+            "../../php-semantics/data/php-8.5.4-strlen.json"
+        ))
+        .expect("embedded PHP semantic catalog must validate")
+    });
+    &CATALOG
+}
+
 /// Convert the existing major/minor language range into correlated full-minor
 /// scenarios. The current checker setting has no patch/platform fields, so
 /// this adapter deliberately leaves those target properties unknown.
@@ -139,6 +152,52 @@ fn next_minor(version: ReleaseVersion) -> Option<ReleaseVersion> {
         minor: 0,
         patch: 0,
     })
+}
+
+#[cfg(test)]
+mod embedded_catalog_tests {
+    use super::*;
+    use types::{PhpRelease, PhpReleaseRange};
+
+    fn key() -> EntryKey {
+        EntryKey::Function {
+            extension: Bytes(b"standard".to_vec()),
+            name: Bytes(b"strlen".to_vec()),
+        }
+    }
+
+    #[test]
+    fn embedded_strlen_artifact_is_patch_exact_and_leaves_other_targets_uncovered() {
+        let catalog = embedded_catalog();
+        let exact = target_set_from_php_releases(Some(PhpReleaseRange::new(
+            PhpRelease::new(8, 5, 4),
+            PhpRelease::new(8, 5, 4),
+        )));
+        let selection = catalog.select_for_targets(&key(), &exact);
+        assert_eq!(selection.variants.len(), 1);
+        assert!(selection.uncovered.is_empty());
+        assert_eq!(selection.variants[0].applicability, Applicability::Yes);
+        assert!(selection.variants[0].graph.coverage.iter().any(|coverage| {
+            coverage.domain == Domain::Return && matches!(coverage.coverage, Coverage::Closed)
+        }));
+
+        let minor = target_set_from_php_releases(Some(PhpReleaseRange::new(
+            PhpRelease::new(8, 5, 0),
+            PhpRelease::new(8, 5, u16::MAX),
+        )));
+        let selection = catalog.select_for_targets(&key(), &minor);
+        assert_eq!(selection.variants.len(), 1);
+        assert_eq!(selection.variants[0].applicability, Applicability::Maybe);
+        assert_eq!(selection.uncovered.len(), 1);
+
+        let earlier = target_set_from_php_releases(Some(PhpReleaseRange::new(
+            PhpRelease::new(8, 5, 0),
+            PhpRelease::new(8, 5, 3),
+        )));
+        let selection = catalog.select_for_targets(&key(), &earlier);
+        assert!(selection.variants.is_empty());
+        assert_eq!(selection.uncovered, earlier.scenarios);
+    }
 }
 
 #[cfg(test)]

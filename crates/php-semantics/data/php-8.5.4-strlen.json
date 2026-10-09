@@ -1,0 +1,944 @@
+{
+  "schema_major": 3,
+  "entries": [
+    {
+      "key": {
+        "Function": {
+          "extension": {
+            "base64": "c3RhbmRhcmQ="
+          },
+          "name": {
+            "base64": "c3RybGVu"
+          }
+        }
+      },
+      "graph": [
+        221,
+        141,
+        46,
+        241,
+        4,
+        29,
+        141,
+        112,
+        231,
+        70,
+        106,
+        103,
+        221,
+        249,
+        141,
+        108,
+        246,
+        33,
+        17,
+        241,
+        225,
+        4,
+        105,
+        167,
+        87,
+        199,
+        144,
+        74,
+        135,
+        120,
+        157,
+        241
+      ],
+      "applicability": {
+        "release": {
+          "min": {
+            "major": 8,
+            "minor": 5,
+            "patch": 4
+          },
+          "max": {
+            "major": 8,
+            "minor": 5,
+            "patch": 4
+          }
+        },
+        "os": null,
+        "arch": null,
+        "sapi": null,
+        "zts": null,
+        "debug": null,
+        "extensions": [],
+        "ini": []
+      }
+    }
+  ],
+  "graphs": [
+    {
+      "id": [
+        221,
+        141,
+        46,
+        241,
+        4,
+        29,
+        141,
+        112,
+        231,
+        70,
+        106,
+        103,
+        221,
+        249,
+        141,
+        108,
+        246,
+        33,
+        17,
+        241,
+        225,
+        4,
+        105,
+        167,
+        87,
+        199,
+        144,
+        74,
+        135,
+        120,
+        157,
+        241
+      ],
+      "graph": {
+        "schema_major": 3,
+        "entry": 0,
+        "blocks": [
+          {
+            "events": [
+              {
+                "Unknown": {
+                  "domains": [
+                    "Invocation",
+                    "UserRead",
+                    "UserWrite",
+                    "ExternalRead",
+                    "ExternalWrite",
+                    "Diagnostic",
+                    "Autoload",
+                    "Output",
+                    "Release",
+                    "Retention",
+                    "PhpThrow",
+                    "Fatal",
+                    "Suspension"
+                  ],
+                  "reason": {
+                    "base64": "ZWZmZWN0cyBhbmQgbm9uLW5vcm1hbCBleGl0cyBhcmUgbm90IG1vZGVsZWQgaW4gdGhpcyBzbGljZQ=="
+                  }
+                }
+              }
+            ],
+            "terminator": {
+              "Return": {
+                "StringByteLength": 0
+              }
+            },
+            "exceptional": {
+              "php_throw": null,
+              "native_unwind": null,
+              "fatal": null,
+              "suspended": null
+            }
+          }
+        ],
+        "coverage": [
+          {
+            "domain": "Invocation",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "UserRead",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "UserWrite",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "ExternalRead",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "ExternalWrite",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Diagnostic",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Autoload",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Output",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Release",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Retention",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Return",
+            "coverage": "Closed",
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "PhpThrow",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Fatal",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          },
+          {
+            "domain": "Suspension",
+            "coverage": {
+              "Open": {
+                "reasons": [
+                  {
+                    "base64": "cmV0dXJuLW9ubHkgZmlyc3Qgc2xpY2U="
+                  }
+                ]
+              }
+            },
+            "precision": "Exact",
+            "dependencies": [],
+            "evidence": [
+              [
+                117,
+                185,
+                8,
+                152,
+                143,
+                37,
+                187,
+                219,
+                10,
+                237,
+                72,
+                29,
+                234,
+                99,
+                83,
+                139,
+                48,
+                115,
+                227,
+                249,
+                206,
+                164,
+                247,
+                119,
+                195,
+                143,
+                124,
+                166,
+                68,
+                61,
+                190,
+                249
+              ]
+            ],
+            "assumptions": []
+          }
+        ]
+      }
+    }
+  ],
+  "evidence": [
+    [
+      [
+        117,
+        185,
+        8,
+        152,
+        143,
+        37,
+        187,
+        219,
+        10,
+        237,
+        72,
+        29,
+        234,
+        99,
+        83,
+        139,
+        48,
+        115,
+        227,
+        249,
+        206,
+        164,
+        247,
+        119,
+        195,
+        143,
+        124,
+        166,
+        68,
+        61,
+        190,
+        249
+      ],
+      {
+        "kind": "SourceTransfer",
+        "source_digest": [
+          13,
+          68,
+          119,
+          23,
+          10,
+          120,
+          84,
+          1,
+          49,
+          137,
+          58,
+          140,
+          252,
+          162,
+          185,
+          209,
+          3,
+          60,
+          121,
+          234,
+          183,
+          84,
+          249,
+          202,
+          61,
+          133,
+          224,
+          90,
+          230,
+          145,
+          149,
+          5
+        ],
+        "site": {
+          "base64": "WmVuZC96ZW5kX2J1aWx0aW5fZnVuY3Rpb25zLmM6WkVORF9GVU5DVElPTihzdHJsZW4pOlpTVFJfTEVOKHMp"
+        },
+        "rule_version": {
+          "base64": "cGhwLTguNS40LXN0cmxlbi1yZXR1cm4tdjE="
+        },
+        "assumptions": [],
+        "dependencies": []
+      }
+    ]
+  ]
+}
