@@ -246,7 +246,8 @@ strict PHP fixture hashes, both captured output hashes and cross-VM equality,
 the output JSON's equality with the declared expectations, and the referenced
 TAILCALL/CALL profile identities and locked binary hashes before accepting the
 runtime witness; it also pins the exact null-deprecation text. A builder
-regression confirms a changed fixture digest is rejected. Other target
+regressions confirm a changed fixture digest and an output/expectation mismatch
+are rejected. Other target
 ranges retain their legacy diagnostic fallback, and the remaining effects and
 throws still do not share this graph evaluation, so F05 remains open.
 Re-running the catalog

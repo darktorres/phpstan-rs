@@ -72,17 +72,11 @@ fn main() {
         strict_output, strict_call_output,
         "strict VM outputs differ"
     );
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&weak_output)
-            .expect("weak runtime output is JSON"),
-        runtime["weak_fixture"]["expected"],
-        "weak runtime output differs from its expected values"
-    );
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&strict_output)
-            .expect("strict runtime output is JSON"),
-        runtime["strict_fixture"]["expected"],
-        "strict runtime output differs from its expected values"
+    validate_runtime_output(&weak_output, &runtime["weak_fixture"]["expected"], "weak");
+    validate_runtime_output(
+        &strict_output,
+        &runtime["strict_fixture"]["expected"],
+        "strict",
     );
     assert_eq!(runtime["result"]["exit_code"].as_u64(), Some(0));
     assert_eq!(
@@ -512,6 +506,15 @@ fn hex_digest(digest: &[u8]) -> String {
     hex
 }
 
+fn validate_runtime_output(output: &[u8], expected: &serde_json::Value, mode: &str) {
+    let observed: serde_json::Value =
+        serde_json::from_slice(output).unwrap_or_else(|_| panic!("{mode} runtime output is JSON"));
+    assert_eq!(
+        &observed, expected,
+        "{mode} runtime output differs from its expected values"
+    );
+}
+
 fn decode_digest(text: &str) -> [u8; 32] {
     assert_eq!(text.len(), 64, "digest must contain 64 hexadecimal digits");
     let mut digest = [0; 32];
@@ -547,5 +550,23 @@ mod tests {
             result.is_err(),
             "a mismatched runtime artifact hash is rejected"
         );
+    }
+
+    #[test]
+    fn runtime_output_must_match_the_declared_observation() {
+        let output = br#"{"lengths":[3],"deprecations":["deprecated"]}"#;
+        let expected = serde_json::json!({
+            "lengths": [3],
+            "deprecations": ["deprecated"],
+        });
+        validate_runtime_output(output, &expected, "weak");
+
+        let incorrect = serde_json::json!({
+            "lengths": [99],
+            "deprecations": ["deprecated"],
+        });
+        let result =
+            std::panic::catch_unwind(|| validate_runtime_output(output, &incorrect, "weak"));
+        assert!(result.is_err(), "a mismatched observation is rejected");
     }
 }
