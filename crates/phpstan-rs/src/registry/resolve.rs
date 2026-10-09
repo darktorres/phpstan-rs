@@ -846,7 +846,7 @@ impl Registry {
         if !self.deferred_types_ready || id.source() == Some(crate::registry::IdSource::Stub) {
             return None;
         }
-        let cell = self.deferred_class_results.get(&id)?;
+        let cell = self.deferred_class_results.get(id)?;
         if let Some(result) = cell.get() {
             return result.as_ref();
         }

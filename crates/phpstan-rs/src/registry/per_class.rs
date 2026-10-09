@@ -1,13 +1,15 @@
 //! Results that belong to one slot of one class, held by class, so the ones
 //! of a class are found without looking at the others'.
 
-use rustc_hash::FxHashMap;
-
+use super::class_table::ClassTable;
 use super::{ClassId, MethodRef, PropertyRef};
 
 /// A reference to a member by its class and its slot in that class.
 pub(crate) trait SlotRef: Copy {
     type Slot: Copy + Eq + std::hash::Hash;
+
+    fn index(slot: Self::Slot) -> usize;
+    fn from_index(index: usize) -> Self::Slot;
 
     fn from_parts(class: ClassId, slot: Self::Slot) -> Self;
     fn class(self) -> ClassId;
@@ -16,6 +18,14 @@ pub(crate) trait SlotRef: Copy {
 
 impl SlotRef for MethodRef {
     type Slot = u16;
+
+    fn index(slot: u16) -> usize {
+        slot as usize
+    }
+
+    fn from_index(index: usize) -> u16 {
+        index as u16
+    }
 
     fn from_parts(class: ClassId, slot: u16) -> Self {
         MethodRef::new(class, slot)
@@ -33,6 +43,14 @@ impl SlotRef for MethodRef {
 impl SlotRef for PropertyRef {
     type Slot = u32;
 
+    fn index(slot: u32) -> usize {
+        slot as usize
+    }
+
+    fn from_index(index: usize) -> u32 {
+        index as u32
+    }
+
     fn from_parts(class: ClassId, slot: u32) -> Self {
         PropertyRef::new(class, slot)
     }
@@ -46,67 +64,76 @@ impl SlotRef for PropertyRef {
     }
 }
 
-/// A table of values keyed by member reference, indexed by class.
+/// A table of values keyed by member reference, indexed by class and then
+/// by slot, which are dense.
 #[derive(Debug, Clone)]
 pub(crate) struct PerClass<R: SlotRef, V> {
-    classes: FxHashMap<ClassId, FxHashMap<R::Slot, V>>,
+    classes: ClassTable<Vec<Option<V>>>,
+    _member: std::marker::PhantomData<R>,
 }
 
 impl<R: SlotRef, V> Default for PerClass<R, V> {
     fn default() -> Self {
         Self {
-            classes: FxHashMap::default(),
+            classes: ClassTable::default(),
+            _member: std::marker::PhantomData,
         }
     }
 }
 
 impl<R: SlotRef, V> PerClass<R, V> {
     pub(crate) fn get(&self, member: &R) -> Option<&V> {
-        self.classes.get(&member.class())?.get(&member.slot())
+        self.classes
+            .get(member.class())?
+            .get(R::index(member.slot()))?
+            .as_ref()
     }
 
     pub(crate) fn contains_key(&self, member: &R) -> bool {
         self.get(member).is_some()
     }
 
+    fn slot_mut(&mut self, member: R) -> &mut Option<V> {
+        let slots = self.classes.get_or_insert_with(member.class(), Vec::new);
+        let at = R::index(member.slot());
+        if slots.len() <= at {
+            slots.resize_with(at + 1, || None);
+        }
+        &mut slots[at]
+    }
+
     pub(crate) fn insert(&mut self, member: R, value: V) -> Option<V> {
-        self.classes
-            .entry(member.class())
-            .or_default()
-            .insert(member.slot(), value)
+        self.slot_mut(member).replace(value)
     }
 
     /// Inserts `value` unless the member has one; whether it was inserted.
     pub(crate) fn insert_if_absent(&mut self, member: R, value: V) -> bool {
-        match self
-            .classes
-            .entry(member.class())
-            .or_default()
-            .entry(member.slot())
-        {
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(value);
-                true
-            }
-            std::collections::hash_map::Entry::Occupied(_) => false,
+        let slot = self.slot_mut(member);
+        if slot.is_some() {
+            return false;
         }
+        *slot = Some(value);
+        true
     }
 
     /// The entries of one class.
     pub(crate) fn of_class(&self, class: ClassId) -> impl Iterator<Item = (R, &V)> {
         self.classes
-            .get(&class)
+            .get(class)
             .into_iter()
             .flatten()
-            .map(move |(slot, value)| (R::from_parts(class, *slot), value))
+            .enumerate()
+            .filter_map(move |(at, value)| {
+                Some((R::from_parts(class, R::from_index(at)), value.as_ref()?))
+            })
     }
 
     /// Every entry.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (R, &V)> {
         self.classes.iter().flat_map(|(class, slots)| {
-            slots
-                .iter()
-                .map(move |(slot, value)| (R::from_parts(*class, *slot), value))
+            slots.iter().enumerate().filter_map(move |(at, value)| {
+                Some((R::from_parts(class, R::from_index(at)), value.as_ref()?))
+            })
         })
     }
 
@@ -115,21 +142,17 @@ impl<R: SlotRef, V> PerClass<R, V> {
     }
 
     pub(crate) fn remove_class(&mut self, class: ClassId) {
-        self.classes.remove(&class);
+        self.classes.remove(class);
     }
 
     /// Keeps the entries of the classes `keep` accepts.
-    pub(crate) fn retain_classes(&mut self, mut keep: impl FnMut(ClassId) -> bool) {
-        self.classes.retain(|class, _| keep(*class));
+    pub(crate) fn retain_classes(&mut self, keep: impl FnMut(ClassId) -> bool) {
+        self.classes.retain(keep);
     }
 
     /// Moves each class's entries to the id `retag` gives it.
-    pub(crate) fn retag_classes(&mut self, mut retag: impl FnMut(ClassId) -> ClassId) {
-        self.classes = self
-            .classes
-            .drain()
-            .map(|(class, slots)| (retag(class), slots))
-            .collect();
+    pub(crate) fn retag_classes(&mut self, retag: impl FnMut(ClassId) -> ClassId) {
+        self.classes.retag(retag);
     }
 }
 

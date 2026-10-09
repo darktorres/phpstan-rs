@@ -15,6 +15,7 @@ pub mod bodies;
 pub(crate) mod canonical;
 mod class_info;
 use class_info::{ResolvedTypeImport, TraitAlias};
+mod class_table;
 mod container;
 mod effect_table;
 mod effects;
@@ -519,7 +520,8 @@ pub struct Registry {
     #[serde(skip)]
     class_type_results_cache: NameTable<ClassTypeResults>,
     #[serde(skip)]
-    deferred_class_results: FxHashMap<ClassId, OnceLock<Option<resolve::DeferredClassResults>>>,
+    deferred_class_results:
+        class_table::ClassTable<OnceLock<Option<resolve::DeferredClassResults>>>,
     #[serde(skip)]
     deferred_types_ready: bool,
     #[serde(skip)]

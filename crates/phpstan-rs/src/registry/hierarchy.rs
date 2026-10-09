@@ -199,7 +199,7 @@ impl Registry {
     /// Drops the memoized deferred result of `class`: it was resolved from
     /// the overlay as it stood, and a write to that overlay makes it stale.
     pub(crate) fn invalidate_deferred_class_result(&mut self, class: super::ClassId) {
-        if let Some(cell) = self.deferred_class_results.get_mut(&class) {
+        if let Some(cell) = self.deferred_class_results.get_mut(class) {
             *cell = std::sync::OnceLock::new();
         }
     }
