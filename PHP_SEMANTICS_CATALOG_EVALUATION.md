@@ -67,6 +67,10 @@ domains, and preserve fatal and suspension as distinct exits. This validates
 integration with the current checker build; it does not establish catalog
 execution at builtin call sites.
 
+After the full run, a targeted CLI config round-trip also passes with
+`php_version = "8.5.4"`, exercising config parsing through session creation and
+the normal checker invocation.
+
 ## Phase F gate-by-gate status
 
 The current [working semantic contract](PHP_SEMANTICS_CATALOG_CONTRACT.md)

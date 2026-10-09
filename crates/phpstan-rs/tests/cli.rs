@@ -574,6 +574,29 @@ fn check_project_config_file_supplies_php_version() {
 }
 
 #[test]
+fn check_project_config_preserves_an_exact_php_patch_release() {
+    let dir = TempDir::new("check_project_config_php_patch");
+    dir.write("src/a.php", "<?php function f(): int { return 1; }");
+    let config_path = dir.write(
+        "phpstan-rs.toml",
+        "paths = [\"src\"]\nphp_version = \"8.5.4\"\n",
+    );
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 file(s) checked, 0 diagnostic(s)"));
+}
+
+#[test]
 fn check_project_cli_php_version_overrides_config_php_version() {
     // Same override precedent as `strict_mixed_arrays`: a CLI flag beats
     // the same key in the config file. A valid CLI value must win over an
