@@ -38,6 +38,28 @@ evidence, supports ASCII symbol matching, projection, and explanation lookup.
 F04 remains OPEN because this state is not yet integrated with PhpFlowIR or
 callback exception flow.
 
+## Phase F gate-by-gate status
+
+| Gate | Evidence established | Remaining evaluation before closure |
+|---|---|---|
+| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. | Review a single written contract for observable traces, abstract order, boundary assumptions, and return refinement. Add invalid composition counterexamples and independently check evaluator post-fixpoints. |
+| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage checks, explicit PHP/native exceptional outcomes, cleanup continuations, and worklist/widening fixtures are implemented. | Review the reference contract fixtures against the written contract; add fatal/suspend/branching callback and loop-growth cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
+| F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect source/layout metadata and witnesses to graph entries. Current compiler import and runtime observation are not semantic graph coverage. |
+| F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
+| F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |
+| F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; checker PHP-version settings convert to minor scenarios and preserve unknown platform facts. | Load/select catalog artifacts in the real builtin-call path, apply results exactly once, use configured platform/profile data, and verify exact/minor/range coverage plus uncovered remainder on checker fixtures. |
+| F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
+
+This audit found additional evaluation work beyond the earlier compiler/framework
+comparison: F00/F01 need reviewed contract and closure evidence; F02 needs
+source-to-graph linkage and normal/CALL behavior comparisons; F03 needs a
+working native summary/bridge path; F04 needs PhpFlowIR composition; F05 needs
+actual builtin-call execution; and F06 needs end-to-end cost and solver evidence.
+The concrete next dependency is to define and review the observable-trace
+contract, then use one locked 8.5.4 builtin slice to drive native import through
+graph validation and a checker call. Until that exists, producer/solver choice
+remains provisional.
+
 ## Findings that change the decision
 
 **Stock SVF and the compact-layout adaptation both fail the 10 GiB resource gate
