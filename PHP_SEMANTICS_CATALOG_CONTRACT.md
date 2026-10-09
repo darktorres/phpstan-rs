@@ -67,12 +67,14 @@ investigation; failure to observe an event cannot prove its absence.
 | A callback writes and throws, but the enclosing graph reports the old state or runs a later normal event. | The callback's pre-throw write is observable; normal continuation is unreachable on that path. | `callback_throw_preserves_prior_write_and_skips_later_events` |
 | A callback has normal and throw outcomes, but their result/state correlations are flattened into one certain result. | This invents a result on the throw path or loses a possible exit. | `callback_normal_and_throw_paths_keep_separate_results_and_states` |
 | A branch after an invocation uses the pre-call state or treats an unsupported host predicate as false. | Callback mutations precede the branch; an undecidable predicate must retain both paths. | `host_predicate_observes_callback_state_after_invocation`; `unsupported_host_predicate_keeps_both_branches` |
+| A state guard after two predecessor states join decides true or false from the pre-join state. | The join contains both predecessors, so a guard not proved across the joined state must retain both successors. | `state_guard_after_a_join_keeps_both_possible_branches` |
+| A result is defined on only one predecessor path, then used after the paths join as if it were available on both. | A value from one path cannot replace an undefined result on another; the evaluator must retain the path distinction or return an incomplete result. | `joining_paths_with_a_partially_defined_result_is_incomplete` |
 | A pending throw enters cleanup, then cleanup returns, while the evaluator still reports the original throw. | The cleanup return overrides the pending completion. | `pending_callback_throw_runs_cleanup_then_resumes`; `cleanup_return_overrides_pending_throw` |
 | A native unwind is reported as a PHP throw. | It crosses a different language/ABI boundary and does not establish PHP exception state. | `native_unwind_remains_distinct_from_php_throw` |
 | A fatal exit or suspension is collapsed into a PHP throw or normal return. | These are distinct observable completion modes and carry different continuation rules. | `fatal_and_suspension_remain_distinct_exits` |
 | An unresolved return is treated as no return or as a closed empty result. | Incomplete evaluation cannot justify excluding a return behavior. | `unresolved_return_is_an_incomplete_evaluation_not_no_return` |
 | A graph labels a domain closed while containing an unknown transfer that affects it, or supplies no coverage/evidence. | Its negative claims are unsupported by the actual transfer graph. | `unknown_transfer_cannot_be_marked_closed_or_reasonless`; `every_domain_requires_a_coverage_decision_and_evidence` |
-| A return projection ignores an open write/invocation domain that it depends on. | A projected fact is closed only when every required semantic domain is justified. | `graph_rejects_closed_return_coverage_with_open_domain_dependency`; `projection_includes_transitive_domain_dependencies` |
+| A return refinement drops a possible write or throw effect by declaring a dependency open. | A projected fact is closed only when every required semantic domain is justified, including effects and exceptional outcomes that can change its preconditions. | `graph_rejects_closed_return_coverage_with_open_domain_dependency`; `closed_return_refinement_cannot_drop_an_open_throw_path`; `projection_includes_transitive_domain_dependencies` |
 | A child opens a domain required by the parent return while the parent return remains closed. | Uncertainty propagates through declared semantic dependencies. | `open_child_dependency_opens_the_parent_result_domain` |
 | Two closed domains justify each other through a dependency cycle without a fixed-point certificate. | Circular dependency metadata alone provides no independent basis for either negative claim. | `graph_rejects_cyclic_closed_domain_dependencies_without_a_certificate` |
 | A closed wrapper invokes an open child but retains its own closed return coverage, or omits child coverage entirely or by domain. | The wrapper's result may depend on child behavior, so child uncertainty must compose into the result and incomplete metadata must not default to closed. | `open_child_coverage_opens_a_closed_parent_domain`; `incomplete_child_coverage_rejects_the_evaluation`; `omitted_child_coverage_rejects_the_evaluation` |
@@ -83,6 +85,6 @@ investigation; failure to observe an event cannot prove its absence.
 
 These tests check structural behavior in a small evaluator host. They do not
 establish that the checker host, native transfers, or every PHP runtime obeys
-the contract. Before F00 closes, add composition tests for state guards across
-joins, return refinement that drops effects/throws, and mismatched target
-scenarios; then obtain independent review.
+the contract. Mismatched target scenarios are covered in the target module,
+but F00 remains open until independent reviewers accept the contract and its
+assumptions.

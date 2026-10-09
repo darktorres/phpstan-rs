@@ -289,6 +289,7 @@ pub enum GraphError {
     CyclicDomainDependency(Domain),
     ApplicableDomainMarkedNotApplicable(Domain),
     UnresolvedValue,
+    ResultDefinedOnOnlySomePaths(u32),
     EventWithoutOutcome,
     NonMonotoneJoin(u32),
     NonPostFixpoint(u32),
@@ -974,7 +975,7 @@ fn merge_results<H: SemanticHost>(
     left: &[(u32, H::Value)],
     right: &[(u32, H::Value)],
     widen: bool,
-) -> Vec<(u32, H::Value)> {
+) -> Result<Vec<(u32, H::Value)>, GraphError> {
     let mut ids: Vec<u32> = left.iter().chain(right).map(|(id, _)| *id).collect();
     ids.sort_unstable();
     ids.dedup();
@@ -988,17 +989,15 @@ fn merge_results<H: SemanticHost>(
                 .iter()
                 .find(|(key, _)| *key == id)
                 .map(|(_, value)| value.clone());
-            let unknown = host.unknown_value();
             let value = match (a, b) {
                 (Some(a), Some(b)) if widen => host.widen_value(a, b),
                 (Some(a), Some(b)) => host.join_value(a, b),
-                (Some(a), None) if widen => host.widen_value(a, unknown),
-                (None, Some(b)) if widen => host.widen_value(unknown, b),
-                (Some(a), None) => host.join_value(a, unknown),
-                (None, Some(b)) => host.join_value(unknown, b),
+                (Some(_), None) | (None, Some(_)) => {
+                    return Err(GraphError::ResultDefinedOnOnlySomePaths(id));
+                }
                 (None, None) => unreachable!(),
             };
-            (id, value)
+            Ok((id, value))
         })
         .collect()
 }
@@ -1400,7 +1399,7 @@ fn enqueue<H: SemanticHost>(
         } else {
             host.join_state(old.state.clone(), frame.state.clone())
         },
-        results: merge_results(host, &old.results, &frame.results, widen),
+        results: merge_results(host, &old.results, &frame.results, widen)?,
         pending: merge_pending(host, old.pending.clone(), frame.pending.clone(), widen),
         growing_updates: old.growing_updates + 1,
     };
@@ -1904,6 +1903,8 @@ mod tests {
                 Predicate::Host(id) if id.0 == b"state-has-invoke" => {
                     if state.iter().any(|event| event == "invoke") {
                         Truth::Yes
+                    } else if state.iter().any(|event| event == "<joined>") {
+                        Truth::Maybe
                     } else {
                         Truth::No
                     }
@@ -2436,6 +2437,114 @@ mod tests {
                 value: Some("called".to_string()),
                 state: vec!["invoke".to_string()],
             }]
+        );
+    }
+
+    #[test]
+    fn state_guard_after_a_join_keeps_both_possible_branches() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![],
+                    Terminator::Branch {
+                        predicate: Predicate::Host(Bytes(b"unknown-guard".to_vec())),
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(
+                    vec![
+                        Event::Write {
+                            storage: Operand::Argument(0),
+                            value: Operand::Literal(Bytes(b"changed".to_vec())),
+                        },
+                        Event::Invoke {
+                            callable: Operand::Argument(1),
+                            arguments: vec![],
+                            result: 0,
+                        },
+                    ],
+                    Terminator::Goto(3),
+                ),
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(1),
+                        arguments: vec![],
+                        result: 0,
+                    }],
+                    Terminator::Goto(3),
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Branch {
+                        predicate: Predicate::Host(Bytes(b"state-has-invoke".to_vec())),
+                        yes: 4,
+                        no: 5,
+                    },
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"yes".to_vec())))),
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"no".to_vec())))),
+                ),
+            ],
+            coverage: coverage_for(&[Domain::Invocation, Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = Host::default();
+        let evaluation = evaluate(
+            &graph,
+            &["slot".into(), "callback".into()],
+            &receiver(),
+            vec![],
+            &mut host,
+        )
+        .unwrap();
+        assert!(evaluation.exits.contains(&Exit::Normal {
+            value: Some("yes".into()),
+            state: vec!["<joined>".into()],
+        }));
+        assert!(evaluation.exits.contains(&Exit::Normal {
+            value: Some("no".into()),
+            state: vec!["<joined>".into()],
+        }));
+    }
+
+    #[test]
+    fn joining_paths_with_a_partially_defined_result_is_incomplete() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![],
+                    Terminator::Branch {
+                        predicate: Predicate::Host(Bytes(b"unknown-guard".to_vec())),
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![],
+                        result: 9,
+                    }],
+                    Terminator::Goto(3),
+                ),
+                Block::new(vec![], Terminator::Goto(3)),
+                Block::new(vec![], Terminator::Return(Some(Operand::Result(9)))),
+            ],
+            coverage: coverage_for(&[Domain::Invocation, Domain::Return]),
+        };
+        let mut host = Host::default();
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::UnresolvedValue)
         );
     }
 
