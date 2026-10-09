@@ -133,7 +133,7 @@ impl CallContext for TypedCall<'_, '_> {
         match receiver {
             Receiver::This => (
                 match self.class() {
-                    Some(class) => Holder::Classes(vec![Name::from(class)]),
+                    Some(class) => Holder::listed(vec![Name::from(class)]),
                     None => Holder::Unknown,
                 },
                 true,

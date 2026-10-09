@@ -359,7 +359,7 @@ fn an_operation_on_classes_reaches_the_hooks_of_each_class_and_those_below() {
         for holder in [
             classes(&["Both"]),
             classes(&["Greeter", "Tagged"]),
-            Holder::Made(Some(vec![Name::from("Both")])),
+            Holder::Made(Some(vec![Name::from("Both")].into())),
         ] {
             implicit(&registry, &holder, &operation);
         }

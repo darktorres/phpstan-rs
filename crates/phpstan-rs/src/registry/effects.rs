@@ -2685,15 +2685,30 @@ pub(crate) fn elements_holder_of(ty: &Type) -> Holder {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Holder {
     /// An object of one of the classes, or of a descendant of one.
-    Classes(Vec<Name>),
+    Classes(Arc<[Name]>),
     /// An object the caller made, no one else has: of exactly one of the
     /// classes, or of a class not known.
-    Made(Option<Vec<Name>>),
+    Made(Option<Arc<[Name]>>),
     /// An object of any class.
     Unknown,
 }
 
 impl Holder {
+    /// The holder of no object.
+    pub(crate) fn none() -> Holder {
+        Holder::Classes(Holder::none_classes())
+    }
+
+    fn none_classes() -> Arc<[Name]> {
+        static NONE: std::sync::LazyLock<Arc<[Name]>> = std::sync::LazyLock::new(|| Arc::from([]));
+        Arc::clone(&NONE)
+    }
+
+    /// The holder of an object of one of `classes`, in the order given.
+    pub(crate) fn listed(classes: Vec<Name>) -> Holder {
+        Holder::Classes(classes.into())
+    }
+
     /// The object a value either holder describes may be.
     pub(crate) fn join(self, other: Holder) -> Holder {
         match (self, other) {
@@ -2702,26 +2717,45 @@ impl Holder {
             }
             (Holder::Unknown | Holder::Made(None), _)
             | (_, Holder::Unknown | Holder::Made(None)) => Holder::Unknown,
-            (Holder::Made(Some(mut a)), Holder::Made(Some(b))) => {
-                a.extend(b);
-                Holder::Made(Some(sorted_classes(a)))
+            (Holder::Made(Some(a)), Holder::Made(Some(b))) => {
+                Holder::Made(Some(merged_classes(a, b)))
             }
             (
-                Holder::Classes(mut a) | Holder::Made(Some(mut a)),
+                Holder::Classes(a) | Holder::Made(Some(a)),
                 Holder::Classes(b) | Holder::Made(Some(b)),
-            ) => {
-                a.extend(b);
-                Holder::Classes(sorted_classes(a))
-            }
+            ) => Holder::Classes(merged_classes(a, b)),
         }
     }
 }
 
 /// `classes` in one order, each once, as PHP compares class names.
-fn sorted_classes(mut classes: Vec<Name>) -> Vec<Name> {
+fn sorted_classes(mut classes: Vec<Name>) -> Arc<[Name]> {
     classes.sort_unstable_by(|a, b| a.lower().cmp(b.lower()));
     classes.dedup_by(|a, b| a.eq_ignore_case(b));
-    classes
+    classes.into()
+}
+
+/// The classes of two lists in one, as `sorted_classes` has them; a list
+/// already in that order that holds the other's is returned as it is.
+fn merged_classes(a: Arc<[Name]>, b: Arc<[Name]>) -> Arc<[Name]> {
+    let holds = |all: &[Name], some: &[Name]| {
+        some.iter()
+            .all(|class| all.iter().any(|have| have.eq_ignore_case(class)))
+    };
+    let ordered = |all: &[Name]| all.windows(2).all(|pair| pair[0].lower() < pair[1].lower());
+    if Arc::ptr_eq(&a, &b) && ordered(&a) {
+        return a;
+    }
+    if ordered(&a) && holds(&a, &b) {
+        return a;
+    }
+    if ordered(&b) && holds(&b, &a) {
+        return b;
+    }
+    let mut all = Vec::with_capacity(a.len() + b.len());
+    all.extend(a.iter().cloned());
+    all.extend(b.iter().cloned());
+    sorted_classes(all)
 }
 
 /// What the `$this` of code PHP runs for `operation` on an object `holder`
@@ -2749,7 +2783,7 @@ fn implicit_transfer(
 /// The holder of a value of type `ty`.
 pub(crate) fn holder_of(ty: &Type) -> Holder {
     match object_classes(ty) {
-        Some(classes) => Holder::Classes(classes),
+        Some(classes) => Holder::listed(classes),
         None => Holder::Unknown,
     }
 }
@@ -3024,7 +3058,7 @@ impl Reach<'_> {
                                 .find(|(at, _)| at == arg)
                                 .map(|(_, place)| place);
                             if place.is_none() && call.objectless.contains(arg) {
-                                Holder::Classes(Vec::new())
+                                Holder::none()
                             } else if position.elements {
                                 self.ctx.elements(arg, place)
                             } else {
@@ -3131,8 +3165,8 @@ impl Reach<'_> {
                 .map(|(_, place)| place);
             match self.ctx.argument(at, place) {
                 Holder::Classes(classes) => classes
-                    .into_iter()
-                    .map(|class| Transfer::Other(Some(class)))
+                    .iter()
+                    .map(|class| Transfer::Other(Some(class.clone())))
                     .collect(),
                 Holder::Made(_) => vec![Transfer::Made],
                 Holder::Unknown => vec![Transfer::Other(None)],
@@ -3183,7 +3217,7 @@ impl Reach<'_> {
                 let mut out = Vec::new();
                 match (&holder, method) {
                     (Holder::Classes(classes), Some(method)) => {
-                        for class in classes {
+                        for class in classes.iter() {
                             out.extend(
                                 registry
                                     .implementations(class, method)
@@ -3194,7 +3228,7 @@ impl Reach<'_> {
                         }
                     }
                     (Holder::Made(Some(classes)), Some(method)) => {
-                        for class in classes {
+                        for class in classes.iter() {
                             out.extend(
                                 self.exact_method(class, method)
                                     .map(|key| (key, transfer(Some(class)))),
@@ -3202,7 +3236,7 @@ impl Reach<'_> {
                         }
                     }
                     (Holder::Classes(classes) | Holder::Made(Some(classes)), None) => {
-                        for class in classes {
+                        for class in classes.iter() {
                             out.extend(
                                 self.every_method(class)
                                     .iter()
@@ -3517,7 +3551,7 @@ impl Reach<'_> {
                 return Some(());
             }
         };
-        for class in classes {
+        for class in classes.iter() {
             // A property an object of the class has where the scope sees it,
             // an object of a descendant has there too: a redeclaration only
             // widens its visibility, and keeps it an instance property.
@@ -4294,7 +4328,7 @@ impl CallContext for Level<'_> {
         match receiver {
             Receiver::This => (
                 match self.class {
-                    Some(class) => Holder::Classes(vec![Name::from(class)]),
+                    Some(class) => Holder::listed(vec![Name::from(class)]),
                     None => Holder::Unknown,
                 },
                 true,
@@ -4373,13 +4407,13 @@ impl CallContext for Level<'_> {
         let Some(origins) = on else {
             return (Holder::Unknown, false);
         };
-        let mut holder = Holder::Classes(Vec::new());
+        let mut holder = Holder::none();
         let (mut this, mut other) = (false, false);
         for origin in origins {
             let (found, same) = self.operand_origin(origin);
             if same {
                 this = true;
-            } else if found != Holder::Classes(Vec::new()) {
+            } else if found != Holder::none() {
                 other = true;
             }
             holder = holder.join(found);
@@ -4400,7 +4434,7 @@ impl<'r> Level<'r> {
             origin,
             Origin::NoObject | Origin::Arithmetic | Origin::Closure
         ) {
-            return (Holder::Classes(Vec::new()), false);
+            return (Holder::none(), false);
         }
         let at: *const Origin = origin;
         if let Some(found) = self.origin_holders.borrow().get(&at) {
@@ -4661,10 +4695,12 @@ impl<'r> Level<'r> {
         if let Some(made) = self.made.get(name.as_str()) {
             return match made {
                 Made::Object(Some(class)) => Holder::Made(Some(
-                    named_classes(self.registry, self.class, class).unwrap_or_default(),
+                    named_classes(self.registry, self.class, class)
+                        .unwrap_or_default()
+                        .into(),
                 )),
                 Made::Object(None) => Holder::Made(None),
-                Made::Closure(_) => Holder::Made(Some(vec![Name::from("Closure")])),
+                Made::Closure(_) => Holder::Made(Some(vec![Name::from("Closure")].into())),
             };
         }
         if let Some(declared) = self.params.get(name.as_str()) {
@@ -4727,7 +4763,7 @@ impl<'r> Level<'r> {
             return held;
         };
         match narrowing {
-            Narrowing::NoObject => Holder::Classes(Vec::new()),
+            Narrowing::NoObject => Holder::none(),
             Narrowing::Declared(ty) if self.known_type(ty) => holder_of(ty),
             Narrowing::Declared(_) => held,
             Narrowing::Instance(classes) => {
@@ -4742,7 +4778,7 @@ impl<'r> Level<'r> {
                     Holder::Made(_) => held,
                     Holder::Classes(own) if !own.is_empty() => {
                         let mut found = Vec::new();
-                        for own in &own {
+                        for own in own.iter() {
                             for class in &named {
                                 found.push(if self.registry.is_subclass_of(own, class) {
                                     own.clone()
@@ -4771,7 +4807,7 @@ impl<'r> Level<'r> {
                         None => return Holder::Unknown,
                     }
                 }
-                Holder::Classes(found)
+                Holder::listed(found)
             }
             Declared::Classes(None) => Holder::Unknown,
         }
@@ -4785,7 +4821,7 @@ impl<'r> Level<'r> {
         let start: FxHashMap<&'r str, Holder> = self
             .origins
             .keys()
-            .map(|&name| (name, Holder::Classes(Vec::new())))
+            .map(|&name| (name, Holder::none()))
             .collect();
         *self.solved.borrow_mut() = Some(start);
         // A holder grows at most to any object; a chain of variables this
@@ -4793,17 +4829,15 @@ impl<'r> Level<'r> {
         for _ in 0..16 {
             let mut grew = false;
             for (&name, origins) in &self.origins {
-                let mut held = self
-                    .base
-                    .get(name)
-                    .cloned()
-                    .unwrap_or(Holder::Classes(Vec::new()));
+                let mut held = self.base.get(name).cloned().unwrap_or(Holder::none());
                 for origin in origins.iter() {
                     held = held.join(self.origin_holder(origin).0);
                 }
                 let held = match held {
-                    Holder::Classes(classes) => Holder::Classes(sorted_classes(classes)),
-                    Holder::Made(Some(classes)) => Holder::Made(Some(sorted_classes(classes))),
+                    Holder::Classes(classes) => Holder::Classes(sorted_classes(classes.to_vec())),
+                    Holder::Made(Some(classes)) => {
+                        Holder::Made(Some(sorted_classes(classes.to_vec())))
+                    }
                     other => other,
                 };
                 let mut solved = self.solved.borrow_mut();
@@ -4831,9 +4865,7 @@ impl<'r> Level<'r> {
     fn origin_holder(&self, origin: &Origin) -> (Holder, bool) {
         let registry = self.registry;
         match origin {
-            Origin::NoObject | Origin::Arithmetic | Origin::Closure => {
-                (Holder::Classes(Vec::new()), false)
-            }
+            Origin::NoObject | Origin::Arithmetic | Origin::Closure => (Holder::none(), false),
             Origin::Declared(ty) if self.known_type(ty) => (holder_of(ty), false),
             Origin::Declared(_) => (Holder::Unknown, false),
             Origin::Place(place) if matches!(place.root, Root::This) && place.steps.is_empty() => {
@@ -4846,12 +4878,14 @@ impl<'r> Level<'r> {
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::New(Some(class)) => (
                 Holder::Made(Some(
-                    named_classes(registry, self.class, class).unwrap_or_default(),
+                    named_classes(registry, self.class, class)
+                        .unwrap_or_default()
+                        .into(),
                 )),
                 false,
             ),
             Origin::New(None) | Origin::Anonymous(None) => (Holder::Made(None), false),
-            Origin::Anonymous(Some(name)) => (Holder::Made(Some(vec![name.clone()])), false),
+            Origin::Anonymous(Some(name)) => (Holder::Made(Some(vec![name.clone()].into())), false),
             Origin::Constant(name) => {
                 let (primary, fallback) = name.candidates();
                 let found = registry
@@ -4865,16 +4899,16 @@ impl<'r> Level<'r> {
                     return (Holder::Unknown, false);
                 };
                 let mut found = Vec::new();
-                for class in &classes {
+                for class in classes.iter() {
                     let Some(ty) = registry.lookup_const_type(class, constant) else {
                         return (Holder::Unknown, false);
                     };
                     match holder_of(ty) {
-                        Holder::Classes(held) => found.extend(held),
+                        Holder::Classes(held) => found.extend(held.iter().cloned()),
                         _ => return (Holder::Unknown, false),
                     }
                 }
-                (Holder::Classes(found), false)
+                (Holder::listed(found), false)
             }
             Origin::Caught(classes) => {
                 let mut found = Vec::new();
@@ -4884,7 +4918,7 @@ impl<'r> Level<'r> {
                         None => return (Holder::Unknown, false),
                     }
                 }
-                (Holder::Classes(found), false)
+                (Holder::listed(found), false)
             }
         }
     }
@@ -4897,7 +4931,7 @@ impl<'r> Level<'r> {
             Callee::Function(name) => match registry.resolve_function(name) {
                 Some((_, sig)) => holder_of(sig.return_type()),
                 // A call to no function throws.
-                None => Holder::Classes(Vec::new()),
+                None => Holder::none(),
             },
             Callee::Method {
                 receiver,
@@ -4908,15 +4942,15 @@ impl<'r> Level<'r> {
                 else {
                     return Holder::Unknown;
                 };
-                let mut held = Holder::Classes(Vec::new());
-                for class in &classes {
+                let mut held = Holder::none();
+                for class in classes.iter() {
                     let found = match registry.lookup_method_with_owner(class, method) {
                         Some((owner, sig)) if !sig.is_magic => {
                             declared_holder(registry, sig.return_type(), class, &owner)
                         }
                         // `__call`, or a method of a class below.
                         _ => {
-                            let mut found = Holder::Classes(Vec::new());
+                            let mut found = Holder::none();
                             for key in registry.implementations(class, method).iter() {
                                 let Some((owner, sig)) = key.class.as_ref().and_then(|owner| {
                                     registry.lookup_method_with_owner(owner, &key.member)
@@ -4944,7 +4978,7 @@ impl<'r> Level<'r> {
                 let Some(targets) = named_classes(registry, self.class, class) else {
                     return Holder::Unknown;
                 };
-                let mut held = Holder::Classes(Vec::new());
+                let mut held = Holder::none();
                 for target in &targets {
                     match registry.lookup_method_with_owner(target, method) {
                         Some((owner, sig)) if !sig.is_magic => {
@@ -4974,7 +5008,7 @@ impl<'r> Level<'r> {
                 held
             }
             // A `set` hook returns nothing.
-            Callee::ParentHook { set: true, .. } => Holder::Classes(Vec::new()),
+            Callee::ParentHook { set: true, .. } => Holder::none(),
             Callee::ParentHook {
                 property,
                 set: false,
@@ -5009,11 +5043,11 @@ impl<'r> Level<'r> {
                 .lookup_property(&owner, prop)
                 .map(|p| holder_of(p.ty()))
             {
-                Some(Holder::Classes(found)) => classes.extend(found),
+                Some(Holder::Classes(found)) => classes.extend(found.iter().cloned()),
                 _ => return Holder::Unknown,
             }
         }
-        Holder::Classes(classes)
+        Holder::listed(classes)
     }
 
     /// The declared types of the static property `class::$prop`, as seen
@@ -5080,9 +5114,9 @@ impl<'r> Level<'r> {
                     prop: prop.clone(),
                 }),
                 Holder::Classes(classes) => {
-                    for class in classes {
+                    for class in classes.iter() {
                         out.insert(Storage::Property {
-                            class: Some(class),
+                            class: Some(class.clone()),
                             prop: prop.clone(),
                         });
                     }
@@ -5176,7 +5210,7 @@ impl<'r> Level<'r> {
         };
         let start = match root {
             Root::This => match self.class {
-                Some(class) => Holder::Classes(vec![Name::from(class)]),
+                Some(class) => Holder::listed(vec![Name::from(class)]),
                 None => Holder::Unknown,
             },
             Root::Variable(Some(name)) => self.narrowed_holder(name, narrowing),
@@ -5184,7 +5218,7 @@ impl<'r> Level<'r> {
             // A superglobal is an array of strings, files or session values
             // PHP itself fills.
             Root::Global(Some(name)) if syntax::ast::is_superglobal(name) => {
-                return Holder::Classes(Vec::new());
+                return Holder::none();
             }
             Root::Variable(None)
             | Root::Static(_, None)
@@ -5199,7 +5233,7 @@ impl<'r> Level<'r> {
         // object the walk starts from.
         let mut reached: Option<Vec<Type>> = typed;
         let classes = match (&reached, start) {
-            (Some(_), _) => Vec::new(),
+            (Some(_), _) => Holder::none_classes(),
             (None, Holder::Classes(classes) | Holder::Made(Some(classes))) => classes,
             (None, _) => return Holder::Unknown,
         };
@@ -5239,7 +5273,7 @@ impl<'r> Level<'r> {
                 None => return Holder::Unknown,
             }
         }
-        Holder::Classes(found)
+        Holder::listed(found)
     }
 
     /// The declared types of the property `prop` on each of `classes`;

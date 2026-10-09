@@ -140,7 +140,7 @@ impl Reach<'_> {
                 return Some(());
             }
         };
-        for class in classes {
+        for class in classes.iter() {
             let declared = matches!(operation, Operation::Property(..))
                 && self.implicit_methods(class, operation).is_empty();
             let below = if exact || declared {
