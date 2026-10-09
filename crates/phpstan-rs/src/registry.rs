@@ -26,6 +26,7 @@ mod hierarchy;
 mod ids;
 mod index;
 pub(crate) mod init_flow;
+mod local_names;
 mod members;
 mod name_context;
 mod name_map;
@@ -297,7 +298,7 @@ pub struct Registry {
     #[serde(skip)]
     class_ids: NameTable<ClassId>,
     #[serde(skip)]
-    project_class_names: Vec<Option<Name>>,
+    project_class_names: local_names::LocalNames,
     /// The first class id local a declaration the registry places itself
     /// (a stub merged over a project's declarations) may take: the
     /// project's own high-water mark, so that no id it has handed to a
@@ -319,7 +320,7 @@ pub struct Registry {
     #[serde(skip)]
     function_ids: NameTable<FnId>,
     #[serde(skip)]
-    project_function_names: Vec<Option<Name>>,
+    project_function_names: local_names::LocalNames,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -880,10 +881,7 @@ impl Registry {
         let name = match id.source()? {
             IdSource::Stub => self.classes.base_name(id.local() as usize)?,
             IdSource::Context => return None,
-            IdSource::Project => self
-                .project_class_names
-                .get(id.local() as usize)?
-                .as_ref()?,
+            IdSource::Project => self.project_class_names.get(id.local())?,
         };
         (self.class_ids.get(name) == Some(&id)).then_some(name)
     }
@@ -977,10 +975,7 @@ impl Registry {
         let name = match id.source()? {
             IdSource::Stub => self.functions.base_name(id.local() as usize)?,
             IdSource::Context => return None,
-            IdSource::Project => self
-                .project_function_names
-                .get(id.local() as usize)?
-                .as_ref()?,
+            IdSource::Project => self.project_function_names.get(id.local())?,
         };
         (self.function_ids.get(name) == Some(&id)).then_some(name)
     }
@@ -1028,11 +1023,7 @@ impl Registry {
             let local = reserved.unwrap_or_else(|| self.next_class_local());
             let id = ClassId::project_in_generation(local, self.id_generation);
             self.class_ids.insert(name.clone(), id);
-            if self.project_class_names.len() <= id.local() as usize {
-                self.project_class_names
-                    .resize_with(id.local() as usize + 1, || None);
-            }
-            self.project_class_names[id.local() as usize] = Some(name.clone());
+            self.project_class_names.set(id.local(), name.clone());
             if let Some(declaration) = declaration {
                 self.class_declarations.insert(id, declaration);
             }
@@ -1041,11 +1032,7 @@ impl Registry {
         let local = reserved.unwrap_or_else(|| self.next_class_local());
         let id = ClassId::project_in_generation(local, self.id_generation);
         self.class_ids.insert(name.clone(), id);
-        if self.project_class_names.len() <= id.local() as usize {
-            self.project_class_names
-                .resize_with(id.local() as usize + 1, || None);
-        }
-        self.project_class_names[id.local() as usize] = Some(name.clone());
+        self.project_class_names.set(id.local(), name.clone());
     }
 
     fn ensure_function_id(&mut self, name: &Name, reserved: Option<u32>) {
@@ -1057,11 +1044,7 @@ impl Registry {
             let local = reserved.unwrap_or_else(|| self.next_function_local());
             let id = FnId::project_in_generation(local, self.id_generation);
             self.function_ids.insert(name.clone(), id);
-            if self.project_function_names.len() <= id.local() as usize {
-                self.project_function_names
-                    .resize_with(id.local() as usize + 1, || None);
-            }
-            self.project_function_names[id.local() as usize] = Some(name.clone());
+            self.project_function_names.set(id.local(), name.clone());
             if let Some(declaration) = declaration {
                 self.function_declarations.insert(id, declaration);
             }
@@ -1070,11 +1053,7 @@ impl Registry {
         let local = reserved.unwrap_or_else(|| self.next_function_local());
         let id = FnId::project_in_generation(local, self.id_generation);
         self.function_ids.insert(name.clone(), id);
-        if self.project_function_names.len() <= id.local() as usize {
-            self.project_function_names
-                .resize_with(id.local() as usize + 1, || None);
-        }
-        self.project_function_names[id.local() as usize] = Some(name.clone());
+        self.project_function_names.set(id.local(), name.clone());
     }
 
     fn remove_project_class_id(&mut self, name: &Name) {

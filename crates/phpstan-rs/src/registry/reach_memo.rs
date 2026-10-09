@@ -70,6 +70,8 @@ pub(crate) struct ReachMemo {
     /// The properties of a class with a hook body, by class, property and
     /// hook.
     pub(crate) hook_declarations: OnceMap<(Name, Option<Name>, bool), Arc<[HookDeclaration]>>,
+    /// Whether objects of a builtin class run what they were made with.
+    pub(crate) stub_holds_code: OnceMap<String, bool>,
     pub(crate) builtins: OnceMap<DeclKey, bool>,
     pub(crate) effect_ids: OnceMap<DeclKey, EffectId>,
 }

@@ -1660,9 +1660,13 @@ impl Registry {
     /// Whether an object of the builtin class `class` may run a callable or
     /// an object's method it was made with.
     fn stub_holds_code(&self, class: &str) -> bool {
-        self.builtin_lineage(class)
-            .iter()
-            .any(|class| self.stub_holding_classes.contains(class))
+        self.reach_memo
+            .stub_holds_code
+            .get_or_compute(class.to_ascii_lowercase(), || {
+                self.builtin_lineage(class)
+                    .iter()
+                    .any(|class| self.stub_holding_classes.contains(class))
+            })
     }
 
     /// What a call of the stub `key` (`sig`) whose arguments are not known
@@ -1794,8 +1798,7 @@ impl Registry {
             {
                 out.push(method_key(&owner, method));
             }
-            let declaring: Vec<&Name> = self.classes_declaring(method).collect();
-            if below.len() < declaring.len() {
+            if below.len() < self.declaring_ids(method).len() {
                 out.extend(
                     below
                         .iter()
@@ -1807,14 +1810,20 @@ impl Registry {
                 );
             } else {
                 out.extend(
-                    declaring
-                        .iter()
+                    self.classes_declaring(method)
                         .filter(|class| below_lower.contains(class.lower()))
                         .map(|class| method_key(class, method)),
                 );
             }
         }
         out
+    }
+
+    /// The ids of the loaded classes declaring `method` with a body.
+    fn declaring_ids(&self, method: &str) -> &[crate::registry::ClassId] {
+        self.methods_by_name
+            .get(&method.to_ascii_lowercase())
+            .map_or(&[], Vec::as_slice)
     }
 
     /// The loaded classes declaring `method` with a body.

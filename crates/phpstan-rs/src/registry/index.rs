@@ -714,11 +714,7 @@ impl Registry {
                     self.class_ids.insert(name.clone(), id);
                     self.class_declarations.insert(id, declaration.clone());
                     if id.source() == Some(crate::registry::IdSource::Project) {
-                        if self.project_class_names.len() <= id.local() as usize {
-                            self.project_class_names
-                                .resize_with(id.local() as usize + 1, || None);
-                        }
-                        self.project_class_names[id.local() as usize] = Some(name.clone());
+                        self.project_class_names.set(id.local(), name.clone());
                     }
                     self.classes.remove(name.as_str());
                     if unconditional {
@@ -745,11 +741,7 @@ impl Registry {
                     self.function_ids.insert(name.clone(), id);
                     self.function_declarations.insert(id, declaration);
                     if id.source() == Some(crate::registry::IdSource::Project) {
-                        if self.project_function_names.len() <= id.local() as usize {
-                            self.project_function_names
-                                .resize_with(id.local() as usize + 1, || None);
-                        }
-                        self.project_function_names[id.local() as usize] = Some(name.clone());
+                        self.project_function_names.set(id.local(), name.clone());
                     }
                     self.functions.remove(name.as_str());
                     let folded = folded_key(&name);
@@ -792,10 +784,7 @@ impl Registry {
                 isolated.classes.insert_shared(name.clone(), declaration);
             }
             if id.source() == Some(crate::registry::IdSource::Project) {
-                isolated
-                    .project_class_names
-                    .resize_with(id.local() as usize + 1, || None);
-                isolated.project_class_names[id.local() as usize] = Some(name.clone());
+                isolated.project_class_names.set(id.local(), name.clone());
             }
         }
         if self.unconditionally_declared_classes.contains(name) {
@@ -828,8 +817,7 @@ impl Registry {
             if id.source() == Some(crate::registry::IdSource::Project) {
                 isolated
                     .project_function_names
-                    .resize_with(id.local() as usize + 1, || None);
-                isolated.project_function_names[id.local() as usize] = Some(name.clone());
+                    .set(id.local(), name.clone());
             }
         }
         if self
