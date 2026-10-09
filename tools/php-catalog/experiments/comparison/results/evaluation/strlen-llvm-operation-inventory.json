@@ -112,6 +112,29 @@
     "stored_as_return_zval_payload": true,
     "zend_string_length_field_index": 2
   },
+  "native_return_demand": {
+    "coverage": {
+      "Return": "closed for normal returns after successful parameter parsing",
+      "effects": "open; represented by catalog domain coverage",
+      "non_normal_exits": "open; represented by catalog domain coverage"
+    },
+    "length_load_register": "%193",
+    "parser_calls": [
+      "zend_flf_parse_arg_str_slow",
+      "zend_parse_arg_str_slow"
+    ],
+    "parser_output_local_slot": "17",
+    "query": {
+      "argument": 0,
+      "demand": "normal-exit return zval payload",
+      "domain": "Return",
+      "function": "zif_strlen"
+    },
+    "return_payload_field_address": "%195",
+    "return_zval_output_slot": "%16",
+    "source_expression": "RETVAL_LONG(ZSTR_LEN(s))",
+    "string_length_field_index": 2
+  },
   "parser_source": {
     "contract_facts": [
       "zend_null_arg_deprecated(\"string\", arg_num)",

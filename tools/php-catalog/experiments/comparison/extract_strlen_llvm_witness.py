@@ -292,12 +292,60 @@ def main() -> None:
     ) is None:
         raise SystemExit("weak string parser no longer writes its parsed string to the dest argument")
     field_load = re.search(
-        r"getelementptr[^\n]*%struct\._zend_string,[^\n]*i32 0, i32 2"
-        r"[^\n]*\n\s*%[^\n]*= load i64,[^\n]*!dbg !(\d+)",
+        r"^\s*(%\d+) = getelementptr[^\n]*%struct\._zend_string,[^\n]*i32 0, i32 2"
+        r"[^\n]*\n\s*(%\d+) = load i64, ptr \1,[^\n]*!dbg !(\d+)$",
         function,
+        re.MULTILINE,
     )
     if field_load is None:
         raise SystemExit("zif_strlen does not load _zend_string field 2 as i64")
+    length_register = field_load.group(2)
+    return_payload_store = re.search(
+        rf"^\s*store i64 {re.escape(length_register)}, ptr (%\d+), align 8(?:, !dbg !\d+)?$",
+        function[field_load.end():],
+        re.MULTILINE,
+    )
+    if return_payload_store is None:
+        raise SystemExit("loaded string length does not reach a zval payload store")
+    return_payload_address = return_payload_store.group(1)
+    return_payload_gep = re.search(
+        rf"^\s*{re.escape(return_payload_address)} = getelementptr[^\n]*%struct\._zval_struct, ptr (%\d+), i32 0, i32 0(?:,|$)",
+        function,
+        re.MULTILINE,
+    )
+    if return_payload_gep is None:
+        raise SystemExit("length payload store is not a zval value-field store")
+    return_zval_pointer = return_payload_gep.group(1)
+    return_zval_load = re.search(
+        rf"^\s*{re.escape(return_zval_pointer)} = load ptr, ptr (%\d+), align 8(?:, !dbg !\d+)?$",
+        function,
+        re.MULTILINE,
+    )
+    if return_zval_load is None:
+        raise SystemExit("return zval pointer is not loaded from its caller-provided slot")
+    return_zval_temporary_slot = return_zval_load.group(1)
+    return_zval_source_stores = list(re.finditer(
+        rf"^\s*store ptr (%\d+), ptr {re.escape(return_zval_temporary_slot)}, align 8(?:, !dbg !\d+)?$",
+        function[:return_zval_load.start()],
+        re.MULTILINE,
+    ))
+    if not return_zval_source_stores:
+        raise SystemExit("return zval temporary has no reaching caller-output pointer store")
+    return_zval_source_register = return_zval_source_stores[-1].group(1)
+    return_zval_source_loads = list(re.finditer(
+        rf"^\s*{re.escape(return_zval_source_register)} = load ptr, ptr (%\d+), align 8(?:, !dbg !\d+)?$",
+        function[:return_zval_source_stores[-1].start()],
+        re.MULTILINE,
+    ))
+    if not return_zval_source_loads:
+        raise SystemExit("return zval pointer does not trace to a caller-output parameter slot")
+    return_zval_slot = return_zval_source_loads[-1].group(1)
+    if re.search(
+        rf"^\s*store ptr %1, ptr {re.escape(return_zval_slot)}, align 8(?:, !dbg !\d+)?$",
+        function,
+        re.MULTILINE,
+    ) is None:
+        raise SystemExit("return zval slot is not initialized from the output parameter")
     helper_destinations = re.finditer(
         r"call zeroext i1 @zend_(?:flf_)?parse_arg_str_slow\(ptr noundef %\d+, ptr noundef %(\d+),",
         function,
@@ -342,7 +390,7 @@ def main() -> None:
     local_slots = {local for _, local in destination_chain}
     if len(local_slots) != 1 or parsed_string_slot is None or parsed_string_slot.group(1) not in local_slots:
         raise SystemExit("strlen field load does not use the parser's output string slot")
-    debug_id = field_load.group(1)
+    debug_id = field_load.group(3)
     metadata_pattern = rf"^{re.escape('!' + debug_id)} = !DILocation\(line: {source_line},"
     if re.search(metadata_pattern, ir, re.MULTILINE) is None:
         raise SystemExit("LLVM debug information does not map the load to the source return line")
@@ -407,6 +455,29 @@ def main() -> None:
             "parser_output_written_through_destination": True,
             "object_cast_handler_indirect_call": True,
             "object_cast_handler_field_index": 18,
+        },
+        "native_return_demand": {
+            "query": {
+                "function": "zif_strlen",
+                "domain": "Return",
+                "demand": "normal-exit return zval payload",
+                "argument": 0,
+            },
+            "source_expression": "RETVAL_LONG(ZSTR_LEN(s))",
+            "parser_output_local_slot": next(iter(local_slots)),
+            "string_length_field_index": 2,
+            "length_load_register": length_register,
+            "return_payload_field_address": return_payload_address,
+            "return_zval_output_slot": return_zval_slot,
+            "parser_calls": [
+                "zend_flf_parse_arg_str_slow",
+                "zend_parse_arg_str_slow",
+            ],
+            "coverage": {
+                "Return": "closed for normal returns after successful parameter parsing",
+                "non_normal_exits": "open; represented by catalog domain coverage",
+                "effects": "open; represented by catalog domain coverage",
+            },
         },
         "configured_implicit_operations": [
             {"operation": operation, "llvm_callee": callee, "catalog_domain": "open"}

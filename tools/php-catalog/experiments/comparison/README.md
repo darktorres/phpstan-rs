@@ -136,4 +136,8 @@ cmp crates/php-semantics/data/php-8.5.4-strlen.json \
 The inventory accounts for each instruction opcode in `zif_strlen` and fails
 if the selected compiler output adds an unclassified instruction. It does not
 interpret those operations; the graph's per-domain coverage remains the
-authority for which behaviors can be consumed.
+authority for which behaviors can be consumed. The witness also carries the
+Return demand path from both parser-result destinations through the `len`
+field load to the caller's return-zval payload. The catalog builder validates
+that slot chain and keeps effects and non-normal outcomes open; it does not
+claim a reusable native CFG or memory solver.

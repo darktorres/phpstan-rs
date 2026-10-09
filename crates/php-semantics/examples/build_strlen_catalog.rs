@@ -356,6 +356,7 @@ fn main() {
             .expect("linked bitcode digest"),
     );
     validate_zif_strlen_inventory(&witness["zif_strlen_operation_inventory"]);
+    validate_native_return_demand(&witness);
     let inventory_evidence = EvidenceRecord {
         kind: EvidenceKind::SourceTransfer,
         source_digest: Digest(module_digest),
@@ -367,6 +368,24 @@ fn main() {
         dependencies: vec![],
     };
     let inventory_evidence_id = inventory_evidence.id().expect("inventory evidence encodes");
+    let native_demand_evidence = EvidenceRecord {
+        kind: EvidenceKind::SourceTransfer,
+        source_digest: Digest(module_digest),
+        site: Some(Bytes(
+            b"php-cli.bc:zif_strlen:normal-return-value-demand".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-native-return-demand-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![
+            source_evidence_id,
+            layout_evidence_id,
+            parser_evidence_id,
+            inventory_evidence_id,
+        ],
+    };
+    let native_demand_evidence_id = native_demand_evidence
+        .id()
+        .expect("native return demand evidence encodes");
     assert_eq!(
         module_digest,
         [
@@ -389,6 +408,7 @@ fn main() {
             layout_evidence_id,
             parser_evidence_id,
             inventory_evidence_id,
+            native_demand_evidence_id,
         ],
     };
     let llvm_evidence_id = llvm_evidence.id().expect("LLVM evidence encodes");
@@ -397,6 +417,7 @@ fn main() {
         layout_evidence_id,
         parser_evidence_id,
         inventory_evidence_id,
+        native_demand_evidence_id,
         llvm_evidence_id,
     ];
     let graph = BehaviorGraph {
@@ -486,11 +507,65 @@ fn main() {
             (parser_evidence_id, parser_evidence),
             (diagnostic_evidence_id, diagnostic_evidence),
             (inventory_evidence_id, inventory_evidence),
+            (native_demand_evidence_id, native_demand_evidence),
             (llvm_evidence_id, llvm_evidence),
         ],
     };
     manifest.validate().expect("generated manifest validates");
     println!("{}", manifest.to_json().expect("manifest is JSON"));
+}
+
+fn validate_native_return_demand(witness: &serde_json::Value) {
+    let demand = &witness["native_return_demand"];
+    assert_eq!(demand["query"]["function"].as_str(), Some("zif_strlen"));
+    assert_eq!(demand["query"]["domain"].as_str(), Some("Return"));
+    assert_eq!(
+        demand["query"]["demand"].as_str(),
+        Some("normal-exit return zval payload")
+    );
+    assert_eq!(demand["query"]["argument"].as_u64(), Some(0));
+    assert_eq!(
+        demand["source_expression"].as_str(),
+        Some("RETVAL_LONG(ZSTR_LEN(s))")
+    );
+    assert_eq!(demand["parser_output_local_slot"].as_str(), Some("17"));
+    assert_eq!(demand["string_length_field_index"].as_u64(), Some(2));
+    assert_eq!(demand["length_load_register"].as_str(), Some("%193"));
+    assert_eq!(
+        demand["return_payload_field_address"].as_str(),
+        Some("%195")
+    );
+    assert_eq!(demand["return_zval_output_slot"].as_str(), Some("%16"));
+    assert_eq!(
+        demand["parser_output_local_slot"],
+        witness["argument_bridge"]["length_load_uses_local_slot"],
+        "parser output and length load use different local slots"
+    );
+    assert_eq!(
+        demand["parser_calls"],
+        serde_json::json!(["zend_flf_parse_arg_str_slow", "zend_parse_arg_str_slow"])
+    );
+    let destinations = witness["argument_bridge"]["parser_destination_slots"]
+        .as_array()
+        .expect("both argument-parser destinations are recorded");
+    assert_eq!(destinations.len(), 2);
+    assert!(destinations.iter().all(|destination| {
+        destination["strlen_local_slot"] == demand["parser_output_local_slot"]
+    }));
+    assert_eq!(
+        demand["coverage"]["Return"].as_str(),
+        Some("closed for normal returns after successful parameter parsing")
+    );
+    assert!(
+        demand["coverage"]["non_normal_exits"]
+            .as_str()
+            .is_some_and(|coverage| coverage.starts_with("open;"))
+    );
+    assert!(
+        demand["coverage"]["effects"]
+            .as_str()
+            .is_some_and(|coverage| coverage.starts_with("open;"))
+    );
 }
 
 fn validate_zif_strlen_inventory(inventory: &serde_json::Value) {
@@ -601,6 +676,38 @@ fn decode_digest(text: &str) -> [u8; 32] {
 mod tests {
     use super::*;
 
+    fn valid_return_demand_witness() -> serde_json::Value {
+        serde_json::json!({
+            "native_return_demand": {
+                "query": {
+                    "function": "zif_strlen",
+                    "domain": "Return",
+                    "demand": "normal-exit return zval payload",
+                    "argument": 0
+                },
+                "source_expression": "RETVAL_LONG(ZSTR_LEN(s))",
+                "parser_output_local_slot": "17",
+                "string_length_field_index": 2,
+                "length_load_register": "%193",
+                "return_payload_field_address": "%195",
+                "return_zval_output_slot": "%16",
+                "parser_calls": ["zend_flf_parse_arg_str_slow", "zend_parse_arg_str_slow"],
+                "coverage": {
+                    "Return": "closed for normal returns after successful parameter parsing",
+                    "non_normal_exits": "open; represented by catalog domain coverage",
+                    "effects": "open; represented by catalog domain coverage"
+                }
+            },
+            "argument_bridge": {
+                "length_load_uses_local_slot": "17",
+                "parser_destination_slots": [
+                    {"strlen_local_slot": "17"},
+                    {"strlen_local_slot": "17"}
+                ]
+            }
+        })
+    }
+
     fn valid_strlen_inventory() -> serde_json::Value {
         serde_json::json!({
             "instruction_count": 241,
@@ -644,6 +751,29 @@ mod tests {
             .unwrap()
             .push(serde_json::json!("invented_target"));
         assert!(std::panic::catch_unwind(|| validate_zif_strlen_inventory(&invented)).is_err());
+    }
+
+    #[test]
+    fn native_return_demand_validator_requires_connected_slots_and_open_boundaries() {
+        let witness = valid_return_demand_witness();
+        validate_native_return_demand(&witness);
+
+        let mut wrong_slot = witness.clone();
+        wrong_slot["argument_bridge"]["parser_destination_slots"][1]["strlen_local_slot"] =
+            serde_json::json!("99");
+        assert!(std::panic::catch_unwind(|| validate_native_return_demand(&wrong_slot)).is_err());
+
+        let mut false_closure = witness;
+        false_closure["native_return_demand"]["coverage"]["effects"] = serde_json::json!("closed");
+        assert!(
+            std::panic::catch_unwind(|| validate_native_return_demand(&false_closure)).is_err()
+        );
+
+        let mut wrong_register = valid_return_demand_witness();
+        wrong_register["native_return_demand"]["length_load_register"] = serde_json::json!("%999");
+        assert!(
+            std::panic::catch_unwind(|| validate_native_return_demand(&wrong_register)).is_err()
+        );
     }
 
     #[test]

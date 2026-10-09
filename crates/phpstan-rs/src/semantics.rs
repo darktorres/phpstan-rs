@@ -234,6 +234,26 @@ mod embedded_catalog_tests {
             ])
         );
         let inventory_id = inventory_record.id().expect("inventory evidence encodes");
+        let native_demand_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| {
+                record.rule_version.0 == b"php-8.5.4-clang-21.1.8-strlen-native-return-demand-v1"
+            })
+            .expect("strlen Return has a source-linked native demand record");
+        assert_eq!(native_demand_record.kind, EvidenceKind::SourceTransfer);
+        assert_eq!(
+            native_demand_record.source_digest,
+            inventory_record.source_digest
+        );
+        assert!(native_demand_record.dependencies.contains(&source_id));
+        assert!(native_demand_record.dependencies.contains(&layout_id));
+        assert!(native_demand_record.dependencies.contains(&parser_id));
+        assert!(native_demand_record.dependencies.contains(&inventory_id));
+        let native_demand_id = native_demand_record
+            .id()
+            .expect("native demand evidence encodes");
         let llvm_record = manifest
             .evidence
             .iter()
@@ -247,6 +267,7 @@ mod embedded_catalog_tests {
         assert!(llvm_record.dependencies.contains(&layout_id));
         assert!(llvm_record.dependencies.contains(&parser_id));
         assert!(llvm_record.dependencies.contains(&inventory_id));
+        assert!(llvm_record.dependencies.contains(&native_demand_id));
         assert_eq!(
             parser_record.source_digest,
             Digest([
@@ -286,6 +307,7 @@ mod embedded_catalog_tests {
                 && coverage.evidence.contains(&layout_id)
                 && coverage.evidence.contains(&parser_id)
                 && coverage.evidence.contains(&inventory_id)
+                && coverage.evidence.contains(&native_demand_id)
                 && coverage.evidence.contains(&llvm_record.id().unwrap())
         }));
         assert!(selection.variants[0].graph.coverage.iter().any(|coverage| {
