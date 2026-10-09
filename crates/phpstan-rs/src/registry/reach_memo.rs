@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effects::{DeclKey, ImplicitKey, Transfer};
+use super::effects::{DeclKey, ImplicitKey, OperationKey, Transfer};
 
 const SHARDS: usize = 16;
 
@@ -56,6 +56,9 @@ pub(crate) struct ReachMemo {
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
     /// What an operation runs, by `ImplicitKey`; none when it may run code
     /// not known.
+    /// What an operation runs on an object of any class, but for a
+    /// property's.
+    pub(crate) unknown_implicit: OnceMap<OperationKey, Arc<[DeclKey]>>,
     pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
     pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
 }

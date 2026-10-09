@@ -43,6 +43,8 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+
+use super::reach_memo::SharedTargets;
 use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
 
@@ -303,9 +305,41 @@ impl Settled {
 /// method, its name alone for a function. The names are held lowercased, and
 /// a key with them in any case finds the declaration.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(from = "DeclKeyNames", into = "DeclKeyNames")]
 pub(crate) struct DeclKey {
     pub(in crate::registry) class: Option<Arc<str>>,
     pub(in crate::registry) member: Arc<str>,
+    /// `decl_hash` of the names, made when the key was.
+    hash: u64,
+}
+
+/// What a `DeclKey` is stored as.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DeclKeyNames {
+    class: Option<Arc<str>>,
+    member: Arc<str>,
+}
+
+impl From<DeclKeyNames> for DeclKey {
+    fn from(names: DeclKeyNames) -> DeclKey {
+        DeclKey::new(names.class, names.member)
+    }
+}
+
+impl From<DeclKey> for DeclKeyNames {
+    fn from(key: DeclKey) -> DeclKeyNames {
+        DeclKeyNames {
+            class: key.class,
+            member: key.member,
+        }
+    }
+}
+
+/// The hash a declaration's names file it under, the same in any case.
+fn decl_hash(class: Option<&str>, member: &str) -> u64 {
+    const K: u64 = 0x517c_c1b7_2722_0a95;
+    let class = class.map_or(0, |class| syntax::name::folded_hash(class.as_bytes()) | 1);
+    (class.rotate_left(5) ^ syntax::name::folded_hash(member.as_bytes())).wrapping_mul(K)
 }
 
 /// The kind of synthetic property hook represented by a property slot.
@@ -379,20 +413,7 @@ impl DeclQuery for DeclKey {
 
 impl std::hash::Hash for dyn DeclQuery + '_ {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let fold = |text: &str, state: &mut H| {
-            for byte in text.bytes() {
-                state.write_u8(byte.to_ascii_lowercase());
-            }
-            state.write_u8(0xff);
-        };
-        match self.class() {
-            Some(class) => {
-                state.write_u8(1);
-                fold(class, state);
-            }
-            None => state.write_u8(0),
-        }
-        fold(self.member(), state);
+        state.write_u64(decl_hash(self.class(), self.member()));
     }
 }
 
@@ -411,13 +432,13 @@ impl Eq for dyn DeclQuery + '_ {}
 
 impl std::hash::Hash for DeclKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (self as &dyn DeclQuery).hash(state);
+        state.write_u64(self.hash);
     }
 }
 
 impl PartialEq for DeclKey {
     fn eq(&self, other: &Self) -> bool {
-        (self as &dyn DeclQuery) == (other as &dyn DeclQuery)
+        self.hash == other.hash && (self as &dyn DeclQuery) == (other as &dyn DeclQuery)
     }
 }
 
@@ -434,21 +455,24 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
 const FILE_CLASS: &str = "\0file";
 
 impl DeclKey {
+    pub(in crate::registry) fn new(class: Option<Arc<str>>, member: Arc<str>) -> DeclKey {
+        let hash = decl_hash(class.as_deref(), &member);
+        DeclKey {
+            class,
+            member,
+            hash,
+        }
+    }
+
     /// The key of the top level of `file`.
     fn file(file: FileId) -> DeclKey {
-        DeclKey {
-            class: Some(FILE_CLASS.into()),
-            member: file.index().to_string().into(),
-        }
+        DeclKey::new(Some(FILE_CLASS.into()), file.index().to_string().into())
     }
 
     /// The key of the top level of a file that is not known: code of
     /// arbitrary content.
     fn unresolved_include() -> DeclKey {
-        DeclKey {
-            class: Some(FILE_CLASS.into()),
-            member: "unresolved".into(),
-        }
+        DeclKey::new(Some(FILE_CLASS.into()), "unresolved".into())
     }
 
     /// The file whose top level the key names, when it names one.
@@ -462,10 +486,10 @@ impl DeclKey {
     /// The key of the closure, arrow function or first-class callable this
     /// declaration's body lists at `index`: a name no declaration has.
     fn closure(&self, index: u32) -> DeclKey {
-        DeclKey {
-            class: self.class.clone(),
-            member: format!("{}{{closure#{index}}}", self.member).into(),
-        }
+        DeclKey::new(
+            self.class.clone(),
+            format!("{}{{closure#{index}}}", self.member).into(),
+        )
     }
 
     /// The name the builtin table knows the declaration by: a function's,
@@ -484,26 +508,20 @@ fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
     let start = key.member.rfind("{closure#")?;
     let ordinal = key.member[start + 9..].strip_suffix('}')?.parse().ok()?;
     Some((
-        DeclKey {
-            class: key.class.clone(),
-            member: key.member[..start].into(),
-        },
+        DeclKey::new(key.class.clone(), key.member[..start].into()),
         ordinal,
     ))
 }
 
 fn function_key(name: &str) -> DeclKey {
-    DeclKey {
-        class: None,
-        member: name.to_ascii_lowercase().into(),
-    }
+    DeclKey::new(None, name.to_ascii_lowercase().into())
 }
 
 fn method_key(class: &str, method: &str) -> DeclKey {
-    DeclKey {
-        class: Some(class.to_ascii_lowercase().into()),
-        member: method.to_ascii_lowercase().into(),
-    }
+    DeclKey::new(
+        Some(class.to_ascii_lowercase().into()),
+        method.to_ascii_lowercase().into(),
+    )
 }
 
 /// The name a hook of the property `property`, its `set` hook when `set`,
@@ -526,10 +544,10 @@ fn hook_member(property: Option<&str>, set: bool) -> String {
 /// The declaration of `class`'s hook of `property`, its `set` hook when
 /// `set`.
 fn hook_key(class: &str, property: &str, set: bool) -> DeclKey {
-    DeclKey {
-        class: Some(class.to_ascii_lowercase().into()),
-        member: hook_member(Some(property), set).into(),
-    }
+    DeclKey::new(
+        Some(class.to_ascii_lowercase().into()),
+        hook_member(Some(property), set).into(),
+    )
 }
 
 /// Whether code of the class `scope` sees a member `owner` declares with
@@ -986,6 +1004,8 @@ pub(crate) struct ImplicitKey {
     holder: Holder,
     same: bool,
     operation: OperationKey,
+    /// Whether it is the hooks alone that are asked about.
+    hooks: Option<bool>,
     scope: Option<String>,
     rebindable: bool,
 }
@@ -2747,43 +2767,50 @@ impl Reach<'_> {
     }
 
     /// The declarations PHP runs for `operation` on the operand `on`, found
-    /// once for each holder, scope and operation asked about.
+    /// once for each holder, operation and, where it decides what is seen,
+    /// scope asked about.
     fn implicit_call_targets(
         &self,
         on: Option<&[Origin]>,
         operation: &Operation,
     ) -> Option<Targets> {
         let (holder, same) = self.ctx.operand(on);
-        let key = ImplicitKey {
-            holder,
+        let scoped = |hooks: Option<bool>| ImplicitKey {
+            holder: holder.clone(),
             same,
             operation: OperationKey::of(operation),
+            hooks,
             scope: self.ctx.class().map(str::to_ascii_lowercase),
             rebindable: self.ctx.rebindable(),
         };
-        let list = self
-            .registry
-            .reach_memo
-            .implicit
-            .get_or_compute(key.clone(), || {
-                self.compute_implicit_targets(&key.holder, same, operation)
-                    .map(Into::into)
-            })?;
-        Some(Targets::Shared(list))
-    }
-
-    fn compute_implicit_targets(
-        &self,
-        holder: &Holder,
-        same: bool,
-        operation: &Operation,
-    ) -> Option<Vec<(DeclKey, Transfer)>> {
-        let mut out = TargetSet::default();
-        if let Some((property, set, iterate)) = hook_access(operation) {
-            self.hook_targets(holder, same, operation, property, set, iterate, &mut out);
+        let memo = &self.registry.reach_memo.implicit;
+        // The hooks the scope sees come first, and are found alone: most
+        // programs have none, and then the rest does not depend on the
+        // scope but for a property's.
+        let hooks = match hook_access(operation) {
+            Some((property, set, iterate)) => memo
+                .get_or_compute(scoped(Some(true)), || {
+                    let mut out = TargetSet::default();
+                    self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
+                    Some(out.into_vec().into())
+                })
+                .unwrap_or_default(),
+            None => SharedTargets::default(),
+        };
+        let mut key = scoped(Some(false));
+        if hooks.is_empty() && !matches!(operation, Operation::Property(..)) {
+            key.scope = None;
+            key.rebindable = false;
         }
-        self.implicit_targets(holder, same, operation, &mut out, &mut Vec::new())?;
-        Some(out.into_vec())
+        let list = memo.get_or_compute(key, || {
+            let mut out = TargetSet::default();
+            for (key, transfer) in hooks.iter() {
+                out.push(key.clone(), transfer.clone());
+            }
+            self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
+            Some(out.into_vec().into())
+        })?;
+        Some(Targets::Shared(list))
     }
 
     /// Adds to `out` the hooks PHP may run for an access to `property` (to
@@ -2905,7 +2932,20 @@ impl Reach<'_> {
 
     /// The declarations PHP runs for `operation` on an object of any class,
     /// each once.
-    fn unknown_implicit_keys(&self, operation: &Operation) -> Vec<DeclKey> {
+    fn unknown_implicit_keys(&self, operation: &Operation) -> Arc<[DeclKey]> {
+        let compute = || self.compute_unknown_implicit_keys(operation).into();
+        match OperationKey::of(operation) {
+            // A property's also asks what the scope sees.
+            OperationKey(0, ..) => compute(),
+            key => self
+                .registry
+                .reach_memo
+                .unknown_implicit
+                .get_or_compute(key, compute),
+        }
+    }
+
+    fn compute_unknown_implicit_keys(&self, operation: &Operation) -> Vec<DeclKey> {
         let registry = self.registry;
         let mut out: Vec<DeclKey> = Vec::new();
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
@@ -2954,8 +2994,8 @@ impl Reach<'_> {
             Holder::Made(Some(classes)) => (classes, true),
             Holder::Unknown | Holder::Made(None) => {
                 let transfer = transfer(None);
-                for key in self.unknown_implicit_keys(operation) {
-                    out.push(key, transfer.clone());
+                for key in self.unknown_implicit_keys(operation).iter() {
+                    out.push(key.clone(), transfer.clone());
                 }
                 return Some(());
             }
@@ -3169,10 +3209,10 @@ impl Registry {
         file: Option<FileId>,
         captured: Option<CapturedHolders<'_>>,
     ) -> Effect {
-        let holder = DeclKey {
-            class: class.map(|class| class.to_ascii_lowercase().into()),
-            member: "".into(),
-        };
+        let holder = DeclKey::new(
+            class.map(|class| class.to_ascii_lowercase().into()),
+            "".into(),
+        );
         let resolve = Resolve {
             registry: self,
             class,
@@ -4617,7 +4657,7 @@ impl<'r> Level<'r> {
 /// `class::member`, or the function's name.
 impl syntax::canonical::Canonical for DeclKey {
     fn canonical(&self, p: &mut syntax::canonical::Printer) {
-        let DeclKey { class, member } = self;
+        let DeclKey { class, member, .. } = self;
         if let Some(class) = class {
             p.name(class);
             p.atom("::");
