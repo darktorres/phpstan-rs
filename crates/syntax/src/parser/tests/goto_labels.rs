@@ -105,14 +105,15 @@ impl Visitor for Check {
             return;
         };
         if let ExprKind::Closure(closure) = &expr.kind
-            && let Some(crate::ast::ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
-                self.compare(
-                    arenas,
-                    "closure",
-                    arenas.stmt_ids(&closure.body),
-                    &closure.goto_labels,
-                );
-            }
+            && let Some(crate::ast::ClosurePayload::Closure(closure)) = arenas.closure(*closure)
+        {
+            self.compare(
+                arenas,
+                "closure",
+                arenas.stmt_ids(&closure.body),
+                &closure.goto_labels,
+            );
+        }
         arena::walk_expr(self, arenas, id);
     }
 

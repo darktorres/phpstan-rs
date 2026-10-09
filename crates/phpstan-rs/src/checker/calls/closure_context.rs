@@ -351,7 +351,7 @@ impl<'a> Checker<'a> {
                         closure: true,
                         ..crate::checker::shared_scope::SharedScope::of(
                             self.registry,
-            arenas,
+                            arenas,
                             body,
                             uses,
                             Some((

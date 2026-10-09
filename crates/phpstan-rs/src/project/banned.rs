@@ -386,8 +386,7 @@ impl<'a> Walker<'a> {
                 );
             }
             ExprKind::Closure(closure_id) => {
-                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id)
-                else {
+                let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure_id) else {
                     return;
                 };
                 if closure.by_ref {
@@ -533,11 +532,8 @@ impl Visitor for Walker<'_> {
             return;
         };
         if let ExprKind::NewAnonymousClass(class) = &e.kind {
-            self.classes.push(
-                arenas
-                    .anonymous_class_name(*class)
-                    .map(ToString::to_string),
-            );
+            self.classes
+                .push(arenas.anonymous_class_name(*class).map(ToString::to_string));
             arena::walk_expr(self, arenas, id);
             self.classes.pop();
         } else {

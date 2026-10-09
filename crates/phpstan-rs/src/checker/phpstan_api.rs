@@ -924,18 +924,20 @@ impl Visitor for Walker<'_> {
                         kind: ExprKind::Name(n),
                         ..
                     }) = arenas.expr(*callee)
-                        && let Some(name) = arenas.qualified_name(n) {
-                            self.check_runtime_reflection_function(name, self.expr_span(e.id));
-                        }
+                        && let Some(name) = arenas.qualified_name(n)
+                    {
+                        self.check_runtime_reflection_function(name, self.expr_span(e.id));
+                    }
                 }
                 ExprKind::New(callee, _) => {
                     if let Some(ExprNode {
                         kind: ExprKind::Name(n),
                         ..
                     }) = arenas.expr(*callee)
-                        && let Some(name) = arenas.qualified_name(n) {
-                            self.check_new(name, self.expr_span(e.id));
-                        }
+                        && let Some(name) = arenas.qualified_name(n)
+                    {
+                        self.check_new(name, self.expr_span(e.id));
+                    }
                 }
                 ExprKind::StaticCall(target, method, _) => {
                     // Resolved unconditionally, NOT pre-filtered through

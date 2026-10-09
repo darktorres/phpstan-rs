@@ -50,7 +50,11 @@ fn a_single_quoted_string_is_what_the_byte_by_byte_scan_made_of_it() {
             panic!("not a string literal: {src:?}");
         };
         let (bytes, end) = byte_by_byte(&src);
-        assert_eq!(string_bytes(&string, &src, &lexer.decoded_bytes), bytes, "{src:?}");
+        assert_eq!(
+            string_bytes(&string, &src, &lexer.decoded_bytes),
+            bytes,
+            "{src:?}"
+        );
         assert_eq!(lexer.pos, end, "{src:?}");
     }
 }

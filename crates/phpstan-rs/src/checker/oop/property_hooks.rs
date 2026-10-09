@@ -253,7 +253,11 @@ impl<'a> Checker<'a> {
                 false,
             ),
             PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(self.registry, arenas, *e)
+                crate::checker::shared_scope::SharedScope::of_arrow_function(
+                    self.registry,
+                    arenas,
+                    *e,
+                )
             }
             PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
         };
@@ -593,7 +597,11 @@ impl<'a> Checker<'a> {
                 false,
             ),
             PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(self.registry, arenas, *e)
+                crate::checker::shared_scope::SharedScope::of_arrow_function(
+                    self.registry,
+                    arenas,
+                    *e,
+                )
             }
             PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
         };

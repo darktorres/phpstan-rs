@@ -351,9 +351,10 @@ impl<'a> Checker<'a> {
                     self.apply_narrowing(other, locals, true);
                 }
             } else if disjunctive_syllogism_atom_key(arenas, *r, locals) == Some(cond_key)
-                && let Some(other) = arenas.expr(*l) {
-                    self.apply_narrowing(other, locals, true);
-                }
+                && let Some(other) = arenas.expr(*l)
+            {
+                self.apply_narrowing(other, locals, true);
+            }
         }
     }
 

@@ -33,9 +33,10 @@ fn new_class_spans(arenas: &NodeArenas, stmts: &[StmtId], out: &mut FxHashSet<Sp
             let Some(e) = arenas.expr(id) else { return };
             if let ExprKind::New(class, _) = &e.kind
                 && let Some(class) = arenas.expr(*class)
-                    && let Some(span) = arenas.expr_span(class.id) {
-                        self.0.insert(span);
-                    }
+                && let Some(span) = arenas.expr_span(class.id)
+            {
+                self.0.insert(span);
+            }
             arena::walk_expr(self, arenas, id);
         }
     }

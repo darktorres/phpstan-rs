@@ -92,11 +92,10 @@ pub(super) fn classify(tokens: &TokenStream, cursor: u32) -> Trigger {
     // <= cursor` too - excluded here, or it would always win `rposition`
     // over the real last token, e.g. the `Arrow` in `$x->` with the
     // cursor right after it.
-    let Some(idx) = tokens
-        .kinds
-        .iter()
-        .enumerate()
-        .rposition(|(index, kind)| *kind != TokenKind::Eof && tokens.span_at(index).end <= cursor)
+    let Some(idx) =
+        tokens.kinds.iter().enumerate().rposition(|(index, kind)| {
+            *kind != TokenKind::Eof && tokens.span_at(index).end <= cursor
+        })
     else {
         return Trigger::Bare;
     };
@@ -186,15 +185,18 @@ fn header_start(tokens: &TokenStream, end_idx: usize) -> usize {
 
 fn function_name_before(tokens: &TokenStream, brace_idx: usize) -> Option<String> {
     let start = header_start(tokens, brace_idx);
-    (start..brace_idx.saturating_sub(1)).find_map(|i| match (tokens.token_at(i), tokens.token_at(i + 1)) {
-        (Token::Keyword(Keyword::Function), Token::Identifier(name)) => Some(name.to_string()),
-        _ => None,
+    (start..brace_idx.saturating_sub(1)).find_map(|i| {
+        match (tokens.token_at(i), tokens.token_at(i + 1)) {
+            (Token::Keyword(Keyword::Function), Token::Identifier(name)) => Some(name.to_string()),
+            _ => None,
+        }
     })
 }
 
 fn class_name_before(tokens: &TokenStream, brace_idx: usize) -> Option<String> {
     let start = header_start(tokens, brace_idx);
-    (start..brace_idx.saturating_sub(1)).find_map(|i| match (tokens.token_at(i), tokens.token_at(i + 1)) {
+    (start..brace_idx.saturating_sub(1)).find_map(|i| {
+        match (tokens.token_at(i), tokens.token_at(i + 1)) {
             (
                 Token::Keyword(
                     Keyword::Class | Keyword::Interface | Keyword::Trait | Keyword::Enum,
@@ -202,7 +204,8 @@ fn class_name_before(tokens: &TokenStream, brace_idx: usize) -> Option<String> {
                 Token::Identifier(name),
             ) => Some(name.to_string()),
             _ => None,
-        })
+        }
+    })
 }
 
 /// Finds the enclosing function/method (and, if any, its own enclosing

@@ -85,14 +85,12 @@ impl Parser<'_> {
             return None;
         };
         let bytes = match payload {
-            StringPayload::Source(span) => self
-                .source?
-                .get(span.start as usize..span.end as usize)?,
+            StringPayload::Source(span) => {
+                self.source?.get(span.start as usize..span.end as usize)?
+            }
             StringPayload::Decoded(_) | StringPayload::Owned(_) => arenas.string_bytes(payload)?,
         };
-        std::str::from_utf8(bytes)
-            .ok()
-            .map(str::to_owned)
+        std::str::from_utf8(bytes).ok().map(str::to_owned)
     }
 
     fn newest_type(&self, attr: &Attribute) -> Option<String> {
@@ -171,12 +169,7 @@ impl Parser<'_> {
 
     /// A synthesized parameter override supersedes any stale declaration
     /// `@param` tag for the same variable. Keep unrelated tags intact.
-    fn override_param_tag(
-        &self,
-        doc: &mut Option<DocCommentRanges>,
-        line: &str,
-        param_name: &str,
-    ) {
+    fn override_param_tag(&self, doc: &mut Option<DocCommentRanges>, line: &str, param_name: &str) {
         let Some(ranges) = doc.as_ref() else {
             return;
         };
@@ -192,7 +185,8 @@ impl Parser<'_> {
                 && trimmed.starts_with("@param ")
                 && trimmed.split_whitespace().any(|part| part == needle)
             {
-                let indent = &original_line[..original_line.len() - original_line.trim_start().len()];
+                let indent =
+                    &original_line[..original_line.len() - original_line.trim_start().len()];
                 updated.push_str(indent);
                 updated.push_str("* ");
                 updated.push_str(line);

@@ -394,10 +394,9 @@ fn parse_watching_in_arenas<'a>(
     let source = lexer.source_bytes();
     lexer.set_decoded_bytes_base(arenas.decoded_bytes_base);
     let token_stream = match reuse.worker() {
-        Some(worker) => lexer.lex_token_stream_with_worker_scratch(
-            std::mem::take(worker.tokens),
-            worker.lexer,
-        ),
+        Some(worker) => {
+            lexer.lex_token_stream_with_worker_scratch(std::mem::take(worker.tokens), worker.lexer)
+        }
         None => lexer.lex_token_stream(),
     };
     let mut parser = match reuse.worker() {

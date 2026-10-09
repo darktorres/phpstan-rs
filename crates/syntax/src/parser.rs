@@ -353,11 +353,7 @@ impl<'a> Parser<'a> {
 
     /// Parses an already lexed flat stream.
     pub fn from_token_stream(stream: TokenStream) -> Parser<'static> {
-        Parser::<'static>::from_token_stream_with_node_arenas(
-            stream,
-            NodeArenas::default(),
-            None,
-        )
+        Parser::<'static>::from_token_stream_with_node_arenas(stream, NodeArenas::default(), None)
     }
 
     /// Creates a parser using reusable transient buffers supplied by a

@@ -2043,10 +2043,7 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner.arenas();
         let stmts = syntax_owner.statements();
         debug_assert_eq!(program, stmts);
-        if let Some(tree) = self
-            .syntax_tree
-            .or(self.syntax_tree_owned.as_deref())
-        {
+        if let Some(tree) = self.syntax_tree.or(self.syntax_tree_owned.as_deref()) {
             debug_assert_eq!(program, tree.statements());
             #[cfg(debug_assertions)]
             assert_node_spans(tree.arenas(), program);
@@ -2108,7 +2105,8 @@ impl<'a> Checker<'a> {
 
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
-        let top_level_scope = shared_scope::SharedScope::of(self.registry, arenas, stmts, &[], None, true);
+        let top_level_scope =
+            shared_scope::SharedScope::of(self.registry, arenas, stmts, &[], None, true);
         let enclosing_scope = self.enter_shared_scope(top_level_scope);
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here: real PHP only

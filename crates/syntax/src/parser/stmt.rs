@@ -37,7 +37,9 @@ impl Parser<'_> {
         let mut leading_doc_comment = self.current_doc_ranges();
         let stmt = match self.peek() {
             Token::InlineHtml(_) => {
-                let span = self.take_inline_html().expect("current token is inline HTML");
+                let span = self
+                    .take_inline_html()
+                    .expect("current token is inline HTML");
                 self.stmt(StmtKind::InlineHtml(span), start)
             }
             Token::Semicolon => {

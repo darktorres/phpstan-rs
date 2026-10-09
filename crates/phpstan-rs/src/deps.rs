@@ -401,9 +401,10 @@ impl Visitor for Collector {
                     kind: ExprKind::Name(name),
                     ..
                 }) = arenas.expr(*callee)
-                    && let Some(name) = arenas.qualified_name(name) {
-                        self.add_name(name, NameKind::Function);
-                    }
+                    && let Some(name) = arenas.qualified_name(name)
+                {
+                    self.add_name(name, NameKind::Function);
+                }
                 for arg in arenas.args(args.clone()) {
                     arena::walk_arg(self, arenas, arg);
                 }

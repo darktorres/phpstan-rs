@@ -60,9 +60,10 @@ fn resolutions(src: &str) -> Vec<(String, ResolvedName)> {
         }
         fn visit_type_hint(&mut self, arenas: &NodeArenas, h: &TypeHint) {
             if let TypeHintKind::Name(n) = &h.kind
-                && let Some(name) = arenas.qualified_name(n) {
-                    self.push(name);
-                }
+                && let Some(name) = arenas.qualified_name(n)
+            {
+                self.push(name);
+            }
         }
     }
     let program = parse(src);

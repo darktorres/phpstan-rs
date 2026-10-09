@@ -204,7 +204,9 @@ impl Parser<'_> {
                 self.expr(ExprKind::Literal(Literal::Float(f)), start)
             }
             Token::StringLit(_) => {
-                let s = self.take_string_payload().expect("current token is a string");
+                let s = self
+                    .take_string_payload()
+                    .expect("current token is a string");
                 self.expr(ExprKind::Literal(Literal::String(s)), start)
             }
             Token::Keyword(Keyword::True) => {
@@ -502,7 +504,9 @@ impl Parser<'_> {
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr()?,
             Token::InterpString(_) => {
-                let parts = self.take_interpolation().expect("current token is interpolated string");
+                let parts = self
+                    .take_interpolation()
+                    .expect("current token is interpolated string");
                 self.build_interpolated(parts, start)?
             }
             // `` `cmd $interpolated` `` - shell-exec shorthand.
