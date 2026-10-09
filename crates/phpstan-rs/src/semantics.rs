@@ -16,12 +16,28 @@ pub fn target_set_from_php_versions(versions: Option<types::PhpVersions>) -> Tar
         || *known.last().expect("PHP versions are defined"),
         |v| v.max,
     );
-    let scenarios = known
+    let requested = VersionRange {
+        min: release(min),
+        max: VersionRange::minor(max.major as u16, max.minor as u16).max,
+    };
+    let mut scenarios = Vec::new();
+    let mut cursor = Some(requested.min);
+    for version in known
         .iter()
         .copied()
         .filter(|version| min <= *version && *version <= max)
-        .map(|version| TargetScenario {
-            release: VersionRange::minor(version.major as u16, version.minor as u16),
+    {
+        let supported = VersionRange::minor(version.major as u16, version.minor as u16);
+        if let Some(start) = cursor.filter(|start| *start < supported.min) {
+            if let Some(end) = previous_release(supported.min) {
+                scenarios.push(unknown_scenario(VersionRange {
+                    min: start,
+                    max: end,
+                }));
+            }
+        }
+        scenarios.push(TargetScenario {
+            release: supported,
             os: None,
             arch: None,
             sapi: None,
@@ -29,9 +45,73 @@ pub fn target_set_from_php_versions(versions: Option<types::PhpVersions>) -> Tar
             debug: None,
             extensions: None,
             ini: None,
-        })
-        .collect();
+        });
+        cursor = next_minor(supported.max);
+    }
+    if let Some(start) = cursor.filter(|start| *start <= requested.max) {
+        scenarios.push(unknown_scenario(VersionRange {
+            min: start,
+            max: requested.max,
+        }));
+    }
     TargetSet::new(scenarios).expect("known PHP versions form valid minor scenarios")
+}
+
+fn release(version: types::PhpVersion) -> ReleaseVersion {
+    ReleaseVersion {
+        major: version.major as u16,
+        minor: version.minor as u16,
+        patch: 0,
+    }
+}
+
+fn unknown_scenario(release: VersionRange) -> TargetScenario {
+    TargetScenario {
+        release,
+        os: None,
+        arch: None,
+        sapi: None,
+        zts: None,
+        debug: None,
+        extensions: None,
+        ini: None,
+    }
+}
+
+fn previous_release(version: ReleaseVersion) -> Option<ReleaseVersion> {
+    if version.patch > 0 {
+        return Some(ReleaseVersion {
+            patch: version.patch - 1,
+            ..version
+        });
+    }
+    if version.minor > 0 {
+        return Some(ReleaseVersion {
+            major: version.major,
+            minor: version.minor - 1,
+            patch: u16::MAX,
+        });
+    }
+    (version.major > 0).then_some(ReleaseVersion {
+        major: version.major - 1,
+        minor: u16::MAX,
+        patch: u16::MAX,
+    })
+}
+
+fn next_minor(version: ReleaseVersion) -> Option<ReleaseVersion> {
+    if version.minor < u16::MAX {
+        return Some(ReleaseVersion {
+            major: version.major,
+            minor: version.minor + 1,
+            patch: 0,
+        });
+    }
+    (version.major < u16::MAX).then_some(ReleaseVersion {
+        major: version.major + 1,
+        minor: 0,
+        patch: 0,
+    })
 }
 
 #[cfg(test)]
@@ -66,5 +146,26 @@ mod tests {
                 .iter()
                 .all(|scenario| scenario.os.is_none())
         );
+    }
+
+    #[test]
+    fn configured_unmodeled_minor_is_preserved_as_an_unknown_scenario() {
+        let targets =
+            target_set_from_php_versions(Some(PhpVersions::exactly(PhpVersion::new(8, 6))));
+        assert_eq!(targets.scenarios.len(), 1);
+        assert_eq!(targets.scenarios[0].release, VersionRange::minor(8, 6));
+        assert!(targets.scenarios[0].extensions.is_none());
+    }
+
+    #[test]
+    fn configured_range_keeps_unmodeled_tail_after_known_minors() {
+        let targets = target_set_from_php_versions(Some(PhpVersions::new(
+            PhpVersion::new(8, 4),
+            PhpVersion::new(8, 6),
+        )));
+        assert_eq!(targets.scenarios.len(), 3);
+        assert_eq!(targets.scenarios[0].release, VersionRange::minor(8, 4));
+        assert_eq!(targets.scenarios[1].release, VersionRange::minor(8, 5));
+        assert_eq!(targets.scenarios[2].release, VersionRange::minor(8, 6));
     }
 }
