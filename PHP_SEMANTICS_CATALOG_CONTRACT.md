@@ -7,20 +7,34 @@ until reviewers accept the contract and its assumptions.
 ## Observable result
 
 For one catalog entry, target scenario, and explicit assumption set, the
-concrete behavior is the set of finite observable traces plus their exit
-states. A trace records observable invocations, reads and writes, diagnostics,
-autoload, output, release/retention, return values, PHP throws, fatal exits,
-and suspension. Trace order is significant. Native unwind is an analysis
-boundary, not itself a PHP throw. A nonterminating execution contributes every
-finite observable prefix; proving termination is a separate claim.
+concrete behavior is the set of finite observable traces paired with their
+exit states. A trace records observable invocations, reads and writes,
+diagnostics, autoload, output, release/retention, normal return values, PHP
+throws, fatal exits, and suspension. Trace order is significant. Native
+unwind is an analysis boundary, not itself a PHP throw. A nonterminating
+execution contributes every finite observable prefix; proving termination is
+a separate claim.
 
-The abstract result is sound only when it contains every such concrete trace
-and exit state. A closed domain can exclude behavior only under its listed
-assumptions and evidence. Missing events, absent native bodies, unresolved
-dispatch, unsupported transfers, or incomplete target applicability are not
-negative facts: they leave the affected domain open and retain a conservative
-unknown transfer or uncovered target remainder. Provenance identifies the
-basis of a fact; it does not prove a transfer function correct.
+The shared evaluator does not enumerate concrete traces. It executes graph
+events in order and returns abstract values, states, exits, and coverage. A
+host state must therefore retain every observable fact needed by a closed
+domain or by a consumer's requested projection. If it cannot represent or
+prove an observable, that domain remains open; a closed claim cannot be
+recovered from provenance alone. In particular, open coverage is not a
+substitute for a sound transfer: an unknown operation must conservatively
+widen or havoc every affected part of the abstract state and invalidate any
+dependent result facts. A consumer may project away observations only after
+the remaining abstract state still soundly contains their influence on the
+requested fact.
+
+The abstract result is sound only when its represented projections contain
+every concrete behavior relevant to each claimed-closed domain. A closed
+domain can exclude behavior only under its listed assumptions and evidence.
+Missing events, absent native bodies, unresolved dispatch, unsupported
+transfers, or incomplete target applicability are not negative facts: they
+leave the affected domain open and retain a conservative unknown transfer or
+uncovered target remainder. Provenance identifies the basis of a fact; it
+does not prove a transfer function correct.
 
 Every invocation outcome carries complete per-domain coverage, precision,
 evidence, and assumptions for the composed call; other events carry the same
@@ -53,12 +67,46 @@ exceptional outcomes. A query projection can omit irrelevant reported
 properties only after retaining all operations needed to derive the requested
 property.
 
+`Return` describes values on normal exits only; it does not imply that every
+execution returns normally. A consumer making a claim about whether a call
+returns must also account for PHP throws, native unwind boundaries, fatal
+exits, and suspension. A normal-return value must be defined on every normal
+path represented by that result. If paths with and without a definition are
+joined, the evaluator must preserve their distinction or reject the
+evaluation. A closed return refinement must declare dependencies on any
+effect or exceptional domain whose behavior can invalidate the refinement's
+preconditions.
+
+The host operations `join_value`, `widen_value`, `join_state`, and
+`widen_state` are semantic obligations: each result must contain both inputs
+in the host's abstract order. Predicate answers must be `Maybe` unless the
+host proves the answer for every represented state. The evaluator checks
+containment where the host supplies subsumption, but those checks do not prove
+that the host's abstract order or transfer functions match PHP.
+
 Assumptions are first-class dependencies: source/build/link identity, loaded
 program and target profile, defined native behavior, engine invariants, model
-contracts, and dispatch/load-order conditions. If an assumption is absent,
-unverified, or invalidated, conclusions depending on it become open or are
-recomputed. Runtime observations can contradict a closed result and force
-investigation; failure to observe an event cannot prove its absence.
+contracts, and dispatch/load-order conditions. Each assumption ID resolves to
+an immutable record with a typed kind, claim, applicability scope, prerequisite
+assumption IDs, supporting evidence IDs, and a validator identifier/version.
+The ID is the digest of the canonical record. Evidence references identify why
+a fact is supported; assumption references identify conditions under which it
+applies. They are distinct namespaces, and both dependency relations must
+resolve and be acyclic.
+
+Applicability is evaluated against the selected target and loaded-program
+context. An assumption is established only when its scope matches, all
+prerequisite assumptions are established, and its validator accepts the
+referenced evidence for that context. Missing records, missing or unverified
+evidence, unknown validators, and unknown context facts do not establish the
+assumption. Conclusions that depend on an unestablished assumption become open
+or are recomputed. Runtime observations can contradict a closed result and
+force investigation; failure to observe an event cannot prove its absence.
+
+The current schema does not yet meet this requirement: it has opaque digest
+vectors but no assumption records or applicability validation. Until that
+schema gap is fixed, no producer may rely on a non-empty assumption vector to
+justify a closed fact.
 
 ## Counterexamples that composition must reject
 
@@ -86,6 +134,10 @@ investigation; failure to observe an event cannot prove its absence.
 
 These tests check structural behavior in a small evaluator host. They do not
 establish that the checker host, native transfers, or every PHP runtime obeys
-the contract. Mismatched target scenarios are covered in the target module,
-but F00 remains open until independent reviewers accept the contract and its
-assumptions.
+the contract. The PHP value host has a regression that checks an unknown
+callback havocs tracked state and leaves effect domains open, but this is one
+host-specific check, not a general proof of unknown-transfer soundness.
+Mismatched target scenarios are covered in the target module. This contract
+revision records a self-review against the evaluator API and current fixtures;
+it has not received independent review, so F00 remains open until reviewers
+accept the contract and its assumptions.
