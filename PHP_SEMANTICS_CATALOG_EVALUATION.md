@@ -3,8 +3,9 @@
 Updated October 9, 2026. The extended comparative campaign has completed. The
 production semantic/checker evaluation and Phase F remain incomplete.
 
-The first comparison is committed as `043f2c78`; this extended evaluation, its
-tools, and its evidence are uncommitted.
+The initial comparison is committed as `043f2c78`; the extended compiler and
+framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
+as `2b6afb95`.
 
 ## Findings that change the decision
 
