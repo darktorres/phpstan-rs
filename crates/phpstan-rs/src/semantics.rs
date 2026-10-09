@@ -196,6 +196,13 @@ mod embedded_catalog_tests {
             .find(|record| record.rule_version.0 == b"php-8.5.4-zend-string-layout-v1")
             .expect("strlen Return has Zend layout evidence");
         let layout_id = layout_record.id().expect("layout evidence encodes");
+        let parser_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| record.rule_version.0 == b"php-8.5.4-zend-string-parser-source-v1")
+            .expect("strlen Return has Zend parser source evidence");
+        let parser_id = parser_record.id().expect("parser evidence encodes");
         let llvm_record = manifest
             .evidence
             .iter()
@@ -205,6 +212,15 @@ mod embedded_catalog_tests {
         assert_eq!(llvm_record.kind, EvidenceKind::SourceTransfer);
         assert!(llvm_record.dependencies.contains(&source_id));
         assert!(llvm_record.dependencies.contains(&layout_id));
+        assert!(llvm_record.dependencies.contains(&parser_id));
+        assert_eq!(
+            parser_record.source_digest,
+            Digest([
+                0xba, 0x6d, 0x16, 0x3b, 0x75, 0x90, 0x5a, 0x3f, 0xc1, 0x22, 0x18, 0x64, 0x52, 0xa4,
+                0xcc, 0x08, 0xab, 0x06, 0xb2, 0x5e, 0x7f, 0xc5, 0x1b, 0x22, 0xd8, 0x30, 0xb3, 0x8d,
+                0x5d, 0xac, 0xa2, 0x3b,
+            ])
+        );
         assert_eq!(
             layout_record.source_digest,
             Digest([
@@ -234,6 +250,7 @@ mod embedded_catalog_tests {
                 && matches!(coverage.coverage, Coverage::Closed)
                 && coverage.evidence.contains(&source_id)
                 && coverage.evidence.contains(&layout_id)
+                && coverage.evidence.contains(&parser_id)
                 && coverage.evidence.contains(&llvm_record.id().unwrap())
         }));
         assert!(
@@ -245,6 +262,7 @@ mod embedded_catalog_tests {
                 .all(|coverage| {
                     matches!(coverage.coverage, Coverage::Open { .. })
                         && coverage.evidence.contains(&source_id)
+                        && coverage.evidence.contains(&parser_id)
                         && coverage.evidence.contains(&llvm_record.id().unwrap())
                 })
         );

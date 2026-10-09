@@ -109,11 +109,39 @@ fn main() {
         dependencies: vec![],
     };
     let layout_evidence_id = layout_evidence.id().expect("Zend layout evidence encodes");
+    assert_eq!(
+        witness["parser_source"]["sha256"].as_str(),
+        Some("ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b"),
+        "LLVM witness refers to different Zend parser source"
+    );
+    assert_eq!(
+        witness["parser_source"]["function"].as_str(),
+        Some("zend_parse_arg_str_weak")
+    );
+    let parser_digest = decode_digest(
+        witness["parser_source"]["sha256"]
+            .as_str()
+            .expect("Zend parser source digest"),
+    );
+    let parser_evidence = EvidenceRecord {
+        kind: EvidenceKind::SourceTransfer,
+        source_digest: Digest(parser_digest),
+        site: Some(Bytes(
+            b"Zend/zend_API.c:zend_parse_arg_str_weak:Z_PARAM_STR".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-zend-string-parser-source-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![],
+    };
+    let parser_evidence_id = parser_evidence.id().expect("Zend parser evidence encodes");
     assert_eq!(witness["mapping"]["loaded_as"].as_str(), Some("i64"));
     for fact in [
         "debug_line_matches_source_return",
         "stored_as_return_zval_payload",
         "parameter_failure_path_present",
+        "parsed_argument_flows_to_length_load",
+        "parser_output_written_through_destination",
+        "object_cast_handler_indirect_call",
     ] {
         assert_eq!(
             witness["mapping"][fact].as_bool(),
@@ -136,6 +164,11 @@ fn main() {
         ("weak_string_parse", "zend_parse_arg_str_weak"),
         ("weak_string_conversion", "_convert_to_string"),
         ("nullable_string_diagnostic", "zend_null_arg_deprecated"),
+        (
+            "object_string_cast_callback",
+            "indirect Zend object handler",
+        ),
+        ("object_release_during_cast", "zend_objects_store_del"),
     ];
     for (operation, callee) in expected_operations {
         assert!(
@@ -181,10 +214,15 @@ fn main() {
         )),
         rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-return-v1".to_vec()),
         assumptions: vec![],
-        dependencies: vec![source_evidence_id, layout_evidence_id],
+        dependencies: vec![source_evidence_id, layout_evidence_id, parser_evidence_id],
     };
     let llvm_evidence_id = llvm_evidence.id().expect("LLVM evidence encodes");
-    let return_evidence = vec![source_evidence_id, layout_evidence_id, llvm_evidence_id];
+    let return_evidence = vec![
+        source_evidence_id,
+        layout_evidence_id,
+        parser_evidence_id,
+        llvm_evidence_id,
+    ];
     let graph = BehaviorGraph {
         schema_major: SCHEMA_MAJOR,
         entry: 0,
@@ -250,6 +288,7 @@ fn main() {
         evidence: vec![
             (source_evidence_id, source_evidence),
             (layout_evidence_id, layout_evidence),
+            (parser_evidence_id, parser_evidence),
             (llvm_evidence_id, llvm_evidence),
         ],
     };

@@ -1,4 +1,18 @@
 {
+  "argument_bridge": {
+    "length_load_uses_local_slot": "17",
+    "object_handler_field_index": 18,
+    "parser_destination_slots": [
+      {
+        "helper_argument_slot": "7",
+        "strlen_local_slot": "17"
+      },
+      {
+        "helper_argument_slot": "7",
+        "strlen_local_slot": "17"
+      }
+    ]
+  },
   "compiler": "Ubuntu clang version 21.1.8 (6ubuntu1)",
   "configured_implicit_operations": [
     {
@@ -35,6 +49,16 @@
       "catalog_domain": "open",
       "llvm_callee": "zend_null_arg_deprecated",
       "operation": "nullable_string_diagnostic"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "indirect Zend object handler",
+      "operation": "object_string_cast_callback"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_objects_store_del",
+      "operation": "object_release_during_cast"
     }
   ],
   "helper_witnesses": {
@@ -55,7 +79,8 @@
     "zend_parse_arg_str_weak": {
       "calls": [
         "_convert_to_string",
-        "zend_null_arg_deprecated"
+        "zend_null_arg_deprecated",
+        "zend_objects_store_del"
       ],
       "extracted_bitcode_sha256": "05ee2e8b8e687ff8f7cac706255f22c1b1a3eed50596610019a8a4b17fe1f254",
       "extracted_ir_sha256": "adfb034c20bf18547951a3da1d9c723f6f74bf4640bef98f6573e34cf0f53b93"
@@ -79,9 +104,25 @@
   "mapping": {
     "debug_line_matches_source_return": true,
     "loaded_as": "i64",
+    "object_cast_handler_field_index": 18,
+    "object_cast_handler_indirect_call": true,
     "parameter_failure_path_present": true,
+    "parsed_argument_flows_to_length_load": true,
+    "parser_output_written_through_destination": true,
     "stored_as_return_zval_payload": true,
     "zend_string_length_field_index": 2
+  },
+  "parser_source": {
+    "contract_facts": [
+      "zend_null_arg_deprecated(\"string\", arg_num)",
+      "convert_to_string(arg);",
+      "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
+      "OBJ_RELEASE(zobj);",
+      "*dest = Z_STR_P(arg);"
+    ],
+    "function": "zend_parse_arg_str_weak",
+    "path": "Zend/zend_API.c",
+    "sha256": "ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b"
   },
   "schema": 1,
   "source": {

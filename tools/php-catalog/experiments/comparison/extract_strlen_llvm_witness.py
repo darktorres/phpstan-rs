@@ -14,6 +14,9 @@ EXPECTED_SOURCE_SHA256 = (
 EXPECTED_LAYOUT_HEADER_SHA256 = (
     "601ed337205b2258ff0de217d40aaf38afd3a52f67a8edf0f91182414a6bcccd"
 )
+EXPECTED_PARSER_SOURCE_SHA256 = (
+    "ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b"
+)
 
 
 def run(command: list[str], *, input_bytes: bytes | None = None) -> bytes:
@@ -61,6 +64,27 @@ def main() -> None:
     ]
     if fields != expected_fields:
         raise SystemExit(f"unexpected _zend_string fields: {fields!r}")
+    parser_source = args.source.parent / "zend_API.c"
+    parser_bytes = parser_source.read_bytes()
+    parser_sha256 = hashlib.sha256(parser_bytes).hexdigest()
+    if parser_sha256 != EXPECTED_PARSER_SOURCE_SHA256:
+        raise SystemExit(f"unexpected Zend argument-parser source digest: {parser_sha256}")
+    parser_text = parser_bytes.decode("utf-8")
+    parser_start = parser_text.find("zend_parse_arg_str_weak(zval *arg")
+    parser_end = parser_text.find("/* }}} */", parser_start)
+    if parser_start < 0 or parser_end < 0:
+        raise SystemExit("locked Zend source lacks zend_parse_arg_str_weak")
+    parser_body = parser_text[parser_start:parser_end]
+    parser_contract = [
+        'zend_null_arg_deprecated("string", arg_num)',
+        "convert_to_string(arg);",
+        "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
+        "OBJ_RELEASE(zobj);",
+        "*dest = Z_STR_P(arg);",
+    ]
+    missing_parser_facts = [fact for fact in parser_contract if fact not in parser_body]
+    if missing_parser_facts:
+        raise SystemExit(f"Zend string parser contract changed: {missing_parser_facts}")
     source_lines = source_bytes.decode("utf-8").splitlines()
     source_line = next(
         (index for index, line in enumerate(source_lines, 1)
@@ -125,7 +149,11 @@ def main() -> None:
     helper_functions = {
         "zend_flf_parse_arg_str_slow": ["zend_parse_arg_str_weak"],
         "zend_parse_arg_str_slow": ["zend_parse_arg_str_weak"],
-        "zend_parse_arg_str_weak": ["_convert_to_string", "zend_null_arg_deprecated"],
+        "zend_parse_arg_str_weak": [
+            "_convert_to_string",
+            "zend_null_arg_deprecated",
+            "zend_objects_store_del",
+        ],
     }
     helper_witnesses = {}
     for name, required_callees in helper_functions.items():
@@ -150,6 +178,39 @@ def main() -> None:
             "extracted_ir_sha256": hashlib.sha256(helper_ir.encode()).hexdigest(),
             "calls": required_callees,
         }
+    weak_ir = run([
+        args.llvm_dis,
+        "-o",
+        "-",
+    ], input_bytes=run([
+        args.llvm_extract,
+        "--func=zend_parse_arg_str_weak",
+        str(args.linked_bitcode),
+        "-o",
+        "-",
+    ])).decode("utf-8")
+    weak_start = weak_ir.find("@zend_parse_arg_str_weak")
+    weak_body_start = weak_ir.rfind("\ndefine ", 0, weak_start) + 1
+    weak_body_end = weak_ir.find("\n}", weak_body_start)
+    weak_function = weak_ir[weak_body_start:weak_body_end]
+    object_handler_load = re.search(
+        r"^\s*(%\d+) = getelementptr[^\n]*%struct\._zend_object_handlers,[^\n]*i32 0, i32 18[^\n]*$"
+        r"(?:(?!^\s*%\d+ = getelementptr).*$\n)*?"
+        r"^\s*(%\d+) = load ptr, ptr \1,[^\n]*$"
+        r"(?:(?!^\s*%\d+ = getelementptr).*$\n)*?"
+        r"^\s*%\d+ = call i32 \2\(",
+        weak_function,
+        re.MULTILINE,
+    )
+    if object_handler_load is None:
+        raise SystemExit("weak string parser lost the indirect object cast handler path")
+    if re.search(r"store ptr %\d+, ptr %\d+", weak_function) is None:
+        raise SystemExit("weak string parser no longer writes the parsed string through dest")
+    if re.search(
+        r"%\d+ = load ptr, ptr %12,[^\n]*\n\s*store ptr %\d+, ptr %\d+",
+        weak_function,
+    ) is None:
+        raise SystemExit("weak string parser no longer writes its parsed string to the dest argument")
     field_load = re.search(
         r"getelementptr[^\n]*%struct\._zend_string,[^\n]*i32 0, i32 2"
         r"[^\n]*\n\s*%[^\n]*= load i64,[^\n]*!dbg !(\d+)",
@@ -157,6 +218,50 @@ def main() -> None:
     )
     if field_load is None:
         raise SystemExit("zif_strlen does not load _zend_string field 2 as i64")
+    helper_destinations = re.finditer(
+        r"call zeroext i1 @zend_(?:flf_)?parse_arg_str_slow\(ptr noundef %\d+, ptr noundef %(\d+),",
+        function,
+    )
+    destination_chain = []
+    for call in helper_destinations:
+        prefix = function[:call.start()]
+        destination_register = call.group(1)
+        destination_loads = list(re.finditer(
+            rf"^\s*%{destination_register} = load ptr, ptr %(\d+)", prefix, re.MULTILINE
+        ))
+        if not destination_loads:
+            raise SystemExit("strlen argument parser destination is not loaded from a stack slot")
+        destination_slot = destination_loads[-1].group(1)
+        destination_stores = list(re.finditer(
+            rf"^\s*store ptr %(\d+), ptr %{destination_slot}(?:, align \d+)?$",
+            prefix,
+            re.MULTILINE,
+        ))
+        if not destination_stores:
+            raise SystemExit("strlen parser destination slot has no reaching store")
+        source_register = destination_stores[-1].group(1)
+        source_loads = list(re.finditer(
+            rf"^\s*%{source_register} = load ptr, ptr %(\d+)", prefix, re.MULTILINE
+        ))
+        if not source_loads:
+            raise SystemExit("strlen parser destination does not trace to its local string slot")
+        source_slot = source_loads[-1].group(1)
+        local_pointer_stores = list(re.finditer(
+            rf"^\s*store ptr %(\d+), ptr %{source_slot}(?:, align \d+)?$",
+            prefix,
+            re.MULTILINE,
+        ))
+        if not local_pointer_stores:
+            raise SystemExit("strlen parser destination is not initialized from a local string slot")
+        local_slot = local_pointer_stores[-1].group(1)
+        destination_chain.append((destination_slot, local_slot))
+    parsed_string_slot = re.search(r"= load ptr, ptr %(\d+), align 8, !dbg !\d+\n"
+                                   r"\s*%\d+ = getelementptr[^\n]*%struct\._zend_string", function)
+    if len(destination_chain) != 2 or not destination_chain:
+        raise SystemExit("expected both configured strictness paths to parse one string argument")
+    local_slots = {local for _, local in destination_chain}
+    if len(local_slots) != 1 or parsed_string_slot is None or parsed_string_slot.group(1) not in local_slots:
+        raise SystemExit("strlen field load does not use the parser's output string slot")
     debug_id = field_load.group(1)
     metadata_pattern = rf"^{re.escape('!' + debug_id)} = !DILocation\(line: {source_line},"
     if re.search(metadata_pattern, ir, re.MULTILINE) is None:
@@ -178,6 +283,12 @@ def main() -> None:
             "return_line": source_line,
             "expression": "RETVAL_LONG(ZSTR_LEN(s))",
             "parameter_parse_lines": parse_lines,
+        },
+        "parser_source": {
+            "path": "Zend/zend_API.c",
+            "sha256": parser_sha256,
+            "function": "zend_parse_arg_str_weak",
+            "contract_facts": parser_contract,
         },
         "compiler": producer.group(1),
         "linked_bitcode": {
@@ -207,6 +318,10 @@ def main() -> None:
             "loaded_as": "i64",
             "stored_as_return_zval_payload": True,
             "parameter_failure_path_present": True,
+            "parsed_argument_flows_to_length_load": True,
+            "parser_output_written_through_destination": True,
+            "object_cast_handler_indirect_call": True,
+            "object_cast_handler_field_index": 18,
         },
         "configured_implicit_operations": [
             {"operation": operation, "llvm_callee": callee, "catalog_domain": "open"}
@@ -218,8 +333,20 @@ def main() -> None:
              "catalog_domain": "open"},
             {"operation": "nullable_string_diagnostic", "llvm_callee": "zend_null_arg_deprecated",
              "catalog_domain": "open"},
+            {"operation": "object_string_cast_callback", "llvm_callee": "indirect Zend object handler",
+             "catalog_domain": "open"},
+            {"operation": "object_release_during_cast", "llvm_callee": "zend_objects_store_del",
+             "catalog_domain": "open"},
         ],
         "helper_witnesses": helper_witnesses,
+        "argument_bridge": {
+            "parser_destination_slots": [
+                {"helper_argument_slot": destination, "strlen_local_slot": local}
+                for destination, local in destination_chain
+            ],
+            "length_load_uses_local_slot": parsed_string_slot.group(1),
+            "object_handler_field_index": 18,
+        },
         "ir_witness": [line.strip() for line in function.splitlines()
                        if "%struct._zend_string" in line or "load i64" in line
                        or "store i64" in line
