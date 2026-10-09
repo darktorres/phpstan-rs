@@ -8,10 +8,10 @@ framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
 as `2b6afb95`.
 
 Phase F implementation is now underway. A checker-independent
-`crates/php-semantics` seed contains schema v5 graph/event/domain-coverage types,
+`crates/php-semantics` seed contains schema v6 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Fifty-six
+explicit exceptional continuations and host-supplied joins/widening. Fifty-seven
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -51,7 +51,8 @@ those records so an open child opens the corresponding closed parent domain.
 Schema major 4 added PHP value/reference flow instructions and regenerated the
 embedded `strlen()` manifest; v3 manifests are rejected explicitly. Schema
 major 5 adds keyed array get/set flow instructions, and the embedded artifact is
-regenerated again for the current wire format.
+regenerated again for the current wire format. Schema major 6 adds explicit
+array-element reference binding for callback alias tracking.
 Canonical manifests now validate graph
 and evidence digests and round-trip byte strings through explicit base64 JSON.
 A shared target-set primitive distinguishes exact releases from minor ranges,
@@ -149,8 +150,9 @@ and rejection of falsely closed replay coverage. The targeted embedded-catalog
 checker test also passes. Schema v4 was necessary because adding a PHP flow event
 changes the serialized graph format; regenerating the embedded manifest removed
 a digest mismatch that the first full checker run caught. The subsequent schema
-v5 extension adds array flow instructions; the current semantics suite passes
-56 tests. For this schema-v5 update, `cargo test -p phpstan-rs` also passes:
+v5 added keyed array get/set instructions, and v6 added array-element reference
+binding. The current semantics suite passes 57 tests. For this schema-v6
+update, `cargo test -p phpstan-rs` also passes:
 1,201 library tests, 3 binary tests, 45 CLI tests, plus file-cache, LSP-exit,
 scaling, stub-index, and version integration suites. `cargo check -p phpstan-rs`,
 edited-file rustfmt, and `git diff --check` pass.
@@ -168,7 +170,7 @@ so it does not close F00 or substitute for independent review.
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, graph-bound candidate containment plus persisted transfer/exit/coverage replay, and fail-closed handling of result IDs defined on only some predecessor paths are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add broader branching callback cases; replace the toy host with calibrated domains and validate host transfer behavior against source-derived fixtures. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` rule is generated only from the exact locked translation unit and checks its source transfer site. | Complete configured implicit-operation mapping for the locked slice; connect actual imported compiler/source/layout metadata and witnesses to graph entries. The source-checked return rule remains manually translated and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
-| F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and run array copy/mutation/read plus object assignment through graph instructions; local reference binding also composes with callback writes on normal/throw paths (56 semantic tests). Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | Add object-property and PHP key-coercion/diagnostic operations; compose the full value/reference product with callback/exceptional state and continue toward source-derived lowering. |
+| F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and run array copy/mutation/read plus object assignment through graph instructions. A copied array containing a reference observes callback writes on normal return and cleanup-resumed throw paths (57 semantic tests). Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | Add object-property and PHP key-coercion/diagnostic operations; continue toward complete product state and source-derived lowering. |
 | F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 

@@ -218,6 +218,41 @@ impl PhpState {
         Ok(())
     }
 
+    /// Bind an array element and local variable to the same PHP reference cell.
+    pub fn array_bind_reference(
+        &mut self,
+        array_name: &[u8],
+        key: ArrayKey,
+        local_name: Bytes,
+    ) -> Result<(), StateError> {
+        let Some(PhpValue::Array(array_id)) = self.local(array_name) else {
+            return Err(StateError::NotArray(Bytes(array_name.to_vec())));
+        };
+        if !self.arrays.contains_key(&array_id) {
+            return Err(StateError::MissingArray(array_id));
+        }
+        let reference = match self.locals.get(&local_name).cloned() {
+            Some(Binding::Reference(id)) => id,
+            Some(Binding::Value(value)) => {
+                let id = self.identity();
+                self.references.insert(id, value);
+                self.locals.insert(local_name, Binding::Reference(id));
+                id
+            }
+            None => {
+                let id = self.identity();
+                self.references.insert(id, PhpValue::Unknown);
+                self.locals.insert(local_name, Binding::Reference(id));
+                id
+            }
+        };
+        self.arrays
+            .get_mut(&array_id)
+            .expect("array was checked above")
+            .insert(key, ArrayElement::Reference(reference));
+        Ok(())
+    }
+
     pub fn array_get(&self, name: &[u8], key: &ArrayKey) -> Result<Option<PhpValue>, StateError> {
         let Some(PhpValue::Array(id)) = self.local(name) else {
             return Err(StateError::NotArray(Bytes(name.to_vec())));
@@ -509,6 +544,9 @@ impl SemanticHost for PhpFlowHost {
                         }),
                         Err(error) => Some(error),
                     },
+                    PhpFlowInstruction::ArrayBindReference { array, key, local } => state
+                        .array_bind_reference(&array.0, key.clone(), local.clone())
+                        .err(),
                 };
                 if error.is_some() {
                     self.unmodeled_outcomes(

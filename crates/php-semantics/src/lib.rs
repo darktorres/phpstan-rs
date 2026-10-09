@@ -26,7 +26,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 5;
+pub const SCHEMA_MAJOR: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -225,6 +225,11 @@ pub enum PhpFlowInstruction {
         destination: Bytes,
         array: Bytes,
         key: ArrayKey,
+    },
+    ArrayBindReference {
+        array: Bytes,
+        key: ArrayKey,
+        local: Bytes,
     },
 }
 
@@ -453,6 +458,9 @@ impl BehaviorGraph {
                     } => vec![Domain::UserRead, Domain::UserWrite],
                     Event::PhpFlow {
                         instruction: PhpFlowInstruction::ArrayGet { .. },
+                    } => vec![Domain::UserRead, Domain::UserWrite],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::ArrayBindReference { .. },
                     } => vec![Domain::UserRead, Domain::UserWrite],
                     Event::Unknown { domains, .. } => domains.clone(),
                 };
@@ -2101,6 +2109,9 @@ mod tests {
                 Event::PhpFlow {
                     instruction: PhpFlowInstruction::ArrayGet { .. },
                 } => vec![Domain::UserRead, Domain::UserWrite],
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayBindReference { .. },
+                } => vec![Domain::UserRead, Domain::UserWrite],
                 Event::Unknown { domains, .. } => domains.clone(),
             };
             for domain in required {
@@ -2320,6 +2331,118 @@ mod tests {
                 state
             },
         }));
+        evaluation.post_fixpoint.validate(&graph, &host).unwrap();
+    }
+
+    #[test]
+    fn php_flow_array_reference_copy_tracks_callback_writes_across_cleanup() {
+        let mut host = PhpFlowHost::new(Digest([14; 32]));
+        host.argument_locations = vec![None, Some(Bytes(b"alias".to_vec()))];
+        host.callbacks.insert(
+            Bytes(b"mutate".to_vec()),
+            vec![
+                PhpCallbackOutcome {
+                    writes: vec![(0, PhpValue::Int(1))],
+                    normal: true,
+                    result: Some(PhpValue::Null),
+                    throws: None,
+                },
+                PhpCallbackOutcome {
+                    writes: vec![(0, PhpValue::Int(2))],
+                    normal: false,
+                    result: None,
+                    throws: Some(PhpValue::Int(99)),
+                },
+            ],
+        );
+        let key = ArrayKey::String(Bytes(b"value".to_vec()));
+        let mut body = Block::new(
+            vec![
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::BindReference {
+                        left: Bytes(b"alias".to_vec()),
+                        right: Bytes(b"slot".to_vec()),
+                    },
+                },
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayBindReference {
+                        array: Bytes(b"source".to_vec()),
+                        key: key.clone(),
+                        local: Bytes(b"slot".to_vec()),
+                    },
+                },
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::Assign {
+                        destination: Bytes(b"copy".to_vec()),
+                        source: Bytes(b"source".to_vec()),
+                    },
+                },
+                Event::Invoke {
+                    callable: Operand::Argument(0),
+                    arguments: vec![Operand::Argument(1)],
+                    result: 0,
+                },
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayGet {
+                        destination: Bytes(b"observed".to_vec()),
+                        array: Bytes(b"copy".to_vec()),
+                        key: key.clone(),
+                    },
+                },
+            ],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        body.exceptional.php_throw = Some(1);
+        let cleanup = Block::new(
+            vec![Event::PhpFlow {
+                instruction: PhpFlowInstruction::ArrayGet {
+                    destination: Bytes(b"observed".to_vec()),
+                    array: Bytes(b"copy".to_vec()),
+                    key: key.clone(),
+                },
+            }],
+            Terminator::Resume,
+        );
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![body, cleanup],
+            coverage: coverage_for(&[
+                Domain::Invocation,
+                Domain::UserRead,
+                Domain::UserWrite,
+                Domain::Return,
+                Domain::PhpThrow,
+            ]),
+        };
+        let mut initial = PhpState::new();
+        initial.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(0));
+        let source = initial.new_array();
+        initial.set_local(Bytes(b"source".to_vec()), source);
+        let evaluation = evaluate(
+            &graph,
+            &[
+                PhpValue::Callable(Bytes(b"mutate".to_vec())),
+                PhpValue::Unknown,
+            ],
+            &PhpValue::Unknown,
+            initial,
+            &mut host,
+        )
+        .unwrap();
+
+        assert!(evaluation.exits.iter().any(|exit| matches!(
+            exit,
+            Exit::Normal { value: Some(PhpValue::Null), state }
+                if state.local(b"slot") == Some(PhpValue::Int(1))
+                    && state.local(b"observed") == Some(PhpValue::Int(1))
+        )));
+        assert!(evaluation.exits.iter().any(|exit| matches!(
+            exit,
+            Exit::PhpThrow { value: PhpValue::Int(99), state }
+                if state.local(b"slot") == Some(PhpValue::Int(2))
+                    && state.local(b"observed") == Some(PhpValue::Int(2))
+        )));
         evaluation.post_fixpoint.validate(&graph, &host).unwrap();
     }
 
