@@ -20,24 +20,42 @@ fn same_span_keeps_distinct_argument_states_and_file_change_clears_them() {
     let int_argument = vec![Type::int_literal(7)];
     let string_result = Type::int_literal(3);
     let int_result = Type::int_range(Some(0), None);
+    let string_evaluation = CatalogCallEvaluation {
+        return_type: string_result.clone(),
+        diagnostics: vec![],
+        diagnostics_closed: true,
+    };
+    let int_evaluation = CatalogCallEvaluation {
+        return_type: int_result.clone(),
+        diagnostics: vec![],
+        diagnostics_closed: true,
+    };
 
-    checker.remember_catalog_return_type(
-        span,
-        string_argument.clone(),
-        string_result.clone(),
-    );
-    checker.remember_catalog_return_type(span, int_argument.clone(), int_result.clone());
+    checker.remember_catalog_return_type(span, string_argument.clone(), string_evaluation);
+    checker.remember_catalog_return_type(span, int_argument.clone(), int_evaluation);
 
     assert_eq!(
-        checker.cached_catalog_return_type(span, &string_argument),
+        checker
+            .cached_catalog_return_type(span, &string_argument)
+            .map(|evaluation| evaluation.return_type),
         Some(string_result)
     );
     assert_eq!(
-        checker.cached_catalog_return_type(span, &int_argument),
+        checker
+            .cached_catalog_return_type(span, &int_argument)
+            .map(|evaluation| evaluation.return_type),
         Some(int_result)
     );
 
     checker.set_current_file(std::path::Path::new("first.php"));
-    assert_eq!(checker.cached_catalog_return_type(span, &string_argument), None);
-    assert_eq!(checker.cached_catalog_return_type(span, &int_argument), None);
+    assert!(
+        checker
+            .cached_catalog_return_type(span, &string_argument)
+            .is_none()
+    );
+    assert!(
+        checker
+            .cached_catalog_return_type(span, &int_argument)
+            .is_none()
+    );
 }

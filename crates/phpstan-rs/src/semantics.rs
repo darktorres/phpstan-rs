@@ -203,6 +203,20 @@ mod embedded_catalog_tests {
             .find(|record| record.rule_version.0 == b"php-8.5.4-zend-string-parser-source-v1")
             .expect("strlen Return has Zend parser source evidence");
         let parser_id = parser_record.id().expect("parser evidence encodes");
+        let diagnostic_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| {
+                record.rule_version.0
+                    == b"php-8.5.4-strlen-null-deprecation-observation-v1"
+            })
+            .expect("strlen Diagnostic has paired runtime evidence");
+        let diagnostic_id = diagnostic_record
+            .id()
+            .expect("diagnostic observation evidence encodes");
+        assert_eq!(diagnostic_record.kind, EvidenceKind::Observation);
+        assert!(diagnostic_record.dependencies.contains(&parser_id));
         let llvm_record = manifest
             .evidence
             .iter()
@@ -258,7 +272,21 @@ mod embedded_catalog_tests {
                 .graph
                 .coverage
                 .iter()
-                .filter(|coverage| coverage.domain != Domain::Return)
+                .any(|coverage| {
+                    coverage.domain == Domain::Diagnostic
+                        && matches!(coverage.coverage, Coverage::Closed)
+                        && coverage.evidence.contains(&parser_id)
+                        && coverage.evidence.contains(&diagnostic_id)
+                })
+        );
+        assert!(
+            selection.variants[0]
+                .graph
+                .coverage
+                .iter()
+                .filter(|coverage| {
+                    coverage.domain != Domain::Return && coverage.domain != Domain::Diagnostic
+                })
                 .all(|coverage| {
                     matches!(coverage.coverage, Coverage::Open { .. })
                         && coverage.evidence.contains(&source_id)

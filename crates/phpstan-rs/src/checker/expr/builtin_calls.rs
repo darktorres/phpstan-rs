@@ -1,5 +1,6 @@
 use crate::checker::{
-    Checker, Locals, literal_shape_key, narrowing_type_for_predicate, resolve_call_args,
+    CatalogCallEvaluation, Checker, Locals, literal_shape_key, narrowing_type_for_predicate,
+    resolve_call_args,
 };
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
@@ -8,11 +9,13 @@ use types::PhpString;
 use types::UnionAll as _;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 
-struct CatalogTypeHost;
+struct CatalogTypeHost {
+    weak_scalar_coercions: bool,
+}
 
 impl php_semantics::SemanticHost for CatalogTypeHost {
     type Value = Type;
-    type State = ();
+    type State = std::collections::BTreeSet<(php_semantics::DiagnosticKind, u32)>;
 
     fn resolve(
         &self,
@@ -54,13 +57,35 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
     fn test(
         &self,
         predicate: &php_semantics::Predicate,
-        _arguments: &[Type],
+        arguments: &[Type],
         _receiver: &Type,
         _results: &[(u32, Type)],
-        _state: &(),
+        _state: &Self::State,
     ) -> php_semantics::Truth {
         match predicate {
             php_semantics::Predicate::Always => php_semantics::Truth::Yes,
+            php_semantics::Predicate::Host(id)
+                if id.0 == b"strlen-weak-null-deprecation" =>
+            {
+                if !self.weak_scalar_coercions {
+                    return php_semantics::Truth::No;
+                }
+                let Some(argument) = arguments.first() else {
+                    return php_semantics::Truth::Maybe;
+                };
+                let members = argument.union_members();
+                if members.iter().any(|member| member.is_null().yes()) {
+                    if members.len() == 1 && members[0].is_null().yes() {
+                        php_semantics::Truth::Yes
+                    } else {
+                        php_semantics::Truth::Maybe
+                    }
+                } else if members.iter().any(Type::is_mixed) {
+                    php_semantics::Truth::Maybe
+                } else {
+                    php_semantics::Truth::No
+                }
+            }
             _ => php_semantics::Truth::Maybe,
         }
     }
@@ -71,16 +96,23 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
         _arguments: &[Type],
         _receiver: &Type,
         _results: &[(u32, Type)],
-        state: (),
-    ) -> Vec<php_semantics::EventExit<Type, ()>> {
-        if matches!(event, php_semantics::Event::Unknown { .. }) {
-            vec![php_semantics::EventExit::Normal {
+        mut state: Self::State,
+    ) -> Vec<php_semantics::EventExit<Type, Self::State>> {
+        match event {
+            php_semantics::Event::EmitDiagnostic { kind, argument } => {
+                state.insert((*kind, *argument));
+                vec![php_semantics::EventExit::Normal {
+                    result: None,
+                    state,
+                    coverage: vec![],
+                }]
+            }
+            php_semantics::Event::Unknown { .. } => vec![php_semantics::EventExit::Normal {
                 result: None,
                 state,
                 coverage: vec![],
-            }]
-        } else {
-            Vec::new()
+            }],
+            _ => Vec::new(),
         }
     }
 
@@ -96,10 +128,15 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
     fn value_subsumes(&self, broad: &Type, narrow: &Type) -> bool {
         Relation::structural().is_super_type_of(broad, narrow).yes()
     }
-    fn join_state(&self, _left: (), _right: ()) {}
-    fn widen_state(&self, _old: (), _next: ()) {}
-    fn state_subsumes(&self, _broad: &(), _narrow: &()) -> bool {
-        true
+    fn join_state(&self, mut left: Self::State, right: Self::State) -> Self::State {
+        left.extend(right);
+        left
+    }
+    fn widen_state(&self, old: Self::State, next: Self::State) -> Self::State {
+        self.join_state(old, next)
+    }
+    fn state_subsumes(&self, broad: &Self::State, narrow: &Self::State) -> bool {
+        narrow.is_subset(broad)
     }
 }
 
@@ -145,10 +182,10 @@ impl<'a> Checker<'a> {
         if let Some(outcome) = self.type_check_call_outcome(arenas, name, args, locals) {
             return Type::bool_literal(outcome);
         }
-        if let Some(catalog_return) =
+        if let Some(catalog_evaluation) =
             self.catalog_builtin_return_type(name, sig, args, locals, call_span)
         {
-            return catalog_return;
+            return catalog_evaluation.return_type;
         }
         match name {
             // Mirrors real PHPStan's `AbsFunctionDynamicReturnTypeExtension` -
@@ -2174,7 +2211,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         call_span: Span,
-    ) -> Option<Type> {
+    ) -> Option<CatalogCallEvaluation> {
         if name != "strlen" || !sig.is_stub() || args.len() != 1 {
             return None;
         }
@@ -2207,8 +2244,16 @@ impl<'a> Checker<'a> {
         if let Some(cached) = self.cached_catalog_return_type(call_span, &arguments) {
             return Some(cached);
         }
+        let strict_types = self
+            .syntax_tree_owner()
+            .and_then(|owner| crate::checker::keywords::strict_types_mode(arenas, owner.statements()));
+        let mut host = CatalogTypeHost {
+            weak_scalar_coercions: strict_types == Some(false),
+        };
         let receiver = Type::mixed();
         let mut returns = Vec::new();
+        let mut diagnostics = std::collections::BTreeSet::new();
+        let mut diagnostics_closed = true;
         for variant in selected.variants {
             if !variant.graph.coverage.iter().any(|coverage| {
                 coverage.domain == php_semantics::Domain::Return
@@ -2216,14 +2261,26 @@ impl<'a> Checker<'a> {
             }) {
                 return None;
             }
-            let mut host = CatalogTypeHost;
             let evaluation =
-                php_semantics::evaluate(variant.graph, &arguments, &receiver, (), &mut host)
+                php_semantics::evaluate(
+                    variant.graph,
+                    &arguments,
+                    &receiver,
+                    std::collections::BTreeSet::new(),
+                    &mut host,
+                )
                     .ok()?;
             evaluation
                 .post_fixpoint
                 .validate(variant.graph, &host)
                 .ok()?;
+            diagnostics_closed &= evaluation
+                .coverage
+                .iter()
+                .find(|coverage| coverage.domain == php_semantics::Domain::Diagnostic)
+                .is_some_and(|coverage| {
+                    matches!(coverage.coverage, php_semantics::Coverage::Closed)
+                });
             if !matches!(
                 evaluation
                     .coverage
@@ -2237,8 +2294,12 @@ impl<'a> Checker<'a> {
             for exit in evaluation.exits {
                 match exit {
                     php_semantics::Exit::Normal {
-                        value: Some(value), ..
-                    } => returns.push(value),
+                        value: Some(value),
+                        state,
+                    } => {
+                        returns.push(value);
+                        diagnostics.extend(state);
+                    }
                     php_semantics::Exit::Normal { value: None, .. } => return None,
                     php_semantics::Exit::PhpThrow { .. }
                     | php_semantics::Exit::NativeUnwind { .. }
@@ -2247,9 +2308,18 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let result = (!returns.is_empty()).then(|| Type::union_of(returns))?;
-        self.remember_catalog_return_type(call_span, arguments, result.clone());
-        Some(result)
+        let return_type = (!returns.is_empty()).then(|| Type::union_of(returns))?;
+        let evaluation = CatalogCallEvaluation {
+            return_type,
+            diagnostics: if diagnostics_closed {
+                diagnostics.into_iter().collect()
+            } else {
+                Vec::new()
+            },
+            diagnostics_closed,
+        };
+        self.remember_catalog_return_type(call_span, arguments, evaluation.clone());
+        Some(evaluation)
     }
 
     /// `get_parent_class`'s per-class answer: `class`'s registered

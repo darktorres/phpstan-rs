@@ -304,6 +304,12 @@ impl<'a> Checker<'a> {
         }
 
         let bound = self.bind_arguments(callee, sig, &arguments, has_named, is_builtin, span);
+        let catalog_call = match callee {
+            Callee::Function(name) if is_builtin && name.eq_ignore_ascii_case("strlen") => {
+                self.catalog_builtin_return_type(name, sig, args, locals, span)
+            }
+            _ => None,
+        };
 
         for (i, (argument, param)) in arguments.iter().zip(bound).enumerate() {
             let Some(param) = param else { continue };
@@ -342,7 +348,21 @@ impl<'a> Checker<'a> {
                     .registry
                     .php_supports_somewhere(PhpFeature::DeprecatesNullToInternalScalarParameter)
                     == Some(true);
-            if null_to_string_is_deprecated {
+            let catalog_emits_null_deprecation = catalog_call.as_ref().is_some_and(|evaluation| {
+                evaluation.diagnostics_closed
+                    && evaluation.diagnostics.contains(&(
+                        php_semantics::DiagnosticKind::NullToInternalScalarParameterDeprecated,
+                        i as u32,
+                    ))
+            });
+            let should_emit_null_deprecation = null_to_string_is_deprecated
+                && match catalog_call.as_ref() {
+                    Some(evaluation) if evaluation.diagnostics_closed => {
+                        catalog_emits_null_deprecation
+                    }
+                    _ => true,
+                };
+            if should_emit_null_deprecation {
                 self.report(
                     format!(
                         "Passing null to parameter #{} (${}) of function strlen is deprecated.",
@@ -394,15 +414,6 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Evaluate catalog-backed builtin returns while the call is being
-        // checked, then let expression inference reuse that result. This is
-        // the first shared producer-consumer seam for catalog call results.
-        if let Callee::Function(name) = callee
-            && name.eq_ignore_ascii_case("strlen")
-            && is_builtin
-        {
-            self.catalog_builtin_return_type(name, sig, args, locals, span);
-        }
     }
 
     /// The arguments a constant array unpacked into a call stands for

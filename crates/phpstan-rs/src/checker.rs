@@ -328,7 +328,8 @@ pub struct Checker<'a> {
     // reused by later expression inference at the same source site. The
     // argument types are part of the key because a call can be revisited on
     // different narrowed control-flow paths.
-    catalog_return_type_memo: RefCell<FxHashMap<Span, Vec<(Vec<Type>, Type)>>>,
+    catalog_return_type_memo:
+        RefCell<FxHashMap<Span, Vec<(Vec<Type>, CatalogCallEvaluation)>>>,
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,
@@ -962,6 +963,13 @@ pub struct Checker<'a> {
     infer_spare: RefCell<InferCache>,
 }
 
+#[derive(Clone)]
+pub(crate) struct CatalogCallEvaluation {
+    pub return_type: Type,
+    pub diagnostics: Vec<(php_semantics::DiagnosticKind, u32)>,
+    pub diagnostics_closed: bool,
+}
+
 /// A syntax owner handle that can be held while the checker mutates its
 /// diagnostics and flow state. Project trees are borrowed for `'a`; trees
 /// reparsed from the context cache are kept alive by a cheap `Arc` clone.
@@ -1555,30 +1563,30 @@ impl<'a> Checker<'a> {
         &self,
         span: Span,
         arguments: &[Type],
-    ) -> Option<Type> {
+    ) -> Option<CatalogCallEvaluation> {
         self.catalog_return_type_memo
             .borrow()
             .get(&span)?
             .iter()
             .find(|(cached_arguments, _)| cached_arguments == arguments)
-            .map(|(_, return_type)| return_type.clone())
+            .map(|(_, evaluation)| evaluation.clone())
     }
 
     pub(crate) fn remember_catalog_return_type(
         &self,
         span: Span,
         arguments: Vec<Type>,
-        return_type: Type,
+        evaluation: CatalogCallEvaluation,
     ) {
         let mut memo = self.catalog_return_type_memo.borrow_mut();
         let entries = memo.entry(span).or_default();
-        if let Some((_, cached_return)) = entries
+        if let Some((_, cached_evaluation)) = entries
             .iter_mut()
             .find(|(cached_arguments, _)| *cached_arguments == arguments)
         {
-            *cached_return = return_type;
+            *cached_evaluation = evaluation;
         } else {
-            entries.push((arguments, return_type));
+            entries.push((arguments, evaluation));
         }
     }
 

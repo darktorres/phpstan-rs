@@ -618,6 +618,9 @@ impl SemanticHost for PhpFlowHost {
                 }
                 exits
             }
+            Event::EmitDiagnostic { .. } => {
+                self.unmodeled_outcomes(state, &[Domain::Diagnostic], None)
+            }
             Event::Unknown { domains, .. } => self.unmodeled_outcomes(state, domains, None),
         }
     }

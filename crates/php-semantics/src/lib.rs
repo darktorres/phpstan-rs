@@ -26,7 +26,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 6;
+pub const SCHEMA_MAJOR: u32 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -193,6 +193,12 @@ pub enum Event {
         arguments: Vec<Operand>,
         result: u32,
     },
+    /// A diagnostic that is observable when this ordered event is reached.
+    /// The argument index identifies the PHP call operand used for its span.
+    EmitDiagnostic {
+        kind: DiagnosticKind,
+        argument: u32,
+    },
     Unknown {
         domains: Vec<Domain>,
         reason: Bytes,
@@ -201,6 +207,11 @@ pub enum Event {
     PhpFlow {
         instruction: PhpFlowInstruction,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum DiagnosticKind {
+    NullToInternalScalarParameterDeprecated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,6 +455,7 @@ impl BehaviorGraph {
                     Event::Read { .. } => vec![Domain::UserRead],
                     Event::Write { .. } => vec![Domain::UserWrite],
                     Event::Invoke { .. } => vec![Domain::Invocation],
+                    Event::EmitDiagnostic { .. } => vec![Domain::Diagnostic],
                     Event::PhpFlow {
                         instruction: PhpFlowInstruction::Assign { .. },
                     } => vec![Domain::UserRead, Domain::UserWrite],
@@ -2021,6 +2033,9 @@ mod tests {
                 Event::PhpFlow { instruction } => {
                     state.push(format!("php-flow:{instruction:?}"));
                 }
+                Event::EmitDiagnostic { kind, argument } => {
+                    state.push(format!("diagnostic:{kind:?}:{argument}"));
+                }
                 Event::Unknown { domains, .. } => state.push(format!("unknown:{domains:?}")),
             }
             let _ = (args, receiver);
@@ -2094,6 +2109,7 @@ mod tests {
                 Event::Read { .. } => vec![Domain::UserRead],
                 Event::Write { .. } => vec![Domain::UserWrite],
                 Event::Invoke { .. } => vec![Domain::Invocation],
+                Event::EmitDiagnostic { .. } => vec![Domain::Diagnostic],
                 Event::PhpFlow {
                     instruction: PhpFlowInstruction::Assign { .. },
                 } => vec![Domain::UserRead, Domain::UserWrite],

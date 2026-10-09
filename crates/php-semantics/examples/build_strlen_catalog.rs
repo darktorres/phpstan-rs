@@ -1,9 +1,9 @@
 use std::{env, fs};
 
 use php_semantics::{
-    BehaviorGraph, Block, Bytes, CatalogEntry, CatalogManifest, Digest, Domain, DomainCoverage,
-    EntryKey, Event, EvidenceKind, EvidenceRecord, GraphRecord, Operand, Precision, ReleaseVersion,
-    SCHEMA_MAJOR, TargetPredicate, Terminator, VersionRange,
+    BehaviorGraph, Block, Bytes, CatalogEntry, CatalogManifest, DiagnosticKind, Digest, Domain,
+    DomainCoverage, EntryKey, Event, EvidenceKind, EvidenceRecord, GraphRecord, Operand, Precision,
+    Predicate, ReleaseVersion, SCHEMA_MAJOR, TargetPredicate, Terminator, VersionRange,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -17,9 +17,45 @@ fn main() {
         .next()
         .map(std::path::PathBuf::from)
         .expect("pass the extracted zif_strlen LLVM witness JSON path");
+    let runtime_path = args
+        .next()
+        .map(std::path::PathBuf::from)
+        .expect("pass the paired PHP 8.5.4 weak/strict runtime witness JSON path");
     let source = fs::read(&source_path).expect("read pinned strlen source");
     let source_digest: [u8; 32] = Sha256::digest(&source).into();
     let source_text = std::str::from_utf8(&source).expect("PHP source is UTF-8");
+    let runtime_bytes = fs::read(&runtime_path).expect("read PHP runtime witness");
+    let runtime: serde_json::Value =
+        serde_json::from_slice(&runtime_bytes).expect("runtime witness is JSON");
+    assert_eq!(
+        runtime["weak_fixture"]["expected"]["lengths"],
+        serde_json::json!([3, 3, 1, 0, 0])
+    );
+    assert!(
+        runtime["weak_fixture"]["expected"]["deprecations"]
+            .as_array()
+            .is_some_and(|messages| messages.iter().any(|message| {
+                message
+                    .as_str()
+                    .is_some_and(|message| message.contains("Passing null"))
+            }))
+    );
+    assert_eq!(
+        runtime["result"]["weak_tailcall_call_outputs_identical"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        runtime["result"]["strict_tailcall_call_outputs_identical"].as_bool(),
+        Some(true)
+    );
+    for rejected in ["int", "float", "bool", "null"] {
+        assert!(
+            runtime["strict_fixture"]["expected"]["rejected"]
+                .as_array()
+                .is_some_and(|types| types.iter().any(|ty| ty.as_str() == Some(rejected)))
+        );
+    }
+    let runtime_digest: [u8; 32] = Sha256::digest(&runtime_bytes).into();
     assert_eq!(
         source_digest,
         [
@@ -150,6 +186,19 @@ fn main() {
         dependencies: vec![],
     };
     let parser_evidence_id = parser_evidence.id().expect("Zend parser evidence encodes");
+    let diagnostic_evidence = EvidenceRecord {
+        kind: EvidenceKind::Observation,
+        source_digest: Digest(runtime_digest),
+        site: Some(Bytes(
+            b"PHP 8.5.4 TAILCALL/CALL weak strlen(null) deprecation witness".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-strlen-null-deprecation-observation-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![parser_evidence_id],
+    };
+    let diagnostic_evidence_id = diagnostic_evidence
+        .id()
+        .expect("diagnostic evidence encodes");
     assert_eq!(witness["mapping"]["loaded_as"].as_str(), Some("i64"));
     for fact in [
         "debug_line_matches_source_return",
@@ -242,25 +291,42 @@ fn main() {
     let graph = BehaviorGraph {
         schema_major: SCHEMA_MAJOR,
         entry: 0,
-        blocks: vec![Block::new(
-            vec![Event::Unknown {
-                domains: Domain::ALL
-                    .iter()
-                    .copied()
-                    .filter(|domain| *domain != Domain::Return)
-                    .collect(),
-                reason: Bytes(
-                    b"effects and non-normal exits are not modeled in this slice".to_vec(),
-                ),
-            }],
-            Terminator::Return(Some(Operand::StringByteLength(0))),
-        )],
+        blocks: vec![
+            Block::new(
+                vec![Event::Unknown {
+                    domains: Domain::ALL
+                        .iter()
+                        .copied()
+                        .filter(|domain| *domain != Domain::Return && *domain != Domain::Diagnostic)
+                        .collect(),
+                    reason: Bytes(
+                        b"effects and non-normal exits are not modeled in this slice".to_vec(),
+                    ),
+                }],
+                Terminator::Branch {
+                    predicate: Predicate::Host(Bytes(b"strlen-weak-null-deprecation".to_vec())),
+                    yes: 1,
+                    no: 2,
+                },
+            ),
+            Block::new(
+                vec![Event::EmitDiagnostic {
+                    kind: DiagnosticKind::NullToInternalScalarParameterDeprecated,
+                    argument: 0,
+                }],
+                Terminator::Goto(2),
+            ),
+            Block::new(
+                vec![],
+                Terminator::Return(Some(Operand::StringByteLength(0))),
+            ),
+        ],
         coverage: Domain::ALL
             .iter()
             .copied()
             .map(|domain| DomainCoverage {
                 domain,
-                coverage: if domain == Domain::Return {
+                coverage: if domain == Domain::Return || domain == Domain::Diagnostic {
                     php_semantics::Coverage::Closed
                 } else {
                     php_semantics::Coverage::Open {
@@ -271,6 +337,8 @@ fn main() {
                 dependencies: vec![],
                 evidence: if domain == Domain::Return {
                     return_evidence.clone()
+                } else if domain == Domain::Diagnostic {
+                    vec![parser_evidence_id, diagnostic_evidence_id]
                 } else {
                     return_evidence.clone()
                 },
@@ -305,6 +373,7 @@ fn main() {
             (source_evidence_id, source_evidence),
             (layout_evidence_id, layout_evidence),
             (parser_evidence_id, parser_evidence),
+            (diagnostic_evidence_id, diagnostic_evidence),
             (llvm_evidence_id, llvm_evidence),
         ],
     };
