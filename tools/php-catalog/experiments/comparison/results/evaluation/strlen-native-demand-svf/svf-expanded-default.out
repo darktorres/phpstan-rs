@@ -1,0 +1,306 @@
+
+*********General Stats***************
+################ (program : strlen-native-demand-std.bc)###############
+AddrsNum            53147
+BBWith2Succ         35
+BBWith3Succ         1
+CallsNum            9
+ConstArrayObj       3150
+ConstStructObj      235
+ConstantObj         0
+CopysNum            168
+FIObjNum            4484
+FSObjNum            3537
+FunctionObjs        4483
+GepsNum             16119
+GlobalObjs          3434
+HeapObjs            1
+IndCallSites        1
+LoadsNum            240
+MaxStructSize       1568
+NonPtrObj           7954
+ReturnsNum          4
+StackObjs           103
+StoresNum           81250
+TotalCallSite       24
+TotalFieldObjects   14817
+TotalObjects        22839
+TotalPTASVFStmts    95804
+TotalPointers       84350
+TotalSVFStmts       151139
+VarArrayObj         14
+VarStructObj        3160
+----------------Time and memory stats--------------------
+LLVMIRTime          0.818595
+SVFIRTime           1.76916
+SymbolTableTime     0.233434
+#######################################################
+
+*********PTACallGraph Stats (Andersen analysis)***************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           23
+TotalNode           4483
+#######################################################
+
+*********Andersen Pointer Analysis Stats***************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Time and memory stats--------------------
+AvgIn/OutAddrEdge   0.629137
+AvgIn/OutCopyEdge   0.50174
+AvgIn/OutEdge       1.44355
+AvgIn/OutLoadEdge   0.00178749
+AvgIn/OutStoreEdge  0.310881
+AvgPtsSetSize       0.756822
+AvgTopLvlPtsSize    0.99328
+CollapseTime        0
+CopyGepTime         0
+LoadStoreTime       0
+MemoryUsageVmrss    227996
+MemoryUsageVmsize   227652
+SCCDetectTime       0
+SCCMergeTime        0
+TotalTime           1.62647
+UpdateCGTime        0
+----------------Numbers stats----------------------------
+AddrProcessed       53147
+CopyProcessed       22648
+DummyFieldPtrs      3470
+FieldObjs           14817
+GepProcessed        29128
+IndCallSites        1
+IndEdgeSolved       0
+LoadProcessed       131
+LocalVarInRecur     0
+MaxInAddrEdge       1
+MaxInCopyEdge       1677
+MaxInLoadEdge       1
+MaxInStoreEdge      1677
+MaxNodesInSCC       3
+MaxOutAddrEdge      45127
+MaxOutCopyEdge      2682
+MaxOutLoadEdge      9
+MaxOutStoreEdge     2812
+MaxPtsSetSize       1677
+MemObjects          22839
+NodesInCycles       3
+NullPointer         50
+NumOfAddrs          53147
+NumOfCGEdge         68798
+NumOfCGNode         103952
+NumOfCopys          26267
+NumOfFieldExpand    0
+NumOfGeps           16118
+NumOfLoads          151
+NumOfSCCDetect      3
+NumOfSFRs           0
+NumOfStores         26262
+NumOfValidNode      84476
+NumOfValidObjNode   14931
+Pointers            84350
+PointsToBlkPtr      0
+PointsToConstPtr    241
+SolveIterations     3
+StoreProcessed      26260
+TotalCycleNum       1
+TotalObjects        22839
+TotalPWCCycleNum    0
+TotalPointers       84350
+#######################################################
+
+****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
+################ (program : strlen-native-demand-std.bc)###############
+UniquePointsToSets       29890
+TotalUnions              119027
+PropertyUnions           97160
+UniqueUnions             7051
+LookupUnions             714
+PreemptiveUnions         14102
+TotalComplements         297036
+PropertyComplements      297036
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       26262
+PropertyIntersections    26262
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+
+*********Memory SSA Statistics***************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Time and memory stats--------------------
+AverageRegSize      1
+GenMUCHITime        0.00082
+GenRegionTime       0.130612
+InsertPHITime       0.00017
+SSARenameTime       0.000415
+TotalMSSATime       0.132989
+----------------Numbers stats----------------------------
+BBHasMSSAPhi        13
+CSChiNode           4
+CSHasChi            4
+CSHasMu             4
+CSMuNode            6
+FunEntryChi         71
+FunHasEntryChi      5
+FunHasRetMu         17
+FunRetMu            71
+LoadHasMu           151
+LoadMuNode          131
+MSSAPhi             99
+MaxRegSize          1
+MemRegions          66
+StoreChiNode        68
+StoreHasChi         70
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          0.033064
+AvgWeight           1
+ConnDirEdgeTime     0
+ConnIndEdgeTime     0.030939
+OptTime             0
+TLNodeTime          0
+TotalTime           0.064017
+----------------Numbers stats----------------------------
+ActualIn            6
+ActualOut           4
+ActualParam         29
+ActualRet           0
+Addr                53147
+AvgInDegree         0
+AvgIndInDeg         1
+AvgIndOutDeg        1
+AvgOutDegree        0
+Copy                119
+DirectCallEdge      8
+DirectEdge          67692
+DirectRetEdge       0
+FormalIn            71
+FormalOut           71
+FormalParam         10
+FormalRet           0
+Gep                 16119
+IndCallEdge         6
+IndRetEdge          4
+IndirectEdge        499
+IndirectEdgeLabels  499
+Load                151
+MSSAPhi             99
+MaxInDegree         3
+MaxIndInDeg         3
+MaxIndOutDeg        10
+MaxOutDegree        2815
+PHI                 0
+Store               26262
+TotalEdge           68191
+TotalNode           96089
+#######################################################
+
+*********PTACallGraph Stats (DDA analysis)***************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           23
+TotalNode           4483
+#######################################################
+
+*********SVFG SCC Stat***************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Numbers stats----------------------------
+CallEdgeInCycle     0
+DirEdgeInCycle      0
+EdgeInCycle         0
+IndEdgeInCycle      0
+InsenCallEdge       0
+InsenRetEdge        0
+MaxNodeInCycle      0
+NodeInCycle         0
+RetEdgeInCycle      0
+TotalCallEdge       14
+TotalCycle          0
+TotalDirEdge        67692
+TotalEdge           68191
+TotalIndEdge        499
+TotalNode           96089
+TotalRetEdge        4
+#######################################################
+
+****Demand-Driven Pointer Analysis Statistics****
+
+************************
+################ (program : strlen-native-demand-std.bc)###############
+----------------Time and memory stats--------------------
+AvgCPtsSize         0
+AvgDPMAtLoc         1
+AvgPtsSize          0
+AvgTimePerQuery     0.000738
+MemoryUsageVmrss    12
+MemoryUsageVmsize   0
+TotalBKCondTime     0
+TotalQueryTime      0.000738
+----------------Numbers stats----------------------------
+IndEdgeSolved       0
+MaxCPtsSize         0
+MaxCxtPerQuery      0
+MaxDPMAtLoc         1
+MaxPathPerQuery     0
+MaxPtsSize          0
+NumOfDPM            136
+NumOfInfePath       0
+NumOfMustAA         0
+NumOfNullPtr        1
+NumOfOOBQuery       0
+NumOfQuery          1
+NumOfSU             10
+NumOfStep           65
+NumOfStepInCycle    19
+NumOfStore          26262
+NumOfStoreSU        10
+PointsToBlkPtr      0
+PointsToConstPtr    0
+#######################################################
+
+****Persistent Points-To Cache Statistics: DDA bitvector****
+################ (program : strlen-native-demand-std.bc)###############
+UniquePointsToSets       10
+TotalUnions              46
+PropertyUnions           46
+UniqueUnions             0
+LookupUnions             0
+PreemptiveUnions         0
+TotalComplements         0
+PropertyComplements      0
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       0
+PropertyIntersections    0
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+=================================================
+Total virtual callsites: 0
+Total analyzed virtual callsites: 0
+Indirect call map size: 0
+Precise callsites: 0
+Zero target callsites: 0
+One target callsites: 0
+Two target callsites: 0
+More than two target callsites: 0
+=================================================
+##<> Source Loc: { "ln": 769, "cl": 7, "fl": "Zend/zend_API.c" }
+Ptr 66578 		PointsTo: {empty}
+

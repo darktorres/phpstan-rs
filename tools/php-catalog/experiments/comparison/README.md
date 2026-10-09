@@ -141,3 +141,27 @@ Return demand path from both parser-result destinations through the `len`
 field load to the caller's return-zval payload. The catalog builder validates
 that slot chain and keeps effects and non-normal outcomes open; it does not
 claim a reusable native CFG or memory solver.
+
+## `strlen` SVF fallback regression
+
+Replay the bounded indirect-call query against the linked PHP 8.5.4 module:
+
+```bash
+python3 -m unittest tools/php-catalog/experiments/comparison/test_evaluate_strlen_svf_demand.py
+python3 tools/php-catalog/experiments/comparison/evaluate_strlen_svf_demand.py \
+  --linked-bitcode /home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc \
+  --svf-bin /tmp/php-catalog-comparison/svf-build/bin \
+  --output tools/php-catalog/experiments/comparison/results/evaluation/strlen-native-demand-svf
+```
+
+The replay extracts and verifies two temporary capsules, then runs stock DDA,
+`-blk`, `-flow-bg=1`, and a capsule augmented with `std_object_handlers` and
+`zend_std_cast_object_tostring`. The default, blackhole, and augmented runs
+complete with an empty target at `zend_API.c:769`; the constrained run marks
+the query out of budget. The pinned runtime witness has a positive
+`Stringable::__toString()` callback sentinel. The capsule omits the input
+object's construction/handler initialization path, so its empty target is
+incomplete evidence and must leave invocation/effect behavior open. The result
+JSON contains identities, command measurements, and extracted hashes; raw SVF
+outputs are retained alongside it, while bitcode capsules are removed after
+each replay.

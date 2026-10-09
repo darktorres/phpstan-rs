@@ -1,0 +1,84 @@
+[
+  {
+    "name": "svf-dda",
+    "command": [
+      "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "-dfs",
+      "-query=funptr",
+      "-stat",
+      "-print-query-pts",
+      "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 9.0185,
+    "sampled_group_peak_bytes": 551522304,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 537168,
+    "user_seconds": 6.03,
+    "system_seconds": 0.8,
+    "exit_status": 0
+  },
+  {
+    "name": "svf-dda_blackhole",
+    "command": [
+      "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "-dfs",
+      "-blk",
+      "-query=funptr",
+      "-stat",
+      "-print-query-pts",
+      "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 9.6966,
+    "sampled_group_peak_bytes": 551071744,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 536840,
+    "user_seconds": 6.01,
+    "system_seconds": 0.76,
+    "exit_status": 0
+  },
+  {
+    "name": "svf-dda_low_budget",
+    "command": [
+      "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "-dfs",
+      "-flow-bg=1",
+      "-query=funptr",
+      "-stat",
+      "-print-query-pts",
+      "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 8.7298,
+    "sampled_group_peak_bytes": 551624704,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 537236,
+    "user_seconds": 5.61,
+    "system_seconds": 0.71,
+    "exit_status": 0
+  },
+  {
+    "name": "svf-expanded-default",
+    "command": [
+      "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "-dfs",
+      "-query=funptr",
+      "-stat",
+      "-print-query-pts",
+      "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand-std.bc"
+    ],
+    "cwd": "/home/torres/projects/phpstan-rs-master3",
+    "elapsed_seconds": 8.1664,
+    "sampled_group_peak_bytes": 553058304,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 538652,
+    "user_seconds": 5.81,
+    "system_seconds": 0.78,
+    "exit_status": 0
+  }
+]

@@ -1,0 +1,209 @@
+{
+  "schema": 1,
+  "php_source_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
+  "linked_module": {
+    "path": "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc",
+    "sha256": "e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e"
+  },
+  "capsules": [
+    {
+      "functions": [
+        "zif_strlen",
+        "zend_flf_parse_arg_str_slow",
+        "zend_parse_arg_str_slow",
+        "zend_parse_arg_str_weak"
+      ],
+      "globals": [],
+      "extract_command": [
+        "llvm-extract-21",
+        "--func=zif_strlen",
+        "--func=zend_flf_parse_arg_str_slow",
+        "--func=zend_parse_arg_str_slow",
+        "--func=zend_parse_arg_str_weak",
+        "--keep-const-init",
+        "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc",
+        "-o",
+        "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+      ],
+      "path": "strlen-native-demand.bc",
+      "bytes": 3587144,
+      "sha256": "f3aebf5458dbea025a7d4506b9629fe08df4469c34642e62f485fa593e1957fd"
+    },
+    {
+      "functions": [
+        "zif_strlen",
+        "zend_flf_parse_arg_str_slow",
+        "zend_parse_arg_str_slow",
+        "zend_parse_arg_str_weak",
+        "zend_std_cast_object_tostring"
+      ],
+      "globals": [
+        "std_object_handlers"
+      ],
+      "extract_command": [
+        "llvm-extract-21",
+        "--func=zif_strlen",
+        "--func=zend_flf_parse_arg_str_slow",
+        "--func=zend_parse_arg_str_slow",
+        "--func=zend_parse_arg_str_weak",
+        "--func=zend_std_cast_object_tostring",
+        "--glob=std_object_handlers",
+        "--keep-const-init",
+        "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc",
+        "-o",
+        "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand-std.bc"
+      ],
+      "path": "strlen-native-demand-std.bc",
+      "bytes": 3591228,
+      "sha256": "1c71258ef342a23d7b67d7f9c543be04698dfefd79b610079d8d76336eb9263c"
+    }
+  ],
+  "llvm_verification": "both extracted capsules passed opt -passes=verify",
+  "svf": {
+    "source_commit": "e889a5139dbca132142b07d90192efab9a16c614",
+    "binary": {
+      "path": "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+      "sha256": "9a2a8e4e1b6103ee3ea7987b8b0350af7157b6c755166b3fa23f40aaba4b27b7"
+    },
+    "measurements": [
+      {
+        "name": "svf-dda",
+        "command": [
+          "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+          "-dfs",
+          "-query=funptr",
+          "-stat",
+          "-print-query-pts",
+          "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+        ],
+        "cwd": "/home/torres/projects/phpstan-rs-master3",
+        "elapsed_seconds": 9.0185,
+        "sampled_group_peak_bytes": 551522304,
+        "exit_code": 0,
+        "stopped": null,
+        "max_rss_kib": 537168,
+        "user_seconds": 6.03,
+        "system_seconds": 0.8,
+        "exit_status": 0
+      },
+      {
+        "name": "svf-dda_blackhole",
+        "command": [
+          "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+          "-dfs",
+          "-blk",
+          "-query=funptr",
+          "-stat",
+          "-print-query-pts",
+          "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+        ],
+        "cwd": "/home/torres/projects/phpstan-rs-master3",
+        "elapsed_seconds": 9.6966,
+        "sampled_group_peak_bytes": 551071744,
+        "exit_code": 0,
+        "stopped": null,
+        "max_rss_kib": 536840,
+        "user_seconds": 6.01,
+        "system_seconds": 0.76,
+        "exit_status": 0
+      },
+      {
+        "name": "svf-dda_low_budget",
+        "command": [
+          "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+          "-dfs",
+          "-flow-bg=1",
+          "-query=funptr",
+          "-stat",
+          "-print-query-pts",
+          "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand.bc"
+        ],
+        "cwd": "/home/torres/projects/phpstan-rs-master3",
+        "elapsed_seconds": 8.7298,
+        "sampled_group_peak_bytes": 551624704,
+        "exit_code": 0,
+        "stopped": null,
+        "max_rss_kib": 537236,
+        "user_seconds": 5.61,
+        "system_seconds": 0.71,
+        "exit_status": 0
+      },
+      {
+        "name": "svf-expanded-default",
+        "command": [
+          "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+          "-dfs",
+          "-query=funptr",
+          "-stat",
+          "-print-query-pts",
+          "/tmp/strlen-svf-capsules-5zq31az6/strlen-native-demand-std.bc"
+        ],
+        "cwd": "/home/torres/projects/phpstan-rs-master3",
+        "elapsed_seconds": 8.1664,
+        "sampled_group_peak_bytes": 553058304,
+        "exit_code": 0,
+        "stopped": null,
+        "max_rss_kib": 538652,
+        "user_seconds": 5.81,
+        "system_seconds": 0.78,
+        "exit_status": 0
+      }
+    ],
+    "queries": {
+      "dda": {
+        "query_count": 1,
+        "out_of_budget_query_count": 0,
+        "query_points_to": [
+          ""
+        ],
+        "source_locations": [
+          "{ \"ln\": 769, \"cl\": 7, \"fl\": \"Zend/zend_API.c\" }"
+        ]
+      },
+      "dda_blackhole": {
+        "query_count": 1,
+        "out_of_budget_query_count": 0,
+        "query_points_to": [
+          ""
+        ],
+        "source_locations": [
+          "{ \"ln\": 769, \"cl\": 7, \"fl\": \"Zend/zend_API.c\" }"
+        ]
+      },
+      "dda_low_budget": {
+        "query_count": 1,
+        "out_of_budget_query_count": 1,
+        "query_points_to": [
+          ""
+        ],
+        "source_locations": [
+          "{ \"ln\": 769, \"cl\": 7, \"fl\": \"Zend/zend_API.c\" }"
+        ]
+      },
+      "expanded_with_std_handlers": {
+        "query_count": 1,
+        "out_of_budget_query_count": 0,
+        "query_points_to": [
+          ""
+        ],
+        "source_locations": [
+          "{ \"ln\": 769, \"cl\": 7, \"fl\": \"Zend/zend_API.c\" }"
+        ]
+      }
+    }
+  },
+  "runtime_witness": {
+    "path": "tools/php-catalog/experiments/comparison/results/runtime/hybrid-call-8.5.4.json",
+    "sha256": "24923d1967f41c93a6a29a02c0e94e6adeea90d39e787ed2387876a607a2d0f1",
+    "witnessed_fixture_sha256": "9b38a3ea63cf5cf42e7dc553924f38fab4046d2297011b03a144c2270f5d38cc",
+    "current_fixture_sha256": "94dc6509e0a164088c6092d68e48b4daee006e109c1ee459ae26e63dee50ca64",
+    "positive_sentinel": "string-coercion-callback"
+  },
+  "finding": {
+    "empty_target_is_not_closed": true,
+    "blackhole_adds_no_target": true,
+    "low_budget_is_explicitly_out_of_budget": true,
+    "boundary_reason": "capsule omits the input object's construction/handler initialization path",
+    "coverage_action": "keep invocation and affected behavior domains open; do not prune the cast callback"
+  }
+}
