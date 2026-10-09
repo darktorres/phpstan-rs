@@ -202,6 +202,35 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// Install a decoded artifact only after validating every graph, key,
+    /// evidence edge, and schema version. This is the runtime ingestion path;
+    /// callers must not execute a manifest by deserializing its fields alone.
+    pub fn from_manifest(manifest: CatalogManifest) -> Result<Self, CatalogError> {
+        manifest.validate()?;
+        let mut catalog = Self::default();
+        catalog.evidence = manifest.evidence.into_iter().collect();
+        catalog.graphs = manifest
+            .graphs
+            .into_iter()
+            .map(|record| (record.id, record.graph))
+            .collect();
+        for entry in manifest.entries {
+            catalog
+                .entries
+                .entry(entry.key.clone())
+                .or_default()
+                .push(entry);
+        }
+        Ok(catalog)
+    }
+
+    /// Decode JSON and pass it through the same validation boundary as a
+    /// generated in-memory manifest.
+    pub fn from_json(json: &str) -> Result<Self, ManifestDecodeError> {
+        let manifest = serde_json::from_str(json).map_err(ManifestDecodeError::Json)?;
+        Self::from_manifest(manifest).map_err(ManifestDecodeError::Catalog)
+    }
+
     pub fn add_evidence(&mut self, record: EvidenceRecord) -> Result<Digest, CatalogError> {
         let id = record.id().map_err(|_| CatalogError::GraphEncoding)?;
         if self.evidence.get(&id).is_some_and(|old| old != &record) {
@@ -381,6 +410,12 @@ impl Catalog {
                 .collect(),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum ManifestDecodeError {
+    Json(serde_json::Error),
+    Catalog(CatalogError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -635,6 +670,8 @@ mod tests {
             decoded.canonical_digest().unwrap(),
             manifest.canonical_digest().unwrap()
         );
+        let loaded = Catalog::from_json(&json).unwrap();
+        assert!(loaded.select(&function(b"CORE", b"STRLEN")).is_some());
 
         let mut tampered = manifest;
         tampered.graphs[0].id = Digest([0; 32]);
