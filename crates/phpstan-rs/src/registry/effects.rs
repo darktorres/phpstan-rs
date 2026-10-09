@@ -956,6 +956,26 @@ fn element_method(access: Access) -> &'static str {
     }
 }
 
+/// What `operation` on an object of any class asks of the registry alone, as
+/// a key to remember the answer by; none for a property's, which also asks
+/// what the scope sees.
+fn unknown_holder_key(operation: &Operation) -> Option<(u8, u8)> {
+    let access = |access: &Access| match access {
+        Access::Read => 0,
+        Access::Write => 1,
+        Access::Isset => 2,
+        Access::Unset => 3,
+    };
+    match operation {
+        Operation::Property(..) => None,
+        Operation::Element(a) => Some((0, access(a))),
+        Operation::String => Some((1, 0)),
+        Operation::Destroy => Some((2, 0)),
+        Operation::Clone { with } => Some((3, u8::from(*with))),
+        Operation::Iterate { keys } => Some((4, u8::from(*keys))),
+    }
+}
+
 /// Every method PHP may call for `operation` on an object of some class.
 fn implicit_method_names(operation: &Operation) -> Vec<&'static str> {
     match operation {
@@ -1002,6 +1022,23 @@ impl TargetSet {
         }
         if self.seen.insert((key.clone(), transfer.clone())) {
             self.list.push((key, transfer));
+        }
+    }
+
+    /// Adds each of `keys`, run with `transfer`, to a set that has nothing
+    /// yet, when the keys are distinct.
+    pub(super) fn extend_with<'a>(
+        &mut self,
+        keys: impl ExactSizeIterator<Item = &'a DeclKey>,
+        transfer: &Transfer,
+    ) {
+        if self.list.is_empty() {
+            self.list
+                .extend(keys.map(|key| (key.clone(), transfer.clone())));
+            return;
+        }
+        for key in keys {
+            self.push(key.clone(), transfer.clone());
         }
     }
 
@@ -2684,15 +2721,9 @@ impl Reach<'_> {
                 }
                 Vec::new()
             }
-            Callee::Implicit { on, operation } => {
-                let (holder, same) = self.ctx.operand(on.as_deref());
-                let mut out = TargetSet::default();
-                if let Some((property, set, iterate)) = hook_access(operation) {
-                    self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
-                }
-                self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
-                out.into_vec()
-            }
+            Callee::Implicit { on, operation } => self
+                .implicit_call_targets(on.as_deref(), operation)?
+                .into_vec(),
             // The file's top level runs in the including code's scope, as its
             // own `$this`; a file that is not known is code of any content.
             Callee::Include(at) => match self
@@ -2716,6 +2747,33 @@ impl Reach<'_> {
                     .collect()
             }
         })
+    }
+
+    /// The declarations PHP runs for `operation` on the operand `on`.
+    fn implicit_call_targets(
+        &self,
+        on: Option<&[Origin]>,
+        operation: &Operation,
+    ) -> Option<Targets> {
+        let (holder, same) = self.ctx.operand(on);
+        if matches!(holder, Holder::Unknown | Holder::Made(None))
+            && hook_access(operation).is_none()
+            && let Some(key) = unknown_holder_key(operation)
+        {
+            let keys = self
+                .registry
+                .reach_memo
+                .unknown_implicit
+                .get_or_compute(key, || self.unknown_implicit_keys(operation).into());
+            let transfer = implicit_transfer(&holder, same, operation, None);
+            return Some(Targets::Shared(keys, transfer));
+        }
+        let mut out = TargetSet::default();
+        if let Some((property, set, iterate)) = hook_access(operation) {
+            self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
+        }
+        self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
+        Some(Targets::List(out.into_vec()))
     }
 
     /// Adds to `out` the hooks PHP may run for an access to `property` (to
@@ -2835,6 +2893,35 @@ impl Reach<'_> {
         }
     }
 
+    /// The declarations PHP runs for `operation` on an object of any class,
+    /// each once.
+    fn unknown_implicit_keys(&self, operation: &Operation) -> Vec<DeclKey> {
+        let registry = self.registry;
+        let mut out: Vec<DeclKey> = Vec::new();
+        let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
+        for method in implicit_method_names(operation) {
+            for class in registry
+                .classes_declaring(method)
+                .chain(registry.builtin_classes_running_code(method))
+            {
+                if !self.implicit_methods(class, operation).contains(&method) {
+                    continue;
+                }
+                // A builtin destructor frees what its object holds
+                // and runs no code of its own.
+                if matches!(operation, Operation::Destroy) && registry.is_builtin_class(class) {
+                    continue;
+                }
+                if let Some(key) = self.implicit_method(class, method)
+                    && seen.insert(key.clone())
+                {
+                    out.push(key);
+                }
+            }
+        }
+        out
+    }
+
     /// Adds to `out` the declarations PHP runs for `operation` on an object
     /// `holder` says may be, the caller's own `$this` when `same`, each with
     /// what its own `$this` is to the caller: by the hierarchy over the
@@ -2856,24 +2943,18 @@ impl Reach<'_> {
             Holder::Classes(classes) => (classes, false),
             Holder::Made(Some(classes)) => (classes, true),
             Holder::Unknown | Holder::Made(None) => {
-                for method in implicit_method_names(operation) {
-                    for class in registry
-                        .classes_declaring(method)
-                        .chain(registry.builtin_classes_running_code(method))
-                    {
-                        if !self.implicit_methods(class, operation).contains(&method) {
-                            continue;
-                        }
-                        // A builtin destructor frees what its object holds
-                        // and runs no code of its own.
-                        if matches!(operation, Operation::Destroy)
-                            && registry.is_builtin_class(class)
-                        {
-                            continue;
-                        }
-                        if let Some(key) = self.implicit_method(class, method) {
-                            out.push(key, transfer(None));
-                        }
+                let transfer = transfer(None);
+                // What an object of any class runs for the operation is the
+                // same wherever it is asked, but for a property's.
+                if let Some(key) = unknown_holder_key(operation) {
+                    let keys = registry
+                        .reach_memo
+                        .unknown_implicit
+                        .get_or_compute(key, || self.unknown_implicit_keys(operation).into());
+                    out.extend_with(keys.iter(), &transfer);
+                } else {
+                    for key in self.unknown_implicit_keys(operation) {
+                        out.push(key, transfer.clone());
                     }
                 }
                 return Some(());
@@ -3199,7 +3280,35 @@ struct Resolve<'r> {
 
 /// What each of a scope's calls reaches, and the places its calls may write
 /// by reference; `None` when it may write anything.
-type Reached<'r> = Option<(Vec<Vec<(DeclKey, Transfer)>>, Vec<&'r Place>)>;
+type Reached<'r> = Option<(Vec<Targets>, Vec<&'r Place>)>;
+
+/// What one call reaches.
+enum Targets {
+    List(Vec<(DeclKey, Transfer)>),
+    /// The declarations an operation runs on an object of any class, shared
+    /// by every call of the operation, each run with the transfer.
+    Shared(Arc<[DeclKey]>, Transfer),
+}
+
+impl Targets {
+    fn keys(&self) -> impl Iterator<Item = &DeclKey> {
+        let (list, shared): (&[(DeclKey, Transfer)], &[DeclKey]) = match self {
+            Targets::List(list) => (list, &[]),
+            Targets::Shared(keys, _) => (&[], keys),
+        };
+        list.iter().map(|(key, _)| key).chain(shared)
+    }
+
+    fn into_vec(self) -> Vec<(DeclKey, Transfer)> {
+        match self {
+            Targets::List(list) => list,
+            Targets::Shared(keys, transfer) => keys
+                .iter()
+                .map(|key| (key.clone(), transfer.clone()))
+                .collect(),
+        }
+    }
+}
 
 impl<'r> Resolve<'r> {
     /// The classification of the body, under `key`, and of each closure it
@@ -3756,12 +3865,17 @@ impl<'r> Level<'r> {
         let mut written_args: Vec<&'r Place> = Vec::new();
         for call in facts.calls.iter() {
             let ran = (self.runs.borrow().len(), self.params_run.borrow().len());
-            let targets = reach.call_targets(&call.callee, Some(call))?;
+            let targets = match &call.callee {
+                Callee::Implicit { on, operation } => {
+                    reach.implicit_call_targets(on.as_deref(), operation)?
+                }
+                callee => Targets::List(reach.call_targets(callee, Some(call))?),
+            };
             // A closure the body wrote or a parameter's argument, called:
             // what it takes by reference is not looked up.
             let unknown_params = (self.runs.borrow().len(), self.params_run.borrow().len()) != ran;
             for (at, place) in call.places.iter() {
-                if unknown_params || targets.iter().any(|(key, _)| self.by_ref_at(key, at)) {
+                if unknown_params || targets.keys().any(|key| self.by_ref_at(key, at)) {
                     written_args.push(place);
                 }
             }
@@ -3777,7 +3891,7 @@ impl<'r> Level<'r> {
     fn classify(
         &self,
         holder: &DeclKey,
-        reached: Vec<Vec<(DeclKey, Transfer)>>,
+        reached: Vec<Targets>,
         written_args: Vec<&Place>,
     ) -> Classification<'r> {
         let reach = Reach {
@@ -3789,9 +3903,24 @@ impl<'r> Level<'r> {
         // The declarations run with no call's arguments, each once.
         let mut siteless: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
         let facts: &'r WriteFacts = self.facts;
+        // The shared sets of declarations already taken, with their transfer.
+        let mut taken: FxHashSet<(usize, Transfer)> = FxHashSet::default();
         for (call, targets) in facts.calls.iter().zip(reached) {
             let mut site: Option<u32> = None;
-            for (key, transfer) in targets {
+            let entries: Box<dyn Iterator<Item = (DeclKey, Transfer)>> = match targets {
+                Targets::List(list) => Box::new(list.into_iter()),
+                Targets::Shared(keys, transfer) => {
+                    debug_assert!(call.arguments.is_empty() && call.places.is_empty());
+                    if !taken.insert((
+                        Arc::as_ptr(&keys).cast::<DeclKey>() as usize,
+                        transfer.clone(),
+                    )) {
+                        continue;
+                    }
+                    Box::new((0..keys.len()).map(move |at| (keys[at].clone(), transfer.clone())))
+                }
+            };
+            for (key, transfer) in entries {
                 // A builtin writes what the code it runs writes: what is
                 // passed to it, and what of its object a class extending it
                 // declares.

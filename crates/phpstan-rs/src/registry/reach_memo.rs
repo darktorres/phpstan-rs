@@ -50,6 +50,9 @@ pub(crate) struct ReachMemo {
     pub(crate) implementations: OnceMap<(String, String), Arc<[DeclKey]>>,
     pub(crate) every_method: OnceMap<String, Arc<[DeclKey]>>,
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
+    /// What an operation runs on an object of any class, by
+    /// `unknown_holder_key`.
+    pub(crate) unknown_implicit: OnceMap<(u8, u8), Arc<[DeclKey]>>,
     pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
 }
 
