@@ -10,12 +10,17 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
+mod php_value;
+pub use php_value::{
+    ArrayId, ArrayKey, Binding, ObjectId, PhpState, PhpValue, ReferenceId, StateError,
+};
+
 pub const SCHEMA_MAJOR: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Bytes(pub Vec<u8>);
 
 impl Serialize for Bytes {
