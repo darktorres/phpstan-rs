@@ -2411,6 +2411,83 @@ mod tests {
     }
 
     #[test]
+    fn php_flow_host_uses_callback_result_to_select_next_invocation() {
+        let mut host = PhpFlowHost::new(Digest([8; 32]));
+        host.argument_locations = vec![None, None];
+        host.callbacks.insert(
+            Bytes(b"first".to_vec()),
+            vec![PhpCallbackOutcome {
+                writes: vec![],
+                normal: true,
+                result: Some(PhpValue::String(Bytes(b"continue".to_vec()))),
+                throws: None,
+            }],
+        );
+        host.callbacks.insert(
+            Bytes(b"second".to_vec()),
+            vec![PhpCallbackOutcome {
+                writes: vec![],
+                normal: true,
+                result: Some(PhpValue::String(Bytes(b"finished".to_vec()))),
+                throws: None,
+            }],
+        );
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![],
+                        result: 3,
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::IsLiteral {
+                            value: Operand::Result(3),
+                            expected: Bytes(b"continue".to_vec()),
+                        },
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(1),
+                        arguments: vec![],
+                        result: 4,
+                    }],
+                    Terminator::Return(Some(Operand::Result(4))),
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"wrong-branch".to_vec())))),
+                ),
+            ],
+            coverage: coverage_for(&[Domain::Invocation, Domain::Return]),
+        };
+        let evaluation = evaluate(
+            &graph,
+            &[
+                PhpValue::Callable(Bytes(b"first".to_vec())),
+                PhpValue::Callable(Bytes(b"second".to_vec())),
+            ],
+            &PhpValue::Unknown,
+            PhpState::new(),
+            &mut host,
+        )
+        .unwrap();
+        assert_eq!(
+            evaluation.exits,
+            vec![Exit::Normal {
+                value: Some(PhpValue::String(Bytes(b"finished".to_vec()))),
+                state: PhpState::new(),
+            }]
+        );
+        evaluation.post_fixpoint.validate(&graph, &host).unwrap();
+    }
+
+    #[test]
     fn php_flow_host_joins_distinct_normal_callback_branches_conservatively() {
         let mut host = PhpFlowHost::new(Digest([15; 32]));
         host.argument_locations = vec![None, Some(Bytes(b"slot".to_vec()))];
