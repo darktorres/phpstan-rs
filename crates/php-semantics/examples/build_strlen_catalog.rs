@@ -85,6 +85,10 @@ fn main() {
         "strict runtime output differs from its expected values"
     );
     assert_eq!(runtime["result"]["exit_code"].as_u64(), Some(0));
+    assert_eq!(
+        runtime["profiles"]["record"].as_str(),
+        Some("tools/php-catalog/experiments/comparison/results/runtime/profiles.json")
+    );
     let profiles: serde_json::Value = serde_json::from_slice(
         &fs::read(
             repository_root.join(
@@ -106,18 +110,37 @@ fn main() {
             profiles[recorded_profile]["binary_sha256"]
         );
     }
+    for (profile, expected_kind, expected_binary) in [
+        (
+            "tailcall",
+            "ZEND_VM_KIND_TAILCALL",
+            "abc41b0be90d2e9d1d744f2c53600c5f6a7e48af09bbd3ffc4eda382ce9236b5",
+        ),
+        (
+            "call",
+            "ZEND_VM_KIND_CALL",
+            "866ee99f4de2644b3d28e45dfc2071a5a3926a65b04ab3127baef312102684af",
+        ),
+    ] {
+        assert_eq!(
+            runtime["profiles"][profile]["vm_kind"].as_str(),
+            Some(expected_kind)
+        );
+        assert_eq!(
+            runtime["profiles"][profile]["binary_sha256"].as_str(),
+            Some(expected_binary),
+            "runtime witness uses an unlocked {profile} profile"
+        );
+    }
     assert_eq!(
         runtime["weak_fixture"]["expected"]["lengths"],
         serde_json::json!([3, 3, 1, 0, 0])
     );
-    assert!(
-        runtime["weak_fixture"]["expected"]["deprecations"]
-            .as_array()
-            .is_some_and(|messages| messages.iter().any(|message| {
-                message
-                    .as_str()
-                    .is_some_and(|message| message.contains("Passing null"))
-            }))
+    assert_eq!(
+        runtime["weak_fixture"]["expected"]["deprecations"],
+        serde_json::json!([
+            "strlen(): Passing null to parameter #1 ($string) of type string is deprecated"
+        ])
     );
     assert_eq!(
         runtime["result"]["weak_tailcall_call_outputs_identical"].as_bool(),
