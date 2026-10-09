@@ -8,15 +8,17 @@ framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
 as `2b6afb95`.
 
 Phase F implementation is now underway. A checker-independent
-`crates/php-semantics` seed contains schema v1 graph/event/coverage types and a
-finite acyclic evaluator. Its tests exercise callback result propagation,
+`crates/php-semantics` seed contains schema v1 graph/event/domain-coverage types,
+separate precision and assumption fields, canonical SHA-256 graph identities,
+and a finite acyclic evaluator. Ten tests exercise callback result propagation,
 write-before-callback order, callback throw skipping later events, disjunctive
-normal/throw outcomes, domain-masked unknown transfers, open-domain validation,
-and refusal to truncate cyclic graphs. These are foundation tests only: the
-evaluator has no loop widening, catalog selection, target semantics, real
-checker host, native producer, or publication certificate, so F00/F01 remain
-OPEN. `cargo test -p phpstan-rs-semantics` and `cargo check -p phpstan-rs` pass
-with the pinned `vendor/phpstan-src` submodule initialized.
+normal/throw outcomes, domain-masked unknown transfers, total coverage/evidence
+validation, unresolved-return rejection, and refusal to truncate cyclic graphs.
+These are foundation tests only: the evaluator has no loop widening, catalog
+selection, target semantics, real checker host, native producer, or publication
+certificate, so F00/F01 remain OPEN. `cargo test -p phpstan-rs-semantics` and
+`cargo check -p phpstan-rs` pass with the pinned `vendor/phpstan-src` submodule
+initialized.
 
 ## Findings that change the decision
 

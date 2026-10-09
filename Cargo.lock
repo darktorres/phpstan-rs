@@ -1677,8 +1677,10 @@ dependencies = [
 name = "phpstan-rs-semantics"
 version = "0.1.0"
 dependencies = [
+ "postcard",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

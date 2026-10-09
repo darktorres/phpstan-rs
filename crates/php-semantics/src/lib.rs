@@ -5,8 +5,12 @@
 //! event transfers; the graph preserves ordering and distinct exit kinds.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 pub const SCHEMA_MAJOR: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Digest(pub [u8; 32]);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Bytes(pub Vec<u8>);
@@ -29,11 +33,46 @@ pub enum Domain {
     Suspension,
 }
 
+impl Domain {
+    pub const ALL: [Self; 14] = [
+        Self::Invocation,
+        Self::UserRead,
+        Self::UserWrite,
+        Self::ExternalRead,
+        Self::ExternalWrite,
+        Self::Diagnostic,
+        Self::Autoload,
+        Self::Output,
+        Self::Release,
+        Self::Retention,
+        Self::Return,
+        Self::PhpThrow,
+        Self::Fatal,
+        Self::Suspension,
+    ];
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Coverage {
     Closed,
     Open { reasons: Vec<Bytes> },
     NotApplicable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Precision {
+    Exact,
+    Joined,
+    Widened,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainCoverage {
+    pub domain: Domain,
+    pub coverage: Coverage,
+    pub precision: Precision,
+    pub evidence: Vec<Digest>,
+    pub assumptions: Vec<Digest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,7 +135,7 @@ pub struct BehaviorGraph {
     pub schema_major: u32,
     pub entry: u32,
     pub blocks: Vec<Block>,
-    pub coverage: Vec<(Domain, Coverage)>,
+    pub coverage: Vec<DomainCoverage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,10 +146,23 @@ pub enum GraphError {
     InvalidSuccessor { block: u32, successor: u32 },
     Cycle(u32),
     DuplicateCoverage(Domain),
+    MissingCoverage(Domain),
     OpenDomainWithoutUnknown(Domain),
+    MissingEvidence(Domain),
+    OpenWithoutReason(Domain),
+    UnresolvedValue,
+    EventWithoutOutcome,
 }
 
 impl BehaviorGraph {
+    /// Encode in the schema's canonical field/vector order and identify the
+    /// result with SHA-256. Producers must sort semantically unordered lists
+    /// before calling this method.
+    pub fn canonical_digest(&self) -> Result<Digest, postcard::Error> {
+        let bytes = postcard::to_allocvec(self)?;
+        Ok(Digest(Sha256::digest(bytes).into()))
+    }
+
     pub fn validate(&self) -> Result<(), GraphError> {
         if self.schema_major != SCHEMA_MAJOR {
             return Err(GraphError::UnsupportedSchema(self.schema_major));
@@ -158,11 +210,17 @@ impl BehaviorGraph {
         }
         visit(self.entry, self, &mut colors)?;
         let mut seen = Vec::new();
-        for (domain, _) in &self.coverage {
+        for item in &self.coverage {
+            let domain = &item.domain;
             if seen.contains(domain) {
                 return Err(GraphError::DuplicateCoverage(*domain));
             }
             seen.push(*domain);
+        }
+        for domain in Domain::ALL {
+            if !seen.contains(&domain) {
+                return Err(GraphError::MissingCoverage(domain));
+            }
         }
         let unknown_domains: Vec<Domain> = self
             .blocks
@@ -175,9 +233,17 @@ impl BehaviorGraph {
                 _ => Vec::new(),
             })
             .collect();
-        for (domain, coverage) in &self.coverage {
-            if matches!(coverage, Coverage::Open { .. }) && !unknown_domains.contains(domain) {
-                return Err(GraphError::OpenDomainWithoutUnknown(*domain));
+        for item in &self.coverage {
+            if matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty()) {
+                return Err(GraphError::OpenWithoutReason(item.domain));
+            }
+            if !matches!(item.coverage, Coverage::Open { .. }) && item.evidence.is_empty() {
+                return Err(GraphError::MissingEvidence(item.domain));
+            }
+            if matches!(item.coverage, Coverage::Open { .. })
+                && !unknown_domains.contains(&item.domain)
+            {
+                return Err(GraphError::OpenDomainWithoutUnknown(item.domain));
             }
         }
         Ok(())
@@ -197,6 +263,14 @@ pub enum Exit<V, S> {
     PhpThrow { value: V, state: S },
     Fatal { value: V, state: S },
     Suspended { value: V, state: S },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evaluation<V, S> {
+    pub exits: Vec<Exit<V, S>>,
+    /// Graph-level derivation coverage is returned with execution results so
+    /// consumers cannot mistake an empty projection for a closed negative.
+    pub coverage: Vec<DomainCoverage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,7 +319,7 @@ pub fn evaluate<H: SemanticHost>(
     receiver: &H::Value,
     initial: H::State,
     host: &mut H,
-) -> Result<Vec<Exit<H::Value, H::State>>, GraphError> {
+) -> Result<Evaluation<H::Value, H::State>, GraphError> {
     graph.validate()?;
     let mut work = vec![(graph.entry, initial, Vec::<(u32, H::Value)>::new())];
     let mut exits = Vec::new();
@@ -255,7 +329,11 @@ pub fn evaluate<H: SemanticHost>(
         for event in &block.events {
             let mut next = Vec::new();
             for (state, values) in paths {
-                for outcome in host.event(event, arguments, receiver, &values, state) {
+                let outcomes = host.event(event, arguments, receiver, &values, state);
+                if outcomes.is_empty() {
+                    return Err(GraphError::EventWithoutOutcome);
+                }
+                for outcome in outcomes {
                     match outcome {
                         EventExit::Normal { result, state } => {
                             let mut next_values = values.clone();
@@ -292,31 +370,41 @@ pub fn evaluate<H: SemanticHost>(
                         }
                     }
                 }
-                Terminator::Return(value) => exits.push(Exit::Normal {
-                    value: value
+                Terminator::Return(value) => {
+                    let value = value
                         .as_ref()
-                        .and_then(|v| host.resolve(v, arguments, receiver, &results)),
-                    state,
-                }),
+                        .map(|v| {
+                            host.resolve(v, arguments, receiver, &results)
+                                .ok_or(GraphError::UnresolvedValue)
+                        })
+                        .transpose()?;
+                    exits.push(Exit::Normal { value, state });
+                }
                 Terminator::Throw(value) => {
-                    if let Some(value) = host.resolve(value, arguments, receiver, &results) {
-                        exits.push(Exit::PhpThrow { value, state });
-                    }
+                    let value = host
+                        .resolve(value, arguments, receiver, &results)
+                        .ok_or(GraphError::UnresolvedValue)?;
+                    exits.push(Exit::PhpThrow { value, state });
                 }
                 Terminator::Fatal(value) => {
-                    if let Some(value) = host.resolve(value, arguments, receiver, &results) {
-                        exits.push(Exit::Fatal { value, state });
-                    }
+                    let value = host
+                        .resolve(value, arguments, receiver, &results)
+                        .ok_or(GraphError::UnresolvedValue)?;
+                    exits.push(Exit::Fatal { value, state });
                 }
                 Terminator::Suspend(value) => {
-                    if let Some(value) = host.resolve(value, arguments, receiver, &results) {
-                        exits.push(Exit::Suspended { value, state });
-                    }
+                    let value = host
+                        .resolve(value, arguments, receiver, &results)
+                        .ok_or(GraphError::UnresolvedValue)?;
+                    exits.push(Exit::Suspended { value, state });
                 }
             }
         }
     }
-    Ok(exits)
+    Ok(Evaluation {
+        exits,
+        coverage: graph.coverage.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -415,11 +503,31 @@ mod tests {
             schema_major: SCHEMA_MAJOR,
             entry: 0,
             blocks: vec![Block { events, terminator }],
-            coverage: vec![],
+            coverage: Domain::ALL
+                .into_iter()
+                .map(|domain| DomainCoverage {
+                    domain,
+                    coverage: Coverage::NotApplicable,
+                    precision: Precision::Exact,
+                    evidence: vec![Digest([1; 32])],
+                    assumptions: vec![],
+                })
+                .collect(),
         }
     }
     fn receiver() -> String {
         "receiver".into()
+    }
+    fn open_coverage(domain: Domain, reason: &[u8]) -> DomainCoverage {
+        DomainCoverage {
+            domain,
+            coverage: Coverage::Open {
+                reasons: vec![Bytes(reason.to_vec())],
+            },
+            precision: Precision::Widened,
+            evidence: vec![Digest([2; 32])],
+            assumptions: vec![],
+        }
     }
 
     #[test]
@@ -446,7 +554,8 @@ mod tests {
             vec![],
             &mut host,
         )
-        .unwrap();
+        .unwrap()
+        .exits;
         assert_eq!(
             exits,
             vec![Exit::Normal {
@@ -487,7 +596,8 @@ mod tests {
             vec![],
             &mut host,
         )
-        .unwrap();
+        .unwrap()
+        .exits;
         assert_eq!(
             exits,
             vec![Exit::PhpThrow {
@@ -524,7 +634,8 @@ mod tests {
             vec![],
             &mut host,
         )
-        .unwrap();
+        .unwrap()
+        .exits;
         assert_eq!(exits.len(), 2);
         assert!(exits.contains(&Exit::Normal {
             value: Some("callback-result".into()),
@@ -539,17 +650,24 @@ mod tests {
     #[test]
     fn unknown_transfer_retains_its_domain_mask() {
         let domains = vec![Domain::UserWrite, Domain::Return];
-        let graph = graph(
+        let mut graph = graph(
             vec![Event::Unknown {
                 domains: domains.clone(),
                 reason: Bytes(b"opaque call".to_vec()),
             }],
             Terminator::Return(None),
         );
+        let index = graph
+            .coverage
+            .iter()
+            .position(|c| c.domain == Domain::UserWrite)
+            .unwrap();
+        graph.coverage[index] = open_coverage(Domain::UserWrite, b"opaque call");
         let mut host = Host::default();
-        let exits = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        assert_eq!(evaluation.coverage, graph.coverage);
         assert_eq!(
-            exits,
+            evaluation.exits,
             vec![Exit::Normal {
                 value: None,
                 state: vec![format!("unknown:{domains:?}")]
@@ -559,37 +677,101 @@ mod tests {
 
     #[test]
     fn cyclic_graph_is_rejected_instead_of_truncated() {
-        let graph = BehaviorGraph {
-            schema_major: SCHEMA_MAJOR,
-            entry: 0,
-            coverage: vec![],
-            blocks: vec![Block {
-                events: vec![],
-                terminator: Terminator::Goto(0),
-            }],
-        };
+        let graph = graph(vec![], Terminator::Goto(0));
         assert_eq!(graph.validate(), Err(GraphError::Cycle(0)));
     }
 
     #[test]
-    fn open_domain_requires_an_executable_unknown_transfer() {
-        let g = BehaviorGraph {
-            schema_major: SCHEMA_MAJOR,
-            entry: 0,
-            blocks: vec![Block {
-                events: vec![],
-                terminator: Terminator::Return(None),
+    fn graph_identity_is_stable_and_order_sensitive() {
+        let first = graph(
+            vec![Event::Read {
+                storage: Operand::Argument(0),
             }],
-            coverage: vec![(
-                Domain::UserWrite,
-                Coverage::Open {
-                    reasons: vec![Bytes(b"missing body".to_vec())],
-                },
-            )],
-        };
+            Terminator::Return(None),
+        );
+        let second = graph(
+            vec![Event::Write {
+                storage: Operand::Argument(0),
+                value: Operand::Literal(Bytes(b"v".to_vec())),
+            }],
+            Terminator::Return(None),
+        );
+        assert_eq!(
+            first.canonical_digest().unwrap(),
+            first.canonical_digest().unwrap()
+        );
+        assert_ne!(
+            first.canonical_digest().unwrap(),
+            second.canonical_digest().unwrap()
+        );
+    }
+
+    #[test]
+    fn open_domain_requires_an_executable_unknown_transfer() {
+        let mut g = graph(vec![], Terminator::Return(None));
+        let index = g
+            .coverage
+            .iter()
+            .position(|c| c.domain == Domain::UserWrite)
+            .unwrap();
+        g.coverage[index] = open_coverage(Domain::UserWrite, b"missing body");
         assert_eq!(
             g.validate(),
             Err(GraphError::OpenDomainWithoutUnknown(Domain::UserWrite))
+        );
+    }
+
+    #[test]
+    fn every_domain_requires_a_coverage_decision_and_evidence() {
+        let mut g = graph(vec![], Terminator::Return(None));
+        g.coverage.clear();
+        assert_eq!(
+            g.validate(),
+            Err(GraphError::MissingCoverage(Domain::Invocation))
+        );
+
+        let mut g = graph(vec![], Terminator::Return(None));
+        g.coverage[0].evidence.clear();
+        assert_eq!(
+            g.validate(),
+            Err(GraphError::MissingEvidence(Domain::Invocation))
+        );
+    }
+
+    #[test]
+    fn open_domain_requires_a_reason() {
+        let mut g = graph(
+            vec![Event::Unknown {
+                domains: vec![Domain::UserWrite],
+                reason: Bytes(b"opaque".to_vec()),
+            }],
+            Terminator::Return(None),
+        );
+        let index = g
+            .coverage
+            .iter()
+            .position(|c| c.domain == Domain::UserWrite)
+            .unwrap();
+        g.coverage[index] = DomainCoverage {
+            domain: Domain::UserWrite,
+            coverage: Coverage::Open { reasons: vec![] },
+            precision: Precision::Widened,
+            evidence: vec![Digest([3; 32])],
+            assumptions: vec![],
+        };
+        assert_eq!(
+            g.validate(),
+            Err(GraphError::OpenWithoutReason(Domain::UserWrite))
+        );
+    }
+
+    #[test]
+    fn unresolved_return_is_an_incomplete_evaluation_not_no_return() {
+        let g = graph(vec![], Terminator::Return(Some(Operand::Unknown)));
+        let mut host = Host::default();
+        assert_eq!(
+            evaluate(&g, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::UnresolvedValue)
         );
     }
 }
