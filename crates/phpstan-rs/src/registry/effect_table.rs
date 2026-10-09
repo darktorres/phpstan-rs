@@ -43,12 +43,61 @@ impl TransferIx {
     }
 }
 
+/// Which parameters of a declaration take their argument by reference.
+pub(crate) struct ByRefParams {
+    by_ref: Box<[bool]>,
+    names: Box<[Name]>,
+    /// Whether the last parameter is variadic, and then whether it is taken
+    /// by reference: it stands for every argument past the list.
+    variadic: Option<bool>,
+}
+
+impl ByRefParams {
+    /// From the `(name, by reference, variadic)` of each parameter.
+    pub(crate) fn new<'a>(params: impl Iterator<Item = (&'a Name, bool, bool)>) -> Self {
+        let (mut by_ref, mut names, mut variadic) = (Vec::new(), Vec::new(), None);
+        for (name, by_reference, is_variadic) in params {
+            by_ref.push(by_reference);
+            names.push(name.clone());
+            variadic = is_variadic.then_some(by_reference);
+        }
+        Self {
+            by_ref: by_ref.into(),
+            names: names.into(),
+            variadic,
+        }
+    }
+
+    /// Whether the argument at position `at` is taken by reference.
+    pub(crate) fn at_position(&self, at: usize) -> bool {
+        match self.by_ref.get(at) {
+            Some(by_ref) => *by_ref,
+            None => self.variadic.unwrap_or(false),
+        }
+    }
+
+    /// Whether the argument named `name` is taken by reference.
+    pub(crate) fn named(&self, name: &str) -> bool {
+        match self.names.iter().position(|param| param.as_str() == name) {
+            Some(at) => self.by_ref[at],
+            None => self.variadic.unwrap_or(false),
+        }
+    }
+
+    /// Whether any parameter is taken by reference.
+    pub(crate) fn any(&self) -> bool {
+        self.by_ref.iter().any(|by_ref| *by_ref)
+    }
+}
+
 /// What the table keeps for a handle: its id, the declaration it was first
-/// asked for, and whether that declaration is a builtin's, found once.
+/// asked for, and, found once, whether that declaration is a builtin's and
+/// which of its parameters are taken by reference.
 struct Entry {
     id: EffectId,
     key: DeclKey,
     builtin: OnceLock<bool>,
+    by_ref: OnceLock<Option<ByRefParams>>,
 }
 
 /// The effect ids met so far, each once, with the handle it stands for.
@@ -81,6 +130,7 @@ impl EffectTable {
             id: id.clone(),
             key: key.clone(),
             builtin: OnceLock::new(),
+            by_ref: OnceLock::new(),
         }) as u32;
         debug_assert!(at & EffectIx::CLOSURE == 0);
         let ix = EffectIx(if id.is_closure() {
@@ -106,6 +156,20 @@ impl EffectTable {
     /// `compute` the first time it is asked.
     pub(crate) fn is_builtin(&self, ix: EffectIx, compute: impl FnOnce() -> bool) -> bool {
         *self.entries[ix.index()].builtin.get_or_init(compute)
+    }
+
+    /// The parameters of the declaration `ix` stands for taken by reference,
+    /// from `compute` the first time they are asked; none when the
+    /// declaration is not known.
+    pub(crate) fn by_ref_params(
+        &self,
+        ix: EffectIx,
+        compute: impl FnOnce() -> Option<ByRefParams>,
+    ) -> Option<&ByRefParams> {
+        self.entries[ix.index()]
+            .by_ref
+            .get_or_init(compute)
+            .as_ref()
     }
 
     /// How many handles have been given out.
@@ -177,5 +241,49 @@ impl TransferTable {
     /// The transfer `ix` stands for.
     pub(crate) fn get(&self, ix: TransferIx) -> &Transfer {
         &self.list[ix.index()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(list: &[(&str, bool, bool)]) -> ByRefParams {
+        let names: Vec<Name> = list.iter().map(|(name, ..)| Name::from(*name)).collect();
+        ByRefParams::new(
+            names
+                .iter()
+                .zip(list)
+                .map(|(name, (_, by_ref, variadic))| (name, *by_ref, *variadic)),
+        )
+    }
+
+    #[test]
+    fn a_position_past_the_list_follows_the_variadic_parameter() {
+        let sort = params(&[("array", true, false), ("flags", false, false)]);
+        assert!(sort.at_position(0));
+        assert!(!sort.at_position(1));
+        assert!(!sort.at_position(5));
+        let sscanf = params(&[("string", false, false), ("vars", true, true)]);
+        assert!(!sscanf.at_position(0));
+        assert!(sscanf.at_position(1));
+        assert!(sscanf.at_position(7));
+    }
+
+    #[test]
+    fn a_name_not_in_the_list_follows_the_variadic_parameter() {
+        let sscanf = params(&[("string", false, false), ("vars", true, true)]);
+        assert!(sscanf.named("vars"));
+        assert!(!sscanf.named("string"));
+        assert!(sscanf.named("other"));
+        let sort = params(&[("array", true, false)]);
+        assert!(!sort.named("other"));
+    }
+
+    #[test]
+    fn a_spread_is_by_reference_when_any_parameter_is() {
+        assert!(params(&[("a", false, false), ("b", true, false)]).any());
+        assert!(!params(&[("a", false, false)]).any());
+        assert!(!params(&[]).any());
     }
 }

@@ -47,7 +47,7 @@ use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::effect_table::{EffectIx, TransferIx, TransferTable};
+use super::effect_table::{ByRefParams, EffectIx, TransferIx, TransferTable};
 use super::reach_memo::{ReturnedKey, SharedTargets, StaticTarget};
 use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
@@ -4986,25 +4986,21 @@ impl<'r> Level<'r> {
         out
     }
 
-    /// Whether the declaration `key` takes the argument passed `at` by
-    /// reference.
+    /// Whether the declaration `ix` stands for takes the argument passed
+    /// `at` by reference.
     fn by_ref_at(&self, ix: EffectIx, at: &ArgAt) -> bool {
-        let Some(sig) = self.registry.declaration(self.registry.effect_key(ix)) else {
+        let registry = self.registry;
+        let Some(params) = registry.reach_memo.effects.by_ref_params(ix, || {
+            registry.declaration(registry.effect_key(ix)).map(|sig| {
+                ByRefParams::new(sig.params.iter().map(|p| (&p.name, p.by_ref, p.variadic)))
+            })
+        }) else {
             return true;
         };
         match at {
-            ArgAt::Position(at) => sig
-                .params
-                .get(*at as usize)
-                .or_else(|| sig.params.last().filter(|p| p.variadic))
-                .is_some_and(|p| p.by_ref),
-            ArgAt::Named(name) => sig
-                .params
-                .iter()
-                .find(|p| p.name.as_ref() == name.as_str())
-                .or_else(|| sig.params.last().filter(|p| p.variadic))
-                .is_some_and(|p| p.by_ref),
-            ArgAt::Spread => sig.params.iter().any(|p| p.by_ref),
+            ArgAt::Position(at) => params.at_position(*at as usize),
+            ArgAt::Named(name) => params.named(name.as_str()),
+            ArgAt::Spread => params.any(),
         }
     }
 
