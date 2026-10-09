@@ -23,20 +23,20 @@ with no calibrated abstract domains; the evaluator also has no catalog
 selection, target semantics, real checker host, native producer, or publication
 certificate, so F00/F01 remain OPEN. Canonical manifests now validate graph
 and evidence digests and round-trip byte strings through explicit base64 JSON.
-A shared target-set primitive distinguishes
-exact releases from minor ranges, retains correlated scenarios, and keeps a
-Maybe-applicable graph alongside an uncovered remainder; it is not yet wired
-into the checker, but catalog variants now use it to preserve exact and
-partially known target branches. F05 remains OPEN pending the actual checker
-adapter and target-config loading. The crate also has
-an initial PHP value/reference state with array-copy, nested-array,
-reference-cell, and object
-identity tests. An exact-entry catalog API now validates evidence, supports
-ASCII symbol matching, projection, and explanation lookup. Target/scenario
-selection and checker execution remain absent, so F04/F05 remain OPEN.
-`cargo test -p phpstan-rs-semantics` and
-`cargo check -p phpstan-rs` pass with the pinned `vendor/phpstan-src` submodule
-initialized.
+A shared target-set primitive distinguishes exact releases from minor ranges,
+retains correlated scenarios, and keeps a Maybe-applicable graph alongside an
+uncovered remainder. Catalog variants use it to preserve exact and partially
+known target branches. The checker now has a thin adapter from its configured
+PHP major/minor range to those scenarios; it leaves platform facts unknown.
+Tests cover exact-minor and unset-version mapping, and `cargo check -p phpstan-rs`
+passes. An unset version maps to every language version recognized by the
+checker (5.3–8.5). This verifies target conversion only: no behavior graph is
+loaded or executed at a builtin call site, so F05 remains OPEN. The crate also
+has an initial PHP value/reference state with array-copy, nested-array,
+reference-cell, and object identity tests. An exact-entry catalog API validates
+evidence, supports ASCII symbol matching, projection, and explanation lookup.
+F04 remains OPEN because this state is not yet integrated with PhpFlowIR or
+callback exception flow.
 
 ## Findings that change the decision
 

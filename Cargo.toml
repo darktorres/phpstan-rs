@@ -14,6 +14,7 @@ license = "MIT OR Apache-2.0"
 bumpalo = "=3.20.3"
 syntax = { package = "phpstan-rs-syntax", path = "crates/syntax" }
 types = { package = "phpstan-rs-types", path = "crates/types" }
+php-semantics = { package = "phpstan-rs-semantics", path = "crates/php-semantics" }
 phpdoc = { package = "phpstan-rs-phpdoc", path = "crates/phpdoc" }
 sql = { package = "phpstan-rs-sql", path = "crates/sql" }
 diagnostics = { package = "phpstan-rs-diagnostics", path = "crates/diagnostics" }

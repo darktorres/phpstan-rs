@@ -1585,6 +1585,7 @@ dependencies = [
  "phpstan-rs-diagnostics",
  "phpstan-rs-dumps",
  "phpstan-rs-phpdoc",
+ "phpstan-rs-semantics",
  "phpstan-rs-sql",
  "phpstan-rs-stub-sources",
  "phpstan-rs-syntax",
