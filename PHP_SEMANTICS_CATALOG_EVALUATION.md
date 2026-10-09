@@ -241,7 +241,11 @@ fixtures pass, including exact-patch weak and strict routing; all 58
 `phpstan-rs-semantics` unit tests pass. Checker unit coverage verifies that
 same-span narrowings keep separate memo entries, preserve distinct diagnostic
 outcomes as well as returns, and clear on a file change. Its targeted gate
-profile test passes. Other target ranges
+profile test passes. The artifact builder now verifies the referenced weak and
+strict PHP fixture hashes, both captured output hashes and cross-VM equality,
+and the referenced TAILCALL/CALL profile identities before accepting the
+runtime witness; a builder regression confirms a changed fixture digest is
+rejected. Other target ranges
 retain their legacy diagnostic fallback, and the remaining effects/throws still
 do not share this graph evaluation, so F05 remains open. Re-running the catalog
 builder with the locked PHP source, LLVM witness, and paired runtime evidence

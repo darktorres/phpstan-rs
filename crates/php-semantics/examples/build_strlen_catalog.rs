@@ -28,6 +28,73 @@ fn main() {
     let runtime: serde_json::Value =
         serde_json::from_slice(&runtime_bytes).expect("runtime witness is JSON");
     assert_eq!(
+        runtime["source_commit"].as_str(),
+        Some("e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03"),
+        "runtime witness refers to a different locked PHP source revision"
+    );
+    let repository_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("resolve repository root");
+    for fixture in ["weak_fixture", "strict_fixture"] {
+        read_witness_file(&repository_root, &runtime[fixture], "path", "sha256");
+    }
+    let weak_output = read_witness_file(
+        &repository_root,
+        &runtime["weak_fixture"],
+        "output",
+        "output_sha256",
+    );
+    let strict_output = read_witness_file(
+        &repository_root,
+        &runtime["strict_fixture"],
+        "output",
+        "output_sha256",
+    );
+    let weak_call_output = fs::read(
+        repository_root.join(
+            runtime["weak_fixture"]["call_output"]
+                .as_str()
+                .expect("weak CALL output path"),
+        ),
+    )
+    .expect("read weak CALL output");
+    let strict_call_output = fs::read(
+        repository_root.join(
+            runtime["strict_fixture"]["call_output"]
+                .as_str()
+                .expect("strict CALL output path"),
+        ),
+    )
+    .expect("read strict CALL output");
+    assert_eq!(weak_output, weak_call_output, "weak VM outputs differ");
+    assert_eq!(
+        strict_output, strict_call_output,
+        "strict VM outputs differ"
+    );
+    assert_eq!(runtime["result"]["exit_code"].as_u64(), Some(0));
+    let profiles: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            repository_root.join(
+                runtime["profiles"]["record"]
+                    .as_str()
+                    .expect("profile record path"),
+            ),
+        )
+        .expect("read PHP VM profile record"),
+    )
+    .expect("profile record is JSON");
+    for (runtime_profile, recorded_profile) in [("tailcall", "normal"), ("call", "call")] {
+        assert_eq!(
+            runtime["profiles"][runtime_profile]["vm_kind"],
+            profiles[recorded_profile]["vm_kind"]
+        );
+        assert_eq!(
+            runtime["profiles"][runtime_profile]["binary_sha256"],
+            profiles[recorded_profile]["binary_sha256"]
+        );
+    }
+    assert_eq!(
         runtime["weak_fixture"]["expected"]["lengths"],
         serde_json::json!([3, 3, 1, 0, 0])
     );
@@ -48,13 +115,10 @@ fn main() {
         runtime["result"]["strict_tailcall_call_outputs_identical"].as_bool(),
         Some(true)
     );
-    for rejected in ["int", "float", "bool", "null"] {
-        assert!(
-            runtime["strict_fixture"]["expected"]["rejected"]
-                .as_array()
-                .is_some_and(|types| types.iter().any(|ty| ty.as_str() == Some(rejected)))
-        );
-    }
+    assert_eq!(
+        runtime["strict_fixture"]["expected"]["rejected"],
+        serde_json::json!(["int", "float", "bool", "bool", "null"])
+    );
     let runtime_digest: [u8; 32] = Sha256::digest(&runtime_bytes).into();
     assert_eq!(
         source_digest,
@@ -381,6 +445,38 @@ fn main() {
     println!("{}", manifest.to_json().expect("manifest is JSON"));
 }
 
+fn read_witness_file(
+    repository_root: &std::path::Path,
+    record: &serde_json::Value,
+    path_field: &str,
+    digest_field: &str,
+) -> Vec<u8> {
+    let relative_path = record[path_field]
+        .as_str()
+        .unwrap_or_else(|| panic!("runtime witness {path_field} is a path"));
+    let expected_digest = record[digest_field]
+        .as_str()
+        .unwrap_or_else(|| panic!("runtime witness {digest_field} is a SHA-256"));
+    let bytes = fs::read(repository_root.join(relative_path))
+        .unwrap_or_else(|error| panic!("read runtime witness file {relative_path}: {error}"));
+    let actual_digest = Sha256::digest(&bytes);
+    assert_eq!(
+        hex_digest(actual_digest.as_slice()),
+        expected_digest,
+        "runtime witness digest differs for {relative_path}"
+    );
+    bytes
+}
+
+fn hex_digest(digest: &[u8]) -> String {
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    hex
+}
+
 fn decode_digest(text: &str) -> [u8; 32] {
     assert_eq!(text.len(), 64, "digest must contain 64 hexadecimal digits");
     let mut digest = [0; 32];
@@ -389,4 +485,32 @@ fn decode_digest(text: &str) -> [u8; 32] {
             .expect("digest contains only hexadecimal digits");
     }
     digest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_fixture_hash_is_checked_against_the_file() {
+        let repository_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("resolve repository root");
+        let record = serde_json::json!({
+            "path": "tools/php-catalog/experiments/comparison/runtime-strlen-weak-scalars.php",
+            "sha256": "30607f7b7f81cb15aaf0ad03701cc1fcedae321f4007c3b9058acaea1362b873",
+        });
+        assert!(!read_witness_file(&repository_root, &record, "path", "sha256").is_empty());
+
+        let mut incorrect_record = record;
+        incorrect_record["sha256"] = serde_json::Value::String("00".repeat(32));
+        let result = std::panic::catch_unwind(|| {
+            read_witness_file(&repository_root, &incorrect_record, "path", "sha256")
+        });
+        assert!(
+            result.is_err(),
+            "a mismatched runtime artifact hash is rejected"
+        );
+    }
 }

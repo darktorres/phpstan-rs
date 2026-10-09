@@ -55,6 +55,6 @@
   },
   "limits": [
     "Runtime witnesses establish these positive parser paths only.",
-    "The weak null deprecation is observed; checker diagnostic behavior for it remains open."
+    "These observations do not establish general scalar-parser, effect, or exception behavior."
   ]
 }
