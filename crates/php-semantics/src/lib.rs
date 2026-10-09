@@ -2390,6 +2390,66 @@ mod tests {
     }
 
     #[test]
+    fn php_flow_missing_array_key_keeps_unknown_outcomes_open() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![Block::new(
+                vec![Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayGet {
+                        destination: Bytes(b"value".to_vec()),
+                        array: Bytes(b"array".to_vec()),
+                        key: ArrayKey::Int(7),
+                    },
+                }],
+                Terminator::Return(Some(Operand::Literal(Bytes(b"done".to_vec())))),
+            )],
+            coverage: coverage_for(&[
+                Domain::UserRead,
+                Domain::UserWrite,
+                Domain::PhpThrow,
+                Domain::Return,
+                Domain::Fatal,
+            ]),
+        };
+        let mut host = PhpFlowHost::new(Digest([13; 32]));
+        let mut initial = PhpState::new();
+        let array = initial.new_array();
+        initial.set_local(Bytes(b"array".to_vec()), array);
+        let evaluation = evaluate(&graph, &[], &PhpValue::Unknown, initial, &mut host).unwrap();
+
+        assert!(
+            evaluation
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::Normal { .. }))
+        );
+        assert!(
+            evaluation
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::PhpThrow { .. }))
+        );
+        for domain in [
+            Domain::UserRead,
+            Domain::UserWrite,
+            Domain::PhpThrow,
+            Domain::Fatal,
+        ] {
+            assert!(matches!(
+                evaluation
+                    .coverage
+                    .iter()
+                    .find(|item| item.domain == domain)
+                    .unwrap()
+                    .coverage,
+                Coverage::Open { .. }
+            ));
+        }
+        evaluation.post_fixpoint.validate(&graph, &host).unwrap();
+    }
+
+    #[test]
     fn php_flow_host_keeps_unknown_callback_effects_open_and_havocs_state() {
         let mut host = PhpFlowHost::new(Digest([10; 32]));
         host.argument_locations = vec![None, Some(Bytes(b"slot".to_vec()))];
