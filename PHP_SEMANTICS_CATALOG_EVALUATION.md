@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v1 graph/event/domain-coverage types,
 separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Twenty-six
+explicit exceptional continuations and host-supplied joins/widening. Twenty-seven
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -26,7 +26,9 @@ and evidence digests and round-trip byte strings through explicit base64 JSON.
 A shared target-set primitive distinguishes
 exact releases from minor ranges, retains correlated scenarios, and keeps a
 Maybe-applicable graph alongside an uncovered remainder; it is not yet wired
-into catalog variants or the checker, so F05 remains OPEN. The crate also has
+into the checker, but catalog variants now use it to preserve exact and
+partially known target branches. F05 remains OPEN pending the actual checker
+adapter and target-config loading. The crate also has
 an initial PHP value/reference state with array-copy, nested-array,
 reference-cell, and object
 identity tests. An exact-entry catalog API now validates evidence, supports

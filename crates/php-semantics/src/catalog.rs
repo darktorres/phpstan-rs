@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::{BehaviorGraph, Digest, Domain, DomainCoverage, GraphError, SemanticHost, evaluate};
+use crate::{
+    Applicability, BehaviorGraph, Digest, Domain, DomainCoverage, GraphError, SemanticHost,
+    TargetPredicate, TargetScenario, TargetSet, evaluate,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum EntryKey {
@@ -93,6 +96,7 @@ impl EvidenceRecord {
 pub struct CatalogEntry {
     pub key: EntryKey,
     pub graph: Digest,
+    pub applicability: TargetPredicate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,13 +155,15 @@ impl CatalogManifest {
         }
         let mut entry_keys = Vec::new();
         for entry in &self.entries {
-            if entry.key != entry.key.normalized() || entry_keys.contains(&entry.key) {
+            if entry.key != entry.key.normalized()
+                || entry_keys.contains(&(entry.key.clone(), entry.applicability.clone()))
+            {
                 return Err(CatalogError::DuplicateEntry(entry.key.clone()));
             }
             if !graph_ids.contains(&entry.graph) {
                 return Err(CatalogError::DigestMismatch(entry.graph));
             }
-            entry_keys.push(entry.key.clone());
+            entry_keys.push((entry.key.clone(), entry.applicability.clone()));
         }
         let mut evidence_ids = Vec::new();
         for (id, record) in &self.evidence {
@@ -191,7 +197,7 @@ impl CatalogManifest {
 #[derive(Debug, Default)]
 pub struct Catalog {
     graphs: BTreeMap<Digest, BehaviorGraph>,
-    entries: BTreeMap<EntryKey, CatalogEntry>,
+    entries: BTreeMap<EntryKey, Vec<CatalogEntry>>,
     evidence: BTreeMap<Digest, EvidenceRecord>,
 }
 
@@ -210,9 +216,22 @@ impl Catalog {
         key: EntryKey,
         graph: BehaviorGraph,
     ) -> Result<CatalogEntry, CatalogError> {
+        self.add_variant(key, TargetPredicate::any(), graph)
+    }
+
+    pub fn add_variant(
+        &mut self,
+        key: EntryKey,
+        applicability: TargetPredicate,
+        graph: BehaviorGraph,
+    ) -> Result<CatalogEntry, CatalogError> {
         graph.validate().map_err(CatalogError::Graph)?;
         let key = key.normalized();
-        if self.entries.contains_key(&key) {
+        if self.entries.get(&key).is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.applicability == applicability)
+        }) {
             return Err(CatalogError::DuplicateEntry(key));
         }
         for domain in &graph.coverage {
@@ -229,13 +248,18 @@ impl Catalog {
         let entry = CatalogEntry {
             key: key.clone(),
             graph: id,
+            applicability,
         };
-        self.entries.insert(key, entry.clone());
+        self.entries.entry(key).or_default().push(entry.clone());
         Ok(entry)
     }
 
     pub fn select(&self, key: &EntryKey) -> Option<Selection<'_>> {
-        let entry = self.entries.get(&key.normalized())?;
+        let entry = self
+            .entries
+            .get(&key.normalized())?
+            .iter()
+            .find(|entry| entry.applicability == TargetPredicate::any())?;
         Some(Selection {
             entry,
             graph: self
@@ -243,6 +267,46 @@ impl Catalog {
                 .get(&entry.graph)
                 .expect("entry graph is installed with the entry"),
         })
+    }
+
+    pub fn select_for_targets(
+        &self,
+        key: &EntryKey,
+        targets: &TargetSet,
+    ) -> CatalogTargetSelection<'_> {
+        let variants = self.entries.get(&key.normalized());
+        let mut selected = Vec::new();
+        let mut uncovered = Vec::new();
+        for scenario in &targets.scenarios {
+            let mut any_candidate = false;
+            let mut maybe = false;
+            if let Some(variants) = variants {
+                for entry in variants {
+                    let applicability = entry.applicability.test(scenario);
+                    if applicability == Applicability::No {
+                        continue;
+                    }
+                    any_candidate = true;
+                    maybe |= applicability == Applicability::Maybe;
+                    selected.push(VariantSelection {
+                        entry,
+                        graph: self
+                            .graphs
+                            .get(&entry.graph)
+                            .expect("entry graph installed atomically"),
+                        scenario: scenario.clone(),
+                        applicability,
+                    });
+                }
+            }
+            if !any_candidate || maybe {
+                uncovered.push(scenario.clone());
+            }
+        }
+        CatalogTargetSelection {
+            variants: selected,
+            uncovered,
+        }
     }
 
     pub fn project(&self, key: &EntryKey, domain: Domain) -> Option<Projection<'_>> {
@@ -262,13 +326,24 @@ impl Catalog {
         self.evidence.get(&id)
     }
     pub fn entry_count(&self) -> usize {
-        self.entries.len()
+        self.entries.values().map(Vec::len).sum()
     }
 
     pub fn manifest(&self) -> CatalogManifest {
+        let mut entries: Vec<_> = self.entries.values().flatten().cloned().collect();
+        entries.sort_by(|a, b| {
+            a.key
+                .cmp(&b.key)
+                .then_with(|| a.graph.cmp(&b.graph))
+                .then_with(|| {
+                    postcard::to_allocvec(&a.applicability)
+                        .unwrap_or_default()
+                        .cmp(&postcard::to_allocvec(&b.applicability).unwrap_or_default())
+                })
+        });
         CatalogManifest {
             schema_major: crate::SCHEMA_MAJOR,
-            entries: self.entries.values().cloned().collect(),
+            entries,
             graphs: self
                 .graphs
                 .iter()
@@ -284,6 +359,20 @@ impl Catalog {
                 .collect(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogTargetSelection<'a> {
+    pub variants: Vec<VariantSelection<'a>>,
+    pub uncovered: Vec<TargetScenario>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantSelection<'a> {
+    pub entry: &'a CatalogEntry,
+    pub graph: &'a BehaviorGraph,
+    pub scenario: TargetScenario,
+    pub applicability: Applicability,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -313,7 +402,10 @@ pub struct Projection<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Block, Bytes, Coverage, SCHEMA_MAJOR, Terminator};
+    use crate::{
+        Applicability, Block, Bytes, Coverage, SCHEMA_MAJOR, TargetPredicate, TargetScenario,
+        TargetSet, Terminator, VersionRange,
+    };
 
     fn evidence_record() -> EvidenceRecord {
         EvidenceRecord {
@@ -351,6 +443,19 @@ mod tests {
         EntryKey::Function {
             extension: Bytes(extension.to_vec()),
             name: Bytes(name.to_vec()),
+        }
+    }
+
+    fn scenario(os: Option<&[u8]>) -> TargetScenario {
+        TargetScenario {
+            release: VersionRange::minor(8, 5),
+            os: os.map(|value| Bytes(value.to_vec())),
+            arch: Some(Bytes(b"x86_64".to_vec())),
+            sapi: Some(Bytes(b"cli".to_vec())),
+            zts: Some(false),
+            debug: Some(false),
+            extensions: Some(vec![(Bytes(b"session".to_vec()), true)]),
+            ini: Some(vec![]),
         }
     }
 
@@ -414,5 +519,43 @@ mod tests {
             tampered.validate(),
             Err(CatalogError::DigestMismatch(Digest([0; 32])))
         );
+    }
+
+    #[test]
+    fn target_selection_keeps_unknown_remainder_and_selects_exact_scenario() {
+        let mut catalog = Catalog::default();
+        let evidence = catalog.add_evidence(evidence_record()).unwrap();
+        let linux = TargetPredicate {
+            os: Some(Bytes(b"linux".to_vec())),
+            ..TargetPredicate::any()
+        };
+        let windows = TargetPredicate {
+            os: Some(Bytes(b"windows".to_vec())),
+            ..TargetPredicate::any()
+        };
+        let key = function(b"core", b"strlen");
+        catalog
+            .add_variant(key.clone(), linux, graph(evidence))
+            .unwrap();
+        catalog
+            .add_variant(key.clone(), windows, graph(evidence))
+            .unwrap();
+
+        let known = TargetSet::new(vec![scenario(Some(b"linux"))]).unwrap();
+        let selection = catalog.select_for_targets(&key, &known);
+        assert_eq!(selection.variants.len(), 1);
+        assert_eq!(selection.variants[0].applicability, Applicability::Yes);
+        assert!(selection.uncovered.is_empty());
+
+        let unknown = TargetSet::new(vec![scenario(None)]).unwrap();
+        let selection = catalog.select_for_targets(&key, &unknown);
+        assert_eq!(selection.variants.len(), 2);
+        assert!(
+            selection
+                .variants
+                .iter()
+                .all(|candidate| candidate.applicability == Applicability::Maybe)
+        );
+        assert_eq!(selection.uncovered.len(), 1);
     }
 }
