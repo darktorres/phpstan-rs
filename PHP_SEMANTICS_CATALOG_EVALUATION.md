@@ -423,9 +423,11 @@ it is neither a demand summary nor a closure certificate.
   C rejection by FlowSensitive, and diagnostic-analyzer cutoff findings remain.
   No complete summary adapter was implemented during this extension.
 - **Regional semantic engine, declarative graphs, and checker:** reference
-  contracts/runtime witnesses exist, but the production graph evaluator, native
-  Zend bridge, recursive post-fixpoint validation, PhpFlowIR product domain,
-  target selection, and real checker integration remain unimplemented.
+  contracts/runtime witnesses exist. The shared graph evaluator, certificate
+  replay, PHP reference-value fixtures, target selection, and a narrow
+  catalog-backed `strlen` checker path are implemented. A native Zend summary
+  producer, the full PhpFlowIR product domain, and stateful checker integration
+  across return/effects/diagnostics remain unimplemented.
 
 There is **no accepted production solver** and no generated closed PHP
 BehaviorGraph. F04's minimum fixture task is satisfied, but F00, F01, F02, F03,
