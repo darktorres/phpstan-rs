@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effects::{DeclKey, EffectId, ImplicitKey, OperationKey, Transfer};
+use super::effects::{DeclKey, EffectId, HookDeclaration, ImplicitKey, OperationKey, Transfer};
 
 const SHARDS: usize = 16;
 
@@ -63,6 +63,13 @@ pub(crate) struct ReachMemo {
     pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
     /// The id a declaration's key stands for in the effects pass.
     /// Whether a declaration is a builtin's.
+    /// The table row a builtin declaration is looked up under.
+    pub(crate) builtin_entries: OnceMap<DeclKey, Option<Arc<str>>>,
+    /// The constructors of every class that has one.
+    pub(crate) constructors: OnceLock<Arc<[DeclKey]>>,
+    /// The properties of a class with a hook body, by class, property and
+    /// hook.
+    pub(crate) hook_declarations: OnceMap<(Name, Option<Name>, bool), Arc<[HookDeclaration]>>,
     pub(crate) builtins: OnceMap<DeclKey, bool>,
     pub(crate) effect_ids: OnceMap<DeclKey, EffectId>,
 }

@@ -990,16 +990,22 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<&FunctionReflection> {
-        if let Some(result) = self
-            .class_ids
-            .get(class)
-            .copied()
-            .zip(self.member_slot(class, method))
-            .and_then(|(class, slot)| self.method_result(super::MethodRef::new(class, slot)))
+        let (_, id) = self.class_ids.get_with_name(class)?;
+        let id = *id;
+        let info = self.class_by_id(id);
+        let slot = info
+            .and_then(|info| info.member_slots.get(method).copied())
+            .or_else(|| {
+                self.class_member_topology
+                    .get(&id)
+                    .and_then(|topology| topology.slots.get(method).copied())
+            });
+        if let Some(result) =
+            slot.and_then(|slot| self.method_result(super::MethodRef::new(id, slot)))
         {
             return Some(result);
         }
-        self.class(class)?.2.methods.get(method)
+        info?.methods.get(method)
     }
 
     pub(crate) fn shared_own_method(

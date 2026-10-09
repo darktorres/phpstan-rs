@@ -564,6 +564,61 @@ fn hook_key(class: &str, property: &str, set: bool) -> DeclKey {
 
 /// Whether code of the class `scope` sees a member `owner` declares with
 /// `visibility`.
+/// A property of a class with a hook body, as its hook's callers need it.
+#[derive(Debug, Clone)]
+pub(crate) struct HookDeclaration {
+    name: Name,
+    /// Who may reach the hook.
+    visibility: Visibility,
+    /// Whether the property is private.
+    private: bool,
+}
+
+impl Registry {
+    /// The properties of `class` named `property` (all when none) that have
+    /// a hook body for `set`, in the order the class declares them.
+    fn hook_declarations(
+        &self,
+        class: &Name,
+        property: Option<&Name>,
+        set: bool,
+    ) -> Vec<HookDeclaration> {
+        let declared: Vec<(&Name, &PropertyReflection)> = match property {
+            Some(property) => self
+                .lookup_property(class, property)
+                .map(|declared| (property, declared))
+                .into_iter()
+                .collect(),
+            None => self
+                .property_names(class)
+                .filter_map(|name| {
+                    self.lookup_property(class, name)
+                        .map(|declared| (name, declared))
+                })
+                .collect(),
+        };
+        declared
+            .into_iter()
+            .filter(|(_, declared)| {
+                if set {
+                    declared.set_hook_body
+                } else {
+                    declared.get_hook_body
+                }
+            })
+            .map(|(name, declared)| HookDeclaration {
+                name: name.clone(),
+                visibility: if set {
+                    declared.write_visibility()
+                } else {
+                    declared.visibility()
+                },
+                private: declared.visibility() == Visibility::Private,
+            })
+            .collect()
+    }
+}
+
 fn sees(registry: &Registry, owner: &str, visibility: Visibility, scope: Option<&str>) -> bool {
     match visibility {
         Visibility::Public => true,
@@ -1573,15 +1628,21 @@ impl Registry {
     /// The name the builtin table knows the builtin `key` by: its own, or,
     /// for a method, its name on the first of its class's ancestors PHP
     /// declares it on; `None` when no call of it was reached.
-    fn builtin_entry(&self, key: &DeclKey) -> Option<String> {
+    fn builtin_entry(&self, key: &DeclKey) -> Option<Arc<str>> {
+        self.reach_memo
+            .builtin_entries
+            .get_or_compute(key.clone(), || self.compute_builtin_entry(key))
+    }
+
+    fn compute_builtin_entry(&self, key: &DeclKey) -> Option<Arc<str>> {
         let name = key.builtin_name();
         if builtin_runs::probed(&name) {
-            return Some(name);
+            return Some(name.into());
         }
         let class = key.class.as_deref()?;
         self.all_ancestor_names(class).iter().find_map(|ancestor| {
             let name = format!("{}::{}", ancestor.to_ascii_lowercase(), key.member);
-            builtin_runs::probed(&name).then_some(name)
+            builtin_runs::probed(&name).then(|| name.into())
         })
     }
 
@@ -1678,6 +1739,19 @@ impl Registry {
             || !builtin_runs::held_wrappers(&name).is_empty()
             || !builtin_runs::runs(&name).is_empty()
             || takes_code
+    }
+
+    /// The constructor of every class that has one, as the class resolves it.
+    fn every_constructor(&self) -> Arc<[DeclKey]> {
+        self.reach_memo
+            .constructors
+            .get_or_init(|| {
+                self.classes_declaring("__construct")
+                    .filter_map(|class| self.lookup_method_with_owner(class, "__construct"))
+                    .map(|(owner, _)| method_key(&owner, "__construct"))
+                    .collect()
+            })
+            .clone()
     }
 
     /// The builtin `key` is, when it is one.
@@ -2729,16 +2803,18 @@ impl Reach<'_> {
                     .map(|key| (key, Transfer::Static))
                     .collect(),
             },
+            Callee::New(None) => registry
+                .every_constructor()
+                .iter()
+                .cloned()
+                .map(|key| (key, Transfer::Made))
+                .collect(),
             Callee::New(class) => {
                 let classes = match class {
                     Some(class) => {
                         named_classes(self.registry, self.ctx.class(), class).unwrap_or_default()
                     }
-                    None => self
-                        .registry
-                        .classes_declaring("__construct")
-                        .cloned()
-                        .collect(),
+                    None => Vec::new(),
                 };
                 classes
                     .iter()
@@ -2897,35 +2973,16 @@ impl Reach<'_> {
                     })
                     .collect()
             });
-            let declarations: Vec<(&Name, &PropertyReflection)> = match property {
-                Some(property) => registry
-                    .lookup_property(declaring, property)
-                    .map(|declared| (property, declared))
-                    .into_iter()
-                    .collect(),
-                None => registry
-                    .property_names(declaring)
-                    .filter_map(|name| {
-                        registry
-                            .lookup_property(declaring, name)
-                            .map(|declared| (name, declared))
-                    })
-                    .collect(),
-            };
-            for (name, declared) in declarations {
-                let body = if set {
-                    declared.set_hook_body
-                } else {
-                    declared.get_hook_body
-                };
-                let visibility = if set {
-                    declared.write_visibility()
-                } else {
-                    declared.visibility()
-                };
-                if !body
-                    || !(self.ctx.rebindable()
-                        || sees(registry, declaring, visibility, self.ctx.class()))
+            let declarations = registry
+                .reach_memo
+                .hook_declarations
+                .get_or_compute((declaring.clone(), property.cloned(), set), || {
+                    registry.hook_declarations(declaring, property, set).into()
+                });
+            for hook in declarations.iter() {
+                let (name, visibility, private) = (&hook.name, hook.visibility, hook.private);
+                if !(self.ctx.rebindable()
+                    || sees(registry, declaring, visibility, self.ctx.class()))
                 {
                     continue;
                 }
@@ -2941,7 +2998,7 @@ impl Reach<'_> {
                     // of a class below both may run it.
                     let reached = match related {
                         Some(true) => {
-                            declared.visibility() == Visibility::Private
+                            private
                                 || registry
                                     .hook_owner(class, name, set)
                                     .is_some_and(|owner| owner.eq_ignore_case(declaring))
