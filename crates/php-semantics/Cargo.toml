@@ -9,6 +9,7 @@ license.workspace = true
 name = "php_semantics"
 
 [dependencies]
+base64.workspace = true
 postcard.workspace = true
 serde.workspace = true
 sha2.workspace = true

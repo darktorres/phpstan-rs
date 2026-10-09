@@ -4,7 +4,10 @@
 //! native compiler importer. A host supplies values, state, predicates, and
 //! event transfers; the graph preserves ordering and distinct exit kinds.
 
-use serde::{Deserialize, Serialize};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
 pub const SCHEMA_MAJOR: u32 = 1;
@@ -12,8 +15,74 @@ pub const SCHEMA_MAJOR: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Bytes(pub Vec<u8>);
+
+impl Serialize for Bytes {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            let mut map = serializer.serialize_map(Some(1))?;
+            map.serialize_entry("base64", &BASE64.encode(&self.0))?;
+            map.end()
+        } else {
+            serializer.serialize_bytes(&self.0)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Bytes {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct BytesVisitor {
+            human_readable: bool,
+        }
+        impl<'de> Visitor<'de> for BytesVisitor {
+            type Value = Bytes;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("base64 byte object or binary byte sequence")
+            }
+            fn visit_bytes<E: serde::de::Error>(self, value: &[u8]) -> Result<Bytes, E> {
+                Ok(Bytes(value.to_vec()))
+            }
+            fn visit_byte_buf<E: serde::de::Error>(self, value: Vec<u8>) -> Result<Bytes, E> {
+                Ok(Bytes(value))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Bytes, A::Error> {
+                let mut bytes = Vec::new();
+                while let Some(byte) = seq.next_element()? {
+                    bytes.push(byte);
+                }
+                Ok(Bytes(bytes))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Bytes, A::Error> {
+                if !self.human_readable {
+                    return Err(serde::de::Error::custom("expected binary byte sequence"));
+                }
+                let mut encoded = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if key != "base64" || encoded.is_some() {
+                        return Err(serde::de::Error::custom("expected one base64 field"));
+                    }
+                    encoded = Some(map.next_value::<String>()?);
+                }
+                let encoded = encoded.ok_or_else(|| serde::de::Error::missing_field("base64"))?;
+                BASE64
+                    .decode(encoded)
+                    .map(Bytes)
+                    .map_err(serde::de::Error::custom)
+            }
+        }
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_map(BytesVisitor {
+                human_readable: true,
+            })
+        } else {
+            deserializer.deserialize_bytes(BytesVisitor {
+                human_readable: false,
+            })
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Domain {
@@ -704,6 +773,16 @@ mod tests {
             first.canonical_digest().unwrap(),
             second.canonical_digest().unwrap()
         );
+    }
+
+    #[test]
+    fn arbitrary_bytes_round_trip_as_explicit_base64_json_and_binary() {
+        let bytes = Bytes(vec![0, 0xff, b'/', b'\n']);
+        let json = serde_json::to_value(&bytes).unwrap();
+        assert_eq!(json, serde_json::json!({"base64": "AP8vCg=="}));
+        assert_eq!(serde_json::from_value::<Bytes>(json).unwrap(), bytes);
+        let postcard = postcard::to_allocvec(&bytes).unwrap();
+        assert_eq!(postcard::from_bytes::<Bytes>(&postcard).unwrap(), bytes);
     }
 
     #[test]
