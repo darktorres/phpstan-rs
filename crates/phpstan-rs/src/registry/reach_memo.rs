@@ -11,7 +11,7 @@ use syntax::name::Name;
 
 use super::effect_table::{EffectIx, EffectTable, TransferTable};
 use super::effects::{
-    DeclKey, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer,
+    BuiltinBase, DeclKey, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer,
 };
 
 const SHARDS: usize = 16;
@@ -110,6 +110,8 @@ pub(crate) struct ReachMemo {
     pub(crate) descendants: OnceMap<(Name, bool), Arc<[Name]>>,
     pub(crate) implementations: OnceMap<(Name, Name), Arc<[DeclKey]>>,
     pub(crate) every_method: OnceMap<Name, Arc<[DeclKey]>>,
+    pub(super) builtin_base: OnceMap<(DeclKey, Transfer, Option<Name>), Option<Arc<BuiltinBase>>>,
+    pub(crate) wrapper_runs: OnceMap<&'static str, Arc<[(DeclKey, Transfer)]>>,
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
     /// What an operation runs, by `ImplicitKey`; none when it may run code
     /// not known.

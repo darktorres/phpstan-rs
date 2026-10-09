@@ -802,9 +802,17 @@ fn sees(registry: &Registry, owner: &str, visibility: Visibility, scope: Option<
 /// Where a builtin runs code: at a parameter, or through the elements of an
 /// array passed there.
 #[derive(Debug, Clone, Copy)]
-struct Position {
-    at: u32,
-    elements: bool,
+pub(super) struct Position {
+    pub(super) at: u32,
+    pub(super) elements: bool,
+}
+
+/// What a call of a builtin runs whatever its arguments are.
+pub(super) struct BuiltinBase {
+    runs: Arc<[(Position, BuiltinRun)]>,
+    prefix: Arc<[(DeclKey, Transfer)]>,
+    /// Per parameter: whether a callable passed there is run.
+    takes_callable: Arc<[bool]>,
 }
 
 /// What the code around a closure knows of the object each variable it
@@ -813,7 +821,7 @@ pub(crate) type CapturedHolders<'a> = &'a dyn Fn(&str) -> Option<Holder>;
 
 /// What a builtin runs through an argument.
 #[derive(Debug, Clone, Copy)]
-enum BuiltinRun {
+pub(super) enum BuiltinRun {
     /// It invokes the callable.
     Calls,
     /// It calls this method (lowercased) of the object.
@@ -2023,6 +2031,23 @@ impl Registry {
         if is_builtin { self.builtin(key) } else { None }
     }
 
+    /// The stream-wrapper methods named `method` a class that may be
+    /// registered as a wrapper declares, run as the wrapper's own object.
+    fn wrapper_runs(&self, method: &'static str) -> Arc<[(DeclKey, Transfer)]> {
+        self.reach_memo.wrapper_runs.get_or_compute(method, || {
+            let mut out = Vec::new();
+            for class in self
+                .classes_declaring(method)
+                .filter(|class| self.may_be_registered_wrapper(class))
+            {
+                if let Some((owner, sig)) = self.lookup_method_with_owner(class, method) {
+                    out.push((self.reached(&owner, method, sig), Transfer::Made));
+                }
+            }
+            out.into()
+        })
+    }
+
     /// The methods with a body overriding one of the builtin class
     /// `builtin`'s that an object of `receiver` or of a class below it may
     /// run: what a method of the builtin may run on its own object. Each of
@@ -2948,79 +2973,36 @@ impl Reach<'_> {
         call: &CallWrites,
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
-        let entry = registry.builtin_entry(key);
-        // A stub no run of PHP has seen runs what its parameters let it run.
-        let derived;
-        let runs: &[(Position, BuiltinRun)] = match &entry {
-            Some(name) => builtin_runs::runs(name),
-            None => {
-                let takes_code = sig
-                    .params
-                    .iter()
-                    .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
-                if sig.declared_pure && !takes_code {
-                    return Some(Vec::new());
-                }
-                derived = derived_runs(sig);
-                &derived
-            }
+        let scope = match transfer {
+            Transfer::Same => self.ctx.class().map(Name::from),
+            _ => None,
         };
-        // A method of a class whose objects run what they were made with may
-        // run anything; the constructor that is making one runs what the
-        // table says it runs, and nothing of what it keeps.
-        if &*key.member != "__construct"
-            && match &entry {
-                Some(name) => builtin_runs::holding(name),
-                None => key
-                    .class
-                    .as_deref()
-                    .is_some_and(|class| registry.stub_holds_code(class)),
-            }
+        let base = registry
+            .reach_memo
+            .builtin_base
+            .get_or_compute((key.clone(), transfer.clone(), scope), || {
+                self.compute_builtin_base(key, sig, transfer)
+            });
+        #[cfg(debug_assertions)]
         {
-            return None;
+            let again = self.compute_builtin_base(key, sig, transfer);
+            debug_assert_eq!(
+                base.as_ref().map(|b| (&b.prefix, &b.takes_callable)),
+                again.as_ref().map(|b| (&b.prefix, &b.takes_callable)),
+            );
         }
-        let mut out = Vec::new();
-        let wrapper_runs = |method: &str, out: &mut Vec<(DeclKey, Transfer)>| {
-            for class in registry
-                .classes_declaring(method)
-                .filter(|class| registry.may_be_registered_wrapper(class))
-            {
-                if let Some((owner, sig)) = registry.lookup_method_with_owner(class, method) {
-                    out.push((registry.reached(&owner, method, sig), Transfer::Made));
-                }
-            }
-        };
-        if let Some(name) = &entry {
-            for method in builtin_runs::held_wrappers(name) {
-                wrapper_runs(method, &mut out);
-            }
-        }
-        if let Some(owner) = &key.class {
-            let receivers: Vec<Name> = match transfer {
-                Transfer::Same => self.ctx.class().map(Name::from).into_iter().collect(),
-                Transfer::Other(Some(class)) => vec![class.clone()],
-                Transfer::Other(None) | Transfer::Made | Transfer::Static => {
-                    vec![Name::from(&**owner)]
-                }
-            };
-            for receiver in &receivers {
-                out.extend(
-                    registry
-                        .overrides_of_builtin(receiver, owner)
-                        .iter()
-                        .cloned()
-                        .map(|key| (key, transfer.clone())),
-                );
-            }
-        }
+        let base = base?;
+        let runs: &[(Position, BuiltinRun)] = &base.runs;
+        let mut out = base.prefix.to_vec();
         // Each parameter a callable is passed at runs it.
         for (at, param) in sig.params.iter().enumerate() {
             let at = at as u32;
-            let takes_callable = param.ty.mentions_any(&["callable", "Closure"])
-                || runs
-                    .iter()
-                    .any(|(position, run)| position.at == at && matches!(run, BuiltinRun::Calls));
-            if !takes_callable {
+            if !base
+                .takes_callable
+                .get(at as usize)
+                .copied()
+                .unwrap_or(false)
+            {
                 continue;
             }
             let passed = |arg: &ArgAt| match arg {
@@ -3075,10 +3057,98 @@ impl Reach<'_> {
                     };
                     out.extend(self.method_targets_on(&holder, method));
                 }
-                BuiltinRun::Wrapper(method) => wrapper_runs(method, &mut out),
+                BuiltinRun::Wrapper(method) => {
+                    out.extend(registry.wrapper_runs(method).iter().cloned())
+                }
             }
         }
         Some(out)
+    }
+
+    /// What a call of the builtin `key` runs whatever its arguments are:
+    /// the table's runs, the stream-wrapper methods it holds, and the
+    /// methods a class extending it declares. `None` when it may run code
+    /// not known.
+    fn compute_builtin_base(
+        &self,
+        key: &DeclKey,
+        sig: &FunctionReflection,
+        transfer: &Transfer,
+    ) -> Option<Arc<BuiltinBase>> {
+        let registry = self.registry;
+        let entry = registry.builtin_entry(key);
+        // A stub no run of PHP has seen runs what its parameters let it run.
+        let runs: Arc<[(Position, BuiltinRun)]> = match &entry {
+            Some(name) => builtin_runs::runs(name).into(),
+            None => {
+                let takes_code = sig
+                    .params
+                    .iter()
+                    .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES));
+                if sig.declared_pure && !takes_code {
+                    return Some(Arc::new(BuiltinBase {
+                        runs: Arc::from([]),
+                        prefix: Arc::from([]),
+                        takes_callable: Arc::from([]),
+                    }));
+                }
+                derived_runs(sig).into()
+            }
+        };
+        // A method of a class whose objects run what they were made with may
+        // run anything; the constructor that is making one runs what the
+        // table says it runs, and nothing of what it keeps.
+        if &*key.member != "__construct"
+            && match &entry {
+                Some(name) => builtin_runs::holding(name),
+                None => key
+                    .class
+                    .as_deref()
+                    .is_some_and(|class| registry.stub_holds_code(class)),
+            }
+        {
+            return None;
+        }
+        let mut out = Vec::new();
+        if let Some(name) = &entry {
+            for method in builtin_runs::held_wrappers(name) {
+                out.extend(registry.wrapper_runs(method).iter().cloned());
+            }
+        }
+        if let Some(owner) = &key.class {
+            let receivers: Vec<Name> = match transfer {
+                Transfer::Same => self.ctx.class().map(Name::from).into_iter().collect(),
+                Transfer::Other(Some(class)) => vec![class.clone()],
+                Transfer::Other(None) | Transfer::Made | Transfer::Static => {
+                    vec![Name::from(&**owner)]
+                }
+            };
+            for receiver in &receivers {
+                out.extend(
+                    registry
+                        .overrides_of_builtin(receiver, owner)
+                        .iter()
+                        .cloned()
+                        .map(|key| (key, transfer.clone())),
+                );
+            }
+        }
+        let takes_callable = sig
+            .params
+            .iter()
+            .enumerate()
+            .map(|(at, param)| {
+                param.ty.mentions_any(&["callable", "Closure"])
+                    || runs.iter().any(|(position, run)| {
+                        position.at == at as u32 && matches!(run, BuiltinRun::Calls)
+                    })
+            })
+            .collect();
+        Some(Arc::new(BuiltinBase {
+            runs,
+            prefix: out.into(),
+            takes_callable,
+        }))
     }
 
     /// The declarations calling `method` on an object `holder` says may be
