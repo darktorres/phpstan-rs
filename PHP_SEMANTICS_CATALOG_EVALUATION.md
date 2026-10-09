@@ -8,10 +8,10 @@ framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
 as `2b6afb95`.
 
 Phase F implementation is now underway. A checker-independent
-`crates/php-semantics` seed contains schema v6 graph/event/domain-coverage types,
+`crates/php-semantics` seed now contains schema v7 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Fifty-eight
+explicit exceptional continuations and host-supplied joins/widening. Sixty
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -52,7 +52,8 @@ Schema major 4 added PHP value/reference flow instructions and regenerated the
 embedded `strlen()` manifest; v3 manifests are rejected explicitly. Schema
 major 5 adds keyed array get/set flow instructions, and the embedded artifact is
 regenerated again for the current wire format. Schema major 6 adds explicit
-array-element reference binding for callback alias tracking.
+array-element reference binding for callback alias tracking; schema major 7
+adds ordered diagnostic events and regenerates the embedded artifact.
 Canonical manifests now validate graph
 and evidence digests and round-trip byte strings through explicit base64 JSON.
 A shared target-set primitive distinguishes exact releases from minor ranges,
@@ -122,8 +123,7 @@ its linked module SHA-256 is
 `e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e`. The report
 is recreated by [extract_strlen_llvm_witness.py](tools/php-catalog/experiments/comparison/extract_strlen_llvm_witness.py) from the locked source and
 linked `php-cli.bc`. Regeneration from the locked source and report is
-byte-identical to
-the checked-in schema-v6 artifact (SHA-256
+byte-identical at that checkpoint to the then-current schema-v6 artifact (SHA-256
 `cdde75d14942525b75529b2c122f35b325d8e91bb54c67566bf462a30203d484`); an
 unrelated source input is rejected. It does not execute effects, callbacks, or
 exceptional state.
@@ -167,7 +167,7 @@ the exact VM kinds and binary hashes are cross-checked against
 An earlier recorded full run on October 9, 2026 (`cargo test -p phpstan-rs -p
 phpstan-rs-types -p phpstan-rs-semantics`) passed, including 1,201 checker
 library tests, 3 checker binary tests, 45 CLI tests, 286 type tests, and 41
-semantic tests. The current updated semantic suite has 58 tests; this turn reran
+semantic tests. At that checkpoint the updated semantic suite had 58 tests; that run reran
 that suite and the targeted checker catalog test. The separate catalog fixture runs also pass for exact-patch
 literal refinement and minor-range fallback. The run includes joined/widened
 precision propagation, exact `8.5.4` config and CLI acceptance, registry target
@@ -191,7 +191,7 @@ checker test also passes. Schema v4 was necessary because adding a PHP flow even
 changes the serialized graph format; regenerating the embedded manifest removed
 a digest mismatch that the first full checker run caught. The subsequent schema
 v5 added keyed array get/set instructions, and v6 added array-element reference
-binding. The current semantics suite passes 58 tests. For this schema-v6
+binding. At that checkpoint the semantics suite passed 58 tests. For this schema-v6
 update, `cargo test -p phpstan-rs` also passes:
 1,201 library tests, 3 binary tests, 45 CLI tests, plus file-cache, LSP-exit,
 scaling, stub-index, and version integration suites. `cargo check -p phpstan-rs`,
@@ -223,7 +223,7 @@ means the required evidence has not been produced or independently reviewed;
 | F00.3 | Partial | Validate host transfer functions against PHP source behavior | Narrow weak `strlen` parser/cast source checks, runtime callback sentinel, strict/weak and Stringable fixtures exist. | General source-to-host audit and callback effect/throw modeling remain open; see [F00 review](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md). |
 | F00.4 | Complete | Specify distinct, validated assumption identities | The contract defines typed records, canonical IDs, distinct evidence references, acyclic dependencies, and context-dependent validation. | Implement record validation under F01.1; current artifacts still contain opaque digests only. See [F00 review](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md). |
 | F00.5 | Open | Independently review the contract and assumptions | Author self-review is recorded; no independent review is recorded. | Obtain and record reviewer findings before closing F00 or starting dependent F01 work. |
-| F01.1 | Partial | Implement versioned graph, evidence, assumption, and domain-coverage schema | Canonical digests, explicit coverage/dependencies, evidence validation, and JSON round trips have tests. | Add distinct assumption records and validate their references/applicability before closing schema work (depends on F00.4). |
+| F01.1 | Partial | Implement versioned graph, evidence, assumption, and domain-coverage schema | Canonical digests, explicit coverage/dependencies, evidence validation, and JSON round trips have tests. | Add distinct assumption records and context validation (F00.4); reject evidence-dependency cycles, invalid entry release ranges, and closed dependencies on `NotApplicable` domains. |
 | F01.2 | Complete | Implement evaluator control flow and exceptional continuations | Worklist, joins/widening, PHP/native exceptional exits, cleanup/resumption, and masked unknown transfers are tested. | Calibrate domains for production behavior. |
 | F01.3 | Complete | Validate post-fixpoint certificates and reject incomplete graph behavior | Graph-bound replay checks transfer candidates, exits, and coverage; partial result definitions and missing/duplicate invocation coverage fail closed. | None for the implemented validation contract. |
 | F01.4 | Partial | Validate reference contracts with broader branch/callback cases | Callback result/write/throw order, state-sensitive predicates, joins, cleanup, and second-callback branch selection are covered. | Independent contract review remains F00-dependent; broaden combinations after review. |
@@ -231,7 +231,7 @@ means the required evidence has not been produced or independently reviewed;
 | F02.1 | Complete | Lock PHP 8.5.4 source, compiler, build, and linked artifacts | Source commit, compiler identities, build/link manifests, and runtime profiles are recorded. | None for the locked experimental profile. |
 | F02.2 | Complete | Inventory the linked `zif_strlen` LLVM instructions and trace the Return demand | All 241 instructions are accounted for; builder checks opcode counts/call targets and the field-to-return path. | Inventory is accounting evidence, not interpretation of all operations. |
 | F02.3 | Partial | Compare source, LLVM, and compiler representations | Source/layout/helper and LLVM witness checks support the narrow Return/Diagnostic slices; Clang/GCC/CIR campaigns are recorded. | Complete systematic AST/CFG-to-LLVM comparison adapters and broader semantic correspondence. |
-| F02.4 | Partial | Establish implicit-operation and normal/CALL behavior | Paired weak/strict runtime witnesses and 13-sentinel Hybrid/CALL comparison exist; Stringable invocation now has pinned source and runtime evidence. | Expand beyond the tested `strlen` scenarios and connect all modeled operations to native behavior. |
+| F02.4 | Partial | Establish implicit-operation and normal/CALL behavior | Paired weak/strict runtime witnesses and 13-sentinel Hybrid/CALL comparison exist; Stringable invocation now has pinned source and runtime evidence, independently replayed against the historical fixture bytes. | Bind callback-specific runtime evidence to its recorded source fixture digest; expand beyond tested `strlen` scenarios and connect all modeled operations to native behavior. |
 | F02.5 | Open | Interpret the wider native `strlen` behavior | Return and null diagnostic slices are represented; the 241-op inventory fails closed on unknown operations. | Model/validate scalar conversion, all callback behavior, object release, effects, and non-normal outcomes. |
 | F03.1 | Complete | Measure whole-profile SVF resource behavior | Stock and compact full-link runs and resource measurements are recorded. | These measurements reject full-profile SVF as a mandatory prerequisite; they do not establish a replacement solver. |
 | F03.2 | Partial | Probe demand summaries, Zend layout/dispatch, and fallback cases | Reduced SVF layout/dispatch probes, copy/initializer regressions, and the empty Stringable-target counterexample are recorded. | Generalize beyond the reduced capsule and add demand-oriented source-derived summaries. |
@@ -244,8 +244,8 @@ means the required evidence has not been produced or independently reviewed;
 | F05.3 | Partial | Route argument checks and null diagnostics through shared catalog evaluation | Return and exact-target null Diagnostic share a memoized evaluation; weak/strict routing fixtures pass. | Generalize source-derived rules; ranges outside exact catalog coverage still use legacy diagnostic behavior. |
 | F05.4 | Partial | Route implicit `Stringable` invocation/effect from the graph | Graph contains weak-mode predicate plus `Invoke(__toString, argument 0)` with pinned source/runtime evidence; checker uses that fact for call-site invalidation. | The graph leaves effect/exception domains open; stateful ordered writes/throws are not consumed by the checker. |
 | F05.5 | Partial | Prevent duplicate legacy application for catalog-covered calls | Catalog invocation facts drive covered-call invalidation; legacy builtin-run behavior remains for calls without catalog evaluation. | Verify this boundary across other consumers and scenarios; current operation transfer still comes from existing checker logic. |
-| F05.6 | Open | Validate full target profile and uncovered behavior end to end | Exact PHP release selection is tested. | Lock platform/build/SAPI/extensions/configuration and exercise covered and uncovered remainders. |
-| F05.7 | Open | Resolve the full fixture-suite failures found during evaluation | The current focused `strlen` set passes 16 fixtures; the full optimized-suite run accompanying its four failures recorded 14/14 focused fixtures. Two stale `strlen` expectations were corrected while preserving other diagnostics. The full optimized run passed 1,198/1,202 checker library tests; each failure reproduced alone, and one reproduced on parent commit `3129ece5`. | Resolve or establish the baseline for all four full-suite failures; compare the other three against the parent. The earlier eight method-tag/PHPDoc mismatches are historical and should not be reported as the current remainder. |
+| F05.6 | Open | Validate full target profile and uncovered behavior end to end | Exact PHP release selection is tested; current entry predicate is release-only although its linked/runtime evidence is Linux x86-64 CLI. | Encode/validate the transfer's profile applicability (or establish source-level portability), lock platform/build/SAPI/extensions/configuration, and exercise covered and uncovered remainders. |
+| F05.7 | Open | Resolve the full fixture-suite failures found during evaluation | The current focused `strlen` set passes 16 fixtures. A fresh full optimized fixture run passed 3,954/3,962; eight `@method`/`@mixin` PHPDoc fixtures failed. A separate fresh optimized library run passed 1,198/1,202; four project/registry tests failed. Each of those four library failures reproduced alone; only the deferred-registry case was compared with parent `3129ece5`. | Establish or resolve both failure sets independently. Compare the remaining three library failures against the parent; establish a baseline for the eight PHPDoc fixture failures. Do not combine the two suites' failure counts. |
 | F06.1 | Partial | Compare candidate producers and compiler routes | Clang/GCC/CIR campaigns and prior comparative evidence are recorded; LLVM plus source metadata is the initial producer choice. | Revisit with evidence from a useful closed production summary. |
 | F06.2 | Complete | Establish full-profile SVF resource feasibility | Stock/layout-only SVF resource failures are measured on the minimal CLI link. | This rules out that configuration as a mandatory whole-profile prerequisite, not all pointer-service assistance. |
 | F06.3 | Open | Compare regional and audited pointer-service alternatives on the same slice | Reduced SVF probe supplies a fallback counterexample. | Build an adapted, coverage-aware comparison against a regional candidate on identical input and demand. |
