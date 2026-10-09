@@ -267,6 +267,7 @@ pub enum GraphError {
     DuplicateDomainDependency(Domain),
     ClosedDomainDependsOnOpen { domain: Domain, dependency: Domain },
     CyclicDomainDependency(Domain),
+    ApplicableDomainMarkedNotApplicable(Domain),
     UnresolvedValue,
     EventWithoutOutcome,
     ResumeWithoutPendingOutcome,
@@ -383,6 +384,44 @@ impl BehaviorGraph {
             .collect();
         if unknown_events.iter().any(|event| matches!(event, Event::Unknown { domains, reason } if domains.is_empty() || reason.0.is_empty())) {
             return Err(GraphError::UnknownTransferWithoutReason);
+        }
+        let mut required_domains = Vec::new();
+        for (index, block) in self.blocks.iter().enumerate() {
+            if colors[index] != 2 {
+                continue;
+            }
+            for event in &block.events {
+                let required = match event {
+                    Event::Read { .. } => vec![Domain::UserRead],
+                    Event::Write { .. } => vec![Domain::UserWrite],
+                    Event::Invoke { .. } => vec![Domain::Invocation],
+                    Event::Unknown { domains, .. } => domains.clone(),
+                };
+                for domain in required {
+                    if !required_domains.contains(&domain) {
+                        required_domains.push(domain);
+                    }
+                }
+            }
+            let required = match block.terminator {
+                Terminator::Return(_) => Some(Domain::Return),
+                Terminator::Throw(_) => Some(Domain::PhpThrow),
+                Terminator::Fatal(_) => Some(Domain::Fatal),
+                Terminator::Suspend(_) => Some(Domain::Suspension),
+                _ => None,
+            };
+            if let Some(domain) = required
+                && !required_domains.contains(&domain)
+            {
+                required_domains.push(domain);
+            }
+        }
+        for domain in required_domains {
+            if self.coverage.iter().any(|item| {
+                item.domain == domain && matches!(item.coverage, Coverage::NotApplicable)
+            }) {
+                return Err(GraphError::ApplicableDomainMarkedNotApplicable(domain));
+            }
         }
         validate_domain_dependencies(&self.coverage)?;
         for item in &self.coverage {
@@ -1376,22 +1415,55 @@ mod tests {
     }
 
     fn graph(events: Vec<Event>, terminator: Terminator) -> BehaviorGraph {
+        let mut applicable = Vec::new();
+        for event in &events {
+            let required = match event {
+                Event::Read { .. } => vec![Domain::UserRead],
+                Event::Write { .. } => vec![Domain::UserWrite],
+                Event::Invoke { .. } => vec![Domain::Invocation],
+                Event::Unknown { domains, .. } => domains.clone(),
+            };
+            for domain in required {
+                if !applicable.contains(&domain) {
+                    applicable.push(domain);
+                }
+            }
+        }
+        let exit_domain = match terminator {
+            Terminator::Return(_) => Some(Domain::Return),
+            Terminator::Throw(_) => Some(Domain::PhpThrow),
+            Terminator::Fatal(_) => Some(Domain::Fatal),
+            Terminator::Suspend(_) => Some(Domain::Suspension),
+            _ => None,
+        };
+        if let Some(domain) = exit_domain
+            && !applicable.contains(&domain)
+        {
+            applicable.push(domain);
+        }
         BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
             entry: 0,
             blocks: vec![Block::new(events, terminator)],
-            coverage: Domain::ALL
-                .into_iter()
-                .map(|domain| DomainCoverage {
-                    domain,
-                    coverage: Coverage::NotApplicable,
-                    precision: Precision::Exact,
-                    dependencies: vec![],
-                    evidence: vec![Digest([1; 32])],
-                    assumptions: vec![],
-                })
-                .collect(),
+            coverage: coverage_for(&applicable),
         }
+    }
+    fn coverage_for(applicable: &[Domain]) -> Vec<DomainCoverage> {
+        Domain::ALL
+            .into_iter()
+            .map(|domain| DomainCoverage {
+                domain,
+                coverage: if applicable.contains(&domain) {
+                    Coverage::Closed
+                } else {
+                    Coverage::NotApplicable
+                },
+                precision: Precision::Exact,
+                dependencies: vec![],
+                evidence: vec![Digest([1; 32])],
+                assumptions: vec![],
+            })
+            .collect()
     }
     fn receiver() -> String {
         "receiver".into()
@@ -1491,17 +1563,7 @@ mod tests {
                     Terminator::Return(Some(Operand::Literal(Bytes(b"not-called".to_vec())))),
                 ),
             ],
-            coverage: Domain::ALL
-                .into_iter()
-                .map(|domain| DomainCoverage {
-                    domain,
-                    coverage: Coverage::NotApplicable,
-                    precision: Precision::Exact,
-                    dependencies: vec![],
-                    evidence: vec![Digest([1; 32])],
-                    assumptions: vec![],
-                })
-                .collect(),
+            coverage: coverage_for(&[Domain::Invocation, Domain::Return]),
         };
         let mut host = Host::default();
         let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
@@ -1537,17 +1599,7 @@ mod tests {
                     Terminator::Return(Some(Operand::Literal(Bytes(b"no".to_vec())))),
                 ),
             ],
-            coverage: Domain::ALL
-                .into_iter()
-                .map(|domain| DomainCoverage {
-                    domain,
-                    coverage: Coverage::NotApplicable,
-                    precision: Precision::Exact,
-                    dependencies: vec![],
-                    evidence: vec![Digest([1; 32])],
-                    assumptions: vec![],
-                })
-                .collect(),
+            coverage: coverage_for(&[Domain::Return]),
         };
         let mut host = Host::default();
         let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
@@ -1901,6 +1953,23 @@ mod tests {
     }
 
     #[test]
+    fn reachable_return_cannot_be_marked_not_applicable() {
+        let mut graph = graph(vec![], Terminator::Return(None));
+        let index = graph
+            .coverage
+            .iter()
+            .position(|item| item.domain == Domain::Return)
+            .unwrap();
+        graph.coverage[index].coverage = Coverage::NotApplicable;
+        assert_eq!(
+            graph.validate(),
+            Err(GraphError::ApplicableDomainMarkedNotApplicable(
+                Domain::Return
+            ))
+        );
+    }
+
+    #[test]
     fn cyclic_graph_reaches_a_stable_widened_exit() {
         let graph = BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
@@ -1919,17 +1988,7 @@ mod tests {
                 ),
                 Block::new(vec![], Terminator::Return(None)),
             ],
-            coverage: Domain::ALL
-                .into_iter()
-                .map(|domain| DomainCoverage {
-                    domain,
-                    coverage: Coverage::NotApplicable,
-                    precision: Precision::Exact,
-                    dependencies: vec![],
-                    evidence: vec![Digest([1; 32])],
-                    assumptions: vec![],
-                })
-                .collect(),
+            coverage: coverage_for(&[Domain::UserWrite, Domain::Return]),
         };
         let mut host = Host {
             maybe_always: true,
