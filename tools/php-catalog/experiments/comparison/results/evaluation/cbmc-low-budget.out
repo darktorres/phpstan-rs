@@ -1,0 +1,581 @@
+[
+  {
+    "program": "CBMC 6.6.0 (cbmc-6.6.0)"
+  },
+  {
+    "messageText": "CBMC version 6.6.0 (cbmc-6.6.0) 64-bit x86_64 linux",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Type-checking loop_contract",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Generating GOTO Program",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Adding CPROVER library (x86_64)",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Removal of function pointers and virtual functions",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Generic Property Instrumentation",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Starting Bounded Model Checking",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Passing problem to propositional reduction",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "converting SSA",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Running propositional reduction",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "SAT checker: instance is SATISFIABLE",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Building error trace",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Running propositional reduction",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "SAT checker inconsistent: instance is UNSATISFIABLE",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "result": [
+      {
+        "description": "assertion count == length",
+        "property": "main.assertion.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+          "function": "main",
+          "line": "8",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "unwinding assertion loop 0",
+        "property": "main.unwind.0",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+          "function": "main",
+          "line": "7",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "FAILURE",
+        "trace": [
+          {
+            "hidden": false,
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "24",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "location-only",
+            "thread": 0
+          },
+          {
+            "function": {
+              "displayName": "__CPROVER_initialize",
+              "identifier": "__CPROVER_initialize",
+              "sourceLocation": {
+                "file": "<built-in-additions>",
+                "line": "24",
+                "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+              }
+            },
+            "hidden": true,
+            "internal": false,
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "24",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "function-call",
+            "thread": 0
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "__CPROVER_dead_object",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "8",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "data": "NULL",
+              "name": "pointer",
+              "type": "const void *"
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "__CPROVER_deallocated",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "data": "NULL",
+              "name": "pointer",
+              "type": "const void *"
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "__CPROVER_max_malloc_size",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "12",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "0000000010000000000000000000000000000000000000000000000000000000",
+              "data": "36028797018963968ul",
+              "name": "integer",
+              "type": "__CPROVER_size_t",
+              "width": 64
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "__CPROVER_memory_leak",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "9",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "data": "NULL",
+              "name": "pointer",
+              "type": "const void *"
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "__CPROVER_rounding_mode",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "<built-in-additions>",
+              "line": "16",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0",
+              "name": "integer",
+              "type": "signed int",
+              "width": 32
+            }
+          },
+          {
+            "function": {
+              "displayName": "__CPROVER_initialize",
+              "identifier": "__CPROVER_initialize",
+              "sourceLocation": {
+                "file": "<built-in-additions>",
+                "line": "24",
+                "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+              }
+            },
+            "hidden": true,
+            "internal": false,
+            "stepType": "function-return",
+            "thread": 0
+          },
+          {
+            "hidden": false,
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "line": "3",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "location-only",
+            "thread": 0
+          },
+          {
+            "function": {
+              "displayName": "main",
+              "identifier": "main",
+              "sourceLocation": {
+                "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+                "line": "3",
+                "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+              }
+            },
+            "hidden": false,
+            "internal": false,
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "line": "3",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "function-call",
+            "thread": 0
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "length",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "4",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "return_value_nondet_uint",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "4",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "return_value_nondet_uint",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "4",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000100",
+              "data": "4u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "length",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "4",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000100",
+              "data": "4u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "hidden": false,
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "5",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "location-only",
+            "thread": 0
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "count",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "6",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "count",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "6",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": true,
+            "internal": false,
+            "lhs": "i",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "i",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000000",
+              "data": "0u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "hidden": false,
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "loop-head",
+            "thread": 0
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "count",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000001",
+              "data": "1u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "i",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000001",
+              "data": "1u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "hidden": false,
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "loop-head",
+            "thread": 0
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "count",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000010",
+              "data": "2u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "assignmentType": "variable",
+            "hidden": false,
+            "internal": false,
+            "lhs": "i",
+            "mode": "C",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "assignment",
+            "thread": 0,
+            "value": {
+              "binary": "00000000000000000000000000000010",
+              "data": "2u",
+              "name": "integer",
+              "type": "unsigned int",
+              "width": 32
+            }
+          },
+          {
+            "hidden": false,
+            "internal": false,
+            "property": "main.unwind.0",
+            "reason": "unwinding assertion loop 0",
+            "sourceLocation": {
+              "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+              "function": "main",
+              "line": "7",
+              "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+            },
+            "stepType": "failure",
+            "thread": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "messageText": "VERIFICATION FAILED",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "cProverStatus": "failure"
+  }
+]

@@ -1,0 +1,1083 @@
+[
+  {
+    "program": "CBMC 6.6.0 (cbmc-6.6.0)"
+  },
+  {
+    "messageText": "CBMC version 6.6.0 (cbmc-6.6.0) 64-bit x86_64 linux",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Type-checking contracts",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Generating GOTO Program",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Adding CPROVER library (x86_64)",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Removal of function pointers and virtual functions",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Generic Property Instrumentation",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Starting Bounded Model Checking",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Passing problem to propositional reduction",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "converting SSA",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "Running propositional reduction",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "messageText": "SAT checker: instance is UNSATISFIABLE",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "result": [
+      {
+        "description": "array 'results' upper bound in results[(signed long int)i]",
+        "property": "main.array_bounds.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "36",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion value == (int)length",
+        "property": "main.assertion.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "37",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion count == (int)length",
+        "property": "main.assertion.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "38",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'results' upper bound in results[(signed long int)i]",
+        "property": "main.array_bounds.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "39",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in (signed int)i + 1",
+        "property": "main.overflow.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "39",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion results[i] == (int)i + 1",
+        "property": "main.assertion.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "39",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion invoke(throwing, &value) == -1",
+        "property": "main.assertion.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "41",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion value == 1 && count == 2 && events[0] == 1 && events[1] == 2",
+        "property": "main.assertion.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "42",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion invoke(increment, &value) == 1",
+        "property": "main.assertion.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "44",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion count == 3 && events[0] == 1 && events[1] == 2 && events[2] == 3",
+        "property": "main.assertion.7",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "45",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion value == 2",
+        "property": "main.assertion.8",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "46",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion through_copy(&source, &value) == 3",
+        "property": "main.assertion.9",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "48",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in retained",
+        "property": "main.pointer_dereference.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in retained",
+        "property": "main.pointer_dereference.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in retained",
+        "property": "main.pointer_dereference.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in retained",
+        "property": "main.pointer_dereference.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in retained",
+        "property": "main.pointer_dereference.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in retained",
+        "property": "main.pointer_dereference.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereferenced function pointer must be one of [throwing, increment]",
+        "property": "main.pointer_dereference.7",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "assertion retained(retained_argument) == 4",
+        "property": "main.assertion.10",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "50",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in count + 1",
+        "property": "increment.overflow.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' lower bound in events[(signed long int)tmp_post_count]",
+        "property": "increment.array_bounds.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' upper bound in events[(signed long int)tmp_post_count]",
+        "property": "increment.array_bounds.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in *x",
+        "property": "increment.pointer_dereference.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in *x",
+        "property": "increment.pointer_dereference.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in *x",
+        "property": "increment.pointer_dereference.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in *x",
+        "property": "increment.pointer_dereference.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in *x",
+        "property": "increment.pointer_dereference.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in *x",
+        "property": "increment.pointer_dereference.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in *x + 1",
+        "property": "increment.overflow.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "increment",
+          "line": "16",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in count + 1",
+        "property": "throwing.overflow.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' lower bound in events[(signed long int)tmp_post_count]",
+        "property": "throwing.array_bounds.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' upper bound in events[(signed long int)tmp_post_count]",
+        "property": "throwing.array_bounds.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in *x",
+        "property": "throwing.pointer_dereference.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in *x",
+        "property": "throwing.pointer_dereference.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in *x",
+        "property": "throwing.pointer_dereference.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in *x",
+        "property": "throwing.pointer_dereference.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in *x",
+        "property": "throwing.pointer_dereference.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in *x",
+        "property": "throwing.pointer_dereference.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in *x + 1",
+        "property": "throwing.overflow.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "throwing",
+          "line": "17",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in count + 1",
+        "property": "release_value.overflow.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "release_value",
+          "line": "18",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' lower bound in events[(signed long int)tmp_post_count]",
+        "property": "release_value.array_bounds.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "release_value",
+          "line": "18",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' upper bound in events[(signed long int)tmp_post_count]",
+        "property": "release_value.array_bounds.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "release_value",
+          "line": "18",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in callback",
+        "property": "invoke.pointer_dereference.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in callback",
+        "property": "invoke.pointer_dereference.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in callback",
+        "property": "invoke.pointer_dereference.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in callback",
+        "property": "invoke.pointer_dereference.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in callback",
+        "property": "invoke.pointer_dereference.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in callback",
+        "property": "invoke.pointer_dereference.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereferenced function pointer must be one of [throwing, increment]",
+        "property": "invoke.pointer_dereference.7",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "20",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "arithmetic overflow on signed + in count + 1",
+        "property": "invoke.overflow.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "23",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' lower bound in events[(signed long int)tmp_post_count]",
+        "property": "invoke.array_bounds.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "23",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "array 'events' upper bound in events[(signed long int)tmp_post_count]",
+        "property": "invoke.array_bounds.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "invoke",
+          "line": "23",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in *left",
+        "property": "alias_write.pointer_dereference.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in *left",
+        "property": "alias_write.pointer_dereference.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in *left",
+        "property": "alias_write.pointer_dereference.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in *left",
+        "property": "alias_write.pointer_dereference.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in *left",
+        "property": "alias_write.pointer_dereference.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in *left",
+        "property": "alias_write.pointer_dereference.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in *right",
+        "property": "alias_write.pointer_dereference.7",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in *right",
+        "property": "alias_write.pointer_dereference.8",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in *right",
+        "property": "alias_write.pointer_dereference.9",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in *right",
+        "property": "alias_write.pointer_dereference.10",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in *right",
+        "property": "alias_write.pointer_dereference.11",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in *right",
+        "property": "alias_write.pointer_dereference.12",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "alias_write",
+          "line": "26",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "same object violation in (const char *)(const void *)source >= (const char *)(void *)&destination + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer.1",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: pointer NULL in (const char *)(const void *)source",
+        "property": "memcpy.pointer_arithmetic.1",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: pointer invalid in (const char *)(const void *)source",
+        "property": "memcpy.pointer_arithmetic.2",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: deallocated dynamic object in (const char *)(const void *)source",
+        "property": "memcpy.pointer_arithmetic.3",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: dead object in (const char *)(const void *)source",
+        "property": "memcpy.pointer_arithmetic.4",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: pointer outside object bounds in (const char *)(const void *)source",
+        "property": "memcpy.pointer_arithmetic.5",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: invalid integer address in (const char *)(const void *)source",
+        "property": "memcpy.pointer_arithmetic.6",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: dead object in (const char *)(void *)&destination + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.7",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "33",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "same object violation in (const char *)(void *)&destination >= (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer.2",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: dead object in (const char *)(void *)&destination",
+        "property": "memcpy.pointer_arithmetic.8",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: pointer NULL in (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.9",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: pointer invalid in (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.10",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: deallocated dynamic object in (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.11",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: dead object in (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.12",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: pointer outside object bounds in (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.13",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "pointer relation: invalid integer address in (const char *)(const void *)source + (signed long int)sizeof(Payload) /*72ul*/ ",
+        "property": "memcpy.pointer_arithmetic.14",
+        "sourceLocation": {
+          "file": "<builtin-library-memcpy>",
+          "function": "memcpy",
+          "line": "34",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "memcpy src/dst overlap",
+        "property": "through_copy.precondition_instance.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "30",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "memcpy source region readable",
+        "property": "through_copy.precondition_instance.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "30",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "memcpy destination region writeable",
+        "property": "through_copy.precondition_instance.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "30",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer NULL in destination.callback",
+        "property": "through_copy.pointer_dereference.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer invalid in destination.callback",
+        "property": "through_copy.pointer_dereference.2",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: deallocated dynamic object in destination.callback",
+        "property": "through_copy.pointer_dereference.3",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: dead object in destination.callback",
+        "property": "through_copy.pointer_dereference.4",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: pointer outside object bounds in destination.callback",
+        "property": "through_copy.pointer_dereference.5",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereference failure: invalid integer address in destination.callback",
+        "property": "through_copy.pointer_dereference.6",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "dereferenced function pointer must be one of [throwing, increment]",
+        "property": "through_copy.pointer_dereference.7",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "through_copy",
+          "line": "31",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "unwinding assertion loop 0",
+        "property": "main.unwind.0",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "36",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      },
+      {
+        "description": "unwinding assertion loop 1",
+        "property": "main.unwind.1",
+        "sourceLocation": {
+          "file": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+          "function": "main",
+          "line": "39",
+          "workingDirectory": "/home/torres/projects/phpstan-rs-master3"
+        },
+        "status": "SUCCESS"
+      }
+    ]
+  },
+  {
+    "messageText": "VERIFICATION SUCCESSFUL",
+    "messageType": "STATUS-MESSAGE"
+  },
+  {
+    "cProverStatus": "success"
+  }
+]

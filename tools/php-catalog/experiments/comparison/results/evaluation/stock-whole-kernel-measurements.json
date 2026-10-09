@@ -1,0 +1,34 @@
+[
+  {
+    "name": "whole-svf-dda",
+    "elapsed_seconds": 101.1536,
+    "sampled_group_peak_bytes": 10747650048,
+    "exit_code": 143,
+    "stopped": null,
+    "max_rss_kib": 12940,
+    "user_seconds": 0.03,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p680483-i688922.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli-promoted.bc"
+      ],
+      "systemd_messages": [
+        "Started run-p680483-i688922.scope - [systemd-run] /usr/bin/python3 /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/worker.py /home/torres/.cache/php-catalog-evaluation/stock-whole-kernel/whole-svf-dda.cgroup.json /tmp/php-catalog-comparison/svf-build/bin/dvf -dfs -query=funptr -stat -print-query-pts /home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli-promoted.bc.",
+        "run-p680483-i688922.scope: The kernel OOM killer killed some processes in this unit.",
+        "run-p680483-i688922.scope: Failed with result 'oom-kill'.",
+        "run-p680483-i688922.scope: Consumed 1min 38.360s CPU time over 1min 41.926s wall clock time, 10G memory peak."
+      ],
+      "kernel_oom_kill": true
+    }
+  }
+]

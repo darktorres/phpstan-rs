@@ -1,0 +1,315 @@
+
+*********General Stats***************
+################ (program : layout_cases-promoted.bc)###############
+AddrsNum            66
+BBWith2Succ         3
+BBWith3Succ         0
+CallsNum            0
+ConstArrayObj       1
+ConstStructObj      1
+ConstantObj         53
+CopysNum            4
+FIObjNum            58
+FSObjNum            9
+FunctionObjs        9
+GepsNum             31
+GlobalObjs          7
+HeapObjs            1
+IndCallSites        4
+LoadsNum            10
+MaxStructSize       6
+NonPtrObj           67
+ReturnsNum          3
+StackObjs           2
+StoresNum           97
+TotalCallSite       13
+TotalFieldObjects   11
+TotalObjects        79
+TotalPTASVFStmts    122
+TotalPointers       173
+TotalSVFStmts       232
+VarArrayObj         6
+VarStructObj        1
+----------------Time and memory stats--------------------
+LLVMIRTime          0.00809
+SVFIRTime           0.002441
+SymbolTableTime     0.00025
+#######################################################
+
+*********PTACallGraph Stats (Andersen analysis)***************
+################ (program : layout_cases-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           9
+TotalNode           9
+#######################################################
+
+*********Andersen Pointer Analysis Stats***************
+################ (program : layout_cases-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgIn/OutAddrEdge   0.351064
+AvgIn/OutCopyEdge   0.287234
+AvgIn/OutEdge       0.75
+AvgIn/OutLoadEdge   0.0531915
+AvgIn/OutStoreEdge  0.0585106
+AvgPtsSetSize       0.456349
+AvgTopLvlPtsSize    0.912281
+CollapseTime        0
+CopyGepTime         0
+LoadStoreTime       0
+MemoryUsageVmrss    748
+MemoryUsageVmsize   396
+SCCDetectTime       0
+SCCMergeTime        0
+TotalTime           0.00068
+UpdateCGTime        0
+----------------Numbers stats----------------------------
+AddrProcessed       66
+CopyProcessed       12
+DummyFieldPtrs      10
+FieldObjs           11
+GepProcessed        31
+IndCallSites        4
+IndEdgeSolved       0
+LoadProcessed       10
+LocalVarInRecur     0
+MaxInAddrEdge       1
+MaxInCopyEdge       2
+MaxInLoadEdge       1
+MaxInStoreEdge      2
+MaxNodesInSCC       2
+MaxOutAddrEdge      1
+MaxOutCopyEdge      9
+MaxOutLoadEdge      1
+MaxOutStoreEdge     3
+MaxPtsSetSize       2
+MemObjects          79
+NodesInCycles       2
+NullPointer         0
+NumOfAddrs          66
+NumOfCGEdge         75
+NumOfCGNode         202
+NumOfCopys          23
+NumOfFieldExpand    0
+NumOfGeps           31
+NumOfLoads          10
+NumOfSCCDetect      3
+NumOfSFRs           0
+NumOfStores         11
+NumOfValidNode      188
+NumOfValidObjNode   77
+Pointers            173
+PointsToBlkPtr      0
+PointsToConstPtr    0
+SolveIterations     3
+StoreProcessed      11
+TotalCycleNum       1
+TotalObjects        79
+TotalPWCCycleNum    0
+TotalPointers       173
+#######################################################
+
+****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
+################ (program : layout_cases-promoted.bc)###############
+UniquePointsToSets       79
+TotalUnions              112
+PropertyUnions           108
+UniqueUnions             1
+LookupUnions             1
+PreemptiveUnions         2
+TotalComplements         596
+PropertyComplements      596
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       22
+PropertyIntersections    22
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+
+*********Memory SSA Statistics***************
+################ (program : layout_cases-promoted.bc)###############
+----------------Time and memory stats--------------------
+AverageRegSize      1.16667
+GenMUCHITime        3.3e-05
+GenRegionTime       0.001404
+InsertPHITime       1.1e-05
+SSARenameTime       1.7e-05
+TotalMSSATime       0.001486
+----------------Numbers stats----------------------------
+BBHasMSSAPhi        0
+CSChiNode           0
+CSHasChi            0
+CSHasMu             3
+CSMuNode            4
+FunEntryChi         15
+FunHasEntryChi      4
+FunHasRetMu         6
+FunRetMu            15
+LoadHasMu           10
+LoadMuNode          10
+MSSAPhi             0
+MaxRegSize          3
+MemRegions          12
+StoreChiNode        6
+StoreHasChi         6
+#######################################################
+
+*********SVFG Statistics***************
+################ (program : layout_cases-promoted.bc)###############
+----------------Time and memory stats--------------------
+ATNodeTime          4.3e-05
+AvgWeight           1.08889
+ConnDirEdgeTime     0
+ConnIndEdgeTime     3.5e-05
+OptTime             0
+TLNodeTime          0
+TotalTime           8.3e-05
+----------------Numbers stats----------------------------
+ActualIn            4
+ActualOut           0
+ActualParam         15
+ActualRet           0
+Addr                66
+AvgInDegree         0
+AvgIndInDeg         1
+AvgIndOutDeg        1
+AvgOutDegree        0
+Copy                4
+DirectCallEdge      0
+DirectEdge          82
+DirectRetEdge       0
+FormalIn            15
+FormalOut           15
+FormalParam         0
+FormalRet           0
+Gep                 31
+IndCallEdge         6
+IndRetEdge          0
+IndirectEdge        45
+IndirectEdgeLabels  49
+Load                10
+MSSAPhi             0
+MaxInDegree         3
+MaxIndInDeg         2
+MaxIndOutDeg        3
+MaxOutDegree        10
+PHI                 0
+Store               11
+TotalEdge           127
+TotalNode           172
+#######################################################
+
+*********PTACallGraph Stats (DDA analysis)***************
+################ (program : layout_cases-promoted.bc)###############
+----------------Numbers stats----------------------------
+CalRetPairInCycle   0
+MaxNodeInCycle      0
+NodeInCycle         0
+TotalCycle          0
+TotalEdge           9
+TotalNode           9
+#######################################################
+
+*********SVFG SCC Stat***************
+################ (program : layout_cases-promoted.bc)###############
+----------------Numbers stats----------------------------
+CallEdgeInCycle     0
+DirEdgeInCycle      0
+EdgeInCycle         0
+IndEdgeInCycle      0
+InsenCallEdge       0
+InsenRetEdge        0
+MaxNodeInCycle      0
+NodeInCycle         0
+RetEdgeInCycle      0
+TotalCallEdge       6
+TotalCycle          0
+TotalDirEdge        82
+TotalEdge           127
+TotalIndEdge        45
+TotalNode           172
+TotalRetEdge        0
+#######################################################
+
+****Demand-Driven Pointer Analysis Statistics****
+
+************************
+################ (program : layout_cases-promoted.bc)###############
+----------------Time and memory stats--------------------
+AvgCPtsSize         0
+AvgDPMAtLoc         1
+AvgPtsSize          0
+AvgTimePerQuery     3.825e-05
+MemoryUsageVmrss    8
+MemoryUsageVmsize   0
+TotalBKCondTime     0
+TotalQueryTime      0.000153
+----------------Numbers stats----------------------------
+IndEdgeSolved       0
+MaxCPtsSize         0
+MaxCxtPerQuery      0
+MaxDPMAtLoc         1
+MaxPathPerQuery     0
+MaxPtsSize          0
+NumOfDPM            78
+NumOfInfePath       0
+NumOfMustAA         0
+NumOfNullPtr        4
+NumOfOOBQuery       0
+NumOfQuery          4
+NumOfSU             2
+NumOfStep           52
+NumOfStepInCycle    18
+NumOfStore          11
+NumOfStoreSU        2
+PointsToBlkPtr      0
+PointsToConstPtr    0
+#######################################################
+
+****Persistent Points-To Cache Statistics: DDA bitvector****
+################ (program : layout_cases-promoted.bc)###############
+UniquePointsToSets       10
+TotalUnions              43
+PropertyUnions           43
+UniqueUnions             0
+LookupUnions             0
+PreemptiveUnions         0
+TotalComplements         0
+PropertyComplements      0
+UniqueComplements        0
+LookupComplements        0
+PreemptiveComplements    0
+TotalIntersections       0
+PropertyIntersections    0
+UniqueIntersections      0
+LookupIntersections      0
+PreemptiveIntersections  0
+#######################################################
+=================================================
+Total virtual callsites: 0
+Total analyzed virtual callsites: 0
+Indirect call map size: 0
+Precise callsites: 0
+Zero target callsites: 0
+One target callsites: 0
+Two target callsites: 0
+More than two target callsites: 0
+=================================================
+##<> Source Loc: { "ln": 13, "cl": 12, "fl": "tools/php-catalog/experiments/comparison/layout_cases.c" }
+Ptr 125 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 13, "cl": 47, "fl": "tools/php-catalog/experiments/comparison/layout_cases.c" }
+Ptr 128 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 18, "cl": 12, "fl": "tools/php-catalog/experiments/comparison/layout_cases.c" }
+Ptr 153 		PointsTo: {empty}
+
+##<> Source Loc: { "ln": 22, "cl": 12, "fl": "tools/php-catalog/experiments/comparison/layout_cases.c" }
+Ptr 170 		PointsTo: {empty}
+

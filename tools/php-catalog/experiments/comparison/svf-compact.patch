@@ -1,0 +1,22 @@
+diff --git a/svf-llvm/lib/LLVMModule.cpp b/svf-llvm/lib/LLVMModule.cpp
+index 3590d87..50b1503 100644
+--- a/svf-llvm/lib/LLVMModule.cpp
++++ b/svf-llvm/lib/LLVMModule.cpp
+@@ -1404,6 +1404,17 @@ StInfo* LLVMModuleSet::collectArrayInfo(const ArrayType* ty)
+         stInfo->getFlattenFieldTypes().push_back(fieldTy);
+     }
+ 
++    // Catalog experiment: use the same array-insensitive field abstraction
++    // as the pointer solver instead of materializing unused physical elements.
++    // Array-sensitive mode retains the original representation below.
++    if (!Options::ModelArrays())
++    {
++        stInfo->addFldWithType(0, elemSvfType, 0);
++        stInfo->getFlattenElementTypes() = stInfo->getFlattenFieldTypes();
++        stInfo->setNumOfFieldsAndElems(nfF, nfF);
++        return stInfo;
++    }
++
+     /// Flatten arrays, map each array element index `i` to flattened index `(i * nfE * totalElemNum)/outArrayElemNum`
+     /// nfE>1 if the array element is a struct with more than one field.
+     u32_t outArrayElemNum = ty->getNumElements();

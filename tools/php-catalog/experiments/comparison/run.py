@@ -41,6 +41,8 @@ def group_rss(group):
 
 
 class Runner:
+    child_limits = staticmethod(memory_limit)
+    stop_on_sampled_rss = True
     def __init__(self, output):
         self.output = output.resolve()
         self.output.mkdir(parents=True, exist_ok=True)
@@ -59,11 +61,11 @@ class Runner:
         with stdout.open('w') as out, stderr.open('w') as err:
             process = subprocess.Popen(wrapped, cwd=cwd, stdout=out, stderr=err,
                                        env=env, start_new_session=True,
-                                       preexec_fn=memory_limit)
+                                       preexec_fn=self.child_limits)
             try:
                 while process.poll() is None:
                     sampled_peak = max(sampled_peak, group_rss(process.pid))
-                    if sampled_peak > LIMIT:
+                    if self.stop_on_sampled_rss and sampled_peak > LIMIT:
                         stopped = 'sampled-group-memory-limit'
                     elif time.monotonic() - start > timeout:
                         stopped = 'timeout'

@@ -1,0 +1,139 @@
+[
+  {
+    "binary": "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+    "name": "first",
+    "address": 4198720,
+    "bytes": 15,
+    "ir_statements": 41,
+    "jumpkind": "Ijk_Ret",
+    "source_layout_recovered": false,
+    "steps_limit": 1000,
+    "active_states": 0,
+    "errored_states": 0,
+    "unconstrained_states": 0,
+    "outcomes": [
+      1
+    ],
+    "status": "bounded-witness"
+  },
+  {
+    "binary": "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+    "name": "second",
+    "address": 4198736,
+    "bytes": 15,
+    "ir_statements": 41,
+    "jumpkind": "Ijk_Ret",
+    "source_layout_recovered": false,
+    "steps_limit": 1000,
+    "active_states": 0,
+    "errored_states": 0,
+    "unconstrained_states": 0,
+    "outcomes": [
+      2
+    ],
+    "status": "bounded-witness"
+  },
+  {
+    "binary": "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+    "name": "nested_copy",
+    "address": 4198752,
+    "bytes": 35,
+    "ir_statements": 27,
+    "jumpkind": "Ijk_Call",
+    "source_layout_recovered": false,
+    "steps_limit": 1000,
+    "active_states": 0,
+    "errored_states": 0,
+    "unconstrained_states": 0,
+    "outcomes": [
+      4
+    ],
+    "status": "bounded-witness"
+  },
+  {
+    "binary": "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+    "name": "overlap_copy",
+    "address": 4198832,
+    "bytes": 64,
+    "ir_statements": 61,
+    "jumpkind": "Ijk_Call",
+    "source_layout_recovered": false,
+    "steps_limit": 1000,
+    "active_states": 0,
+    "errored_states": 0,
+    "unconstrained_states": 0,
+    "outcomes": [
+      2
+    ],
+    "status": "bounded-witness"
+  },
+  {
+    "binary": "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+    "name": "negative_index",
+    "address": 4198912,
+    "bytes": 40,
+    "ir_statements": 38,
+    "jumpkind": "Ijk_Call",
+    "source_layout_recovered": false,
+    "steps_limit": 1000,
+    "active_states": 0,
+    "errored_states": 0,
+    "unconstrained_states": 0,
+    "outcomes": [
+      1
+    ],
+    "status": "bounded-witness"
+  },
+  {
+    "binary": "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+    "load_and_probe_seconds": 0.1935660060007649,
+    "missing_native_libraries": "open",
+    "catalog_closure": false
+  },
+  {
+    "binary": "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+    "name": "zif_array_map",
+    "address": 10870112,
+    "bytes": 200,
+    "ir_statements": 145,
+    "jumpkind": "Ijk_Boring",
+    "source_layout_recovered": false,
+    "status": "entry-block-lifted-no-PHP-summary"
+  },
+  {
+    "binary": "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+    "name": "zif_strlen",
+    "address": 13888576,
+    "bytes": 139,
+    "ir_statements": 133,
+    "jumpkind": "Ijk_Boring",
+    "source_layout_recovered": false,
+    "status": "entry-block-lifted-no-PHP-summary"
+  },
+  {
+    "binary": "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+    "name": "zend_call_function",
+    "address": 14237616,
+    "bytes": 59,
+    "ir_statements": 53,
+    "jumpkind": "Ijk_Boring",
+    "source_layout_recovered": false,
+    "status": "entry-block-lifted-no-PHP-summary"
+  },
+  {
+    "binary": "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+    "name": "_php_stream_free",
+    "address": 12760368,
+    "bytes": 73,
+    "ir_statements": 103,
+    "jumpkind": "Ijk_Boring",
+    "source_layout_recovered": false,
+    "status": "entry-block-lifted-no-PHP-summary"
+  },
+  {
+    "binary": "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+    "load_and_probe_seconds": 4.176914945997851,
+    "missing_native_libraries": "open",
+    "catalog_closure": false
+  }
+]

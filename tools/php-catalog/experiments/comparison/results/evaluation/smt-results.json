@@ -1,0 +1,98 @@
+[
+  {
+    "name": "contradictory-guards",
+    "smtlib": "(declare-const x (_ BitVec 32)) (assert (bvult x #x00000003)) (assert (bvugt x #x00000004))",
+    "expected": "unsat",
+    "exit_code": 0,
+    "stdout": "unsat\n",
+    "stderr": "",
+    "may_prune": true
+  },
+  {
+    "name": "unsigned-overflow",
+    "smtlib": "(assert (= (bvadd #xff #x01) #x00))",
+    "expected": "sat",
+    "exit_code": 0,
+    "stdout": "sat\n",
+    "stderr": "",
+    "may_prune": false
+  },
+  {
+    "name": "signed-comparison",
+    "smtlib": "(assert (bvslt #xff #x01))",
+    "expected": "sat",
+    "exit_code": 0,
+    "stdout": "sat\n",
+    "stderr": "",
+    "may_prune": false
+  },
+  {
+    "name": "unsigned-comparison",
+    "smtlib": "(assert (bvult #xff #x01))",
+    "expected": "unsat",
+    "exit_code": 0,
+    "stdout": "unsat\n",
+    "stderr": "",
+    "may_prune": true
+  },
+  {
+    "name": "sign-extension",
+    "smtlib": "(assert (= ((_ sign_extend 8) #xff) #xffff))",
+    "expected": "sat",
+    "exit_code": 0,
+    "stdout": "sat\n",
+    "stderr": "",
+    "may_prune": false
+  },
+  {
+    "name": "zero-extension",
+    "smtlib": "(assert (= ((_ zero_extend 8) #xff) #x00ff))",
+    "expected": "sat",
+    "exit_code": 0,
+    "stdout": "sat\n",
+    "stderr": "",
+    "may_prune": false
+  },
+  {
+    "name": "pointer-identity",
+    "smtlib": "(declare-sort Region 0) (declare-const a Region) (declare-const b Region) (assert (= a b)) (assert (distinct a b))",
+    "expected": "unsat",
+    "exit_code": 0,
+    "stdout": "unsat\n",
+    "stderr": "",
+    "may_prune": true
+  },
+  {
+    "name": "resource-exhaustion",
+    "smtlib": "(set-option :rlimit 1) (declare-const x (_ BitVec 32)) (assert (= (bvmul x x) #x00000011))",
+    "expected": "unknown",
+    "exit_code": 0,
+    "stdout": "unknown\n",
+    "stderr": "",
+    "may_prune": false
+  },
+  {
+    "name": "unsupported-logic",
+    "smtlib": "(set-logic QF_NOT_A_SUPPORTED_LOGIC) (assert true)",
+    "expected": null,
+    "exit_code": 0,
+    "stdout": "unsupported\n; ignoring unsupported logic QF_NOT_A_SUPPORTED_LOGIC line: 1 position: 1\nsat\n",
+    "stderr": "",
+    "may_prune": false
+  },
+  {
+    "name": "malformed-formula",
+    "smtlib": "(assert (= )",
+    "expected": null,
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "Traceback (most recent call last):\n  File \"/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/smt_worker.py\", line 10, in <module>\n    print(Z3_eval_smtlib2_string(context.ref(), sys.stdin.read()), end='')\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/torres/.cache/php-catalog-evaluation/python/lib/python3.12/site-packages/z3/z3core.py\", line 3780, in Z3_eval_smtlib2_string\n    _elems.Check(a0)\n  File \"/home/torres/.cache/php-catalog-evaluation/python/lib/python3.12/site-packages/z3/z3core.py\", line 1629, in Check\n    raise self.Exception(self.get_error_message(ctx, err))\nz3.z3types.Z3Exception: b'(error \"line 1 column 12: invalid function application, arguments missing\")\\n'\n",
+    "may_prune": false
+  },
+  {
+    "name": "process-failure",
+    "exit_code": 1,
+    "may_prune": false,
+    "path_retained": true
+  }
+]

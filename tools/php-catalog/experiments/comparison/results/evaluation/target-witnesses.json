@@ -1,0 +1,6046 @@
+{
+  "binary_sha256": "4158fb21a2edd308446dd561bdc750c569701119fd84e4617170d3206775ac3a",
+  "uninstrumented_module_sha256": "e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e",
+  "instrumented_module_sha256": "edb1f5693f65b984c829bc9c1829daf88d4c43c6aa6e5abb4defb3fc38b52944",
+  "indirect_sites": 4642,
+  "observed_sites": 529,
+  "targets": [
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 1,
+      "line": 873,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 33,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 2,
+      "line": 879,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 3,
+      "line": 886,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 4,
+      "line": 893,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 5,
+      "line": 900,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 6,
+      "line": 907,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 7,
+      "line": 914,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 8,
+      "line": 921,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 9,
+      "line": 928,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 10,
+      "line": 935,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 11,
+      "line": 942,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 12,
+      "line": 949,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 13,
+      "line": 956,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 32,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 14,
+      "line": 963,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 32,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeInterface",
+      "id": 15,
+      "line": 970,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTime",
+      "id": 16,
+      "line": 997,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 17,
+      "line": 1016,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 56,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 18,
+      "line": 1028,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 53,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 19,
+      "line": 1035,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 53,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 20,
+      "line": 1042,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 61,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 21,
+      "line": 1049,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 57,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 22,
+      "line": 1056,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 57,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 23,
+      "line": 1063,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 60,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 24,
+      "line": 1070,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 62,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 25,
+      "line": 1077,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 64,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeImmutable",
+      "id": 26,
+      "line": 1084,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 27,
+      "line": 1098,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 28,
+      "line": 1103,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 29,
+      "line": 1109,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 30,
+      "line": 1115,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 31,
+      "line": 1121,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 33,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 32,
+      "line": 1127,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 37,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 33,
+      "line": 1133,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 34,
+      "line": 1139,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 35,
+      "line": 1145,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 35,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 36,
+      "line": 1151,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 37,
+      "line": 1157,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 32,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 38,
+      "line": 1163,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 32,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 39,
+      "line": 1169,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 40,
+      "line": 1175,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateTimeZone",
+      "id": 41,
+      "line": 1181,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateInterval",
+      "id": 42,
+      "line": 1200,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DatePeriod",
+      "id": 43,
+      "line": 1218,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 47,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DatePeriod",
+      "id": 44,
+      "line": 1224,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DatePeriod",
+      "id": 45,
+      "line": 1230,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateError",
+      "id": 46,
+      "line": 1295,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateObjectError",
+      "id": 47,
+      "line": 1305,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateRangeError",
+      "id": 48,
+      "line": 1315,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateException",
+      "id": 49,
+      "line": 1325,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateInvalidTimeZoneException",
+      "id": 50,
+      "line": 1335,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateInvalidOperationException",
+      "id": 51,
+      "line": 1345,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateMalformedStringException",
+      "id": 52,
+      "line": 1355,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateMalformedIntervalStringException",
+      "id": 53,
+      "line": 1365,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/date/php_date_arginfo.h",
+      "function": "register_class_DateMalformedPeriodStringException",
+      "id": 54,
+      "line": 1375,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_context.c",
+      "function": "_pcre2_memctl_malloc_8",
+      "id": 83,
+      "line": 90,
+      "targets": [
+        "php_pcre_malloc"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_context.c",
+      "function": "php_pcre2_general_context_create",
+      "id": 84,
+      "line": 121,
+      "targets": [
+        "php_pcre_emalloc",
+        "php_pcre_malloc"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_context.c",
+      "function": "php_pcre2_general_context_free",
+      "id": 89,
+      "line": 287,
+      "targets": [
+        "php_pcre_efree",
+        "php_pcre_free"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_context.c",
+      "function": "php_pcre2_compile_context_free",
+      "id": 90,
+      "line": 295,
+      "targets": [
+        "php_pcre_free"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_context.c",
+      "function": "php_pcre2_match_context_free",
+      "id": 91,
+      "line": 303,
+      "targets": [
+        "php_pcre_free"
+      ]
+    },
+    {
+      "column": 8,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_jit_compile.c",
+      "function": "pcre2_jit_malloc",
+      "id": 99,
+      "line": 76,
+      "targets": [
+        "php_pcre_malloc"
+      ]
+    },
+    {
+      "column": 1,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_jit_compile.c",
+      "function": "pcre2_jit_free",
+      "id": 100,
+      "line": 82,
+      "targets": [
+        "php_pcre_free"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_jit_misc.c",
+      "function": "php_pcre2_jit_stack_free",
+      "id": 106,
+      "line": 196,
+      "targets": [
+        "php_pcre_free"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/pcre/pcre2lib/pcre2_match_data.c",
+      "function": "php_pcre2_match_data_free",
+      "id": 111,
+      "line": 108,
+      "targets": [
+        "php_pcre_free"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/hash/hash.c",
+      "function": "php_hash_register_algo",
+      "id": 147,
+      "line": 119,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/hash/hash_arginfo.h",
+      "function": "register_class_HashContext",
+      "id": 148,
+      "line": 237,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/json/json_arginfo.h",
+      "function": "register_class_JsonSerializable",
+      "id": 205,
+      "line": 89,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/json/json_arginfo.h",
+      "function": "register_class_JsonException",
+      "id": 206,
+      "line": 99,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/lexbor/lexbor/ports/posix/lexbor/core/memory.c",
+      "function": "lexbor_malloc",
+      "id": 468,
+      "line": 17,
+      "targets": [
+        "php_lexbor_malloc"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/lexbor/lexbor/ports/posix/lexbor/core/memory.c",
+      "function": "lexbor_calloc",
+      "id": 470,
+      "line": 29,
+      "targets": [
+        "php_lexbor_calloc"
+      ]
+    },
+    {
+      "column": 5,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/lexbor/lexbor/ports/posix/lexbor/core/memory.c",
+      "function": "lexbor_free",
+      "id": 471,
+      "line": 35,
+      "targets": [
+        "php_lexbor_free"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_Engine",
+      "id": 662,
+      "line": 295,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_CryptoSafeEngine",
+      "id": 663,
+      "line": 305,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_RandomError",
+      "id": 664,
+      "line": 348,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_BrokenRandomEngineError",
+      "id": 665,
+      "line": 358,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_RandomException",
+      "id": 666,
+      "line": 368,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_Engine_Mt19937",
+      "id": 667,
+      "line": 251,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_Engine_PcgOneseq128XslRr64",
+      "id": 669,
+      "line": 262,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_Engine_Xoshiro256StarStar",
+      "id": 670,
+      "line": 273,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_Engine_Secure",
+      "id": 671,
+      "line": 284,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random_arginfo.h",
+      "function": "register_class_Random_Randomizer",
+      "id": 672,
+      "line": 316,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 25,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/random.c",
+      "function": "php_random_range32",
+      "id": 676,
+      "line": 91,
+      "targets": [
+        "generate.6147"
+      ]
+    },
+    {
+      "column": 30,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/random/zend_utils.c",
+      "function": "php_random_bytes_insecure_for_zend",
+      "id": 689,
+      "line": 58,
+      "targets": [
+        "generate.6162"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionException",
+      "id": 690,
+      "line": 1373,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_Reflection",
+      "id": 691,
+      "line": 1383,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_Reflector",
+      "id": 692,
+      "line": 1393,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionFunctionAbstract",
+      "id": 693,
+      "line": 1404,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionFunction",
+      "id": 694,
+      "line": 1419,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionFunction",
+      "id": 695,
+      "line": 1424,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionGenerator",
+      "id": 696,
+      "line": 1443,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionParameter",
+      "id": 697,
+      "line": 1719,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionType",
+      "id": 698,
+      "line": 1754,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionNamedType",
+      "id": 699,
+      "line": 1765,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionUnionType",
+      "id": 700,
+      "line": 1775,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionIntersectionType",
+      "id": 701,
+      "line": 1785,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 702,
+      "line": 1453,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 703,
+      "line": 1458,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 704,
+      "line": 1464,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 705,
+      "line": 1470,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 706,
+      "line": 1476,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 707,
+      "line": 1482,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 37,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionMethod",
+      "id": 708,
+      "line": 1488,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 709,
+      "line": 1511,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 49,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 710,
+      "line": 1517,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 49,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 711,
+      "line": 1523,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 37,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 712,
+      "line": 1529,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 713,
+      "line": 1535,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 61,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 714,
+      "line": 1541,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClass",
+      "id": 715,
+      "line": 1547,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionObject",
+      "id": 716,
+      "line": 1562,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 717,
+      "line": 1589,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 718,
+      "line": 1595,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 719,
+      "line": 1601,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 720,
+      "line": 1607,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 721,
+      "line": 1613,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 722,
+      "line": 1619,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 723,
+      "line": 1625,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 724,
+      "line": 1631,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 43,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 725,
+      "line": 1637,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 726,
+      "line": 1643,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 37,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionProperty",
+      "id": 727,
+      "line": 1649,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClassConstant",
+      "id": 728,
+      "line": 1676,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClassConstant",
+      "id": 729,
+      "line": 1682,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClassConstant",
+      "id": 730,
+      "line": 1688,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClassConstant",
+      "id": 731,
+      "line": 1694,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 37,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionClassConstant",
+      "id": 732,
+      "line": 1700,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionExtension",
+      "id": 733,
+      "line": 1795,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionZendExtension",
+      "id": 734,
+      "line": 1810,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionReference",
+      "id": 735,
+      "line": 1825,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionAttribute",
+      "id": 736,
+      "line": 1835,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionAttribute",
+      "id": 737,
+      "line": 1841,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionEnum",
+      "id": 738,
+      "line": 1856,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionEnumUnitCase",
+      "id": 739,
+      "line": 1866,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionEnumBackedCase",
+      "id": 740,
+      "line": 1876,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionFiber",
+      "id": 741,
+      "line": 1886,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/reflection/php_reflection_arginfo.h",
+      "function": "register_class_ReflectionConstant",
+      "id": 742,
+      "line": 1896,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "zm_startup_session",
+      "id": 765,
+      "line": 2961,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_save_current_state",
+      "id": 769,
+      "line": 539,
+      "targets": [
+        "ps_write_user"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_save_current_state",
+      "id": 770,
+      "line": 564,
+      "targets": [
+        "ps_close_user"
+      ]
+    },
+    {
+      "column": 10,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_encode",
+      "id": 771,
+      "line": 275,
+      "targets": [
+        "ps_srlzr_encode_php"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_initialize",
+      "id": 772,
+      "line": 432,
+      "targets": [
+        "ps_open_user"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_initialize",
+      "id": 773,
+      "line": 447,
+      "targets": [
+        "ps_create_sid_user"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_initialize",
+      "id": 776,
+      "line": 480,
+      "targets": [
+        "ps_read_user"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session.c",
+      "function": "php_session_decode",
+      "id": 780,
+      "line": 294,
+      "targets": [
+        "ps_srlzr_decode_php"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session_arginfo.h",
+      "function": "register_class_SessionHandlerInterface",
+      "id": 785,
+      "line": 238,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session_arginfo.h",
+      "function": "register_class_SessionIdInterface",
+      "id": 786,
+      "line": 248,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session_arginfo.h",
+      "function": "register_class_SessionUpdateTimestampHandlerInterface",
+      "id": 787,
+      "line": 258,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/session/session_arginfo.h",
+      "function": "register_class_SessionHandler",
+      "id": 788,
+      "line": 268,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_ArrayObject",
+      "id": 806,
+      "line": 261,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_ArrayObject",
+      "id": 807,
+      "line": 267,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 43,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_ArrayObject",
+      "id": 808,
+      "line": 273,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_ArrayIterator",
+      "id": 809,
+      "line": 284,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_ArrayIterator",
+      "id": 810,
+      "line": 290,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 43,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_ArrayIterator",
+      "id": 811,
+      "line": 296,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_RecursiveArrayIterator",
+      "id": 812,
+      "line": 307,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 46,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_array_arginfo.h",
+      "function": "register_class_RecursiveArrayIterator",
+      "id": 813,
+      "line": 313,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplFileInfo",
+      "id": 814,
+      "line": 479,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_DirectoryIterator",
+      "id": 817,
+      "line": 495,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 818,
+      "line": 506,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 46,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 819,
+      "line": 511,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 48,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 820,
+      "line": 517,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 48,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 821,
+      "line": 523,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 822,
+      "line": 529,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 823,
+      "line": 535,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 824,
+      "line": 541,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 825,
+      "line": 547,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 826,
+      "line": 553,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 48,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 827,
+      "line": 559,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 828,
+      "line": 565,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 829,
+      "line": 571,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_FilesystemIterator",
+      "id": 830,
+      "line": 577,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_RecursiveDirectoryIterator",
+      "id": 831,
+      "line": 588,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_GlobIterator",
+      "id": 832,
+      "line": 599,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplFileObject",
+      "id": 833,
+      "line": 610,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplFileObject",
+      "id": 834,
+      "line": 616,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplFileObject",
+      "id": 835,
+      "line": 622,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplFileObject",
+      "id": 836,
+      "line": 628,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 37,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplFileObject",
+      "id": 837,
+      "line": 634,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_directory_arginfo.h",
+      "function": "register_class_SplTempFileObject",
+      "id": 838,
+      "line": 645,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplDoublyLinkedList",
+      "id": 839,
+      "line": 153,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplDoublyLinkedList",
+      "id": 840,
+      "line": 159,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplDoublyLinkedList",
+      "id": 841,
+      "line": 165,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 43,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplDoublyLinkedList",
+      "id": 842,
+      "line": 171,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplDoublyLinkedList",
+      "id": 843,
+      "line": 177,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplQueue",
+      "id": 844,
+      "line": 188,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_dllist_arginfo.h",
+      "function": "register_class_SplStack",
+      "id": 845,
+      "line": 198,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_LogicException",
+      "id": 846,
+      "line": 8,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_BadFunctionCallException",
+      "id": 847,
+      "line": 18,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_BadMethodCallException",
+      "id": 848,
+      "line": 28,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_DomainException",
+      "id": 849,
+      "line": 38,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_InvalidArgumentException",
+      "id": 850,
+      "line": 48,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_LengthException",
+      "id": 851,
+      "line": 58,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_OutOfRangeException",
+      "id": 852,
+      "line": 68,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_RuntimeException",
+      "id": 853,
+      "line": 78,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_OutOfBoundsException",
+      "id": 854,
+      "line": 88,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_OverflowException",
+      "id": 855,
+      "line": 98,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_RangeException",
+      "id": 856,
+      "line": 108,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_UnderflowException",
+      "id": 857,
+      "line": 118,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_exceptions_arginfo.h",
+      "function": "register_class_UnexpectedValueException",
+      "id": 858,
+      "line": 128,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_fixedarray_arginfo.h",
+      "function": "register_class_SplFixedArray",
+      "id": 859,
+      "line": 95,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplHeap",
+      "id": 866,
+      "line": 210,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplMinHeap",
+      "id": 867,
+      "line": 221,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplMaxHeap",
+      "id": 868,
+      "line": 231,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplPriorityQueue",
+      "id": 869,
+      "line": 181,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplPriorityQueue",
+      "id": 870,
+      "line": 187,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplPriorityQueue",
+      "id": 871,
+      "line": 193,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_heap_arginfo.h",
+      "function": "register_class_SplPriorityQueue",
+      "id": 872,
+      "line": 199,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveIterator",
+      "id": 917,
+      "line": 639,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_OuterIterator",
+      "id": 918,
+      "line": 685,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveIteratorIterator",
+      "id": 919,
+      "line": 650,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveIteratorIterator",
+      "id": 920,
+      "line": 656,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveIteratorIterator",
+      "id": 921,
+      "line": 662,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveIteratorIterator",
+      "id": 922,
+      "line": 668,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveIteratorIterator",
+      "id": 923,
+      "line": 674,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_IteratorIterator",
+      "id": 926,
+      "line": 696,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_FilterIterator",
+      "id": 927,
+      "line": 707,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveFilterIterator",
+      "id": 928,
+      "line": 717,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CallbackFilterIterator",
+      "id": 929,
+      "line": 618,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveCallbackFilterIterator",
+      "id": 930,
+      "line": 628,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_ParentIterator",
+      "id": 931,
+      "line": 728,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_SeekableIterator",
+      "id": 932,
+      "line": 738,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_LimitIterator",
+      "id": 933,
+      "line": 749,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 934,
+      "line": 759,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 935,
+      "line": 765,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 936,
+      "line": 771,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 937,
+      "line": 777,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 49,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 938,
+      "line": 783,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 47,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 939,
+      "line": 789,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_CachingIterator",
+      "id": 940,
+      "line": 795,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveCachingIterator",
+      "id": 941,
+      "line": 806,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_NoRewindIterator",
+      "id": 942,
+      "line": 817,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_AppendIterator",
+      "id": 943,
+      "line": 827,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_InfiniteIterator",
+      "id": 944,
+      "line": 837,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 945,
+      "line": 847,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 946,
+      "line": 852,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 947,
+      "line": 858,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 34,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 948,
+      "line": 864,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 949,
+      "line": 870,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 950,
+      "line": 876,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 34,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 951,
+      "line": 882,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 36,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RegexIterator",
+      "id": 952,
+      "line": 888,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveRegexIterator",
+      "id": 953,
+      "line": 905,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_EmptyIterator",
+      "id": 954,
+      "line": 607,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 955,
+      "line": 916,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 43,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 956,
+      "line": 921,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 957,
+      "line": 927,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 40,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 958,
+      "line": 933,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 48,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 959,
+      "line": 939,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 960,
+      "line": 945,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 48,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 961,
+      "line": 951,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 962,
+      "line": 957,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_iterators_arginfo.h",
+      "function": "register_class_RecursiveTreeIterator",
+      "id": 963,
+      "line": 963,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_SplObserver",
+      "id": 967,
+      "line": 237,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_SplSubject",
+      "id": 968,
+      "line": 247,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_SplObjectStorage",
+      "id": 969,
+      "line": 257,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_MultipleIterator",
+      "id": 970,
+      "line": 290,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_MultipleIterator",
+      "id": 971,
+      "line": 296,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_MultipleIterator",
+      "id": 972,
+      "line": 302,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_MultipleIterator",
+      "id": 973,
+      "line": 308,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 43,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/spl/spl_observer_arginfo.h",
+      "function": "register_class_MultipleIterator",
+      "id": 974,
+      "line": 314,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/basic_functions_arginfo.h",
+      "function": "register_class___PHP_Incomplete_Class",
+      "id": 1022,
+      "line": 3971,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 86,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/basic_functions_arginfo.h",
+      "function": "register_class___PHP_Incomplete_Class",
+      "id": 1023,
+      "line": 3974,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/basic_functions_arginfo.h",
+      "function": "register_class_AssertionError",
+      "id": 1024,
+      "line": 3985,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/dir_arginfo.h",
+      "function": "register_class_Directory",
+      "id": 1034,
+      "line": 60,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/password.c",
+      "function": "php_password_algo_register",
+      "id": 1062,
+      "line": 41,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/user_filters_arginfo.h",
+      "function": "register_class_php_user_filter",
+      "id": 1088,
+      "line": 42,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/standard/user_filters_arginfo.h",
+      "function": "register_class_StreamBucket",
+      "id": 1089,
+      "line": 70,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_Rfc3986_Uri",
+      "id": 1101,
+      "line": 359,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_WhatWg_Url",
+      "id": 1105,
+      "line": 480,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_UriException",
+      "id": 1106,
+      "line": 318,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_UriError",
+      "id": 1107,
+      "line": 328,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_InvalidUriException",
+      "id": 1108,
+      "line": 338,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_WhatWg_InvalidUrlException",
+      "id": 1109,
+      "line": 372,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri_arginfo.h",
+      "function": "register_class_Uri_WhatWg_UrlValidationError",
+      "id": 1110,
+      "line": 453,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "ext/uri/php_uri.c",
+      "function": "php_uri_parser_register",
+      "id": 1111,
+      "line": 1062,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/main.c",
+      "function": "php_module_startup",
+      "id": 1393,
+      "line": 2335,
+      "targets": [
+        "php_register_internal_extensions"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/output.c",
+      "function": "php_output_op",
+      "id": 1405,
+      "line": 1138,
+      "targets": [
+        "sapi_cli_ub_write"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_ini.c",
+      "function": "php_init_config",
+      "id": 1416,
+      "line": 421,
+      "targets": [
+        "sapi_cli_ini_defaults"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "_php_import_environment_variables",
+      "id": 1425,
+      "line": 54,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_register_variable_ex",
+      "id": 1427,
+      "line": 54,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_startup_auto_globals",
+      "id": 1431,
+      "line": 975,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_startup_auto_globals",
+      "id": 1432,
+      "line": 976,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_startup_auto_globals",
+      "id": 1433,
+      "line": 977,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_startup_auto_globals",
+      "id": 1434,
+      "line": 981,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_auto_globals_create_get",
+      "id": 1435,
+      "line": 802,
+      "targets": [
+        "php_default_treat_data"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_auto_globals_create_cookie",
+      "id": 1437,
+      "line": 836,
+      "targets": [
+        "php_default_treat_data"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_register_server_variables",
+      "id": 1439,
+      "line": 727,
+      "targets": [
+        "sapi_cli_register_variables"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_register_server_variables",
+      "id": 1443,
+      "line": 54,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/php_variables.c",
+      "function": "php_register_server_variables",
+      "id": 1444,
+      "line": 54,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 34,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/SAPI.c",
+      "function": "sapi_activate",
+      "id": 1473,
+      "line": 479,
+      "targets": [
+        "sapi_cli_read_cookies"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/SAPI.c",
+      "function": "sapi_deactivate_module",
+      "id": 1476,
+      "line": 533,
+      "targets": [
+        "sapi_cli_deactivate"
+      ]
+    },
+    {
+      "column": 22,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/SAPI.c",
+      "function": "sapi_header_add_op",
+      "id": 1484,
+      "line": 659,
+      "targets": [
+        "sapi_cli_header_handler"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/SAPI.c",
+      "function": "sapi_send_headers",
+      "id": 1485,
+      "line": 906,
+      "targets": [
+        "sapi_cli_send_headers"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/SAPI.c",
+      "function": "sapi_flush",
+      "id": 1489,
+      "line": 1022,
+      "targets": [
+        "sapi_cli_flush"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/filter.c",
+      "function": "php_stream_filter_register_factory",
+      "id": 1502,
+      "line": 44,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 9,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/streams.c",
+      "function": "_php_stream_free",
+      "id": 1511,
+      "line": 480,
+      "targets": [
+        "php_stdiop_close",
+        "php_userstreamop_close"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/streams.c",
+      "function": "_php_stream_free",
+      "id": 1512,
+      "line": 506,
+      "targets": [
+        "user_wrapper_close"
+      ]
+    },
+    {
+      "column": 15,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/streams.c",
+      "function": "_php_stream_fill_read_buffer",
+      "id": 1520,
+      "line": 693,
+      "targets": [
+        "php_userstreamop_read"
+      ]
+    },
+    {
+      "column": 8,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/streams.c",
+      "function": "php_register_url_stream_wrapper",
+      "id": 1526,
+      "line": 1946,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 13,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/streams.c",
+      "function": "_php_stream_open_wrapper_ex",
+      "id": 1532,
+      "line": 2270,
+      "targets": [
+        "php_stream_url_wrap_php",
+        "user_wrapper_opener"
+      ]
+    },
+    {
+      "column": 21,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "main/streams/transports.c",
+      "function": "php_stream_xport_register",
+      "id": 1535,
+      "line": 30,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 22,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/Optimizer/zend_func_info.c",
+      "function": "zend_func_info_add",
+      "id": 1548,
+      "line": 204,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_alloc.c",
+      "function": "zend_mm_refresh_key",
+      "id": 1555,
+      "line": 2010,
+      "targets": [
+        "php_random_bytes_insecure_for_zend"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_parse_arg_str_weak",
+      "id": 1634,
+      "line": 769,
+      "targets": [
+        "zend_std_cast_object_tostring"
+      ]
+    },
+    {
+      "column": 50,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_is_callable_at_frame",
+      "id": 1639,
+      "line": 4220,
+      "targets": [
+        "zend_closure_get_closure"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "object_init_ex",
+      "id": 1642,
+      "line": 1856,
+      "targets": [
+        "zend_closure_new",
+        "zend_default_exception_new"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "add_property_zval_ex",
+      "id": 1645,
+      "line": 2406,
+      "targets": [
+        "zend_std_write_property"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_startup_module_ex",
+      "id": 1646,
+      "line": 2452,
+      "targets": [
+        "zm_globals_ctor_date",
+        "zm_globals_ctor_json",
+        "zm_globals_ctor_pcre",
+        "zm_globals_ctor_ps",
+        "zm_globals_ctor_random"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_startup_module_ex",
+      "id": 1647,
+      "line": 2458,
+      "targets": [
+        "zm_startup_basic",
+        "zm_startup_core",
+        "zm_startup_date",
+        "zm_startup_hash",
+        "zm_startup_json",
+        "zm_startup_lexbor",
+        "zm_startup_pcre",
+        "zm_startup_random",
+        "zm_startup_reflection",
+        "zm_startup_session",
+        "zm_startup_spl",
+        "zm_startup_uri",
+        "zm_startup_zend_accelerator"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_register_module_ex",
+      "id": 1648,
+      "line": 2652,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_register_functions",
+      "id": 1650,
+      "line": 2996,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 20,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_register_functions",
+      "id": 1651,
+      "line": 3100,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 26,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_register_functions",
+      "id": 1652,
+      "line": 3188,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 27,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_register_functions",
+      "id": 1653,
+      "line": 3203,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 24,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_register_functions",
+      "id": 1654,
+      "line": 2942,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "module_destructor",
+      "id": 1656,
+      "line": 3358,
+      "targets": [
+        "zm_shutdown_basic",
+        "zm_shutdown_date",
+        "zm_shutdown_hash",
+        "zm_shutdown_pcre",
+        "zm_shutdown_random",
+        "zm_shutdown_session",
+        "zm_shutdown_uri",
+        "zm_shutdown_zend_accelerator"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "module_destructor",
+      "id": 1657,
+      "line": 3375,
+      "targets": [
+        "zm_globals_dtor_pcre"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_activate_modules",
+      "id": 1658,
+      "line": 3411,
+      "targets": [
+        "zm_activate_basic",
+        "zm_activate_date",
+        "zm_activate_json",
+        "zm_activate_pcre",
+        "zm_activate_random",
+        "zm_activate_session",
+        "zm_activate_spl",
+        "zm_activate_uri",
+        "zm_activate_zend_accelerator"
+      ]
+    },
+    {
+      "column": 5,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_deactivate_modules",
+      "id": 1660,
+      "line": 3440,
+      "targets": [
+        "zm_deactivate_basic",
+        "zm_deactivate_date",
+        "zm_deactivate_pcre",
+        "zm_deactivate_session",
+        "zm_deactivate_spl"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_post_deactivate_modules",
+      "id": 1662,
+      "line": 3489,
+      "targets": [
+        "accel_post_deactivate",
+        "zm_post_zend_deactivate_date",
+        "zm_post_zend_deactivate_uri"
+      ]
+    },
+    {
+      "column": 19,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "do_register_internal_class",
+      "id": 1663,
+      "line": 3520,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_declare_typed_property",
+      "id": 1665,
+      "line": 4597,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 24,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_declare_typed_property",
+      "id": 1666,
+      "line": 4614,
+      "targets": [
+        "zend_new_interned_string_permanent",
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 24,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_API.c",
+      "function": "zend_declare_typed_property",
+      "id": 1667,
+      "line": 2942,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1682,
+      "line": 93,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 41,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1683,
+      "line": 98,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1684,
+      "line": 104,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1685,
+      "line": 110,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1686,
+      "line": 116,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 50,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1687,
+      "line": 122,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 45,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1688,
+      "line": 128,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 44,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1689,
+      "line": 134,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 39,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1690,
+      "line": 140,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 42,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1691,
+      "line": 146,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 60,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Attribute",
+      "id": 1692,
+      "line": 156,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_ReturnTypeWillChange",
+      "id": 1693,
+      "line": 168,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 71,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_ReturnTypeWillChange",
+      "id": 1694,
+      "line": 171,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_AllowDynamicProperties",
+      "id": 1695,
+      "line": 183,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 73,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_AllowDynamicProperties",
+      "id": 1696,
+      "line": 186,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_SensitiveParameter",
+      "id": 1697,
+      "line": 198,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 69,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_SensitiveParameter",
+      "id": 1698,
+      "line": 201,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_SensitiveParameterValue",
+      "id": 1699,
+      "line": 213,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Override",
+      "id": 1700,
+      "line": 227,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 59,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Override",
+      "id": 1701,
+      "line": 230,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Deprecated",
+      "id": 1702,
+      "line": 242,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 61,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_Deprecated",
+      "id": 1703,
+      "line": 253,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_NoDiscard",
+      "id": 1704,
+      "line": 265,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 60,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_NoDiscard",
+      "id": 1705,
+      "line": 272,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_DelayedTargetValidation",
+      "id": 1706,
+      "line": 284,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 74,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_attributes_arginfo.h",
+      "function": "register_class_DelayedTargetValidation",
+      "id": 1707,
+      "line": 287,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_builtin_functions_arginfo.h",
+      "function": "register_class_stdClass",
+      "id": 1708,
+      "line": 387,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 72,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_builtin_functions_arginfo.h",
+      "function": "register_class_stdClass",
+      "id": 1709,
+      "line": 390,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_closures_arginfo.h",
+      "function": "register_class_Closure",
+      "id": 1720,
+      "line": 51,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 16,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zval_make_interned_string",
+      "id": 1721,
+      "line": 566,
+      "targets": [
+        "zend_new_interned_string_permanent",
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 25,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_is_auto_global",
+      "id": 1724,
+      "line": 1989,
+      "targets": [
+        "php_auto_globals_create_server"
+      ]
+    },
+    {
+      "column": 25,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_activate_auto_globals",
+      "id": 1725,
+      "line": 2022,
+      "targets": [
+        "php_auto_globals_create_cookie",
+        "php_auto_globals_create_files",
+        "php_auto_globals_create_get",
+        "php_auto_globals_create_post"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_begin_method_decl",
+      "id": 1726,
+      "line": 8309,
+      "targets": [
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 10,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_compile_class_decl",
+      "id": 1728,
+      "line": 9268,
+      "targets": [
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_compile_class_decl",
+      "id": 1729,
+      "line": 9292,
+      "targets": [
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_try_ct_eval_binary_op",
+      "id": 1733,
+      "line": 10031,
+      "targets": [
+        "is_identical_function"
+      ]
+    },
+    {
+      "column": 9,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_generate_anon_class_name",
+      "id": 1736,
+      "line": 9215,
+      "targets": [
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 9,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_compile.c",
+      "function": "zend_build_runtime_definition_key",
+      "id": 1737,
+      "line": 180,
+      "targets": [
+        "zend_new_interned_string_request"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_constants.c",
+      "function": "zend_register_long_constant",
+      "id": 1739,
+      "line": 165,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_constants.c",
+      "function": "zend_register_bool_constant",
+      "id": 1740,
+      "line": 155,
+      "targets": [
+        "zend_string_init_interned_permanent",
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_constants.c",
+      "function": "zend_register_null_constant",
+      "id": 1741,
+      "line": 145,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_constants.c",
+      "function": "zend_register_stringl_constant",
+      "id": 1743,
+      "line": 185,
+      "targets": [
+        "zend_string_init_interned_permanent",
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_constants.c",
+      "function": "zend_register_stringl_constant",
+      "id": 1744,
+      "line": 187,
+      "targets": [
+        "zend_string_init_interned_permanent",
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 11,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_constants.c",
+      "function": "zend_register_double_constant",
+      "id": 1745,
+      "line": 176,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_enum_arginfo.h",
+      "function": "register_class_UnitEnum",
+      "id": 1747,
+      "line": 31,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_enum_arginfo.h",
+      "function": "register_class_BackedEnum",
+      "id": 1748,
+      "line": 41,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_enum.c",
+      "function": "zend_register_internal_enum",
+      "id": 1749,
+      "line": 510,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 26,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_enum.c",
+      "function": "zend_enum_add_case_cstr",
+      "id": 1750,
+      "line": 611,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions.c",
+      "function": "zend_register_default_exception",
+      "id": 1755,
+      "line": 850,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions.c",
+      "function": "zend_register_default_exception",
+      "id": 1756,
+      "line": 852,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_Throwable",
+      "id": 1757,
+      "line": 149,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_Exception",
+      "id": 1758,
+      "line": 160,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_ErrorException",
+      "id": 1759,
+      "line": 200,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_Error",
+      "id": 1760,
+      "line": 214,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_CompileError",
+      "id": 1761,
+      "line": 254,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_ParseError",
+      "id": 1762,
+      "line": 264,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_TypeError",
+      "id": 1763,
+      "line": 274,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_ArgumentCountError",
+      "id": 1764,
+      "line": 284,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_ValueError",
+      "id": 1765,
+      "line": 294,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_ArithmeticError",
+      "id": 1766,
+      "line": 304,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_DivisionByZeroError",
+      "id": 1767,
+      "line": 314,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_UnhandledMatchError",
+      "id": 1768,
+      "line": 324,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_exceptions_arginfo.h",
+      "function": "register_class_RequestParseBodyException",
+      "id": 1769,
+      "line": 334,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_execute_API.c",
+      "function": "zend_call_function",
+      "id": 1772,
+      "line": 1010,
+      "targets": [
+        "execute_ex"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_execute_API.c",
+      "function": "zend_call_function",
+      "id": 1773,
+      "line": 1023,
+      "targets": [
+        "zif_session_register_shutdown",
+        "zif_session_write_close"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "execute_ex",
+      "id": 1783,
+      "line": 116190,
+      "targets": [
+        "ZEND_ASSIGN_SPEC_CV_CONST_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_ASSIGN_SPEC_CV_VAR_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_BIND_STATIC_SPEC_CV_TAILCALL_HANDLER",
+        "ZEND_DECLARE_CLASS_SPEC_CONST_TAILCALL_HANDLER",
+        "ZEND_FETCH_OBJ_R_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+        "ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+        "ZEND_FETCH_STATIC_PROP_W_SPEC_TAILCALL_HANDLER",
+        "ZEND_FRAMELESS_ICALL_2_SPEC_TAILCALL_HANDLER",
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER",
+        "ZEND_PRE_INC_OBJ_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+        "ZEND_RECV_SPEC_UNUSED_TAILCALL_HANDLER",
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "zend_execute",
+      "id": 1785,
+      "line": 121902,
+      "targets": [
+        "execute_ex"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ADD_SPEC_TMPVARCV_CONST_TAILCALL_HANDLER",
+      "id": 1793,
+      "line": 68989,
+      "targets": [
+        "ZEND_RETURN_SPEC_TMP_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_BOOL_NOT_SPEC_CV_TAILCALL_HANDLER",
+      "id": 1900,
+      "line": 96716,
+      "targets": [
+        "ZEND_JMPZ_SPEC_TMPVAR_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_IS_IDENTICAL_SPEC_TMP_CONST_TAILCALL_HANDLER",
+      "id": 1908,
+      "line": 76520,
+      "targets": [
+        "ZEND_JMPZ_EX_SPEC_TMPVAR_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_IS_IDENTICAL_SPEC_VAR_CONST_TAILCALL_HANDLER",
+      "id": 1910,
+      "line": 79522,
+      "targets": [
+        "ZEND_JMPZ_EX_SPEC_TMPVAR_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_IS_IDENTICAL_SPEC_CV_CONST_TAILCALL_HANDLER",
+      "id": 1913,
+      "line": 98611,
+      "targets": [
+        "ZEND_BOOL_SPEC_TMPVAR_TAILCALL_HANDLER",
+        "ZEND_JMPZ_EX_SPEC_TMPVAR_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_SPEC_CV_CONST_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 2111,
+      "line": 101149,
+      "targets": [
+        "ZEND_ASSIGN_SPEC_CV_CONST_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_ASSIGN_SPEC_CV_CV_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_DECLARE_ANON_CLASS_SPEC_TAILCALL_HANDLER",
+        "ZEND_INIT_ARRAY_SPEC_CV_UNUSED_TAILCALL_HANDLER",
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER",
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_SPEC_CV_TMP_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 2113,
+      "line": 106179,
+      "targets": [
+        "ZEND_ASSIGN_SPEC_CV_CV_RETVAL_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_SPEC_CV_VAR_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 2115,
+      "line": 106271,
+      "targets": [
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_SPEC_CV_CV_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 2117,
+      "line": 110797,
+      "targets": [
+        "ZEND_ASSIGN_DIM_SPEC_CV_CONST_OP_DATA_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_CONST_TAILCALL_HANDLER",
+      "id": 2127,
+      "line": 85552,
+      "targets": [
+        "ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_OP_DATA_CONST_TAILCALL_HANDLER",
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_DIM_SPEC_CV_CONST_OP_DATA_CONST_TAILCALL_HANDLER",
+      "id": 2135,
+      "line": 100650,
+      "targets": [
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_DIM_SPEC_CV_UNUSED_OP_DATA_CONST_TAILCALL_HANDLER",
+      "id": 2143,
+      "line": 106735,
+      "targets": [
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER",
+        "ZEND_NEW_SPEC_CONST_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_DIM_SPEC_CV_UNUSED_OP_DATA_CV_TAILCALL_HANDLER",
+      "id": 2146,
+      "line": 107204,
+      "targets": [
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 10,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_OP_DATA_CONST_TAILCALL_HANDLER",
+      "id": 2175,
+      "line": 90564,
+      "targets": [
+        "zend_std_write_property"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_OP_DATA_CONST_TAILCALL_HANDLER",
+      "id": 2176,
+      "line": 90585,
+      "targets": [
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ASSIGN_OBJ_REF_SPEC_UNUSED_CONST_OP_DATA_CV_TAILCALL_HANDLER",
+      "id": 2306,
+      "line": 91132,
+      "targets": [
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_JMPZ_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 2343,
+      "line": 71086,
+      "targets": [
+        "ZEND_ASSIGN_SPEC_CV_CONST_RETVAL_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_JMPZ_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 2344,
+      "line": 71095,
+      "targets": [
+        "ZEND_ASSIGN_DIM_SPEC_CV_UNUSED_OP_DATA_CV_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_JMPZ_EX_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 2369,
+      "line": 71155,
+      "targets": [
+        "ZEND_IS_IDENTICAL_SPEC_CV_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_BOOL_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 2424,
+      "line": 71309,
+      "targets": [
+        "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_FCALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 2464,
+      "line": 57795,
+      "targets": [
+        "zim_Exception___construct"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_FCALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 2467,
+      "line": 57844,
+      "targets": [
+        "ZEND_THROW_SPEC_TMPVAR_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 2478,
+      "line": 59835,
+      "targets": [
+        "ZEND_DECLARE_LAMBDA_FUNCTION_SPEC_CONST_TAILCALL_HANDLER",
+        "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_FETCH_STATIC_PROP_R_SPEC_TAILCALL_HANDLER",
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER",
+        "ZEND_IS_IDENTICAL_SPEC_CV_CONST_TAILCALL_HANDLER",
+        "ZEND_NEW_SPEC_CONST_UNUSED_TAILCALL_HANDLER",
+        "ZEND_SEND_REF_SPEC_CV_UNUSED_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_CONST_UNUSED_TAILCALL_HANDLER",
+        "ZEND_SEND_VAR_SPEC_CV_UNUSED_TAILCALL_HANDLER",
+        "ZEND_STRLEN_SPEC_CV_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 2479,
+      "line": 60446,
+      "targets": [
+        "zend_leave_helper_SPEC_TAILCALL"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_RETURN_SPEC_TMP_TAILCALL_HANDLER",
+      "id": 2481,
+      "line": 75957,
+      "targets": [
+        "zend_leave_helper_SPEC_TAILCALL"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_RECV_SPEC_UNUSED_TAILCALL_HANDLER",
+      "id": 2484,
+      "line": 59972,
+      "targets": [
+        "ZEND_ASSIGN_OBJ_REF_SPEC_UNUSED_CONST_OP_DATA_CV_TAILCALL_HANDLER",
+        "ZEND_FETCH_STATIC_PROP_W_SPEC_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_RECV_SPEC_UNUSED_TAILCALL_HANDLER",
+      "id": 2485,
+      "line": 59975,
+      "targets": [
+        "ZEND_BIND_GLOBAL_SPEC_CV_CONST_TAILCALL_HANDLER",
+        "ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+        "ZEND_FETCH_STATIC_PROP_W_SPEC_TAILCALL_HANDLER",
+        "ZEND_RECV_SPEC_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_SEND_VAL_SPEC_CONST_UNUSED_TAILCALL_HANDLER",
+      "id": 2491,
+      "line": 66730,
+      "targets": [
+        "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_DO_ICALL_SPEC_RETVAL_USED_TAILCALL_HANDLER",
+        "ZEND_DO_UCALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_CONST_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER",
+      "id": 2494,
+      "line": 74656,
+      "targets": [
+        "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_CONST_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_SEND_VAR_EX_SPEC_CV_UNUSED_QUICK_TAILCALL_HANDLER",
+      "id": 2509,
+      "line": 107455,
+      "targets": [
+        "ZEND_DO_FCALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_SEND_REF_SPEC_CV_UNUSED_TAILCALL_HANDLER",
+      "id": 2517,
+      "line": 107350,
+      "targets": [
+        "ZEND_DECLARE_LAMBDA_FUNCTION_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 16,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_NEW_SPEC_CONST_UNUSED_TAILCALL_HANDLER",
+      "id": 2520,
+      "line": 66844,
+      "targets": [
+        "zend_std_get_constructor"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_NEW_SPEC_CONST_UNUSED_TAILCALL_HANDLER",
+      "id": 2521,
+      "line": 66849,
+      "targets": [
+        "ZEND_COUNT_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_NEW_SPEC_CONST_UNUSED_TAILCALL_HANDLER",
+      "id": 2523,
+      "line": 66875,
+      "targets": [
+        "ZEND_SEND_VAL_EX_SPEC_CONST_UNUSED_QUICK_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 16,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_NEW_SPEC_VAR_UNUSED_TAILCALL_HANDLER",
+      "id": 2525,
+      "line": 86688,
+      "targets": [
+        "zend_std_get_constructor"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_NEW_SPEC_VAR_UNUSED_TAILCALL_HANDLER",
+      "id": 2528,
+      "line": 86719,
+      "targets": [
+        "ZEND_SEND_VAR_EX_SPEC_CV_UNUSED_QUICK_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ADD_ARRAY_ELEMENT_SPEC_CV_UNUSED_TAILCALL_HANDLER",
+      "id": 2570,
+      "line": 107596,
+      "targets": [
+        "ZEND_ASSIGN_SPEC_CV_TMP_RETVAL_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FETCH_OBJ_R_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+      "id": 2695,
+      "line": 90199,
+      "targets": [
+        "zend_std_read_property"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FETCH_OBJ_R_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+      "id": 2696,
+      "line": 90225,
+      "targets": [
+        "ZEND_VERIFY_RETURN_TYPE_SPEC_TMP_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 8,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_execute.c",
+      "function": "ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+      "id": 2732,
+      "line": 3614,
+      "targets": [
+        "zend_std_get_property_ptr_ptr"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+      "id": 2734,
+      "line": 90252,
+      "targets": [
+        "ZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_CATCH_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 2905,
+      "line": 60842,
+      "targets": [
+        "ZEND_ASSIGN_DIM_SPEC_CV_UNUSED_OP_DATA_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_THROW_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 2909,
+      "line": 71283,
+      "targets": [
+        "ZEND_HANDLE_EXCEPTION_SPEC_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_SEND_VAL_EX_SPEC_CONST_UNUSED_QUICK_TAILCALL_HANDLER",
+      "id": 3096,
+      "line": 66806,
+      "targets": [
+        "ZEND_DO_FCALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_SEND_VAR_SPEC_CV_UNUSED_TAILCALL_HANDLER",
+      "id": 3111,
+      "line": 107319,
+      "targets": [
+        "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_CONST_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_STRLEN_SPEC_CV_TAILCALL_HANDLER",
+      "id": 3140,
+      "line": 98136,
+      "targets": [
+        "ZEND_IS_IDENTICAL_SPEC_TMP_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_VERIFY_RETURN_TYPE_SPEC_TMP_UNUSED_TAILCALL_HANDLER",
+      "id": 3150,
+      "line": 77540,
+      "targets": [
+        "ZEND_RETURN_SPEC_TMP_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 3221,
+      "line": 57128,
+      "targets": [
+        "zif_array_map",
+        "zif_array_walk",
+        "zif_fclose",
+        "zif_session_set_save_handler",
+        "zif_session_start",
+        "zif_session_write_close",
+        "zif_stream_wrapper_register"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 3222,
+      "line": 57165,
+      "targets": [
+        "ZEND_HANDLE_EXCEPTION_SPEC_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_ICALL_SPEC_RETVAL_UNUSED_TAILCALL_HANDLER",
+      "id": 3223,
+      "line": 57169,
+      "targets": [
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_ICALL_SPEC_RETVAL_USED_TAILCALL_HANDLER",
+      "id": 3224,
+      "line": 57194,
+      "targets": [
+        "zif_array_map",
+        "zif_extension_loaded",
+        "zif_fopen",
+        "zif_fread"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DO_ICALL_SPEC_RETVAL_USED_TAILCALL_HANDLER",
+      "id": 3226,
+      "line": 57235,
+      "targets": [
+        "ZEND_ASSIGN_SPEC_CV_VAR_RETVAL_UNUSED_TAILCALL_HANDLER",
+        "ZEND_IS_IDENTICAL_SPEC_VAR_CONST_TAILCALL_HANDLER",
+        "ZEND_JMPZ_SPEC_TMPVAR_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_PRE_INC_OBJ_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+      "id": 3245,
+      "line": 89967,
+      "targets": [
+        "zend_std_get_property_ptr_ptr"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_PRE_INC_OBJ_SPEC_UNUSED_CONST_TAILCALL_HANDLER",
+      "id": 3246,
+      "line": 89988,
+      "targets": [
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ECHO_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 3275,
+      "line": 60209,
+      "targets": [
+        "php_output_write"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ECHO_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 3277,
+      "line": 60223,
+      "targets": [
+        "ZEND_RETURN_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ECHO_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 3278,
+      "line": 71060,
+      "targets": [
+        "php_output_write"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_ECHO_SPEC_TMPVAR_TAILCALL_HANDLER",
+      "id": 3280,
+      "line": 71074,
+      "targets": [
+        "ZEND_ECHO_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DECLARE_LAMBDA_FUNCTION_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 3297,
+      "line": 61571,
+      "targets": [
+        "ZEND_BIND_LEXICAL_SPEC_TMP_CV_TAILCALL_HANDLER",
+        "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DECLARE_CLASS_SPEC_CONST_TAILCALL_HANDLER",
+      "id": 3300,
+      "line": 61544,
+      "targets": [
+        "ZEND_INIT_FCALL_SPEC_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_DECLARE_ANON_CLASS_SPEC_TAILCALL_HANDLER",
+      "id": 3304,
+      "line": 58996,
+      "targets": [
+        "ZEND_NEW_SPEC_VAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_HANDLE_EXCEPTION_SPEC_TAILCALL_HANDLER",
+      "id": 3335,
+      "line": 59099,
+      "targets": [
+        "ZEND_CATCH_SPEC_CONST_TAILCALL_HANDLER",
+        "zend_leave_helper_SPEC_TAILCALL"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_BIND_GLOBAL_SPEC_CV_CONST_TAILCALL_HANDLER",
+      "id": 3447,
+      "line": 102391,
+      "targets": [
+        "ZEND_BOOL_NOT_SPEC_CV_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FETCH_STATIC_PROP_R_SPEC_TAILCALL_HANDLER",
+      "id": 3468,
+      "line": 56696,
+      "targets": [
+        "ZEND_IS_IDENTICAL_SPEC_TMP_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FETCH_STATIC_PROP_W_SPEC_TAILCALL_HANDLER",
+      "id": 3469,
+      "line": 56702,
+      "targets": [
+        "ZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_BIND_LEXICAL_SPEC_TMP_CV_TAILCALL_HANDLER",
+      "id": 3534,
+      "line": 78359,
+      "targets": [
+        "ZEND_SEND_VAL_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_BIND_STATIC_SPEC_CV_TAILCALL_HANDLER",
+      "id": 3535,
+      "line": 98290,
+      "targets": [
+        "ZEND_ASSIGN_DIM_SPEC_CV_UNUSED_OP_DATA_CONST_TAILCALL_HANDLER",
+        "ZEND_PRE_INC_SPEC_CV_RETVAL_UNUSED_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_COUNT_SPEC_TMPVAR_UNUSED_TAILCALL_HANDLER",
+      "id": 3585,
+      "line": 74839,
+      "targets": [
+        "ZEND_IS_IDENTICAL_SPEC_TMP_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FRAMELESS_ICALL_2_SPEC_TAILCALL_HANDLER",
+      "id": 3653,
+      "line": 59534,
+      "targets": [
+        "zflf_implode_2"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "ZEND_FRAMELESS_ICALL_2_SPEC_TAILCALL_HANDLER",
+      "id": 3654,
+      "line": 59543,
+      "targets": [
+        "ZEND_ECHO_SPEC_TMPVAR_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "zend_leave_helper_SPEC_TAILCALL",
+      "id": 3827,
+      "line": 57069,
+      "targets": [
+        "ZEND_HALT_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "zend_leave_helper_SPEC_TAILCALL",
+      "id": 3828,
+      "line": 57094,
+      "targets": [
+        "ZEND_HALT_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_vm_execute.h",
+      "function": "zend_pre_inc_helper_SPEC_CV_TAILCALL",
+      "id": 3874,
+      "line": 96749,
+      "targets": [
+        "ZEND_ADD_SPEC_TMPVARCV_CONST_TAILCALL_HANDLER"
+      ]
+    },
+    {
+      "column": 8,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_execute.c",
+      "function": "zend_assign_to_property_reference_this_const",
+      "id": 3882,
+      "line": 3614,
+      "targets": [
+        "zend_std_get_property_ptr_ptr"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_extensions.c",
+      "function": "zend_extension_startup",
+      "id": 4193,
+      "line": 196,
+      "targets": [
+        "accel_startup"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_fibers_arginfo.h",
+      "function": "register_class_Fiber",
+      "id": 4199,
+      "line": 77,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_fibers_arginfo.h",
+      "function": "register_class_FiberError",
+      "id": 4200,
+      "line": 87,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 38,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_gc.c",
+      "function": "gc_init",
+      "id": 4210,
+      "line": 2362,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_generators_arginfo.h",
+      "function": "register_class_Generator",
+      "id": 4217,
+      "line": 57,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_generators_arginfo.h",
+      "function": "register_class_ClosedGeneratorException",
+      "id": 4218,
+      "line": 68,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 5,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_update",
+      "id": 4221,
+      "line": 872,
+      "targets": [
+        "zval_ptr_dtor"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_destroy",
+      "id": 4244,
+      "line": 1747,
+      "targets": [
+        "attr_free"
+      ]
+    },
+    {
+      "column": 8,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_destroy",
+      "id": 4245,
+      "line": 1752,
+      "targets": [
+        "list_destructors_dtor"
+      ]
+    },
+    {
+      "column": 8,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_destroy",
+      "id": 4246,
+      "line": 1769,
+      "targets": [
+        "_str_dtor",
+        "auto_global_dtor",
+        "free_zend_constant",
+        "zend_function_dtor",
+        "zval_ptr_dtor"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_destroy",
+      "id": 4248,
+      "line": 1780,
+      "targets": [
+        "_type_dtor",
+        "config_zval_dtor",
+        "free_internal_attribute",
+        "tag_dtor",
+        "user_shutdown_function_dtor",
+        "zend_function_dtor"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_graceful_reverse_destroy",
+      "id": 4258,
+      "line": 1467,
+      "targets": [
+        "list_entry_destructor"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_graceful_reverse_destroy",
+      "id": 4259,
+      "line": 1493,
+      "targets": [
+        "destroy_zend_class",
+        "module_destructor_zval"
+      ]
+    },
+    {
+      "column": 13,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_apply",
+      "id": 4262,
+      "line": 2091,
+      "targets": [
+        "user_shutdown_function_call",
+        "zend_startup_module_zval"
+      ]
+    },
+    {
+      "column": 13,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_apply_with_argument",
+      "id": 4266,
+      "line": 2129,
+      "targets": [
+        "zend_remove_ini_entries"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_apply_with_argument",
+      "id": 4267,
+      "line": 1493,
+      "targets": [
+        "free_ini_entry"
+      ]
+    },
+    {
+      "column": 13,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_reverse_apply",
+      "id": 4274,
+      "line": 2232,
+      "targets": [
+        "zval_call_destructor"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_reverse_apply",
+      "id": 4275,
+      "line": 1493,
+      "targets": [
+        "zval_ptr_dtor"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_sort_internal",
+      "id": 4288,
+      "line": 3030,
+      "targets": [
+        "zend_sort_modules"
+      ]
+    },
+    {
+      "column": 13,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_hash.c",
+      "function": "zend_hash_compare",
+      "id": 4289,
+      "line": 3196,
+      "targets": [
+        "hash_zval_identical_function"
+      ]
+    },
+    {
+      "column": 83,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_inheritance.c",
+      "function": "do_implement_interface",
+      "id": 4310,
+      "line": 1588,
+      "targets": [
+        "implement_date_interface_handler",
+        "php_json_implement_json_serializable",
+        "zend_implement_aggregate",
+        "zend_implement_arrayaccess",
+        "zend_implement_backed_enum",
+        "zend_implement_iterator",
+        "zend_implement_serializable",
+        "zend_implement_throwable",
+        "zend_implement_traversable",
+        "zend_implement_unit_enum"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini_parser.y",
+      "function": "ini_parse",
+      "id": 4316,
+      "line": 377,
+      "targets": [
+        "php_ini_parser_cb"
+      ]
+    },
+    {
+      "column": 14,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_restore_ini_entry_cb",
+      "id": 4320,
+      "line": 61,
+      "targets": [
+        "OnUpdateSaveHandler",
+        "OnUpdateSessionBool",
+        "OnUpdateSessionStr"
+      ]
+    },
+    {
+      "column": 13,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_register_ini_entries_ex",
+      "id": 4321,
+      "line": 229,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 25,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_register_ini_entries_ex",
+      "id": 4322,
+      "line": 255,
+      "targets": [
+        "OnUpdateBool",
+        "OnUpdateDisplayErrors",
+        "OnUpdateLong",
+        "OnUpdateTimeout"
+      ]
+    },
+    {
+      "column": 16,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_register_ini_entries_ex",
+      "id": 4323,
+      "line": 259,
+      "targets": [
+        "zend_new_interned_string_permanent"
+      ]
+    },
+    {
+      "column": 5,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_register_ini_entries_ex",
+      "id": 4324,
+      "line": 263,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 5,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_register_ini_entries_ex",
+      "id": 4325,
+      "line": 266,
+      "targets": [
+        "OnChangeBrowscap",
+        "OnChangeCallback",
+        "OnChangeMailForceExtra",
+        "OnChangeMaxMemoryLimit",
+        "OnChangeMemoryLimit",
+        "OnEnable",
+        "OnSetExceptionStringParamMaxLen",
+        "OnSetFacility",
+        "OnSetLogFilter",
+        "OnSetPrecision",
+        "OnSetSerializePrecision",
+        "OnUpdateActiveBool",
+        "OnUpdateAssertions",
+        "OnUpdateAutoDetectLineEndings",
+        "OnUpdateBacktrackLimit",
+        "OnUpdateBailBool",
+        "OnUpdateBaseDir",
+        "OnUpdateBool",
+        "OnUpdateCookieLifetime",
+        "OnUpdateCounter",
+        "OnUpdateDefaultCharset",
+        "OnUpdateDefaultMimeTye",
+        "OnUpdateErrorLog",
+        "OnUpdateErrorReporting",
+        "OnUpdateExceptionBool",
+        "OnUpdateFiberStackSize",
+        "OnUpdateFileCache",
+        "OnUpdateGCEnabled",
+        "OnUpdateInputEncoding",
+        "OnUpdateInternalEncoding",
+        "OnUpdateInternedStringsBuffer",
+        "OnUpdateJit",
+        "OnUpdateJit.4896",
+        "OnUpdateJitDebug",
+        "OnUpdateLong",
+        "OnUpdateLongGEZero",
+        "OnUpdateMailCrLfMode",
+        "OnUpdateMailLog",
+        "OnUpdateMaxAcceleratedFiles",
+        "OnUpdateMaxAllowedStackSize",
+        "OnUpdateMaxTraceLength",
+        "OnUpdateMaxWastedPercentage",
+        "OnUpdateMemoryConsumption",
+        "OnUpdateName",
+        "OnUpdateOutputEncoding",
+        "OnUpdateOutputHosts",
+        "OnUpdateOutputTags",
+        "OnUpdateReal",
+        "OnUpdateRecursionLimit",
+        "OnUpdateRefererCheck",
+        "OnUpdateReportMemleaks",
+        "OnUpdateReservedStackSize",
+        "OnUpdateRfc1867Freq",
+        "OnUpdateSaveDir",
+        "OnUpdateSaveHandler",
+        "OnUpdateScriptEncoding",
+        "OnUpdateSerializer",
+        "OnUpdateSessionBool",
+        "OnUpdateSessionDivisor",
+        "OnUpdateSessionGcProbability",
+        "OnUpdateSessionHosts",
+        "OnUpdateSessionLong",
+        "OnUpdateSessionStr",
+        "OnUpdateSessionTags",
+        "OnUpdateSidBits",
+        "OnUpdateSidLength",
+        "OnUpdateStr",
+        "OnUpdateStrNotEmpty",
+        "OnUpdateString",
+        "OnUpdateStringUnempty",
+        "OnUpdateUnrollC",
+        "OnUpdateUnrollL",
+        "OnUpdateUnrollR",
+        "OnUpdateUseOnlyCookies",
+        "OnUpdateUseTransSid",
+        "OnUpdateWarningBool",
+        "OnUpdate_date_timezone"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_ini.c",
+      "function": "zend_alter_ini_entry_ex",
+      "id": 4326,
+      "line": 402,
+      "targets": [
+        "OnUpdateSaveHandler",
+        "OnUpdateSessionBool",
+        "OnUpdateSessionStr"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_Traversable",
+      "id": 4343,
+      "line": 124,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_IteratorAggregate",
+      "id": 4344,
+      "line": 134,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_Iterator",
+      "id": 4345,
+      "line": 145,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_Serializable",
+      "id": 4346,
+      "line": 166,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_ArrayAccess",
+      "id": 4347,
+      "line": 156,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_Countable",
+      "id": 4348,
+      "line": 176,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_Stringable",
+      "id": 4349,
+      "line": 186,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_interfaces_arginfo.h",
+      "function": "register_class_InternalIterator",
+      "id": 4350,
+      "line": 196,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_iterators.c",
+      "function": "zend_register_iterator_wrapper",
+      "id": 4351,
+      "line": 60,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_list.c",
+      "function": "zend_resource_dtor",
+      "id": 4370,
+      "line": 73,
+      "targets": [
+        "file_context_dtor",
+        "stream_resource_regular_dtor",
+        "stream_wrapper_dtor"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_llist.c",
+      "function": "zend_llist_del_element",
+      "id": 4372,
+      "line": 93,
+      "targets": [
+        "accelerator_remove_cb",
+        "zend_compare_file_handles"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_llist.c",
+      "function": "zend_llist_del_element",
+      "id": 4373,
+      "line": 94,
+      "targets": [
+        "zend_file_handle_dtor"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_llist.c",
+      "function": "zend_llist_destroy",
+      "id": 4374,
+      "line": 109,
+      "targets": [
+        "zend_extension_dtor"
+      ]
+    },
+    {
+      "column": 7,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_llist.c",
+      "function": "zend_llist_apply_with_del",
+      "id": 4376,
+      "line": 170,
+      "targets": [
+        "zend_extension_startup"
+      ]
+    },
+    {
+      "column": 3,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_llist.c",
+      "function": "zend_llist_apply",
+      "id": 4378,
+      "line": 183,
+      "targets": [
+        "zend_extension_activator",
+        "zend_extension_deactivator",
+        "zend_extension_shutdown"
+      ]
+    },
+    {
+      "column": 4,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_objects_API.c",
+      "function": "zend_objects_store_del",
+      "id": 4408,
+      "line": 196,
+      "targets": [
+        "zend_closure_free_storage",
+        "zend_object_std_dtor"
+      ]
+    },
+    {
+      "column": 9,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_stream.c",
+      "function": "zend_stream_fsize",
+      "id": 4529,
+      "line": 60,
+      "targets": [
+        "zend_stream_stdio_fsizer"
+      ]
+    },
+    {
+      "column": 9,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_stream.c",
+      "function": "zend_stream_read",
+      "id": 4530,
+      "line": 124,
+      "targets": [
+        "zend_stream_stdio_reader"
+      ]
+    },
+    {
+      "column": 5,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_stream.c",
+      "function": "zend_file_handle_dtor",
+      "id": 4532,
+      "line": 224,
+      "targets": [
+        "zend_stream_stdio_closer"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_variables.c",
+      "function": "rc_dtor_func",
+      "id": 4533,
+      "line": 57,
+      "targets": [
+        "_efree",
+        "zend_array_destroy",
+        "zend_objects_store_del",
+        "zend_reference_destroy"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_weakrefs_arginfo.h",
+      "function": "register_class_WeakReference",
+      "id": 4536,
+      "line": 68,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend_weakrefs_arginfo.h",
+      "function": "register_class_WeakMap",
+      "id": 4537,
+      "line": 78,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend.c",
+      "function": "zend_vstrpprintf",
+      "id": 4539,
+      "line": 340,
+      "targets": [
+        "php_printf_to_smart_str"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend.c",
+      "function": "zend_startup",
+      "id": 4546,
+      "line": 1059,
+      "targets": [
+        "zend_string_init_interned_permanent"
+      ]
+    },
+    {
+      "column": 10,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend.c",
+      "function": "zend_get_configuration_directive",
+      "id": 4555,
+      "line": 1408,
+      "targets": [
+        "php_get_configuration_directive_for_zend"
+      ]
+    },
+    {
+      "column": 28,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "Zend/zend.c",
+      "function": "zend_execute_script",
+      "id": 4556,
+      "line": 1970,
+      "targets": [
+        "compile_file"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "main",
+      "id": 4558,
+      "line": 1329,
+      "targets": [
+        "php_cli_startup"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "cli_register_file_handles",
+      "id": 4573,
+      "line": 551,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "cli_register_file_handles",
+      "id": 4574,
+      "line": 555,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 12,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "cli_register_file_handles",
+      "id": 4575,
+      "line": 559,
+      "targets": [
+        "zend_string_init_interned_request"
+      ]
+    },
+    {
+      "column": 2,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "sapi_cli_register_variables",
+      "id": 4577,
+      "line": 324,
+      "targets": [
+        "_php_import_environment_variables"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "sapi_cli_register_variables",
+      "id": 4578,
+      "line": 328,
+      "targets": [
+        "php_default_input_filter"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "sapi_cli_register_variables",
+      "id": 4579,
+      "line": 331,
+      "targets": [
+        "php_default_input_filter"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "sapi_cli_register_variables",
+      "id": 4580,
+      "line": 336,
+      "targets": [
+        "php_default_input_filter"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "sapi_cli_register_variables",
+      "id": 4581,
+      "line": 339,
+      "targets": [
+        "php_default_input_filter"
+      ]
+    },
+    {
+      "column": 6,
+      "directory": "/tmp/php-catalog-comparison/php-src",
+      "file": "sapi/cli/php_cli.c",
+      "function": "sapi_cli_register_variables",
+      "id": 4582,
+      "line": 344,
+      "targets": [
+        "php_default_input_filter"
+      ]
+    }
+  ],
+  "evidence": "positive witnesses; unobserved sites remain open"
+}

@@ -1,0 +1,14 @@
+{
+  "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685308-i685726.scope",
+  "memory_max_bytes": 10737418240,
+  "swap_max_bytes": 0,
+  "aggregate_hard_limit_enforced": true,
+  "command": [
+    "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+    "-dfs",
+    "-query=funptr",
+    "-stat",
+    "-print-query-pts",
+    "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli-promoted.bc"
+  ]
+}

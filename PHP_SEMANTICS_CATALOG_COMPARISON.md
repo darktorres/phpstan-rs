@@ -2,15 +2,21 @@
 
 Measured on October 8, 2026. Decision record for §2.3 of `PHP_SEMANTICS_CATALOG_PLAN.md`.
 
+**Extended evaluation record:** [the full-evaluation findings](PHP_SEMANTICS_CATALOG_EVALUATION.md)
+adds the actual minimal CLI link, enforcing cgroup runs, an SVF layout adaptation,
+and native target instrumentation. Both stock and adapted SVF fail the whole-link
+10 GiB gate, so the successful slice timings below do not establish profile
+feasibility. Full Phase F remains OPEN.
+
 ## Decision
 
 Select **LLVM execution IR paired with Clang AST/type/layout metadata** for the first Clang-built profile. Clang AST/CFG remains the metadata and comparison surface. Its configured CFG failed a required C++ exceptional-cleanup case, so it cannot be the authoritative execution graph without additional lowering and validation.
 
-**Keep SVF as the preferred infrastructure reuse experiment for pointer/call-target prerequisites, with two required adaptations: coverage-aware unknown boundaries and compact array/layout storage. Do not adopt stock SVF as the catalog's semantic authority, and do not replace its pointer machinery with a new custom solver merely because the old prototype exhausted memory.** The small PHP workloads ran comfortably; the reduced array case exposed a specific initialization weakness that can be isolated before deciding whether adaptation is worthwhile.
+**Do not select stock or layout-only adapted SVF as the whole-profile pointer prerequisite:** both were killed by the enforced 10 GiB cgroup gate on the actual configured PHP CLI link. The adaptation does reduce isolated array-layout costs, but it did not fix full-link feasibility or the nested/copy target misses. SVF remains a bounded-reduction research candidate only; F03/F06 must compare an auditable reduced reuse path against the regional candidate before any production solver is selected.
 
 The regional Zend/PHP state, ordered behavior graphs, parameterized summaries, and their validator remain project-specific. Reusing a pointer solver does not implement those semantics. F03/F06 must compare the adapted reuse path against the regional candidate on actual closed summaries before final solver acceptance. This comparison selects the initial producer and narrows the solver work; **the full Phase F gate remains OPEN**.
 
-GCC GIMPLE is a credible future producer for actual GCC profiles. CIR and binary lifting are not initial production dependencies. Native compiler identity remains part of coverage; Clang replay of GCC source does not establish compiler equivalence.
+A GCC-built CLI and full GIMPLE/CFG/EH command campaign were feasible under the resource cap, but 505 of 523 C units emitted GIMPLE/CFG/EH dumps; 18 successful invocations were data-only or empty and had no defined functions to dump. No GIMPLE importer or semantic analyzer was evaluated. GCC is a credible producer candidate, not yet a catalog profile. CIR-enabled Clang emitted output for only 44/523 PHP C units (8.4%); all four targeted fixtures failed, and 204 of the 479 failed PHP commands ended in compiler crashes. CIR is not a viable producer for this locked profile. Native compiler identity remains part of coverage; Clang replay of GCC source does not establish compiler equivalence.
 
 ## Locked workload and method
 
@@ -64,7 +70,7 @@ LLVM includes destruction on the Linux landing-pad path and on the Windows clean
 
 Source CFG could be repaired using additional exception/lifetime lowering, but that would recreate behavior already emitted by the compiler and add another correctness obligation. Maximum churn favors the compiler's execution graph plus source metadata here.
 
-CIR flags are recognized, but every attempted import reports `action unknown not compiled in` in the installed 21.1.8 build. This establishes local unavailability, not failure of all CIR revisions. A different CIR-enabled toolchain would need its own exception/ABI capability comparison. [CIR build requirements](https://llvm.github.io/clangir/GettingStarted/build-install.html)
+In the initial LLVM/Clang build without CIR enabled, CIR flags were recognized but each import reported `action unknown not compiled in`. The extended evaluation then built the combined CIR-enabled toolchain: the actual campaign emitted CIR for only 44/523 C units and failed all four cleanup/dispatch fixtures, so this pinned CIR configuration cannot cover the locked profile. A different CIR revision would need its own feature and exception/ABI comparison. [CIR build requirements](https://llvm.github.io/clangir/GettingStarted/build-install.html)
 
 ## Framework results
 
@@ -136,7 +142,7 @@ The Windows exception fixture imports, but no Windows runtime/profile is verifie
 
 1. Retain LLVM plus metadata as the selected initial producer. Complete actual link capture and the Zend abstraction bridge before treating source imports as semantic coverage.
 2. Audit closed native capsules and unknown boundaries first. An incomplete PHP link unit or unmodeled native write must never supply closed negative facts.
-3. Prototype compact SVF array/layout storage and coverage-aware boundary modeling before duplicating its pointer machinery. Measure initialization as well as query work; preserve fallback evidence. A maintained adaptation and its dependency/license terms are part of the reuse cost.
+3. Restrict SVF array/layout and boundary-modeling work to reduced, discriminating fixtures until a reduced configuration passes resource and target-coverage gates. Both stock and compact-layout variants already fail the actual whole-link 10 GiB gate. Measure initialization as well as query work; preserve fallback evidence. A maintained adaptation and its dependency/license terms are part of the reuse cost.
 4. Keep one regional ordered semantic engine. Pointer results are a subordinate service; they cannot independently narrow returns, erase exceptions, or override observable transfers.
 5. Compare adapted SVF-assisted summaries against the regional candidate on actual PHP graphs, including callback results, mutation, pending-exception cleanup, retention, post-fixpoints, and whole-profile resource limits. Select the production solver only after that gate.
 

@@ -2,6 +2,13 @@
 
 Status: DESIGN with measured native representation/framework experiments. The production feature and full Phase F gate remain unimplemented. See [the comparison decision record](PHP_SEMANTICS_CATALOG_COMPARISON.md).
 
+The [extended evaluation](PHP_SEMANTICS_CATALOG_EVALUATION.md) is complete at the
+compiler/framework campaign level. Stock and compact-layout SVF both hit the
+enforced 10 GiB limit on the actual minimal CLI link. Layout adaptation alone
+does not satisfy the reuse gate; copy/initializer misses and coverage-aware
+native capsules need investigation before further full-profile retries. CIR
+emission succeeded for only 44/523 C units. No Phase F task is DONE.
+
 This replaces the earlier outline and the catalog architecture in `PROFILE_DRILL_PIWIGO_20G.md`. The optimization ledger's scheduling remains unchanged: implementation of the deferred catalog is a separate project after O3 unless the user changes that order. The task sequence in §15 is this feature's implementation order, not a continuation of the optimization ledger.
 
 ## 1. Goal, boundaries, and decisions
@@ -155,10 +162,10 @@ Phase F ends with a decision record and updated implementation details. The comp
 Measured findings and implementation consequences:
 
 - Six PHP 8.5.4 translation units import through LLVM, AST/CFG, and GIMPLE; selected runtime traces agree between actual TAILCALL and explicitly configured CALL builds. These are import/witness results, not closed catalog graphs.
-- SVF DDA completes the tested PHP array/invocation prerequisites below 210 MiB, but initializes Andersen/value-flow graphs before solving demands. Low budgets fall back to Andersen and must retain that dependency/precision reason.
+- SVF DDA completes selected PHP array/invocation translation-unit tests below 210 MiB, but initializes Andersen/value-flow graphs before solving demands. Low budgets fall back to Andersen and must retain that dependency/precision reason. On the full actual minimal CLI link, both stock and compact-layout variants are killed at the enforced 10 GiB limit.
 - An unmodeled external write yields an incorrect exhaustive callback target if consumed without a coverage gate. Supplying the external body repairs the result; the blackhole option alone does not. Unknown bodies/models must widen and havoc affected domains before any exclusion is accepted.
-- A 64 MiB static byte buffer produces a constant pointer graph but about 2 GiB RSS in stock SVF because type/layout tables expand per element. Prototype symbolic/sparse layouts before adopting that implementation or building equivalent custom infrastructure. The reduced test does not establish whole-program resource failure.
-- The preferred reuse experiment is a compact, coverage-aware SVF pointer service subordinate to the regional ordered semantic engine. It cannot independently certify PHP effects/returns/throws. Compare it against the regional candidate on closed PHP summaries before final production solver selection.
+- A 64 MiB static byte buffer produces a constant pointer graph but about 2 GiB RSS in stock SVF because type/layout tables expand per element. Compact layouts address this isolated cost, but both layouts fail the full-link resource gate and both tested modes miss targets in nested/copy fixtures. Continue only with reduced, discriminating SVF experiments before considering any production assistance.
+- SVF is a bounded reuse candidate, not the preferred production helper: it must first pass a reduced resource/coverage gate. Any pointer service remains subordinate to the regional ordered semantic engine and cannot independently certify PHP effects/returns/throws. Compare an audited configuration against the regional candidate on closed PHP summaries before final production solver selection.
 - Phase F remains OPEN: no checker-backed BehaviorGraph, native/PHP semantic closure, complete profile, or kernel aggregate-memory acceptance has been established by these probes.
 
 ## 3. Reproducible builds and coverage profiles
@@ -1060,4 +1067,4 @@ Future php-src/dependency updates repeat fetch/build/import/analyze/validate/pub
 - Acquire exact source releases from the official inventory: [PHP releases](https://www.php.net/releases/).
 - Fixed-point approximation and its relation to concrete semantics inform the abstract-domain and post-fixpoint obligations: [Cousot and Cousot, abstract interpretation](https://www.di.ens.fr/~cousot/COUSOTpapers/POPL77.shtml). The particular schema, validator, and phase sequence here are engineering proposals, not results established by that paper.
 
-The measured comparison selects LLVM plus Clang metadata for the initial producer. Phase F still selects and accepts the production pointer/summary kernel, with compact, coverage-aware SVF assistance preferred for reuse experiments alongside the regional candidate. Clang CFG's tested unwind gap prevents using it as the initial execution authority. The shared observable contract and PHP flow architecture remain independent of helper selection; the final implementation has one authoritative semantic arrangement.
+The measured comparison selects LLVM plus Clang metadata for the initial producer. Phase F still selects and accepts the production pointer/summary kernel. Stock and layout-only adapted SVF both failed the enforced 10 GiB full-profile memory gate and showed unresolved copy/layout misses; retain SVF only as a reduced research candidate, not a preferred production helper. CIR emission covered 44/523 PHP C objects and failed every targeted fixture. GCC GIMPLE commands covered the full configured C inventory, but 18 data-only/empty objects had no functions to dump, and no semantic importer was evaluated. Clang CFG's tested unwind gap prevents using it as the initial execution authority. The shared observable contract and PHP flow architecture remain independent of helper selection; the final implementation has one authoritative semantic arrangement.

@@ -1,0 +1,1248 @@
+[
+  {
+    "name": "cbmc-contracts",
+    "elapsed_seconds": 0.214,
+    "sampled_group_peak_bytes": 27934720,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 16652,
+    "user_seconds": 0.1,
+    "system_seconds": 0.06,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p684964-i696929.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+        "--unwinding-assertions",
+        "--bounds-check",
+        "--pointer-check",
+        "--json-ui",
+        "--unwind",
+        "4"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 22835200,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "cbmc-invalid-composition",
+    "elapsed_seconds": 0.2123,
+    "sampled_group_peak_bytes": 30834688,
+    "exit_code": 10,
+    "stopped": null,
+    "max_rss_kib": 17668,
+    "user_seconds": 0.12,
+    "system_seconds": 0.04,
+    "exit_status": 10,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p684977-i685663.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c",
+        "--unwinding-assertions",
+        "--bounds-check",
+        "--pointer-check",
+        "--json-ui",
+        "--unwind",
+        "4",
+        "-DINVALID_COMPOSITION"
+      ],
+      "exit_code": 10,
+      "memory_peak_bytes": 13438976,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+      "systemd_messages": [
+        "Started run-p684977-i685663.scope - [systemd-run] /usr/bin/python3 /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/worker.py /home/torres/.cache/php-catalog-evaluation/campaign/cbmc-invalid-composition.cgroup.json /home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/contracts.c --unwinding-assertions --bounds-check --pointer-check --json-ui --unwind 4 -DINVALID_COMPOSITION."
+      ],
+      "kernel_oom_kill": false
+    }
+  },
+  {
+    "name": "cbmc-low-budget",
+    "elapsed_seconds": 0.1241,
+    "sampled_group_peak_bytes": 14831616,
+    "exit_code": 10,
+    "stopped": null,
+    "max_rss_kib": 14076,
+    "user_seconds": 0.05,
+    "system_seconds": 0.02,
+    "exit_status": 10,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p684990-i696933.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c",
+        "--unwinding-assertions",
+        "--bounds-check",
+        "--pointer-check",
+        "--json-ui",
+        "--unwind",
+        "2"
+      ],
+      "exit_code": 10,
+      "memory_peak_bytes": 11915264,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+      "systemd_messages": [
+        "Started run-p684990-i696933.scope - [systemd-run] /usr/bin/python3 /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/worker.py /home/torres/.cache/php-catalog-evaluation/campaign/cbmc-low-budget.cgroup.json /home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/loop_contract.c --unwinding-assertions --bounds-check --pointer-check --json-ui --unwind 2."
+      ],
+      "kernel_oom_kill": false
+    }
+  },
+  {
+    "name": "smt",
+    "elapsed_seconds": 1.2449,
+    "sampled_group_peak_bytes": 75153408,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 62248,
+    "user_seconds": 0.83,
+    "system_seconds": 0.32,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685000-i685667.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/python/bin/python",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/smt_cases.py",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/smt-results.json"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 94060544,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout-build-clang-21",
+    "elapsed_seconds": 0.1635,
+    "sampled_group_peak_bytes": 169861120,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 96456,
+    "user_seconds": 0.07,
+    "system_seconds": 0.04,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685013-i675112.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-no-pie",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/layout_cases.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 22319104,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout-runtime-clang-21",
+    "elapsed_seconds": 0.0828,
+    "sampled_group_peak_bytes": 1708032,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 12940,
+    "user_seconds": 0.03,
+    "system_seconds": 0.0,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685018-i685672.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 6864896,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout-build-gcc",
+    "elapsed_seconds": 0.1218,
+    "sampled_group_peak_bytes": 14630912,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 25396,
+    "user_seconds": 0.04,
+    "system_seconds": 0.03,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685021-i685673.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "gcc",
+        "-O0",
+        "-g",
+        "-no-pie",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/layout_cases.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout-gcc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 13225984,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout-runtime-gcc",
+    "elapsed_seconds": 0.0825,
+    "sampled_group_peak_bytes": 1642496,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 13016,
+    "user_seconds": 0.02,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685028-i678827.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout-gcc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 6860800,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "binary",
+    "elapsed_seconds": 5.938,
+    "sampled_group_peak_bytes": 164798464,
+    "exit_code": 1,
+    "stopped": null,
+    "max_rss_kib": 146536,
+    "user_seconds": 4.34,
+    "system_seconds": 0.61,
+    "exit_status": 1,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685031-i689544.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/python/bin/python",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/binary_cases.py",
+        "--fixture",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21",
+        "--php",
+        "/tmp/php-catalog-comparison/php-src/sapi/cli/php",
+        "--output",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/binary-results.json"
+      ],
+      "exit_code": 1,
+      "memory_peak_bytes": 268812288,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+      "systemd_messages": [
+        "Started run-p685031-i689544.scope - [systemd-run] /usr/bin/python3 /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/worker.py /home/torres/.cache/php-catalog-evaluation/campaign/binary.cgroup.json /home/torres/.cache/php-catalog-evaluation/python/bin/python /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/binary_cases.py --fixture /home/torres/.cache/php-catalog-evaluation/campaign/layout-clang-21 --php /tmp/php-catalog-comparison/php-src/sapi/cli/php --output /home/torres/.cache/php-catalog-evaluation/campaign/binary-results.json.",
+        "run-p685031-i689544.scope: Consumed 4.957s CPU time over 5.911s wall clock time, 256.3M memory peak."
+      ],
+      "kernel_oom_kill": false
+    }
+  },
+  {
+    "name": "compact-compile",
+    "elapsed_seconds": 15.8978,
+    "sampled_group_peak_bytes": 698347520,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 667360,
+    "user_seconds": 14.92,
+    "system_seconds": 0.75,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685036-i675114.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/usr/bin/clang++-21",
+        "-DEXPERIMENTAL_KEY_INSTRUCTIONS",
+        "-DLLVM_BUILD_STATIC",
+        "-DSVF_INSTALL_EXTAPI_BC=\"/tmp/php-catalog-comparison/svf-build/lib/extapi.bc\"",
+        "-D_GNU_SOURCE",
+        "-D__STDC_CONSTANT_MACROS",
+        "-D__STDC_FORMAT_MACROS",
+        "-D__STDC_LIMIT_MACROS",
+        "-I/tmp/php-catalog-comparison/SVF/svf-llvm/include",
+        "-I/tmp/php-catalog-comparison/svf-build",
+        "-I/tmp/php-catalog-comparison/svf-build/include",
+        "-I/tmp/php-catalog-comparison/svf-build/include/SVF",
+        "-I/tmp/php-catalog-comparison/SVF/svf/include",
+        "-isystem",
+        "/usr/lib/llvm-21/include",
+        "-isystem",
+        "/tmp/php-catalog-comparison/deps/usr/include",
+        "-O3",
+        "-DNDEBUG",
+        "-std=gnu++17",
+        "-fPIC",
+        "-MD",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/LLVMModule.cpp.o",
+        "-c",
+        "/home/torres/.cache/php-catalog-evaluation/svf-compact/svf-llvm/lib/LLVMModule.cpp"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 602062848,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "compact-archive",
+    "elapsed_seconds": 0.0925,
+    "sampled_group_peak_bytes": 14970880,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 56432,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685112-i685692.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "llvm-ar-21",
+        "r",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/libSvfLLVM.a",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/LLVMModule.cpp.o"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11833344,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "compact-link",
+    "elapsed_seconds": 3.4197,
+    "sampled_group_peak_bytes": 416698368,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 342536,
+    "user_seconds": 1.81,
+    "system_seconds": 1.36,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685115-i693704.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/usr/bin/clang++-21",
+        "-O3",
+        "-DNDEBUG",
+        "svf-llvm/tools/DDA/CMakeFiles/dvf.dir/dda.cpp.o",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-L/usr/lib/llvm-21/lib",
+        "-L/tmp/php-catalog-comparison/svf-build",
+        "-L/tmp/php-catalog-comparison/svf-build/lib",
+        "-Wl,-rpath,/usr/lib/llvm-21/lib:/tmp/php-catalog-comparison/svf-build:/tmp/php-catalog-comparison/svf-build/lib:/tmp/php-catalog-comparison/deps/usr/lib/x86_64-linux-gnu:",
+        "lib/libSvfCore.a",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/libSvfLLVM.a",
+        "lib/libSvfCore.a",
+        "/tmp/php-catalog-comparison/deps/usr/lib/x86_64-linux-gnu/libz3.so",
+        "/usr/lib/llvm-21/lib/libLLVMPasses.a",
+        "/usr/lib/llvm-21/lib/libLLVMCFGuard.a",
+        "/usr/lib/llvm-21/lib/libLLVMGlobalISel.a",
+        "/usr/lib/llvm-21/lib/libLLVMSelectionDAG.a",
+        "/usr/lib/llvm-21/lib/libLLVMCodeGen.a",
+        "/usr/lib/llvm-21/lib/libLLVMTarget.a",
+        "/usr/lib/llvm-21/lib/libLLVMCGData.a",
+        "/usr/lib/llvm-21/lib/libLLVMCodeGenTypes.a",
+        "/usr/lib/llvm-21/lib/libLLVMCoroutines.a",
+        "/usr/lib/llvm-21/lib/libLLVMipo.a",
+        "/usr/lib/llvm-21/lib/libLLVMBitWriter.a",
+        "/usr/lib/llvm-21/lib/libLLVMInstrumentation.a",
+        "/usr/lib/llvm-21/lib/libLLVMLinker.a",
+        "/usr/lib/llvm-21/lib/libLLVMFrontendOpenMP.a",
+        "/usr/lib/llvm-21/lib/libLLVMFrontendOffloading.a",
+        "/usr/lib/llvm-21/lib/libLLVMObjectYAML.a",
+        "/usr/lib/llvm-21/lib/libLLVMFrontendAtomic.a",
+        "/usr/lib/llvm-21/lib/libLLVMFrontendDirective.a",
+        "/usr/lib/llvm-21/lib/libLLVMVectorize.a",
+        "/usr/lib/llvm-21/lib/libLLVMSandboxIR.a",
+        "/usr/lib/llvm-21/lib/libLLVMScalarOpts.a",
+        "/usr/lib/llvm-21/lib/libLLVMInstCombine.a",
+        "/usr/lib/llvm-21/lib/libLLVMAggressiveInstCombine.a",
+        "/usr/lib/llvm-21/lib/libLLVMHipStdPar.a",
+        "/usr/lib/llvm-21/lib/libLLVMIRPrinter.a",
+        "/usr/lib/llvm-21/lib/libLLVMObjCARCOpts.a",
+        "/usr/lib/llvm-21/lib/libLLVMTransformUtils.a",
+        "/usr/lib/llvm-21/lib/libLLVMAnalysis.a",
+        "/usr/lib/llvm-21/lib/libLLVMProfileData.a",
+        "/usr/lib/llvm-21/lib/libLLVMSymbolize.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoGSYM.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoPDB.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoCodeView.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoMSF.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoBTF.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoDWARF.a",
+        "/usr/lib/llvm-21/lib/libLLVMObject.a",
+        "/usr/lib/llvm-21/lib/libLLVMIRReader.a",
+        "/usr/lib/llvm-21/lib/libLLVMAsmParser.a",
+        "/usr/lib/llvm-21/lib/libLLVMBitReader.a",
+        "/usr/lib/llvm-21/lib/libLLVMMCParser.a",
+        "/usr/lib/llvm-21/lib/libLLVMMC.a",
+        "/usr/lib/llvm-21/lib/libLLVMTextAPI.a",
+        "/usr/lib/llvm-21/lib/libLLVMDebugInfoDWARFLowLevel.a",
+        "/usr/lib/llvm-21/lib/libLLVMCore.a",
+        "/usr/lib/llvm-21/lib/libLLVMBinaryFormat.a",
+        "/usr/lib/llvm-21/lib/libLLVMRemarks.a",
+        "/usr/lib/llvm-21/lib/libLLVMBitstreamReader.a",
+        "/usr/lib/llvm-21/lib/libLLVMTargetParser.a",
+        "/usr/lib/llvm-21/lib/libLLVMSupport.a",
+        "/usr/lib/llvm-21/lib/libLLVMDemangle.a",
+        "-lrt",
+        "-ldl",
+        "-lm",
+        "/usr/lib/x86_64-linux-gnu/libz.so",
+        "/usr/lib/x86_64-linux-gnu/libzstd.so"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 489627648,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "dispatch-emit",
+    "elapsed_seconds": 0.1299,
+    "sampled_group_peak_bytes": 14946304,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92824,
+    "user_seconds": 0.04,
+    "system_seconds": 0.03,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685223-i689561.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dispatch.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14061568,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "dispatch-promote",
+    "elapsed_seconds": 0.0944,
+    "sampled_group_peak_bytes": 14888960,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 62044,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685226-i689562.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dispatch.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dispatch-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 12083200,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "dispatch-stock",
+    "elapsed_seconds": 0.1386,
+    "sampled_group_peak_bytes": 14700544,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 29160,
+    "user_seconds": 0.04,
+    "system_seconds": 0.03,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685229-i696970.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dispatch-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11689984,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "dispatch-compact",
+    "elapsed_seconds": 0.0905,
+    "sampled_group_peak_bytes": 14868480,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 30964,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685232-i675138.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dispatch-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9990144,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "external-emit",
+    "elapsed_seconds": 0.1226,
+    "sampled_group_peak_bytes": 14880768,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 90580,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685235-i696971.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/external.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/external.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14061568,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "external-promote",
+    "elapsed_seconds": 0.0815,
+    "sampled_group_peak_bytes": 14946304,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 61736,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685238-i675139.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/external.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/external-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11821056,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "external-stock",
+    "elapsed_seconds": 0.0844,
+    "sampled_group_peak_bytes": 14942208,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 26648,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685241-i700517.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/external-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 8945664,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "external-compact",
+    "elapsed_seconds": 0.0832,
+    "sampled_group_peak_bytes": 14831616,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 29384,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685244-i700518.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/external-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 8941568,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout_cases-emit",
+    "elapsed_seconds": 0.1237,
+    "sampled_group_peak_bytes": 14880768,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92748,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685247-i700519.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/layout_cases.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout_cases.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14057472,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout_cases-promote",
+    "elapsed_seconds": 0.081,
+    "sampled_group_peak_bytes": 14831616,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 61932,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685250-i700520.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout_cases.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout_cases-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11829248,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout_cases-stock",
+    "elapsed_seconds": 0.0862,
+    "sampled_group_peak_bytes": 14864384,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 27360,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685253-i700522.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/tmp/php-catalog-comparison/svf-build/bin/dvf",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout_cases-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9486336,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "layout_cases-compact",
+    "elapsed_seconds": 0.0842,
+    "sampled_group_peak_bytes": 14807040,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 30512,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685256-i685719.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/layout_cases-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9216000,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-64-emit",
+    "elapsed_seconds": 0.1227,
+    "sampled_group_peak_bytes": 14946304,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92900,
+    "user_seconds": 0.05,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685259-i685720.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-DPAYLOAD_BYTES=64",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-64.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14454784,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-64-promote",
+    "elapsed_seconds": 0.0829,
+    "sampled_group_peak_bytes": 14753792,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 62032,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685262-i689565.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-64.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-64-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11567104,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-64-compact",
+    "elapsed_seconds": 0.0837,
+    "sampled_group_peak_bytes": 14811136,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 31356,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685265-i689566.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-64-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9728000,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-65536-emit",
+    "elapsed_seconds": 0.1221,
+    "sampled_group_peak_bytes": 14696448,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92864,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685268-i696973.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-DPAYLOAD_BYTES=65536",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-65536.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14462976,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-65536-promote",
+    "elapsed_seconds": 0.0918,
+    "sampled_group_peak_bytes": 14934016,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 62116,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685271-i700525.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-65536.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-65536-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11563008,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-65536-compact",
+    "elapsed_seconds": 0.0849,
+    "sampled_group_peak_bytes": 14942208,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 31312,
+    "user_seconds": 0.04,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685278-i700528.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-65536-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9736192,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-16777216-emit",
+    "elapsed_seconds": 0.1327,
+    "sampled_group_peak_bytes": 14811136,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92880,
+    "user_seconds": 0.06,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685281-i700529.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-DPAYLOAD_BYTES=16777216",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-16777216.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14462976,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-16777216-promote",
+    "elapsed_seconds": 0.093,
+    "sampled_group_peak_bytes": 14929920,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 62024,
+    "user_seconds": 0.03,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685284-i700530.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-16777216.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-16777216-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11579392,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-16777216-compact",
+    "elapsed_seconds": 0.0854,
+    "sampled_group_peak_bytes": 14888960,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 30660,
+    "user_seconds": 0.05,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685287-i681659.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-16777216-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9732096,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-67108864-emit",
+    "elapsed_seconds": 0.1287,
+    "sampled_group_peak_bytes": 14942208,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92692,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685290-i675145.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-DPAYLOAD_BYTES=67108864",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-67108864.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14721024,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-67108864-promote",
+    "elapsed_seconds": 0.1389,
+    "sampled_group_peak_bytes": 14970880,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 62088,
+    "user_seconds": 0.06,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685293-i696976.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-67108864.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-67108864-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11571200,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-67108864-compact",
+    "elapsed_seconds": 0.0917,
+    "sampled_group_peak_bytes": 14782464,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 31504,
+    "user_seconds": 0.05,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685296-i696977.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-67108864-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9736192,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-268435456-emit",
+    "elapsed_seconds": 0.1315,
+    "sampled_group_peak_bytes": 15011840,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 92916,
+    "user_seconds": 0.05,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685299-i696979.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "clang-21",
+        "-O0",
+        "-g",
+        "-Xclang",
+        "-disable-O0-optnone",
+        "-DPAYLOAD_BYTES=268435456",
+        "-emit-llvm",
+        "-c",
+        "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/dispatch.c",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-268435456.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 14462976,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-268435456-promote",
+    "elapsed_seconds": 0.1281,
+    "sampled_group_peak_bytes": 14929920,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 61940,
+    "user_seconds": 0.04,
+    "system_seconds": 0.02,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685302-i689573.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "opt-21",
+        "-passes=mem2reg",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-268435456.bc",
+        "-o",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-268435456-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 11571200,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "growth-268435456-compact",
+    "elapsed_seconds": 0.1385,
+    "sampled_group_peak_bytes": 14815232,
+    "exit_code": 0,
+    "stopped": null,
+    "max_rss_kib": 31136,
+    "user_seconds": 0.05,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685305-i700533.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/campaign/growth-268435456-promoted.bc"
+      ],
+      "exit_code": 0,
+      "memory_peak_bytes": 9744384,
+      "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "whole-compact-dda",
+    "elapsed_seconds": 150.4158,
+    "sampled_group_peak_bytes": 10749624320,
+    "exit_code": 143,
+    "stopped": null,
+    "max_rss_kib": 12908,
+    "user_seconds": 0.02,
+    "system_seconds": 0.01,
+    "exit_status": 0,
+    "resource_proof": {
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685308-i685726.scope",
+      "memory_max_bytes": 10737418240,
+      "swap_max_bytes": 0,
+      "aggregate_hard_limit_enforced": true,
+      "command": [
+        "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+        "-dfs",
+        "-query=funptr",
+        "-stat",
+        "-print-query-pts",
+        "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli-promoted.bc"
+      ],
+      "systemd_messages": [
+        "Started run-p685308-i685726.scope - [systemd-run] /usr/bin/python3 /home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/worker.py /home/torres/.cache/php-catalog-evaluation/campaign/whole-compact-dda.cgroup.json /home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact -dfs -query=funptr -stat -print-query-pts /home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli-promoted.bc.",
+        "run-p685308-i685726.scope: The kernel OOM killer killed some processes in this unit.",
+        "run-p685308-i685726.scope: Failed with result 'oom-kill'.",
+        "run-p685308-i685726.scope: Consumed 2min 15.701s CPU time over 2min 31.310s wall clock time, 10G memory peak."
+      ],
+      "kernel_oom_kill": true
+    }
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "checks": [
+    "Python syntax",
+    "JSON/compressed measurements",
+    "525 link objects / 523 C",
+    "both kernel OOM records",
+    "4642 sites / 529 observed / 307 targets",
+    "13 instrumented runtime sentinels",
+    "CBMC expected pass/fail outcomes",
+    "local report links"
+  ],
+  "semantic_acceptance": "OPEN"
+}
