@@ -215,7 +215,9 @@ enum Keys {
         index: Range<usize>,
         names: syntax::name::CacheNameTable,
     },
-    Built(Vec<Name>),
+    /// The names, sorted, with a hash index over them: a power of two of
+    /// places, each the position of a name plus one, or zero when free.
+    Built { names: Vec<Name>, index: Box<[u32]> },
 }
 
 /// The hash a stored table's index files a name under: of its key, which is
@@ -282,7 +284,7 @@ impl Keys {
     fn len(&self) -> usize {
         match self {
             Keys::Stored { records, .. } => records.len() / RECORD_LEN,
-            Keys::Built(names) => names.len(),
+            Keys::Built { names, .. } => names.len(),
         }
     }
 
@@ -315,7 +317,7 @@ impl Keys {
                 .text(self.record(i).0 as u32)
                 .expect("a stored name index is valid")
                 .as_bytes(),
-            Keys::Built(names) => names[i].as_str().as_bytes(),
+            Keys::Built { names, .. } => names[i].as_str().as_bytes(),
         }
     }
 
@@ -326,7 +328,7 @@ impl Keys {
             Keys::Stored { names, .. } => names
                 .text(self.record(i).0 as u32)
                 .expect("a stored name index is valid"),
-            Keys::Built(names) => names[i].as_str(),
+            Keys::Built { names, .. } => names[i].as_str(),
         }
     }
 }
@@ -344,7 +346,10 @@ fn cmp_text(fold: bool, text: &[u8], key: &[u8]) -> Ordering {
 impl<V> Base<V> {
     pub(super) fn empty(fold: bool) -> Base<V> {
         Base {
-            keys: Keys::Built(Vec::new()),
+            keys: Keys::Built {
+                names: Vec::new(),
+                index: Box::new([0; 2]),
+            },
             slots: Box::default(),
             decode: None,
             fold,
@@ -378,8 +383,25 @@ impl<V> Base<V> {
                 .unwrap_or_else(|_| unreachable!("a new slot is empty"));
             slots.push(slot);
         }
+        debug_assert!(
+            names.windows(2).all(|pair| if fold {
+                pair[0].lower() != pair[1].lower()
+            } else {
+                pair[0].as_str() != pair[1].as_str()
+            }),
+            "a base holds each name once"
+        );
+        let places = index_places(names.len());
+        let mut index = vec![0u32; places].into_boxed_slice();
+        for (at, name) in names.iter().enumerate() {
+            let mut place = name.folded_hash() as usize & (places - 1);
+            while index[place] != 0 {
+                place = (place + 1) & (places - 1);
+            }
+            index[place] = at as u32 + 1;
+        }
         Base {
-            keys: Keys::Built(names),
+            keys: Keys::Built { names, index },
             slots: slots.into_boxed_slice(),
             decode: None,
             fold,
@@ -401,6 +423,35 @@ impl<V> Base<V> {
         if let Keys::Stored { buffer, index, .. } = &self.keys {
             return self.find_indexed(buffer, index, key);
         }
+        let found = self.find_built(key);
+        #[cfg(debug_assertions)]
+        assert_eq!(found, self.search(key));
+        found
+    }
+
+    /// `find` through a built base's hash index.
+    fn find_built(&self, key: &[u8]) -> Option<usize> {
+        let Keys::Built { names, index } = &self.keys else {
+            unreachable!("a stored base is found through its stored index")
+        };
+        let mask = index.len() - 1;
+        let mut place = hash_key(key) & mask;
+        loop {
+            let entry = index[place] as usize;
+            if entry == 0 {
+                return None;
+            }
+            let i = entry - 1;
+            if eq_text(self.fold, names[i].as_str().as_bytes(), key) {
+                return Some(i);
+            }
+            place = (place + 1) & mask;
+        }
+    }
+
+    /// `find` by binary search over the sorted names.
+    #[cfg(debug_assertions)]
+    fn search(&self, key: &[u8]) -> Option<usize> {
         let (mut low, mut high) = (0, self.len());
         while low < high {
             let middle = low + (high - low) / 2;
@@ -435,6 +486,21 @@ impl<V> Base<V> {
                     place = (place + 1) & mask;
                 }
             }
+            Keys::Built { names, index } if self.fold => {
+                let mask = index.len() - 1;
+                let mut place = key.fold_hash() as usize & mask;
+                loop {
+                    let entry = index[place] as usize;
+                    if entry == 0 {
+                        return None;
+                    }
+                    let i = entry - 1;
+                    if key.eq_text_ignoring_case(names[i].as_str().as_bytes()) {
+                        return Some(i);
+                    }
+                    place = (place + 1) & mask;
+                }
+            }
             _ => key.with_key(|lower| self.find(lower)),
         }
     }
@@ -462,7 +528,7 @@ impl<V> Base<V> {
     /// The declared name of entry `i`.
     pub(super) fn name(&self, i: usize) -> &Name {
         match &self.keys {
-            Keys::Built(names) => &names[i],
+            Keys::Built { names, .. } => &names[i],
             Keys::Stored { names, .. } => names
                 .interned(self.keys.record(i).0 as u32)
                 .expect("a stored name index is valid"),

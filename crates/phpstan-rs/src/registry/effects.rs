@@ -2865,6 +2865,10 @@ pub(crate) trait CallContext {
     /// Whether the calling code is a closure's, which may be bound to any
     /// class's scope.
     fn rebindable(&self) -> bool;
+    /// The name of the class the calling code belongs to.
+    fn own_class(&self) -> Option<Name> {
+        self.class().map(Name::from)
+    }
     /// The lowercase name of the class the calling code belongs to.
     fn scope_name(&self) -> Option<Name> {
         self.class()
@@ -2894,23 +2898,23 @@ pub(crate) enum Written<'a> {
 /// no parent; empty for a name that is no class.
 fn named_classes(
     registry: &Registry,
-    own: Option<&str>,
+    own: Option<&Name>,
     class: &QualifiedName,
 ) -> Option<Vec<Name>> {
     Some(if class.is_keyword("self") {
-        vec![Name::from(own?)]
+        vec![own?.clone()]
     } else if class.is_keyword("parent") {
         vec![
             registry
-                .class_references_by_name(own?)?
+                .class_references_by_name(own?.as_str())?
                 .extends
                 .first()?
                 .clone(),
         ]
     } else if class.is_keyword("static") {
         let own = own?;
-        std::iter::once(Name::from(own))
-            .chain(registry.subclasses(own))
+        std::iter::once(own.clone())
+            .chain(registry.subclasses(own.as_str()))
             .collect()
     } else {
         class.resolved_class_name().cloned().into_iter().collect()
@@ -2975,7 +2979,7 @@ impl Reach<'_> {
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
         let scope = match transfer {
-            Transfer::Same => self.ctx.class().map(Name::from),
+            Transfer::Same => self.ctx.own_class(),
             _ => None,
         };
         let base = registry
@@ -3118,7 +3122,7 @@ impl Reach<'_> {
         }
         if let Some(owner) = &key.class {
             let receivers: Vec<Name> = match transfer {
-                Transfer::Same => self.ctx.class().map(Name::from).into_iter().collect(),
+                Transfer::Same => self.ctx.own_class().into_iter().collect(),
                 Transfer::Other(Some(class)) => vec![class.clone()],
                 Transfer::Other(None) | Transfer::Made | Transfer::Static => {
                     vec![Name::from(&**owner)]
@@ -3354,7 +3358,8 @@ impl Reach<'_> {
             Callee::New(class) => {
                 let classes = match class {
                     Some(class) => {
-                        named_classes(self.registry, self.ctx.class(), class).unwrap_or_default()
+                        named_classes(self.registry, self.ctx.own_class().as_ref(), class)
+                            .unwrap_or_default()
                     }
                     None => Vec::new(),
                 };
@@ -3846,7 +3851,7 @@ impl Reach<'_> {
         method: Option<&Name>,
     ) -> Option<Vec<(DeclKey, Transfer)>> {
         let registry = self.registry;
-        let classes = named_classes(registry, self.ctx.class(), class)?;
+        let classes = named_classes(registry, self.ctx.own_class().as_ref(), class)?;
         let forwards_from = |target: &str| {
             self.ctx.class().is_some_and(|own| {
                 own.eq_ignore_ascii_case(target) || registry.is_subclass_of(own, target)
@@ -4471,6 +4476,10 @@ impl CallContext for Level<'_> {
         self.class
     }
 
+    fn own_class(&self) -> Option<Name> {
+        self.class_name().cloned()
+    }
+
     fn scope_name(&self) -> Option<Name> {
         self.class_name().map(|class| class.lowered().clone())
     }
@@ -4872,7 +4881,7 @@ impl<'r> Level<'r> {
         if let Some(made) = self.made.get(name.as_str()) {
             return match made {
                 Made::Object(Some(class)) => Holder::Made(Some(
-                    named_classes(self.registry, self.class, class)
+                    named_classes(self.registry, self.class_name(), class)
                         .unwrap_or_default()
                         .into(),
                 )),
@@ -4946,7 +4955,7 @@ impl<'r> Level<'r> {
             Narrowing::Instance(classes) => {
                 let mut named = Vec::new();
                 for class in classes.iter() {
-                    match named_classes(self.registry, self.class, class) {
+                    match named_classes(self.registry, self.class_name(), class) {
                         Some(found) => named.extend(found),
                         None => return held,
                     }
@@ -4979,7 +4988,7 @@ impl<'r> Level<'r> {
             Declared::Classes(Some(classes)) => {
                 let mut found = Vec::new();
                 for class in *classes {
-                    match named_classes(self.registry, self.class, class) {
+                    match named_classes(self.registry, self.class_name(), class) {
                         Some(named) => found.extend(named),
                         None => return Holder::Unknown,
                     }
@@ -5086,7 +5095,7 @@ impl<'r> Level<'r> {
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::New(Some(class)) => (
                 Holder::Made(Some(
-                    named_classes(registry, self.class, class)
+                    named_classes(registry, self.class_name(), class)
                         .unwrap_or_default()
                         .into(),
                 )),
@@ -5103,7 +5112,7 @@ impl<'r> Level<'r> {
                 (found.map_or(Holder::Unknown, holder_of), false)
             }
             Origin::ClassConstant(class, constant) => {
-                let Some(classes) = named_classes(registry, self.class, class) else {
+                let Some(classes) = named_classes(registry, self.class_name(), class) else {
                     return (Holder::Unknown, false);
                 };
                 let mut found = Vec::new();
@@ -5121,7 +5130,7 @@ impl<'r> Level<'r> {
             Origin::Caught(classes) => {
                 let mut found = Vec::new();
                 for class in classes.iter() {
-                    match named_classes(registry, self.class, class) {
+                    match named_classes(registry, self.class_name(), class) {
                         Some(named) => found.extend(named),
                         None => return (Holder::Unknown, false),
                     }
@@ -5249,7 +5258,7 @@ impl<'r> Level<'r> {
                 class: Some(class),
                 method: Some(method),
             } => {
-                let Some(targets) = named_classes(registry, self.class, class) else {
+                let Some(targets) = named_classes(registry, self.class_name(), class) else {
                     return Holder::Unknown;
                 };
                 let mut held = Holder::none();
@@ -5342,7 +5351,7 @@ impl<'r> Level<'r> {
         class: &QualifiedName,
         prop: Option<&Name>,
     ) -> Vec<(Option<Name>, Option<Name>)> {
-        let Some(classes) = named_classes(self.registry, self.class, class) else {
+        let Some(classes) = named_classes(self.registry, self.class_name(), class) else {
             return vec![(None, prop.cloned())];
         };
         let mut out: Vec<(Option<Name>, Option<Name>)> = Vec::new();
@@ -5483,10 +5492,7 @@ impl<'r> Level<'r> {
             _ => None,
         };
         let start = match root {
-            Root::This => match self.class {
-                Some(class) => Holder::listed(vec![Name::from(class)]),
-                None => Holder::Unknown,
-            },
+            Root::This => self.this_holder(),
             Root::Variable(Some(name)) => self.narrowed_holder(name, narrowing),
             Root::Static(class, Some(prop)) => self.static_holder(class, prop),
             // A superglobal is an array of strings, files or session values

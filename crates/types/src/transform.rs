@@ -15,13 +15,20 @@ impl Type {
         if self.0.flags() & crate::HAS_STATIC == 0 {
             return self.clone();
         }
+        self.bind_static_as(&Name::from(class))
+    }
+
+    fn bind_static_as(&self, class: &Name) -> Type {
+        if self.0.flags() & crate::HAS_STATIC == 0 {
+            return self.clone();
+        }
         syntax::stack::guard(|| match self.repr() {
             Repr::StaticRef(args) => Type::object(
-                class.into(),
-                args.iter().map(|a| a.bind_static(class)).collect(),
+                class.clone(),
+                args.iter().map(|a| a.bind_static_as(class)).collect(),
             ),
-            Repr::This => Type::object(class.into(), Vec::new()),
-            _ => self.map_children(&mut |t| t.bind_static(class)),
+            Repr::This => Type::object(class.clone(), Vec::new()),
+            _ => self.map_children(&mut |t| t.bind_static_as(class)),
         })
     }
 
@@ -35,12 +42,19 @@ impl Type {
         if self.0.flags() & crate::HAS_SELF == 0 {
             return self.clone();
         }
+        self.bind_self_as(&Name::from(class))
+    }
+
+    fn bind_self_as(&self, class: &Name) -> Type {
+        if self.0.flags() & crate::HAS_SELF == 0 {
+            return self.clone();
+        }
         syntax::stack::guard(|| match self.repr() {
             Repr::SelfRef(args) => Type::object(
-                class.into(),
-                args.iter().map(|a| a.bind_self(class)).collect(),
+                class.clone(),
+                args.iter().map(|a| a.bind_self_as(class)).collect(),
             ),
-            _ => self.map_children(&mut |t| t.bind_self(class)),
+            _ => self.map_children(&mut |t| t.bind_self_as(class)),
         })
     }
 
