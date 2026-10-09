@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effects::DeclKey;
+use super::effects::{DeclKey, ImplicitKey, Transfer};
 
 const SHARDS: usize = 16;
 
@@ -41,6 +41,10 @@ impl<K: Hash + Eq, V: Clone> OnceMap<K, V> {
     }
 }
 
+/// The declarations a call runs, each with its transfer, shared by the
+/// calls that ask the same.
+pub(crate) type SharedTargets = Arc<[(DeclKey, Transfer)]>;
+
 /// The memoised queries, keyed by lowercased names.
 #[derive(Default)]
 pub(crate) struct ReachMemo {
@@ -50,9 +54,9 @@ pub(crate) struct ReachMemo {
     pub(crate) implementations: OnceMap<(String, String), Arc<[DeclKey]>>,
     pub(crate) every_method: OnceMap<String, Arc<[DeclKey]>>,
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
-    /// What an operation runs on an object of any class, by
-    /// `unknown_holder_key`.
-    pub(crate) unknown_implicit: OnceMap<(u8, u8), Arc<[DeclKey]>>,
+    /// What an operation runs, by `ImplicitKey`; none when it may run code
+    /// not known.
+    pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
     pub(crate) methods_named: OnceMap<String, Arc<[DeclKey]>>,
 }
 

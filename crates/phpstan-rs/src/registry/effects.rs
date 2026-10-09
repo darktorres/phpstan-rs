@@ -956,24 +956,38 @@ fn element_method(access: Access) -> &'static str {
     }
 }
 
-/// What `operation` on an object of any class asks of the registry alone, as
-/// a key to remember the answer by; none for a property's, which also asks
-/// what the scope sees.
-fn unknown_holder_key(operation: &Operation) -> Option<(u8, u8)> {
-    let access = |access: &Access| match access {
-        Access::Read => 0,
-        Access::Write => 1,
-        Access::Isset => 2,
-        Access::Unset => 3,
-    };
-    match operation {
-        Operation::Property(..) => None,
-        Operation::Element(a) => Some((0, access(a))),
-        Operation::String => Some((1, 0)),
-        Operation::Destroy => Some((2, 0)),
-        Operation::Clone { with } => Some((3, u8::from(*with))),
-        Operation::Iterate { keys } => Some((4, u8::from(*keys))),
+/// An operation, as a key to remember what it runs by.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct OperationKey(u8, u8, Option<Name>);
+
+impl OperationKey {
+    fn of(operation: &Operation) -> OperationKey {
+        let access = |access: &Access| match access {
+            Access::Read => 0,
+            Access::Write => 1,
+            Access::Isset => 2,
+            Access::Unset => 3,
+        };
+        match operation {
+            Operation::Property(name, a) => OperationKey(0, access(a), name.clone()),
+            Operation::Element(a) => OperationKey(1, access(a), None),
+            Operation::String => OperationKey(2, 0, None),
+            Operation::Destroy => OperationKey(3, 0, None),
+            Operation::Clone { with } => OperationKey(4, u8::from(*with), None),
+            Operation::Iterate { keys } => OperationKey(5, u8::from(*keys), None),
+        }
     }
+}
+
+/// What an operation's targets depend on: the object, the scope that
+/// asks, and the operation.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ImplicitKey {
+    holder: Holder,
+    same: bool,
+    operation: OperationKey,
+    scope: Option<String>,
+    rebindable: bool,
 }
 
 /// Every method PHP may call for `operation` on an object of some class.
@@ -1022,23 +1036,6 @@ impl TargetSet {
         }
         if self.seen.insert((key.clone(), transfer.clone())) {
             self.list.push((key, transfer));
-        }
-    }
-
-    /// Adds each of `keys`, run with `transfer`, to a set that has nothing
-    /// yet, when the keys are distinct.
-    pub(super) fn extend_with<'a>(
-        &mut self,
-        keys: impl ExactSizeIterator<Item = &'a DeclKey>,
-        transfer: &Transfer,
-    ) {
-        if self.list.is_empty() {
-            self.list
-                .extend(keys.map(|key| (key.clone(), transfer.clone())));
-            return;
-        }
-        for key in keys {
-            self.push(key.clone(), transfer.clone());
         }
     }
 
@@ -2133,7 +2130,7 @@ pub(crate) fn elements_holder_of(ty: &Type) -> Holder {
 }
 
 /// The object a value may be.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Holder {
     /// An object of one of the classes, or of a descendant of one.
     Classes(Vec<Name>),
@@ -2749,31 +2746,44 @@ impl Reach<'_> {
         })
     }
 
-    /// The declarations PHP runs for `operation` on the operand `on`.
+    /// The declarations PHP runs for `operation` on the operand `on`, found
+    /// once for each holder, scope and operation asked about.
     fn implicit_call_targets(
         &self,
         on: Option<&[Origin]>,
         operation: &Operation,
     ) -> Option<Targets> {
         let (holder, same) = self.ctx.operand(on);
-        if matches!(holder, Holder::Unknown | Holder::Made(None))
-            && hook_access(operation).is_none()
-            && let Some(key) = unknown_holder_key(operation)
-        {
-            let keys = self
-                .registry
-                .reach_memo
-                .unknown_implicit
-                .get_or_compute(key, || self.unknown_implicit_keys(operation).into());
-            let transfer = implicit_transfer(&holder, same, operation, None);
-            return Some(Targets::Shared(keys, transfer));
-        }
+        let key = ImplicitKey {
+            holder,
+            same,
+            operation: OperationKey::of(operation),
+            scope: self.ctx.class().map(str::to_ascii_lowercase),
+            rebindable: self.ctx.rebindable(),
+        };
+        let list = self
+            .registry
+            .reach_memo
+            .implicit
+            .get_or_compute(key.clone(), || {
+                self.compute_implicit_targets(&key.holder, same, operation)
+                    .map(Into::into)
+            })?;
+        Some(Targets::Shared(list))
+    }
+
+    fn compute_implicit_targets(
+        &self,
+        holder: &Holder,
+        same: bool,
+        operation: &Operation,
+    ) -> Option<Vec<(DeclKey, Transfer)>> {
         let mut out = TargetSet::default();
         if let Some((property, set, iterate)) = hook_access(operation) {
-            self.hook_targets(&holder, same, operation, property, set, iterate, &mut out);
+            self.hook_targets(holder, same, operation, property, set, iterate, &mut out);
         }
-        self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
-        Some(Targets::List(out.into_vec()))
+        self.implicit_targets(holder, same, operation, &mut out, &mut Vec::new())?;
+        Some(out.into_vec())
     }
 
     /// Adds to `out` the hooks PHP may run for an access to `property` (to
@@ -2944,18 +2954,8 @@ impl Reach<'_> {
             Holder::Made(Some(classes)) => (classes, true),
             Holder::Unknown | Holder::Made(None) => {
                 let transfer = transfer(None);
-                // What an object of any class runs for the operation is the
-                // same wherever it is asked, but for a property's.
-                if let Some(key) = unknown_holder_key(operation) {
-                    let keys = registry
-                        .reach_memo
-                        .unknown_implicit
-                        .get_or_compute(key, || self.unknown_implicit_keys(operation).into());
-                    out.extend_with(keys.iter(), &transfer);
-                } else {
-                    for key in self.unknown_implicit_keys(operation) {
-                        out.push(key, transfer.clone());
-                    }
+                for key in self.unknown_implicit_keys(operation) {
+                    out.push(key, transfer.clone());
                 }
                 return Some(());
             }
@@ -3285,27 +3285,23 @@ type Reached<'r> = Option<(Vec<Targets>, Vec<&'r Place>)>;
 /// What one call reaches.
 enum Targets {
     List(Vec<(DeclKey, Transfer)>),
-    /// The declarations an operation runs on an object of any class, shared
-    /// by every call of the operation, each run with the transfer.
-    Shared(Arc<[DeclKey]>, Transfer),
+    /// What an operation runs, found once for every call asking the same.
+    Shared(Arc<[(DeclKey, Transfer)]>),
 }
 
 impl Targets {
     fn keys(&self) -> impl Iterator<Item = &DeclKey> {
-        let (list, shared): (&[(DeclKey, Transfer)], &[DeclKey]) = match self {
-            Targets::List(list) => (list, &[]),
-            Targets::Shared(keys, _) => (&[], keys),
+        let list = match self {
+            Targets::List(list) => &list[..],
+            Targets::Shared(list) => list,
         };
-        list.iter().map(|(key, _)| key).chain(shared)
+        list.iter().map(|(key, _)| key)
     }
 
     fn into_vec(self) -> Vec<(DeclKey, Transfer)> {
         match self {
             Targets::List(list) => list,
-            Targets::Shared(keys, transfer) => keys
-                .iter()
-                .map(|key| (key.clone(), transfer.clone()))
-                .collect(),
+            Targets::Shared(list) => list.to_vec(),
         }
     }
 }
@@ -3903,21 +3899,18 @@ impl<'r> Level<'r> {
         // The declarations run with no call's arguments, each once.
         let mut siteless: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
         let facts: &'r WriteFacts = self.facts;
-        // The shared sets of declarations already taken, with their transfer.
-        let mut taken: FxHashSet<(usize, Transfer)> = FxHashSet::default();
+        // The shared sets of declarations already taken.
+        let mut taken: FxHashSet<usize> = FxHashSet::default();
         for (call, targets) in facts.calls.iter().zip(reached) {
             let mut site: Option<u32> = None;
             let entries: Box<dyn Iterator<Item = (DeclKey, Transfer)>> = match targets {
                 Targets::List(list) => Box::new(list.into_iter()),
-                Targets::Shared(keys, transfer) => {
+                Targets::Shared(list) => {
                     debug_assert!(call.arguments.is_empty() && call.places.is_empty());
-                    if !taken.insert((
-                        Arc::as_ptr(&keys).cast::<DeclKey>() as usize,
-                        transfer.clone(),
-                    )) {
+                    if !taken.insert(Arc::as_ptr(&list).cast::<(DeclKey, Transfer)>() as usize) {
                         continue;
                     }
-                    Box::new((0..keys.len()).map(move |at| (keys[at].clone(), transfer.clone())))
+                    Box::new((0..list.len()).map(move |at| list[at].clone()))
                 }
             };
             for (key, transfer) in entries {
