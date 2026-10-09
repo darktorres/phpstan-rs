@@ -2898,3 +2898,438 @@ The 584 allocating functions of M11 are given below, grouped by mechanism, with 
 
 **unattributable** (4 sites, 10,987 allocations):
  `-` 7,673; `-` 3,186; `-` 92; `-` 36.
+
+# Appendix B. Effect resolution: the 664-vs-581 false positives and the 130 G Ir regression
+
+Design of ledger item E. Row names below are the design's own; the ledger prefixes them with `E` (`1.5.5` is `E1.5.5`, `G.9` is `EG.9`, `2.3` is `E2.3`). Section numbers here are prefixed `B` to keep them apart from the plan's.
+
+
+The design behind each row. The rows above name the item (P5, A0, B3, ...) they build.
+
+## B.1 Part 1 - Why Piwigo went from 581 to 664 findings, and the fix
+
+### B1.1 Baselines and method
+
+- `5fb858c9` (the 20G profile commit, cache off) gives **581**; `df603944` gives **664** (+84, -1).
+  Identical 664 at the sweep points 1.V, 2.V, 3.V, 5.V and at head (4.V alone reported 26,813, a
+  bug of the declaration-ID migration, fixed by 5.V). So it is checker/effect work between
+  `5fb858c9` and `e75694ac`, not config and not the perf plan.
+- Saved outputs: `~/.cache/prs-profile/baseline/df603944-664.json` and `5fb858c9-581.json`.
+  Compare with `LC_ALL=C sort` on both; run with `PHPSTAN_RS_NO_FILE_CACHE=1`.
+- The +84 are false positives (checked against the corpus source): `$checked === 0` always-true in
+  `tools/doc-drift-check.php` although `$checked++` runs; `resource|false` back after a
+  `=== false` guard plus `exit`; `$_SERVER` narrowed to `array{HTTP_X_PIWIGO_ENV?: 'test'}`;
+  narrowed `readonly` DTO fields forgotten after a call.
+- Method that worked: reduce a row on a copy of Piwigo `src` (about 1-100 s per run with
+  `target/debug/phpstan-rs check-project --no-composer --format json src`), then to a one-file
+  reproduction; env-gated `eprintln` in `forget_effect` (`FE reset`, `FECALL`), `Level::classify`,
+  `Registry::call_effect`, `settle` (`SET`/`ROOT` lines) plus a script that follows `anything` roots
+  through the settle log. One-file harness: a directory with a `vendor` symlink and `composer.json`,
+  `check-project --scan-dir src <file>`. **Keep one copy of a class per probe directory** (a second
+  copy silently supplies the bodies the registry uses). Single-file `--no-composer` runs do not
+  reproduce rows that need project/vendor context.
+
+### B1.2 How findings are produced (what the fix acts on)
+
+A diagnostic appears when a narrowed fact (a property, an index key, a top-level variable) is
+dropped by an effect and the fall-back is the declared type or the corpus-wide global fact.
+`object_written` drops property/index facts; `forget_effect` resets shared variables
+(`Shared::{Global, Reference, Captured, Anything}`) to `registry.global_variables()` (one
+corpus-wide union per variable NAME) on `anything`. An effect is `anything` when a call cannot be
+resolved to known bodies. Therefore:
+
+- **Protecting facts is the structural fix** (they survive even genuinely unknown code).
+- **Narrowing `anything` at its sources is the precision work**: it removes forgets but, measured,
+  barely moves the count (emptying the whole builtin poison set cut `anything` roots by 81% and the
+  count 664 -> 659). Sources are whack-a-mole: each layer peeled reveals another imprecise holder.
+- Experiments have never added a row; every row removed was a false positive.
+
+### B1.3 Experiment table (all throwaway; counts on full Piwigo, debug binary, cache off)
+
+| experiment | count | rows removed |
+|---|---|---|
+| none (HEAD) | 664 | |
+| A0: superglobals hold arrays only | 658 | ActivityService (`$_SERVER`), SearchService:554, UserService:1228, doc-drift-check:89, p58/assign:187 |
+| P1: a narrowed fact on a `readonly` property is never dropped (20 lines in `object_written`) | 646 | 10 renderer rows + `ActionController:93`, `CategoryUpdateController:89`, `ImageSetCategoryController:60`, and the A0 rows above |
+| P5: a by-value local array's index facts are never dropped by a call | 658 | Lang.php:412, AuthService:253, SearchService:554, UserService:1228, doc-drift-check:89, p58/assign:187 |
+| A2 crude (unprobed stubs run only what they take) | 659 | |
+| whole builtin poison set emptied (unsound upper bound) | 659 | |
+| both class-level guards also off (unsound) | 659 | Latte still 11 |
+| P5 + P1 + A0 + W + no-poison in `implicit_targets` + `include` not `anything` | 616 | renderers (11), ActionController, CategoryUpdate, ImageSetCategory, ActivityService (2), BrowserTestHelpers:839, PageHeader/Tail tests (4), Fake SMTP (18), doc-drift:73, latte-lint:59, p58/census (2) |
+| + by-ref params with object-free declared type keep their holder, constants/class constants are `NoObject` origins, `Element` on an unknown holder has no targets | **609** (+29 over 581) | opcache-preload (7) |
+
+Open: `tests/Integration/ThemesStandardPagesPageRendererTest.php:381` "Unreachable statement" is in
+581 but absent in every experiment run (the -1 of the 664-vs-581 diff). Decide first whether 581
+had a false positive or the new runs lose a true one (php probe of the statement).
+
+### B1.4 The model (what gets built)
+
+#### Facts that unknown code cannot change (structural protection)
+- **P1 readonly**: a fact on a `readonly` property (property-level, class-level, promoted or not,
+  `@readonly`) is never dropped, whatever the effect. A readonly field cannot be written after
+  initialisation, not even by `anything`.
+- **P5 private arrays**: a variable that is not top-level, not `global`/`static`/reference-bound,
+  not captured by reference, not `$$`-reachable, and not the root of an `&` binding (`$x = &$a[..]`,
+  `[&$a]`, `foreach ($a as &$v)`, by-ref argument) is *private*; facts rooted at a private array whose
+  `key_type` is object-free are never dropped by a call. Arrays are values: a callee cannot change
+  the caller's array unless a reference exists. Real implementation tracks exposure **positionally**
+  at check time (a by-ref argument retained by the callee is the one sound hole; the same machinery
+  as Limit 2). Experiment ignored by-ref call arguments and by-ref parameters; the real one must not.
+- **P6 fresh results**: a callee summary "returns a freshly allocated object nothing else holds"
+  (all returns are `new` or another fresh-returning call, not stored in a property/static/global/
+  array passed out or captured), carried in `BodySummary`, settled in the effects fixpoint; the
+  caller treats the result as `Held::Made` (today `Held::Made` stops at `new` in the same scope, so
+  `Req::make()`/`fromGlobals()` results are `Held::Other`).
+- **P7 stable properties** (partial, only with write-site receiver resolution): a property whose
+  every write in the loaded program (project + vendor + stubs; by-ref binds included) is in a
+  constructor/`__clone` on `$this` or its initialiser is never dropped. Measured
+  (`scratchpad/p7`): of mutable instance properties, 23% (project) / 44% (vendor) are stable under
+  strict receiver matching, 50% / 61% if write-site receivers were resolved. 162 dynamic-name writes
+  need the class of the receiver or a program flag. Does **not** protect `MailArgs::*` (a real writer
+  exists). Build only together with A5's receiver resolution; never as the fix for a row on its own.
+- **P4 static properties**: a static-property fact survives calls whose effect does not name that
+  static, including a method call on the object the fact narrowed.
+
+#### Narrowing what is `anything` at the source (precision, built after the structural fixes)
+- **A0 superglobals**: `Registry::value_holder` returns `Holder::Classes([])` for
+  `_GET|_POST|_COOKIE|_FILES|_SERVER|_ENV|_REQUEST|_SESSION|GLOBALS`; today `Unknown`, and an
+  `Element` operation on an unknown holder has no targets, so every function touching a superglobal
+  or `$GLOBALS['x']` is `anything` (the largest single source). A named global holds what
+  `Registry::global_variables()` says. An `Element` on an unknown holder becomes the join over every
+  `ArrayAccess` implementation, not `None`.
+- **W registered stream wrappers**: a stream builtin (`fopen`, `file_put_contents`, `fwrite`,
+  `unlink`, `stream_socket_accept`...) runs only classes registrable through
+  `stream_wrapper_register`: a class is registrable iff a call site in the loaded program names it
+  (`X::class`, `__CLASS__`/`static::class` in its own register method, a string literal) in a
+  reachable function; a non-constant class argument registers every class with the methods. Native
+  wrappers (`file http php phar data glob ftp`) have no PHP code. Fixes the vendor wrapper classes
+  (`Symfony\...\StreamWrapper`, `Pest\Mutate\...`, `ClosureStream`, `GuzzleHttp\Psr7\StreamWrapper`,
+  `nyholm/psr7` anonymous class) making every file builtin `anything`.
+- **F2 / closure captured holders**: `Registry::closure_effect` resolves a closure standalone, so a
+  by-value captured variable gets `Holder::Unknown` (and the inline `@var` is not seen). Pass the
+  caller's inferred holders of by-value captures (`TypedCall::inferred` exists) and make summary
+  holders honour inline `@var` and `is_array`/`instanceof` guards.
+- **Include effect**: an `include`/`require` inside a function scope writes globals only through
+  explicit bindings (`global`, `$GLOBALS`, static refs); the included file's top-level assignments are
+  local to the including function. `BodySummary` must not set `anything` for `Include` in a function
+  scope; a top-level include of an unknown file stays program-wide.
+- **Constants as origins**: constants and class constants are `Origin::NoObject` (a string operand in
+  `$root . DIRECTORY_SEPARATOR . self::X` no longer has an unknown origin).
+- **By-ref params**: a by-ref parameter with an object-free declared type keeps its declared holder
+  (sound except an alias writing an object into the referent: covered by the exposure rule).
+- **A2 unprobed stubs**: stub classes the probing PHP lacks (Redis, Relay, pgsql, SolrQuery,
+  Swoole... 9,069 of 10,827 poisoned methods, 844 classes) are `anything` unless declared pure.
+  Derive rows from the signature the way `tools/builtin-runs/record.php` would measure them: callable
+  parameters -> `Calls`; string -> `__toString` on the argument; array/iterable/Countable -> element
+  and iteration hook rows; object/mixed -> hook set of what it may hold; class-name string ->
+  autoload; int/float/bool -> nothing. Rows tagged `derived`, kept apart from `probed`.
+- **A3 held values (probed)**: extend `record.php` to probe call sequences on one object (M1 given a
+  recording value, then every public M2) producing `held-by` rows, so the class-level
+  `builtin_holds_code` guard (ArrayObject, SplObjectStorage, Reflection*, Phar, mysqli, PDO, Dom*...,
+  175 probed classes, 1,758 methods) goes away for probed classes; unprobed classes use A2's derived
+  storing methods.
+- **A4 poison becomes a join**: `methods_named`, `implicit_targets` (Unknown holder) and
+  `method_targets_on` stop returning `None` for a name in `builtin_methods_running_code`; they add the
+  builtin method's own effect (rows -> runs) to the join, so an unknown receiver costs the join over
+  every class with the method, `anything` only when one of those is.
+- **A5 receivers and holders**: `Receiver::Unknown` (5,662 roots) covers every chained receiver
+  (`$a->b()->c()`, `new X()->m()`, `f()->m()`, `$a[0]->m()`); `summaries.rs::receiver()` knows only
+  `$this`, `$var`, `$this->prop`, `Class::$static`. Add `Receiver::Origins(Vec<Origin>)` (declared
+  return types, `new`, iterable element types) reusing the `Origin`/`value_holder` machinery, and the
+  narrowed type of tracked variables (`instanceof`, `is_array`). Prerequisite of P7.
+- **A (implicit conversions)**: `__toString` (echo/print/concat/interpolation/cast/`strlen` family),
+  `__get/__set/__isset/__unset/__call/__callStatic/__invoke`, `ArrayAccess`, `Countable`,
+  `IteratorAggregate/Iterator` in foreach, `__destruct`, `__clone`, `__serialize/__sleep/__wakeup`
+  get the join of the possible implementations' effects; no reachable implementation = `nothing`.
+  Only an unresolvable callee (`$f()` of unknown callable, `eval`, include of unknown file) stays
+  `anything`.
+
+#### Global variables (the `$checked`, `$_SERVER`, `$conn`, `$paths`, `$classMap` rows)
+- **B1 complete write sites** in `registry/global_vars.rs`: today only expression-statement `=`,
+  `=&`, `op=` are sites. Add every write form, nested in expressions too: `++/--`, `foreach` targets,
+  `list()`/`[..] =`, by-ref arguments (the callee parameter's out-type or `mixed`), `catch`,
+  `unset`, `static`, `extract`, `$$n`, assignments inside expressions. Unknown writer = `mixed`,
+  never silently absent.
+- **B2 superglobals** start from PHP's own type (`unassigned_variable_type`) and sites only widen;
+  `$_SERVER['K'] = ..` in a bootstrap top level never narrows the fact. (Row:
+  `RequestBootstrapConfigureTest:50`.)
+- **B3 per-component facts / reachability-bounded `anything`**: a name's fact = sites of the files
+  that can share one global scope (include graph already resolved in `resolve_global_scope_files`) +
+  `global $x` sites of functions that component can reach. A standalone script reads only its own
+  component; the corpus-wide union stays only as fallback for `global $x` in a function reachable
+  from several components. And `anything` may write a global only if some body reachable from that
+  entry point binds it (`global`, `$GLOBALS['x']`, a reference) or a dynamic form is reachable.
+  **A project-wide `dynamic_globals` flag is useless**: `vendor/phpunit` global-state code writes
+  `$GLOBALS[$k]`, `rector` mentions `global $$`, 51 files call `extract(`. Unknown callables are
+  bounded by address-taken closures/methods. (Rows: `public/install.php`, `p58/trace.php:143`,
+  `openapi-*`.)
+- **B4** a top-level variable read inside its own file uses the flow-sensitive local type; the reset
+  after a call goes to `local type widened by the writes the effect may perform`, not to the
+  whole-corpus fact. **B5** `changed_global_variables`/incremental invalidation re-keyed per
+  component.
+
+#### Limits (the model for unknown code that is not covered above)
+- **Limit 1, every shared variable is a `Storage` location**: add `Storage::Captured { closure, var }`
+  (closure identity = the literal's arena id, never the variable name); a closure body's writes to a
+  by-ref capture are effects on it, carried in `BodySummary`, settled in the fixpoint; a call that may
+  run closure C carries only C's `Captured` effects; `runs_written: Cell<bool>` and the
+  `Shared::Captured` special case in `forget_effect` are deleted. `forget_effect` resets a shared
+  variable only when a storage the effect names matches it; a truly unknown effect still resets
+  every shared variable to the declared type narrowed by assignments seen so far. (Today
+  `forget_effect` resets ALL captured names when `runs_written`, and inside a closure body the
+  fall-back is `mixed`.)
+- **Limit 2, escape and retention**: positional (flow-sensitive) exposure: a closure/array/object
+  becomes reachable from the first statement where it is used as something other than a direct callee
+  (argument, return, property/array/static store, `global`/`static`/`&` binding, another closure's
+  `use`, `yield`, `compact/extract/get_defined_vars/$$/include/eval`); loops need a back-edge
+  fixpoint in `Locals`. Retention of a callable parameter: builtins get a "retains the callable"
+  column in `registry/data/builtin-runs-8.5.tsv` probed by `record.php` in a child process
+  (shutdown functions, autoloaders, error/exception handlers, `ob_start`, stream filters/wrappers,
+  iterators, generators, fibers, destructors); user functions get a per-parameter retention summary in
+  `BodySummary` settled in the fixpoint (stored, returned, captured, passed to a retaining parameter,
+  callee with dynamic constructs => retained). `array_map`/`usort`/`preg_replace_callback` are probed
+  non-retaining. This is also what makes unknown-callee rows independent of `$args` (MailService).
+- **Unknown-code write bound**: unknown code is code of the loaded program; its writes are bounded by
+  the program's write sites and, per call, by the callables that can reach that call site.
+
+### B1.5 Row ledger: the 83 added diagnostics, by cause and by fix
+
+(Row lists: scratchpad `added.json`, `r1-added.json`; diff tool `cmp.py`.)
+
+| rows | fixed by | evidence |
+|---|---|---|
+| Lang.php:412 (the `$options['force_fallback']` argument), AuthService:253 (+4 overlap rows) | P5 | removed in the P5 experiment |
+| 10 renderers (`Admin/{LanguagesInstalled,LanguagesNew,ThemesInstalled,ThemesNew,PluginsNew}PageRenderer`), ActionController:93, CategoryUpdateController:89, ImageSetCategoryController:60 | P1 (+A0) | all `readonly`; removed in the P1 experiment |
+| ActivityService:152, SearchService:554, UserService:1228, doc-drift-check:89, p58/assign:187 | A0 or P5 (either) | both experiments remove them (the same `anything` for those) |
+| Fake SMTP 18, latte-lint:59, p58/census ×2, PageHeader/Tail renderer tests ×4, BrowserTestHelpers:839, doc-drift:73 | W | `pp10` one file + vendor symlink; restricting `wrapper_runs` to `Piwigo\` removes all. G0 not needed for these |
+| opcache-preload ×7 | F2 (closure captured holders) + include effect + `Element` on an unknown holder | `spl_autoload_register(static function (string $class) use ($classMap) { require $classMap[$class]; })`: both parts needed; vendor `OptionsResolver::offsetGet` runs a closure |
+| regenerate-fixture-photos:63 | A2 | `pg_connect`/`pg_query` unprobed `anything` resets top-level `$pgConn` |
+| SearchFilterRenderer:442 | by-ref param holder + A5/A4 | `$rules->addedBy` after `getClauseForFilter(.., array &$page)`: `Element` on the by-ref param (Unknown holder) then `array_diff(array_keys($x), ..)` has an unknown element holder and `__toString` poison; `Doctrine\ORM\Query\Expr\Base::add` (`own_any`) must not dominate |
+| public/install.php ×2 | constants as origins + B3 | top-level `$paths` reset to the corpus-wide union after `Env::loadEnvFile` and `InstallBootstrap::boot` |
+| p58/trace.php:143 | A3 or B3 | `templatesByCompiledName()` (RecursiveIteratorIterator through `builtin_holds_code`) is `anything` and resets top-level `$censusFiles` to `mixed`; the message is an artefact of the reset plus loop convergence |
+| RequestBootstrapConfigureTest:50 | B2 | `$_SERVER` folded by a bootstrap top level |
+| CommentService:301, DerivativeImage:348, MailService ×6 (892/975/976/991/997/1005), ImageStdParamsTestFactory:40 | Limit 2 / P6 / P7 (+A5) | genuinely unknown calls; `DerivativeImage::$params` is written only in the constructor (P7 would work with write-site receiver resolution, but the name `params` has other-receiver writes in vendor); MailService chain traced through `Headers::setHeaderBody`, `DatePoint::__construct`, `webmasterMailAddress()`: each layer an imprecise holder, count unchanged, so only callee-independent-of-`$args` (escape analysis) fixes it |
+| Latte `ContextVariableExtractor` ×11 | A5 (+A3/A4), P7 with receiver resolution | `$item->key->value` after `$type = $this->currentConfigChainType($item->value)`: `$item->key` (plain php-parser property) dropped because the call is `anything`: (1) `$call->name->name` on a local holding a narrowed `$expr->var`: holder Unknown, `__get` in the poison set; (2) chained receiver `Method{getType, Unknown}`; (3) `builtin_runs None` for `ReflectionNamedType::isBuiltin` via `builtin_holds_code`. Not moved by any experiment |
+| openapi-generate-input-dto:117,167, openapi-bootstrap:243 (`$ast`) | B3 (not attributed) | present only in the full corpus (absent in the one-file harness): a corpus-wide global fact on top-level `$mediaType`/`$schema`/`$ast`. Attribution run was stopped; still to do |
+| ThemesStandardPagesPageRendererTest:381 | decide (see 1.3) | in 581, absent in all new runs |
+
+Largest remaining unknown-code sources (blame ranking over 10,226 `anything` declarations):
+`LoaderLoadException::__construct` 1,053, anonymous class in `MessengerFactory.php:184::get` 190
+(`Value(None)`), `DatePoint::__construct` 80, `StreamWrapper::stream_open` 76, Latte
+`TokenStream::tryPeek` 67, `RedisClusterNodeProxy::__call` 66, `InputValidator::validate` 64,
+`Env::testModeHeader` 61, `AccessLevelChecker::getUserStatus` 59, `Output::write` 52: mostly
+legitimate unknown code (`Value(None)`, `__call` proxies, wrappers) or one imprecise holder fanning
+out. Origin of the `anything` roots (23,311 events): ~24% `Method` on `Receiver::Unknown`, ~39%
+`Implicit` on an unknown holder, 16% `builtin_runs None`, 2% `Value`, 0.5% eval/include.
+
+
+## B.2 Part 2 - Perf: the 130 G Ir regression in effect resolution (steps 2-11 run after Part 1)
+
+### B2.1 Profile
+
+Callgrind of `df603944` (+ two uncommitted registry edits), `dhat` profile, warm per-file cache,
+Piwigo: **130.3 G Ir** against 20.57 G in the 20G report (`5fb858c9`, cache off). Data:
+`~/.cache/prs-profile/cl-head/cg.out-01..18`, `cg.pkl`; drill scripts in
+`~/.cache/prs-profile/drill-scripts/` (`charge.py` charges library code to its user-code caller).
+Percentages overlap (inclusive).
+
+| id | Ir | where | cause |
+|---|---|---|---|
+| A | 33.8 G | `effects::push_target` | linear dedupe through `dyn DeclQuery` `eq` (case folding), 338 M compares / 917 K pushes |
+| B | 24.8 G | `Reach::builtin_runs` -> `Registry::overrides_of_builtin` | re-derived per builtin call: `descendants` 5.9 G, `lookup_own_method` 9.0 G (6.6 M calls), `classes_declaring` chain 6.7 G |
+| C | ~13.8 G | `Reach::call_targets` direct callees | `classes_declaring` (4.2 M calls, 9.5 G), `implementations` 3.1 G, `methods_named` 1.1 G |
+| D | 14.5 G | `Registry::class_result_overlay` | `method_results_for_class` (and property/constant siblings) scan the whole `class_method_results` map keeping `method.class() == class`: classes x all entries |
+| E | ~6 G | name-hash plumbing | `FoldKey::is_folded_eq` 8.0 G, `fold_hash` 5.3 G from `DeclKey` String keys; 3 M String clones; `siteless` set 2.4 G |
+
+A-C are inside `Registry::classify` (81.7 G inclusive, 63 K calls, 8 workers). Roots, by Ir:
+`classify` 83.7 G; `run_finishing_passes` 18.4 G (contains `resolve_transitive_purity` 11.4 G,
+`end_declaration_changes` 2.2 G, `changed_class_results` 2.2 G, `flatten_phpdoc_inheritance` 0.5 G);
+`changed_class_results` closure (stolen) 12.3 G (D); `run_checker` 12.3 G (3.6 G of it
+`Registry::call_effect` -> `Reach`, the same code as A-C; checker proper ~8.7 G); parse 5.9 G (cache
+on, not a regression); `flatten_phpdoc_inheritance_one_pass` 2.7 G (448 K `lookup_own_method` =
+2.5 G); rest < 4 G.
+
+Regression by charged user function (20G `cg20.pkl` vs head, 20,036 M vs 129,163 M): the 109.7 G
+rise is two things that did not exist in the 20G run: effect classification and the lookups serving
+it (+96.6 G: `DeclQuery::eq` 24.9, `Reach::*` ~9.7, `Registry::{class, descendants,
+lookup_own_method, member_slot, class_name_by_id, method_owners, property_owners, lookup_property}`
+~27, `NameTable::get` 3.1, `push_target` 3.5, `Resolve::run` 3.4, `DeclKey::{member,class}` 5.7,
+`method_key` 0.9, `effect_id_for` 1.3) and the overlay snapshot (+14.4 G). Everything else up is +4.5 G
+and not a regression (cache read, item 7 `relation_memo`, item 10 token stream, deserialisation).
+The remaining ~12.8 G are the 20G report's own items (checker flat at ~3.8 G charged); out of scope
+here except that the rerun must show none moved. Three "20G" functions are partly regressions of the
+new code: `resolved_deferred_class` (2,568 -> 12,490 calls, 2.2 G), `precompute_member_owners`
+(170 -> 346 calls, 4.1 G inclusive), `flatten_traits` (145 -> 575 M).
+
+Origin: the feature came after the 20G commit (`72de29b9`, `24353080`, `e4923d51`, 10-04..05), cheap
+at 3.V (`642125ee`, 4.586 s); the jump is 4.V (`45dbbe04`, 9.782 s) after ~150 commits of the
+declaration-ID migration (effects keyed by ids: `5b69c001`, `02ce0ec9`, `8efa71a0`, `9f560a46`,
+`908b42b3`, `6b4b301a`, `da48c352`, `d28d22a1`, `5cc92c9e`, `45dbbe04`; D arrives with `d28d22a1` and
+`a94e87c4`). Reading: the algorithms were already quadratic at 3.V; the migration made every
+primitive they call dearer and added D. Hence ids end to end plus memo, not a symptom patch. Not
+proved (no profile of 3.V/4.V exists, none planned); 6.V-10.1 timings are unusable.
+
+#### Regression attribution by commit (from git history, no profile run)
+
+Method: for each hot function, `git log -L` over its body and `git log -S` on the shape that makes it dear, then the patches read. Times are 2026-10-04..06. Reference points: 3.V `642125ee` (10-05 21:13, 4.586 s), 4.V `45dbbe04` (10-06 14:14, 9.782 s, 146 commits after 3.V). `acb344c6` (19:10) and `dacee2df` (17:27) come after 4.V and are in the profiled tree. The commits `ac83e634`, `9b6cd2ad`, `527bf6a0`, `3c13d952` and the other Part 1 rows (10-08) come after `df603944`: they are not in the 130 G profile, and their effect on the target counts is unmeasured. Confidence: **shape** = the patch shows the cost pattern; **range** = history only narrows it.
+
+| id / step | what costs | introduced by | made dearer by | confidence |
+|---|---|---|---|---|
+| D / 2.2 | `*_results_for_class` scans the whole result map keeping `method.class() == class` | `d28d22a1` (10-06 10:46) changed `class_method_results` from `FxHashMap<ClassId, Members<..>>` to one flat `FxHashMap<MethodRef, ..>`; `method_results_for_class` (and the property and constant siblings) was written as a filter over it in the same commit; `acb344c6` (19:10) kept the filter and added the deferred chain | `a94e87c4` (08:19) added `class_result_overlay` / `changed_class_results` (per-class `.get(&id)` then, cheap); `12734f6a` (08:51) kept it per class; `d28d22a1` switched the overlay to `method_results_for_class(id)`, so the overlay of every class scans every method result; `45dbbe04` keyed the incremental snapshot by id | shape |
+| B / 2.4 | `overrides_of_builtin`: `descendants`, `lookup_own_method`, `classes_declaring` per builtin call | `24353080` (10-04 01:09) added the function; `847595e5` (10-04 15:37) gave it its present shape (methods of the builtin x classes below the receiver) | `07b88079` (06:47) made `lookup_own_method` read `class_method_results` through `class_ids` and a `raw_active` test; `d28d22a1` made it `member_slot` + `method_result` + `class()`; `acb344c6` made `method_result` a `deferred_class_result` lookup plus a linear `iter().find`. `descendants` itself is unchanged since `8650bb37` (10-01): its 5.9 G is the call count from `847595e5`, so it was already there at 3.V | shape for `lookup_own_method`; range for `descendants` |
+| C / 2.4 | `classes_declaring` 4.2 M calls | `72de29b9` (10-04 00:53) | `02ce0ec9` (10-06 01:59) changed `classes_declaring` from `&[Name]` (a free borrow) to an iterator that maps each class id through `class_name_by_id`, and `overrides_of_builtin` now `collect`s it into a `Vec<&Name>` for every method of every call | shape |
+| C / 2.4 | `implementations`, `every_method`, `methods_named` | `72de29b9` | no later change to `implementations` or `every_method`; `methods_named` touched by `02ce0ec9`, `8efa71a0` (ids) and `9b6cd2ad` (10-08, outside the profile) | range |
+| A / 2.3, 2.5 | `push_target` linear dedupe 338 M compares | `e4923d51` (10-05 13:41), body unchanged since; `DeclKey` equality (case-folding through `dyn DeclQuery`) since `7a7de9a0` / `72de29b9` (10-03/04) | none of the 10-06 commits touch the loop or the comparison. The growth is in how many targets are pushed (917 K), which the history does not attribute: candidates are the call-edge and set changes `8efa71a0`, `9f560a46`, `5cc92c9e`. **No commit found by history alone** | range, unresolved |
+| E / 2.3 | `FoldKey::is_folded_eq`, `fold_hash`, 3 M `String` clones, `siteless` | `DeclKey` with `String` class and member since `72de29b9` / `7a7de9a0`; `siteless` since `e4923d51` | `5b69c001` (10-06 01:45) added `effect_id_for`, which turns each `DeclKey` into an id key at every edge; `d28d22a1` added `classification_by_id`, which converts every call of every declaration (clones and folded hashing) | shape |
+| 2.5 settle | per-wave joins per declaration | `2bc29a87`, `73b265ec` (10-05 morning: per-closure effects, parameter conditions) | `8efa71a0` (02:16) settled through ids, `9f560a46` (02:23) resolved edges to ids, `5cc92c9e` (13:54) parallelised the relation passes | range |
+| 2.7 | padded `Vec<Option<Name>>` per isolated slot | `7c1c5fba` (10-06 14:19) `ensure_class_id` with `resize_with(local + 1)` | `dacee2df` (17:27, "20G item 5") added `isolated_class_slot`/`isolated_function_slot` that call it once per declaration, so the pad is paid per slot, O(classes^2); after 4.V, so not part of the 4.V jump | shape |
+| 2.8 | `method_result` linear `find`, `resolved_deferred_class` per call | `862d168a` (10-01) resolved deferred types in a parallel pass (about 2.6 K calls) | `acb344c6` (10-06 19:10) made them on demand: `deferred_class_result` per `method_result` call plus `iter().find`, which is where 12.5 K calls and 5.6 M `method_result` calls come from; after 4.V | shape |
+| 2.9 | `flatten_phpdoc_inheritance_one_pass` 448 K `lookup_own_method` | present since `b9c5b565` (09-09), many perf passes until `6a8a6155` (10-02) | the 10-06 id commits that rewrote it (`da99f22b`, `dec35a80`, `42c24a58`, `07b88079`, `32fb0a32`, `12734f6a`, `d28d22a1`, `451f0fa6`); the dear part is the `lookup_own_method` change of `d28d22a1` | range, via B |
+| 2.10 | `Resolve::run` rounds, 276 K `call_targets` | `2bc29a87` (10-05 11:53) the `lost` fixpoint loop | not touched by the id migration; the cost per round grew with C and B | range |
+| 2.2 snapshot | `end_declaration_changes` snapshots 15,660 overlays | `7e3324ac` (10-01) with `bc861405`; `ea2f283a` (10-02) | `a94e87c4` and `45dbbe04` made the snapshot a per-class overlay build, so it pays D for every class | shape |
+
+Reading: the migration commits did not add an algorithm; the dear ones are `d28d22a1` (flat result map, `lookup_own_method` through slots, `classification_by_id`), `02ce0ec9` (`classes_declaring` by id), `07b88079`, `5b69c001` and, after 4.V, `acb344c6` and `dacee2df`. Item A (and the 3.V to 4.V jump it belongs to) has no commit that history can name. A profile of `642125ee`, `02ce0ec9`, `d28d22a1` and `45dbbe04` would settle it; none is planned.
+
+### B2.2 Heap (dhat-heap of the same tree, `~/.cache/prs-profile/heap-head/dhat-heap.json`)
+
+Total 7.43 GB in 46.2 M blocks; peak (t-gmax) 875.8 MB in 4.01 M blocks; at exit 659.8 MB; check's
+live max 669.3 MB; resident max 1.255 GB. By site: `Registry::descendants` 1.27 GB / 10.7 M blocks;
+`Vec<&Name>` in `overrides_of_builtin` 905 MB; `Vec<Option<Name>>` 648 MB (below); `(DeclKey,
+Transfer)` dedupe table 254 MB; `Vec<DeclKey>::reserve` 223 MB; `method_key` 177 MB; `DeclKey::clone`
+123 MB; `overrides_of_builtin` 152 MB.
+- Peak holder 156 MB (mislabelled `ParamFlagsCondition`) is `Level::classify`'s
+  `calls: Vec<(DeclKey, Transfer, Option<u32>)>` (`effects.rs:3264`, `:3277`): `classification_by_id`
+  keeps it as `IdClassification.calls` for all 63 K declarations until `settle` ends. Sharing target
+  sets (step 4) and not expanding per declaration (step 5) lower the peak.
+- `Vec<Option<Name>>` 648 MB / 14.8 K blocks: `ensure_class_id` (`registry.rs:973`) from
+  `isolated_class_slot` (`registry/index.rs:789-806`): each isolated slot's `project_class_names` is
+  `resize_with(id.local() + 1, || None)`, O(classes^2) bytes and memset (651 M Ir). Same for
+  `isolated_function_slot` (`index.rs:818`, 26.5 M Ir). Step 7.
+- Retained at exit: `NodeArenas::alloc_expr` 66 MB, lazy `FunctionReflection` Arcs 31 MB, container
+  reader 29 MB, `CallWrites` 29 MB, file table 26 MB.
+
+### B2.3 Steps (one commit each, scoped verification; the numbering is kept: step 1 = oracles, 0 was the baseline, now Part 1)
+
+Gates compare diagnostics with the baseline Part 1 settles (581, or the explained set), not 664.
+
+1. **Oracles first (no behaviour change)**: `#[cfg(debug_assertions)]` oracles keeping the current
+   `implementations`, `every_method`, `overrides_of_builtin`, `methods_named`, `implicit_targets`,
+   `method_results_for_class`/`property_results_for_class`/`class_constant_results_for_class`,
+   comparing sorted results with the new ones (the repo's pattern; the `oracle` profile runs them over
+   Piwigo). Unit tests on small hierarchies: diamonds, interfaces, traits, `__call`, `@method` tags,
+   iterator aggregates, case-different names. Part 1 changes `classify`; re-capture the oracles'
+   reference from the Part 1 result.
+2. **D: per-class index of the overlay maps**. `registry.rs:476/468/483`
+   (`class_method_results`, `class_constant_results`, `class_property_results`) keyed by member; every
+   `*_results_for_class` (`registry/hierarchy.rs`: `method_results_for_class` :304,
+   `property_results_for_class` :172, `raw_property_results_for_class`, constants) scans all entries.
+   Re-shape each to `FxHashMap<ClassId, per-class map>`; 37 uses (`registry.rs`
+   1033/1396/1418/1496/1669/2162/2338/2627, `hierarchy.rs` 289-357/1018, `canonical.rs`
+   432/499/633, `stub_cache_round_trip.rs`). Cache serialisation (`class_method_results_for_cache`)
+   byte-identical or re-keyed deliberately; `canonical.rs` snapshots keep their order. Build on the
+   uncommitted `hierarchy.rs`/`tests/phpdoc_inheritance.rs` edits (the `contains_key` stale-copy
+   filter, the `method_result` precedence); commit with a pathspec. Then skip the snapshot when no
+   caller compares: `Project::run_finishing_passes` (`project.rs:2121`) passes
+   `self.keeps_as_built`; `Registry::end_declaration_changes` (`registry.rs:1210`) snapshots every
+   class (15,660 overlays) whenever `resolved_declarations` is set, and `changed_since` is read only by
+   the incremental/LSP path. Give the snapshot an explicit reader; tests: one-shot = no snapshot,
+   incremental = same changed set as before.
+3. **A + E: effects on ids end to end** (no names, no `DeclKey` in the hot path):
+   `Holder::Classes(Arc<[ClassId]>)` built in `holder_of`/`declared_holder`/`object_classes`;
+   `Reach::{call_targets, implicit_targets, implicit_methods, implicit_method, exact_method,
+   every_method, static_targets, method_targets_on, builtin_runs}` and `Registry::{implementations,
+   property_magic, hook_owner, overrides_of_builtin, reached}` take `ClassId`/method slot/`MethodRef`
+   and return `MethodRef`-based targets; new by-id accessors (`lookup_method_ref(ClassId, name)`,
+   `method_is_abstract(MethodRef)`, `is_subclass_of(ClassId, ClassId)`); `Target = (EffectId,
+   Transfer)`, `EffectId::Named(DeclKey)` only for declarations outside the registry; dedupe is a
+   `TargetSet { Vec<Target>, FxHashSet<Target> }` (insertion-ordered, output order unchanged);
+   `siteless` a set of `Target`; `by_ref_at`, `Registry::builtin`, `declaration` take ids;
+   `classification_by_id` stops converting. ~40 functions in `effects.rs` (~4,000 lines),
+   `CallContext`, `Level`, `Passing`, `run_passed`, `Registry::call_effect`, the checker's callers of
+   `call_effect`/`virtual_method_effect`/`method_effect_by_name`, and the effect tests. Part 1 changes
+   `Holder` and `Receiver`; this step builds on them.
+4. **B + C: one memo for the pure hierarchy queries**. `ReachMemo` on `Registry`, owned by the
+   registry generation (rebuilt on a declaration change bump, not dropped at the end of
+   `resolve_effects`), so the checker's `call_effect` (3.6 G) and incremental/LSP rechecks share it:
+   sharded `OnceLock<Arc<[Target]>>` cells, each key computed once, in parallel, deterministically.
+   Keys by interned ids: `implementations(class, method)`, `every_method(class)`,
+   `overrides_of_builtin(receiver, builtin)`, `methods_named(method)`, implicit sets for
+   `Holder::Unknown` per operation, `classes_declaring(method)` as `&[ClassId]` (`methods_by_name`,
+   `effects.rs:562`, already stores ids). `Registry::descendants` (`hierarchy.rs:691`, per-call BFS
+   with `String` hashing) is replaced by a descendants index built once with the relation passes
+   (`5cc92c9e` parallelised them) returning `Arc<[ClassId]>`; `subclasses`/`inheritors` keep their
+   signatures. `Reach::builtin_runs` reads the lineage and wrappers from the memo.
+5. **`settle`: join each distinct target set once per wave** (`effects.rs:1534`). Sites sharing an
+   `Arc<[Target]>` join its effect once per wave; done regardless of its 0.6 G because it turns the
+   per-declaration expanded lists (the 156 MB peak) into shared storage.
+6. **Cached classifications on warm runs**. Every hierarchy read goes through `ReachMemo` (step 4), so
+   a declaration's read-set is the memo keys it consulted; fingerprint = hash of those keys' values.
+   Store `(body hash, read-set fingerprint) -> IdClassification` in the per-file cache
+   (`project/file_cache.rs`, `registry/stub_cache.rs` container: per-record CRC, no hand-kept
+   version); on a warm run recompute only memo values and declarations whose fingerprint changed.
+   Needs its own oracle (cached == recomputed, `oracle` profile, file cache on) and a round-trip test.
+   (Part 1's global-fact scoping per component feeds the fingerprint.)
+7. **Isolated declaration slots without padded name vectors**: `Registry::isolated_class_slot` /
+   `isolated_function_slot` (`registry/index.rs:789`, `:818`) and `ensure_class_id`/
+   `ensure_function_id` (`registry.rs:944`): a slot keeps one `(local, Name)` entry;
+   `project_class_names`/`project_function_names` are filled when slots merge
+   (`insert_built_declarations_batch`, `index.rs:640-660`). Removes 648 MB and ~650 M Ir. Tests: the
+   merge's existing tests plus an ID-stability test (ids and the `project_*_names` tables identical
+   before/after, one and many declarations).
+8. **Deferred class results by slot, flags precomputed**. `Registry::method_result` (`hierarchy.rs:286`)
+   does `deferred_class_result(class)` then a linear `iter().find` (5.6 M calls, 2.2 G; 10.8 M
+   `deferred_class_result` calls, 2.8 G): index a class's results by `MethodRef` slot (O(1)).
+   `resolved_deferred_class` (`resolve.rs:929`, 12.5 K calls, 1.65 G self) re-scans every signature
+   with `contains_deferred`; cache the "has a deferred sentinel" bit on the interned `Type` node
+   (`types/src/intern.rs`). Check whether the effects pass forces classes whose result is unused.
+9. **`flatten_phpdoc_inheritance_one_pass` by slots** (`hierarchy.rs`/`registry.rs`, 2.7 G): iterate
+   each class's own members by slot, reach ancestors' members by `MethodRef`. Needs step 3's accessors.
+   Oracle: the flattened result table equals the old one.
+10. **`Resolve::run` fixpoint as a worklist** (`effects.rs:2765`): 276 K `call_targets` calls for 63 K
+    declarations show repeated rounds. Each scope reached once, re-reached only when a scope it
+    captures from gains a `lost` variable (dependents map built with the levels). Acceptance: a debug
+    counter (re-reaches per declaration) on Piwigo, and an oracle comparing with the round-based loop
+    kept under `cfg(debug_assertions)`. Part 1's fixes to `Resolve::levels` (captured/by-ref holders)
+    land first.
+11. **Check phase residual**: `run_checker` 12.3 G, 3.6 G `call_effect` (steps 3-4); the rest charged
+    to checker code is ~3.8 G flat across hundreds of functions (`check_expr_impl` 347 M,
+    `check_parameters` 120 M, `merge_scopes` 112 M, `find_var` 100 M, `expr_span` 94 M,
+    `check_function_impl` 90 M, `lookup_method_with_owner` 68 M); no hotspot above noise. No
+    checker-specific step; re-check after steps 2-9 with the callgrind rerun and fix only what it shows.
+
+### B2.4 Reused code
+Oracle pattern and `[profile.oracle]` (`Cargo.toml`); `Registry::methods_by_name` (`effects.rs:562`);
+sharded `OnceLock` map patterns in `registry/name_table.rs` / `ids.rs`; `Registry::{member_slot,
+property_ref_by_name, class_ids}`; per-file cache container for step 6.
+
+### B2.5 Verification (end of Part 2)
+- Per step: fmt, check, clippy, the touched module's tests (debug profile).
+- End of group: `cargo test --workspace`, `cargo test --test fixtures` (3,829), O2 report via
+  `cargo xtask` equal to the Part 1 baseline, the `oracle` pass over Piwigo (three configs), each
+  vendor project, the edit replay.
+- Callgrind rerun with the `cl-head` recipe (`dhat` + `-C force-frame-pointers=yes`, own
+  `CARGO_TARGET_DIR`, warm cache, `--separate-threads=yes`, `nice -n 19`); expect `classify` 81.7 G ->
+  under 5 G and D 14.5 G -> under 0.5 G; compare phase tables with `cl-head` by stable entry points.
+- Heap: rerun the `dhat-heap` binary (`.corpus-runs/gate/bin/<commit>/dhat-heap/`) and compare by
+  holder with `heap-head/dhat-heap.json`; the memo and shared target sets must not raise the peak.
+- `hyperfine -N --warmup 2 --runs 10`, warm cache, previous binary vs new, alternating, loadavg
+  logged (`nice -n 19`); warm wall should leave the 6-10 s of the `cl-head` runs.
+- One heavy job at a time; redirect big outputs to files; rm with literal full paths.
+
+### B2.6 Facts to settle while implementing
+The ~30 G outside `classify` and `run_checker` is attributed above (overlay, purity's stolen effects
+work, `precompute_member_owners`, `flatten_phpdoc`, `resolved_deferred_class`, finishing-pass
+lookups); the callgrind rerun shows what is left, nothing is assumed.
+
+## B.3 The most proper fix for each open gap (EG.15-EG.20, EG.11)
+
+Written as a design discussion; nothing here is built. The first three pieces share one foundation and land in this order, before Part 2, because they reshape `Holder`, `Transfer` and the cached classifications Part 2 optimises.
+
+1. **Holders derived from types (EG.16).** One source of truth: a holder is a function of a `Type` (no object component gives `NoObject`, classes give `Classes`, `mixed` gives `Unknown`). The summarizer reads per-expression types from a sound-by-construction mode of the checker's own inference (flow-sensitive for private locals, declared types for properties, elements and globals, nothing narrowed on mutable state that a call may change), kept as a side table of expression id to type per body. `Origin` and `value_holder` give way to the type-to-holder map. Touches the summarizer, a new inference mode, the file cache format.
+2. **Parametric summaries (EG.15).** `BodySummary` records symbolic operations `(ParamPath, Operation)` (a parameter with projections: property, element) instead of an Unknown holder; callee-to-callee passing composes through `Transfer`; the fixpoint settles them as it settles `Condition` for callable parameters; a call instantiates them from the holders of its actual arguments (`CallContext::argument` and `elements`), memoised per `(declaration, argument holders)`. Touches `BodySummary`, `Transfer`, `settle`, `Level::classify`, `Registry::call_effect`, the checker's callers, the cache, and Part 2 rows 2.3 and 2.5 (`Target = (EffectId, Transfer)` changes shape).
+3. **Stub classes by a contents pseudo-field (EG.20 included).** Replace `stub_holds_code` (the 9,983 `builtin_runs None` roots: Ds\Deque, Decimal, Redis...) by a synthetic `contents` field per unprobed stub class: storing methods (chosen from parameter types and probed rows) deposit the argument holder into it, every other method runs its operations against the contents holder. The contents holder is the program-wide join of what is ever stored (flow-insensitive, sound). A program that stores only strings makes `count`, `join` and the like run nothing. `implode` and `count` on a genuinely `mixed` element holder keep the join over `__toString` / `Countable` implementers, which is correct; its effect becomes known once the stub declarations stop being Unknown.
+4. **Autoload and handler events (EG.18).** `spl_autoload_register` registers (a new "registers" kind next to "runs" and "retains" in the builtin table): it adds the callable to `Storage::Autoloaders` and runs nothing. A new `Operation::Autoload(class)` is emitted where a class name is first needed (`new`, static call, static property and class constant, `class_exists` and siblings, callable strings and arrays, `ReflectionClass`, `unserialize`, declaration-time `extends` / `implements`), skipped for classes certainly loaded (builtins, `self` / `parent` / `static`, the current hierarchy, classes declared earlier in the same file). Its effect is the join of the registered autoloaders' effects; a closure that only `require`s becomes an `Include` of program files. The same registry generalises to `set_error_handler`, `set_exception_handler`, `register_shutdown_function`, `ob_start` and `session_set_save_handler`; shutdown and exception handlers fully, the error handler at builtin calls that can warn.
+5. **Stream functions by path and resource (EG.19).** A per-scheme wrapper table from `stream_wrapper_register` with a literal scheme and class (a non-literal scheme registers the class under any scheme); a probed `path` column in the builtin table naming the path argument; an abstract string value for it (a literal gives its scheme or none, a concatenation with a literal prefix gives that prefix, a new "cannot start with `scheme://`" string fact from literals, `__DIR__`, `dirname`, `realpath`, `basename`); resources carry the wrapper set chosen at `fopen`, so `fwrite($fp)` on a literal-path stream runs nothing. `phar://` is not plain native (opening a phar unserializes its metadata, an unserialize hook) and `php://filter` with a user filter name reaches `stream_filter_register` classes. The string-fact lattice in the types crate is the largest part.
+6. **Settings, last (EG.17, EG.11).** No sound bound exists (reflection, `Closure::bind`, `unserialize`, `settype` write any property; a thrown exception's trace keeps arguments alive), so the proper form is a named, documented assumption in the configuration: `unknown_code.writes = "all" | "public" | "declared-writers"` (default `all`) and `exception_traces_keep_arguments` (default off). Built after 1-5, since they leave only the truly unknowable (`$callback()` of a `mixed` value).
+
+Decisions pending: whether to build 1-5 as one body of work, and whether 6 is built at all.
