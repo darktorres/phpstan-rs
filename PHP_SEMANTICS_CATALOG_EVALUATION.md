@@ -243,11 +243,12 @@ same-span narrowings keep separate memo entries, preserve distinct diagnostic
 outcomes as well as returns, and clear on a file change. Its targeted gate
 profile test passes. The artifact builder now verifies the referenced weak and
 strict PHP fixture hashes, both captured output hashes and cross-VM equality,
-and the referenced TAILCALL/CALL profile identities before accepting the
-runtime witness; a builder regression confirms a changed fixture digest is
-rejected. Other target ranges
-retain their legacy diagnostic fallback, and the remaining effects/throws still
-do not share this graph evaluation, so F05 remains open. Re-running the catalog
+the output JSON's equality with the declared expectations, and the referenced
+TAILCALL/CALL profile identities before accepting the runtime witness; a
+builder regression confirms a changed fixture digest is rejected. Other target
+ranges retain their legacy diagnostic fallback, and the remaining effects and
+throws still do not share this graph evaluation, so F05 remains open.
+Re-running the catalog
 builder with the locked PHP source, LLVM witness, and paired runtime evidence
 produces byte-identical checked-in JSON. The embedded-artifact assertion now
 requires the new closed Diagnostic evidence and preserves open status for every

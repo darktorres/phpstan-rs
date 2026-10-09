@@ -72,6 +72,18 @@ fn main() {
         strict_output, strict_call_output,
         "strict VM outputs differ"
     );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&weak_output)
+            .expect("weak runtime output is JSON"),
+        runtime["weak_fixture"]["expected"],
+        "weak runtime output differs from its expected values"
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&strict_output)
+            .expect("strict runtime output is JSON"),
+        runtime["strict_fixture"]["expected"],
+        "strict runtime output differs from its expected values"
+    );
     assert_eq!(runtime["result"]["exit_code"].as_u64(), Some(0));
     let profiles: serde_json::Value = serde_json::from_slice(
         &fs::read(
