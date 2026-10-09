@@ -316,9 +316,31 @@ impl Catalog {
             .coverage
             .iter()
             .find(|item| item.domain == domain)?;
+        let mut pending = coverage.dependencies.clone();
+        let mut seen = vec![domain];
+        let mut dependencies = Vec::new();
+        while let Some(required) = pending.pop() {
+            if seen.contains(&required) {
+                continue;
+            }
+            seen.push(required);
+            let item = selection
+                .graph
+                .coverage
+                .iter()
+                .find(|item| item.domain == required)?;
+            dependencies.push(item);
+            pending.extend(item.dependencies.iter().copied());
+        }
+        dependencies.sort_by_key(|item| {
+            crate::Domain::ALL
+                .iter()
+                .position(|domain| *domain == item.domain)
+        });
         Some(Projection {
             entry: selection.entry,
             coverage,
+            dependencies,
         })
     }
 
@@ -393,18 +415,20 @@ impl Selection<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Projection<'a> {
     pub entry: &'a CatalogEntry,
     pub coverage: &'a DomainCoverage,
+    /// Transitive domain dependencies in canonical `Domain::ALL` order.
+    pub dependencies: Vec<&'a DomainCoverage>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        Applicability, Block, Bytes, Coverage, SCHEMA_MAJOR, TargetPredicate, TargetScenario,
-        TargetSet, Terminator, VersionRange,
+        Applicability, Block, Bytes, Coverage, Event, GraphError, SCHEMA_MAJOR, TargetPredicate,
+        TargetScenario, TargetSet, Terminator, VersionRange,
     };
 
     fn evidence_record() -> EvidenceRecord {
@@ -432,6 +456,7 @@ mod tests {
                     domain,
                     coverage: Coverage::Closed,
                     precision: crate::Precision::Exact,
+                    dependencies: vec![],
                     evidence: vec![evidence],
                     assumptions: vec![],
                 })
@@ -496,6 +521,76 @@ mod tests {
     }
 
     #[test]
+    fn graph_rejects_closed_return_coverage_with_open_domain_dependency() {
+        let mut catalog = Catalog::default();
+        let record = evidence_record();
+        let id = catalog.add_evidence(record).unwrap();
+        let mut graph = graph(id);
+        graph.blocks[0].events.push(Event::Unknown {
+            domains: vec![Domain::UserWrite],
+            reason: Bytes(b"unmodeled write".to_vec()),
+        });
+        let returned = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        returned.dependencies.push(Domain::UserWrite);
+        let write = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::UserWrite)
+            .unwrap();
+        write.coverage = Coverage::Open {
+            reasons: vec![Bytes(b"unmodeled write".to_vec())],
+        };
+
+        assert_eq!(
+            catalog.add_entry(function(b"core", b"strlen"), graph),
+            Err(CatalogError::Graph(GraphError::ClosedDomainDependsOnOpen {
+                domain: Domain::Return,
+                dependency: Domain::UserWrite,
+            }))
+        );
+    }
+
+    #[test]
+    fn projection_includes_transitive_domain_dependencies() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(id);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::Invocation);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Invocation)
+            .unwrap()
+            .dependencies
+            .push(Domain::UserRead);
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph)
+            .unwrap();
+
+        let projection = catalog
+            .project(&function(b"core", b"strlen"), Domain::Return)
+            .unwrap();
+        assert_eq!(
+            projection
+                .dependencies
+                .iter()
+                .map(|item| item.domain)
+                .collect::<Vec<_>>(),
+            vec![Domain::Invocation, Domain::UserRead]
+        );
+    }
+
+    #[test]
     fn canonical_manifest_round_trips_and_rejects_tampered_graph_identity() {
         let mut catalog = Catalog::default();
         let evidence = catalog.add_evidence(evidence_record()).unwrap();
@@ -518,6 +613,21 @@ mod tests {
         assert_eq!(
             tampered.validate(),
             Err(CatalogError::DigestMismatch(Digest([0; 32])))
+        );
+    }
+
+    #[test]
+    fn manifest_rejects_the_previous_schema_major() {
+        let mut catalog = Catalog::default();
+        let evidence = catalog.add_evidence(evidence_record()).unwrap();
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph(evidence))
+            .unwrap();
+        let mut manifest = catalog.manifest();
+        manifest.schema_major = SCHEMA_MAJOR - 1;
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::UnsupportedManifest(SCHEMA_MAJOR - 1))
         );
     }
 

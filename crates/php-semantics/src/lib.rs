@@ -25,7 +25,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 1;
+pub const SCHEMA_MAJOR: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -155,6 +155,8 @@ pub struct DomainCoverage {
     pub domain: Domain,
     pub coverage: Coverage,
     pub precision: Precision,
+    /// Other semantic domains required to justify this domain's facts.
+    pub dependencies: Vec<Domain>,
     pub evidence: Vec<Digest>,
     pub assumptions: Vec<Digest>,
 }
@@ -262,6 +264,8 @@ pub enum GraphError {
     OpenWithoutReason(Domain),
     UnknownTransferWithoutReason,
     UnknownTransferWithoutOpenCoverage(Domain),
+    DuplicateDomainDependency(Domain),
+    ClosedDomainDependsOnOpen { domain: Domain, dependency: Domain },
     UnresolvedValue,
     EventWithoutOutcome,
     ResumeWithoutPendingOutcome,
@@ -380,6 +384,24 @@ impl BehaviorGraph {
             return Err(GraphError::UnknownTransferWithoutReason);
         }
         for item in &self.coverage {
+            let mut dependencies = Vec::new();
+            for dependency in &item.dependencies {
+                if dependencies.contains(dependency) {
+                    return Err(GraphError::DuplicateDomainDependency(item.domain));
+                }
+                dependencies.push(*dependency);
+                if matches!(item.coverage, Coverage::Closed)
+                    && self.coverage.iter().any(|candidate| {
+                        candidate.domain == *dependency
+                            && matches!(candidate.coverage, Coverage::Open { .. })
+                    })
+                {
+                    return Err(GraphError::ClosedDomainDependsOnOpen {
+                        domain: item.domain,
+                        dependency: *dependency,
+                    });
+                }
+            }
             if matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty()) {
                 return Err(GraphError::OpenWithoutReason(item.domain));
             }
@@ -542,6 +564,13 @@ fn merge_coverage(
         {
             return Err(GraphError::InvalidComposedCoverage);
         }
+        let mut dependencies = Vec::new();
+        for dependency in &item.dependencies {
+            if dependencies.contains(dependency) {
+                return Err(GraphError::InvalidComposedCoverage);
+            }
+            dependencies.push(*dependency);
+        }
     }
     if Domain::ALL.iter().any(|domain| !seen.contains(domain)) {
         return Err(GraphError::InvalidComposedCoverage);
@@ -575,11 +604,31 @@ fn merge_coverage(
         item.evidence.extend(addition.evidence.iter().copied());
         item.evidence.sort();
         item.evidence.dedup();
+        item.dependencies
+            .extend(addition.dependencies.iter().copied());
+        item.dependencies
+            .sort_by_key(|dependency| Domain::ALL.iter().position(|d| d == dependency));
+        item.dependencies.dedup();
         item.assumptions
             .extend(addition.assumptions.iter().copied());
         item.assumptions.sort();
         item.assumptions.dedup();
         merged.push(item);
+    }
+    for item in &merged {
+        if matches!(item.coverage, Coverage::Closed) {
+            for dependency in &item.dependencies {
+                if merged.iter().any(|candidate| {
+                    candidate.domain == *dependency
+                        && matches!(candidate.coverage, Coverage::Open { .. })
+                }) {
+                    return Err(GraphError::ClosedDomainDependsOnOpen {
+                        domain: item.domain,
+                        dependency: *dependency,
+                    });
+                }
+            }
+        }
     }
     *current = merged;
     Ok(())
@@ -1252,6 +1301,7 @@ mod tests {
                     domain,
                     coverage: Coverage::NotApplicable,
                     precision: Precision::Exact,
+                    dependencies: vec![],
                     evidence: vec![Digest([1; 32])],
                     assumptions: vec![],
                 })
@@ -1268,6 +1318,7 @@ mod tests {
                 reasons: vec![Bytes(reason.to_vec())],
             },
             precision: Precision::Widened,
+            dependencies: vec![],
             evidence: vec![Digest([2; 32])],
             assumptions: vec![],
         }
@@ -1286,6 +1337,7 @@ mod tests {
                     Coverage::Closed
                 },
                 precision: Precision::Exact,
+                dependencies: vec![],
                 evidence: vec![Digest([2; 32])],
                 assumptions: vec![Digest([3; 32])],
             })
@@ -1360,6 +1412,7 @@ mod tests {
                     domain,
                     coverage: Coverage::NotApplicable,
                     precision: Precision::Exact,
+                    dependencies: vec![],
                     evidence: vec![Digest([1; 32])],
                     assumptions: vec![],
                 })
@@ -1405,6 +1458,7 @@ mod tests {
                     domain,
                     coverage: Coverage::NotApplicable,
                     precision: Precision::Exact,
+                    dependencies: vec![],
                     evidence: vec![Digest([1; 32])],
                     assumptions: vec![],
                 })
@@ -1749,6 +1803,7 @@ mod tests {
                     domain,
                     coverage: Coverage::NotApplicable,
                     precision: Precision::Exact,
+                    dependencies: vec![],
                     evidence: vec![Digest([1; 32])],
                     assumptions: vec![],
                 })
@@ -1853,6 +1908,7 @@ mod tests {
             domain: Domain::UserWrite,
             coverage: Coverage::Open { reasons: vec![] },
             precision: Precision::Widened,
+            dependencies: vec![],
             evidence: vec![Digest([3; 32])],
             assumptions: vec![],
         };
