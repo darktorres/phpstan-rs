@@ -19,6 +19,17 @@ final class StringLengthEffectStringable
     }
 }
 
+final class ThrowingStringLengthEffectStringable
+{
+    public function __construct(private StringLengthEffectBox $box) {}
+
+    public function __toString(): string
+    {
+        $this->box->value = null;
+        throw new RuntimeException('conversion failed');
+    }
+}
+
 function strlenCatalogStillAppliesStringableEffects(
     StringLengthEffectBox $box,
     StringLengthEffectStringable $value,
@@ -26,6 +37,19 @@ function strlenCatalogStillAppliesStringableEffects(
     if ($box->value !== null) {
         $length = strlen($value);
         assertType('int<0, max>', $length);
+        assertType('string|null', $box->value);
+    }
+}
+
+function strlenCatalogPreservesStringableWritesBeforeThrow(
+    StringLengthEffectBox $box,
+    ThrowingStringLengthEffectStringable $value,
+): void {
+    if ($box->value !== null) {
+        try {
+            strlen($value);
+        } catch (RuntimeException) {
+        }
         assertType('string|null', $box->value);
     }
 }
