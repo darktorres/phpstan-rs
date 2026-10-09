@@ -50,6 +50,7 @@ pub(crate) mod php_date_parser;
 pub mod project;
 pub mod reflection_rule;
 pub mod regex_groups;
+pub use syntax::stats;
 pub mod registry;
 pub mod restricted_symbols;
 pub mod rule;
