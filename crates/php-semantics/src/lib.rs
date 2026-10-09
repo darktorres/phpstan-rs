@@ -459,6 +459,18 @@ pub enum EventExit<V, S> {
     },
 }
 
+impl<V, S> EventExit<V, S> {
+    fn coverage(&self) -> &[DomainCoverage] {
+        match self {
+            Self::Normal { coverage, .. }
+            | Self::PhpThrow { coverage, .. }
+            | Self::NativeUnwind { coverage, .. }
+            | Self::Fatal { coverage, .. }
+            | Self::Suspended { coverage, .. } => coverage,
+        }
+    }
+}
+
 pub trait SemanticHost {
     type Value: Clone + PartialEq;
     type State: Clone + PartialEq;
@@ -768,6 +780,9 @@ pub fn evaluate<H: SemanticHost>(
                     return Err(GraphError::EventWithoutOutcome);
                 }
                 for outcome in outcomes {
+                    if matches!(event, Event::Invoke { .. }) && outcome.coverage().is_empty() {
+                        return Err(GraphError::InvalidComposedCoverage);
+                    }
                     match outcome {
                         EventExit::Normal {
                             result,
@@ -1068,6 +1083,7 @@ mod tests {
         maybe_always: bool,
         nested_open: Option<Domain>,
         incomplete_nested_coverage: bool,
+        omit_nested_coverage: bool,
     }
     impl SemanticHost for Host {
         type Value = String;
@@ -1135,6 +1151,9 @@ mod tests {
                     let mut coverage = composed_coverage(self.nested_open);
                     if self.incomplete_nested_coverage {
                         coverage.pop();
+                    }
+                    if self.omit_nested_coverage {
+                        coverage.clear();
                     }
                     if self.native_unwind_invoke {
                         return vec![EventExit::NativeUnwind {
@@ -1340,6 +1359,26 @@ mod tests {
         );
         let mut host = Host {
             incomplete_nested_coverage: true,
+            ..Host::default()
+        };
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::InvalidComposedCoverage)
+        );
+    }
+
+    #[test]
+    fn omitted_child_coverage_rejects_the_evaluation() {
+        let graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 0,
+            }],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        let mut host = Host {
+            omit_nested_coverage: true,
             ..Host::default()
         };
         assert_eq!(
