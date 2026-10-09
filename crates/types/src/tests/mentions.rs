@@ -28,6 +28,34 @@ fn mentions_any_is_mentions_for_each_name() {
 }
 
 #[test]
+fn mentions_callable_is_mentions_any_of_callable_and_closure() {
+    let object = |name: &str, args: Vec<Type>| Type::object(name.into(), args);
+    let types = [
+        Type::int(),
+        Type::callable(None),
+        object("Closure", Vec::new()),
+        object("\\CLOSURE", Vec::new()),
+        object("callable", Vec::new()),
+        object("ClosureFactory", Vec::new()),
+        object("Box", vec![object("Closure", Vec::new())]),
+        Type::array(Type::int(), Type::callable(None)),
+        Type::union_of(vec![
+            Type::null(),
+            Type::list_of(object("Closure", Vec::new())),
+        ]),
+        Type::intersection_of(vec![object("Foo", Vec::new()), object("Bar", Vec::new())]),
+        Type::array(Type::string(), Type::string()),
+    ];
+    for ty in &types {
+        assert_eq!(
+            ty.mentions_callable(),
+            ty.mentions_any(&["callable", "Closure"]),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
 fn the_first_and_single_object_class_are_those_of_the_list() {
     /// `object_class_names` as it was made: a list for each member, joined.
     fn by_lists(ty: &Type) -> Vec<Name> {

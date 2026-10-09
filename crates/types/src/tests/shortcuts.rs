@@ -152,6 +152,8 @@ proptest! {
         prop_assert_eq!(ty.0.flags() & crate::HAS_CONDITIONAL != 0, conditional);
         prop_assert_eq!(ty.0.flags() & crate::HAS_OBJECT != 0, object);
         prop_assert_eq!(ty.0.flags() & crate::HAS_PARAM_CONDITIONAL != 0, param);
+        let callable = crate::without_shortcuts(|| ty.mentions_callable());
+        prop_assert_eq!(ty.0.flags() & crate::HAS_CALLABLE_KIND != 0, callable);
     }
 }
 

@@ -258,6 +258,17 @@ impl Type {
             || self.any_child(|t| t.mentions_any(names))
     }
 
+    /// `mentions_any(&["callable", "Closure"])`, from a flag the type's node
+    /// has from the time it is made.
+    #[inline]
+    pub fn mentions_callable(&self) -> bool {
+        if crate::shortcuts_enabled() {
+            self.0.flags() & crate::HAS_CALLABLE_KIND != 0
+        } else {
+            self.mentions_any(&["callable", "Closure"])
+        }
+    }
+
     /// `mentions` for this type's own form, not what is nested in it.
     fn mentions_directly(&self, name: &str) -> bool {
         match (name, self.repr()) {

@@ -817,9 +817,29 @@ pub(super) struct Position {
 /// What a call of a builtin runs whatever its arguments are.
 pub(super) struct BuiltinBase {
     runs: Arc<[(Position, BuiltinRun)]>,
-    prefix: Arc<[(DeclKey, Transfer)]>,
+    prefix: Arc<[Run]>,
     /// Per parameter: whether a callable passed there is run.
     takes_callable: Arc<[bool]>,
+}
+
+/// What a call of a builtin runs: what it runs whatever its arguments are,
+/// shared by the calls that ask the same, and what its arguments add.
+pub(super) struct BuiltinRuns {
+    prefix: Arc<[Run]>,
+    added: Vec<Run>,
+}
+
+impl BuiltinRuns {
+    fn of(added: Vec<Run>) -> Self {
+        BuiltinRuns {
+            prefix: Arc::from([]),
+            added,
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Run> + '_ {
+        self.prefix.iter().chain(&self.added).copied()
+    }
 }
 
 /// What the code around a closure knows of the object each variable it
@@ -1132,29 +1152,6 @@ impl IdTargetSet {
 /// The numbers of the waves of every `settle`.
 static WAVES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// The same classification after resolving all declaration edges to IDs,
-/// ready for the fixed-point worklist.
-#[derive(Debug)]
-struct IdClassification<'r> {
-    own: Effect,
-    calls: Vec<(EffectIx, TransferIx, Option<u32>)>,
-    sets: Vec<IdTargets>,
-    sites: Vec<IdSite<'r>>,
-    runs: Vec<Condition>,
-}
-
-#[derive(Debug)]
-struct IdSite<'r> {
-    call: &'r CallWrites,
-    passed: Vec<(&'r ArgAt, IdPassed)>,
-}
-
-#[derive(Debug)]
-struct IdPassed {
-    runs: Vec<(EffectIx, TransferIx)>,
-    params: Vec<Condition>,
-}
-
 impl Classification<'_> {
     fn anything() -> Self {
         Classification::of(Effect::anything())
@@ -1188,7 +1185,7 @@ struct Site<'r> {
 /// these parameters of its own.
 #[derive(Debug)]
 struct Passed {
-    runs: Vec<(DeclKey, Transfer)>,
+    runs: Vec<Run>,
     params: Vec<Condition>,
 }
 
@@ -1198,7 +1195,7 @@ enum Passing<'c> {
     Argument(&'c ArgAt),
     /// Nothing: the parameter's default runs these, called; none when the
     /// parameter is required, since the call throws.
-    Default(Vec<(DeclKey, Transfer)>),
+    Default(Vec<Run>),
     /// Not known.
     Unknown,
 }
@@ -1231,9 +1228,12 @@ fn passes_arguments(callee: &Callee, key: &DeclKey) -> bool {
 
 /// The function `text` names, called: none when it names no function, since
 /// the call throws.
-fn function_named(registry: &Registry, text: &str) -> Vec<(DeclKey, Transfer)> {
+fn function_named(registry: &Registry, text: &str) -> Vec<Run> {
     match registry.lookup_function_with_name(text.trim_start_matches('\\')) {
-        Some((declared, _)) => vec![(function_key(declared), Transfer::Static)],
+        Some((declared, _)) => vec![(
+            registry.effect_ix(&function_key(declared)),
+            TransferTable::STATIC,
+        )],
         None => Vec::new(),
     }
 }
@@ -1381,41 +1381,8 @@ fn classification_by_id<'r>(
     registry: &Registry,
     key: DeclKey,
     classification: Classification<'r>,
-) -> (EffectIx, IdClassification<'r>) {
-    let sites = classification
-        .sites
-        .into_iter()
-        .map(|site| IdSite {
-            call: site.call,
-            passed: site
-                .passed
-                .into_iter()
-                .map(|(at, passed)| {
-                    (
-                        at,
-                        IdPassed {
-                            runs: passed
-                                .runs
-                                .into_iter()
-                                .map(|(key, transfer)| registry.effect_run(&key, &transfer))
-                                .collect(),
-                            params: passed.params,
-                        },
-                    )
-                })
-                .collect(),
-        })
-        .collect();
-    (
-        registry.effect_ix(&key),
-        IdClassification {
-            own: classification.own,
-            calls: classification.calls,
-            sets: classification.sets,
-            sites,
-            runs: classification.runs,
-        },
-    )
+) -> (EffectIx, Classification<'r>) {
+    (registry.effect_ix(&key), classification)
 }
 
 impl Registry {
@@ -1584,7 +1551,7 @@ impl Registry {
                 })
             })
             .collect();
-        let mut classified: Vec<(EffectIx, IdClassification<'_>)> = functions
+        let mut classified: Vec<(EffectIx, Classification<'_>)> = functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(name, sig)| {
@@ -2091,15 +2058,18 @@ impl Registry {
 
     /// The stream-wrapper methods named `method` a class that may be
     /// registered as a wrapper declares, run as the wrapper's own object.
-    fn wrapper_runs(&self, method: &'static str) -> Arc<[(DeclKey, Transfer)]> {
+    fn wrapper_runs(&self, method: &'static str) -> Arc<[Run]> {
         self.reach_memo.wrapper_runs.get_or_compute(method, || {
-            let mut out = Vec::new();
+            let mut out: Vec<Run> = Vec::new();
             for class in self
                 .classes_declaring(method)
                 .filter(|class| self.may_be_registered_wrapper(class))
             {
                 if let Some((owner, sig)) = self.lookup_method_with_owner(class, method) {
-                    out.push((self.reached(&owner, method, sig), Transfer::Made));
+                    out.push((
+                        self.effect_ix(&self.reached(&owner, method, sig)),
+                        TransferTable::MADE,
+                    ));
                 }
             }
             out.into()
@@ -2378,7 +2348,7 @@ impl Slots {
     /// The slots of `classified`, a declaration listed twice at the later
     /// position. `dense` is the number of handles when a table of that
     /// size is worth it.
-    fn of(classified: &[(EffectIx, IdClassification<'_>)], dense: Option<usize>) -> Slots {
+    fn of(classified: &[(EffectIx, Classification<'_>)], dense: Option<usize>) -> Slots {
         match dense {
             Some(len) => {
                 let mut at = vec![0u32; len];
@@ -2448,7 +2418,7 @@ impl Settlements {
 /// the whole of the registry's handles, so its slots are a table by handle.
 fn settle(
     registry: &Registry,
-    classified: &[(EffectIx, IdClassification<'_>)],
+    classified: &[(EffectIx, Classification<'_>)],
     shared: bool,
     outside: impl Fn(EffectIx) -> Settled + Sync,
 ) -> Settlements {
@@ -2664,7 +2634,7 @@ impl SetJoin {
 #[allow(clippy::too_many_arguments)]
 fn run_passed<'g>(
     registry: &Registry,
-    site: Option<&IdSite<'_>>,
+    site: Option<&Site<'_>>,
     callee: EffectIx,
     transfer: &Transfer,
     condition: &Condition,
@@ -2690,10 +2660,7 @@ fn run_passed<'g>(
             }
         },
         Passing::Default(runs) => {
-            default = runs
-                .into_iter()
-                .map(|(key, transfer)| registry.effect_run(&key, &transfer))
-                .collect::<Vec<_>>();
+            default = runs;
             (&default[..], &[][..])
         }
         Passing::Unknown => {
@@ -3007,7 +2974,7 @@ impl Reach<'_> {
         call: &CallWrites,
         at: &ArgAt,
         transfer: &Transfer,
-    ) -> Option<Vec<(DeclKey, Transfer)>> {
+    ) -> Option<Vec<Run>> {
         // A spread argument is an array of arguments.
         if matches!(at, ArgAt::Spread) {
             return None;
@@ -3046,7 +3013,7 @@ impl Reach<'_> {
         sig: &FunctionReflection,
         transfer: &Transfer,
         call: &CallWrites,
-    ) -> Option<Vec<(DeclKey, Transfer)>> {
+    ) -> Option<BuiltinRuns> {
         let registry = self.registry;
         let scope = match transfer {
             Transfer::Same => self.ctx.own_class(),
@@ -3068,7 +3035,7 @@ impl Reach<'_> {
         }
         let base = base?;
         let runs: &[(Position, BuiltinRun)] = &base.runs;
-        let mut out = base.prefix.to_vec();
+        let mut out: Vec<Run> = Vec::new();
         // Each parameter a callable is passed at runs it.
         for (at, param) in sig.params.iter().enumerate() {
             let at = at as u32;
@@ -3132,12 +3099,13 @@ impl Reach<'_> {
                     };
                     out.extend(self.method_targets_on(&holder, method));
                 }
-                BuiltinRun::Wrapper(method) => {
-                    out.extend(registry.wrapper_runs(method).iter().cloned())
-                }
+                BuiltinRun::Wrapper(method) => out.extend(registry.wrapper_runs(method).iter()),
             }
         }
-        Some(out)
+        Some(BuiltinRuns {
+            prefix: Arc::clone(&base.prefix),
+            added: out,
+        })
     }
 
     /// What a call of the builtin `key` runs whatever its arguments are:
@@ -3187,7 +3155,7 @@ impl Reach<'_> {
         let mut out = Vec::new();
         if let Some(name) = &entry {
             for method in builtin_runs::held_wrappers(name) {
-                out.extend(registry.wrapper_runs(method).iter().cloned());
+                out.extend(registry.wrapper_runs(method).iter());
             }
         }
         if let Some(owner) = &key.class {
@@ -3203,8 +3171,7 @@ impl Reach<'_> {
                     registry
                         .overrides_of_builtin(receiver, owner)
                         .iter()
-                        .cloned()
-                        .map(|key| (key, transfer.clone())),
+                        .map(|key| registry.effect_run(key, transfer)),
                 );
             }
         }
@@ -3213,7 +3180,7 @@ impl Reach<'_> {
             .iter()
             .enumerate()
             .map(|(at, param)| {
-                param.ty.mentions_any(&["callable", "Closure"])
+                param.ty.mentions_callable()
                     || runs.iter().any(|(position, run)| {
                         position.at == at as u32 && matches!(run, BuiltinRun::Calls)
                     })
@@ -3231,8 +3198,9 @@ impl Reach<'_> {
     /// the method, and every loaded declaration of it otherwise, since the
     /// method may run on an object the first one gave back. Nothing for a
     /// value that is no object.
-    fn method_targets_on(&self, holder: &Holder, method: &str) -> Vec<(DeclKey, Transfer)> {
+    fn method_targets_on(&self, holder: &Holder, method: &str) -> Vec<Run> {
         let registry = self.registry;
+        let transfers = &registry.reach_memo.transfers;
         let has_method = |class: &Name| {
             registry.lookup_method(class, method).is_some()
                 || registry.lookup_method(class, &well_known().call).is_some()
@@ -3242,28 +3210,26 @@ impl Reach<'_> {
             Holder::Classes(classes) if classes.iter().all(has_method) => classes
                 .iter()
                 .flat_map(|class| {
-                    let keys = registry.implementations(class, method);
-                    keys.iter()
-                        .map(|key| (key.clone(), Transfer::Other(Some(class.clone()))))
-                        .collect::<Vec<_>>()
+                    let transfer = transfers.intern(&Transfer::Other(Some(class.clone())));
+                    let ixs = registry.implementation_ixs(class, method);
+                    ixs.iter().map(|&ix| (ix, transfer)).collect::<Vec<_>>()
                 })
                 .collect(),
             Holder::Made(Some(classes)) if classes.iter().all(has_method) => classes
                 .iter()
                 .filter_map(|class| self.exact_method(class, method))
-                .map(|key| (key, Transfer::Made))
+                .map(|key| (registry.effect_ix(&key), TransferTable::MADE))
                 .collect(),
             _ => registry
-                .methods_named(method)
+                .methods_named_ixs(method)
                 .iter()
-                .cloned()
-                .map(|key| (key, Transfer::Other(None)))
+                .map(|&ix| (ix, TransferTable::ANY))
                 .collect(),
         }
     }
 
     /// The declarations a callable the body names runs.
-    fn callable_targets(&self, callable: &Callable) -> Option<Vec<(DeclKey, Transfer)>> {
+    fn callable_targets(&self, callable: &Callable) -> Option<Vec<Run>> {
         let registry = self.registry;
         match callable {
             // What the caller wrote is found where it is passed.
@@ -3276,36 +3242,20 @@ impl Reach<'_> {
                         span: Default::default(),
                     };
                     self.static_targets(&class, Some(&Name::from(method)))
-                        .map(|runs| self.keyed(runs))
                 }
                 None => Some(function_named(registry, text)),
             },
-            Callable::Pair(PairTarget::Class(class), method) => self
-                .static_targets(class, Some(method))
-                .map(|runs| self.keyed(runs)),
-            Callable::Pair(PairTarget::Object(receiver), method) => self
-                .call_targets(
-                    &Callee::Method {
-                        receiver: receiver.clone(),
-                        method: Some(method.clone()),
-                    },
-                    None,
-                )
-                .map(|runs| self.keyed(runs)),
+            Callable::Pair(PairTarget::Class(class), method) => {
+                self.static_targets(class, Some(method))
+            }
+            Callable::Pair(PairTarget::Object(receiver), method) => self.call_targets(
+                &Callee::Method {
+                    receiver: receiver.clone(),
+                    method: Some(method.clone()),
+                },
+                None,
+            ),
         }
-    }
-
-    /// The declarations and transfers `runs` stand for.
-    fn keyed(&self, runs: Vec<Run>) -> Vec<(DeclKey, Transfer)> {
-        let registry = self.registry;
-        runs.into_iter()
-            .map(|(ix, transfer)| {
-                (
-                    registry.effect_key(ix).clone(),
-                    registry.transfer_of(transfer).clone(),
-                )
-            })
-            .collect()
     }
 
     /// Whether `$name->method(...)` runs only closures the caller wrote,
@@ -4046,7 +3996,7 @@ impl Registry {
             value: None,
             captured,
         };
-        let classified: Vec<(EffectIx, IdClassification<'_>)> = resolve
+        let classified: Vec<(EffectIx, Classification<'_>)> = resolve
             .run(&holder, None)
             .into_iter()
             .map(|(key, classification)| classification_by_id(self, key, classification))
@@ -4085,7 +4035,7 @@ impl Registry {
                 None => {
                     let settled = self.settled_by_ix(ix);
                     effect.join_transferred(&settled.effect, transfer);
-                    let mut runs = Vec::new();
+                    let mut runs: Vec<Run> = Vec::new();
                     for condition in &settled.runs {
                         let passing = if passes_arguments(&call.callee, key) {
                             self.passing(call, key, condition.at)
@@ -4104,15 +4054,15 @@ impl Registry {
                             return Effect::unknown();
                         };
                         runs.extend(passed.into_iter().map(|(run, own)| {
-                            let bound = condition.bound(transfer, &own);
-                            (run, bound)
+                            let bound = condition.bound(transfer, self.transfer_of(own));
+                            (run, self.reach_memo.transfers.intern(&bound))
                         }));
                     }
-                    runs
+                    BuiltinRuns::of(runs)
                 }
             };
-            for (run, bound) in runs {
-                effect.join_transferred(&self.settled_effect(&run), &bound);
+            for (run, bound) in runs.iter() {
+                effect.join_transferred(&self.settled_effect_by_ix(run), self.transfer_of(bound));
             }
             if effect.is_anything() {
                 break;
@@ -4915,8 +4865,7 @@ impl<'r> Level<'r> {
                     let Some(runs) = reach.builtin_runs(key, sig, transfer, call) else {
                         return Classification::unknown();
                     };
-                    for (run_key, run_transfer) in runs {
-                        let run = self.registry.effect_run(&run_key, &run_transfer);
+                    for run in runs.iter() {
                         if siteless.insert(run) {
                             calls.push((run.0, run.1, None));
                         }
@@ -4994,8 +4943,7 @@ impl<'r> Level<'r> {
                             registry.transfer_of(transfer),
                             call,
                         )?;
-                        for (key, transfer) in runs {
-                            let run = registry.effect_run(&key, &transfer);
+                        for run in runs.iter() {
                             if seen.insert(run) {
                                 out.push(run);
                             }
@@ -5027,11 +4975,9 @@ impl<'r> Level<'r> {
             let closures = self.runs.borrow_mut().split_off(ran.0);
             let params = self.params_run.borrow_mut().split_off(ran.1);
             if let Some(mut runs) = runs {
-                runs.extend(
-                    closures
-                        .into_iter()
-                        .map(|(id, transfer)| (holder.closure(id), transfer)),
-                );
+                runs.extend(closures.into_iter().map(|(id, transfer)| {
+                    self.registry.effect_run(&holder.closure(id), &transfer)
+                }));
                 out.push((at, Passed { runs, params }));
             }
         }

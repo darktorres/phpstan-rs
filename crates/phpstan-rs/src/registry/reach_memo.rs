@@ -149,7 +149,7 @@ pub(crate) struct ReachMemo {
     pub(crate) every_method_ixs: OnceMap<Name, Arc<[EffectIx]>>,
     pub(crate) methods_named_ixs: OnceMap<Name, Arc<[EffectIx]>>,
     pub(super) builtin_base: OnceMap<(DeclKey, Transfer, Option<Name>), Option<Arc<BuiltinBase>>>,
-    pub(crate) wrapper_runs: OnceMap<&'static str, Arc<[(DeclKey, Transfer)]>>,
+    pub(crate) wrapper_runs: OnceMap<&'static str, SharedTargets>,
     pub(crate) hook_members: OnceMap<(Option<Name>, bool), Name>,
     pub(crate) overrides_of_builtin: OnceMap<(String, String), Arc<[DeclKey]>>,
     /// What an operation runs, by `ImplicitKey`; none when it may run code

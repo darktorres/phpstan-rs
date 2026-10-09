@@ -178,6 +178,9 @@ pub(crate) const HAS_CONDITIONAL: u16 = 256;
 pub(crate) const HAS_OBJECT: u16 = 512;
 /// A conditional on a parameter, which a call's arguments resolve.
 pub(crate) const HAS_PARAM_CONDITIONAL: u16 = 1024;
+/// A `callable`, or an object of class `callable` or `Closure`:
+/// `Type::mentions_callable`.
+pub(crate) const HAS_CALLABLE_KIND: u16 = 2048;
 
 #[cfg(test)]
 thread_local! {
@@ -256,6 +259,17 @@ pub(crate) fn reference_flags(repr: &Repr) -> u16 {
         } => HAS_CONDITIONAL | HAS_PARAM_CONDITIONAL,
         _ => 0,
     };
+    let callable = match repr {
+        Repr::Callable(_) => true,
+        Repr::Object(name, _) => {
+            let name = name.trim_start_matches('\\');
+            name.eq_ignore_ascii_case("callable") || name.eq_ignore_ascii_case("closure")
+        }
+        _ => false,
+    };
+    if callable {
+        flags |= HAS_CALLABLE_KIND;
+    }
     traverse::for_each_repr_child(repr, &mut |child| flags |= child.0.flags() & PASSED_UP);
     let refined = match repr {
         Repr::Intersection(members) => members.iter().any(|m| {
