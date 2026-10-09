@@ -80,6 +80,23 @@ or eliminate legacy effect handling. A direct sentinel on the normal PHP
 and `strlen("é")`, respectively, confirming byte-length behavior. This is
 normal-runtime evidence only; it does not compare the CALL VM.
 
+An October 9, 2026 attempt to close that gap generated the CALL VM and rebuilt
+the locked minimal CLI with `--disable-opcache-jit`, preserving GCC and the
+original `-O0 -g` flags. The first build attempt exposed an OPcache JIT/tail-call
+handler-signature incompatibility. Disabling JIT removed that failure, but
+compilation then failed in `Zend/zend_execute.c`: on this x86_64 host,
+`zend_vm_opcodes.h` selects `ZEND_VM_KIND_TAILCALL` when the compiler advertises
+`musttail`/`preserve_none`, while the generator's CALL output has incompatible
+handler declarations/table entries for that selected ABI. A brief attempt to
+force the selector was not a valid repair and is not evidence about runtime
+behavior. The original saved
+Hybrid executable is intact (SHA-256
+`5628c72ba2098d26746c77ff57880d243f249a74ded535a2ffdd0a48f7d3e0dc`), and the
+tracked PHP source files were restored. No CALL runtime output was produced;
+the VM comparison remains OPEN and needs a supported build configuration or
+an upstream generator/compiler compatibility fix. This failed build attempt is
+not evidence of behavioral equivalence.
+
 The latest full run on October 9, 2026 (`cargo test -p phpstan-rs -p
 phpstan-rs-types -p phpstan-rs-semantics`) passes, including 1,201 checker
 library tests, 3 checker binary tests, 45 CLI tests, 286 type tests, and 41
@@ -107,7 +124,7 @@ so it does not close F00 or substitute for independent review.
 |---|---|---|
 | F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; independently check evaluator post-fixpoints. |
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
-| F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
+| F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, normal Hybrid runtime sentinels, and indirect-call witnesses are recorded. A normal-vs-CALL build was attempted with matched GCC/`-O0 -g` settings and JIT disabled, but the CALL build failed in generated Zend handler ABI selection before runtime comparison. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Resolve the CALL generator/compiler ABI issue and complete behavior comparison; complete configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |
 | F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
