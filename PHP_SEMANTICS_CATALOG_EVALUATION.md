@@ -40,6 +40,11 @@ evidence, supports ASCII symbol matching, projection, and explanation lookup.
 F04 remains OPEN because this state is not yet integrated with PhpFlowIR or
 callback exception flow.
 
+The checker and semantic-crate regression suites pass together:
+`cargo test -p phpstan-rs -p phpstan-rs-semantics` completed with 1,194 checker
+library tests, all checker binary/integration tests, and 27 semantic-crate
+tests passing. `cargo check -p phpstan-rs` also passes.
+
 ## Phase F gate-by-gate status
 
 The current [working semantic contract](PHP_SEMANTICS_CATALOG_CONTRACT.md)
