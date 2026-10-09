@@ -1,3 +1,4 @@
+use crate::registry::name_table::TableKey;
 use std::sync::{Arc, OnceLock};
 
 use rayon::prelude::*;
@@ -610,7 +611,10 @@ impl Registry {
     }
 
     /// The id and declaration selected for `name` by PHP's class-name rules.
-    pub(crate) fn class(&self, name: &str) -> Option<(ClassId, &Name, &ClassReflection)> {
+    pub(crate) fn class<K: TableKey + ?Sized>(
+        &self,
+        name: &K,
+    ) -> Option<(ClassId, &Name, &ClassReflection)> {
         let (name, id) = self.class_ids.get_with_name(name)?;
         Some((*id, name, self.class_by_id(*id)?))
     }

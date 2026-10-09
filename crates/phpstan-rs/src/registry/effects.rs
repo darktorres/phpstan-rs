@@ -1407,10 +1407,10 @@ impl Registry {
     fn declaration_effect(&self, key: &DeclKey) -> Effect {
         match &key.class {
             Some(class) => {
-                if self.class(class).is_none() {
+                if self.class(&**class).is_none() {
                     return Effect::anything();
                 }
-                let Some(sig) = self.lookup_own_method(class, &key.member) else {
+                let Some(sig) = self.lookup_own_method(&**class, &key.member) else {
                     return Effect::anything();
                 };
                 if sig.is_stub {
@@ -1448,7 +1448,7 @@ impl Registry {
     /// The declaration `key` names, when it is one.
     fn declaration(&self, key: &DeclKey) -> Option<&FunctionReflection> {
         match &key.class {
-            Some(class) => self.lookup_method(class, &key.member),
+            Some(class) => self.lookup_method(&**class, &key.member),
             None => self.lookup_function(&key.member),
         }
     }

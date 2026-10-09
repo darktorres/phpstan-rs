@@ -238,7 +238,7 @@ impl Registry {
             )
     }
 
-    pub(crate) fn member_slot(&self, class: &str, method: &str) -> Option<u16> {
+    pub(crate) fn member_slot<K: TableKey + ?Sized>(&self, class: &K, method: &str) -> Option<u16> {
         self.class(class)
             .and_then(|(_, _, info)| info.member_slots.get(method).copied())
             .or_else(|| {
@@ -347,7 +347,7 @@ impl Registry {
             .insert_if_absent(method, signature)
     }
 
-    pub(crate) fn method_is_abstract(&self, class: &str, method: &str) -> bool {
+    pub(crate) fn method_is_abstract<K: TableKey + ?Sized>(&self, class: &K, method: &str) -> bool {
         self.member_slot(class, method)
             .and_then(|slot| {
                 self.class_ids
@@ -358,7 +358,7 @@ impl Registry {
             .is_some_and(|entry| entry.is_abstract)
     }
 
-    pub(crate) fn method_is_static(&self, class: &str, method: &str) -> bool {
+    pub(crate) fn method_is_static<K: TableKey + ?Sized>(&self, class: &K, method: &str) -> bool {
         self.member_slot(class, method)
             .and_then(|slot| {
                 self.class_ids
@@ -396,8 +396,8 @@ impl Registry {
         &self,
         class: &K,
     ) -> Option<&FoldedMap<Name>> {
-        class
-            .with_key(|key| self.class_ids.get(key))
+        self.class_ids
+            .get(class)
             .and_then(|id| self.member_owners.get(id))
             .map(|owners| owners.methods.get())
     }
@@ -407,16 +407,16 @@ impl Registry {
         &self,
         class: &K,
     ) -> Option<&NameMap<Name>> {
-        class
-            .with_key(|key| self.class_ids.get(key))
+        self.class_ids
+            .get(class)
             .and_then(|id| self.member_owners.get(id))
             .map(|owners| owners.properties.get())
     }
 
     /// The owners of `class`'s constant names.
     pub(crate) fn const_owners<K: TableKey + ?Sized>(&self, class: &K) -> Option<&NameMap<Name>> {
-        class
-            .with_key(|key| self.class_ids.get(key))
+        self.class_ids
+            .get(class)
             .and_then(|id| self.member_owners.get(id))
             .map(|owners| owners.consts.get())
     }
@@ -985,9 +985,9 @@ impl Registry {
         self.member_entries(class).map(|entry| &entry.name)
     }
 
-    pub(crate) fn lookup_own_method(
+    pub(crate) fn lookup_own_method<K: TableKey + ?Sized>(
         &self,
-        class: &str,
+        class: &K,
         method: &str,
     ) -> Option<&FunctionReflection> {
         let (_, id) = self.class_ids.get_with_name(class)?;
@@ -1037,7 +1037,11 @@ impl Registry {
         })
     }
 
-    pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionReflection> {
+    pub fn lookup_method<K: TableKey + ?Sized>(
+        &self,
+        class: &K,
+        method: &str,
+    ) -> Option<&FunctionReflection> {
         // Real PHP resolves method calls case-insensitively, the same as
         // class and function names: the owners hold one entry for each
         // method, by the most derived declaration's spelling.
@@ -1101,9 +1105,9 @@ impl Registry {
     /// not globally unique - substituting an inherited method/property's
     /// `TemplateParam`s correctly requires knowing which ancestor's own
     /// template scope they belong to, not just the value found.
-    pub fn lookup_method_with_owner(
+    pub fn lookup_method_with_owner<K: TableKey + ?Sized>(
         &self,
-        class: &str,
+        class: &K,
         method: &str,
     ) -> Option<(Name, &FunctionReflection)> {
         // See `lookup_method`.
@@ -1593,7 +1597,11 @@ impl Registry {
     /// introduced via constructor promotion). A single two-level
     /// `HashMap` lookup against `self.property_owner_by_class` - see
     /// `precompute_member_owners`'s own doc comment.
-    pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertyReflection> {
+    pub fn lookup_property<K: TableKey + ?Sized>(
+        &self,
+        class: &K,
+        prop: &str,
+    ) -> Option<&PropertyReflection> {
         let owner = self.property_owners(class)?.get(prop)?;
         let id = self.class_ids.get(owner)?;
         self.property_result_by_name(*id, prop)
@@ -1623,9 +1631,9 @@ impl Registry {
     /// Same as `lookup_property`, but also returns the declaring
     /// ancestor's name - class-level generic substitution needs it the
     /// same way `lookup_method_with_owner`'s own doc comment explains.
-    pub fn lookup_property_with_owner(
+    pub fn lookup_property_with_owner<K: TableKey + ?Sized>(
         &self,
-        class: &str,
+        class: &K,
         prop: &str,
     ) -> Option<(Name, &PropertyReflection)> {
         let owner = self.property_owners(class)?.get(prop)?;
