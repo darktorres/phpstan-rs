@@ -18,6 +18,15 @@ EXPECTED_PARSER_SOURCE_SHA256 = (
     "ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b"
 )
 
+OPERATION_GROUPS = {
+    "native_storage": {"alloca", "load", "store"},
+    "layout_access": {"getelementptr"},
+    "scalar_transfer": {"add", "icmp", "sext", "trunc", "xor", "zext", "phi"},
+    "calls": {"call"},
+    "control_flow": {"br"},
+    "exit": {"ret"},
+}
+
 
 def run(command: list[str], *, input_bytes: bytes | None = None) -> bytes:
     result = subprocess.run(command, input=input_bytes, capture_output=True, check=False)
@@ -27,6 +36,52 @@ def run(command: list[str], *, input_bytes: bytes | None = None) -> bytes:
             f"{result.stderr.decode(errors='replace')}"
         )
     return result.stdout
+
+
+def operation_inventory(function: str) -> dict[str, object]:
+    """Account for every LLVM instruction family in the selected function.
+
+    This is an inventory, not a semantic importer. Unknown instruction families
+    fail extraction so a compiler/source change cannot silently disappear from
+    the recorded slice.
+    """
+    groups_by_opcode = {
+        opcode: group for group, opcodes in OPERATION_GROUPS.items() for opcode in opcodes
+    }
+    counts: dict[str, int] = {}
+    calls: list[str] = []
+    indirect_calls = 0
+    for line in function.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("define ") or stripped.endswith(":"):
+            continue
+        match = re.match(r"^(?:%[-a-zA-Z$._0-9]+\s*=\s*)?([a-z][a-z0-9.]*)\b", stripped)
+        if match is None:
+            continue
+        opcode = match.group(1)
+        if opcode not in groups_by_opcode:
+            raise SystemExit(f"unaccounted LLVM instruction in zif_strlen: {opcode}: {stripped}")
+        counts[opcode] = counts.get(opcode, 0) + 1
+        if opcode == "call":
+            target = re.search(r"@([-a-zA-Z$._0-9]+)\(", stripped)
+            if target is None:
+                indirect_calls += 1
+            else:
+                calls.append(target.group(1))
+    if not counts or counts.get("ret") != 1:
+        raise SystemExit("zif_strlen instruction inventory lacks its single return")
+    grouped_counts = {
+        group: sum(counts.get(opcode, 0) for opcode in opcodes)
+        for group, opcodes in OPERATION_GROUPS.items()
+    }
+    return {
+        "instruction_count": sum(counts.values()),
+        "opcode_counts": dict(sorted(counts.items())),
+        "operation_group_counts": grouped_counts,
+        "direct_call_targets": sorted(calls),
+        "indirect_call_count": indirect_calls,
+        "accounting_scope": "all instructions inventoried; operation semantics remain subject to graph coverage",
+    }
 
 
 def main() -> None:
@@ -155,6 +210,7 @@ def main() -> None:
     if start < 0 or end < 0:
         raise SystemExit("linked LLVM module lacks a zif_strlen definition")
     function = ir[start:end]
+    inventory = operation_inventory(function)
     target_triple = re.search(r'^target triple = "([^"]+)"', ir, re.MULTILINE)
     if target_triple is None or target_triple.group(1) != "x86_64-pc-linux-gnu":
         raise SystemExit("linked module does not match the locked Linux x86-64 layout profile")
@@ -325,6 +381,7 @@ def main() -> None:
             "extracted_bitcode_sha256": hashlib.sha256(extracted).hexdigest(),
             "extracted_ir_sha256": hashlib.sha256(ir.encode()).hexdigest(),
         },
+        "zif_strlen_operation_inventory": inventory,
         "target": {
             "triple": target_triple.group(1),
             "datalayout_has_64_bit_i64": 'i64:64' in ir.split('target datalayout = "', 1)[1].split('"', 1)[0],

@@ -355,6 +355,18 @@ fn main() {
             .as_str()
             .expect("linked bitcode digest"),
     );
+    validate_zif_strlen_inventory(&witness["zif_strlen_operation_inventory"]);
+    let inventory_evidence = EvidenceRecord {
+        kind: EvidenceKind::SourceTransfer,
+        source_digest: Digest(module_digest),
+        site: Some(Bytes(
+            b"php-cli.bc:zif_strlen:complete-llvm-opcode-inventory".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-opcode-inventory-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![],
+    };
+    let inventory_evidence_id = inventory_evidence.id().expect("inventory evidence encodes");
     assert_eq!(
         module_digest,
         [
@@ -370,15 +382,21 @@ fn main() {
         site: Some(Bytes(
             b"php-cli.bc:zif_strlen:line-382:_zend_string.field[2]->return-zval.i64".to_vec(),
         )),
-        rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-return-v1".to_vec()),
+        rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-return-v2-inventoried".to_vec()),
         assumptions: vec![],
-        dependencies: vec![source_evidence_id, layout_evidence_id, parser_evidence_id],
+        dependencies: vec![
+            source_evidence_id,
+            layout_evidence_id,
+            parser_evidence_id,
+            inventory_evidence_id,
+        ],
     };
     let llvm_evidence_id = llvm_evidence.id().expect("LLVM evidence encodes");
     let return_evidence = vec![
         source_evidence_id,
         layout_evidence_id,
         parser_evidence_id,
+        inventory_evidence_id,
         llvm_evidence_id,
     ];
     let graph = BehaviorGraph {
@@ -467,11 +485,65 @@ fn main() {
             (layout_evidence_id, layout_evidence),
             (parser_evidence_id, parser_evidence),
             (diagnostic_evidence_id, diagnostic_evidence),
+            (inventory_evidence_id, inventory_evidence),
             (llvm_evidence_id, llvm_evidence),
         ],
     };
     manifest.validate().expect("generated manifest validates");
     println!("{}", manifest.to_json().expect("manifest is JSON"));
+}
+
+fn validate_zif_strlen_inventory(inventory: &serde_json::Value) {
+    assert_eq!(inventory["instruction_count"].as_u64(), Some(241));
+    assert_eq!(inventory["indirect_call_count"].as_u64(), Some(0));
+    assert_eq!(
+        inventory["accounting_scope"].as_str(),
+        Some("all instructions inventoried; operation semantics remain subject to graph coverage")
+    );
+    assert_eq!(
+        inventory["opcode_counts"],
+        serde_json::json!({
+            "add": 1,
+            "alloca": 28,
+            "br": 32,
+            "call": 7,
+            "getelementptr": 9,
+            "icmp": 17,
+            "load": 67,
+            "phi": 3,
+            "ret": 1,
+            "sext": 6,
+            "store": 39,
+            "trunc": 8,
+            "xor": 12,
+            "zext": 11,
+        }),
+        "opcode inventory differs from the locked Clang module"
+    );
+    assert_eq!(
+        inventory["operation_group_counts"],
+        serde_json::json!({
+            "calls": 7,
+            "control_flow": 32,
+            "exit": 1,
+            "layout_access": 9,
+            "native_storage": 134,
+            "scalar_transfer": 58,
+        }),
+        "operation groups do not reconcile to the pinned LLVM inventory"
+    );
+    assert_eq!(
+        inventory["direct_call_targets"],
+        serde_json::json!([
+            "llvm.assume",
+            "llvm.assume",
+            "llvm.assume",
+            "zend_flf_parse_arg_str_slow",
+            "zend_parse_arg_str_slow",
+            "zend_wrong_parameter_error",
+            "zend_wrong_parameters_count_error",
+        ])
+    );
 }
 
 fn read_witness_file(
@@ -528,6 +600,51 @@ fn decode_digest(text: &str) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn valid_strlen_inventory() -> serde_json::Value {
+        serde_json::json!({
+            "instruction_count": 241,
+            "indirect_call_count": 0,
+            "accounting_scope": "all instructions inventoried; operation semantics remain subject to graph coverage",
+            "opcode_counts": {
+                "add": 1, "alloca": 28, "br": 32, "call": 7,
+                "getelementptr": 9, "icmp": 17, "load": 67, "phi": 3,
+                "ret": 1, "sext": 6, "store": 39, "trunc": 8,
+                "xor": 12, "zext": 11
+            },
+            "operation_group_counts": {
+                "calls": 7, "control_flow": 32, "exit": 1,
+                "layout_access": 9, "native_storage": 134, "scalar_transfer": 58
+            },
+            "direct_call_targets": [
+                "llvm.assume", "llvm.assume", "llvm.assume",
+                "zend_flf_parse_arg_str_slow", "zend_parse_arg_str_slow",
+                "zend_wrong_parameter_error", "zend_wrong_parameters_count_error"
+            ]
+        })
+    }
+
+    #[test]
+    fn zif_strlen_inventory_validator_accepts_the_locked_operation_accounting() {
+        validate_zif_strlen_inventory(&valid_strlen_inventory());
+    }
+
+    #[test]
+    fn zif_strlen_inventory_validator_rejects_missing_or_invented_operations() {
+        let mut missing = valid_strlen_inventory();
+        missing["opcode_counts"]
+            .as_object_mut()
+            .unwrap()
+            .remove("load");
+        assert!(std::panic::catch_unwind(|| validate_zif_strlen_inventory(&missing)).is_err());
+
+        let mut invented = valid_strlen_inventory();
+        invented["direct_call_targets"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!("invented_target"));
+        assert!(std::panic::catch_unwind(|| validate_zif_strlen_inventory(&invented)).is_err());
+    }
 
     #[test]
     fn runtime_fixture_hash_is_checked_against_the_file() {

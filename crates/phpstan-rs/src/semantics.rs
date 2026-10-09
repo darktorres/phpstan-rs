@@ -208,8 +208,7 @@ mod embedded_catalog_tests {
             .iter()
             .map(|(_, record)| record)
             .find(|record| {
-                record.rule_version.0
-                    == b"php-8.5.4-strlen-null-deprecation-observation-v1"
+                record.rule_version.0 == b"php-8.5.4-strlen-null-deprecation-observation-v1"
             })
             .expect("strlen Diagnostic has paired runtime evidence");
         let diagnostic_id = diagnostic_record
@@ -217,16 +216,37 @@ mod embedded_catalog_tests {
             .expect("diagnostic observation evidence encodes");
         assert_eq!(diagnostic_record.kind, EvidenceKind::Observation);
         assert!(diagnostic_record.dependencies.contains(&parser_id));
+        let inventory_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| {
+                record.rule_version.0 == b"php-8.5.4-clang-21.1.8-strlen-opcode-inventory-v1"
+            })
+            .expect("strlen Return has complete LLVM operation-inventory evidence");
+        assert_eq!(inventory_record.kind, EvidenceKind::SourceTransfer);
+        assert_eq!(
+            inventory_record.source_digest,
+            Digest([
+                0xe3, 0x42, 0x7c, 0xe8, 0x1f, 0x98, 0xf9, 0xa0, 0x4d, 0xb3, 0xe0, 0x4c, 0xe8, 0x22,
+                0xc3, 0xe0, 0xf1, 0xc7, 0x31, 0x13, 0x7f, 0x0d, 0x63, 0xe0, 0x44, 0x0f, 0x86, 0x2b,
+                0x1e, 0x61, 0xc9, 0x3e,
+            ])
+        );
+        let inventory_id = inventory_record.id().expect("inventory evidence encodes");
         let llvm_record = manifest
             .evidence
             .iter()
             .map(|(_, record)| record)
-            .find(|record| record.rule_version.0 == b"php-8.5.4-clang-21.1.8-strlen-return-v1")
+            .find(|record| {
+                record.rule_version.0 == b"php-8.5.4-clang-21.1.8-strlen-return-v2-inventoried"
+            })
             .expect("strlen Return has linked-module evidence");
         assert_eq!(llvm_record.kind, EvidenceKind::SourceTransfer);
         assert!(llvm_record.dependencies.contains(&source_id));
         assert!(llvm_record.dependencies.contains(&layout_id));
         assert!(llvm_record.dependencies.contains(&parser_id));
+        assert!(llvm_record.dependencies.contains(&inventory_id));
         assert_eq!(
             parser_record.source_digest,
             Digest([
@@ -265,20 +285,15 @@ mod embedded_catalog_tests {
                 && coverage.evidence.contains(&source_id)
                 && coverage.evidence.contains(&layout_id)
                 && coverage.evidence.contains(&parser_id)
+                && coverage.evidence.contains(&inventory_id)
                 && coverage.evidence.contains(&llvm_record.id().unwrap())
         }));
-        assert!(
-            selection.variants[0]
-                .graph
-                .coverage
-                .iter()
-                .any(|coverage| {
-                    coverage.domain == Domain::Diagnostic
-                        && matches!(coverage.coverage, Coverage::Closed)
-                        && coverage.evidence.contains(&parser_id)
-                        && coverage.evidence.contains(&diagnostic_id)
-                })
-        );
+        assert!(selection.variants[0].graph.coverage.iter().any(|coverage| {
+            coverage.domain == Domain::Diagnostic
+                && matches!(coverage.coverage, Coverage::Closed)
+                && coverage.evidence.contains(&parser_id)
+                && coverage.evidence.contains(&diagnostic_id)
+        }));
         assert!(
             selection.variants[0]
                 .graph

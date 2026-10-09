@@ -112,3 +112,28 @@ framework that repairs them requires reviewing the comparison. Runtime traces
 do not prove absence or complete equivalence. Probe exit zero never certifies
 closed effects: framework errors, exploration cutoffs, and pointer fallback
 results are recorded separately.
+
+## `strlen` instruction inventory
+
+With the cached locked PHP tree and linked module, regenerate the source/layout
+and LLVM witness, including the fail-closed opcode-family inventory:
+
+```bash
+python3 -m unittest tools/php-catalog/experiments/comparison/test_extract_strlen_llvm_witness.py
+python3 tools/php-catalog/experiments/comparison/extract_strlen_llvm_witness.py \
+  /home/torres/.cache/php-catalog-evaluation/php-src-gcc/Zend/zend_builtin_functions.c \
+  /home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc \
+  --output /tmp/php-catalog-comparison/strlen-llvm-operation-inventory.json
+cargo run -p phpstan-rs-semantics --example build_strlen_catalog -- \
+  /home/torres/.cache/php-catalog-evaluation/php-src-gcc/Zend/zend_builtin_functions.c \
+  /tmp/php-catalog-comparison/strlen-llvm-operation-inventory.json \
+  tools/php-catalog/experiments/comparison/results/runtime/strlen-weak-scalars-8.5.4.json \
+  > /tmp/php-catalog-comparison/php-8.5.4-strlen.json
+cmp crates/php-semantics/data/php-8.5.4-strlen.json \
+  /tmp/php-catalog-comparison/php-8.5.4-strlen.json
+```
+
+The inventory accounts for each instruction opcode in `zif_strlen` and fails
+if the selected compiler output adds an unclassified instruction. It does not
+interpret those operations; the graph's per-domain coverage remains the
+authority for which behaviors can be consumed.

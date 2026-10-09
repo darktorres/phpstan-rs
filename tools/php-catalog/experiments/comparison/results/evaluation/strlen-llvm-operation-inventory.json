@@ -1,0 +1,228 @@
+{
+  "argument_bridge": {
+    "length_load_uses_local_slot": "17",
+    "object_handler_field_index": 18,
+    "parser_destination_slots": [
+      {
+        "helper_argument_slot": "7",
+        "strlen_local_slot": "17"
+      },
+      {
+        "helper_argument_slot": "7",
+        "strlen_local_slot": "17"
+      }
+    ]
+  },
+  "compiler": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+  "configured_implicit_operations": [
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_wrong_parameters_count_error",
+      "operation": "parameter_count_error"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_flf_parse_arg_str_slow",
+      "operation": "flf_strictness_gate"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_parse_arg_str_slow",
+      "operation": "general_strictness_gate"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_wrong_parameter_error",
+      "operation": "type_error"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_parse_arg_str_weak",
+      "operation": "weak_string_parse"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "_convert_to_string",
+      "operation": "weak_string_conversion"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_null_arg_deprecated",
+      "operation": "nullable_string_diagnostic"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "indirect Zend object handler",
+      "operation": "object_string_cast_callback"
+    },
+    {
+      "catalog_domain": "open",
+      "llvm_callee": "zend_objects_store_del",
+      "operation": "object_release_during_cast"
+    }
+  ],
+  "helper_witnesses": {
+    "zend_flf_parse_arg_str_slow": {
+      "calls": [
+        "zend_parse_arg_str_weak"
+      ],
+      "extracted_bitcode_sha256": "7c8680beb855471b7cc08c1080fb5c7b80a113cc9fe5ade09c1de6bc7842eeeb",
+      "extracted_ir_sha256": "0ddd5c2e42104b0f8a20c529c0c065c6b814d742558247220e5ea305e3b70a33"
+    },
+    "zend_parse_arg_str_slow": {
+      "calls": [
+        "zend_parse_arg_str_weak"
+      ],
+      "extracted_bitcode_sha256": "1e5941516861ab82f5c732756df2f77153b7419bb8e77a936c8a075d84e768a9",
+      "extracted_ir_sha256": "2c46955ac23c0675a3c6eb42e97a1a61c1270aaf579271e64973b463e4750a0d"
+    },
+    "zend_parse_arg_str_weak": {
+      "calls": [
+        "_convert_to_string",
+        "zend_null_arg_deprecated",
+        "zend_objects_store_del"
+      ],
+      "extracted_bitcode_sha256": "05ee2e8b8e687ff8f7cac706255f22c1b1a3eed50596610019a8a4b17fe1f254",
+      "extracted_ir_sha256": "adfb034c20bf18547951a3da1d9c723f6f74bf4640bef98f6573e34cf0f53b93"
+    }
+  },
+  "ir_witness": [
+    "call void @zend_wrong_parameters_count_error(i32 noundef %64, i32 noundef %65), !dbg !14",
+    "%148 = call zeroext i1 @zend_flf_parse_arg_str_slow(ptr noundef %145, ptr noundef %146, i32 noundef %147) #2, !dbg !50",
+    "%153 = call zeroext i1 @zend_parse_arg_str_slow(ptr noundef %150, ptr noundef %151, i32 noundef %152) #2, !dbg !55",
+    "call void @zend_wrong_parameter_error(i32 noundef %182, i32 noundef %183, ptr noundef %184, i32 noundef %185, ptr noundef %186), !dbg !59",
+    "%192 = getelementptr inbounds nuw %struct._zend_string, ptr %191, i32 0, i32 2, !dbg !60",
+    "%193 = load i64, ptr %192, align 8, !dbg !60",
+    "store i64 %193, ptr %195, align 8, !dbg !60"
+  ],
+  "linked_bitcode": {
+    "extracted_bitcode_sha256": "bf6696c0e9952198988cbdaa765b88d409e57ce25d9538877ea9d535dbf8922e",
+    "extracted_ir_sha256": "9e5f1e2bfe8ae4bb40dd318359d013210ab168dc157ae08186fbf5018f19a5ee",
+    "function": "zif_strlen",
+    "sha256": "e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e"
+  },
+  "mapping": {
+    "debug_line_matches_source_return": true,
+    "loaded_as": "i64",
+    "object_cast_handler_field_index": 18,
+    "object_cast_handler_indirect_call": true,
+    "parameter_failure_path_present": true,
+    "parsed_argument_flows_to_length_load": true,
+    "parser_output_written_through_destination": true,
+    "stored_as_return_zval_payload": true,
+    "zend_string_length_field_index": 2
+  },
+  "parser_source": {
+    "contract_facts": [
+      "zend_null_arg_deprecated(\"string\", arg_num)",
+      "convert_to_string(arg);",
+      "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
+      "OBJ_RELEASE(zobj);",
+      "*dest = Z_STR_P(arg);",
+      "if (UNEXPECTED(ZEND_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+      "return zend_parse_arg_str_weak(arg, dest, arg_num);",
+      "if (UNEXPECTED(ZEND_FLF_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
+      "return zend_parse_arg_str_weak(arg, dest, arg_num);"
+    ],
+    "functions": [
+      "zend_parse_arg_str_weak",
+      "zend_parse_arg_str_slow",
+      "zend_flf_parse_arg_str_slow"
+    ],
+    "path": "Zend/zend_API.c",
+    "sha256": "ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b"
+  },
+  "schema": 1,
+  "source": {
+    "expression": "RETVAL_LONG(ZSTR_LEN(s))",
+    "function": "zif_strlen",
+    "parameter_parse_lines": [
+      {
+        "line": 378,
+        "text": "ZEND_PARSE_PARAMETERS_START(1, 1)"
+      },
+      {
+        "line": 379,
+        "text": "Z_PARAM_STR(s)"
+      },
+      {
+        "line": 380,
+        "text": "ZEND_PARSE_PARAMETERS_END();"
+      }
+    ],
+    "path": "Zend/zend_builtin_functions.c",
+    "return_line": 382,
+    "sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+  },
+  "target": {
+    "datalayout_has_64_bit_i64": true,
+    "triple": "x86_64-pc-linux-gnu"
+  },
+  "zend_string_layout": {
+    "fields": [
+      {
+        "index": 0,
+        "name": "gc",
+        "type": "zend_refcounted_h"
+      },
+      {
+        "index": 1,
+        "name": "h",
+        "type": "zend_ulong"
+      },
+      {
+        "index": 2,
+        "name": "len",
+        "type": "size_t"
+      },
+      {
+        "index": 3,
+        "name": "val[1]",
+        "type": "char"
+      }
+    ],
+    "header": "Zend/zend_types.h",
+    "length_field_index": 2,
+    "length_field_name": "len",
+    "length_field_type": "size_t",
+    "sha256": "601ed337205b2258ff0de217d40aaf38afd3a52f67a8edf0f91182414a6bcccd"
+  },
+  "zif_strlen_operation_inventory": {
+    "accounting_scope": "all instructions inventoried; operation semantics remain subject to graph coverage",
+    "direct_call_targets": [
+      "llvm.assume",
+      "llvm.assume",
+      "llvm.assume",
+      "zend_flf_parse_arg_str_slow",
+      "zend_parse_arg_str_slow",
+      "zend_wrong_parameter_error",
+      "zend_wrong_parameters_count_error"
+    ],
+    "indirect_call_count": 0,
+    "instruction_count": 241,
+    "opcode_counts": {
+      "add": 1,
+      "alloca": 28,
+      "br": 32,
+      "call": 7,
+      "getelementptr": 9,
+      "icmp": 17,
+      "load": 67,
+      "phi": 3,
+      "ret": 1,
+      "sext": 6,
+      "store": 39,
+      "trunc": 8,
+      "xor": 12,
+      "zext": 11
+    },
+    "operation_group_counts": {
+      "calls": 7,
+      "control_flow": 32,
+      "exit": 1,
+      "layout_access": 9,
+      "native_storage": 134,
+      "scalar_transfer": 58
+    }
+  }
+}
