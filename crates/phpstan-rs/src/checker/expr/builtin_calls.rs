@@ -9,13 +9,21 @@ use types::PhpString;
 use types::UnionAll as _;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 
-struct CatalogTypeHost {
+struct CatalogTypeHost<'a> {
     weak_scalar_coercions: bool,
+    registry: &'a Registry,
+    invocation_coverage: Vec<php_semantics::DomainCoverage>,
 }
 
-impl php_semantics::SemanticHost for CatalogTypeHost {
+#[derive(Clone, Default, PartialEq, Eq)]
+struct CatalogTypeState {
+    diagnostics: std::collections::BTreeSet<(php_semantics::DiagnosticKind, u32)>,
+    invoked_string_arguments: std::collections::BTreeSet<u32>,
+}
+
+impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
     type Value = Type;
-    type State = std::collections::BTreeSet<(php_semantics::DiagnosticKind, u32)>;
+    type State = CatalogTypeState;
 
     fn resolve(
         &self,
@@ -64,9 +72,7 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
     ) -> php_semantics::Truth {
         match predicate {
             php_semantics::Predicate::Always => php_semantics::Truth::Yes,
-            php_semantics::Predicate::Host(id)
-                if id.0 == b"strlen-weak-null-deprecation" =>
-            {
+            php_semantics::Predicate::Host(id) if id.0 == b"strlen-weak-null-deprecation" => {
                 if !self.weak_scalar_coercions {
                     return php_semantics::Truth::No;
                 }
@@ -86,6 +92,44 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
                     php_semantics::Truth::No
                 }
             }
+            php_semantics::Predicate::Host(id) if id.0 == b"strlen-weak-stringable-cast" => {
+                if !self.weak_scalar_coercions {
+                    return php_semantics::Truth::No;
+                }
+                let Some(argument) = arguments.first() else {
+                    return php_semantics::Truth::Maybe;
+                };
+                let mut may_cast = false;
+                let mut may_not_cast = false;
+                for member in argument.union_members() {
+                    if member.is_mixed() {
+                        may_cast = true;
+                        may_not_cast = true;
+                        continue;
+                    }
+                    if let Some((class, _)) = member.as_object() {
+                        if self.registry.is_subclass_of(class, "Stringable") {
+                            may_cast = true;
+                        } else if self
+                            .registry
+                            .class_by_name(class)
+                            .is_some_and(|class| class.is_final())
+                        {
+                            may_not_cast = true;
+                        } else {
+                            may_cast = true;
+                            may_not_cast = true;
+                        }
+                    } else {
+                        may_not_cast = true;
+                    }
+                }
+                match (may_cast, may_not_cast) {
+                    (true, false) => php_semantics::Truth::Yes,
+                    (false, true) => php_semantics::Truth::No,
+                    _ => php_semantics::Truth::Maybe,
+                }
+            }
             _ => php_semantics::Truth::Maybe,
         }
     }
@@ -100,7 +144,7 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
     ) -> Vec<php_semantics::EventExit<Type, Self::State>> {
         match event {
             php_semantics::Event::EmitDiagnostic { kind, argument } => {
-                state.insert((*kind, *argument));
+                state.diagnostics.insert((*kind, *argument));
                 vec![php_semantics::EventExit::Normal {
                     result: None,
                     state,
@@ -112,6 +156,22 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
                 state,
                 coverage: vec![],
             }],
+            php_semantics::Event::Invoke {
+                callable: php_semantics::Operand::Literal(method),
+                arguments: invoked_arguments,
+                result,
+            } if method.0 == b"__toString" => {
+                let Some(php_semantics::Operand::Argument(argument)) = invoked_arguments.first()
+                else {
+                    return Vec::new();
+                };
+                state.invoked_string_arguments.insert(*argument);
+                vec![php_semantics::EventExit::Normal {
+                    result: Some((*result, Type::string())),
+                    state,
+                    coverage: self.invocation_coverage.clone(),
+                }]
+            }
             _ => Vec::new(),
         }
     }
@@ -129,14 +189,19 @@ impl php_semantics::SemanticHost for CatalogTypeHost {
         Relation::structural().is_super_type_of(broad, narrow).yes()
     }
     fn join_state(&self, mut left: Self::State, right: Self::State) -> Self::State {
-        left.extend(right);
+        left.diagnostics.extend(right.diagnostics);
+        left.invoked_string_arguments
+            .extend(right.invoked_string_arguments);
         left
     }
     fn widen_state(&self, old: Self::State, next: Self::State) -> Self::State {
         self.join_state(old, next)
     }
     fn state_subsumes(&self, broad: &Self::State, narrow: &Self::State) -> bool {
-        narrow.is_subset(broad)
+        narrow.diagnostics.is_subset(&broad.diagnostics)
+            && narrow
+                .invoked_string_arguments
+                .is_subset(&broad.invoked_string_arguments)
     }
 }
 
@@ -2244,32 +2309,35 @@ impl<'a> Checker<'a> {
         if let Some(cached) = self.cached_catalog_return_type(call_span, &arguments) {
             return Some(cached);
         }
-        let strict_types = self
-            .syntax_tree_owner()
-            .and_then(|owner| crate::checker::keywords::strict_types_mode(arenas, owner.statements()));
+        let strict_types = self.syntax_tree_owner().and_then(|owner| {
+            crate::checker::keywords::strict_types_mode(arenas, owner.statements())
+        });
         let mut host = CatalogTypeHost {
             weak_scalar_coercions: strict_types == Some(false),
+            registry: self.registry,
+            invocation_coverage: Vec::new(),
         };
         let receiver = Type::mixed();
         let mut returns = Vec::new();
         let mut diagnostics = std::collections::BTreeSet::new();
+        let mut invoked_string_arguments = std::collections::BTreeSet::new();
         let mut diagnostics_closed = true;
         for variant in selected.variants {
+            host.invocation_coverage = variant.graph.coverage.clone();
             if !variant.graph.coverage.iter().any(|coverage| {
                 coverage.domain == php_semantics::Domain::Return
                     && matches!(coverage.coverage, php_semantics::Coverage::Closed)
             }) {
                 return None;
             }
-            let evaluation =
-                php_semantics::evaluate(
-                    variant.graph,
-                    &arguments,
-                    &receiver,
-                    std::collections::BTreeSet::new(),
-                    &mut host,
-                )
-                    .ok()?;
+            let evaluation = php_semantics::evaluate(
+                variant.graph,
+                &arguments,
+                &receiver,
+                CatalogTypeState::default(),
+                &mut host,
+            )
+            .ok()?;
             evaluation
                 .post_fixpoint
                 .validate(variant.graph, &host)
@@ -2298,7 +2366,8 @@ impl<'a> Checker<'a> {
                         state,
                     } => {
                         returns.push(value);
-                        diagnostics.extend(state);
+                        diagnostics.extend(state.diagnostics);
+                        invoked_string_arguments.extend(state.invoked_string_arguments);
                     }
                     php_semantics::Exit::Normal { value: None, .. } => return None,
                     php_semantics::Exit::PhpThrow { .. }
@@ -2317,6 +2386,7 @@ impl<'a> Checker<'a> {
                 Vec::new()
             },
             diagnostics_closed,
+            invoked_string_arguments: invoked_string_arguments.into_iter().collect(),
         };
         self.remember_catalog_return_type(call_span, arguments, evaluation.clone());
         Some(evaluation)

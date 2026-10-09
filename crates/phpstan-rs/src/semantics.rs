@@ -216,6 +216,26 @@ mod embedded_catalog_tests {
             .expect("diagnostic observation evidence encodes");
         assert_eq!(diagnostic_record.kind, EvidenceKind::Observation);
         assert!(diagnostic_record.dependencies.contains(&parser_id));
+        let cast_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| record.rule_version.0 == b"php-8.5.4-zend-stringable-cast-invocation-v1")
+            .expect("Stringable invocation cites the Zend handler source");
+        assert_eq!(cast_record.kind, EvidenceKind::SourceTransfer);
+        assert!(cast_record.dependencies.contains(&parser_id));
+        let cast_id = cast_record.id().expect("cast evidence encodes");
+        let callback_record = manifest
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .find(|record| {
+                record.rule_version.0 == b"php-8.5.4-strlen-stringable-callback-observation-v1"
+            })
+            .expect("Stringable invocation has paired runtime observation evidence");
+        assert_eq!(callback_record.kind, EvidenceKind::Observation);
+        assert!(callback_record.dependencies.contains(&cast_id));
+        let callback_id = callback_record.id().expect("callback evidence encodes");
         let inventory_record = manifest
             .evidence
             .iter()
@@ -315,6 +335,26 @@ mod embedded_catalog_tests {
                 && matches!(coverage.coverage, Coverage::Closed)
                 && coverage.evidence.contains(&parser_id)
                 && coverage.evidence.contains(&diagnostic_id)
+        }));
+        assert!(selection.variants[0].graph.coverage.iter().any(|coverage| {
+            coverage.domain == Domain::Invocation
+                && matches!(coverage.coverage, Coverage::Open { .. })
+                && coverage.evidence.contains(&parser_id)
+                && coverage.evidence.contains(&cast_id)
+                && coverage.evidence.contains(&callback_id)
+        }));
+        assert!(selection.variants[0].graph.blocks.iter().any(|block| {
+            block.events.iter().any(|event| {
+                matches!(
+                    event,
+                    Event::Invoke {
+                        callable: Operand::Literal(method),
+                        arguments,
+                        ..
+                    } if method.0 == b"__toString"
+                        && arguments == &[Operand::Argument(0)]
+                )
+            })
         }));
         assert!(
             selection.variants[0]

@@ -328,8 +328,7 @@ pub struct Checker<'a> {
     // reused by later expression inference at the same source site. The
     // argument types are part of the key because a call can be revisited on
     // different narrowed control-flow paths.
-    catalog_return_type_memo:
-        RefCell<FxHashMap<Span, Vec<(Vec<Type>, CatalogCallEvaluation)>>>,
+    catalog_return_type_memo: RefCell<FxHashMap<Span, Vec<(Vec<Type>, CatalogCallEvaluation)>>>,
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,
@@ -968,6 +967,9 @@ pub(crate) struct CatalogCallEvaluation {
     pub return_type: Type,
     pub diagnostics: Vec<(php_semantics::DiagnosticKind, u32)>,
     pub diagnostics_closed: bool,
+    /// Source graph events that require the ordinary checker operation
+    /// transfer (for example, `__toString` during weak internal coercion).
+    pub invoked_string_arguments: Vec<u32>,
 }
 
 /// A syntax owner handle that can be held while the checker mutates its
@@ -2558,6 +2560,16 @@ impl<'a> Checker<'a> {
             );
             self.diagnostics.extend(found);
         }
+    }
+
+    pub(crate) fn catalog_string_arguments_at(&self, span: Span) -> Option<Vec<u32>> {
+        let memo = self.catalog_return_type_memo.borrow();
+        let entries = memo.get(&span)?;
+        let mut arguments = std::collections::BTreeSet::new();
+        for (_, evaluation) in entries {
+            arguments.extend(evaluation.invoked_string_arguments.iter().copied());
+        }
+        Some(arguments.into_iter().collect())
     }
 }
 

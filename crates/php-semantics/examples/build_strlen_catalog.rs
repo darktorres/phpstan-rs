@@ -279,6 +279,89 @@ fn main() {
         dependencies: vec![],
     };
     let parser_evidence_id = parser_evidence.id().expect("Zend parser evidence encodes");
+    let object_handlers_path = source_path
+        .parent()
+        .expect("Zend source has a parent directory")
+        .join("zend_object_handlers.c");
+    let object_handlers =
+        fs::read(&object_handlers_path).expect("read pinned Zend object-handler source");
+    let object_handlers_text =
+        std::str::from_utf8(&object_handlers).expect("Zend object-handler source is UTF-8");
+    let cast_start = object_handlers_text
+        .find("ZEND_API zend_result zend_std_cast_object_tostring")
+        .expect("pinned source contains the standard object cast handler");
+    let cast_end = object_handlers_text[cast_start..]
+        .find("/* }}} */")
+        .map(|offset| cast_start + offset)
+        .expect("standard cast handler has a section terminator");
+    assert!(object_handlers_text[cast_start..cast_end].contains(
+        "zend_call_known_instance_method_with_0_params(ce->__tostring, readobj, &retval)"
+    ));
+    assert!(object_handlers_text.contains("zend_std_cast_object_tostring,\t\t\t/* cast_object */"));
+    let object_handlers_digest: [u8; 32] = Sha256::digest(&object_handlers).into();
+    let object_cast_evidence = EvidenceRecord {
+        kind: EvidenceKind::SourceTransfer,
+        source_digest: Digest(object_handlers_digest),
+        site: Some(Bytes(
+            b"Zend/zend_object_handlers.c:zend_std_cast_object_tostring:ce->__tostring;std_object_handlers.cast_object".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-zend-stringable-cast-invocation-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![parser_evidence_id],
+    };
+    let object_cast_evidence_id = object_cast_evidence.id().expect("cast evidence encodes");
+    let callback_runtime_path = repository_root
+        .join("tools/php-catalog/experiments/comparison/results/runtime/hybrid-call-8.5.4.json");
+    let callback_runtime_bytes =
+        fs::read(&callback_runtime_path).expect("read Hybrid/CALL runtime witness");
+    let callback_runtime: serde_json::Value =
+        serde_json::from_slice(&callback_runtime_bytes).expect("callback runtime witness is JSON");
+    assert_eq!(
+        callback_runtime["source_commit"].as_str(),
+        Some("e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03")
+    );
+    assert!(
+        callback_runtime["result"]["runtime_php_sentinels"]
+            .as_array()
+            .is_some_and(|sentinels| sentinels
+                .iter()
+                .any(|sentinel| sentinel.as_str() == Some("string-coercion-callback")))
+    );
+    let callback_fixture = &callback_runtime["fixtures"][0];
+    let callback_witness = read_witness_file(
+        &repository_root,
+        callback_fixture,
+        "hybrid_output",
+        "output_sha256",
+    );
+    assert!(
+        callback_witness
+            .split(|byte| *byte == b'\n')
+            .any(|line| line == b"string-coercion-callback")
+    );
+    let call_callback_witness_path = repository_root.join(
+        callback_fixture["call_output"]
+            .as_str()
+            .expect("CALL callback output path"),
+    );
+    assert_eq!(
+        callback_witness,
+        fs::read(call_callback_witness_path).expect("read CALL callback witness"),
+        "PHP VM profiles disagree on the Stringable callback witness"
+    );
+    let callback_observation = EvidenceRecord {
+        kind: EvidenceKind::Observation,
+        source_digest: Digest(Sha256::digest(&callback_runtime_bytes).into()),
+        site: Some(Bytes(
+            b"PHP 8.5.4 Hybrid/CALL runtime:strlen(Stringable):string-coercion-callback".to_vec(),
+        )),
+        rule_version: Bytes(b"php-8.5.4-strlen-stringable-callback-observation-v1".to_vec()),
+        assumptions: vec![],
+        dependencies: vec![parser_evidence_id, object_cast_evidence_id],
+    };
+    let callback_observation_id = callback_observation
+        .id()
+        .expect("callback observation evidence encodes");
     let diagnostic_evidence = EvidenceRecord {
         kind: EvidenceKind::Observation,
         source_digest: Digest(runtime_digest),
@@ -446,7 +529,23 @@ fn main() {
                     kind: DiagnosticKind::NullToInternalScalarParameterDeprecated,
                     argument: 0,
                 }],
-                Terminator::Goto(2),
+                Terminator::Goto(3),
+            ),
+            Block::new(
+                vec![],
+                Terminator::Branch {
+                    predicate: Predicate::Host(Bytes(b"strlen-weak-stringable-cast".to_vec())),
+                    yes: 3,
+                    no: 4,
+                },
+            ),
+            Block::new(
+                vec![Event::Invoke {
+                    callable: Operand::Literal(Bytes(b"__toString".to_vec())),
+                    arguments: vec![Operand::Argument(0)],
+                    result: 0,
+                }],
+                Terminator::Goto(4),
             ),
             Block::new(
                 vec![],
@@ -467,7 +566,13 @@ fn main() {
                 },
                 precision: Precision::Exact,
                 dependencies: vec![],
-                evidence: if domain == Domain::Return {
+                evidence: if domain == Domain::Invocation {
+                    let mut evidence = return_evidence.clone();
+                    evidence.extend([object_cast_evidence_id, callback_observation_id]);
+                    evidence.sort();
+                    evidence.dedup();
+                    evidence
+                } else if domain == Domain::Return {
                     return_evidence.clone()
                 } else if domain == Domain::Diagnostic {
                     vec![parser_evidence_id, diagnostic_evidence_id]
@@ -505,6 +610,8 @@ fn main() {
             (source_evidence_id, source_evidence),
             (layout_evidence_id, layout_evidence),
             (parser_evidence_id, parser_evidence),
+            (object_cast_evidence_id, object_cast_evidence),
+            (callback_observation_id, callback_observation),
             (diagnostic_evidence_id, diagnostic_evidence),
             (inventory_evidence_id, inventory_evidence),
             (native_demand_evidence_id, native_demand_evidence),

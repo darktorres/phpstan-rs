@@ -455,6 +455,21 @@ impl Checker<'_> {
             })
             .cloned()
             .collect();
+        if let Some(string_arguments) = self.catalog_string_arguments_at(self.expr_span(e.id)) {
+            // The selected catalog graph is authoritative for which
+            // argument conversions run. Reuse the checker operation transfer
+            // for their PHP-body effects, but do not also apply the legacy
+            // builtin-run summary for this covered call.
+            for argument in string_arguments {
+                if let Some(value) = args
+                    .get(argument as usize)
+                    .and_then(|argument| arenas.expr(argument.value))
+                {
+                    self.forget_what_an_operation_on_may_change(value, Operation::String, locals);
+                }
+            }
+            return;
+        }
         let effect = {
             let ctx = TypedCall {
                 checker: self,
