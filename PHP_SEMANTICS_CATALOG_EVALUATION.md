@@ -99,8 +99,11 @@ source-transfer rule, not an imported compiler graph. The generator now takes
 the source file as an explicit input, computes its digest from those bytes,
 rejects anything other than the locked translation unit, and checks that the
 `strlen` body still contains the `RETVAL_LONG(ZSTR_LEN(s))` transfer before
-emitting evidence. It does not execute effects, callbacks, or exceptional
-state.
+emitting evidence. Regeneration from the locked source is byte-identical to
+the checked-in schema-v6 artifact (SHA-256
+`fb93ee4245428a46ff5b984e794ff9e9bec490369b8ce210e1d6b5172475b72e`); an
+unrelated source input is rejected. It does not execute effects, callbacks, or
+exceptional state.
 The checker uses it only when every configured target scenario is definitely
 covered, and falls back on uncovered or Maybe-applicable ranges. This is
 concrete F05 progress, but it does not satisfy the full C24/C25 architecture
