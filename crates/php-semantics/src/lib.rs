@@ -266,6 +266,7 @@ pub enum GraphError {
     UnknownTransferWithoutOpenCoverage(Domain),
     DuplicateDomainDependency(Domain),
     ClosedDomainDependsOnOpen { domain: Domain, dependency: Domain },
+    CyclicDomainDependency(Domain),
     UnresolvedValue,
     EventWithoutOutcome,
     ResumeWithoutPendingOutcome,
@@ -383,25 +384,8 @@ impl BehaviorGraph {
         if unknown_events.iter().any(|event| matches!(event, Event::Unknown { domains, reason } if domains.is_empty() || reason.0.is_empty())) {
             return Err(GraphError::UnknownTransferWithoutReason);
         }
+        validate_domain_dependencies(&self.coverage)?;
         for item in &self.coverage {
-            let mut dependencies = Vec::new();
-            for dependency in &item.dependencies {
-                if dependencies.contains(dependency) {
-                    return Err(GraphError::DuplicateDomainDependency(item.domain));
-                }
-                dependencies.push(*dependency);
-                if matches!(item.coverage, Coverage::Closed)
-                    && self.coverage.iter().any(|candidate| {
-                        candidate.domain == *dependency
-                            && matches!(candidate.coverage, Coverage::Open { .. })
-                    })
-                {
-                    return Err(GraphError::ClosedDomainDependsOnOpen {
-                        domain: item.domain,
-                        dependency: *dependency,
-                    });
-                }
-            }
             if matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty()) {
                 return Err(GraphError::OpenWithoutReason(item.domain));
             }
@@ -425,6 +409,68 @@ impl BehaviorGraph {
         }
         Ok(())
     }
+}
+
+fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), GraphError> {
+    for item in coverage {
+        let mut dependencies = Vec::new();
+        for dependency in &item.dependencies {
+            if dependencies.contains(dependency) {
+                return Err(GraphError::DuplicateDomainDependency(item.domain));
+            }
+            dependencies.push(*dependency);
+            if matches!(item.coverage, Coverage::Closed)
+                && coverage.iter().any(|candidate| {
+                    candidate.domain == *dependency
+                        && matches!(candidate.coverage, Coverage::Open { .. })
+                })
+            {
+                return Err(GraphError::ClosedDomainDependsOnOpen {
+                    domain: item.domain,
+                    dependency: *dependency,
+                });
+            }
+        }
+    }
+
+    fn visit(
+        domain: Domain,
+        coverage: &[DomainCoverage],
+        colors: &mut [u8],
+    ) -> Result<(), GraphError> {
+        let index = Domain::ALL
+            .iter()
+            .position(|candidate| *candidate == domain)
+            .ok_or(GraphError::DuplicateDomainDependency(domain))?;
+        match colors[index] {
+            1 => return Err(GraphError::CyclicDomainDependency(domain)),
+            2 => return Ok(()),
+            _ => {}
+        }
+        colors[index] = 1;
+        if let Some(item) = coverage.iter().find(|item| item.domain == domain)
+            && matches!(item.coverage, Coverage::Closed)
+        {
+            for dependency in &item.dependencies {
+                if coverage.iter().any(|candidate| {
+                    candidate.domain == *dependency
+                        && matches!(candidate.coverage, Coverage::Closed)
+                }) {
+                    visit(*dependency, coverage, colors)?;
+                }
+            }
+        }
+        colors[index] = 2;
+        Ok(())
+    }
+
+    let mut colors = vec![0u8; Domain::ALL.len()];
+    for item in coverage {
+        if matches!(item.coverage, Coverage::Closed) {
+            visit(item.domain, coverage, &mut colors)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -615,21 +661,7 @@ fn merge_coverage(
         item.assumptions.dedup();
         merged.push(item);
     }
-    for item in &merged {
-        if matches!(item.coverage, Coverage::Closed) {
-            for dependency in &item.dependencies {
-                if merged.iter().any(|candidate| {
-                    candidate.domain == *dependency
-                        && matches!(candidate.coverage, Coverage::Open { .. })
-                }) {
-                    return Err(GraphError::ClosedDomainDependsOnOpen {
-                        domain: item.domain,
-                        dependency: *dependency,
-                    });
-                }
-            }
-        }
-    }
+    validate_domain_dependencies(&merged)?;
     *current = merged;
     Ok(())
 }

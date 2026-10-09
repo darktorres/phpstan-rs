@@ -555,6 +555,34 @@ mod tests {
     }
 
     #[test]
+    fn graph_rejects_cyclic_closed_domain_dependencies_without_a_certificate() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(id);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::Invocation);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Invocation)
+            .unwrap()
+            .dependencies
+            .push(Domain::Return);
+
+        assert_eq!(
+            catalog.add_entry(function(b"core", b"strlen"), graph),
+            Err(CatalogError::Graph(GraphError::CyclicDomainDependency(
+                Domain::Invocation
+            )))
+        );
+    }
+
+    #[test]
     fn projection_includes_transitive_domain_dependencies() {
         let mut catalog = Catalog::default();
         let id = catalog.add_evidence(evidence_record()).unwrap();
