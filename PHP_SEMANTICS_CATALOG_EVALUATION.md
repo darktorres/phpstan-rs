@@ -248,6 +248,19 @@ produces byte-identical checked-in JSON. The embedded-artifact assertion now
 requires the new closed Diagnostic evidence and preserves open status for every
 other non-Return domain. The full `phpstan-rs` library suite passes (1,202/1,202).
 
+A later optimized gate-profile run of `cargo test --profile gate -p phpstan-rs
+-p phpstan-rs-types -p phpstan-rs-semantics` did not pass as a whole: 1,198 of
+1,202 checker library tests passed, while four unrelated project/registry
+tests failed. Each of those four failures reproduced when run alone in the
+current tree. The deferred-registry failure also reproduced against the parent
+commit `3129ece5`, before the typed diagnostic integration; the other three
+have not yet been checked against that control. The optimized `strlen_` gate
+fixtures (14/14), semantic library tests (58/58), the Debug-profile checker
+library suite (1,202/1,202), crate checks, and deterministic artifact
+regeneration pass. The unrelated optimized-profile failures remain open and
+should be resolved or separately accepted before claiming a clean full gate
+run.
+
 The remaining **approach-comparison** work in §2.3 is also explicit: compare
 regional and adapted pointer-service solutions on the same useful closed PHP
 summary; measure graph/region growth, checker/runtime cost, contract volume,
