@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v2 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Thirty-seven
+explicit exceptional continuations and host-supplied joins/widening. Forty-one
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -57,13 +57,15 @@ integrated with PhpFlowIR or callback exception flow.
 
 The latest full run (`cargo test -p phpstan-rs -p phpstan-rs-types -p phpstan-rs-semantics`)
 passes 1,200 checker library tests, 58 checker
-binary/integration tests, 286 type tests, and 40 semantic tests. Separate
-`cargo check -p phpstan-rs` passes. The run includes config and CLI acceptance
-of exact `8.5.4`, registry target conversion, and canonical identity separation
-across patches. Semantic regressions reject inapplicable coverage for
-reachable and composed invocation domains, and preserve fatal and suspension
-as distinct exits. This validates integration with the current checker build;
-it does not establish catalog execution at builtin call sites.
+binary/integration tests, 286 type tests, and 40 semantic tests. After that
+run, the focused semantic suite passes all 41 tests, including joined/widened
+precision propagation, and `cargo check -p phpstan-rs` passes. The full run
+includes config and CLI acceptance of exact `8.5.4`, registry target
+conversion, and canonical identity separation across patches. Semantic
+regressions reject inapplicable coverage for reachable and composed invocation
+domains, and preserve fatal and suspension as distinct exits. This validates
+integration with the current checker build; it does not establish catalog
+execution at builtin call sites.
 
 ## Phase F gate-by-gate status
 
@@ -75,7 +77,7 @@ so it does not close F00 or substitute for independent review.
 | Gate | Evidence established | Remaining evaluation before closure |
 |---|---|---|
 | F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; independently check evaluator post-fixpoints. |
-| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist/widening fixtures, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback and loop-growth cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
+| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, and closed dependency-cycle rejection are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and independent post-fixpoint validation. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect source/layout metadata and witnesses to graph entries. Current compiler import and runtime observation are not semantic graph coverage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |

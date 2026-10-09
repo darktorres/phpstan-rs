@@ -882,6 +882,7 @@ fn enqueue<H: SemanticHost>(
     records: &mut Vec<Frame<H::Value, H::State>>,
     by_block: &mut [Vec<usize>],
     queue: &mut Vec<usize>,
+    precision: &mut Precision,
 ) {
     let index = by_block[frame.block as usize]
         .iter()
@@ -912,6 +913,14 @@ fn enqueue<H: SemanticHost>(
     };
     if merged.state == old.state && merged.results == old.results && merged.pending == old.pending {
         return;
+    }
+    let next_precision = if widen {
+        Precision::Widened
+    } else {
+        Precision::Joined
+    };
+    if precision_rank(next_precision) > precision_rank(*precision) {
+        *precision = next_precision;
     }
     if widen {
         merged.growing_updates = old.growing_updates + 1;
@@ -947,6 +956,7 @@ pub fn evaluate<H: SemanticHost>(
     let mut by_block = vec![Vec::new(); graph.blocks.len()];
     by_block[graph.entry as usize].push(0);
     let mut queue = vec![0usize];
+    let mut evaluation_precision = Precision::Exact;
     let mut exits = Vec::new();
     let mut evaluation_coverage = graph.coverage.clone();
     while let Some(frame_id) = queue.pop() {
@@ -1006,6 +1016,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut records,
                                     &mut by_block,
                                     &mut queue,
+                                    &mut evaluation_precision,
                                 );
                             } else {
                                 push_exit(&mut exits, Exit::PhpThrow { value, state });
@@ -1030,6 +1041,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut records,
                                     &mut by_block,
                                     &mut queue,
+                                    &mut evaluation_precision,
                                 );
                             } else {
                                 push_exit(&mut exits, Exit::NativeUnwind { value, state });
@@ -1054,6 +1066,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut records,
                                     &mut by_block,
                                     &mut queue,
+                                    &mut evaluation_precision,
                                 );
                             } else {
                                 push_exit(&mut exits, Exit::Fatal { value, state });
@@ -1078,6 +1091,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut records,
                                     &mut by_block,
                                     &mut queue,
+                                    &mut evaluation_precision,
                                 );
                             } else {
                                 push_exit(&mut exits, Exit::Suspended { value, state });
@@ -1102,6 +1116,7 @@ pub fn evaluate<H: SemanticHost>(
                     &mut records,
                     &mut by_block,
                     &mut queue,
+                    &mut evaluation_precision,
                 ),
                 Terminator::Branch { predicate, yes, no } => {
                     match host.test(predicate, arguments, receiver, &results, &state) {
@@ -1117,6 +1132,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut records,
                             &mut by_block,
                             &mut queue,
+                            &mut evaluation_precision,
                         ),
                         Truth::No => enqueue(
                             host,
@@ -1130,6 +1146,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut records,
                             &mut by_block,
                             &mut queue,
+                            &mut evaluation_precision,
                         ),
                         Truth::Maybe => {
                             enqueue(
@@ -1144,6 +1161,7 @@ pub fn evaluate<H: SemanticHost>(
                                 &mut records,
                                 &mut by_block,
                                 &mut queue,
+                                &mut evaluation_precision,
                             );
                             enqueue(
                                 host,
@@ -1157,6 +1175,7 @@ pub fn evaluate<H: SemanticHost>(
                                 &mut records,
                                 &mut by_block,
                                 &mut queue,
+                                &mut evaluation_precision,
                             );
                         }
                     }
@@ -1188,6 +1207,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut records,
                             &mut by_block,
                             &mut queue,
+                            &mut evaluation_precision,
                         );
                     } else {
                         push_exit(&mut exits, Exit::PhpThrow { value, state });
@@ -1210,6 +1230,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut records,
                             &mut by_block,
                             &mut queue,
+                            &mut evaluation_precision,
                         );
                     } else {
                         push_exit(&mut exits, Exit::Fatal { value, state });
@@ -1232,6 +1253,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut records,
                             &mut by_block,
                             &mut queue,
+                            &mut evaluation_precision,
                         );
                     } else {
                         push_exit(&mut exits, Exit::Suspended { value, state });
@@ -1255,6 +1277,15 @@ pub fn evaluate<H: SemanticHost>(
             }
         }
     }
+    if evaluation_precision != Precision::Exact {
+        for item in &mut evaluation_coverage {
+            if !matches!(item.coverage, Coverage::NotApplicable) {
+                if precision_rank(evaluation_precision) > precision_rank(item.precision) {
+                    item.precision = evaluation_precision;
+                }
+            }
+        }
+    }
     Ok(Evaluation {
         exits,
         coverage: evaluation_coverage,
@@ -1271,6 +1302,7 @@ mod tests {
         both_invoke_outcomes: bool,
         native_unwind_invoke: bool,
         maybe_always: bool,
+        growing_loop: bool,
         nested_open: Option<Domain>,
         incomplete_nested_coverage: bool,
         omit_nested_coverage: bool,
@@ -1342,7 +1374,13 @@ mod tests {
             let mut result = None;
             match event {
                 Event::Read { .. } => state.push("read".into()),
-                Event::Write { .. } => state.push("write".into()),
+                Event::Write { .. } => {
+                    if self.growing_loop {
+                        state.push(format!("write-{}", state.len()));
+                    } else {
+                        state.push("write".into());
+                    }
+                }
                 Event::Invoke {
                     result: result_id, ..
                 } => {
@@ -1420,13 +1458,27 @@ mod tests {
             broad == narrow || broad == "<unknown>"
         }
         fn join_state(&self, a: Vec<String>, b: Vec<String>) -> Vec<String> {
-            if a == b { a } else { vec!["<joined>".into()] }
+            if a == b {
+                a
+            } else if self.growing_loop {
+                if a.len() >= b.len() { a } else { b }
+            } else {
+                vec!["<joined>".into()]
+            }
         }
         fn widen_state(&self, _old: Vec<String>, _next: Vec<String>) -> Vec<String> {
-            vec!["<joined>".into()]
+            vec![if self.growing_loop {
+                "<widened>".into()
+            } else {
+                "<joined>".into()
+            }]
         }
         fn state_subsumes(&self, broad: &Vec<String>, narrow: &Vec<String>) -> bool {
-            broad == narrow || broad == &["<joined>".to_string()]
+            if self.growing_loop {
+                broad == narrow || broad == &["<widened>".to_string()]
+            } else {
+                broad == narrow || broad == &["<joined>".to_string()]
+            }
         }
     }
 
@@ -2031,7 +2083,7 @@ mod tests {
     }
 
     #[test]
-    fn cyclic_graph_reaches_a_stable_widened_exit() {
+    fn cyclic_graph_reaches_a_stable_joined_exit() {
         let graph = BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
             entry: 0,
@@ -2063,6 +2115,66 @@ mod tests {
                 .any(|exit| matches!(exit, Exit::Normal { .. }))
         );
         assert!(result.exits.len() <= 2);
+        assert!(result.coverage.iter().all(|item| {
+            matches!(item.coverage, Coverage::NotApplicable) || item.precision != Precision::Exact
+        }));
+        for domain in [Domain::UserWrite, Domain::Return] {
+            assert_eq!(
+                result
+                    .coverage
+                    .iter()
+                    .find(|item| item.domain == domain)
+                    .unwrap()
+                    .precision,
+                Precision::Joined
+            );
+        }
+    }
+
+    #[test]
+    fn widening_is_reflected_in_domain_precision() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Write {
+                        storage: Operand::Argument(0),
+                        value: Operand::Literal(Bytes(b"loop".to_vec())),
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::Always,
+                        yes: 0,
+                        no: 1,
+                    },
+                ),
+                Block::new(vec![], Terminator::Return(None)),
+            ],
+            coverage: coverage_for(&[Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = Host {
+            maybe_always: true,
+            growing_loop: true,
+            ..Host::default()
+        };
+        let result = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        assert!(
+            result
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::Normal { .. }))
+        );
+        for domain in [Domain::UserWrite, Domain::Return] {
+            assert_eq!(
+                result
+                    .coverage
+                    .iter()
+                    .find(|item| item.domain == domain)
+                    .unwrap()
+                    .precision,
+                Precision::Widened
+            );
+        }
     }
 
     #[test]
