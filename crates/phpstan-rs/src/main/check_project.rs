@@ -25,10 +25,10 @@ pub(crate) struct CheckProjectArgs {
     /// "report everything".
     #[arg(long)]
     pub(crate) level: Option<u8>,
-    /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
-    /// portability rules that check "X is only supported on PHP Y.Z
-    /// and later" (see `php_version::PhpFeature`). Unset means no
-    /// such rule has anything to check against yet.
+    /// Target PHP version, as "major.minor" (e.g. "8.1") or an exact
+    /// "major.minor.patch" release (e.g. "8.5.4"). Portability rules use
+    /// the major/minor projection; semantic catalog selection retains exact
+    /// patch information. Unset means no version-specific target is known.
     #[arg(long)]
     pub(crate) php_version: Option<String>,
     /// Sets a config key, overriding the config file: `--set

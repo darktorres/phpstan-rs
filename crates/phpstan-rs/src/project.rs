@@ -705,6 +705,8 @@ pub struct ProjectSettings {
     /// The composer packages, and which directories each owns.
     pub packages: composer::PackageIndex,
     pub php_versions: Option<types::PhpVersions>,
+    /// Patch-aware PHP release interval for semantic catalog selection.
+    pub php_releases: Option<types::PhpReleaseRange>,
     /// Whether the project consumes PHPStan as a library, which the
     /// PHPStan-API rules apply to.
     pub phpstan_api_check_enabled: bool,
@@ -950,6 +952,7 @@ impl Project {
             roles,
             packages,
             php_versions,
+            php_releases,
             phpstan_api_check_enabled,
             retain_source,
             keeps_as_built,
@@ -978,6 +981,8 @@ impl Project {
         self.keeps_as_built = keeps_as_built;
 
         self.registry.php_versions = php_versions;
+        self.registry.php_releases = php_releases
+            .or_else(|| php_versions.map(types::PhpReleaseRange::from_language_versions));
         self.registry
             .set_assertion_tables(overlays.assertions, overlays.class_argument_returns);
 

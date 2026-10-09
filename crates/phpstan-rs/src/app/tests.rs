@@ -307,3 +307,23 @@ fn a_php_version_is_one_version_or_a_range() {
     );
     assert_eq!(versions(""), None);
 }
+
+#[test]
+fn a_patch_php_version_is_retained_for_catalog_targets() {
+    let setting = load(r#"php_version = "8.5.4""#)
+        .section::<ReflectionSettings>()
+        .unwrap()
+        .php_version
+        .unwrap();
+    assert_eq!(
+        setting.releases().unwrap(),
+        types::PhpReleaseRange::new(
+            types::PhpRelease::new(8, 5, 4),
+            types::PhpRelease::new(8, 5, 4)
+        )
+    );
+    assert_eq!(
+        setting.versions().unwrap(),
+        types::PhpVersions::exactly(types::PhpVersion::new(8, 5))
+    );
+}

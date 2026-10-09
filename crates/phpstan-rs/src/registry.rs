@@ -389,6 +389,10 @@ pub struct Registry {
     // `types::php_version::PhpFeature` for the feature table.
     #[serde(skip)]
     pub php_versions: Option<types::PhpVersions>,
+    /// Patch-aware target interval; unlike `php_versions`, this retains
+    /// exact releases for semantic catalog applicability.
+    #[serde(skip)]
+    pub php_releases: Option<types::PhpReleaseRange>,
     // Class names with at least one *unconditional* declaration indexed
     // so far - lets `insert_built_decl` tell "this name's entry is
     // itself unconditional, so a second one should merge onto it"
@@ -1292,6 +1296,11 @@ impl Registry {
     /// The highest PHP version the project runs on.
     pub(crate) fn php_version_max(&self) -> Option<types::PhpVersion> {
         self.php_versions.map(|v| v.max)
+    }
+
+    /// Full patch-aware target possibilities for semantic catalog selection.
+    pub fn semantic_target_set(&self) -> php_semantics::TargetSet {
+        crate::semantics::target_set_from_php_releases(self.php_releases)
     }
 
     /// `eval`'s answer on every PHP version the project runs on: the same
@@ -2761,6 +2770,7 @@ impl Registry {
     /// the names changed so far.
     pub(crate) fn switch_base(&mut self, mut base: Registry) {
         base.php_versions = self.php_versions.take();
+        base.php_releases = self.php_releases.take();
         base.configured_assertions = std::mem::take(&mut self.configured_assertions);
         base.configured_class_argument_returns =
             std::mem::take(&mut self.configured_class_argument_returns);

@@ -480,6 +480,7 @@ impl CanonicalOver for Registry {
             // and the tables.
             scoped_names: _,
             php_versions,
+            php_releases,
             unconditionally_declared_classes,
             built_in_stub_classes,
             unconditionally_declared_functions,
@@ -561,6 +562,7 @@ impl CanonicalOver for Registry {
                 ("phpstan_stubs_loaded", phpstan_stubs_loaded),
                 ("scope", scope),
                 ("php_versions", php_versions),
+                ("php_releases", php_releases),
                 (
                     "unconditionally_declared_classes",
                     &Over(
@@ -698,6 +700,7 @@ canonical_struct!(Registry {
     phpstan_stubs_loaded,
     scope,
     php_versions,
+    php_releases,
     unconditionally_declared_classes,
     built_in_stub_classes,
     unconditionally_declared_functions,

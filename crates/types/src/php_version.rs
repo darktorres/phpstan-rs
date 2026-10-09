@@ -53,6 +53,123 @@ impl std::fmt::Display for PhpVersion {
     }
 }
 
+/// A concrete PHP release. Catalog applicability uses this patch-aware
+/// identity; language feature gates continue to use [`PhpVersion`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PhpRelease {
+    pub major: u16,
+    pub minor: u16,
+    pub patch: u16,
+}
+
+impl PhpRelease {
+    pub const fn new(major: u16, minor: u16, patch: u16) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
+}
+
+impl std::fmt::Display for PhpRelease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+impl syntax::canonical::Canonical for PhpRelease {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        p.atom(&self.to_string());
+    }
+}
+
+/// Inclusive patch-aware release interval. A minor-only lower endpoint
+/// expands to patch zero; a minor-only upper endpoint expands to the full
+/// minor series. Exact patch endpoints remain exact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PhpReleaseRange {
+    pub min: PhpRelease,
+    pub max: PhpRelease,
+}
+
+impl PhpReleaseRange {
+    pub const fn new(min: PhpRelease, max: PhpRelease) -> Self {
+        Self { min, max }
+    }
+
+    pub fn from_language_versions(versions: PhpVersions) -> Self {
+        Self::new(
+            PhpRelease::new(
+                u16::from(versions.min.major),
+                u16::from(versions.min.minor),
+                0,
+            ),
+            PhpRelease::new(
+                u16::from(versions.max.major),
+                u16::from(versions.max.minor),
+                u16::MAX,
+            ),
+        )
+    }
+
+    pub fn language_versions(self) -> Option<PhpVersions> {
+        let min = PhpVersion::new(
+            self.min.major.try_into().ok()?,
+            self.min.minor.try_into().ok()?,
+        );
+        let max = PhpVersion::new(
+            self.max.major.try_into().ok()?,
+            self.max.minor.try_into().ok()?,
+        );
+        (min <= max).then_some(PhpVersions::new(min, max))
+    }
+}
+
+impl syntax::canonical::Canonical for PhpReleaseRange {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        self.min.canonical(p);
+        p.atom("..");
+        self.max.canonical(p);
+    }
+}
+
+/// Parse an exact `major.minor.patch` release or a minor-wide `major.minor`
+/// interval. Exact versions are not rounded to their containing minor.
+pub fn parse_php_release_range(s: &str) -> Result<PhpReleaseRange, String> {
+    let invalid = || {
+        format!(
+            "invalid php_version {s:?}: expected major.minor or major.minor.patch (e.g. \"8.5.4\")"
+        )
+    };
+    let mut parts = s.split('.');
+    let major: u8 = parts
+        .next()
+        .ok_or_else(invalid)?
+        .parse()
+        .map_err(|_| invalid())?;
+    let minor: u8 = parts
+        .next()
+        .ok_or_else(invalid)?
+        .parse()
+        .map_err(|_| invalid())?;
+    let patch = parts.next();
+    if parts.next().is_some() {
+        return Err(invalid());
+    }
+    match patch {
+        Some(patch) => {
+            let patch: u16 = patch.parse().map_err(|_| invalid())?;
+            let release = PhpRelease::new(u16::from(major), u16::from(minor), patch);
+            Ok(PhpReleaseRange::new(release, release))
+        }
+        None => Ok(PhpReleaseRange::new(
+            PhpRelease::new(u16::from(major), u16::from(minor), 0),
+            PhpRelease::new(u16::from(major), u16::from(minor), u16::MAX),
+        )),
+    }
+}
+
 /// The PHP versions code may run on, `min..=max` (PHPStan's
 /// `PhpVersions`): a `PHP_VERSION_ID` comparison narrows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

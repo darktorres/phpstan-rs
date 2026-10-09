@@ -57,6 +57,33 @@ pub fn target_set_from_php_versions(versions: Option<types::PhpVersions>) -> Tar
     TargetSet::new(scenarios).expect("known PHP versions form valid minor scenarios")
 }
 
+/// Preserve configured patch endpoints for catalog selection while keeping
+/// native platform/profile facts unknown unless separately configured.
+pub fn target_set_from_php_releases(releases: Option<types::PhpReleaseRange>) -> TargetSet {
+    let Some(releases) = releases else {
+        return target_set_from_php_versions(None);
+    };
+    let release = |version: types::PhpRelease| ReleaseVersion {
+        major: version.major,
+        minor: version.minor,
+        patch: version.patch,
+    };
+    TargetSet::new(vec![TargetScenario {
+        release: VersionRange {
+            min: release(releases.min),
+            max: release(releases.max),
+        },
+        os: None,
+        arch: None,
+        sapi: None,
+        zts: None,
+        debug: None,
+        extensions: None,
+        ini: None,
+    }])
+    .expect("configured PHP release range is ordered")
+}
+
 fn release(version: types::PhpVersion) -> ReleaseVersion {
     ReleaseVersion {
         major: version.major as u16,
@@ -177,5 +204,23 @@ mod tests {
         assert_eq!(selection.applicable[0].0.release, VersionRange::minor(8, 5));
         assert_eq!(selection.uncovered.len(), 2);
         assert_eq!(selection.uncovered[1].release, VersionRange::minor(8, 6));
+    }
+
+    #[test]
+    fn configured_patch_release_remains_exact_for_catalog_selection() {
+        let targets = target_set_from_php_releases(Some(types::PhpReleaseRange::new(
+            types::PhpRelease::new(8, 5, 4),
+            types::PhpRelease::new(8, 5, 4),
+        )));
+        assert_eq!(targets.scenarios.len(), 1);
+        assert_eq!(
+            targets.scenarios[0].release,
+            VersionRange::exact(ReleaseVersion {
+                major: 8,
+                minor: 5,
+                patch: 4,
+            })
+        );
+        assert!(targets.scenarios[0].os.is_none());
     }
 }

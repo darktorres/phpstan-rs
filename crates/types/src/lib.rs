@@ -62,8 +62,8 @@ pub use parse::{native_type, parse_type_string, parse_written_type};
 pub use parse_display::{try_parse_displayed, try_parse_displayed_with};
 pub(crate) use php_float_format::format_php_float;
 pub use php_version::{
-    KNOWN_PHP_VERSIONS, PhpFeature, PhpVersion, PhpVersions, known_php_versions_where,
-    parse_php_version,
+    KNOWN_PHP_VERSIONS, PhpFeature, PhpRelease, PhpReleaseRange, PhpVersion, PhpVersions,
+    known_php_versions_where, parse_php_release_range, parse_php_version,
 };
 pub use record::{record_unions, recorded_unions};
 #[doc(hidden)]

@@ -766,14 +766,13 @@ impl Session {
             cutoff.rule = rule;
         }
         recovered(psr3.context_key_pattern().map(drop), policy, &mut warnings)?;
-        let php_version = recovered(
+        let php_releases = recovered(
             match &overrides.php_version {
-                Some(version) => types::parse_php_version(version)
-                    .map(|version| Some(types::PhpVersions::exactly(version))),
+                Some(version) => types::parse_php_release_range(version).map(Some),
                 None => reflection
                     .php_version
                     .as_ref()
-                    .map(crate::registry::settings::PhpVersionSetting::versions)
+                    .map(crate::registry::settings::PhpVersionSetting::releases)
                     .transpose(),
             },
             policy,
@@ -911,7 +910,9 @@ impl Session {
             }
         }
 
-        let php_versions = php_version.or(composer_php_versions);
+        let php_releases = php_releases
+            .or_else(|| composer_php_versions.map(types::PhpReleaseRange::from_language_versions));
+        let php_versions = php_releases.and_then(types::PhpReleaseRange::language_versions);
         let extensions = recovered(
             ext::ActiveExtensions::resolve(config, &|p| {
                 ext::installed_in(root_manifest.as_ref(), p)
@@ -942,6 +943,7 @@ impl Session {
             roles,
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
+            php_releases,
             phpstan_api_check_enabled,
             retain_source: false,
             keeps_as_built: false,

@@ -18,6 +18,25 @@ fn rejects_a_patch_component() {
 }
 
 #[test]
+fn patch_aware_release_ranges_keep_exact_and_minor_wide_targets_distinct() {
+    assert_eq!(
+        parse_php_release_range("8.5.4"),
+        Ok(PhpReleaseRange::new(
+            PhpRelease::new(8, 5, 4),
+            PhpRelease::new(8, 5, 4)
+        ))
+    );
+    assert_eq!(
+        parse_php_release_range("8.5"),
+        Ok(PhpReleaseRange::new(
+            PhpRelease::new(8, 5, 0),
+            PhpRelease::new(8, 5, u16::MAX)
+        ))
+    );
+    assert!(parse_php_release_range("8").is_err());
+}
+
+#[test]
 fn rejects_non_numeric_parts() {
     assert!(parse_php_version("a.b").is_err());
     assert!(parse_php_version("8.x").is_err());

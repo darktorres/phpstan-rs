@@ -514,7 +514,7 @@ fn check_project_php_version_flag_is_accepted_and_checking_proceeds_normally() {
     let output = bin()
         .arg("check-project")
         .arg("--php-version")
-        .arg("8.1")
+        .arg("8.5.4")
         .arg(dir.path())
         .output()
         .unwrap();

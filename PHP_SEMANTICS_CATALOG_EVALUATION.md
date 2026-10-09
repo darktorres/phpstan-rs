@@ -38,11 +38,15 @@ uncovered remainder. Catalog variants use it to preserve exact and partially
 known target branches. The checker now has a thin adapter from its configured
 PHP major/minor range to those scenarios; it leaves platform facts unknown and
 preserves unknown release intervals before, between, or after known minors as
-uncovered scenarios. Four adapter tests cover exact, unset, and future-minor
-ranges, and `cargo check -p phpstan-rs` passes. An unset version maps to every
-language version recognized by the checker (5.3–8.5). This verifies target
-conversion only: no behavior graph is loaded or executed at a builtin call
-site, so F05 remains OPEN. The crate also
+uncovered scenarios. Five adapter tests cover exact, unset, future-minor, and
+patch-exact ranges. Exact patch releases are now parsed separately from the existing
+major/minor language-gate projection, retained in project/registry settings,
+included in canonical registry identity, and converted to exact catalog target
+ranges while platform facts remain unknown. Config, registry, adapter, and CLI
+fixtures exercise `8.5.4`; `cargo check -p phpstan-rs` passes. An unset version
+maps to every language version recognized by the checker (5.3–8.5). This
+verifies target propagation only: no behavior graph is loaded or executed at a
+builtin call site, so F05 remains OPEN. The crate also
 has an initial PHP value/reference state with array-copy, nested-array,
 reference-cell, and object identity tests. An exact-entry catalog API validates
 evidence, supports ASCII symbol matching, projection, and explanation lookup.
@@ -51,14 +55,15 @@ artifacts before installing runtime indexes; it is not yet wired to a checker
 artifact or call site. F04 remains OPEN because this state is not yet
 integrated with PhpFlowIR or callback exception flow.
 
-The full `cargo test -p phpstan-rs -p phpstan-rs-semantics` run passes: 1,194
-checker library tests, 58 checker binary/integration tests, and 39 semantic
-tests. After that full run, a focused suite passes all 40 semantic tests and
-`cargo check -p phpstan-rs` passes again. The newest regressions reject
-inapplicable coverage for reachable and composed invocation domains, and
-preserve fatal and suspension as distinct exits. This validates integration
-with the present checker build; it does not establish catalog execution at
-builtin call sites.
+The latest full run (`cargo test -p phpstan-rs -p phpstan-rs-types -p phpstan-rs-semantics`)
+passes 1,200 checker library tests, 58 checker
+binary/integration tests, 286 type tests, and 40 semantic tests. Separate
+`cargo check -p phpstan-rs` passes. The run includes config and CLI acceptance
+of exact `8.5.4`, registry target conversion, and canonical identity separation
+across patches. Semantic regressions reject inapplicable coverage for
+reachable and composed invocation domains, and preserve fatal and suspension
+as distinct exits. This validates integration with the current checker build;
+it does not establish catalog execution at builtin call sites.
 
 ## Phase F gate-by-gate status
 
@@ -74,7 +79,7 @@ so it does not close F00 or substitute for independent review.
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, runtime sentinels, and indirect-call witnesses are recorded. | Complete normal-vs-CALL comparisons and configured implicit-operation mapping for the locked slice; connect source/layout metadata and witnesses to graph entries. Current compiler import and runtime observation are not semantic graph coverage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |
-| F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON before runtime selection; checker PHP-version settings convert to minor scenarios, preserve unknown release intervals, and retain unknown platform facts. An adapter test selects the 8.5 variant from an 8.4–8.6 range while retaining 8.4 and 8.6 as uncovered. | Embed/load generated catalog artifacts in the real builtin-call path, apply results exactly once, use configured platform/profile data, and verify exact/minor/range coverage plus uncovered remainder on checker fixtures. |
+| F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; configured exact patch ranges now flow through project settings and registry target selection without inferring platform facts. Tests select the 8.5 variant from an 8.4–8.6 range while retaining uncovered releases and verify exact `8.5.4` preservation. | Embed/load generated catalog artifacts in the real builtin-call path, apply results exactly once, use configured platform/profile data, and verify exact/minor/range coverage plus uncovered remainder on checker fixtures. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 
 This audit found additional evaluation work beyond the earlier compiler/framework
