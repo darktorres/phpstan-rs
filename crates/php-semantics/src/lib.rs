@@ -18,7 +18,8 @@ pub use catalog::{
     EvidenceKind, EvidenceRecord, GraphRecord, Projection, Selection, VariantSelection,
 };
 pub use php_value::{
-    ArrayId, ArrayKey, Binding, ObjectId, PhpState, PhpValue, ReferenceId, StateError,
+    ArrayId, ArrayKey, Binding, ObjectId, PhpCallbackOutcome, PhpFlowHost, PhpState, PhpValue,
+    ReferenceId, StateError,
 };
 pub use target::{
     Applicability, ReleaseVersion, TargetError, TargetPredicate, TargetScenario, TargetSelection,
@@ -192,10 +193,21 @@ pub enum Event {
         arguments: Vec<Operand>,
         result: u32,
     },
+    /// PHP value/reference operations executed by the PHP-specific host.
+    PhpFlow {
+        instruction: PhpFlowInstruction,
+    },
     Unknown {
         domains: Vec<Domain>,
         reason: Bytes,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PhpFlowInstruction {
+    Assign { destination: Bytes, source: Bytes },
+    Unset { local: Bytes },
+    BindReference { left: Bytes, right: Bytes },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -408,6 +420,15 @@ impl BehaviorGraph {
                     Event::Read { .. } => vec![Domain::UserRead],
                     Event::Write { .. } => vec![Domain::UserWrite],
                     Event::Invoke { .. } => vec![Domain::Invocation],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::Assign { .. },
+                    } => vec![Domain::UserRead, Domain::UserWrite],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::Unset { .. },
+                    } => vec![Domain::UserWrite],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::BindReference { .. },
+                    } => vec![Domain::UserRead, Domain::UserWrite],
                     Event::Unknown { domains, .. } => domains.clone(),
                 };
                 for domain in required {
@@ -1587,6 +1608,9 @@ mod tests {
                         coverage,
                     }];
                 }
+                Event::PhpFlow { instruction } => {
+                    state.push(format!("php-flow:{instruction:?}"));
+                }
                 Event::Unknown { domains, .. } => state.push(format!("unknown:{domains:?}")),
             }
             let _ = (args, receiver);
@@ -1660,6 +1684,15 @@ mod tests {
                 Event::Read { .. } => vec![Domain::UserRead],
                 Event::Write { .. } => vec![Domain::UserWrite],
                 Event::Invoke { .. } => vec![Domain::Invocation],
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::Assign { .. },
+                } => vec![Domain::UserRead, Domain::UserWrite],
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::Unset { .. },
+                } => vec![Domain::UserWrite],
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::BindReference { .. },
+                } => vec![Domain::UserRead, Domain::UserWrite],
                 Event::Unknown { domains, .. } => domains.clone(),
             };
             for domain in required {
@@ -1783,6 +1816,190 @@ mod tests {
                 value: Some("callback-result".into()),
                 state: vec!["write".into(), "invoke".into()]
             }]
+        );
+    }
+
+    #[test]
+    fn php_flow_host_composes_callback_writes_with_normal_and_throw_states() {
+        let evidence = Digest([9; 32]);
+        let mut host = PhpFlowHost::new(evidence);
+        host.argument_locations = vec![None, Some(Bytes(b"alias".to_vec()))];
+        host.callbacks.insert(
+            Bytes(b"mutate".to_vec()),
+            vec![
+                PhpCallbackOutcome {
+                    writes: vec![(0, PhpValue::Int(1))],
+                    normal: true,
+                    result: Some(PhpValue::Int(7)),
+                    throws: None,
+                },
+                PhpCallbackOutcome {
+                    writes: vec![(0, PhpValue::Int(2))],
+                    normal: false,
+                    result: None,
+                    throws: Some(PhpValue::Int(99)),
+                },
+            ],
+        );
+        let mut invoke = Block::new(
+            vec![
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::BindReference {
+                        left: Bytes(b"alias".to_vec()),
+                        right: Bytes(b"slot".to_vec()),
+                    },
+                },
+                Event::Invoke {
+                    callable: Operand::Argument(0),
+                    arguments: vec![Operand::Argument(1)],
+                    result: 4,
+                },
+            ],
+            Terminator::Return(Some(Operand::Result(4))),
+        );
+        invoke.exceptional.php_throw = Some(1);
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![invoke, Block::new(vec![], Terminator::Resume)],
+            coverage: coverage_for(&[
+                Domain::Invocation,
+                Domain::UserRead,
+                Domain::UserWrite,
+                Domain::Return,
+                Domain::PhpThrow,
+            ]),
+        };
+        let mut initial = PhpState::new();
+        initial.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(0));
+        let evaluation = evaluate(
+            &graph,
+            &[
+                PhpValue::Callable(Bytes(b"mutate".to_vec())),
+                PhpValue::Unknown,
+            ],
+            &PhpValue::Unknown,
+            initial,
+            &mut host,
+        )
+        .unwrap();
+
+        assert!(evaluation.exits.contains(&Exit::Normal {
+            value: Some(PhpValue::Int(7)),
+            state: {
+                let mut state = PhpState::new();
+                state.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(0));
+                state.bind_reference(Bytes(b"alias".to_vec()), Bytes(b"slot".to_vec()));
+                state.set_local(Bytes(b"alias".to_vec()), PhpValue::Int(1));
+                state
+            },
+        }));
+        assert!(evaluation.exits.contains(&Exit::PhpThrow {
+            value: PhpValue::Int(99),
+            state: {
+                let mut state = PhpState::new();
+                state.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(0));
+                state.bind_reference(Bytes(b"alias".to_vec()), Bytes(b"slot".to_vec()));
+                state.set_local(Bytes(b"alias".to_vec()), PhpValue::Int(2));
+                state
+            },
+        }));
+        evaluation.post_fixpoint.validate(&graph, &host).unwrap();
+    }
+
+    #[test]
+    fn php_flow_host_keeps_unknown_callback_effects_open_and_havocs_state() {
+        let mut host = PhpFlowHost::new(Digest([10; 32]));
+        host.argument_locations = vec![None, Some(Bytes(b"slot".to_vec()))];
+        let graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![Operand::Argument(1)],
+                result: 0,
+            }],
+            Terminator::Return(Some(Operand::Result(0))),
+        );
+        let mut initial = PhpState::new();
+        initial.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(4));
+        let evaluation = evaluate(
+            &graph,
+            &[
+                PhpValue::Callable(Bytes(b"unmodeled".to_vec())),
+                PhpValue::Unknown,
+            ],
+            &PhpValue::Unknown,
+            initial,
+            &mut host,
+        )
+        .unwrap();
+
+        assert_eq!(evaluation.exits.len(), 5);
+        assert!(evaluation.exits.iter().all(|exit| match exit {
+            Exit::Normal { state, .. }
+            | Exit::PhpThrow { state, .. }
+            | Exit::NativeUnwind { state, .. }
+            | Exit::Fatal { state, .. }
+            | Exit::Suspended { state, .. } => {
+                state.local(b"slot") == Some(PhpValue::Unknown)
+            }
+        }));
+        assert!(
+            evaluation
+                .coverage
+                .iter()
+                .all(|coverage| matches!(coverage.coverage, Coverage::Open { .. }))
+        );
+    }
+
+    #[test]
+    fn php_flow_host_keeps_unmodeled_read_exceptions_visible() {
+        let mut host = PhpFlowHost::new(Digest([11; 32]));
+        let graph = graph(
+            vec![Event::Read {
+                storage: Operand::Argument(0),
+            }],
+            Terminator::Return(Some(Operand::Literal(Bytes(b"read".to_vec())))),
+        );
+        let mut initial = PhpState::new();
+        initial.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(5));
+        let evaluation = evaluate(
+            &graph,
+            &[PhpValue::Unknown],
+            &PhpValue::Unknown,
+            initial,
+            &mut host,
+        )
+        .unwrap();
+
+        assert!(
+            evaluation
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::PhpThrow { .. }))
+        );
+        assert!(
+            evaluation
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::NativeUnwind { .. }))
+        );
+        assert!(
+            evaluation
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::Fatal { .. }))
+        );
+        assert!(
+            evaluation
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::Suspended { .. }))
+        );
+        assert!(
+            evaluation
+                .coverage
+                .iter()
+                .all(|coverage| matches!(coverage.coverage, Coverage::Open { .. }))
         );
     }
 

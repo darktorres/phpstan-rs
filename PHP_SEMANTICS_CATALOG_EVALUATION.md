@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Forty-eight
+explicit exceptional continuations and host-supplied joins/widening. Fifty-two
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -21,7 +21,12 @@ coverage/evidence validation, composed-child coverage propagation and rejection
 of incomplete composed coverage, unresolved-return rejection, rejection of a
 closed return refinement with an open throw dependency, state-sensitive
 post-invocation predicates, conservative handling of unsupported predicates,
-and loop convergence. The evaluator rejects host join or widening results
+and loop convergence. A PHP-specific `SemanticHost` now runs through the shared
+evaluator with PHP values and reference state. Its callback fixture maps
+callback parameter writes through invoke operands and preserves separate
+normal/throw states; an unknown callback havocs tracked state, emits normal,
+PHP-throw, native-unwind, fatal, and suspension paths, and opens all effect
+domains. Reads and unsupported operations also remain open. The evaluator rejects host join or widening results
 that fail to subsume both incoming states/results; state-loss, result-loss,
 and widening-loss fixtures cover that guard. A post-worklist validation pass
 checks that each recorded transfer candidate is covered by the completed
@@ -61,12 +66,17 @@ maps to every language version recognized by the checker (5.3–8.5). This
 verifies target propagation only; a separate exact-release `strlen()` slice is
 now wired into the builtin call path as described below. The crate also
 has an initial PHP value/reference state with array-copy, nested-array,
-reference-cell, and object identity tests. An exact-entry catalog API validates
+reference-cell, alias-rebinding, unset, and object-identity tests. The state now
+backs the PHP-specific host. Its initial PhpFlow instruction set covers local
+assignment, unset, and reference binding, and the evaluator fixture binds a
+reference before a callback writes through it on normal and throwing paths.
+Arrays and object identity are still tested only at the state API, not through
+flow instructions, so F04 remains OPEN. An exact-entry catalog API validates
 evidence, supports ASCII symbol matching, projection, and explanation lookup.
 Catalog manifests also have a validated JSON ingestion API that checks
-artifacts before installing runtime indexes. F04 remains OPEN because the PHP
-value/reference state is not yet integrated with PhpFlowIR or callback
-exception flow.
+artifacts before installing runtime indexes. F04 remains OPEN because
+array/object operations and the full callback/value/reference product are not
+yet composed through the flow instructions; callback modeling remains bounded.
 
 The first embedded artifact exercises the production catalog call path for
 `strlen()` when the configured target is exactly PHP 8.5.4. The checked-in
@@ -146,7 +156,7 @@ so it does not close F00 or substitute for independent review.
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, and graph-bound candidate containment validation are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and an independent persisted-certificate post-fixpoint validator. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Complete configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
-| F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, and cover alias rebinding plus unset of one binding while another alias survives (49 semantic tests). | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |
+| F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and run local reference binding plus callback writes/normal/throw through the shared evaluator (52 semantic tests). Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | Expand flow instructions for array/object operations and compose the full value/reference product with callback and exceptional state; exercise copy/reference/object behavior through flow instructions. |
 | F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 

@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Bytes;
+use crate::{
+    Bytes, Coverage, Digest, Domain, DomainCoverage, Event, EventExit, Operand, PhpFlowInstruction,
+    Precision, Predicate, SemanticHost, Truth,
+};
 
 pub type ArrayId = u64;
 pub type ObjectId = u64;
@@ -49,6 +52,7 @@ pub struct PhpState {
     references: BTreeMap<ReferenceId, PhpValue>,
     arrays: BTreeMap<ArrayId, BTreeMap<ArrayKey, ArrayElement>>,
     next_identity: u64,
+    havoced: bool,
 }
 
 impl PhpState {
@@ -108,10 +112,35 @@ impl PhpState {
     }
 
     pub fn local(&self, name: &[u8]) -> Option<PhpValue> {
-        match self.locals.get(&Bytes(name.to_vec()))? {
+        let Some(binding) = self.locals.get(&Bytes(name.to_vec())) else {
+            return self.havoced.then_some(PhpValue::Unknown);
+        };
+        match binding {
             Binding::Value(value) => Some(value.clone()),
             Binding::Reference(id) => self.references.get(id).cloned(),
         }
+    }
+
+    fn join_abstract(&self, other: &Self) -> Self {
+        if self == other {
+            self.clone()
+        } else {
+            Self {
+                havoced: true,
+                ..Self::default()
+            }
+        }
+    }
+
+    fn subsumes_abstract(&self, other: &Self) -> bool {
+        self == other || self.havoced
+    }
+
+    fn havoc(&mut self) {
+        *self = Self {
+            havoced: true,
+            ..Self::default()
+        };
     }
 
     /// PHP assignment copies arrays recursively while preserving object
@@ -210,6 +239,357 @@ impl PhpState {
             PhpValue::Array(id) => Some(id),
             _ => None,
         }
+    }
+}
+
+/// One reviewed callback outcome for the minimal PHP flow slice. Argument
+/// indices in `writes` refer to callback parameters; invoke operands map those
+/// parameters to caller locations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhpCallbackOutcome {
+    pub writes: Vec<(u32, PhpValue)>,
+    pub normal: bool,
+    pub result: Option<PhpValue>,
+    pub throws: Option<PhpValue>,
+}
+
+/// PHP-specific value/state adapter for the shared behavior-graph evaluator.
+/// A missing callback model stays open and produces both normal and throw
+/// outcomes; modeled callbacks retain ordered writes on either exit.
+#[derive(Debug, Clone)]
+pub struct PhpFlowHost {
+    pub argument_locations: Vec<Option<Bytes>>,
+    pub callbacks: BTreeMap<Bytes, Vec<PhpCallbackOutcome>>,
+    pub evidence: Digest,
+}
+
+impl PhpFlowHost {
+    pub fn new(evidence: Digest) -> Self {
+        Self {
+            argument_locations: Vec::new(),
+            callbacks: BTreeMap::new(),
+            evidence,
+        }
+    }
+
+    fn coverage(&self) -> Vec<DomainCoverage> {
+        // The minimal callback model only closes invocation, user writes,
+        // normal return, and PHP throw. Other effect domains remain open.
+        let modeled = [
+            Domain::Invocation,
+            Domain::UserWrite,
+            Domain::Return,
+            Domain::PhpThrow,
+        ];
+        Domain::ALL
+            .into_iter()
+            .map(|domain| DomainCoverage {
+                domain,
+                coverage: if !modeled.contains(&domain) {
+                    Coverage::Open {
+                        reasons: vec![Bytes(b"callback model is incomplete".to_vec())],
+                    }
+                } else {
+                    Coverage::Closed
+                },
+                precision: if modeled.contains(&domain) {
+                    Precision::Exact
+                } else {
+                    Precision::Widened
+                },
+                dependencies: if domain == Domain::Return {
+                    vec![Domain::PhpThrow]
+                } else {
+                    vec![]
+                },
+                evidence: vec![self.evidence],
+                assumptions: vec![],
+            })
+            .collect()
+    }
+
+    fn open_domains(&self, domains: &[Domain]) -> Vec<DomainCoverage> {
+        Domain::ALL
+            .into_iter()
+            .map(|domain| DomainCoverage {
+                domain,
+                coverage: if domains.contains(&domain) {
+                    Coverage::Open {
+                        reasons: vec![Bytes(b"PHP flow operation is not modeled".to_vec())],
+                    }
+                } else {
+                    Coverage::NotApplicable
+                },
+                precision: Precision::Widened,
+                dependencies: vec![],
+                evidence: vec![self.evidence],
+                assumptions: vec![],
+            })
+            .collect()
+    }
+
+    fn unmodeled_outcomes(
+        &self,
+        mut state: PhpState,
+        domains: &[Domain],
+        result: Option<u32>,
+    ) -> Vec<EventExit<PhpValue, PhpState>> {
+        state.havoc();
+        let coverage = self.open_domains(domains);
+        let mut outcomes = vec![EventExit::Normal {
+            result: result.map(|id| (id, PhpValue::Unknown)),
+            state: state.clone(),
+            coverage: coverage.clone(),
+        }];
+        if domains.contains(&Domain::PhpThrow) {
+            outcomes.push(EventExit::PhpThrow {
+                value: PhpValue::Unknown,
+                state: state.clone(),
+                coverage: coverage.clone(),
+            });
+        }
+        if domains.contains(&Domain::Invocation) {
+            outcomes.push(EventExit::NativeUnwind {
+                value: PhpValue::Unknown,
+                state: state.clone(),
+                coverage: coverage.clone(),
+            });
+        }
+        if domains.contains(&Domain::Fatal) {
+            outcomes.push(EventExit::Fatal {
+                value: PhpValue::Unknown,
+                state: state.clone(),
+                coverage: coverage.clone(),
+            });
+        }
+        if domains.contains(&Domain::Suspension) {
+            outcomes.push(EventExit::Suspended {
+                value: PhpValue::Unknown,
+                state,
+                coverage,
+            });
+        }
+        outcomes
+    }
+
+    fn argument_location(&self, operand: &Operand) -> Option<&Bytes> {
+        let Operand::Argument(index) = operand else {
+            return None;
+        };
+        self.argument_locations.get(*index as usize)?.as_ref()
+    }
+}
+
+impl SemanticHost for PhpFlowHost {
+    type Value = PhpValue;
+    type State = PhpState;
+
+    fn resolve(
+        &self,
+        operand: &Operand,
+        arguments: &[PhpValue],
+        receiver: &PhpValue,
+        results: &[(u32, PhpValue)],
+    ) -> Option<PhpValue> {
+        match operand {
+            Operand::Argument(index) => arguments.get(*index as usize).cloned(),
+            Operand::Receiver => Some(receiver.clone()),
+            Operand::Result(index) => results
+                .iter()
+                .find(|(id, _)| id == index)
+                .map(|(_, value)| value.clone()),
+            Operand::Literal(bytes) => Some(PhpValue::String(bytes.clone())),
+            Operand::IntRange {
+                min: Some(min),
+                max: Some(max),
+            } if min == max => Some(PhpValue::Int(*min)),
+            Operand::StringByteLength(index) => match arguments.get(*index as usize) {
+                Some(PhpValue::String(bytes)) => Some(PhpValue::Int(bytes.0.len() as i64)),
+                _ => Some(PhpValue::Unknown),
+            },
+            Operand::IntRange { .. } | Operand::Unknown => Some(PhpValue::Unknown),
+        }
+    }
+
+    fn test(
+        &self,
+        predicate: &Predicate,
+        arguments: &[PhpValue],
+        receiver: &PhpValue,
+        results: &[(u32, PhpValue)],
+        _state: &PhpState,
+    ) -> Truth {
+        match predicate {
+            Predicate::Always => Truth::Yes,
+            Predicate::IsLiteral { value, expected } => {
+                match self.resolve(value, arguments, receiver, results) {
+                    Some(PhpValue::String(value)) if value == *expected => Truth::Yes,
+                    Some(PhpValue::Unknown) | None => Truth::Maybe,
+                    Some(_) => Truth::No,
+                }
+            }
+            Predicate::Host(_) => Truth::Maybe,
+        }
+    }
+
+    fn event(
+        &mut self,
+        event: &Event,
+        arguments: &[PhpValue],
+        receiver: &PhpValue,
+        results: &[(u32, PhpValue)],
+        mut state: PhpState,
+    ) -> Vec<EventExit<PhpValue, PhpState>> {
+        match event {
+            Event::Read { .. } => self.unmodeled_outcomes(state, &Domain::ALL, None),
+            Event::Write { storage, value } => {
+                let Some(value) = self.resolve(value, arguments, receiver, results) else {
+                    return self.unmodeled_outcomes(
+                        state,
+                        &[
+                            Domain::Invocation,
+                            Domain::UserWrite,
+                            Domain::PhpThrow,
+                            Domain::Fatal,
+                        ],
+                        None,
+                    );
+                };
+                let Some(location) = self.argument_location(storage) else {
+                    return self.unmodeled_outcomes(
+                        state,
+                        &[
+                            Domain::Invocation,
+                            Domain::UserWrite,
+                            Domain::PhpThrow,
+                            Domain::Fatal,
+                        ],
+                        None,
+                    );
+                };
+                state.set_local(location.clone(), value);
+                vec![EventExit::Normal {
+                    result: None,
+                    state,
+                    coverage: vec![],
+                }]
+            }
+            Event::PhpFlow { instruction } => {
+                let error = match instruction {
+                    PhpFlowInstruction::Assign {
+                        destination,
+                        source,
+                    } => state.assign(destination.clone(), &source.0).err(),
+                    PhpFlowInstruction::Unset { local } => {
+                        state.unset_local(&local.0);
+                        None
+                    }
+                    PhpFlowInstruction::BindReference { left, right } => {
+                        state.bind_reference(left.clone(), right.clone());
+                        None
+                    }
+                };
+                if error.is_some() {
+                    self.unmodeled_outcomes(
+                        state,
+                        &[
+                            Domain::UserRead,
+                            Domain::UserWrite,
+                            Domain::PhpThrow,
+                            Domain::Fatal,
+                        ],
+                        None,
+                    )
+                } else {
+                    vec![EventExit::Normal {
+                        result: None,
+                        state,
+                        coverage: vec![],
+                    }]
+                }
+            }
+            Event::Invoke {
+                callable,
+                arguments: callback_args,
+                result,
+            } => {
+                let name = self.resolve(callable, arguments, receiver, results);
+                let callable_name = match name {
+                    Some(PhpValue::Callable(name)) => Some(name),
+                    _ => None,
+                };
+                let Some(outcomes) = callable_name
+                    .as_ref()
+                    .and_then(|name| self.callbacks.get(name))
+                    .cloned()
+                else {
+                    return self.unmodeled_outcomes(state, &Domain::ALL, Some(*result));
+                };
+                let mut exits = Vec::new();
+                for outcome in outcomes {
+                    let mut next = state.clone();
+                    for (index, value) in &outcome.writes {
+                        let target = callback_args
+                            .get(*index as usize)
+                            .and_then(|operand| self.argument_location(operand));
+                        if let Some(location) = target {
+                            next.set_local(location.clone(), value.clone());
+                        } else {
+                            next.havoc();
+                        }
+                    }
+                    let coverage = self.coverage();
+                    if outcome.normal {
+                        exits.push(EventExit::Normal {
+                            result: outcome.result.map(|value| (*result, value)),
+                            state: next.clone(),
+                            coverage: coverage.clone(),
+                        });
+                    }
+                    if let Some(value) = outcome.throws {
+                        exits.push(EventExit::PhpThrow {
+                            value,
+                            state: next,
+                            coverage,
+                        });
+                    }
+                }
+                if exits.is_empty() {
+                    return self.unmodeled_outcomes(state, &Domain::ALL, Some(*result));
+                }
+                exits
+            }
+            Event::Unknown { domains, .. } => self.unmodeled_outcomes(state, domains, None),
+        }
+    }
+
+    fn unknown_value(&self) -> PhpValue {
+        PhpValue::Unknown
+    }
+    fn join_value(&self, left: PhpValue, right: PhpValue) -> PhpValue {
+        if left == right {
+            left
+        } else {
+            PhpValue::Unknown
+        }
+    }
+    fn widen_value(&self, _old: PhpValue, _next: PhpValue) -> PhpValue {
+        PhpValue::Unknown
+    }
+    fn value_subsumes(&self, broad: &PhpValue, narrow: &PhpValue) -> bool {
+        broad == narrow || *broad == PhpValue::Unknown
+    }
+    fn join_state(&self, left: PhpState, right: PhpState) -> PhpState {
+        left.join_abstract(&right)
+    }
+    fn widen_state(&self, _old: PhpState, _next: PhpState) -> PhpState {
+        PhpState {
+            havoced: true,
+            ..PhpState::default()
+        }
+    }
+    fn state_subsumes(&self, broad: &PhpState, narrow: &PhpState) -> bool {
+        broad.subsumes_abstract(narrow)
     }
 }
 
