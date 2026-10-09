@@ -1,0 +1,85 @@
+{
+  "source_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
+  "compiler": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "cflags": "-O0 -g",
+  "fixtures": [
+    {
+      "path": "tools/php-catalog/experiments/comparison/runtime.php",
+      "sha256": "9b38a3ea63cf5cf42e7dc553924f38fab4046d2297011b03a144c2270f5d38cc",
+      "sentinels_passed": 13,
+      "hybrid_output": "tools/php-catalog/experiments/comparison/results/runtime/php-hybrid-vm.out",
+      "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-vm.out",
+      "output_sha256": "2bd72db611daeac4b383eed0b0352ac80581ab6c7e58e8cb13a8b505f9411c04"
+    },
+    {
+      "path": "campaign/php-vm-strlen-sentinel.php",
+      "sha256": "447600fd00879283e3052ce0c304f6676bf0cfec709367a327d14285cd27363d",
+      "sentinels": [
+        "direct strlen",
+        "call_user_func strlen",
+        "binary and multibyte strings",
+        "__toString side effect and throw",
+        "invalid array type"
+      ],
+      "hybrid_output": "tools/php-catalog/experiments/comparison/results/runtime/php-vm-strlen-hybrid.out",
+      "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-vm-strlen-call.out",
+      "output_sha256": "f6ffb81683edd229153c86b258375bcaee38c9805e083d0916057ec5b164f4e5"
+    }
+  ],
+  "profiles": {
+    "hybrid": {
+      "vm_kind": "ZEND_VM_KIND_HYBRID",
+      "binary_sha256": "5628c72ba2098d26746c77ff57880d243f249a74ded535a2ffdd0a48f7d3e0dc",
+      "configuration": [
+        "--disable-all",
+        "--disable-cgi",
+        "--disable-phpdbg",
+        "--without-pear",
+        "--enable-cli",
+        "--enable-session"
+      ],
+      "gcc_global_registers": true
+    },
+    "call": {
+      "vm_kind": "ZEND_VM_KIND_CALL",
+      "binary_sha256": "8b0d5810d7390a601dafb4d788c71327fb8fce21bd67d467001cc88f4716d057",
+      "configuration": [
+        "--disable-all",
+        "--disable-cgi",
+        "--disable-phpdbg",
+        "--without-pear",
+        "--enable-cli",
+        "--enable-session",
+        "--disable-opcache-jit",
+        "--disable-gcc-global-regs"
+      ],
+      "gcc_global_registers": false
+    }
+  },
+  "result": {
+    "exit_code": 0,
+    "output_files_identical": true,
+    "runtime_php_sentinels_passed": 13,
+    "runtime_php_sentinels": [
+      "empty-map",
+      "null-map",
+      "callback-result-map",
+      "write-before-throw",
+      "countable-dispatch",
+      "by-reference-walk",
+      "scalar-return",
+      "array-copy",
+      "shared-reference-cell",
+      "string-coercion-callback",
+      "stream-read-result",
+      "stream-wrapper-dispatch",
+      "retained-session-callbacks"
+    ],
+    "all_captured_fixture_outputs_identical": true
+  },
+  "limits": [
+    "The CALL profile disables GCC global-register variables because the CALL handler ABI requires execute_data and opline arguments.",
+    "OPcache JIT is disabled in the CALL build; the runtime command uses -n, so OPcache is not loaded for either run.",
+    "These positive witnesses do not prove unobserved VM behaviors equivalent."
+  ]
+}
