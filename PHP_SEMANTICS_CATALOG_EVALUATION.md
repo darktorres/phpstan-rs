@@ -49,12 +49,13 @@ evidence, supports ASCII symbol matching, projection, and explanation lookup.
 F04 remains OPEN because this state is not yet integrated with PhpFlowIR or
 callback exception flow.
 
-The full checker suite passed with 1,194 library tests, all checker
-binary/integration tests, and 35 semantic-crate tests after the schema and
-dependency-closure change. Subsequent focused runs pass all 38 semantic-crate
-tests and `cargo check -p phpstan-rs`; regressions reject marking a reachable
-return domain not applicable and preserve fatal and suspension as distinct
-exits. Checker sources have not changed since the full-suite run.
+The full `cargo test -p phpstan-rs -p phpstan-rs-semantics` run passes: 1,194
+checker library tests, 58 checker binary/integration tests, and 39 semantic
+tests. Separate `cargo check -p phpstan-rs` also passes. The newest semantic
+regressions reject marking a reachable return domain not applicable and
+preserve fatal and suspension as distinct exits. This validates integration
+with the present checker build; it does not establish catalog execution at
+builtin call sites.
 
 ## Phase F gate-by-gate status
 
