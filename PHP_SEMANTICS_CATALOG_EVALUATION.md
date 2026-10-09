@@ -55,17 +55,15 @@ artifacts before installing runtime indexes; it is not yet wired to a checker
 artifact or call site. F04 remains OPEN because this state is not yet
 integrated with PhpFlowIR or callback exception flow.
 
-The latest full run (`cargo test -p phpstan-rs -p phpstan-rs-types -p phpstan-rs-semantics`)
-passes 1,200 checker library tests, 58 checker
-binary/integration tests, 286 type tests, and 40 semantic tests. After that
-run, the focused semantic suite passes all 41 tests, including joined/widened
-precision propagation, and `cargo check -p phpstan-rs` passes. The full run
-includes config and CLI acceptance of exact `8.5.4`, registry target
-conversion, and canonical identity separation across patches. Semantic
-regressions reject inapplicable coverage for reachable and composed invocation
-domains, and preserve fatal and suspension as distinct exits. This validates
-integration with the current checker build; it does not establish catalog
-execution at builtin call sites.
+The latest full run on October 9, 2026 (`cargo test -p phpstan-rs -p
+phpstan-rs-types -p phpstan-rs-semantics`) passes 1,200 checker library tests,
+59 checker binary/integration tests, 286 type tests, and 41 semantic tests.
+The run includes joined/widened precision propagation, exact `8.5.4` config and
+CLI acceptance, registry target conversion, and canonical identity separation
+across patches. Semantic regressions reject inapplicable coverage for reachable
+and composed invocation domains, and preserve fatal and suspension as distinct
+exits. This validates integration with the current checker build; it does not
+establish catalog execution at builtin call sites.
 
 After the full run, a targeted CLI config round-trip also passes with
 `php_version = "8.5.4"`, exercising config parsing through session creation and
@@ -97,6 +95,14 @@ The concrete next dependency is to define and review the observable-trace
 contract, then use one locked 8.5.4 builtin slice to drive native import through
 graph validation and a checker call. Until that exists, producer/solver choice
 remains provisional.
+
+This is the full remaining Phase F evaluation set, not the full project-plan
+implementation. The plan's later phases (0–4) also retain their own open tasks
+for reproducible build capture, separate normal/CALL runtimes, NativeIR import
+and link resolution, recursive summary solving, demand summaries, whole-project
+cache invalidation, and end-to-end resource/regression gates. They are gated on
+the Phase F slice and cannot yet be meaningfully accepted by the current tests.
+The workspace test suite passing does not close those plan items.
 
 ## Findings that change the decision
 
