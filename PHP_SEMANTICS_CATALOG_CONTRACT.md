@@ -79,6 +79,7 @@ investigation; failure to observe an event cannot prove its absence.
 | An invoked child marks its invocation domain not applicable while returning a complete coverage vector. | A composed call necessarily has invocation behavior; a full vector cannot make that fact inapplicable. | `invoked_child_cannot_mark_invocation_not_applicable` |
 | A maybe-applicable target graph is selected as definitely applicable, or its uncovered remainder is dropped. | The target set includes configurations whose behavior was not established. | `target_selection_keeps_unknown_remainder_and_selects_exact_scenario`; target-module correlated-scenario tests |
 | A loop joins or widens abstract state while the returned domain metadata remains `Exact`. | Consumers could treat a joined or extrapolated fact as exact and overstate its precision. | `cyclic_graph_reaches_a_stable_joined_exit`; `widening_is_reflected_in_domain_precision` |
+| A host join or widening returns a state/result that does not contain both incoming possibilities. | The worklist can reach an empty queue after silently dropping a reachable value, so queue exhaustion alone is not a closure argument. | `evaluator_rejects_a_join_that_drops_a_reachable_state`; `evaluator_rejects_a_value_join_that_drops_a_reachable_result`; `evaluator_rejects_a_widening_that_drops_a_reachable_state` |
 
 These tests check structural behavior in a small evaluator host. They do not
 establish that the checker host, native transfers, or every PHP runtime obeys

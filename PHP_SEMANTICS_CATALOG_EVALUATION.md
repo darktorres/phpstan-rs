@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Forty-one
+explicit exceptional continuations and host-supplied joins/widening. Forty-four
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -20,14 +20,17 @@ separation, domain-masked unknown transfers with consistency checks, total
 coverage/evidence validation, composed-child coverage propagation and rejection
 of incomplete composed coverage, unresolved-return rejection, state-sensitive
 post-invocation predicates, conservative handling of unsupported predicates,
-and loop convergence. Domain projections now include transitive coverage
+and loop convergence. The evaluator rejects host join or widening results
+that fail to subsume both incoming states/results; state-loss, result-loss,
+and widening-loss fixtures cover that guard. Domain projections now include transitive coverage
 dependencies, validation rejects closed domains that depend on open domains or
 on uncertified closed cycles, and evaluation propagates open child domains
-through parent dependencies. These are
-foundation tests only: loop widening is generic and has only a small fixture,
-with no calibrated abstract domains; the evaluator also has no catalog
-selection, target semantics, real checker host, native producer, or publication
-certificate, so F00/F01 remain OPEN. Composed host event outcomes now carry
+through parent dependencies. These are foundation tests only: loop widening
+has a small interval-like fixture, not a calibrated production domain; local
+join checks are not an independent post-fixpoint certificate. The checker
+bridge currently uses a narrow type-only host for `strlen()` and does not model
+effect state, callback invocation, or exception integration. F00/F01 remain
+OPEN. Composed host event outcomes now carry
 per-domain coverage, precision, evidence, and assumptions; evaluation merges
 those records so an open child opens the corresponding closed parent domain.
 Canonical manifests now validate graph

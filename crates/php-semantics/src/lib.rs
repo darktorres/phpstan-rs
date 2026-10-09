@@ -278,6 +278,7 @@ pub enum GraphError {
     ApplicableDomainMarkedNotApplicable(Domain),
     UnresolvedValue,
     EventWithoutOutcome,
+    NonMonotoneJoin(u32),
     ResumeWithoutPendingOutcome,
     InvalidComposedCoverage,
 }
@@ -891,7 +892,7 @@ fn enqueue<H: SemanticHost>(
     by_block: &mut [Vec<usize>],
     queue: &mut Vec<usize>,
     precision: &mut Precision,
-) {
+) -> Result<(), GraphError> {
     let index = by_block[frame.block as usize]
         .iter()
         .copied()
@@ -901,26 +902,29 @@ fn enqueue<H: SemanticHost>(
         by_block[frame.block as usize].push(index);
         records.push(frame);
         queue.push(index);
-        return;
+        return Ok(());
     };
     if frame_subsumes(host, &records[index], &frame) {
-        return;
+        return Ok(());
     }
     let old = &records[index];
     let widen = old.growing_updates >= 3;
     let mut merged = Frame {
         block: old.block,
         state: if widen {
-            host.widen_state(old.state.clone(), frame.state)
+            host.widen_state(old.state.clone(), frame.state.clone())
         } else {
-            host.join_state(old.state.clone(), frame.state)
+            host.join_state(old.state.clone(), frame.state.clone())
         },
         results: merge_results(host, &old.results, &frame.results, widen),
-        pending: merge_pending(host, old.pending.clone(), frame.pending, widen),
+        pending: merge_pending(host, old.pending.clone(), frame.pending.clone(), widen),
         growing_updates: old.growing_updates + 1,
     };
+    if !frame_subsumes(host, &merged, old) || !frame_subsumes(host, &merged, &frame) {
+        return Err(GraphError::NonMonotoneJoin(frame.block));
+    }
     if merged.state == old.state && merged.results == old.results && merged.pending == old.pending {
-        return;
+        return Ok(());
     }
     let next_precision = if widen {
         Precision::Widened
@@ -937,6 +941,7 @@ fn enqueue<H: SemanticHost>(
     if !queue.contains(&index) {
         queue.push(index);
     }
+    Ok(())
 }
 
 fn push_exit<V: PartialEq, S: PartialEq>(exits: &mut Vec<Exit<V, S>>, exit: Exit<V, S>) {
@@ -1025,7 +1030,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
-                                );
+                                )?;
                             } else {
                                 push_exit(&mut exits, Exit::PhpThrow { value, state });
                             }
@@ -1050,7 +1055,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
-                                );
+                                )?;
                             } else {
                                 push_exit(&mut exits, Exit::NativeUnwind { value, state });
                             }
@@ -1075,7 +1080,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
-                                );
+                                )?;
                             } else {
                                 push_exit(&mut exits, Exit::Fatal { value, state });
                             }
@@ -1100,7 +1105,7 @@ pub fn evaluate<H: SemanticHost>(
                                     &mut by_block,
                                     &mut queue,
                                     &mut evaluation_precision,
-                                );
+                                )?;
                             } else {
                                 push_exit(&mut exits, Exit::Suspended { value, state });
                             }
@@ -1125,7 +1130,7 @@ pub fn evaluate<H: SemanticHost>(
                     &mut by_block,
                     &mut queue,
                     &mut evaluation_precision,
-                ),
+                )?,
                 Terminator::Branch { predicate, yes, no } => {
                     match host.test(predicate, arguments, receiver, &results, &state) {
                         Truth::Yes => enqueue(
@@ -1141,7 +1146,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
-                        ),
+                        )?,
                         Truth::No => enqueue(
                             host,
                             Frame {
@@ -1155,7 +1160,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
-                        ),
+                        )?,
                         Truth::Maybe => {
                             enqueue(
                                 host,
@@ -1170,7 +1175,7 @@ pub fn evaluate<H: SemanticHost>(
                                 &mut by_block,
                                 &mut queue,
                                 &mut evaluation_precision,
-                            );
+                            )?;
                             enqueue(
                                 host,
                                 Frame {
@@ -1184,7 +1189,7 @@ pub fn evaluate<H: SemanticHost>(
                                 &mut by_block,
                                 &mut queue,
                                 &mut evaluation_precision,
-                            );
+                            )?;
                         }
                     }
                 }
@@ -1216,7 +1221,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
-                        );
+                        )?;
                     } else {
                         push_exit(&mut exits, Exit::PhpThrow { value, state });
                     }
@@ -1239,7 +1244,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
-                        );
+                        )?;
                     } else {
                         push_exit(&mut exits, Exit::Fatal { value, state });
                     }
@@ -1262,7 +1267,7 @@ pub fn evaluate<H: SemanticHost>(
                             &mut by_block,
                             &mut queue,
                             &mut evaluation_precision,
-                        );
+                        )?;
                     } else {
                         push_exit(&mut exits, Exit::Suspended { value, state });
                     }
@@ -1311,11 +1316,32 @@ mod tests {
         native_unwind_invoke: bool,
         maybe_always: bool,
         growing_loop: bool,
+        bad_join: bool,
+        bad_value_join: bool,
+        bad_widening: bool,
         nested_open: Option<Domain>,
         incomplete_nested_coverage: bool,
         omit_nested_coverage: bool,
         invocation_not_applicable: bool,
     }
+    fn count_interval(state: &[String]) -> (u32, Option<u32>) {
+        let Some(encoded) = state.first().and_then(|item| item.strip_prefix("count:")) else {
+            return (0, Some(0));
+        };
+        let (min, max) = encoded.split_once(':').expect("count interval delimiter");
+        (
+            min.parse().expect("count lower bound"),
+            (max != "*").then(|| max.parse().expect("count upper bound")),
+        )
+    }
+
+    fn encode_count_interval(min: u32, max: Option<u32>) -> Vec<String> {
+        vec![format!(
+            "count:{min}:{}",
+            max.map_or_else(|| "*".into(), |n| n.to_string())
+        )]
+    }
+
     impl SemanticHost for Host {
         type Value = String;
         type State = Vec<String>;
@@ -1386,7 +1412,9 @@ mod tests {
                 Event::Read { .. } => state.push("read".into()),
                 Event::Write { .. } => {
                     if self.growing_loop {
-                        state.push(format!("write-{}", state.len()));
+                        let (min, max) = count_interval(&state);
+                        state =
+                            encode_count_interval(min + 1, max.map(|max| max.saturating_add(1)));
                     } else {
                         state.push("write".into());
                     }
@@ -1459,6 +1487,9 @@ mod tests {
             "<unknown>".into()
         }
         fn join_value(&self, a: String, b: String) -> String {
+            if self.bad_value_join {
+                return a;
+            }
             if a == b { a } else { "<unknown>".into() }
         }
         fn widen_value(&self, _old: String, _next: String) -> String {
@@ -1468,24 +1499,40 @@ mod tests {
             broad == narrow || broad == "<unknown>"
         }
         fn join_state(&self, a: Vec<String>, b: Vec<String>) -> Vec<String> {
-            if a == b {
-                a
-            } else if self.growing_loop {
-                if a.len() >= b.len() { a } else { b }
+            if self.bad_join {
+                return a;
+            }
+            if self.growing_loop {
+                let (a_min, a_max) = count_interval(&a);
+                let (b_min, b_max) = count_interval(&b);
+                return encode_count_interval(
+                    a_min.min(b_min),
+                    match (a_max, b_max) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        _ => None,
+                    },
+                );
+            }
+            if a == b { a } else { vec!["<joined>".into()] }
+        }
+        fn widen_state(&self, old: Vec<String>, next: Vec<String>) -> Vec<String> {
+            if self.bad_widening {
+                return old;
+            }
+            if self.growing_loop {
+                let (old_min, _) = count_interval(&old);
+                let (next_min, _) = count_interval(&next);
+                encode_count_interval(old_min.min(next_min), None)
             } else {
                 vec!["<joined>".into()]
             }
         }
-        fn widen_state(&self, _old: Vec<String>, _next: Vec<String>) -> Vec<String> {
-            vec![if self.growing_loop {
-                "<widened>".into()
-            } else {
-                "<joined>".into()
-            }]
-        }
         fn state_subsumes(&self, broad: &Vec<String>, narrow: &Vec<String>) -> bool {
             if self.growing_loop {
-                broad == narrow || broad == &["<widened>".to_string()]
+                let (broad_min, broad_max) = count_interval(broad);
+                let (narrow_min, narrow_max) = count_interval(narrow);
+                broad_min <= narrow_min
+                    && broad_max.is_none_or(|max| narrow_max.is_some_and(|n| n <= max))
             } else {
                 broad == narrow || broad == &["<joined>".to_string()]
             }
@@ -2185,6 +2232,108 @@ mod tests {
                 Precision::Widened
             );
         }
+    }
+
+    #[test]
+    fn evaluator_rejects_a_join_that_drops_a_reachable_state() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Write {
+                        storage: Operand::Argument(0),
+                        value: Operand::Literal(Bytes(b"loop".to_vec())),
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::Always,
+                        yes: 0,
+                        no: 1,
+                    },
+                ),
+                Block::new(vec![], Terminator::Return(None)),
+            ],
+            coverage: coverage_for(&[Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = Host {
+            maybe_always: true,
+            bad_join: true,
+            ..Host::default()
+        };
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::NonMonotoneJoin(0))
+        );
+    }
+
+    #[test]
+    fn evaluator_rejects_a_value_join_that_drops_a_reachable_result() {
+        let host = Host {
+            bad_value_join: true,
+            ..Host::default()
+        };
+        let old = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![(7, "old result".into())],
+            pending: None,
+            growing_updates: 0,
+        };
+        let incoming = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![(7, "new result".into())],
+            pending: None,
+            growing_updates: 0,
+        };
+        let mut records = vec![old];
+        let mut by_block = vec![vec![0]];
+        let mut queue = vec![];
+        let mut precision = Precision::Exact;
+        assert_eq!(
+            enqueue(
+                &host,
+                incoming,
+                &mut records,
+                &mut by_block,
+                &mut queue,
+                &mut precision,
+            ),
+            Err(GraphError::NonMonotoneJoin(0))
+        );
+    }
+
+    #[test]
+    fn evaluator_rejects_a_widening_that_drops_a_reachable_state() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Write {
+                        storage: Operand::Argument(0),
+                        value: Operand::Literal(Bytes(b"loop".to_vec())),
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::Always,
+                        yes: 0,
+                        no: 1,
+                    },
+                ),
+                Block::new(vec![], Terminator::Return(None)),
+            ],
+            coverage: coverage_for(&[Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = Host {
+            maybe_always: true,
+            growing_loop: true,
+            bad_widening: true,
+            ..Host::default()
+        };
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut host),
+            Err(GraphError::NonMonotoneJoin(0))
+        );
     }
 
     #[test]
