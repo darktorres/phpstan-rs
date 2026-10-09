@@ -950,6 +950,26 @@ mod tests {
     }
 
     #[test]
+    fn a_registry_not_kept_as_built_takes_no_snapshot_of_class_results() {
+        let tokens = Lexer::new("<?php class A { function m(): int {} }").tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut registry = crate::registry::Registry::build(&program.arenas, program.statements());
+        let all = crate::registry::scope::Scope::all();
+        assert!(
+            registry
+                .end_declaration_changes(&all, Some(&all), false, None)
+                .is_none()
+        );
+        assert!(!registry.has_resolved_declarations());
+        registry.begin_declaration_changes();
+        assert!(
+            registry
+                .end_declaration_changes(&all, Some(&all), false, None)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn function_declarations_stay_as_built_while_class_state_resets() {
         let tokens = Lexer::new("<?php function helper(): int {}").tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
