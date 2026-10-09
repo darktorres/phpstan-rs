@@ -2263,6 +2263,66 @@ mod tests {
     }
 
     #[test]
+    fn callback_result_selects_branch_before_the_next_callback() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![],
+                        result: 3,
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::IsLiteral {
+                            value: Operand::Result(3),
+                            expected: Bytes(b"callback-result".to_vec()),
+                        },
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(
+                    vec![
+                        Event::Write {
+                            storage: Operand::Argument(1),
+                            value: Operand::Literal(Bytes(b"between-callbacks".to_vec())),
+                        },
+                        Event::Invoke {
+                            callable: Operand::Argument(0),
+                            arguments: vec![],
+                            result: 4,
+                        },
+                    ],
+                    Terminator::Return(Some(Operand::Result(4))),
+                ),
+                Block::new(
+                    vec![],
+                    Terminator::Return(Some(Operand::Literal(Bytes(b"wrong-branch".to_vec())))),
+                ),
+            ],
+            coverage: coverage_for(&[Domain::Invocation, Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = Host::default();
+        let evaluation = evaluate(
+            &graph,
+            &["callback".into(), "slot".into()],
+            &receiver(),
+            vec![],
+            &mut host,
+        )
+        .unwrap();
+        assert_eq!(
+            evaluation.exits,
+            vec![Exit::Normal {
+                value: Some("callback-result".into()),
+                state: vec!["invoke".into(), "write".into(), "invoke".into()],
+            }]
+        );
+    }
+
+    #[test]
     fn php_flow_host_composes_callback_writes_with_normal_and_throw_states() {
         let evidence = Digest([9; 32]);
         let mut host = PhpFlowHost::new(evidence);
