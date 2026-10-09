@@ -1,0 +1,1 @@
+php_version = { min = "8.0", max = "8.1" }

@@ -1,0 +1,1 @@
+4:19-4:25 argument.nullDeprecated L0 | Passing null to parameter #1 ($string) of function strlen is deprecated.

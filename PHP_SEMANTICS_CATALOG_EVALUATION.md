@@ -197,8 +197,8 @@ update, `cargo test -p phpstan-rs` also passes:
 scaling, stub-index, and version integration suites. `cargo check -p phpstan-rs`,
 edited-file rustfmt, and `git diff --check` pass.
 Weak/strict `strlen()` binding now models scalar and `Stringable` coercions; its
-null diagnostic is gated from PHP 8.1. All eleven `strlen_` gate fixtures pass,
-including PHP 8.0/8.1 and strict-mode cases. The full checker library suite passes
+null diagnostic is gated from PHP 8.1. All twelve `strlen_` gate fixtures pass,
+including PHP 8.0/8.1, a range crossing the deprecation boundary, and strict-mode cases. The full checker library suite passes
 all 1,201 tests, and the type library passes all 286 tests with the version feature.
 TAILCALL and CALL runtime witnesses verify scalar lengths and the null deprecation.
 
