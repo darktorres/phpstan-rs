@@ -86,12 +86,19 @@
     "expected": null,
     "exit_code": 1,
     "stdout": "",
-    "stderr": "Traceback (most recent call last):\n  File \"/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/smt_worker.py\", line 10, in <module>\n    print(Z3_eval_smtlib2_string(context.ref(), sys.stdin.read()), end='')\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/torres/.cache/php-catalog-evaluation/python/lib/python3.12/site-packages/z3/z3core.py\", line 3780, in Z3_eval_smtlib2_string\n    _elems.Check(a0)\n  File \"/home/torres/.cache/php-catalog-evaluation/python/lib/python3.12/site-packages/z3/z3core.py\", line 1629, in Check\n    raise self.Exception(self.get_error_message(ctx, err))\nz3.z3types.Z3Exception: b'(error \"line 1 column 12: invalid function application, arguments missing\")\\n'\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/smt_worker.py\", line 10, in <module>\n    print(Z3_eval_smtlib2_string(context.ref(), sys.stdin.read()), end='')\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/torres/.cache/php-catalog-evaluation/smt-python/lib/python3.12/site-packages/z3/z3core.py\", line 3780, in Z3_eval_smtlib2_string\n    _elems.Check(a0)\n  File \"/home/torres/.cache/php-catalog-evaluation/smt-python/lib/python3.12/site-packages/z3/z3core.py\", line 1629, in Check\n    raise self.Exception(self.get_error_message(ctx, err))\nz3.z3types.Z3Exception: b'(error \"line 1 column 12: invalid function application, arguments missing\")\\n'\n",
     "may_prune": false
   },
   {
     "name": "process-failure",
-    "exit_code": 1,
+    "command": [
+      "python",
+      "-c",
+      "import sys; sys.stdin.read(); print('injected solver crash', file=sys.stderr); raise SystemExit(17)"
+    ],
+    "exit_code": 17,
+    "stdout": "",
+    "stderr": "injected solver crash\n",
     "may_prune": false,
     "path_retained": true
   }

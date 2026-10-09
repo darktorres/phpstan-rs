@@ -183,8 +183,10 @@ it is neither a demand summary nor a closure certificate.
   width-specific overflow, signed/unsigned comparison, extension casts, pointer
   identity, resource exhaustion, unsupported logic, and malformed input. Only
   valid `unsat` responses are classified as eligible to prune. Inconclusive and
-  invalid responses retain paths. The process-failure entry is a reference policy
-  record; a real failed solver-process test remains to implement.
+  invalid responses retain paths. The harness now launches an actual child that
+  exits 17 after consuming an SMT request; the recorded nonzero exit and stderr
+  produce no pruning result, and the path is retained. This verifies the
+  harness policy, not a production solver adapter.
 - **Binary lifting/symbolic execution:** angr 9.3.4 lifts actual reduced binaries,
   and bounded symbolic execution reproduces five scalar/copy/index outcomes.
   Four PHP entry blocks also lift. Full PHP binary CFG recovery, high-level layout

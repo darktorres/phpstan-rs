@@ -6,6 +6,14 @@ import sys
 from pathlib import Path
 
 worker = Path(__file__).with_name('smt_worker.py')
+
+
+def may_prune(run):
+    answers = [line.strip() for line in run.stdout.splitlines() if line.strip() in ['sat', 'unsat', 'unknown']]
+    valid = run.returncode == 0 and '(error' not in run.stdout and not run.stderr and len(answers) == 1
+    return valid and answers == ['unsat']
+
+
 cases = {
     'contradictory-guards': ('(declare-const x (_ BitVec 32)) (assert (bvult x #x00000003)) (assert (bvugt x #x00000004))', 'unsat'),
     'unsigned-overflow': ('(assert (= (bvadd #xff #x01) #x00))', 'sat'),
@@ -24,14 +32,25 @@ for name, (formula, expected) in cases.items():
     run = subprocess.run(command, input=formula + '\n(check-sat)\n', text=True, capture_output=True)
     answers = [line.strip() for line in run.stdout.splitlines() if line.strip() in ['sat', 'unsat', 'unknown']]
     valid = run.returncode == 0 and '(error' not in run.stdout and not run.stderr and len(answers) == 1
-    prune = valid and answers == ['unsat']
+    prune = may_prune(run)
     if expected is not None:
         assert valid and answers == [expected], (name, run.stdout, run.stderr)
     else:
         assert not prune, name
     results.append(dict(name=name, smtlib=formula, expected=expected, exit_code=run.returncode,
                         stdout=run.stdout, stderr=run.stderr, may_prune=prune))
-# Process failure has no result and must retain the path.
-results.append(dict(name='process-failure', exit_code=1, may_prune=False, path_retained=True))
+# A real child-process crash has no solver result and must retain the path.
+failure_program = (
+    "import sys; sys.stdin.read(); "
+    "print('injected solver crash', file=sys.stderr); raise SystemExit(17)"
+)
+failure_command = [sys.executable, '-c', failure_program]
+failure = subprocess.run(failure_command, input='(check-sat)\n', text=True, capture_output=True)
+failure_prune = may_prune(failure)
+assert failure.returncode == 17 and failure.stderr.strip() == 'injected solver crash'
+assert not failure_prune
+results.append(dict(name='process-failure', command=['python', '-c', failure_program],
+                    exit_code=failure.returncode, stdout=failure.stdout, stderr=failure.stderr,
+                    may_prune=failure_prune, path_retained=not failure_prune))
 Path(sys.argv[1]).write_text(json.dumps(results, indent=2) + '\n')
 print(json.dumps(dict(cases=len(results), valid_unsat_pruned=sum(x['may_prune'] for x in results))))
