@@ -190,9 +190,9 @@ impl<'a> Checker<'a> {
         let supports =
             |feature: PhpFeature| self.registry.php_supports_everywhere(feature) != Some(false);
         // The catalog's `strlen` return transfer is only valid after PHP's
-        // own weak parser has accepted the value. Weak-mode Stringable is
-        // accepted by zend_parse_arg_str_weak; strict mode exits before the
-        // cast callback, so keep the ordinary string-only type check there.
+        // own weak parser has accepted the value. Weak mode accepts scalar
+        // string coercions and Stringable; strict mode exits before either
+        // conversion, so keep the ordinary string-only type check there.
         let weak_strlen_string_coercion = is_builtin
             && sig.is_stub()
             && matches!(callee, Callee::Function(name) if name.eq_ignore_ascii_case("strlen"))
@@ -320,10 +320,12 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
             };
-            let stringable_accepted = weak_strlen_string_coercion
+            let weak_string_value_accepted = weak_strlen_string_coercion
                 && arg_ty.union_members().iter().all(|member| {
                     let relation = self.relation();
                     relation.is_super_type_of(&param_ty, member).yes()
+                        || member.is_scalar().yes()
+                        || member.is_null().yes()
                         || relation
                             .is_super_type_of(
                                 &Type::object("Stringable".into(), Vec::new()),
@@ -332,7 +334,7 @@ impl<'a> Checker<'a> {
                             .yes()
                 });
             if let Some(from) = self.rejected_from(&param_ty, &arg_ty)
-                && !stringable_accepted
+                && !weak_string_value_accepted
             {
                 let position = match &argument.name {
                     Some(name) => Position::Name(name),

@@ -1,0 +1,4 @@
+3:60-3:66 argument.type L5 | Parameter #1 $string of function strlen expects string, int given.
+4:64-4:70 argument.type L5 | Parameter #1 $string of function strlen expects string, float given.
+5:62-5:68 argument.type L5 | Parameter #1 $string of function strlen expects string, bool given.
+6:62-6:68 argument.type L5 | Parameter #1 $string of function strlen expects string, null given.

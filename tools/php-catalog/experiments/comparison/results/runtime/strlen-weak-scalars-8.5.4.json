@@ -1,0 +1,60 @@
+{
+  "source_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
+  "weak_fixture": {
+    "path": "tools/php-catalog/experiments/comparison/runtime-strlen-weak-scalars.php",
+    "sha256": "30607f7b7f81cb15aaf0ad03701cc1fcedae321f4007c3b9058acaea1362b873",
+    "command": "php -n runtime-strlen-weak-scalars.php",
+    "output": "tools/php-catalog/experiments/comparison/results/runtime/php-tailcall-strlen-weak-scalars.out",
+    "output_sha256": "eb9d43d173a609fe654710cdd8ae13358284b09f4d04e4ab115836c4373e8729",
+    "expected": {
+      "lengths": [
+        3,
+        3,
+        1,
+        0,
+        0
+      ],
+      "deprecations": [
+        "strlen(): Passing null to parameter #1 ($string) of type string is deprecated"
+      ]
+    },
+    "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-strlen-weak-scalars.out"
+  },
+  "strict_fixture": {
+    "path": "tools/php-catalog/experiments/comparison/runtime-strlen-strict-scalars.php",
+    "sha256": "eaf741f67267883579c3af77c8390f9190ebffd6461d80aaa9de2195023f7488",
+    "command": "php -n runtime-strlen-strict-scalars.php",
+    "output": "tools/php-catalog/experiments/comparison/results/runtime/php-tailcall-strlen-strict-scalars.out",
+    "output_sha256": "176ac7094895180fc398a882a7e93f619efc03961a4ab9fa26516a2d90a240ed",
+    "expected": {
+      "rejected": [
+        "int",
+        "float",
+        "bool",
+        "bool",
+        "null"
+      ]
+    },
+    "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-strlen-strict-scalars.out"
+  },
+  "profiles": {
+    "tailcall": {
+      "vm_kind": "ZEND_VM_KIND_TAILCALL",
+      "binary_sha256": "abc41b0be90d2e9d1d744f2c53600c5f6a7e48af09bbd3ffc4eda382ce9236b5"
+    },
+    "call": {
+      "vm_kind": "ZEND_VM_KIND_CALL",
+      "binary_sha256": "866ee99f4de2644b3d28e45dfc2071a5a3926a65b04ab3127baef312102684af"
+    },
+    "record": "tools/php-catalog/experiments/comparison/results/runtime/profiles.json"
+  },
+  "result": {
+    "exit_code": 0,
+    "weak_tailcall_call_outputs_identical": true,
+    "strict_tailcall_call_outputs_identical": true
+  },
+  "limits": [
+    "Runtime witnesses establish these positive parser paths only.",
+    "The weak null deprecation is observed; checker diagnostic behavior for it remains open."
+  ]
+}
