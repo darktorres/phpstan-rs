@@ -9,9 +9,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effects::{
-    DeclKey, EffectId, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer,
-};
+use super::effect_table::{EffectIx, EffectTable, TransferTable};
+use super::effects::{DeclKey, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer};
 
 const SHARDS: usize = 16;
 
@@ -83,7 +82,6 @@ pub(crate) struct ReachMemo {
     pub(crate) unknown_implicit: OnceMap<OperationKey, Arc<[DeclKey]>>,
     pub(crate) implicit: OnceMap<ImplicitKey, Option<SharedTargets>>,
     pub(crate) methods_named: OnceMap<Name, Arc<[DeclKey]>>,
-    /// The id a declaration's key stands for in the effects pass.
     /// Whether a declaration is a builtin's.
     /// The table row a builtin declaration is looked up under.
     pub(crate) builtin_entries: OnceMap<DeclKey, Option<Arc<str>>>,
@@ -95,7 +93,10 @@ pub(crate) struct ReachMemo {
     /// Whether objects of a builtin class run what they were made with.
     pub(crate) stub_holds_code: OnceMap<String, bool>,
     pub(crate) builtins: OnceMap<DeclKey, bool>,
-    pub(crate) effect_ids: OnceMap<DeclKey, EffectId>,
+    /// The handle a declaration's key stands for in the effects pass.
+    pub(crate) effect_ixs: OnceMap<DeclKey, EffectIx>,
+    pub(crate) effects: EffectTable,
+    pub(crate) transfers: TransferTable,
     /// Whether a shared set (by address; the cell keeps the set alive) holds
     /// a declaration run with the caller's own `$this`.
     pub(crate) shared_scoped: OnceMap<usize, (SharedTargets, bool)>,

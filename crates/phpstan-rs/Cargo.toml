@@ -6,6 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+boxcar.workspace = true
 bumpalo.workspace = true
 composer.workspace = true
 config.workspace = true

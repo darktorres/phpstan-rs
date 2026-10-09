@@ -16,6 +16,7 @@ pub(crate) mod canonical;
 mod class_info;
 use class_info::{ResolvedTypeImport, TraitAlias};
 mod container;
+mod effect_table;
 mod effects;
 mod file_decls;
 mod fresh;

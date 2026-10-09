@@ -45,6 +45,7 @@ use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::effect_table::{EffectIx, TransferIx, TransferTable};
 use super::reach_memo::SharedTargets;
 use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
@@ -423,7 +424,7 @@ pub(crate) enum EffectId {
 }
 
 impl EffectId {
-    fn is_closure(&self) -> bool {
+    pub(super) fn is_closure(&self) -> bool {
         matches!(self, EffectId::Closure { .. })
     }
 
@@ -1060,7 +1061,7 @@ struct Classification<'r> {
     /// Each declaration a call runs, with what its own `$this` is to the
     /// body and, when it takes the call's arguments as its own, the call
     /// (`sites`).
-    calls: Vec<(DeclKey, Transfer, Option<u32>)>,
+    calls: Vec<(EffectIx, TransferIx, Option<u32>)>,
     /// The declarations calls run that no call's arguments reach, found
     /// once for every body that asks the same.
     sets: Vec<IdTargets>,
@@ -1077,12 +1078,12 @@ pub(in crate::registry) type IdTargets = Arc<IdTargetSet>;
 /// the wave of `settle` that last asked.
 #[derive(Debug)]
 pub(in crate::registry) struct IdTargetSet {
-    entries: Vec<(EffectId, Transfer)>,
+    entries: Vec<(EffectIx, TransferIx)>,
     joined: Mutex<(u64, Option<Arc<SetJoin>>)>,
 }
 
 impl IdTargetSet {
-    fn new(entries: Vec<(EffectId, Transfer)>) -> Self {
+    fn new(entries: Vec<(EffectIx, TransferIx)>) -> Self {
         IdTargetSet {
             entries,
             joined: Mutex::new((0, None)),
@@ -1094,7 +1095,8 @@ impl IdTargetSet {
     fn joined<'g>(
         &self,
         wave: u64,
-        get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
+        transfers: &TransferTable,
+        get: &impl Fn(EffectIx) -> std::borrow::Cow<'g, Settled>,
     ) -> Arc<SetJoin> {
         let mut held = self
             .joined
@@ -1105,7 +1107,7 @@ impl IdTargetSet {
         {
             return Arc::clone(joined);
         }
-        let joined = Arc::new(SetJoin::of(&self.entries, get));
+        let joined = Arc::new(SetJoin::of(&self.entries, transfers, get));
         *held = (wave, Some(Arc::clone(&joined)));
         joined
     }
@@ -1119,7 +1121,7 @@ static WAVES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1
 #[derive(Debug)]
 struct IdClassification<'r> {
     own: Effect,
-    calls: Vec<(EffectId, Transfer, Option<u32>)>,
+    calls: Vec<(EffectIx, TransferIx, Option<u32>)>,
     sets: Vec<IdTargets>,
     sites: Vec<IdSite<'r>>,
     runs: Vec<Condition>,
@@ -1133,7 +1135,7 @@ struct IdSite<'r> {
 
 #[derive(Debug)]
 struct IdPassed {
-    runs: Vec<(EffectId, Transfer)>,
+    runs: Vec<(EffectIx, TransferIx)>,
     params: Vec<Condition>,
 }
 
@@ -1360,18 +1362,7 @@ fn classification_by_id<'r>(
     registry: &Registry,
     key: DeclKey,
     classification: Classification<'r>,
-) -> (EffectId, IdClassification<'r>) {
-    let id_of = |key: &DeclKey| {
-        registry
-            .reach_memo
-            .effect_ids
-            .get_or_compute_ref(key, || registry.effect_id_for(key))
-    };
-    let calls = classification
-        .calls
-        .into_iter()
-        .map(|(key, transfer, site)| (id_of(&key), transfer, site))
-        .collect();
+) -> (EffectIx, IdClassification<'r>) {
     let sites = classification
         .sites
         .into_iter()
@@ -1387,7 +1378,7 @@ fn classification_by_id<'r>(
                             runs: passed
                                 .runs
                                 .into_iter()
-                                .map(|(key, transfer)| (id_of(&key), transfer))
+                                .map(|(key, transfer)| registry.effect_run(&key, &transfer))
                                 .collect(),
                             params: passed.params,
                         },
@@ -1397,10 +1388,10 @@ fn classification_by_id<'r>(
         })
         .collect();
     (
-        id_of(&key),
+        registry.effect_ix(&key),
         IdClassification {
             own: classification.own,
-            calls,
+            calls: classification.calls,
             sets: classification.sets,
             sites,
             runs: classification.runs,
@@ -1409,6 +1400,25 @@ fn classification_by_id<'r>(
 }
 
 impl Registry {
+    /// The handle the declaration `key` stands for in the effects pass.
+    pub(crate) fn effect_ix(&self, key: &DeclKey) -> EffectIx {
+        let memo = &self.reach_memo;
+        let ix = memo
+            .effect_ixs
+            .get_or_compute_ref(key, || memo.effects.intern(&self.effect_id_for(key)));
+        debug_assert_eq!(*memo.effects.id(ix), self.effect_id_for(key));
+        ix
+    }
+
+    /// The handles of a declaration run with its own `$this` what
+    /// `transfer` says.
+    pub(crate) fn effect_run(&self, key: &DeclKey, transfer: &Transfer) -> (EffectIx, TransferIx) {
+        (
+            self.effect_ix(key),
+            self.reach_memo.transfers.intern(transfer),
+        )
+    }
+
     pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
         if let Some(file) = key.file_id() {
             return EffectId::File(file);
@@ -1540,7 +1550,7 @@ impl Registry {
                 })
             })
             .collect();
-        let mut classified: FxHashMap<EffectId, IdClassification<'_>> = functions
+        let mut classified: Vec<(EffectIx, IdClassification<'_>)> = functions
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(name, sig)| {
@@ -1611,17 +1621,19 @@ impl Registry {
                         })
                 }),
         );
-        let mut effects = settle(registry, &classified, |id| match id {
-            // A file the program does not hold, or holds no summary of.
-            EffectId::File(_) => Settled::of(Effect::anything()),
-            id => registry.effect_decl_key(id).map_or_else(
-                || Settled::of(Effect::unknown()),
-                |key| Settled::of(registry.declaration_effect(&key)),
-            ),
+        let settlements = settle(registry, &classified, true, |ix| {
+            match registry.reach_memo.effects.id(ix) {
+                // A file the program does not hold, or holds no summary of.
+                EffectId::File(_) => Settled::of(Effect::anything()),
+                id => registry.effect_decl_key(id).map_or_else(
+                    || Settled::of(Effect::unknown()),
+                    |key| Settled::of(registry.declaration_effect(&key)),
+                ),
+            }
         });
         // A closure's effect is taken where it runs; no call names it. Keep
         // its result through settlement, then omit it from the registry.
-        effects.retain(|id, _| !id.is_closure());
+        let effects = settlements.into_effects(registry);
         self.effects = effects;
     }
 
@@ -2259,32 +2271,121 @@ impl Registry {
     }
 }
 
+/// Where each declaration of a classified list sits in it, by handle.
+enum Slots {
+    /// A position plus one by handle number, 0 for a declaration not held.
+    Dense(Vec<u32>),
+    Sparse(FxHashMap<EffectIx, u32>),
+}
+
+impl Slots {
+    /// The slots of `classified`, a declaration listed twice at the later
+    /// position. `dense` is the number of handles when a table of that
+    /// size is worth it.
+    fn of(classified: &[(EffectIx, IdClassification<'_>)], dense: Option<usize>) -> Slots {
+        match dense {
+            Some(len) => {
+                let mut at = vec![0u32; len];
+                for (pos, (ix, _)) in classified.iter().enumerate() {
+                    at[ix.index()] = pos as u32 + 1;
+                }
+                Slots::Dense(at)
+            }
+            None => Slots::Sparse(
+                classified
+                    .iter()
+                    .enumerate()
+                    .map(|(pos, (ix, _))| (*ix, pos as u32))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn get(&self, ix: EffectIx) -> Option<usize> {
+        match self {
+            Slots::Dense(at) => match at.get(ix.index()) {
+                Some(&at) if at != 0 => Some(at as usize - 1),
+                _ => None,
+            },
+            Slots::Sparse(at) => at.get(&ix).map(|&at| at as usize),
+        }
+    }
+}
+
+/// What `settle` found for the declarations it was given.
+struct Settlements {
+    slots: Slots,
+    /// The handle of each position of the list `settle` was given.
+    ixs: Vec<EffectIx>,
+    /// What each position settled to; none for a declaration listed again
+    /// further on.
+    settled: Vec<Option<Settled>>,
+}
+
+impl Settlements {
+    fn get(&self, ix: EffectIx) -> Option<&Settled> {
+        self.slots
+            .get(ix)
+            .and_then(|pos| self.settled[pos].as_ref())
+    }
+
+    /// The settled effects by id, but for the closures' (a closure's effect
+    /// is taken where it runs; no call names it).
+    fn into_effects(self, registry: &Registry) -> FxHashMap<EffectId, Settled> {
+        let table = &registry.reach_memo.effects;
+        let mut out = FxHashMap::with_capacity_and_hasher(self.ixs.len(), Default::default());
+        for (ix, settled) in self.ixs.into_iter().zip(self.settled) {
+            if let Some(settled) = settled
+                && !ix.is_closure()
+            {
+                out.insert(table.id(ix).clone(), settled);
+            }
+        }
+        out
+    }
+}
+
 /// What each declaration `classified` holds may write, settled from what it
 /// writes itself: it grows by what each declaration it calls may write, by
 /// `outside` for one `classified` does not hold, and, where a callee runs
-/// what a call passes it, by what that may write.
+/// what a call passes it, by what that may write. `shared` says the list is
+/// the whole of the registry's handles, so its slots are a table by handle.
 fn settle(
     registry: &Registry,
-    classified: &FxHashMap<EffectId, IdClassification<'_>>,
-    outside: impl Fn(&EffectId) -> Settled + Sync,
-) -> FxHashMap<EffectId, Settled> {
-    let mut settled: FxHashMap<EffectId, Settled> = classified
+    classified: &[(EffectIx, IdClassification<'_>)],
+    shared: bool,
+    outside: impl Fn(EffectIx) -> Settled + Sync,
+) -> Settlements {
+    let table = &registry.reach_memo.effects;
+    let transfers = &registry.reach_memo.transfers;
+    let slots = Slots::of(classified, shared.then(|| table.len()));
+    let live = |pos: usize| slots.get(classified[pos].0) == Some(pos);
+    let mut settled: Vec<Option<Settled>> = classified
         .iter()
-        .map(|(key, classification)| {
-            let runs = classification.runs.iter().cloned().collect();
-            let own = Settled {
+        .enumerate()
+        .map(|(pos, (_, classification))| {
+            live(pos).then(|| Settled {
                 effect: classification.own.clone(),
-                runs,
-            };
-            (key.clone(), own)
+                runs: classification.runs.iter().cloned().collect(),
+            })
         })
         .collect();
+    // What a declaration `classified` does not hold settles to, once.
+    let outside_cache: Vec<std::sync::OnceLock<Settled>> = if shared {
+        (0..table.len())
+            .map(|_| std::sync::OnceLock::new())
+            .collect()
+    } else {
+        Vec::new()
+    };
     // A declaration's effect only ever grows, and grows only when one it is
     // made of does: every declaration is joined once, and again only when a
     // declaration it calls, or one an argument it passes runs, has grown.
-    let mut callers: FxHashMap<&EffectId, Vec<&EffectId>> = FxHashMap::default();
-    for (key, classification) in classified {
-        let caller = key;
+    let mut callers: Vec<Vec<u32>> = vec![Vec::new(); classified.len()];
+    for (pos, (_, classification)) in classified.iter().enumerate() {
+        if !live(pos) {
+            continue;
+        }
         let set_callees = classification
             .sets
             .iter()
@@ -2296,115 +2397,127 @@ fn settle(
             .map(|(callee, _, _)| callee)
             .chain(set_callees)
         {
-            if let Some((callee, _)) = classified.get_key_value(callee) {
-                callers.entry(callee).or_default().push(caller);
+            if let Some(callee) = slots.get(*callee) {
+                let list = &mut callers[callee];
+                if list.last() != Some(&(pos as u32)) {
+                    list.push(pos as u32);
+                }
             }
         }
     }
     // The declarations an argument runs, which a declaration reads only once
     // a callee runs the argument.
-    let mut passed_to: FxHashSet<(&EffectId, &EffectId)> = FxHashSet::default();
-    let mut queue: std::collections::VecDeque<&EffectId> = classified.keys().collect();
-    let mut queued: FxHashSet<&EffectId> = queue.iter().copied().collect();
+    let mut passed_to: FxHashSet<(u32, u32)> = FxHashSet::default();
+    let mut queue: std::collections::VecDeque<u32> = (0..classified.len())
+        .filter(|pos| live(*pos))
+        .map(|pos| pos as u32)
+        .collect();
+    let mut queued: Vec<bool> = (0..classified.len()).map(live).collect();
     while !queue.is_empty() {
         // Every member of a wave reads the same settled snapshot. Its own
         // result and newly discovered argument edges are collected locally;
         // the merge below is serial, so no two workers write shared state.
-        let wave: Vec<&EffectId> = queue.drain(..).collect();
-        for key in &wave {
-            queued.remove(*key);
+        let wave: Vec<u32> = queue.drain(..).collect();
+        for pos in &wave {
+            queued[*pos as usize] = false;
         }
         let wave_number = WAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let updates: Vec<(&EffectId, Settled, Vec<EffectId>)> = wave
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .filter_map(|key| {
-                let key = *key;
-                let classification = &classified[key];
-                let before = &settled[key];
-                if before.effect.is_anything() {
-                    return None;
-                }
-                let mut now = before.clone();
-                let mut read: Vec<EffectId> = Vec::new();
-                let get = |callee: &EffectId| match settled.get(callee) {
-                    Some(found) => std::borrow::Cow::Borrowed(found),
+        let updates: Vec<(u32, Settled, Vec<EffectIx>)> = {
+            let get = |callee: EffectIx| match slots
+                .get(callee)
+                .and_then(|pos| settled[pos].as_ref())
+            {
+                Some(found) => std::borrow::Cow::Borrowed(found),
+                None => match outside_cache.get(callee.index()) {
+                    Some(cell) => std::borrow::Cow::Borrowed(cell.get_or_init(|| outside(callee))),
                     None => std::borrow::Cow::Owned(outside(callee)),
-                };
-                let calls = classification
-                    .calls
-                    .iter()
-                    .map(|(callee, transfer, site)| (callee, transfer, *site));
-                for (callee, transfer, site) in calls {
-                    let found = get(callee);
-                    now.effect.join_transferred(&found.effect, transfer);
-                    for condition in &found.runs {
-                        if callee.is_closure() {
-                            // What a closure the body wrote runs of the body's
-                            // parameters is the body's to run.
-                            now.runs.insert(condition.through(transfer));
-                            continue;
+                },
+            };
+            wave.par_iter()
+                .with_min_len(crate::registry::PASS_CHUNK)
+                .filter_map(|&pos| {
+                    let classification = &classified[pos as usize].1;
+                    let before = settled[pos as usize].as_ref()?;
+                    if before.effect.is_anything() {
+                        return None;
+                    }
+                    let mut now = before.clone();
+                    let mut read: Vec<EffectIx> = Vec::new();
+                    for &(callee, transfer, site) in &classification.calls {
+                        let found = get(callee);
+                        let transfer = transfers.get(transfer);
+                        now.effect.join_transferred(&found.effect, transfer);
+                        for condition in &found.runs {
+                            if callee.is_closure() {
+                                // What a closure the body wrote runs of the
+                                // body's parameters is the body's to run.
+                                now.runs.insert(condition.through(transfer));
+                                continue;
+                            }
+                            run_passed(
+                                registry,
+                                site.map(|site| &classification.sites[site as usize]),
+                                callee,
+                                transfer,
+                                condition,
+                                &get,
+                                &mut now,
+                                &mut read,
+                            );
+                            if now.effect.is_anything() {
+                                break;
+                            }
                         }
-                        run_passed(
-                            registry,
-                            site.map(|site| &classification.sites[site as usize]),
-                            callee,
-                            transfer,
-                            condition,
-                            &get,
-                            &mut now,
-                            &mut read,
-                        );
                         if now.effect.is_anything() {
                             break;
                         }
                     }
-                    if now.effect.is_anything() {
-                        break;
+                    for set in &classification.sets {
+                        if now.effect.is_anything() {
+                            break;
+                        }
+                        let joined = set.joined(wave_number, transfers, &get);
+                        now.effect.join(&joined.effect);
+                        now.runs.extend(joined.runs.iter().cloned());
+                        if joined.unknown {
+                            now.effect = Effect::unknown();
+                        }
                     }
-                }
-                for set in &classification.sets {
-                    if now.effect.is_anything() {
-                        break;
-                    }
-                    let joined = set.joined(wave_number, &get);
-                    now.effect.join(&joined.effect);
-                    now.runs.extend(joined.runs.iter().cloned());
-                    if joined.unknown {
-                        now.effect = Effect::unknown();
-                    }
-                }
-                Some((key, now, read))
-            })
-            .collect();
+                    Some((pos, now, read))
+                })
+                .collect()
+        };
 
-        for (key, now, read) in updates {
+        for (pos, now, read) in updates {
             for found in read {
-                if let Some((found, _)) = classified.get_key_value(&found)
-                    && passed_to.insert((found, key))
+                if let Some(found) = slots.get(found)
+                    && passed_to.insert((found as u32, pos))
                 {
-                    // Keep caller edges borrowed from `classified`'s stable keys.
-                    callers.entry(found).or_default().push(key);
+                    callers[found].push(pos);
                     // The callee may have advanced earlier in this same
                     // wave, after this caller read the wave's old snapshot.
                     // Revisit the caller once the new edge is visible.
-                    if queued.insert(key) {
-                        queue.push_back(key);
+                    if !std::mem::replace(&mut queued[pos as usize], true) {
+                        queue.push_back(pos);
                     }
                 }
             }
-            if now == settled[key] {
+            if settled[pos as usize].as_ref() == Some(&now) {
                 continue;
             }
-            settled.insert(key.clone(), now);
-            for caller in callers.get(key).into_iter().flatten() {
-                if queued.insert(caller) {
+            settled[pos as usize] = Some(now);
+            for &caller in &callers[pos as usize] {
+                if !std::mem::replace(&mut queued[caller as usize], true) {
                     queue.push_back(caller);
                 }
             }
         }
     }
-    settled
+    Settlements {
+        slots,
+        ixs: classified.iter().map(|(ix, _)| *ix).collect(),
+        settled,
+    }
 }
 
 /// What a caller holding a set of declarations adds to its own effect: what
@@ -2420,15 +2533,17 @@ struct SetJoin {
 
 impl SetJoin {
     fn of<'g>(
-        set: &[(EffectId, Transfer)],
-        get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
+        set: &[(EffectIx, TransferIx)],
+        transfers: &TransferTable,
+        get: &impl Fn(EffectIx) -> std::borrow::Cow<'g, Settled>,
     ) -> SetJoin {
         let mut joined = SetJoin {
             effect: Effect::nothing(),
             runs: BTreeSet::new(),
             unknown: false,
         };
-        for (callee, transfer) in set {
+        for &(callee, transfer) in set {
+            let transfer = transfers.get(transfer);
             let found = get(callee);
             joined.effect.join_transferred(&found.effect, transfer);
             for condition in &found.runs {
@@ -2454,18 +2569,18 @@ impl SetJoin {
 fn run_passed<'g>(
     registry: &Registry,
     site: Option<&IdSite<'_>>,
-    callee: &EffectId,
+    callee: EffectIx,
     transfer: &Transfer,
     condition: &Condition,
-    get: &impl Fn(&EffectId) -> std::borrow::Cow<'g, Settled>,
+    get: &impl Fn(EffectIx) -> std::borrow::Cow<'g, Settled>,
     into: &mut Settled,
-    read: &mut Vec<EffectId>,
+    read: &mut Vec<EffectIx>,
 ) {
     let Some(site) = site else {
         into.effect = Effect::unknown();
         return;
     };
-    let Some(callee_key) = registry.effect_decl_key(callee) else {
+    let Some(callee_key) = registry.effect_decl_key(registry.reach_memo.effects.id(callee)) else {
         into.effect = Effect::unknown();
         return;
     };
@@ -2481,7 +2596,7 @@ fn run_passed<'g>(
         Passing::Default(runs) => {
             default = runs
                 .into_iter()
-                .map(|(key, transfer)| (registry.effect_id_for(&key), transfer))
+                .map(|(key, transfer)| registry.effect_run(&key, &transfer))
                 .collect::<Vec<_>>();
             (&default[..], &[][..])
         }
@@ -2490,8 +2605,9 @@ fn run_passed<'g>(
             return;
         }
     };
-    for (run, own) in runs {
-        let bound = condition.bound(transfer, own);
+    let transfers = &registry.reach_memo.transfers;
+    for &(run, own) in runs {
+        let bound = condition.bound(transfer, transfers.get(own));
         let found = get(run);
         into.effect.join_transferred(&found.effect, &bound);
         if run.is_closure() {
@@ -2502,7 +2618,7 @@ fn run_passed<'g>(
             // It runs its own parameters' arguments, which the callee passes.
             into.effect = Effect::unknown();
         }
-        read.push(run.clone());
+        read.push(run);
         if into.effect.is_anything() {
             return;
         }
@@ -3628,17 +3744,17 @@ impl Registry {
             value: None,
             captured,
         };
-        let classified: FxHashMap<EffectId, IdClassification<'_>> = resolve
+        let classified: Vec<(EffectIx, IdClassification<'_>)> = resolve
             .run(&holder, None)
             .into_iter()
             .map(|(key, classification)| classification_by_id(self, key, classification))
             .collect();
-        let effects = settle(self, &classified, |id| {
-            self.effect_decl_key(id)
+        let settlements = settle(self, &classified, false, |ix| {
+            self.effect_decl_key(self.reach_memo.effects.id(ix))
                 .map_or_else(|| Settled::of(Effect::unknown()), |key| self.settled(&key))
         });
-        effects
-            .get(&self.effect_id_for(&holder.closure(0)))
+        settlements
+            .get(self.effect_ix(&holder.closure(0)))
             .map_or_else(Effect::anything, Settled::unconditional)
     }
 
@@ -4361,11 +4477,11 @@ impl<'r> Level<'r> {
             registry: self.registry,
             ctx: self,
         };
-        let mut calls: Vec<(DeclKey, Transfer, Option<u32>)> = Vec::new();
+        let mut calls: Vec<(EffectIx, TransferIx, Option<u32>)> = Vec::new();
         let mut sets: Vec<IdTargets> = Vec::new();
         let mut sites: Vec<Site<'r>> = Vec::new();
         // The declarations run with no call's arguments, each once.
-        let mut siteless: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
+        let mut siteless: FxHashSet<(EffectIx, TransferIx)> = FxHashSet::default();
         let facts: &'r WriteFacts = self.facts;
         // The shared sets of declarations already taken.
         let mut taken: FxHashSet<usize> = FxHashSet::default();
@@ -4395,10 +4511,9 @@ impl<'r> Level<'r> {
                     let Some(runs) = reach.builtin_runs(&key, sig, &transfer, call) else {
                         return Classification::unknown();
                     };
-                    for run in runs {
-                        // A run already noted is dropped without a copy.
-                        if !siteless.contains(&run) {
-                            siteless.insert(run.clone());
+                    for (run_key, run_transfer) in runs {
+                        let run = self.registry.effect_run(&run_key, &run_transfer);
+                        if siteless.insert(run) {
                             calls.push((run.0, run.1, None));
                         }
                     }
@@ -4411,13 +4526,12 @@ impl<'r> Level<'r> {
                         sites.len() as u32 - 1
                     })
                 });
+                let run = self.registry.effect_run(&key, &transfer);
                 if at.is_some() {
-                    calls.push((key, transfer, at));
+                    calls.push((run.0, run.1, at));
                     continue;
                 }
-                let run = (key, transfer);
-                if !siteless.contains(&run) {
-                    siteless.insert(run.clone());
+                if siteless.insert(run) {
                     calls.push((run.0, run.1, None));
                 }
             }
@@ -4429,12 +4543,10 @@ impl<'r> Level<'r> {
                 break;
             }
         }
-        calls.extend(
-            self.runs
-                .take()
-                .into_iter()
-                .map(|(id, transfer)| (holder.closure(id), transfer, None)),
-        );
+        for (id, transfer) in self.runs.take() {
+            let (run, transfer) = self.registry.effect_run(&holder.closure(id), &transfer);
+            calls.push((run, transfer, None));
+        }
         Classification {
             own,
             calls,
@@ -4467,21 +4579,21 @@ impl<'r> Level<'r> {
         };
         let (_, runs) = memo.shared_runs.get_or_compute((address, class), || {
             let runs = (|| {
-                let mut out: Vec<(EffectId, Transfer)> = Vec::new();
-                let mut seen: FxHashSet<(DeclKey, Transfer)> = FxHashSet::default();
-                let id_of = |key: &DeclKey| {
-                    memo.effect_ids
-                        .get_or_compute_ref(key, || registry.effect_id_for(key))
-                };
+                let mut out: Vec<(EffectIx, TransferIx)> = Vec::new();
+                let mut seen: FxHashSet<(EffectIx, TransferIx)> = FxHashSet::default();
                 for (key, transfer) in list.iter() {
                     if let Some(sig) = registry.builtin_once(key) {
                         for (key, transfer) in reach.builtin_runs(key, sig, transfer, call)? {
-                            if seen.insert((key.clone(), transfer.clone())) {
-                                out.push((id_of(&key), transfer));
+                            let run = registry.effect_run(&key, &transfer);
+                            if seen.insert(run) {
+                                out.push(run);
                             }
                         }
-                    } else if seen.insert((key.clone(), transfer.clone())) {
-                        out.push((id_of(key), transfer.clone()));
+                    } else {
+                        let run = registry.effect_run(key, transfer);
+                        if seen.insert(run) {
+                            out.push(run);
+                        }
                     }
                 }
                 Some(IdTargets::new(IdTargetSet::new(out)))
