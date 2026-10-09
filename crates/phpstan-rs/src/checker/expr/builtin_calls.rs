@@ -124,6 +124,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
+        call_span: Span,
     ) -> Type {
         let syntax_owner = self
             .syntax_tree_owner()
@@ -144,7 +145,9 @@ impl<'a> Checker<'a> {
         if let Some(outcome) = self.type_check_call_outcome(arenas, name, args, locals) {
             return Type::bool_literal(outcome);
         }
-        if let Some(catalog_return) = self.catalog_builtin_return_type(name, sig, args, locals) {
+        if let Some(catalog_return) =
+            self.catalog_builtin_return_type(name, sig, args, locals, call_span)
+        {
             return catalog_return;
         }
         match name {
@@ -2164,12 +2167,13 @@ impl<'a> Checker<'a> {
         self.infer_call_return_type(sig, &resolved, locals)
     }
 
-    fn catalog_builtin_return_type(
+    pub(crate) fn catalog_builtin_return_type(
         &self,
         name: &str,
         sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
+        call_span: Span,
     ) -> Option<Type> {
         if name != "strlen" || !sig.is_stub() || args.len() != 1 {
             return None;
@@ -2200,6 +2204,9 @@ impl<'a> Checker<'a> {
                     .unwrap_or_else(Type::mixed)
             })
             .collect();
+        if let Some(cached) = self.cached_catalog_return_type(call_span, &arguments) {
+            return Some(cached);
+        }
         let receiver = Type::mixed();
         let mut returns = Vec::new();
         for variant in selected.variants {
@@ -2240,7 +2247,9 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        (!returns.is_empty()).then(|| Type::union_of(returns))
+        let result = (!returns.is_empty()).then(|| Type::union_of(returns))?;
+        self.remember_catalog_return_type(call_span, arguments, result.clone());
+        Some(result)
     }
 
     /// `get_parent_class`'s per-class answer: `class`'s registered

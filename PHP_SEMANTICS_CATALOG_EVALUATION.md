@@ -232,6 +232,14 @@ independently reviewed observable-trace contract, followed by one locked 8.5.4
 builtin slice driven from native import through graph validation and a checker
 call. Until that exists, producer/solver choice remains provisional.
 
+An additional F05 implementation step in `master3` now pre-evaluates the
+catalog-backed `strlen` return during argument checking and memoizes it by call
+span and inferred argument types for later return inference. The 12 focused
+`strlen_` checker fixtures pass, and `cargo check -p phpstan-rs` passes. This
+shares the return evaluation across the existing checker consumers; argument
+coercion/deprecation diagnostics still use the legacy parameter checker, so it
+does not yet satisfy the stateful single-evaluation gate.
+
 The remaining **approach-comparison** work in §2.3 is also explicit: compare
 regional and adapted pointer-service solutions on the same useful closed PHP
 summary; measure graph/region growth, checker/runtime cost, contract volume,

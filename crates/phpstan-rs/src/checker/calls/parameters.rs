@@ -393,6 +393,16 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+
+        // Evaluate catalog-backed builtin returns while the call is being
+        // checked, then let expression inference reuse that result. This is
+        // the first shared producer-consumer seam for catalog call results.
+        if let Callee::Function(name) = callee
+            && name.eq_ignore_ascii_case("strlen")
+            && is_builtin
+        {
+            self.catalog_builtin_return_type(name, sig, args, locals, span);
+        }
     }
 
     /// The arguments a constant array unpacked into a call stands for

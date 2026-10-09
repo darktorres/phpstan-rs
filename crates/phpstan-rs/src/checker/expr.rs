@@ -1138,6 +1138,7 @@ impl<'a> Checker<'a> {
                             s,
                             args,
                             locals,
+                            self.expr_span(e.id),
                         )
                     })
                     .unwrap_or_else(|| {
@@ -5960,6 +5961,7 @@ impl<'a> Checker<'a> {
                                     sig,
                                     args,
                                     locals,
+                                    self.expr_span(e.id),
                                 )
                             })
                             .unwrap_or_else(|| {

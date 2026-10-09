@@ -324,6 +324,11 @@ pub struct Checker<'a> {
     // What `lookup_method_with_owner` found for each class and method it
     // was asked about, as they were asked.
     method_memo: std::cell::RefCell<MethodMemo<'a>>,
+    // Return values produced while checking a builtin call's arguments are
+    // reused by later expression inference at the same source site. The
+    // argument types are part of the key because a call can be revisited on
+    // different narrowed control-flow paths.
+    catalog_return_type_memo: RefCell<FxHashMap<Span, Vec<(Vec<Type>, Type)>>>,
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,
@@ -1413,6 +1418,7 @@ impl<'a> Checker<'a> {
             class_memo: std::cell::RefCell::new((String::new(), None)),
             var_tag_memo: std::cell::RefCell::new(FxHashMap::default()),
             method_memo: std::cell::RefCell::new(FxHashMap::default()),
+            catalog_return_type_memo: RefCell::new(FxHashMap::default()),
             settings: &DEFAULT_SETTINGS,
             bodies: &crate::registry::NoBodies,
             sql: &NO_SQL,
@@ -1541,7 +1547,39 @@ impl<'a> Checker<'a> {
     /// See `current_file`.
     pub fn set_current_file(&mut self, path: &std::path::Path) {
         self.synthetic_nodes.clear();
+        self.catalog_return_type_memo.get_mut().clear();
         self.current_file = Some(path.to_path_buf());
+    }
+
+    pub(crate) fn cached_catalog_return_type(
+        &self,
+        span: Span,
+        arguments: &[Type],
+    ) -> Option<Type> {
+        self.catalog_return_type_memo
+            .borrow()
+            .get(&span)?
+            .iter()
+            .find(|(cached_arguments, _)| cached_arguments == arguments)
+            .map(|(_, return_type)| return_type.clone())
+    }
+
+    pub(crate) fn remember_catalog_return_type(
+        &self,
+        span: Span,
+        arguments: Vec<Type>,
+        return_type: Type,
+    ) {
+        let mut memo = self.catalog_return_type_memo.borrow_mut();
+        let entries = memo.entry(span).or_default();
+        if let Some((_, cached_return)) = entries
+            .iter_mut()
+            .find(|(cached_arguments, _)| *cached_arguments == arguments)
+        {
+            *cached_return = return_type;
+        } else {
+            entries.push((arguments, return_type));
+        }
     }
 
     /// Allocates a checker-only expression in this checker's current-file
