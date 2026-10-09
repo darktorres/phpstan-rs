@@ -2664,8 +2664,9 @@ fn run_passed<'g>(
 /// The classes `ty` may be an object of: `Some` with each one named, `None`
 /// when it may be an object of a class not named (`object`, `mixed`).
 pub(crate) fn object_classes(ty: &Type) -> Option<Vec<Name>> {
-    let mut classes = Vec::new();
-    for member in ty.union_members() {
+    let members = ty.union_members();
+    let mut classes = Vec::with_capacity(members.len());
+    for member in members {
         if let Some((class, _)) = member.as_object() {
             classes.push(Name::from(class));
         } else if !member.is_object().no() {
@@ -4679,7 +4680,15 @@ impl<'r> Level<'r> {
             registry: self.registry,
             ctx: self,
         };
-        let mut calls: Vec<(EffectIx, TransferIx, Option<u32>)> = Vec::new();
+        let mut calls: Vec<(EffectIx, TransferIx, Option<u32>)> = Vec::with_capacity(
+            reached
+                .iter()
+                .map(|targets| match targets {
+                    Targets::List(list) => list.len(),
+                    Targets::Shared(_) => 0,
+                })
+                .sum(),
+        );
         let mut sets: Vec<IdTargets> = Vec::new();
         let mut sites: Vec<Site<'r>> = Vec::new();
         // The declarations run with no call's arguments, each once.

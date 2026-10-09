@@ -399,6 +399,9 @@ fn parse_watching_in_arenas<'a>(
         }
         None => lexer.lex_token_stream(),
     };
+    if matches!(reuse, Reuse::Fresh) {
+        arenas.reserve_for_tokens(token_stream.kinds.len());
+    }
     let mut parser = match reuse.worker() {
         Some(worker) => Parser::from_token_stream_with_scratch(
             token_stream,

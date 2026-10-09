@@ -420,6 +420,19 @@ impl<T> ListArena<T> {
 }
 
 impl NodeArenas {
+    /// Sizes the expression and statement storage of empty arenas for a file
+    /// of `tokens` tokens, so parsing it does not regrow them.
+    pub fn reserve_for_tokens(&mut self, tokens: usize) {
+        if self.exprs.is_empty() && self.stmts.is_empty() {
+            let exprs = tokens.div_ceil(3);
+            self.exprs = ExprArena::with_capacity(exprs);
+            self.expr_spans.reserve(exprs);
+            let stmts = tokens.div_ceil(8);
+            self.stmts = StmtArena::with_capacity(stmts);
+            self.stmt_spans.reserve(stmts);
+        }
+    }
+
     /// Creates an empty append fragment whose IDs begin immediately after
     /// this owner's current nodes and payloads.
     pub fn new_fragment(&self) -> Self {

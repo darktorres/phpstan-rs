@@ -12,6 +12,7 @@
 //!   assigns anywhere, on `$this` or on a variable it made an instance of.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
 use syntax::ast::*;
 use syntax::name::Name;
@@ -1934,10 +1935,10 @@ impl Summarizer<'_> {
     fn call(&mut self, arenas: &NodeArenas, callee: Callee, args: ArgRange) {
         let args = arenas.args(args);
         let mut spread = false;
-        let mut arguments = Vec::new();
-        let mut places = Vec::new();
-        let mut objectless = Vec::new();
-        let mut callables = Vec::new();
+        let mut arguments = Vec::with_capacity(args.len());
+        let mut places: SmallVec<[_; 4]> = SmallVec::new();
+        let mut objectless: SmallVec<[_; 4]> = SmallVec::new();
+        let mut callables: SmallVec<[_; 4]> = SmallVec::new();
         for (at, arg) in args.iter().enumerate() {
             spread |= arg.spread;
             let at = match &arg.name {
@@ -1958,9 +1959,9 @@ impl Summarizer<'_> {
         self.scope.calls.push(CallWrites {
             callee,
             arguments: arguments.into_boxed_slice(),
-            places: places.into_boxed_slice(),
-            objectless: objectless.into_boxed_slice(),
-            callables: callables.into_boxed_slice(),
+            places: places.into_iter().collect(),
+            objectless: objectless.into_iter().collect(),
+            callables: callables.into_iter().collect(),
         });
     }
 
