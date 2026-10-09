@@ -82,10 +82,10 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    E1.V.3. It runs before the final validation, V.0.
    **E2 part 2 (perf)** has its plan in `PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md`:
    one batch of items 0-14 (0b, 7a-7h, 12a-12f) for every hotspot of the
-   9071f48f callgrind profile. Status: planned, nothing built; the Baseline step
+   9071f48f callgrind profile. Status: in progress; the Baseline step
    is done (off 54.13 G, warm 42.14 G, cold-with-store 56.24 G; `strace` says
-   no `memmap2`). Resume at the off-versus-warm drill, then item 0 (land the
-   uncommitted `registry/effects.rs` edits). Verification runs once, after item 14.
+   no `memmap2`), items 0, 0b and 1 are committed. Resume at item 2
+   (`Name.lowered`, names carried, `DeclKey` over `Name`). Verification runs once, after item 14.
 2. Then **level 8's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
    finds beyond what the optimization needs, validated together (the
