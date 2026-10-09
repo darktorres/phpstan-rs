@@ -2335,6 +2335,79 @@ mod tests {
     }
 
     #[test]
+    fn php_flow_host_joins_distinct_normal_callback_branches_conservatively() {
+        let mut host = PhpFlowHost::new(Digest([15; 32]));
+        host.argument_locations = vec![None, Some(Bytes(b"slot".to_vec()))];
+        host.callbacks.insert(
+            Bytes(b"branching".to_vec()),
+            vec![
+                PhpCallbackOutcome {
+                    writes: vec![(0, PhpValue::Int(1))],
+                    normal: true,
+                    result: Some(PhpValue::Int(10)),
+                    throws: None,
+                },
+                PhpCallbackOutcome {
+                    writes: vec![(0, PhpValue::Int(2))],
+                    normal: true,
+                    result: Some(PhpValue::Int(20)),
+                    throws: None,
+                },
+            ],
+        );
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![Operand::Argument(1)],
+                        result: 4,
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::Host(Bytes(b"uncertain-branch".to_vec())),
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(vec![], Terminator::Goto(3)),
+                Block::new(vec![], Terminator::Goto(3)),
+                Block::new(vec![], Terminator::Return(Some(Operand::Result(4)))),
+            ],
+            coverage: coverage_for(&[
+                Domain::Invocation,
+                Domain::UserWrite,
+                Domain::Return,
+                Domain::PhpThrow,
+            ]),
+        };
+        let mut initial = PhpState::new();
+        initial.set_local(Bytes(b"slot".to_vec()), PhpValue::Int(0));
+        let evaluation = evaluate(
+            &graph,
+            &[
+                PhpValue::Callable(Bytes(b"branching".to_vec())),
+                PhpValue::Unknown,
+            ],
+            &PhpValue::Unknown,
+            initial,
+            &mut host,
+        )
+        .unwrap();
+
+        assert_eq!(evaluation.exits.len(), 1);
+        assert!(matches!(
+            &evaluation.exits[0],
+            Exit::Normal {
+                value: Some(PhpValue::Unknown),
+                state,
+            } if state.local(b"slot") == Some(PhpValue::Unknown)
+        ));
+        evaluation.post_fixpoint.validate(&graph, &host).unwrap();
+    }
+
+    #[test]
     fn php_flow_array_reference_copy_tracks_callback_writes_across_cleanup() {
         let mut host = PhpFlowHost::new(Digest([14; 32]));
         host.argument_locations = vec![None, Some(Bytes(b"alias".to_vec()))];
