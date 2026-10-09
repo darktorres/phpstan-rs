@@ -74,16 +74,16 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    Each item's gate runs workspace and item-specific tests only (including their inherent compile).
    Full §11 validation and O3 run once, after item 19. Only
    the rows that optimize are built now; the rest are DEFERRED.
-2. Then **level 8's deferred rows**, as a plan of their own: the PHP
-   catalog, and every row of the 20 G plan that changes what the analysis
-   finds beyond what the optimization needs, validated together (the
-   ledger's row D.V).
    **Item E of the same ledger** (effect resolution: the 664-vs-581 false
    positives, then the 130 G Ir regression) is in progress on `master2`:
    E1 (correctness) is built up to its validation row E1.V.2, whose Piwigo run
    leaves 30 rows that need the parametric-summary work (EG.15-EG.20, design
    in the plan's Appendix B.3, decision pending); E2 (perf) starts only after
    E1.V.3. It runs before the final validation, V.0.
+2. Then **level 8's deferred rows**, as a plan of their own: the PHP
+   catalog, and every row of the 20 G plan that changes what the analysis
+   finds beyond what the optimization needs, validated together (the
+   ledger's row D.V).
 3. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
