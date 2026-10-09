@@ -211,18 +211,28 @@ so it does not close F00 or substitute for independent review.
 This audit found additional evaluation work beyond the earlier compiler/framework
 comparison. The minimum F04 value/reference fixture task is complete, but its
 broader C22 lowering work remains. F00 needs independent contract review; F01
-needs broader branch fixtures and a calibrated host; F02 needs configured
-implicit-operation mapping plus source-derived graph linkage beyond the single
-`strlen` slice; F03 needs native demand summaries and pointer reuse beyond the
-direct Zend string-field bridge; F05 needs stateful checker integration across
-effects and exceptions; and F06 needs same-slice precision, cost, and solver
-evidence. The next dependency is an
+needs broader branch fixtures and a calibrated host; F02 has configured
+implicit-operation/source/layout/call-flow evidence for one `strlen` slice but
+still needs semantic comparison of the wider native/PHP behavior; F03 needs
+native demand summaries and pointer reuse beyond the direct Zend string-field
+bridge; F05 needs stateful checker integration across effects and exceptions;
+and F06 needs same-slice precision, cost, and solver evidence. The next dependency is an
 independently reviewed observable-trace contract, followed by one locked 8.5.4
 builtin slice driven from native import through graph validation and a checker
 call. Until that exists, producer/solver choice remains provisional.
 
-This is the full remaining Phase F evaluation set, not the full project-plan
-implementation. The plan's later phases (0–4) also retain their own open tasks
+The remaining **approach-comparison** work in §2.3 is also explicit: compare
+regional and adapted pointer-service solutions on the same useful closed PHP
+summary; measure graph/region growth, checker/runtime cost, contract volume,
+invalidation behavior, and adaptation maintenance; and repeat representative
+older PHP/platform compiler cases. The current report measures compiler import,
+resource use, selected framework queries, and concrete failure witnesses, but
+has no complete semantic engine to produce those same-slice solver metrics.
+The 8.4 import replay and Windows EH fixture are narrow compatibility evidence,
+not that missing representative historical/platform evaluation.
+
+This completes the inventory of current **Phase F and approach-comparison
+evidence**, not the full project-plan implementation. The plan's later phases (0–4) also retain their own open tasks
 for reproducible build capture, separate normal/CALL runtimes, NativeIR import
 and link resolution, recursive summary solving, demand summaries, whole-project
 cache invalidation, and end-to-end resource/regression gates. They are gated on
