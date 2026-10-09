@@ -52,9 +52,9 @@ callback exception flow.
 The full checker suite passed with 1,194 library tests, all checker
 binary/integration tests, and 35 semantic-crate tests after the schema and
 dependency-closure change. Subsequent focused runs pass all 38 semantic-crate
-tests and `cargo check -p phpstan-rs`; the new regression rejects marking a
-reachable return domain not applicable. Checker sources have not changed since
-the full-suite run.
+tests and `cargo check -p phpstan-rs`; regressions reject marking a reachable
+return domain not applicable and preserve fatal and suspension as distinct
+exits. Checker sources have not changed since the full-suite run.
 
 ## Phase F gate-by-gate status
 

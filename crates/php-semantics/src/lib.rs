@@ -1970,6 +1970,31 @@ mod tests {
     }
 
     #[test]
+    fn fatal_and_suspension_remain_distinct_exits() {
+        for (terminator, expected) in [
+            (
+                Terminator::Fatal(Operand::Literal(Bytes(b"fatal".to_vec()))),
+                Exit::Fatal {
+                    value: "fatal".into(),
+                    state: vec![],
+                },
+            ),
+            (
+                Terminator::Suspend(Operand::Literal(Bytes(b"yield".to_vec()))),
+                Exit::Suspended {
+                    value: "yield".into(),
+                    state: vec![],
+                },
+            ),
+        ] {
+            let graph = graph(vec![], terminator);
+            let mut host = Host::default();
+            let evaluation = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+            assert_eq!(evaluation.exits, vec![expected]);
+        }
+    }
+
+    #[test]
     fn cyclic_graph_reaches_a_stable_widened_exit() {
         let graph = BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
