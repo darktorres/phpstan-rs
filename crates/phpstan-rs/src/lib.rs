@@ -5,6 +5,10 @@
 //! `phpstan_rs::project::Project`/`phpstan_rs::checker::Checker`. The full
 //! module paths remain available either way.
 
+// `Name` holds a cell its lowercase form is made into on first use; its
+// `Hash` and `Eq` read only the allocation and the text.
+#![allow(clippy::mutable_key_type)]
+
 /// The allocator every project's tables are allocated from and freed to:
 /// building and dropping a project is mostly allocation, and this serves
 /// many threads' allocations and frees faster than the system's.

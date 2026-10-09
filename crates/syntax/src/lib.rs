@@ -2,6 +2,9 @@
 //! name resolution and interned names.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
+// `Name` holds a cell its lowercase form is made into on first use; its
+// `Hash` and `Eq` read only the allocation and the text.
+#![allow(clippy::mutable_key_type)]
 
 pub mod ast;
 pub mod canonical;

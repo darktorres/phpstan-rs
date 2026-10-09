@@ -33,6 +33,9 @@ struct NameData {
     text: Box<str>,
     /// `None` when `text` is already lowercase.
     lower: Option<Box<str>>,
+    /// The lowercase name, made on first use; unused when `lower` is `None`
+    /// (the name is its own).
+    lowered: OnceLock<Name>,
     /// `folded_hash` of the text, made once: what a table keyed by the
     /// name ignoring case files it under.
     folded_hash: u64,
@@ -194,6 +197,7 @@ impl Name {
         Name(Arc::new(NameData {
             text: text.into(),
             lower,
+            lowered: OnceLock::new(),
             folded_hash: folded_hash(text.as_bytes()),
             hash,
         }))
@@ -225,10 +229,19 @@ impl Name {
         self.0.lower.as_deref().unwrap_or(&self.0.text)
     }
 
+    /// The name in ASCII lowercase, as a name; `self` when it is.
+    #[inline]
+    pub fn lowered(&self) -> &Name {
+        match &self.0.lower {
+            None => self,
+            Some(lower) => self.0.lowered.get_or_init(|| Name::from(&**lower)),
+        }
+    }
+
     /// Equal ignoring ASCII case, as PHP compares class, function and
     /// method names.
     pub fn eq_ignore_case(&self, other: &Name) -> bool {
-        self == other || self.lower() == other.lower()
+        self == other || self.lowered() == other.lowered()
     }
 }
 
@@ -1736,6 +1749,17 @@ impl NameCache {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_lowercase_name_is_made_once_and_is_its_own_lowercase() {
+        let mixed = Name::from("Foo\\Bar");
+        let lower = mixed.lowered();
+        assert_eq!(lower.as_str(), "foo\\bar");
+        assert!(lower.same_allocation(mixed.lowered()));
+        assert!(lower.same_allocation(&Name::from("foo\\bar")));
+        assert!(lower.lowered().same_allocation(lower));
+        assert!(mixed.eq_ignore_case(&Name::from("FOO\\BAR")));
+    }
+
     use super::*;
 
     /// Texts that differ in case, and in what is not ASCII, from a small
@@ -1942,9 +1966,8 @@ mod tests {
 
     #[test]
     fn a_name_keeps_its_spelling_and_its_lowercase_key() {
-        let interner = Interner::new();
-        let upper = interner.name("DateTime");
-        let lower = interner.name("datetime");
+        let upper = Name::from("DateTime");
+        let lower = Name::from("datetime");
         assert_eq!(upper.as_str(), "DateTime");
         assert_eq!(upper.lower(), "datetime");
         assert!(upper.eq_ignore_case(&lower));

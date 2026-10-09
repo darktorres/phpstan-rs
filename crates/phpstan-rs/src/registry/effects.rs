@@ -343,8 +343,8 @@ impl Settled {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "DeclKeyNames", into = "DeclKeyNames")]
 pub(crate) struct DeclKey {
-    pub(in crate::registry) class: Option<Arc<str>>,
-    pub(in crate::registry) member: Arc<str>,
+    pub(in crate::registry) class: Option<Name>,
+    pub(in crate::registry) member: Name,
     /// `decl_hash` of the names, made when the key was.
     hash: u64,
 }
@@ -358,24 +358,40 @@ struct DeclKeyNames {
 
 impl From<DeclKeyNames> for DeclKey {
     fn from(names: DeclKeyNames) -> DeclKey {
-        DeclKey::new(names.class, names.member)
+        DeclKey::new(
+            names.class.map(|class| Name::from(&*class)),
+            Name::from(&*names.member),
+        )
     }
 }
 
 impl From<DeclKey> for DeclKeyNames {
     fn from(key: DeclKey) -> DeclKeyNames {
         DeclKeyNames {
-            class: key.class,
-            member: key.member,
+            class: key.class.map(|class| Arc::from(class.as_str())),
+            member: Arc::from(key.member.as_str()),
         }
     }
 }
 
 /// The hash a declaration's names file it under, the same in any case.
-fn decl_hash(class: Option<&str>, member: &str) -> u64 {
+fn decl_hash(class: &Option<Name>, member: &Name) -> u64 {
+    mix_decl_hash(class.as_ref().map(Name::folded_hash), member.folded_hash())
+}
+
+/// `decl_hash` from the folded hashes of the names.
+fn mix_decl_hash(class: Option<u64>, member: u64) -> u64 {
     const K: u64 = 0x517c_c1b7_2722_0a95;
-    let class = class.map_or(0, |class| syntax::name::folded_hash(class.as_bytes()) | 1);
-    (class.rotate_left(5) ^ syntax::name::folded_hash(member.as_bytes())).wrapping_mul(K)
+    let class = class.map_or(0, |hash| hash | 1);
+    (class.rotate_left(5) ^ member).wrapping_mul(K)
+}
+
+/// `decl_hash` of names given as text.
+fn decl_text_hash(class: Option<&str>, member: &str) -> u64 {
+    mix_decl_hash(
+        class.map(|class| syntax::name::folded_hash(class.as_bytes())),
+        syntax::name::folded_hash(member.as_bytes()),
+    )
 }
 
 /// The kind of synthetic property hook represented by a property slot.
@@ -449,7 +465,7 @@ impl DeclQuery for DeclKey {
 
 impl std::hash::Hash for dyn DeclQuery + '_ {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(decl_hash(self.class(), self.member()));
+        state.write_u64(decl_text_hash(self.class(), self.member()));
     }
 }
 
@@ -474,10 +490,7 @@ impl std::hash::Hash for DeclKey {
 
 impl PartialEq for DeclKey {
     fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
-            && (self.member_is_shared(other)
-                || (self.class.as_deref() == other.class.as_deref() && self.member == other.member)
-                || (self as &dyn DeclQuery) == (other as &dyn DeclQuery))
+        self.hash == other.hash && self.member == other.member && self.class == other.class
     }
 }
 
@@ -494,18 +507,12 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
 const FILE_CLASS: &str = "\0file";
 
 impl DeclKey {
-    /// Whether both keys hold the very same strings, which makes them equal.
-    fn member_is_shared(&self, other: &DeclKey) -> bool {
-        Arc::ptr_eq(&self.member, &other.member)
-            && match (&self.class, &other.class) {
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
-    }
-
-    pub(in crate::registry) fn new(class: Option<Arc<str>>, member: Arc<str>) -> DeclKey {
-        let hash = decl_hash(class.as_deref(), &member);
+    /// The key of the declaration of `member`, in `class` for a method; the
+    /// names are taken in lowercase.
+    pub(in crate::registry) fn new(class: Option<Name>, member: Name) -> DeclKey {
+        let class = class.map(|class| class.lowered().clone());
+        let member = member.lowered().clone();
+        let hash = decl_hash(&class, &member);
         DeclKey {
             class,
             member,
@@ -515,13 +522,16 @@ impl DeclKey {
 
     /// The key of the top level of `file`.
     fn file(file: FileId) -> DeclKey {
-        DeclKey::new(Some(FILE_CLASS.into()), file.index().to_string().into())
+        DeclKey::new(
+            Some(Name::from(FILE_CLASS)),
+            Name::from(file.index().to_string()),
+        )
     }
 
     /// The key of the top level of a file that is not known: code of
     /// arbitrary content.
     fn unresolved_include() -> DeclKey {
-        DeclKey::new(Some(FILE_CLASS.into()), "unresolved".into())
+        DeclKey::new(Some(Name::from(FILE_CLASS)), Name::from("unresolved"))
     }
 
     /// The file whose top level the key names, when it names one.
@@ -537,7 +547,7 @@ impl DeclKey {
     fn closure(&self, index: u32) -> DeclKey {
         DeclKey::new(
             self.class.clone(),
-            format!("{}{{closure#{index}}}", self.member).into(),
+            Name::from(format!("{}{{closure#{index}}}", self.member)),
         )
     }
 
@@ -557,48 +567,136 @@ fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
     let start = key.member.rfind("{closure#")?;
     let ordinal = key.member[start + 9..].strip_suffix('}')?.parse().ok()?;
     Some((
-        DeclKey::new(key.class.clone(), key.member[..start].into()),
+        DeclKey::new(key.class.clone(), Name::from(&key.member[..start])),
         ordinal,
     ))
 }
 
-fn function_key(name: &str) -> DeclKey {
-    DeclKey::new(None, name.to_ascii_lowercase().into())
+fn function_key(name: &(impl KeyName + ?Sized)) -> DeclKey {
+    DeclKey::new(None, name.lowered_name())
 }
 
-fn method_key(class: &str, method: &str) -> DeclKey {
-    DeclKey::new(Some(lowered_text(class)), lowered_text(method))
+fn method_key(class: &(impl KeyName + ?Sized), method: &(impl KeyName + ?Sized)) -> DeclKey {
+    DeclKey::new(Some(class.lowered_name()), method.lowered_name())
 }
 
-/// `text` lowercased, held once per thread for every key that names it, so
-/// keys of one declaration share their strings and building one allocates
-/// nothing once its names are known.
-fn lowered_text(text: &str) -> Arc<str> {
-    thread_local! {
-        static HELD: std::cell::RefCell<FxHashSet<Arc<str>>> = std::cell::RefCell::default();
+/// A name that makes the lowercase `Name` a key holds: a `Name` has it
+/// already, text is lowercased and interned.
+pub(crate) trait KeyName {
+    fn lowered_name(&self) -> Name;
+    fn text(&self) -> &str;
+}
+
+impl KeyName for Name {
+    #[inline]
+    fn lowered_name(&self) -> Name {
+        self.lowered().clone()
     }
-    const STACK: usize = 128;
-    let mut stack = [0u8; STACK];
-    let owned;
-    let lower: &str = if !text.bytes().any(|byte| byte.is_ascii_uppercase()) {
-        text
-    } else if text.len() <= STACK {
-        let bytes = &mut stack[..text.len()];
-        bytes.copy_from_slice(text.as_bytes());
-        bytes.make_ascii_lowercase();
-        std::str::from_utf8(bytes).expect("lowercasing ASCII keeps UTF-8")
-    } else {
-        owned = text.to_ascii_lowercase();
-        &owned
-    };
-    HELD.with_borrow_mut(|held| {
-        if let Some(found) = held.get(lower) {
-            return Arc::clone(found);
+
+    #[inline]
+    fn text(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl KeyName for str {
+    fn text(&self) -> &str {
+        self
+    }
+
+    fn lowered_name(&self) -> Name {
+        const STACK: usize = 128;
+        if !self.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            Name::from(self)
+        } else if self.len() <= STACK {
+            let mut stack = [0u8; STACK];
+            let bytes = &mut stack[..self.len()];
+            bytes.copy_from_slice(self.as_bytes());
+            bytes.make_ascii_lowercase();
+            Name::from(std::str::from_utf8(bytes).expect("lowercasing ASCII keeps UTF-8"))
+        } else {
+            Name::from(self.to_ascii_lowercase())
         }
-        let made: Arc<str> = lower.into();
-        held.insert(Arc::clone(&made));
-        made
-    })
+    }
+}
+
+impl KeyName for String {
+    fn lowered_name(&self) -> Name {
+        self.as_str().lowered_name()
+    }
+
+    fn text(&self) -> &str {
+        self
+    }
+}
+
+impl<T: KeyName + ?Sized> KeyName for &T {
+    fn lowered_name(&self) -> Name {
+        (**self).lowered_name()
+    }
+
+    fn text(&self) -> &str {
+        (**self).text()
+    }
+}
+
+/// The names of the methods the analysis asks for by name, interned once.
+pub(crate) struct WellKnownNames {
+    pub(crate) call: Name,
+    pub(crate) call_static: Name,
+    pub(crate) construct: Name,
+    pub(crate) destruct: Name,
+    pub(crate) clone: Name,
+    pub(crate) to_string: Name,
+    pub(crate) get: Name,
+    pub(crate) set: Name,
+    pub(crate) isset: Name,
+    pub(crate) unset: Name,
+    pub(crate) offset_get: Name,
+    pub(crate) offset_set: Name,
+    pub(crate) offset_exists: Name,
+    pub(crate) offset_unset: Name,
+    pub(crate) get_iterator: Name,
+    pub(crate) rewind: Name,
+    pub(crate) valid: Name,
+    pub(crate) current: Name,
+    pub(crate) next: Name,
+    pub(crate) key: Name,
+}
+
+pub(crate) fn well_known() -> &'static WellKnownNames {
+    static NAMES: std::sync::LazyLock<WellKnownNames> = std::sync::LazyLock::new(|| {
+        // Each name's lowercase form is made at once, so a key built from it
+        // finds it.
+        let name = |text: &str| {
+            let name = Name::from(text);
+            name.lowered();
+            name
+        };
+        WellKnownNames {
+            call: name("__call"),
+            call_static: name("__callStatic"),
+            construct: name("__construct"),
+            destruct: name("__destruct"),
+            clone: name("__clone"),
+            to_string: name("__toString"),
+            get: name("__get"),
+            set: name("__set"),
+            isset: name("__isset"),
+            unset: name("__unset"),
+            offset_get: name("offsetGet"),
+            offset_set: name("offsetSet"),
+            offset_exists: name("offsetExists"),
+            offset_unset: name("offsetUnset"),
+            get_iterator: name("getIterator"),
+            rewind: name("rewind"),
+            valid: name("valid"),
+            current: name("current"),
+            next: name("next"),
+            key: name("key"),
+        }
+    });
+    &NAMES
 }
 
 /// The name a hook of the property `property`, its `set` hook when `set`,
@@ -622,10 +720,10 @@ fn hook_member(property: Option<&str>, set: bool) -> String {
 
 /// The declaration of `class`'s hook of `property`, its `set` hook when
 /// `set`.
-fn hook_key(class: &str, property: &str, set: bool) -> DeclKey {
+fn hook_key(class: &(impl KeyName + ?Sized), property: &str, set: bool) -> DeclKey {
     DeclKey::new(
-        Some(lowered_text(class)),
-        hook_member(Some(property), set).into(),
+        Some(class.lowered_name()),
+        Name::from(hook_member(Some(property), set)),
     )
 }
 
@@ -1122,12 +1220,13 @@ fn function_named(registry: &Registry, text: &str) -> Vec<(DeclKey, Transfer)> {
 }
 
 /// The magic method PHP calls for `access` to a property it runs one for.
-fn property_magic_method(access: Access) -> &'static str {
+fn property_magic_method(access: Access) -> &'static Name {
+    let known = well_known();
     match access {
-        Access::Read => "__get",
-        Access::Write => "__set",
-        Access::Isset => "__isset",
-        Access::Unset => "__unset",
+        Access::Read => &known.get,
+        Access::Write => &known.set,
+        Access::Isset => &known.isset,
+        Access::Unset => &known.unset,
     }
 }
 
@@ -1149,12 +1248,13 @@ fn hook_access(operation: &Operation) -> Option<(Option<&Name>, bool, bool)> {
 }
 
 /// The method PHP calls on an `ArrayAccess` for `access` to an element.
-fn element_method(access: Access) -> &'static str {
+fn element_method(access: Access) -> &'static Name {
+    let known = well_known();
     match access {
-        Access::Read => "offsetGet",
-        Access::Write => "offsetSet",
-        Access::Isset => "offsetExists",
-        Access::Unset => "offsetUnset",
+        Access::Read => &known.offset_get,
+        Access::Write => &known.offset_set,
+        Access::Isset => &known.offset_exists,
+        Access::Unset => &known.offset_unset,
     }
 }
 
@@ -1195,18 +1295,25 @@ pub(crate) struct ImplicitKey {
 }
 
 /// Every method PHP may call for `operation` on an object of some class.
-fn implicit_method_names(operation: &Operation) -> Vec<&'static str> {
+fn implicit_method_names(operation: &Operation) -> Vec<&'static Name> {
+    let known = well_known();
     match operation {
         Operation::Property(_, access) => vec![property_magic_method(*access)],
         Operation::Element(access) => vec![element_method(*access)],
-        Operation::String => vec!["__toString"],
-        Operation::Destroy => vec!["__destruct"],
-        Operation::Clone { with: false } => vec!["__clone"],
-        Operation::Clone { with: true } => vec!["__clone", "__set"],
+        Operation::String => vec![&known.to_string],
+        Operation::Destroy => vec![&known.destruct],
+        Operation::Clone { with: false } => vec![&known.clone],
+        Operation::Clone { with: true } => vec![&known.clone, &known.set],
         Operation::Iterate { keys } => {
-            let mut methods = vec!["getIterator", "rewind", "valid", "current", "next"];
+            let mut methods = vec![
+                &known.get_iterator,
+                &known.rewind,
+                &known.valid,
+                &known.current,
+                &known.next,
+            ];
             if *keys {
-                methods.push("key");
+                methods.push(&known.key);
             }
             methods
         }
@@ -1350,19 +1457,17 @@ impl Registry {
 
     pub(crate) fn effect_decl_key(&self, id: &EffectId) -> Option<DeclKey> {
         match id {
-            EffectId::Function(id) => self
-                .function_name_by_id(*id)
-                .map(|name| function_key(name.as_str())),
+            EffectId::Function(id) => self.function_name_by_id(*id).map(function_key),
             EffectId::Method(method) => {
                 let class = self.class_name_by_id(method.class())?;
                 let member = self.member_entry_by_ref(*method)?;
-                Some(method_key(class.as_str(), member.name.as_str()))
+                Some(method_key(class, &member.name))
             }
             EffectId::PropertyHook { property, kind } => {
                 let class_name = self.class_name_by_id(property.class())?;
                 let property = self.property_name_by_ref(*property)?;
                 Some(hook_key(
-                    class_name.as_str(),
+                    class_name,
                     property.as_str(),
                     *kind == PropertyHookKind::Set,
                 ))
@@ -1654,7 +1759,7 @@ impl Registry {
             let key = match self.lookup_method_with_owner(&candidate, method) {
                 Some((owner, sig)) => self.reached(&owner, method, sig),
                 None => match self.lookup_method_with_owner(&candidate, "__call") {
-                    Some((owner, _)) => method_key(&owner, "__call"),
+                    Some((owner, _)) => method_key(&owner, &well_known().call),
                     None => continue,
                 },
             };
@@ -1667,11 +1772,16 @@ impl Registry {
 
     /// The declaration a call to `owner`'s `method` runs: `__call` for a
     /// method only a `@method` tag declares.
-    fn reached(&self, owner: &str, method: &str, sig: &FunctionReflection) -> DeclKey {
+    fn reached(
+        &self,
+        owner: &(impl KeyName + ?Sized),
+        method: &(impl KeyName + ?Sized),
+        sig: &FunctionReflection,
+    ) -> DeclKey {
         if sig.is_magic
-            && let Some((call_owner, _)) = self.lookup_method_with_owner(owner, "__call")
+            && let Some((call_owner, _)) = self.lookup_method_with_owner(owner.text(), "__call")
         {
-            return method_key(&call_owner, "__call");
+            return method_key(&call_owner, &well_known().call);
         }
         method_key(owner, method)
     }
@@ -1870,7 +1980,7 @@ impl Registry {
             .get_or_init(|| {
                 self.classes_declaring("__construct")
                     .filter_map(|class| self.lookup_method_with_owner(class, "__construct"))
-                    .map(|(owner, _)| method_key(&owner, "__construct"))
+                    .map(|(owner, _)| method_key(&owner, &well_known().construct))
                     .collect()
             })
             .clone()
@@ -1975,14 +2085,17 @@ impl Registry {
     fn compute_methods_named(&self, method: &str) -> Vec<DeclKey> {
         let mut out: Vec<DeclKey> = Vec::new();
         let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
+        let method_name = Name::from(method);
         let declaring = self
             .classes_declaring(method)
             .chain(self.builtin_classes_running_code(method))
-            .map(|class| (class, method));
-        let magic = ["__call", "__callStatic"].into_iter().flat_map(|magic| {
-            self.classes_declaring(magic)
-                .map(move |class| (class, magic))
-        });
+            .map(|class| (class, &method_name));
+        let magic = [&well_known().call, &well_known().call_static]
+            .into_iter()
+            .flat_map(|magic| {
+                self.classes_declaring(magic)
+                    .map(move |class| (class, magic))
+            });
         for (class, method) in declaring.chain(magic) {
             if let Some((owner, sig)) = self.lookup_method_with_owner(class, method) {
                 let key = self.reached(&owner, method, sig);
@@ -3011,13 +3124,13 @@ impl Reach<'_> {
                 classes
                     .iter()
                     .filter_map(|class| registry.lookup_method_with_owner(class, "__construct"))
-                    .map(|(owner, _)| (method_key(&owner, "__construct"), Transfer::Made))
+                    .map(|(owner, _)| (method_key(&owner, &well_known().construct), Transfer::Made))
                     .collect()
             }
             Callee::Anonymous(name) => name
                 .as_ref()
                 .and_then(|name| registry.lookup_method_with_owner(name, "__construct"))
-                .map(|(owner, _)| (method_key(&owner, "__construct"), Transfer::Made))
+                .map(|(owner, _)| (method_key(&owner, &well_known().construct), Transfer::Made))
                 .into_iter()
                 .collect(),
             Callee::Value(variable) => {
@@ -3324,8 +3437,9 @@ impl Reach<'_> {
 
     /// The methods PHP calls for `operation` on an object of exactly
     /// `class`.
-    fn implicit_methods(&self, class: &str, operation: &Operation) -> Vec<&'static str> {
+    fn implicit_methods(&self, class: &str, operation: &Operation) -> Vec<&'static Name> {
         let registry = self.registry;
+        let known = well_known();
         match operation {
             Operation::Property(prop, access) => {
                 if registry.property_magic(
@@ -3346,19 +3460,20 @@ impl Reach<'_> {
                     Vec::new()
                 }
             }
-            Operation::String => vec!["__toString"],
-            Operation::Destroy => vec!["__destruct"],
-            Operation::Clone { with: false } => vec!["__clone"],
-            Operation::Clone { with: true } => vec!["__clone", "__set"],
+            Operation::String => vec![&known.to_string],
+            Operation::Destroy => vec![&known.destruct],
+            Operation::Clone { with: false } => vec![&known.clone],
+            Operation::Clone { with: true } => vec![&known.clone, &known.set],
             Operation::Iterate { keys } => {
                 if registry.is_subclass_of(class, "Iterator") {
-                    let mut methods = vec!["rewind", "valid", "current", "next"];
+                    let mut methods =
+                        vec![&known.rewind, &known.valid, &known.current, &known.next];
                     if *keys {
-                        methods.push("key");
+                        methods.push(&known.key);
                     }
                     methods
                 } else if registry.is_subclass_of(class, "IteratorAggregate") {
-                    vec!["getIterator"]
+                    vec![&known.get_iterator]
                 } else {
                     Vec::new()
                 }
@@ -3369,7 +3484,7 @@ impl Reach<'_> {
     /// The declaration PHP runs calling `method` on an object of exactly
     /// `class` itself: none when the class has no body for it, or only a
     /// `@method` tag or an abstract method declares it.
-    fn implicit_method(&self, class: &str, method: &str) -> Option<DeclKey> {
+    fn implicit_method(&self, class: &str, method: &Name) -> Option<DeclKey> {
         let registry = self.registry;
         let (owner, sig) = registry.lookup_method_with_owner(class, method)?;
         let (_, _, info) = registry.class(owner.as_str())?;
@@ -3380,13 +3495,13 @@ impl Reach<'_> {
 
     /// The declaration a call of `method` runs on an object of exactly
     /// `class`: its own, or `__call` when it has none.
-    fn exact_method(&self, class: &str, method: &str) -> Option<DeclKey> {
+    fn exact_method(&self, class: &str, method: &(impl KeyName + ?Sized)) -> Option<DeclKey> {
         let registry = self.registry;
-        match registry.lookup_method_with_owner(class, method) {
+        match registry.lookup_method_with_owner(class, method.text()) {
             Some((owner, sig)) => Some(registry.reached(&owner, method, sig)),
             None => registry
                 .lookup_method_with_owner(class, "__call")
-                .map(|(owner, _)| method_key(&owner, "__call")),
+                .map(|(owner, _)| method_key(&owner, &well_known().call)),
         }
     }
 
@@ -3460,7 +3575,7 @@ impl Reach<'_> {
                     out.push((registry.reached(&owner, method, sig), transfer));
                 }
                 None => {
-                    for magic in ["__callStatic", "__call"] {
+                    for magic in [&well_known().call_static, &well_known().call] {
                         if let Some((owner, _)) = registry.lookup_method_with_owner(target, magic) {
                             out.push((method_key(&owner, magic), Transfer::Static));
                         }
@@ -4715,7 +4830,7 @@ impl<'r> Level<'r> {
                             ));
                         }
                         _ => {
-                            for magic in ["__callStatic", "__call"] {
+                            for magic in [&well_known().call_static, &well_known().call] {
                                 if let Some((owner, sig)) =
                                     registry.lookup_method_with_owner(target, magic)
                                 {
