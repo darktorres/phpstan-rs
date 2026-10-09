@@ -280,6 +280,9 @@ pub enum GraphError {
     EventWithoutOutcome,
     NonMonotoneJoin(u32),
     NonPostFixpoint(u32),
+    InvalidCertificateBlock(u32),
+    CertificateGraphMismatch,
+    CanonicalEncodingFailed,
     ResumeWithoutPendingOutcome,
     InvalidComposedCoverage,
 }
@@ -539,11 +542,63 @@ pub enum Exit<V, S> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum PendingOutcome<V> {
+pub enum PendingOutcome<V> {
     PhpThrow(V),
     NativeUnwind(V),
     Fatal(V),
     Suspended(V),
+}
+
+/// One abstract state entering a graph block, or a transfer result offered to
+/// a successor during evaluator discovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CertifiedFrame<V, S> {
+    pub block: u32,
+    pub state: S,
+    pub results: Vec<(u32, V)>,
+    pub pending: Option<PendingOutcome<V>>,
+}
+
+/// Candidate transfers and the final per-block solution used by a
+/// post-fixpoint containment check. It allows a publication boundary to
+/// recheck recorded candidate containment and graph identity, but does not
+/// independently reconstruct or certify that the candidate list is complete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostFixpointCertificate<V, S> {
+    pub graph_digest: Digest,
+    pub solution: Vec<CertifiedFrame<V, S>>,
+    pub candidates: Vec<CertifiedFrame<V, S>>,
+}
+
+impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
+    pub fn validate<H>(&self, graph: &BehaviorGraph, host: &H) -> Result<(), GraphError>
+    where
+        H: SemanticHost<Value = V, State = S>,
+    {
+        graph.validate()?;
+        let graph_digest = graph
+            .canonical_digest()
+            .map_err(|_| GraphError::CanonicalEncodingFailed)?;
+        if graph_digest != self.graph_digest {
+            return Err(GraphError::CertificateGraphMismatch);
+        }
+        for frame in self.solution.iter().chain(&self.candidates) {
+            if frame.block as usize >= graph.blocks.len() {
+                return Err(GraphError::InvalidCertificateBlock(frame.block));
+            }
+        }
+        for candidate in &self.candidates {
+            let covered = self.solution.iter().any(|record| {
+                record.block == candidate.block
+                    && pending_kind(&record.pending) == pending_kind(&candidate.pending)
+                    && certified_frame_subsumes(host, record, candidate)
+            });
+            if !covered {
+                return Err(GraphError::NonPostFixpoint(candidate.block));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -552,6 +607,7 @@ pub struct Evaluation<V, S> {
     /// Graph-level derivation coverage is returned with execution results so
     /// consumers cannot mistake an empty projection for a closed negative.
     pub coverage: Vec<DomainCoverage>,
+    pub post_fixpoint: PostFixpointCertificate<V, S>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -886,6 +942,39 @@ fn frame_subsumes<H: SemanticHost>(
         })
 }
 
+fn certified_frame_subsumes<H: SemanticHost>(
+    host: &H,
+    broad: &CertifiedFrame<H::Value, H::State>,
+    narrow: &CertifiedFrame<H::Value, H::State>,
+) -> bool {
+    frame_subsumes(
+        host,
+        &Frame {
+            block: broad.block,
+            state: broad.state.clone(),
+            results: broad.results.clone(),
+            pending: broad.pending.clone(),
+            growing_updates: 0,
+        },
+        &Frame {
+            block: narrow.block,
+            state: narrow.state.clone(),
+            results: narrow.results.clone(),
+            pending: narrow.pending.clone(),
+            growing_updates: 0,
+        },
+    )
+}
+
+fn certified_frame<V: Clone, S: Clone>(frame: &Frame<V, S>) -> CertifiedFrame<V, S> {
+    CertifiedFrame {
+        block: frame.block,
+        state: frame.state.clone(),
+        results: frame.results.clone(),
+        pending: frame.pending.clone(),
+    }
+}
+
 fn enqueue<H: SemanticHost>(
     host: &H,
     frame: Frame<H::Value, H::State>,
@@ -943,28 +1032,6 @@ fn enqueue<H: SemanticHost>(
     records[index] = merged;
     if !queue.contains(&index) {
         queue.push(index);
-    }
-    Ok(())
-}
-
-/// Check the evaluator's recorded transfer candidates against the completed
-/// block states. This validation pass is separate from worklist discovery and
-/// join/widen decisions: every candidate must be contained by the final state
-/// for the same block and pending-outcome kind.
-fn validate_post_fixpoint<H: SemanticHost>(
-    host: &H,
-    records: &[Frame<H::Value, H::State>],
-    candidates: &[Frame<H::Value, H::State>],
-) -> Result<(), GraphError> {
-    for candidate in candidates {
-        let covered = records.iter().any(|record| {
-            record.block == candidate.block
-                && pending_kind(&record.pending) == pending_kind(&candidate.pending)
-                && frame_subsumes(host, record, candidate)
-        });
-        if !covered {
-            return Err(GraphError::NonPostFixpoint(candidate.block));
-        }
     }
     Ok(())
 }
@@ -1328,7 +1395,14 @@ pub fn evaluate<H: SemanticHost>(
             }
         }
     }
-    validate_post_fixpoint(host, &records, &transfer_candidates)?;
+    let post_fixpoint = PostFixpointCertificate {
+        graph_digest: graph
+            .canonical_digest()
+            .map_err(|_| GraphError::CanonicalEncodingFailed)?,
+        solution: records.iter().map(certified_frame).collect(),
+        candidates: transfer_candidates.iter().map(certified_frame).collect(),
+    };
+    post_fixpoint.validate(graph, host)?;
     if evaluation_precision != Precision::Exact {
         for item in &mut evaluation_coverage {
             if !matches!(item.coverage, Coverage::NotApplicable) {
@@ -1341,6 +1415,7 @@ pub fn evaluate<H: SemanticHost>(
     Ok(Evaluation {
         exits,
         coverage: evaluation_coverage,
+        post_fixpoint,
     })
 }
 
@@ -1610,6 +1685,17 @@ mod tests {
             entry: 0,
             blocks: vec![Block::new(events, terminator)],
             coverage: coverage_for(&applicable),
+        }
+    }
+    fn test_certificate(
+        graph: &BehaviorGraph,
+        solution: Vec<Frame<String, Vec<String>>>,
+        candidates: Vec<Frame<String, Vec<String>>>,
+    ) -> PostFixpointCertificate<String, Vec<String>> {
+        PostFixpointCertificate {
+            graph_digest: graph.canonical_digest().unwrap(),
+            solution: solution.iter().map(certified_frame).collect(),
+            candidates: candidates.iter().map(certified_frame).collect(),
         }
     }
     fn coverage_for(applicable: &[Domain]) -> Vec<DomainCoverage> {
@@ -2346,6 +2432,7 @@ mod tests {
     #[test]
     fn post_fixpoint_validator_rejects_a_dropped_transfer_candidate() {
         let host = Host::default();
+        let graph = graph(vec![], Terminator::Return(None));
         let candidate = Frame {
             block: 0,
             state: vec!["write".into()],
@@ -2361,14 +2448,58 @@ mod tests {
             growing_updates: 0,
         };
         assert_eq!(
-            validate_post_fixpoint(&host, &[incomplete_solution], &[candidate]),
+            test_certificate(&graph, vec![incomplete_solution], vec![candidate])
+                .validate(&graph, &host),
             Err(GraphError::NonPostFixpoint(0))
+        );
+    }
+
+    #[test]
+    fn published_post_fixpoint_certificate_is_revalidatable_and_graph_bound() {
+        let graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Write {
+                        storage: Operand::Argument(0),
+                        value: Operand::Literal(Bytes(b"write".to_vec())),
+                    }],
+                    Terminator::Goto(1),
+                ),
+                Block::new(vec![], Terminator::Return(None)),
+            ],
+            coverage: coverage_for(&[Domain::UserWrite, Domain::Return]),
+        };
+        let mut host = Host::default();
+        let result = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        result.post_fixpoint.validate(&graph, &host).unwrap();
+
+        let mut incomplete = result.post_fixpoint.clone();
+        incomplete
+            .solution
+            .iter_mut()
+            .find(|frame| frame.block == 1)
+            .unwrap()
+            .state
+            .clear();
+        assert_eq!(
+            incomplete.validate(&graph, &host),
+            Err(GraphError::NonPostFixpoint(1))
+        );
+
+        let mut changed_graph = graph.clone();
+        changed_graph.blocks[0].events.clear();
+        assert_eq!(
+            result.post_fixpoint.validate(&changed_graph, &host),
+            Err(GraphError::CertificateGraphMismatch)
         );
     }
 
     #[test]
     fn post_fixpoint_validator_rejects_a_dropped_result_or_pending_throw() {
         let host = Host::default();
+        let graph = graph(vec![], Terminator::Return(None));
         let empty_solution = Frame {
             block: 0,
             state: vec![],
@@ -2384,7 +2515,8 @@ mod tests {
             growing_updates: 0,
         };
         assert_eq!(
-            validate_post_fixpoint(&host, &[empty_solution.clone()], &[result_candidate]),
+            test_certificate(&graph, vec![empty_solution.clone()], vec![result_candidate])
+                .validate(&graph, &host),
             Err(GraphError::NonPostFixpoint(0))
         );
         let throw_candidate = Frame {
@@ -2395,7 +2527,8 @@ mod tests {
             growing_updates: 0,
         };
         assert_eq!(
-            validate_post_fixpoint(&host, &[empty_solution], &[throw_candidate]),
+            test_certificate(&graph, vec![empty_solution], vec![throw_candidate])
+                .validate(&graph, &host),
             Err(GraphError::NonPostFixpoint(0))
         );
     }

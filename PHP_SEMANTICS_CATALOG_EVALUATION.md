@@ -11,7 +11,7 @@ Phase F implementation is now underway. A checker-independent
 `crates/php-semantics` seed contains schema v3 graph/event/domain-coverage types,
 per-domain dependency lists, separate precision and assumption fields, canonical SHA-256 graph identities,
 explicit base64 JSON encoding with binary round trips, and an evaluator with
-explicit exceptional continuations and host-supplied joins/widening. Forty-six
+explicit exceptional continuations and host-supplied joins/widening. Forty-seven
 tests exercise
 callback result propagation, write-before-callback order, callback throw
 skipping later events, disjunctive normal/throw outcomes, pending-throw
@@ -24,9 +24,12 @@ and loop convergence. The evaluator rejects host join or widening results
 that fail to subsume both incoming states/results; state-loss, result-loss,
 and widening-loss fixtures cover that guard. A post-worklist validation pass
 checks that each recorded transfer candidate is covered by the completed
-block solution; dropped state, result, and pending-throw candidates are
-rejected as non-post-fixpoints. This validates the discovery run's recorded transfers, not an
-independent re-execution of transfer semantics from a persisted certificate.
+block solution. The returned certificate binds to the canonical graph digest
+and can be revalidated at a publication boundary; fixtures reject a dropped
+state, result, or pending-throw candidate and reject reuse with a changed
+graph. It checks the discovery run's recorded candidates; it neither proves
+candidate-list completeness nor independently re-executes transfer semantics
+from a persisted certificate.
 Domain projections now include transitive coverage
 dependencies, validation rejects closed domains that depend on open domains or
 on uncertified closed cycles, and evaluation propagates open child domains
@@ -127,8 +130,8 @@ so it does not close F00 or substitute for independent review.
 
 | Gate | Evidence established | Remaining evaluation before closure |
 |---|---|---|
-| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. A post-worklist check now rejects recorded transfer candidates omitted by the completed block solution. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; add an independent persisted-certificate traversal that reapplies transfers. |
-| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, and post-worklist candidate containment validation are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and an independent persisted-certificate post-fixpoint validator. |
+| F00 — semantic contract | Ordered callback/write/throw/cleanup behavior is exercised in graph and CBMC reference fixtures; graph assumptions, coverage, precision, and open-domain reasons are explicit. A working contract draft maps invalid compositions to tests, including state-sensitive post-invocation predicates. A graph-bound certificate can be revalidated and rejects omitted recorded transfer states, results, and pending outcomes. | Obtain independent review of observable traces, abstract order, boundary assumptions, and return refinement. Add predicate/join, dropped-effect, incomplete-projection, and mismatched-target counterexamples; validate transfer-list completeness by independently replaying a persisted certificate. |
+| F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, and graph-bound candidate containment validation are implemented. Missing, partial, or duplicate invocation coverage is rejected. | Review the reference contract fixtures against the written contract; add branching callback cases; replace the toy host with calibrated domains and an independent persisted-certificate post-fixpoint validator. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` return rule carries the pinned source-file digest and source site. | Complete configured implicit-operation mapping for the locked slice; connect actual imported source/layout metadata and witnesses to graph entries. The checked-in `strlen()` rule is manually encoded and does not close this linkage. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. | Reduce/fix pointer misses, implement demand summaries and Zend bridge, implement coverage-aware pointer consumption/fallback tracking, and validate source-derived closed graphs with an independent post-fixpoint checker. No native summary has passed this gate. |
 | F04 — PhpFlowIR/value domain | Seed PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, and preserve object identity. | Implement PhpFlowIR and compose it with references, callbacks, exceptional state, and relevant alias/value products; test callback exception-state behavior through that IR. |
