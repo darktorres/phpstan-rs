@@ -189,6 +189,16 @@ impl<'a> Checker<'a> {
         let max = if variadic { None } else { Some(params.len()) };
         let supports =
             |feature: PhpFeature| self.registry.php_supports_everywhere(feature) != Some(false);
+        // The catalog's `strlen` return transfer is only valid after PHP's
+        // own weak parser has accepted the value. Weak-mode Stringable is
+        // accepted by zend_parse_arg_str_weak; strict mode exits before the
+        // cast callback, so keep the ordinary string-only type check there.
+        let weak_strlen_string_coercion = is_builtin
+            && sig.is_stub()
+            && matches!(callee, Callee::Function(name) if name.eq_ignore_ascii_case("strlen"))
+            && self.syntax_tree_owner().and_then(|owner| {
+                crate::checker::keywords::strict_types_mode(arenas, owner.statements())
+            }) == Some(false);
         let named_after_unpack = supports(PhpFeature::NamedArgumentAfterUnpackedArgument);
         let named_supported = supports(PhpFeature::NamedArguments);
 
@@ -310,7 +320,20 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
             };
-            if let Some(from) = self.rejected_from(&param_ty, &arg_ty) {
+            let stringable_accepted = weak_strlen_string_coercion
+                && arg_ty.union_members().iter().all(|member| {
+                    let relation = self.relation();
+                    relation.is_super_type_of(&param_ty, member).yes()
+                        || relation
+                            .is_super_type_of(
+                                &Type::object("Stringable".into(), Vec::new()),
+                                member,
+                            )
+                            .yes()
+                });
+            if let Some(from) = self.rejected_from(&param_ty, &arg_ty)
+                && !stringable_accepted
+            {
                 let position = match &argument.name {
                     Some(name) => Position::Name(name),
                     None => Position::Index(i + 1),

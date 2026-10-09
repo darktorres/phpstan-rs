@@ -373,6 +373,43 @@ fn collect_declares(arenas: &NodeArenas, program: &[StmtId]) -> Vec<(StmtId, boo
     declares.out
 }
 
+/// The file's call-site scalar strictness, read from the leading file-level
+/// `declare` statements. `None` means a directive in that prefix is malformed
+/// or misplaced, so callers must avoid using it to narrow runtime behavior.
+/// An absent directive is PHP's weak mode; other misplaced directives are
+/// diagnosed by `check_declare_directives`.
+pub(crate) fn strict_types_mode(arenas: &NodeArenas, program: &[StmtId]) -> Option<bool> {
+    let mut mode = None;
+    for (index, id) in program.iter().enumerate() {
+        let is_first = index == 0;
+        let stmt = arenas.stmt(*id)?;
+        let StmtKind::Declare { directives, body } = &stmt.kind else {
+            break;
+        };
+        for directive in arenas.declare_directives(directives.clone()) {
+            if !directive.name.eq_ignore_ascii_case("strict_types") {
+                continue;
+            }
+            if !is_first || body.is_some() || mode.is_some() {
+                return None;
+            }
+            let value = arenas.expr(directive.value)?;
+            let ExprKind::Literal(Literal::Int(value)) = value.kind else {
+                return None;
+            };
+            match value {
+                0 => mode = Some(false),
+                1 => mode = Some(true),
+                _ => return None,
+            }
+        }
+        if body.is_some() {
+            break;
+        }
+    }
+    Some(mode.unwrap_or(false))
+}
+
 fn describe_literal(arenas: &NodeArenas, id: ExprId) -> String {
     let Some(value) = arenas.expr(id) else {
         return "an expression".to_string();

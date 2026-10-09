@@ -1,0 +1,1 @@
+6:19-6:25 argument.type L5 | Parameter #1 $string of function strlen expects string, Stringable given.
