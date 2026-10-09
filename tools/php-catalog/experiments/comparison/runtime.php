@@ -49,6 +49,18 @@ $stringable = new class($coercions) implements Stringable {
     public function __toString(): string { ++$this->calls; return 'abc'; }
 };
 ensure(strlen($stringable) === 3 && $coercions === 1, 'string-coercion-callback');
+$castEvents = [];
+$throwingStringable = new class($castEvents) implements Stringable {
+    private array $events;
+    public function __construct(array &$events) { $this->events =& $events; }
+    public function __toString(): string {
+        $this->events[] = 'cast';
+        throw new RuntimeException('cast');
+    }
+};
+try { strlen($throwingStringable); }
+catch (RuntimeException $e) { $castEvents[] = 'caught'; }
+ensure($castEvents === ['cast', 'caught'], 'string-coercion-throw');
 final class ProbeStream {
     public $context;
     public static array $events = [];

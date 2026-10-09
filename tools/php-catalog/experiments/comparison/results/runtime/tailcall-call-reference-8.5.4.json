@@ -2,9 +2,9 @@
   "source_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
   "fixture": {
     "path": "tools/php-catalog/experiments/comparison/runtime.php",
-    "sha256": "2d54dbe713fa3ec157191c41f1eed2ad157bdcd1f15079c9518e5b2c2449569e",
+    "sha256": "94dc6509e0a164088c6092d68e48b4daee006e109c1ee459ae26e63dee50ca64",
     "command": "php -n runtime.php",
-    "sentinels_passed": 15,
+    "sentinels_passed": 16,
     "sentinels": [
       "empty-map",
       "null-map",
@@ -18,13 +18,14 @@
       "array-ref-copy-normal-callback",
       "array-ref-copy-throw-cleanup",
       "string-coercion-callback",
+      "string-coercion-throw",
       "stream-read-result",
       "stream-wrapper-dispatch",
       "retained-session-callbacks"
     ],
     "tailcall_output": "tools/php-catalog/experiments/comparison/results/runtime/php-tailcall-reference.out",
     "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-reference.out",
-    "output_sha256": "99f1940149f9d1c1db591b584669db89ec0d8c990a8d9b3ade27a3266e817912"
+    "output_sha256": "147bcbcdae2a01baf452749ab78390f8824bf4e22ce92d95d346a5e245afb2b3"
   },
   "profiles": {
     "tailcall": {
@@ -61,7 +62,7 @@
   "result": {
     "exit_code": 0,
     "output_files_identical": true,
-    "runtime_php_sentinels_passed": 15,
+    "runtime_php_sentinels_passed": 16,
     "runtime_php_sentinels": [
       "empty-map",
       "null-map",
@@ -75,6 +76,7 @@
       "array-ref-copy-normal-callback",
       "array-ref-copy-throw-cleanup",
       "string-coercion-callback",
+      "string-coercion-throw",
       "stream-read-result",
       "stream-wrapper-dispatch",
       "retained-session-callbacks"

@@ -132,7 +132,8 @@ concrete F05 progress, but it does not satisfy the full C24/C25 architecture
 or eliminate legacy effect handling. A direct sentinel on the normal PHP
 8.5.4 runtime returns `0`, `3`, and `2` for `strlen("")`, `strlen("abc")`,
 and `strlen("é")`, respectively, confirming byte-length behavior. This is
-confirmed again in the 15-sentinel Hybrid/CALL comparison below.
+confirmed in the 13-sentinel Hybrid/CALL comparison below and in the separate
+16-sentinel TAILCALL/CALL reference run.
 
 An October 9, 2026 comparison runs the same 13 positive PHP sentinels on
 PHP 8.5.4 Hybrid and CALL runtimes. GCC 15.2.0 and `-O0 -g` match. The CALL
@@ -147,22 +148,24 @@ Earlier builds without the VM-compatible global-register setting failed at
 handler signatures, which identified the required configuration. This is
 behavioral evidence for these positive cases, including direct/indirect
 `strlen()`, callback order, throw-state retention, references, coercion, stream
-dispatch, and retained session callbacks. It does not prove equivalence for
-unobserved behaviors or close the native source-to-graph linkage obligations.
+and retained session callbacks. It does not prove equivalence for unobserved
+behaviors or close the native source-to-graph linkage obligations.
 
-A separate reference run exercises the current 15-case runtime fixture on the
+A separate reference run exercises the current 16-case runtime fixture on the
 hash-recorded PHP 8.5.4 TAILCALL and CALL profiles. Both outputs match and
 include copied-array reference writes on normal callback return and during
-`finally` before a pending throw resumes. The source, profile, binary, and
+`finally` before a pending throw resumes, plus a `Stringable::__toString()`
+write followed by a thrown exception that remains visible to the catch block. The source, profile, binary, and
 output hashes are recorded in
 [`tailcall-call-reference-8.5.4.json`](tools/php-catalog/experiments/comparison/results/runtime/tailcall-call-reference-8.5.4.json);
 the exact VM kinds and binary hashes are cross-checked against
 [`profiles.json`](tools/php-catalog/experiments/comparison/results/runtime/profiles.json).
 
-The latest full run on October 9, 2026 (`cargo test -p phpstan-rs -p
-phpstan-rs-types -p phpstan-rs-semantics`) passes, including 1,201 checker
+An earlier recorded full run on October 9, 2026 (`cargo test -p phpstan-rs -p
+phpstan-rs-types -p phpstan-rs-semantics`) passed, including 1,201 checker
 library tests, 3 checker binary tests, 45 CLI tests, 286 type tests, and 41
-semantic tests. The separate catalog fixture runs also pass for exact-patch
+semantic tests. The current updated semantic suite has 58 tests; this turn reran
+that suite and the targeted checker catalog test. The separate catalog fixture runs also pass for exact-patch
 literal refinement and minor-range fallback. The run includes joined/widened
 precision propagation, exact `8.5.4` config and CLI acceptance, registry target
 conversion, and canonical identity separation across patches. Semantic
@@ -204,7 +207,7 @@ so it does not close F00 or substitute for independent review.
 | F01 — graph/evaluator | Versioned graph/evidence schema, canonical digests, domain coverage/dependency checks, rejection of not-applicable reachable or composed invocation domains, explicit PHP/native exceptional outcomes, cleanup continuations, worklist convergence with join/widen precision propagation, child-coverage propagation, closed dependency-cycle rejection, graph-bound candidate containment plus persisted transfer/exit/coverage replay, and fail-closed handling of result IDs defined on only some predecessor paths are implemented. Missing, partial, or duplicate invocation coverage is rejected. A PHP-host regression sends distinct normal callback results and writes through a CFG join and verifies both become unknown. | Review the reference contract fixtures against the written contract; add broader branch/callback combinations; replace the toy host with calibrated domains and validate host transfer behavior against source-derived fixtures. |
 | F02 — compiler/source slice | Pinned PHP 8.5.4 source, LLVM import/link/inventory, Clang/GCC/CIR campaigns, indirect-call witnesses, and a reproducible 13-sentinel Hybrid-vs-CALL comparison are recorded. The comparison uses matched GCC/`-O0 -g` settings; CALL disables GCC global-register variables for its handler ABI and disables an unused JIT build feature. The embedded `strlen()` Return domain cites pinned `zend_builtin_functions.c`, `_zend_string` layout, `zend_API.c`, and a validated Clang 21.1.8 module witness: both `Z_PARAM_STR` helper destinations are traced to the local string slot consumed by the length load. The weak parser’s scalar conversion, nullable diagnostic, indirect object cast callback, and object release are recorded as configured operations, while their domains remain open. | This is still one manually translated closed Return slice. The evidence establishes identities and data flow, not PHP coercion or diagnostic semantics, effect/exception behavior, nor broader graph correspondence to LLVM. |
 | F03 — native summaries/pointer reuse | Full-link stock and compact SVF resource failures are measured; reduced SVF copy/initializer counterexamples and native runtime witnesses exist. The `strlen` bridge now connects pinned Zend layout and parser source through linked LLVM pointer flow to the graph transfer. It does not solve native memory or interprocedural summaries. | Implement demand summaries, coverage-aware pointer consumption/fallback tracking, and validate source-derived closed native graphs with an independent post-fixpoint checker. No native demand summary has passed this gate. |
-| F04 — PhpFlowIR/value domain | **Phase F minimum fixture set complete.** PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and execute array copy/mutation/read plus object assignment through graph instructions. A copied array containing a reference observes callback writes on normal return and cleanup-resumed throw paths (58 semantic tests); matching PHP 8.5.4 TAILCALL/CALL reference sentinels confirm both traces. Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | No remaining Phase F fixture is identified. Broader key coercion, object properties, and syntax-to-flow lowering remain C22 phase work. |
+| F04 — PhpFlowIR/value domain | **Phase F minimum fixture set complete.** PHP values distinguish unknown/null, copy arrays, preserve nested reference cells, preserve object identity, cover alias rebinding/unset, and execute array copy/mutation/read plus object assignment through graph instructions. A copied array containing a reference observes callback writes on normal return and cleanup-resumed throw paths (58 semantic tests); matching PHP 8.5.4 TAILCALL/CALL reference sentinels confirm both traces. A runtime sentinel also verifies that a `Stringable::__toString()` state write remains visible when conversion throws through `strlen()`. Missing array keys retain open normal/throw/fatal outcomes. Unknown callbacks retain five exit kinds, havoc tracked state, and open every effect domain. | No remaining Phase F fixture is identified. Broader key coercion, object properties, and syntax-to-flow lowering remain C22 phase work. |
 | F05 — checker/targets | Catalog selection handles exact and partially known correlated target scenarios; manifests can be validated and installed from JSON; exact patch ranges flow through project settings. An embedded exact-8.5.4 `strlen()` graph is loaded and executed at the builtin return-inference call site; fixtures prove exact literal refinement and conservative fallback on an 8.5 minor range. Non-return domains stay open, and target selection requires definite full coverage. | Replace the manual rule with compiler/source-derived graph data; execute whole relevant behavior through a stateful `SemanticHost`; preserve ordered callback/write/throw state and apply outcomes once across checker consumers; include platform/profile configuration and verify uncovered behavior end to end. |
 | F06 — producer/solver decision | Comparative producer/compiler results and full-profile SVF resource failures rule out stock/layout-only SVF as mandatory whole-profile prerequisites; LLVM plus source metadata remains the initial producer. | Implement useful closed summaries, compare regional and audited pointer-service alternatives on the same slice, measure graph growth/RSS/runtime/checker cost, calibrate defaults, and record a final solver decision. No production solver is accepted. |
 

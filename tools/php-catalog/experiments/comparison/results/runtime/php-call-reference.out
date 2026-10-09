@@ -10,6 +10,7 @@ shared-reference-cell
 array-ref-copy-normal-callback
 array-ref-copy-throw-cleanup
 string-coercion-callback
+string-coercion-throw
 stream-read-result
 stream-wrapper-dispatch
 retained-session-callbacks
