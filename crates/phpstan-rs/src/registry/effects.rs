@@ -1449,9 +1449,8 @@ impl Registry {
     }
 
     /// The settled effect of the declaration `key`, when the pass found one.
-    fn settled_of(&self, key: &DeclKey) -> Option<&Settled> {
-        self.effects
-            .get(self.reach_memo.effects.id(self.effect_ix(key)))
+    fn settled_of(&self, ix: EffectIx) -> Option<&Settled> {
+        self.effects.get(self.reach_memo.effects.id(ix))
     }
 
     pub(crate) fn effect_id_for(&self, key: &DeclKey) -> EffectId {
@@ -1662,7 +1661,7 @@ impl Registry {
                 EffectId::File(_) => Settled::of(Effect::anything()),
                 id => registry.effect_decl_key(id).map_or_else(
                     || Settled::of(Effect::unknown()),
-                    |key| Settled::of(registry.declaration_effect(&key)),
+                    |_| Settled::of(registry.declaration_effect(ix)),
                 ),
             }
         });
@@ -1675,7 +1674,8 @@ impl Registry {
     /// What a declaration with no body at hand may write: a stub's by its
     /// parameters, an abstract method or an interface's nothing (it never
     /// runs), anything else's anything.
-    fn declaration_effect(&self, key: &DeclKey) -> Effect {
+    fn declaration_effect(&self, ix: EffectIx) -> Effect {
+        let key = self.effect_key(ix);
         match &key.class {
             Some(class) => {
                 if self.class(class).is_none() {
@@ -1685,7 +1685,7 @@ impl Registry {
                     return Effect::anything();
                 };
                 if sig.is_stub {
-                    self.stub_effect(key, sig)
+                    self.stub_effect(ix, sig)
                 } else if never_runs(self, class, &key.member, sig) {
                     Effect::nothing()
                 } else {
@@ -1693,7 +1693,7 @@ impl Registry {
                 }
             }
             None => match self.lookup_function(&key.member) {
-                Some(sig) if sig.is_stub => self.stub_effect(key, sig),
+                Some(sig) if sig.is_stub => self.stub_effect(ix, sig),
                 _ => Effect::anything(),
             },
         }
@@ -1701,18 +1701,28 @@ impl Registry {
 
     /// What a call to the declaration `key` may write, as settled.
     fn settled(&self, key: &DeclKey) -> Settled {
-        match self.settled_of(key) {
+        self.settled_by_ix(self.effect_ix(key))
+    }
+
+    /// `settled` for the declaration `ix` stands for.
+    fn settled_by_ix(&self, ix: EffectIx) -> Settled {
+        match self.settled_of(ix) {
             Some(settled) => settled.clone(),
-            None => Settled::of(self.declaration_effect(key)),
+            None => Settled::of(self.declaration_effect(ix)),
         }
     }
 
     /// What a call to the declaration `key` whose arguments are not known
     /// may write, as settled.
     fn settled_effect(&self, key: &DeclKey) -> Effect {
-        match self.settled_of(key) {
+        self.settled_effect_by_ix(self.effect_ix(key))
+    }
+
+    /// `settled_effect` for the declaration `ix` stands for.
+    fn settled_effect_by_ix(&self, ix: EffectIx) -> Effect {
+        match self.settled_of(ix) {
             Some(settled) => settled.unconditional(),
-            None => self.declaration_effect(key),
+            None => self.declaration_effect(ix),
         }
     }
 
@@ -1976,12 +1986,12 @@ impl Registry {
     /// (`CODE_RUNNING_PARAMETER_TYPES`); for a stub no call of which was
     /// seen, nothing when its doc declares it pure and it takes no code;
     /// anything otherwise.
-    fn stub_effect(&self, key: &DeclKey, sig: &FunctionReflection) -> Effect {
+    fn stub_effect(&self, ix: EffectIx, sig: &FunctionReflection) -> Effect {
         let runs_code = self
             .stub_effect_results
-            .get(self.reach_memo.effects.id(self.effect_ix(key)))
+            .get(self.reach_memo.effects.id(ix))
             .copied()
-            .unwrap_or_else(|| self.stub_runs_code(key, sig));
+            .unwrap_or_else(|| self.stub_runs_code(self.effect_key(ix), sig));
         if runs_code {
             Effect::unknown()
         } else {
@@ -2264,7 +2274,7 @@ impl Registry {
                     continue;
                 };
                 if self
-                    .stub_effect(&method_key(&owner, method), sig)
+                    .stub_effect(self.effect_ix(&method_key(&owner, method)), sig)
                     .is_anything()
                 {
                     let owners = names.entry(method.to_ascii_lowercase()).or_default();
@@ -4072,7 +4082,7 @@ impl Registry {
                     None => return Effect::unknown(),
                 },
                 None => {
-                    let settled = self.settled(key);
+                    let settled = self.settled_by_ix(ix);
                     effect.join_transferred(&settled.effect, transfer);
                     let mut runs = Vec::new();
                     for condition in &settled.runs {
