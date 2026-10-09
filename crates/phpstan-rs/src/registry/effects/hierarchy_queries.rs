@@ -72,7 +72,13 @@ fn implicit(registry: &Registry, holder: &Holder, operation: &Operation) -> Vec<
     let (mut found, mut expected) = (TargetSet::default(), Vec::new());
     reach.implicit_targets(holder, false, operation, &mut found, &mut Vec::new());
     reach.reference_implicit_targets(holder, false, operation, &mut expected, &mut Vec::new());
-    let (found, expected) = (target_names(found.into_vec()), target_names(expected));
+    let found = found.into_vec().into_iter().map(|(ix, transfer)| {
+        (
+            registry.effect_key(ix).clone(),
+            registry.transfer_of(transfer).clone(),
+        )
+    });
+    let (found, expected) = (target_names(found), target_names(expected));
     assert_eq!(found, expected);
     found
 }
@@ -368,8 +374,9 @@ fn an_operation_on_classes_reaches_the_hooks_of_each_class_and_those_below() {
 
 #[test]
 fn a_target_set_keeps_each_target_once_in_the_order_added() {
+    let registry = registry(SHAPES);
     let mut set = TargetSet::default();
-    let mut expected: Vec<(DeclKey, Transfer)> = Vec::new();
+    let mut expected: Vec<Run> = Vec::new();
     for round in 0..3 {
         for n in 0..40 {
             let key = method_key(&Name::from(format!("C{n}")), "m");
@@ -378,14 +385,15 @@ fn a_target_set_keeps_each_target_once_in_the_order_added() {
             } else {
                 Transfer::Other(None)
             };
-            set.push(key.clone(), transfer.clone());
+            let run = registry.effect_run(&key, &transfer);
+            set.push(run);
             if round == 0 {
-                expected.push((key, transfer));
+                expected.push(run);
             }
         }
     }
     // A name in another case is the same declaration.
-    set.push(method_key(&Name::from("c1"), "M"), Transfer::Other(None));
+    set.push(registry.effect_run(&method_key(&Name::from("c1"), "M"), &Transfer::Other(None)));
     assert_eq!(set.into_vec(), expected);
 }
 
@@ -405,4 +413,62 @@ fn an_answer_is_computed_once_and_dropped_when_the_graph_can_change() {
     let second = registry.implementations("Shape", "area");
     assert!(!Arc::ptr_eq(&first, &second));
     assert_eq!(*first, *second);
+}
+
+#[test]
+fn the_memos_by_handle_hold_the_same_declarations_in_the_same_order() {
+    let registry = registry(GRAPH);
+    let keys = |ixs: Arc<[EffectIx]>| -> Vec<DeclKey> {
+        ixs.iter()
+            .map(|ix| registry.effect_key(*ix).clone())
+            .collect()
+    };
+    let reach = Reach {
+        registry: &registry,
+        ctx: &NoContext,
+    };
+    for (class, method) in [
+        ("Root", "root"),
+        ("Both", "root"),
+        ("Greeter", "greet"),
+        ("Tagged", "ghost"),
+        ("MIXED_CASE", "DOTHING"),
+        ("Missing", "root"),
+    ] {
+        assert_eq!(
+            keys(registry.implementation_ixs(class, method)),
+            registry.implementations(class, method).to_vec(),
+            "{class}::{method}"
+        );
+    }
+    for method in ["root", "GHOST", "dothing", "missing"] {
+        assert_eq!(
+            keys(registry.methods_named_ixs(method)),
+            registry.methods_named(method).to_vec(),
+            "{method}"
+        );
+    }
+    for class in ["Both", "Root", "Greeter", "Row", "Missing"] {
+        assert_eq!(
+            keys(reach.every_method_ixs(class)),
+            reach.every_method(class).to_vec(),
+            "{class}"
+        );
+    }
+}
+
+#[test]
+fn a_handle_gives_back_its_declaration_and_whether_it_is_a_builtin() {
+    let registry = registry(GRAPH);
+    let user = method_key(&Name::from("Both"), "root");
+    let stub = method_key(&Name::from("ArrayObject"), "count");
+    for key in [&user, &stub] {
+        let ix = registry.effect_ix(key);
+        assert_eq!(registry.effect_key(ix), key);
+        assert_eq!(registry.effect_ix(key), ix);
+        assert_eq!(
+            registry.builtin_of(ix).is_some(),
+            registry.builtin(key).is_some()
+        );
+    }
 }

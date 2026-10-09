@@ -5,13 +5,13 @@
 //! threads first ask for a value. Nothing may depend on the number a handle
 //! holds, only on which value it stands for.
 
-use std::sync::{Mutex, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::hash::BuildHasher;
 use syntax::name::Name;
 
-use super::effects::{EffectId, Transfer};
+use super::effects::{DeclKey, EffectId, Transfer};
 
 const SHARDS: usize = 16;
 
@@ -43,24 +43,33 @@ impl TransferIx {
     }
 }
 
+/// What the table keeps for a handle: its id, the declaration it was first
+/// asked for, and whether that declaration is a builtin's, found once.
+struct Entry {
+    id: EffectId,
+    key: DeclKey,
+    builtin: OnceLock<bool>,
+}
+
 /// The effect ids met so far, each once, with the handle it stands for.
 pub(crate) struct EffectTable {
     index: [Mutex<FxHashMap<EffectId, EffectIx>>; SHARDS],
-    ids: boxcar::Vec<EffectId>,
+    entries: boxcar::Vec<Entry>,
 }
 
 impl Default for EffectTable {
     fn default() -> Self {
         Self {
             index: std::array::from_fn(|_| Mutex::new(FxHashMap::default())),
-            ids: boxcar::Vec::new(),
+            entries: boxcar::Vec::new(),
         }
     }
 }
 
 impl EffectTable {
-    /// The handle of `id`, given out the first time it is asked for.
-    pub(crate) fn intern(&self, id: &EffectId) -> EffectIx {
+    /// The handle of `id`, which `key` stands for, given out the first time
+    /// it is asked for.
+    pub(crate) fn intern(&self, id: &EffectId, key: &DeclKey) -> EffectIx {
         let shard = FxBuildHasher.hash_one(id) as usize % SHARDS;
         let mut map = self.index[shard]
             .lock()
@@ -68,7 +77,11 @@ impl EffectTable {
         if let Some(found) = map.get(id) {
             return *found;
         }
-        let at = self.ids.push(id.clone()) as u32;
+        let at = self.entries.push(Entry {
+            id: id.clone(),
+            key: key.clone(),
+            builtin: OnceLock::new(),
+        }) as u32;
         debug_assert!(at & EffectIx::CLOSURE == 0);
         let ix = EffectIx(if id.is_closure() {
             at | EffectIx::CLOSURE
@@ -81,12 +94,23 @@ impl EffectTable {
 
     /// The id `ix` stands for.
     pub(crate) fn id(&self, ix: EffectIx) -> &EffectId {
-        &self.ids[ix.index()]
+        &self.entries[ix.index()].id
+    }
+
+    /// The declaration `ix` was first asked for.
+    pub(crate) fn key(&self, ix: EffectIx) -> &DeclKey {
+        &self.entries[ix.index()].key
+    }
+
+    /// Whether the declaration `ix` stands for is a builtin's, from
+    /// `compute` the first time it is asked.
+    pub(crate) fn is_builtin(&self, ix: EffectIx, compute: impl FnOnce() -> bool) -> bool {
+        *self.entries[ix.index()].builtin.get_or_init(compute)
     }
 
     /// How many handles have been given out.
     pub(crate) fn len(&self) -> usize {
-        self.ids.count()
+        self.entries.count()
     }
 }
 

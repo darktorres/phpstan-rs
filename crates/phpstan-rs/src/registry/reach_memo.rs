@@ -11,7 +11,8 @@ use syntax::name::Name;
 
 use super::effect_table::{EffectIx, EffectTable, TransferTable};
 use super::effects::{
-    BuiltinBase, DeclKey, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Transfer,
+    BuiltinBase, DeclKey, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Run,
+    Transfer,
 };
 
 const SHARDS: usize = 16;
@@ -116,7 +117,7 @@ pub(crate) enum StaticTarget {
 
 /// The declarations a call runs, each with its transfer, shared by the
 /// calls that ask the same.
-pub(crate) type SharedTargets = Arc<[(DeclKey, Transfer)]>;
+pub(crate) type SharedTargets = Arc<[Run]>;
 
 impl ReachMemo {
     /// Replaces the memo with an empty one. A memo that holds the answers
@@ -143,6 +144,10 @@ pub(crate) struct ReachMemo {
     pub(crate) descendants: OnceMap<(Name, bool), Arc<[Name]>>,
     pub(crate) implementations: OnceMap<(Name, Name), Arc<[DeclKey]>>,
     pub(crate) every_method: OnceMap<Name, Arc<[DeclKey]>>,
+    /// The same three, by handle.
+    pub(crate) implementation_ixs: OnceMap<(Name, Name), Arc<[EffectIx]>>,
+    pub(crate) every_method_ixs: OnceMap<Name, Arc<[EffectIx]>>,
+    pub(crate) methods_named_ixs: OnceMap<Name, Arc<[EffectIx]>>,
     pub(super) builtin_base: OnceMap<(DeclKey, Transfer, Option<Name>), Option<Arc<BuiltinBase>>>,
     pub(crate) wrapper_runs: OnceMap<&'static str, Arc<[(DeclKey, Transfer)]>>,
     pub(crate) hook_members: OnceMap<(Option<Name>, bool), Name>,
@@ -151,7 +156,7 @@ pub(crate) struct ReachMemo {
     /// not known.
     /// What an operation runs on an object of any class, but for a
     /// property's.
-    pub(crate) unknown_implicit: OnceMap<(OperationKey, Option<Name>, bool), Arc<[DeclKey]>>,
+    pub(crate) unknown_implicit: OnceMap<(OperationKey, Option<Name>, bool), Arc<[EffectIx]>>,
     /// The same with the `$this` each runs with.
     pub(crate) unknown_targets:
         OnceMap<(OperationKey, Option<Name>, bool, Transfer), SharedTargets>,
@@ -165,7 +170,6 @@ pub(crate) struct ReachMemo {
     /// The methods PHP calls for an operation but a property's on an object
     /// of exactly a class.
     pub(crate) implicit_methods: OnceMap<(Name, OperationKey), Arc<[&'static Name]>>,
-    /// Whether a declaration is a builtin's.
     /// The table row a builtin declaration is looked up under.
     pub(crate) builtin_entries: OnceMap<DeclKey, Option<Arc<str>>>,
     /// The constructors of every class that has one.
@@ -175,7 +179,6 @@ pub(crate) struct ReachMemo {
     pub(crate) hook_declarations: OnceMap<(Name, Option<Name>, bool), Arc<[HookDeclaration]>>,
     /// Whether objects of a builtin class run what they were made with.
     pub(crate) stub_holds_code: OnceMap<String, bool>,
-    pub(crate) builtins: OnceMap<DeclKey, bool>,
     /// The handle a declaration's key stands for in the effects pass.
     pub(crate) effect_ixs: OnceMap<DeclKey, EffectIx>,
     pub(crate) effects: EffectTable,

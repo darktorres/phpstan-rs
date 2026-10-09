@@ -1339,37 +1339,40 @@ fn implicit_method_names(operation: &Operation) -> Vec<&'static Name> {
     }
 }
 
+/// A declaration run with what its own `$this` is to the caller, by handle.
+pub(super) type Run = (EffectIx, TransferIx);
+
 /// The declarations a call runs, each with what its own `$this` is to the
 /// caller, in the order they were first added and once each.
 #[derive(Default)]
 pub(super) struct TargetSet {
-    list: Vec<(DeclKey, Transfer)>,
+    list: Vec<Run>,
     /// Every entry of `list`, kept once the list is long enough for a scan
     /// to cost more than a hash.
-    seen: FxHashSet<(DeclKey, Transfer)>,
+    seen: FxHashSet<Run>,
 }
 
 impl TargetSet {
     /// Entries a scan is cheaper than a hash for.
     const SCANNED: usize = 12;
 
-    /// Adds `key`, run with its own `$this` what `transfer` says, once.
-    pub(super) fn push(&mut self, key: DeclKey, transfer: Transfer) {
+    /// Adds `run` once.
+    pub(super) fn push(&mut self, run: Run) {
         if self.list.len() < Self::SCANNED {
-            if !self.list.iter().any(|(k, t)| *k == key && *t == transfer) {
-                self.list.push((key, transfer));
+            if !self.list.contains(&run) {
+                self.list.push(run);
             }
             return;
         }
         if self.seen.is_empty() {
-            self.seen.extend(self.list.iter().cloned());
+            self.seen.extend(self.list.iter().copied());
         }
-        if self.seen.insert((key.clone(), transfer.clone())) {
-            self.list.push((key, transfer));
+        if self.seen.insert(run) {
+            self.list.push(run);
         }
     }
 
-    pub(super) fn into_vec(self) -> Vec<(DeclKey, Transfer)> {
+    pub(super) fn into_vec(self) -> Vec<Run> {
         self.list
     }
 }
@@ -1421,14 +1424,24 @@ impl Registry {
         let memo = &self.reach_memo;
         let ix = memo
             .effect_ixs
-            .get_or_compute_ref(key, || memo.effects.intern(&self.effect_id_for(key)));
+            .get_or_compute_ref(key, || memo.effects.intern(&self.effect_id_for(key), key));
         debug_assert_eq!(*memo.effects.id(ix), self.effect_id_for(key));
         ix
     }
 
+    /// The declaration the handle `ix` stands for.
+    pub(crate) fn effect_key(&self, ix: EffectIx) -> &DeclKey {
+        self.reach_memo.effects.key(ix)
+    }
+
+    /// The transfer the handle `ix` stands for.
+    pub(crate) fn transfer_of(&self, ix: TransferIx) -> &Transfer {
+        self.reach_memo.transfers.get(ix)
+    }
+
     /// The handles of a declaration run with its own `$this` what
     /// `transfer` says.
-    pub(crate) fn effect_run(&self, key: &DeclKey, transfer: &Transfer) -> (EffectIx, TransferIx) {
+    pub(crate) fn effect_run(&self, key: &DeclKey, transfer: &Transfer) -> Run {
         (
             self.effect_ix(key),
             self.reach_memo.transfers.intern(transfer),
@@ -1787,6 +1800,23 @@ impl Registry {
         )
     }
 
+    /// `implementations`, by handle.
+    fn implementation_ixs(
+        &self,
+        class: &(impl KeyName + ?Sized),
+        method: &(impl KeyName + ?Sized),
+    ) -> Arc<[EffectIx]> {
+        self.reach_memo.implementation_ixs.get_or_compute(
+            (class.lowered_name(), method.lowered_name()),
+            || {
+                self.implementations(class, method)
+                    .iter()
+                    .map(|key| self.effect_ix(key))
+                    .collect()
+            },
+        )
+    }
+
     fn compute_implementations(&self, class: &str, method: &str) -> Vec<DeclKey> {
         if let Some((owner, sig)) = self.lookup_method_with_owner(class, method)
             && is_non_overridable(self, class, &owner, method, sig)
@@ -2034,13 +2064,19 @@ impl Registry {
         self.declaration(key).filter(|sig| sig.is_stub)
     }
 
-    /// `builtin`, with the question whether `key` is one asked once.
-    fn builtin_once(&self, key: &DeclKey) -> Option<&FunctionReflection> {
-        let is_builtin = self
+    /// `builtin` for the declaration `ix` stands for, with the question
+    /// whether it is one asked once.
+    fn builtin_of(&self, ix: EffectIx) -> Option<&FunctionReflection> {
+        let key = self.effect_key(ix);
+        if self
             .reach_memo
-            .builtins
-            .get_or_compute_ref(key, || self.builtin(key).is_some());
-        if is_builtin { self.builtin(key) } else { None }
+            .effects
+            .is_builtin(ix, || self.builtin(key).is_some())
+        {
+            self.builtin(key)
+        } else {
+            None
+        }
     }
 
     /// The stream-wrapper methods named `method` a class that may be
@@ -2139,6 +2175,18 @@ impl Registry {
             .methods_named
             .get_or_compute(method.lowered_name(), || {
                 self.compute_methods_named(method.text()).into()
+            })
+    }
+
+    /// `methods_named`, by handle.
+    fn methods_named_ixs(&self, method: &(impl KeyName + ?Sized)) -> Arc<[EffectIx]> {
+        self.reach_memo
+            .methods_named_ixs
+            .get_or_compute(method.lowered_name(), || {
+                self.methods_named(method)
+                    .iter()
+                    .map(|key| self.effect_ix(key))
+                    .collect()
             })
     }
 
@@ -3218,20 +3266,36 @@ impl Reach<'_> {
                         span: Default::default(),
                     };
                     self.static_targets(&class, Some(&Name::from(method)))
+                        .map(|runs| self.keyed(runs))
                 }
                 None => Some(function_named(registry, text)),
             },
-            Callable::Pair(PairTarget::Class(class), method) => {
-                self.static_targets(class, Some(method))
-            }
-            Callable::Pair(PairTarget::Object(receiver), method) => self.call_targets(
-                &Callee::Method {
-                    receiver: receiver.clone(),
-                    method: Some(method.clone()),
-                },
-                None,
-            ),
+            Callable::Pair(PairTarget::Class(class), method) => self
+                .static_targets(class, Some(method))
+                .map(|runs| self.keyed(runs)),
+            Callable::Pair(PairTarget::Object(receiver), method) => self
+                .call_targets(
+                    &Callee::Method {
+                        receiver: receiver.clone(),
+                        method: Some(method.clone()),
+                    },
+                    None,
+                )
+                .map(|runs| self.keyed(runs)),
         }
+    }
+
+    /// The declarations and transfers `runs` stand for.
+    fn keyed(&self, runs: Vec<Run>) -> Vec<(DeclKey, Transfer)> {
+        let registry = self.registry;
+        runs.into_iter()
+            .map(|(ix, transfer)| {
+                (
+                    registry.effect_key(ix).clone(),
+                    registry.transfer_of(transfer).clone(),
+                )
+            })
+            .collect()
     }
 
     /// Whether `$name->method(...)` runs only closures the caller wrote,
@@ -3275,19 +3339,19 @@ impl Reach<'_> {
     /// The declarations a call may run, each with what its callee's own
     /// `$this` is to the caller; `None` when it may run code not known.
     /// `call` is the call, when the callee is not a callable's.
-    fn call_targets(
-        &self,
-        callee: &Callee,
-        call: Option<&CallWrites>,
-    ) -> Option<Vec<(DeclKey, Transfer)>> {
+    fn call_targets(&self, callee: &Callee, call: Option<&CallWrites>) -> Option<Vec<Run>> {
         let registry = self.registry;
+        let transfers = &registry.reach_memo.transfers;
         Some(match callee {
             Callee::Function(name) => match registry.resolve_function(name) {
                 Some((resolved, _)) => {
                     let declared = registry
                         .lookup_function_with_name(resolved)
                         .map_or(resolved, |(declared, _)| declared);
-                    vec![(function_key(declared), Transfer::Static)]
+                    vec![(
+                        registry.effect_ix(&function_key(declared)),
+                        TransferTable::STATIC,
+                    )]
                 }
                 // A call to no function throws.
                 None => Vec::new(),
@@ -3299,52 +3363,51 @@ impl Reach<'_> {
             Callee::Method { receiver, method } => {
                 let (holder, same) = self.ctx.receiver(receiver);
                 let transfer = |class: Option<&Name>| {
-                    if same {
+                    transfers.intern(&if same {
                         Transfer::Same
                     } else if matches!(holder, Holder::Made(_)) {
                         Transfer::Made
                     } else {
                         Transfer::Other(class.cloned())
-                    }
+                    })
                 };
                 let mut out = Vec::new();
                 match (&holder, method) {
                     (Holder::Classes(classes), Some(method)) => {
                         for class in classes.iter() {
+                            let transfer = transfer(Some(class));
                             out.extend(
                                 registry
-                                    .implementations(class, method)
+                                    .implementation_ixs(class, method)
                                     .iter()
-                                    .cloned()
-                                    .map(|key| (key, transfer(Some(class)))),
+                                    .map(|&ix| (ix, transfer)),
                             );
                         }
                     }
                     (Holder::Made(Some(classes)), Some(method)) => {
                         for class in classes.iter() {
-                            out.extend(
-                                self.exact_method(class, method)
-                                    .map(|key| (key, transfer(Some(class)))),
-                            );
+                            if let Some(key) = self.exact_method(class, method) {
+                                out.push((registry.effect_ix(&key), transfer(Some(class))));
+                            }
                         }
                     }
                     (Holder::Classes(classes) | Holder::Made(Some(classes)), None) => {
                         for class in classes.iter() {
+                            let transfer = transfer(Some(class));
                             out.extend(
-                                self.every_method(class)
+                                self.every_method_ixs(class)
                                     .iter()
-                                    .cloned()
-                                    .map(|key| (key, transfer(Some(class)))),
+                                    .map(|&ix| (ix, transfer)),
                             );
                         }
                     }
                     (Holder::Unknown | Holder::Made(None), Some(method)) => {
+                        let transfer = transfer(None);
                         out.extend(
-                            self.registry
-                                .methods_named(method)
+                            registry
+                                .methods_named_ixs(method)
                                 .iter()
-                                .cloned()
-                                .map(|key| (key, transfer(None))),
+                                .map(|&ix| (ix, transfer)),
                         );
                     }
                     (Holder::Unknown | Holder::Made(None), None) => return None,
@@ -3353,19 +3416,16 @@ impl Reach<'_> {
             }
             Callee::Static { class, method } => match class {
                 Some(class) => self.static_targets(class, method.as_ref())?,
-                None => self
-                    .registry
-                    .methods_named(method.as_ref()?)
+                None => registry
+                    .methods_named_ixs(method.as_ref()?)
                     .iter()
-                    .cloned()
-                    .map(|key| (key, Transfer::Static))
+                    .map(|&ix| (ix, TransferTable::STATIC))
                     .collect(),
             },
             Callee::New(None) => registry
                 .every_constructor()
                 .iter()
-                .cloned()
-                .map(|key| (key, Transfer::Made))
+                .map(|key| (registry.effect_ix(key), TransferTable::MADE))
                 .collect(),
             Callee::New(class) => {
                 let classes = match class {
@@ -3380,13 +3440,23 @@ impl Reach<'_> {
                     .filter_map(|class| {
                         registry.lookup_method_with_owner(class, &well_known().construct)
                     })
-                    .map(|(owner, _)| (method_key(&owner, &well_known().construct), Transfer::Made))
+                    .map(|(owner, _)| {
+                        (
+                            registry.effect_ix(&method_key(&owner, &well_known().construct)),
+                            TransferTable::MADE,
+                        )
+                    })
                     .collect()
             }
             Callee::Anonymous(name) => name
                 .as_ref()
                 .and_then(|name| registry.lookup_method_with_owner(name, &well_known().construct))
-                .map(|(owner, _)| (method_key(&owner, &well_known().construct), Transfer::Made))
+                .map(|(owner, _)| {
+                    (
+                        registry.effect_ix(&method_key(&owner, &well_known().construct)),
+                        TransferTable::MADE,
+                    )
+                })
                 .into_iter()
                 .collect(),
             Callee::Value(variable) => {
@@ -3407,15 +3477,18 @@ impl Reach<'_> {
                 .into_vec(),
             // The file's top level runs in the including code's scope, as its
             // own `$this`; a file that is not known is code of any content.
-            Callee::Include(at) => match self
-                .ctx
-                .file()
-                .and_then(|file| registry.include_target(file, *at))
-                .flatten()
-            {
-                Some(target) => vec![(DeclKey::file(target), Transfer::Same)],
-                None => vec![(DeclKey::unresolved_include(), Transfer::Same)],
-            },
+            Callee::Include(at) => {
+                let key = match self
+                    .ctx
+                    .file()
+                    .and_then(|file| registry.include_target(file, *at))
+                    .flatten()
+                {
+                    Some(target) => DeclKey::file(target),
+                    None => DeclKey::unresolved_include(),
+                };
+                vec![(registry.effect_ix(&key), TransferTable::SAME)]
+            }
             Callee::ParentHook { property, set } => {
                 let parent = registry
                     .class_references_by_name(self.ctx.class()?)?
@@ -3423,7 +3496,12 @@ impl Reach<'_> {
                     .first()?;
                 registry
                     .hook_owner(parent, property, *set)
-                    .map(|owner| (hook_key(&owner, property, *set), Transfer::Same))
+                    .map(|owner| {
+                        (
+                            registry.effect_ix(&hook_key(&owner, property, *set)),
+                            TransferTable::SAME,
+                        )
+                    })
                     .into_iter()
                     .collect()
             }
@@ -3478,8 +3556,8 @@ impl Reach<'_> {
                 return Some(shared);
             }
             let mut out = TargetSet::default();
-            for (key, transfer) in hooks.iter() {
-                out.push(key.clone(), transfer.clone());
+            for run in hooks.iter() {
+                out.push(*run);
             }
             self.implicit_targets(&holder, same, operation, &mut out, &mut Vec::new())?;
             Some(out.into_vec().into())
@@ -3563,8 +3641,9 @@ impl Reach<'_> {
                     continue;
                 }
                 let key = hook_key(declaring, name, set);
+                let ix = registry.effect_ix(&key);
                 let Some(classes) = classes else {
-                    out.push(key, transfer(None));
+                    out.push((ix, registry.reach_memo.transfers.intern(&transfer(None))));
                     continue;
                 };
                 for (class, related) in classes.iter().zip(&related) {
@@ -3583,7 +3662,10 @@ impl Reach<'_> {
                         None => false,
                     };
                     if reached {
-                        out.push(key.clone(), transfer(Some(class)));
+                        out.push((
+                            ix,
+                            registry.reach_memo.transfers.intern(&transfer(Some(class))),
+                        ));
                     }
                 }
             }
@@ -3592,13 +3674,16 @@ impl Reach<'_> {
 
     /// The declarations PHP runs for `operation` on an object of any class,
     /// each once.
-    fn unknown_implicit_keys(&self, operation: &Operation) -> Arc<[DeclKey]> {
-        self.registry
-            .reach_memo
-            .unknown_implicit
-            .get_or_compute(self.unknown_scope(operation), || {
-                self.compute_unknown_implicit_keys(operation).into()
-            })
+    fn unknown_implicit_ixs(&self, operation: &Operation) -> Arc<[EffectIx]> {
+        self.registry.reach_memo.unknown_implicit.get_or_compute(
+            self.unknown_scope(operation),
+            || {
+                self.compute_unknown_implicit_keys(operation)
+                    .iter()
+                    .map(|key| self.registry.effect_ix(key))
+                    .collect()
+            },
+        )
     }
 
     /// What the declarations PHP runs for `operation` on an object of any
@@ -3625,9 +3710,10 @@ impl Reach<'_> {
         self.registry.reach_memo.unknown_targets.get_or_compute(
             (operation_key, scope, rebindable, transfer.clone()),
             || {
-                self.unknown_implicit_keys(operation)
+                let transfer = self.registry.reach_memo.transfers.intern(&transfer);
+                self.unknown_implicit_ixs(operation)
                     .iter()
-                    .map(|key| (key.clone(), transfer.clone()))
+                    .map(|&ix| (ix, transfer))
                     .collect()
             },
         )
@@ -3681,9 +3767,9 @@ impl Reach<'_> {
             Holder::Classes(classes) => (classes, false),
             Holder::Made(Some(classes)) => (classes, true),
             Holder::Unknown | Holder::Made(None) => {
-                let transfer = transfer(None);
-                for key in self.unknown_implicit_keys(operation).iter() {
-                    out.push(key.clone(), transfer.clone());
+                let transfer = registry.reach_memo.transfers.intern(&transfer(None));
+                for &ix in self.unknown_implicit_ixs(operation).iter() {
+                    out.push((ix, transfer));
                 }
                 return Some(());
             }
@@ -3702,7 +3788,7 @@ impl Reach<'_> {
             for candidate in std::iter::once(class).chain(below.iter()) {
                 for &method in self.implicit_methods(candidate, operation).iter() {
                     if let Some(key) = self.implicit_method(candidate, method) {
-                        out.push(key, transfer(Some(class)));
+                        out.push(registry.effect_run(&key, &transfer(Some(class))));
                     }
                 }
                 if !matches!(operation, Operation::Iterate { .. })
@@ -3837,6 +3923,19 @@ impl Reach<'_> {
             })
     }
 
+    /// `every_method`, by handle.
+    fn every_method_ixs(&self, class: &(impl KeyName + ?Sized)) -> Arc<[EffectIx]> {
+        self.registry
+            .reach_memo
+            .every_method_ixs
+            .get_or_compute(class.lowered_name(), || {
+                self.every_method(class)
+                    .iter()
+                    .map(|key| self.registry.effect_ix(key))
+                    .collect()
+            })
+    }
+
     fn compute_every_method(&self, class: &str) -> Vec<DeclKey> {
         let registry = self.registry;
         let mut out = Vec::new();
@@ -3862,11 +3961,7 @@ impl Reach<'_> {
     /// class's own, and `__callStatic` or `__call` where there is none. A
     /// non-static method reached from the body's own class or an ancestor
     /// of it runs on the caller's `$this`.
-    fn static_targets(
-        &self,
-        class: &QualifiedName,
-        method: Option<&Name>,
-    ) -> Option<Vec<(DeclKey, Transfer)>> {
+    fn static_targets(&self, class: &QualifiedName, method: Option<&Name>) -> Option<Vec<Run>> {
         let registry = self.registry;
         let classes = named_classes(registry, self.ctx.own_class().as_ref(), class)?;
         let forwards_from = |target: &str| {
@@ -3878,10 +3973,9 @@ impl Reach<'_> {
         for target in &classes {
             let Some(method) = method else {
                 out.extend(
-                    self.every_method(target)
+                    self.every_method_ixs(target)
                         .iter()
-                        .cloned()
-                        .map(|key| (key, Transfer::Static)),
+                        .map(|&ix| (ix, TransferTable::STATIC)),
                 );
                 continue;
             };
@@ -3889,16 +3983,22 @@ impl Reach<'_> {
                 Some((owner, sig)) => {
                     let is_static = registry.method_is_static(&owner, method);
                     let transfer = if !is_static && forwards_from(target) {
-                        Transfer::Same
+                        TransferTable::SAME
                     } else {
-                        Transfer::Static
+                        TransferTable::STATIC
                     };
-                    out.push((registry.reached(&owner, method, sig), transfer));
+                    out.push((
+                        registry.effect_ix(&registry.reached(&owner, method, sig)),
+                        transfer,
+                    ));
                 }
                 None => {
                     for magic in [&well_known().call_static, &well_known().call] {
                         if let Some((owner, _)) = registry.lookup_method_with_owner(target, magic) {
-                            out.push((method_key(&owner, magic), Transfer::Static));
+                            out.push((
+                                registry.effect_ix(&method_key(&owner, magic)),
+                                TransferTable::STATIC,
+                            ));
                         }
                     }
                 }
@@ -3963,25 +4063,27 @@ impl Registry {
             return Effect::unknown();
         };
         let mut effect = Effect::nothing();
-        for (key, transfer) in targets {
-            let runs = match self.builtin(&key) {
-                Some(sig) => match reach.builtin_runs(&key, sig, &transfer, call) {
+        for (ix, transfer) in targets {
+            let key = self.effect_key(ix);
+            let transfer = self.transfer_of(transfer);
+            let runs = match self.builtin_of(ix) {
+                Some(sig) => match reach.builtin_runs(key, sig, transfer, call) {
                     Some(runs) => runs,
                     None => return Effect::unknown(),
                 },
                 None => {
-                    let settled = self.settled(&key);
-                    effect.join_transferred(&settled.effect, &transfer);
+                    let settled = self.settled(key);
+                    effect.join_transferred(&settled.effect, transfer);
                     let mut runs = Vec::new();
                     for condition in &settled.runs {
-                        let passing = if passes_arguments(&call.callee, &key) {
-                            self.passing(call, &key, condition.at)
+                        let passing = if passes_arguments(&call.callee, key) {
+                            self.passing(call, key, condition.at)
                         } else {
                             Passing::Unknown
                         };
                         let passed = match passing {
                             Passing::Argument(at) => {
-                                let written = condition.bound(&transfer, &Transfer::Same);
+                                let written = condition.bound(transfer, &Transfer::Same);
                                 reach.argument_runs(call, at, &written)
                             }
                             Passing::Default(runs) => Some(runs),
@@ -3991,7 +4093,7 @@ impl Registry {
                             return Effect::unknown();
                         };
                         runs.extend(passed.into_iter().map(|(run, own)| {
-                            let bound = condition.bound(&transfer, &own);
+                            let bound = condition.bound(transfer, &own);
                             (run, bound)
                         }));
                     }
@@ -4036,21 +4138,21 @@ type Reached<'r> = Option<(Vec<Targets>, Vec<&'r Place>)>;
 
 /// What one call reaches.
 enum Targets {
-    List(Vec<(DeclKey, Transfer)>),
+    List(Vec<Run>),
     /// What an operation runs, found once for every call asking the same.
-    Shared(Arc<[(DeclKey, Transfer)]>),
+    Shared(SharedTargets),
 }
 
 impl Targets {
-    fn keys(&self) -> impl Iterator<Item = &DeclKey> {
+    fn ixs(&self) -> impl Iterator<Item = EffectIx> + '_ {
         let list = match self {
             Targets::List(list) => &list[..],
             Targets::Shared(list) => list,
         };
-        list.iter().map(|(key, _)| key)
+        list.iter().map(|(ix, _)| *ix)
     }
 
-    fn into_vec(self) -> Vec<(DeclKey, Transfer)> {
+    fn into_vec(self) -> Vec<Run> {
         match self {
             Targets::List(list) => list,
             Targets::Shared(list) => list.to_vec(),
@@ -4683,7 +4785,7 @@ impl<'r> Level<'r> {
             // what it takes by reference is not looked up.
             let unknown_params = (self.runs.borrow().len(), self.params_run.borrow().len()) != ran;
             for (at, place) in call.places.iter() {
-                if unknown_params || targets.keys().any(|key| self.by_ref_at(key, at)) {
+                if unknown_params || targets.ixs().any(|ix| self.by_ref_at(ix, at)) {
                     written_args.push(place);
                 }
             }
@@ -4728,7 +4830,7 @@ impl<'r> Level<'r> {
                 Targets::List(list) => list,
                 Targets::Shared(list) => {
                     debug_assert!(call.arguments.is_empty() && call.places.is_empty());
-                    if !taken.insert(Arc::as_ptr(&list).cast::<(DeclKey, Transfer)>() as usize) {
+                    if !taken.insert(Arc::as_ptr(&list).cast::<Run>() as usize) {
                         continue;
                     }
                     let Some(set) = self.shared_runs(&reach, list, call) else {
@@ -4740,12 +4842,15 @@ impl<'r> Level<'r> {
                     continue;
                 }
             };
-            for (key, transfer) in entries {
+            for run in entries {
+                let (ix, transfer) = run;
+                let key = self.registry.effect_key(ix);
                 // A builtin writes what the code it runs writes: what is
                 // passed to it, and what of its object a class extending it
                 // declares.
-                if let Some(sig) = self.registry.builtin_once(&key) {
-                    let Some(runs) = reach.builtin_runs(&key, sig, &transfer, call) else {
+                if let Some(sig) = self.registry.builtin_of(ix) {
+                    let transfer = self.registry.transfer_of(transfer);
+                    let Some(runs) = reach.builtin_runs(key, sig, transfer, call) else {
                         return Classification::unknown();
                     };
                     for (run_key, run_transfer) in runs {
@@ -4756,14 +4861,13 @@ impl<'r> Level<'r> {
                     }
                     continue;
                 }
-                let at = passes_arguments(&call.callee, &key).then(|| {
+                let at = passes_arguments(&call.callee, key).then(|| {
                     *site.get_or_insert_with(|| {
                         let passed = self.passed(holder, &reach, call);
                         sites.push(Site { call, passed });
                         sites.len() as u32 - 1
                     })
                 });
-                let run = self.registry.effect_run(&key, &transfer);
                 if at.is_some() {
                     calls.push((run.0, run.1, at));
                     continue;
@@ -4804,9 +4908,11 @@ impl<'r> Level<'r> {
     ) -> Option<IdTargets> {
         let registry = self.registry;
         let memo = &registry.reach_memo;
-        let address = Arc::as_ptr(&list).cast::<(DeclKey, Transfer)>() as usize;
+        let address = Arc::as_ptr(&list).cast::<Run>() as usize;
         let (_, scoped) = memo.shared_scoped.get_or_compute(address, || {
-            let scoped = list.iter().any(|(_, transfer)| *transfer == Transfer::Same);
+            let scoped = list
+                .iter()
+                .any(|(_, transfer)| *transfer == TransferTable::SAME);
             (Arc::clone(&list), scoped)
         });
         let class = if scoped {
@@ -4818,19 +4924,22 @@ impl<'r> Level<'r> {
             let runs = (|| {
                 let mut out: Vec<(EffectIx, TransferIx)> = Vec::new();
                 let mut seen: FxHashSet<(EffectIx, TransferIx)> = FxHashSet::default();
-                for (key, transfer) in list.iter() {
-                    if let Some(sig) = registry.builtin_once(key) {
-                        for (key, transfer) in reach.builtin_runs(key, sig, transfer, call)? {
+                for &(ix, transfer) in list.iter() {
+                    if let Some(sig) = registry.builtin_of(ix) {
+                        let runs = reach.builtin_runs(
+                            registry.effect_key(ix),
+                            sig,
+                            registry.transfer_of(transfer),
+                            call,
+                        )?;
+                        for (key, transfer) in runs {
                             let run = registry.effect_run(&key, &transfer);
                             if seen.insert(run) {
                                 out.push(run);
                             }
                         }
-                    } else {
-                        let run = registry.effect_run(key, transfer);
-                        if seen.insert(run) {
-                            out.push(run);
-                        }
+                    } else if seen.insert((ix, transfer)) {
+                        out.push((ix, transfer));
                     }
                 }
                 Some(IdTargets::new(IdTargetSet::new(out)))
@@ -4869,8 +4978,8 @@ impl<'r> Level<'r> {
 
     /// Whether the declaration `key` takes the argument passed `at` by
     /// reference.
-    fn by_ref_at(&self, key: &DeclKey, at: &ArgAt) -> bool {
-        let Some(sig) = self.registry.declaration(key) else {
+    fn by_ref_at(&self, ix: EffectIx, at: &ArgAt) -> bool {
+        let Some(sig) = self.registry.declaration(self.registry.effect_key(ix)) else {
             return true;
         };
         match at {
