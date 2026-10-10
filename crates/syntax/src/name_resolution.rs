@@ -96,6 +96,14 @@ impl<const FOLDED: bool> ImportTable<FOLDED> {
             .map(|(_, path)| path)
     }
 
+    /// `get` for a name whose `hash_of` is already known.
+    fn get_hashed(&self, hash: u64, name: &str) -> Option<&Name> {
+        debug_assert_eq!(hash, Self::hash_of(name));
+        self.table
+            .find(hash, |(known, _)| Self::same(known.text(), name))
+            .map(|(_, path)| path)
+    }
+
     fn iter(&self) -> impl Iterator<Item = (&ImportKey<FOLDED>, &Name)> {
         self.table.iter().map(|(key, path)| (key, path))
     }
@@ -130,6 +138,16 @@ impl UseMap {
             UseKind::Class => self.classes.get(name),
             UseKind::Function => self.functions.get(name),
             UseKind::Const => self.constants.get(name),
+        }
+    }
+
+    /// `get` for a name with no backslash, which is its own first segment:
+    /// the hash the name carries is the one the table files it under.
+    fn get_named(&self, kind: UseKind, name: &Name) -> Option<&Name> {
+        match kind {
+            UseKind::Class => self.classes.get_hashed(name.folded_hash(), name.as_str()),
+            UseKind::Function => self.functions.get_hashed(name.folded_hash(), name.as_str()),
+            UseKind::Const => self.constants.get_hashed(name.text_hash(), name.as_str()),
         }
     }
 
@@ -429,27 +447,54 @@ impl NameContext {
         self.declared_name(name)
     }
 
+    /// `resolve_as` for a name the lexer made: one with no backslash is
+    /// looked up under the hash it carries.
+    fn resolve_named(&self, written: &Name, kind: UseKind) -> String {
+        if written.as_str().contains('\\') {
+            return self.resolve_as(written.as_str(), kind);
+        }
+        let resolved = match self.use_map.get_named(kind, written) {
+            Some(imported) => imported.to_string(),
+            None => self.declared_name(written.as_str()),
+        };
+        debug_assert_eq!(resolved, self.resolve_as(written.as_str(), kind));
+        resolved
+    }
+
+    /// `resolve_with_global_fallback` for a name the lexer made.
+    fn resolve_named_with_global_fallback(
+        &self,
+        written: &Name,
+        kind: UseKind,
+    ) -> (String, Option<String>) {
+        if written.as_str().contains('\\') {
+            return self.resolve_with_global_fallback(written.as_str(), kind);
+        }
+        let resolved = match self.use_map.get_named(kind, written) {
+            Some(imported) => (imported.to_string(), None),
+            None if self.namespace.is_empty() => (self.declared_name(written.as_str()), None),
+            None => (
+                self.declared_name(written.as_str()),
+                Some(written.as_str().to_string()),
+            ),
+        };
+        debug_assert_eq!(
+            resolved,
+            self.resolve_with_global_fallback(written.as_str(), kind)
+        );
+        resolved
+    }
+
     /// Function-call resolution differs from `resolve()` in exactly the
     /// one way real PHP's own does: an unqualified name (no leading/
     /// internal `\`, not matched by a `use function` import) that isn't
     /// declared in the current namespace falls back to the *global*
-    /// namespace at runtime - classes have no such fallback, which is why
-    /// this is separate from `resolve()` rather than a flag on it.
-    /// Returns the primary candidate to look up first, plus a
-    /// global-namespace fallback candidate when that rule could apply
-    /// (namespaced file, unqualified name, no matching import).
-    fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
-        self.resolve_with_global_fallback(name, UseKind::Function)
-    }
-
-    /// The constant counterpart of `resolve_function_candidates` - real
-    /// PHP applies the identical current-namespace-then-global fallback
-    /// to an unqualified constant, but matches it against `use const`
-    /// imports, never `use function` ones.
-    fn resolve_constant_candidates(&self, name: &str) -> (String, Option<String>) {
-        self.resolve_with_global_fallback(name, UseKind::Const)
-    }
-
+    /// namespace at runtime - classes have no such fallback. A constant
+    /// takes the identical fallback but matches `use const` imports,
+    /// never `use function` ones. Returns the primary candidate to look
+    /// up first, plus a global-namespace fallback candidate when that
+    /// rule could apply (namespaced file, unqualified name, no matching
+    /// import).
     fn resolve_with_global_fallback(&self, name: &str, kind: UseKind) -> (String, Option<String>) {
         let is_unqualified = !name.contains('\\');
         let use_matched = is_unqualified && self.use_map.contains(kind, name);
@@ -484,25 +529,25 @@ pub(crate) enum Resolution {
 
 impl NameContext {
     /// What a class reference as written refers to.
-    pub(crate) fn class_reference(&self, written: &str) -> Resolution {
+    pub(crate) fn class_reference(&self, written: &Name) -> Resolution {
         if is_class_keyword(written) {
             Resolution::Unresolved
         } else {
-            Resolution::Exact(self.resolve(written))
+            Resolution::Exact(self.resolve_named(written, UseKind::Class))
         }
     }
 
     /// What a function reference as written refers to.
-    pub(crate) fn function_reference(&self, written: &str) -> Resolution {
-        match self.resolve_function_candidates(written) {
+    pub(crate) fn function_reference(&self, written: &Name) -> Resolution {
+        match self.resolve_named_with_global_fallback(written, UseKind::Function) {
             (primary, Some(_)) => Resolution::WithGlobalFallback(primary),
             (primary, None) => Resolution::Exact(primary),
         }
     }
 
     /// What a constant reference as written refers to.
-    pub(crate) fn constant_reference(&self, written: &str) -> Resolution {
-        match self.resolve_constant_candidates(written) {
+    pub(crate) fn constant_reference(&self, written: &Name) -> Resolution {
+        match self.resolve_named_with_global_fallback(written, UseKind::Const) {
             (primary, Some(_)) => Resolution::WithGlobalFallback(primary),
             (primary, None) => Resolution::Exact(primary),
         }
