@@ -669,7 +669,6 @@ macro_rules! canonical_struct {
                 );
             }
             #[allow(unused_variables)]
-            #[allow(unused_variables)]
             fn canonical_with(
                 &self,
                 p: &mut $crate::canonical::Printer,

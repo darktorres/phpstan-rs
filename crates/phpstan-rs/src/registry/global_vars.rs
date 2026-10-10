@@ -1065,13 +1065,13 @@ pub(in crate::registry) fn resolve_include_targets(
         .collect()
 }
 
-/// Resolves the include graph: the files whose own
-/// top level genuinely runs in real global scope on at least one resolved
-/// path, and which of them share a scope - see the module doc comment. A file with no resolved incoming
-/// edges at all (including every file this corpus's own dynamic includes
-/// only ever reach) defaults to included, matching today's behavior; a
-/// file whose only resolved incoming edges are all from inside a function
-/// body is excluded.
+/// Resolves the include graph: the files whose own top level genuinely runs
+/// in real global scope on at least one resolved path, and which of them
+/// share a scope - see the module doc comment. A file with no resolved
+/// incoming edges at all (including every file this corpus's own dynamic
+/// includes only ever reach) defaults to included, matching today's
+/// behavior; a file whose only resolved incoming edges are all from inside a
+/// function body is excluded.
 fn resolve_global_scope_files(
     files: &[(FileId, &Path, &GlobalFacts)],
     include_sites: &[(FileId, &IncludeSite)],
