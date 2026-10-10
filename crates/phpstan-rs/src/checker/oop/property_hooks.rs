@@ -241,25 +241,31 @@ impl<'a> Checker<'a> {
             _ => self.enter_assigned_variables(arenas, &[]),
         };
         let hook_scope = match body {
-            PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
-                self.registry,
-                arenas,
-                arenas.stmt_ids(stmts),
-                &[],
-                Some((
-                    self.current_class.as_deref().map(syntax::name::Name::from),
-                    syntax::name::Name::from("{hook}"),
-                )),
-                false,
-            ),
-            PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(
+            PropertyHookBody::Block(stmts) => {
+                crate::checker::shared_scope::LazyShared::of_statements(
+                    self.syntax_tree_owner(),
                     self.registry,
                     arenas,
-                    *e,
+                    arenas.stmt_ids(stmts),
+                    &[],
+                    Some((
+                        self.current_class.as_deref().map(syntax::name::Name::from),
+                        syntax::name::Name::from("{hook}"),
+                    )),
+                    false,
+                    false,
+                    &[],
                 )
             }
-            PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
+            PropertyHookBody::Arrow(e) => crate::checker::shared_scope::LazyShared::of_expression(
+                self.syntax_tree_owner(),
+                self.registry,
+                arenas,
+                *e,
+                false,
+                &[],
+            ),
+            PropertyHookBody::Abstract => crate::checker::shared_scope::LazyShared::default(),
         };
         let enclosing_scope = self.enter_shared_scope(hook_scope);
         let previous_goto_targets = match body {
@@ -585,25 +591,31 @@ impl<'a> Checker<'a> {
             _ => self.enter_assigned_variables(arenas, &[]),
         };
         let hook_scope = match body {
-            PropertyHookBody::Block(stmts) => crate::checker::shared_scope::SharedScope::of(
-                self.registry,
-                arenas,
-                arenas.stmt_ids(stmts),
-                &[],
-                Some((
-                    self.current_class.as_deref().map(syntax::name::Name::from),
-                    syntax::name::Name::from("{hook}"),
-                )),
-                false,
-            ),
-            PropertyHookBody::Arrow(e) => {
-                crate::checker::shared_scope::SharedScope::of_arrow_function(
+            PropertyHookBody::Block(stmts) => {
+                crate::checker::shared_scope::LazyShared::of_statements(
+                    self.syntax_tree_owner(),
                     self.registry,
                     arenas,
-                    *e,
+                    arenas.stmt_ids(stmts),
+                    &[],
+                    Some((
+                        self.current_class.as_deref().map(syntax::name::Name::from),
+                        syntax::name::Name::from("{hook}"),
+                    )),
+                    false,
+                    false,
+                    &[],
                 )
             }
-            PropertyHookBody::Abstract => crate::checker::shared_scope::SharedScope::default(),
+            PropertyHookBody::Arrow(e) => crate::checker::shared_scope::LazyShared::of_expression(
+                self.syntax_tree_owner(),
+                self.registry,
+                arenas,
+                *e,
+                false,
+                &[],
+            ),
+            PropertyHookBody::Abstract => crate::checker::shared_scope::LazyShared::default(),
         };
         let enclosing_scope = self.enter_shared_scope(hook_scope);
         let previous_goto_targets = match body {

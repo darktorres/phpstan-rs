@@ -7,11 +7,15 @@
 //! objects the scope made that never leave it, whose properties no other
 //! code can reach.
 
+use std::cell::OnceCell;
+use std::ops::Deref;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
+use super::SyntaxTreeOwner;
 use crate::registry::Registry;
 use crate::registry::summaries::{
     BodySummary, Place, Step, destructures_by_ref, writes_computed_variables,
@@ -126,21 +130,19 @@ impl SharedScope {
     }
 
     /// The shared scope of the statements `body`, a function's, a closure's
-    /// (whose `use` list is `uses`) or a file's top level.
+    /// (which captures `by_ref_uses` by reference) or a file's top level.
     pub(crate) fn of(
         registry: &Registry,
         arenas: &NodeArenas,
         body: &[StmtId],
-        uses: &[ClosureUse],
+        by_ref_uses: &[Name],
         function: Option<(Option<Name>, Name)>,
         top_level: bool,
     ) -> SharedScope {
         let mut scan = Scan::new(registry);
-        for u in uses {
-            if u.by_ref {
-                scan.captured.entry(u.name.name.clone()).or_default().own = true;
-                scan.held.insert(u.name.name.clone(), Held::Other);
-            }
+        for name in by_ref_uses {
+            scan.captured.entry(name.clone()).or_default().own = true;
+            scan.held.insert(name.clone(), Held::Other);
         }
         arena::walk_stmts(&mut scan, arenas, body);
         scan.finish(function, top_level)
@@ -158,10 +160,38 @@ impl SharedScope {
     }
 
     /// The scope's by-reference parameters are exposed.
-    pub(crate) fn expose_parameters(&mut self, params: &[Param]) {
-        for param in params.iter().filter(|param| param.by_ref) {
-            self.exposed.insert(param.name.name.clone());
+    fn expose(&mut self, by_ref_params: &[Name]) {
+        self.exposed.extend(by_ref_params.iter().cloned());
+    }
+
+    /// The scope as text, with the keys sorted, for comparing two builds.
+    #[cfg(debug_assertions)]
+    fn fingerprint(&self) -> String {
+        fn sorted<'a, T: std::fmt::Debug + 'a>(items: impl Iterator<Item = T>) -> Vec<String> {
+            let mut items: Vec<String> = items.map(|item| format!("{item:?}")).collect();
+            items.sort();
+            items
         }
+        format!(
+            "{:?}",
+            (
+                (
+                    self.top_level,
+                    self.closure,
+                    self.any_global,
+                    self.all_exposed
+                ),
+                sorted(self.globals.iter()),
+                sorted(self.statics.iter()),
+                &self.function,
+                sorted(self.references.keys()),
+                sorted(self.captured.iter()),
+                sorted(self.closure_escapes.iter()),
+                sorted(self.closures.keys()),
+                sorted(self.made.iter()),
+                sorted(self.exposed.iter()),
+            )
+        )
     }
 
     /// Whether the array (or string) variable `name` is a value no other
@@ -190,6 +220,270 @@ impl SharedScope {
     }
 }
 
+/// What a lazily built scope is built from.
+enum Source {
+    Statements(Vec<StmtId>),
+    Arrow(ExprId),
+}
+
+struct Plan<'a> {
+    owner: SyntaxTreeOwner<'a>,
+    registry: &'a Registry,
+    source: Source,
+    by_ref_uses: Vec<Name>,
+    function: Option<(Option<Name>, Name)>,
+    top_level: bool,
+    closure: bool,
+    by_ref_params: Vec<Name>,
+}
+
+/// A `SharedScope` built when something first reads it: many bodies never
+/// do.
+pub(crate) struct LazyShared<'a> {
+    scope: OnceCell<SharedScope>,
+    plan: Option<Plan<'a>>,
+    #[cfg(debug_assertions)]
+    eager: Option<String>,
+}
+
+impl Default for LazyShared<'_> {
+    fn default() -> Self {
+        LazyShared::ready(SharedScope::default())
+    }
+}
+
+impl<'a> LazyShared<'a> {
+    pub(crate) fn ready(scope: SharedScope) -> Self {
+        Self {
+            scope: OnceCell::from(scope),
+            plan: None,
+            #[cfg(debug_assertions)]
+            eager: None,
+        }
+    }
+
+    /// The scope of the statements `body`: a function's, a closure's
+    /// (`closure`, whose `use` list is `uses`) or a file's top level.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn of_statements(
+        owner: Option<SyntaxTreeOwner<'a>>,
+        registry: &'a Registry,
+        arenas: &NodeArenas,
+        body: &[StmtId],
+        uses: &[ClosureUse],
+        function: Option<(Option<Name>, Name)>,
+        top_level: bool,
+        closure: bool,
+        params: &[Param],
+    ) -> Self {
+        let by_ref_uses: Vec<Name> = uses
+            .iter()
+            .filter(|u| u.by_ref)
+            .map(|u| u.name.name.clone())
+            .collect();
+        let source = Source::Statements(body.to_vec());
+        Self::planned(
+            owner,
+            registry,
+            arenas,
+            source,
+            by_ref_uses,
+            function,
+            top_level,
+            closure,
+            params,
+        )
+    }
+
+    /// The scope of an arrow function's or a hook's expression body.
+    pub(crate) fn of_expression(
+        owner: Option<SyntaxTreeOwner<'a>>,
+        registry: &'a Registry,
+        arenas: &NodeArenas,
+        body: ExprId,
+        closure: bool,
+        params: &[Param],
+    ) -> Self {
+        Self::planned(
+            owner,
+            registry,
+            arenas,
+            Source::Arrow(body),
+            Vec::new(),
+            None,
+            false,
+            closure,
+            params,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn planned(
+        owner: Option<SyntaxTreeOwner<'a>>,
+        registry: &'a Registry,
+        arenas: &NodeArenas,
+        source: Source,
+        by_ref_uses: Vec<Name>,
+        function: Option<(Option<Name>, Name)>,
+        top_level: bool,
+        closure: bool,
+        params: &[Param],
+    ) -> Self {
+        let by_ref_params: Vec<Name> = params
+            .iter()
+            .filter(|param| param.by_ref)
+            .map(|param| param.name.name.clone())
+            .collect();
+        let Some(owner) = owner else {
+            let plan = PlanParts {
+                registry,
+                source: &source,
+                by_ref_uses: &by_ref_uses,
+                function: &function,
+                top_level,
+                closure,
+                by_ref_params: &by_ref_params,
+            };
+            return Self::ready(plan.build(arenas));
+        };
+        let plan = Plan {
+            owner,
+            registry,
+            source,
+            by_ref_uses,
+            function,
+            top_level,
+            closure,
+            by_ref_params,
+        };
+        #[cfg(debug_assertions)]
+        let eager = Some(plan.parts().build(arenas).fingerprint());
+        Self {
+            scope: OnceCell::new(),
+            plan: Some(plan),
+            #[cfg(debug_assertions)]
+            eager,
+        }
+    }
+
+    pub(crate) fn get(&self) -> &SharedScope {
+        self.scope.get_or_init(|| {
+            let plan = self.plan.as_ref().expect("a scope with no plan is ready");
+            let scope = plan.parts().build(plan.owner.arenas());
+            #[cfg(debug_assertions)]
+            if let Some(eager) = &self.eager {
+                debug_assert_eq!(*eager, scope.fingerprint());
+            }
+            scope
+        })
+    }
+
+    /// The plan of a scope nothing has read yet.
+    fn unread(&self) -> Option<&Plan<'a>> {
+        match self.scope.get() {
+            Some(_) => None,
+            None => self.plan.as_ref(),
+        }
+    }
+
+    /// Whether the scope is a file's top level.
+    pub(crate) fn top_level(&self) -> bool {
+        match &self.plan {
+            Some(plan) => plan.top_level,
+            None => self.get().top_level,
+        }
+    }
+
+    /// `SharedScope::binds_nothing`, without building the scope for a file
+    /// with nothing that binds a variable to share.
+    pub(crate) fn binds_nothing(&self) -> bool {
+        if let Some(plan) = self.unread()
+            && !plan.top_level
+            && plan.by_ref_uses.is_empty()
+            && !plan.owner.arenas().binds_shared_variables()
+        {
+            debug_assert!(self.get().binds_nothing());
+            return true;
+        }
+        self.get().binds_nothing()
+    }
+
+    /// Whether the scope or a closure it writes captures a variable by
+    /// reference.
+    pub(crate) fn captures_nothing(&self) -> bool {
+        if let Some(plan) = self.unread()
+            && plan.by_ref_uses.is_empty()
+            && !plan.owner.arenas().has_closure_use_by_ref()
+        {
+            debug_assert!(self.get().captured.is_empty());
+            return true;
+        }
+        self.get().captured.is_empty()
+    }
+
+    /// Whether `name` is one of the scope's static variables.
+    pub(crate) fn has_static(&self, name: &Name) -> bool {
+        if let Some(plan) = self.unread()
+            && !plan.owner.arenas().has_static_var_statement()
+        {
+            debug_assert!(!self.get().statics.contains(name));
+            return false;
+        }
+        self.get().statics.contains(name)
+    }
+}
+
+impl Deref for LazyShared<'_> {
+    type Target = SharedScope;
+
+    fn deref(&self) -> &SharedScope {
+        self.get()
+    }
+}
+
+struct PlanParts<'p> {
+    registry: &'p Registry,
+    source: &'p Source,
+    by_ref_uses: &'p [Name],
+    function: &'p Option<(Option<Name>, Name)>,
+    top_level: bool,
+    closure: bool,
+    by_ref_params: &'p [Name],
+}
+
+impl PlanParts<'_> {
+    fn build(&self, arenas: &NodeArenas) -> SharedScope {
+        let mut scope = match self.source {
+            Source::Statements(body) => SharedScope::of(
+                self.registry,
+                arenas,
+                body,
+                self.by_ref_uses,
+                self.function.clone(),
+                self.top_level,
+            ),
+            Source::Arrow(body) => SharedScope::of_arrow_function(self.registry, arenas, *body),
+        };
+        scope.closure = self.closure;
+        scope.expose(self.by_ref_params);
+        scope
+    }
+}
+
+impl Plan<'_> {
+    fn parts(&self) -> PlanParts<'_> {
+        PlanParts {
+            registry: self.registry,
+            source: &self.source,
+            by_ref_uses: &self.by_ref_uses,
+            function: &self.function,
+            top_level: self.top_level,
+            closure: self.closure,
+            by_ref_params: &self.by_ref_params,
+        }
+    }
+}
+
 /// What a variable is written.
 enum Held {
     /// Only objects the scope made.
@@ -211,13 +505,13 @@ struct Scan<'r> {
     statics: FxHashSet<Name>,
     references: FxHashMap<Name, Place>,
     captured: FxHashMap<Name, Capture>,
-    /// The uses of a variable that may let what it holds leave the scope,
-    /// other than calling it.
-    leaks: FxHashMap<Name, Vec<Escape>>,
     /// Where each closure was written.
     closure_at: FxHashMap<u32, Escape>,
     held: FxHashMap<Name, Held>,
-    escapes: FxHashMap<Name, Vec<Escape>>,
+    /// Each use of a variable that may let what it holds go, with whether
+    /// it leaves the scope (any use but calling the variable or passing it
+    /// to a function that keeps nothing of it).
+    escapes: FxHashMap<Name, Vec<(Escape, bool)>>,
     /// Where the statement being scanned starts.
     stmt_at: Option<u32>,
     /// The loops being scanned, outermost first.
@@ -257,7 +551,12 @@ impl<'r> Scan<'r> {
             }
             match held {
                 Held::Made => {
-                    let mut escapes = escapes.remove(&name).unwrap_or_default();
+                    let mut escapes: Vec<Escape> = escapes
+                        .remove(&name)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(escape, _)| escape)
+                        .collect();
                     if self.jumps {
                         for escape in &mut escapes {
                             escape.stmt = None;
@@ -266,9 +565,18 @@ impl<'r> Scan<'r> {
                     made.insert(name, escapes);
                 }
                 Held::Closures(bodies) => {
-                    let leaks = self.leaks.get(&name).cloned().unwrap_or_default();
-                    for (id, _) in &bodies {
-                        closure_escapes.insert(id.into_raw().into_u32(), leaks.clone());
+                    let leaks: Vec<Escape> = escapes
+                        .get(&name)
+                        .into_iter()
+                        .flatten()
+                        .filter(|(_, leaks)| *leaks)
+                        .map(|(escape, _)| *escape)
+                        .collect();
+                    if let Some(((last, _), rest)) = bodies.split_last() {
+                        for (id, _) in rest {
+                            closure_escapes.insert(id.into_raw().into_u32(), leaks.clone());
+                        }
+                        closure_escapes.insert(last.into_raw().into_u32(), leaks);
                     }
                     closures.insert(name, bodies);
                 }
@@ -310,24 +618,28 @@ impl<'r> Scan<'r> {
 
     /// That `name` is written what `held` says.
     fn note(&mut self, name: &Name, held: Held) {
-        let joined = match (self.held.remove(name), held) {
-            (None, held) => held,
-            (Some(Held::Made), Held::Made) => Held::Made,
-            (Some(Held::Closures(mut a)), Held::Closures(b)) => {
+        let Some(slot) = self.held.get_mut(name) else {
+            self.held.insert(name.clone(), held);
+            return;
+        };
+        *slot = match (std::mem::replace(slot, Held::Other), held) {
+            (Held::Made, Held::Made) => Held::Made,
+            (Held::Closures(mut a), Held::Closures(b)) => {
                 a.extend(b);
                 Held::Closures(a)
             }
             _ => Held::Other,
         };
-        self.held.insert(name.clone(), joined);
     }
 
     /// A use of the variable `name` that may let the object it holds leave
     /// the scope, in the statement being scanned.
     fn escape(&mut self, name: &Name) {
         let escape = self.here();
-        self.escapes.entry(name.clone()).or_default().push(escape);
-        self.leaks.entry(name.clone()).or_default().push(escape);
+        self.escapes
+            .entry(name.clone())
+            .or_default()
+            .push((escape, true));
     }
 
     /// Passing the variable `name` to a function that keeps nothing of it:
@@ -338,14 +650,20 @@ impl<'r> Scan<'r> {
             transient: true,
             ..self.here()
         };
-        self.escapes.entry(name.clone()).or_default().push(escape);
+        self.escapes
+            .entry(name.clone())
+            .or_default()
+            .push((escape, false));
     }
 
     /// Calling the variable `name`: what it holds, if an object, gets its
     /// `__invoke` a `$this`, but a closure it holds leaves nothing.
     fn call(&mut self, name: &Name) {
         let escape = self.here();
-        self.escapes.entry(name.clone()).or_default().push(escape);
+        self.escapes
+            .entry(name.clone())
+            .or_default()
+            .push((escape, false));
     }
 
     fn here(&self) -> Escape {

@@ -346,21 +346,21 @@ impl<'a> Checker<'a> {
                     GotoState::new(goto_labels.to_owned()),
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(arenas, body);
-                let enclosing_scope =
-                    self.enter_shared_scope(crate::checker::shared_scope::SharedScope {
-                        closure: true,
-                        ..crate::checker::shared_scope::SharedScope::of(
-                            self.registry,
-                            arenas,
-                            body,
-                            uses,
-                            Some((
-                                self.current_class.as_deref().map(syntax::name::Name::from),
-                                syntax::name::Name::from("{closure}"),
-                            )),
-                            false,
-                        )
-                    });
+                let closure_scope = crate::checker::shared_scope::LazyShared::of_statements(
+                    self.syntax_tree_owner(),
+                    self.registry,
+                    arenas,
+                    body,
+                    uses,
+                    Some((
+                        self.current_class.as_deref().map(syntax::name::Name::from),
+                        syntax::name::Name::from("{closure}"),
+                    )),
+                    false,
+                    true,
+                    &[],
+                );
+                let enclosing_scope = self.enter_shared_scope(closure_scope);
                 // The closure's own by-reference state, as `checker::expr`'s
                 // `ExprKind::Closure` arm keeps it: its captures by
                 // reference are snapshotted where its body returns.

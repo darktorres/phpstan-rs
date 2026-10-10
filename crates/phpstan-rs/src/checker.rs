@@ -774,7 +774,7 @@ pub struct Checker<'a> {
     // What of the scope being checked other code may write or run
     // (`shared_scope`), and what the closures it wrote may have left in the
     // variables they capture by reference.
-    pub(crate) shared_scope: std::rc::Rc<shared_scope::SharedScope>,
+    pub(crate) shared_scope: std::rc::Rc<shared_scope::LazyShared<'a>>,
     // Where the statement being checked starts, as the scope's escapes are
     // placed (`SharedScope::unescaped_at`); `None` outside one.
     pub(crate) stmt_at: std::cell::Cell<Option<u32>>,
@@ -1587,20 +1587,19 @@ impl<'a> Checker<'a> {
     /// the scope it is in had comes back with `leave_shared_scope`.
     pub(crate) fn enter_shared_scope(
         &mut self,
-        scope: shared_scope::SharedScope,
-    ) -> EnclosingScope {
-        let statics = scope.statics.iter().cloned().collect();
+        scope: shared_scope::LazyShared<'a>,
+    ) -> EnclosingScope<'a> {
         EnclosingScope {
             shared: std::mem::replace(&mut self.shared_scope, std::rc::Rc::new(scope)),
             captured: std::mem::take(&mut self.captured_types),
-            statics: std::mem::replace(&mut self.static_var_names, statics),
+            statics: std::mem::take(&mut self.static_var_names),
             entries: std::mem::take(&mut self.capture_entries),
             widening: std::mem::take(&mut self.capture_widening),
             seen: std::mem::take(&mut self.capture_seen),
         }
     }
 
-    pub(crate) fn leave_shared_scope(&mut self, enclosing: EnclosingScope) {
+    pub(crate) fn leave_shared_scope(&mut self, enclosing: EnclosingScope<'a>) {
         self.shared_scope = enclosing.shared;
         self.captured_types = enclosing.captured;
         self.static_var_names = enclosing.statics;
@@ -1621,7 +1620,7 @@ impl<'a> Checker<'a> {
         mut check: impl FnMut(&mut Self, &mut Locals) -> R,
     ) -> R {
         const MAX_PASSES: usize = 4;
-        if self.shared_scope.captured.is_empty() {
+        if self.shared_scope.captures_nothing() {
             return check(self, locals);
         }
         let entry = locals.clone();
@@ -1660,7 +1659,7 @@ impl<'a> Checker<'a> {
     /// Records what each variable the scope's closures capture by reference
     /// holds now (`check_capturing_scope`).
     pub(crate) fn note_captured_types(&mut self, locals: &Locals) {
-        if self.shared_scope.captured.is_empty() {
+        if self.shared_scope.captures_nothing() {
             return;
         }
         let scope = std::rc::Rc::clone(&self.shared_scope);
@@ -1674,6 +1673,12 @@ impl<'a> Checker<'a> {
             };
             self.capture_seen.insert(name.clone(), seen);
         }
+    }
+
+    /// Whether `name` is a `static` variable of the scope being checked:
+    /// one a `static` statement has bound, or one the scope binds later.
+    pub(crate) fn is_static_var(&self, name: &syntax::name::Name) -> bool {
+        self.static_var_names.contains(name.as_ref()) || self.shared_scope.has_static(name)
     }
 
     /// An empty scope of this checker's, made by its table of keys.
@@ -2155,8 +2160,17 @@ impl<'a> Checker<'a> {
 
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
-        let top_level_scope =
-            shared_scope::SharedScope::of(self.registry, arenas, stmts, &[], None, true);
+        let top_level_scope = shared_scope::LazyShared::of_statements(
+            self.syntax_tree_owner(),
+            self.registry,
+            arenas,
+            stmts,
+            &[],
+            None,
+            true,
+            false,
+            &[],
+        );
         let enclosing_scope = self.enter_shared_scope(top_level_scope);
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here: real PHP only
@@ -2443,8 +2457,8 @@ fn assert_node_spans(arenas: &NodeArenas, program: &[StmtId]) {
 
 /// What `Checker::enter_shared_scope` set aside for the scope a nested one
 /// is in.
-pub(crate) struct EnclosingScope {
-    shared: std::rc::Rc<shared_scope::SharedScope>,
+pub(crate) struct EnclosingScope<'a> {
+    shared: std::rc::Rc<shared_scope::LazyShared<'a>>,
     captured: rustc_hash::FxHashMap<syntax::name::Name, Type>,
     statics: NameSet,
     entries: Vec<(u32, syntax::name::Name, Type)>,

@@ -1326,7 +1326,8 @@ impl<'a> Checker<'a> {
             // idiom or a class declared conditionally, has a scope of its
             // own. At a file's top level, `check_program` checks it once,
             // after the passes over the top level's statements.
-            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) if self.shared_scope.top_level => {}
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) if self.shared_scope.top_level() => {
+            }
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {
                 self.check_nested_declaration(stmt)
             }

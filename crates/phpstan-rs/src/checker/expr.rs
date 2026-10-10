@@ -1243,7 +1243,7 @@ impl<'a> Checker<'a> {
                 // pass.
                 if nullsafe.is_nullsafe()
                     && self.loop_depth == 0
-                    && !matches!(&recv.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
+                    && !matches!(&recv.kind, ExprKind::Variable(n) if self.is_static_var(n))
                     && type_definitely_excludes_null(&recv_ty)
                 {
                     self.report(format!(
@@ -3639,7 +3639,7 @@ impl<'a> Checker<'a> {
                 // guard on the `MethodCall` arm above for why.
                 if nullsafe.is_nullsafe()
                     && self.loop_depth == 0
-                    && !matches!(&base.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
+                    && !matches!(&base.kind, ExprKind::Variable(n) if self.is_static_var(n))
                     && type_definitely_excludes_null(&base_ty)
                 {
                     self.report(format!(
@@ -4632,21 +4632,20 @@ impl<'a> Checker<'a> {
                     GotoState::new(goto_labels.clone()),
                 );
                 let previous_assigned_variables = self.enter_assigned_variables(arenas, body);
-                let mut closure_scope = crate::checker::shared_scope::SharedScope {
-                    closure: true,
-                    ..crate::checker::shared_scope::SharedScope::of(
-                        self.registry,
-                        arenas,
-                        body,
-                        uses,
-                        Some((
-                            self.current_class.as_deref().map(Name::from),
-                            Name::from("{closure}"),
-                        )),
-                        false,
-                    )
-                };
-                closure_scope.expose_parameters(params);
+                let closure_scope = crate::checker::shared_scope::LazyShared::of_statements(
+                    self.syntax_tree_owner(),
+                    self.registry,
+                    arenas,
+                    body,
+                    uses,
+                    Some((
+                        self.current_class.as_deref().map(Name::from),
+                        Name::from("{closure}"),
+                    )),
+                    false,
+                    true,
+                    params,
+                );
                 let enclosing_scope = self.enter_shared_scope(closure_scope);
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`
@@ -4933,16 +4932,15 @@ impl<'a> Checker<'a> {
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
                 self.check_generator_return_type(declared_return.as_ref(), self.expr_span(e.id));
-                let mut arrow_scope = crate::checker::shared_scope::SharedScope {
-                    closure: true,
-                    ..crate::checker::shared_scope::SharedScope::of_arrow_function(
-                        self.registry,
-                        self.syntax_arenas()
-                            .expect("arrow checks require the syntax tree owner"),
-                        body.id,
-                    )
-                };
-                arrow_scope.expose_parameters(params);
+                let arrow_scope = crate::checker::shared_scope::LazyShared::of_expression(
+                    self.syntax_tree_owner(),
+                    self.registry,
+                    self.syntax_arenas()
+                        .expect("arrow checks require the syntax tree owner"),
+                    body.id,
+                    true,
+                    params,
+                );
                 let enclosing_scope = self.enter_shared_scope(arrow_scope);
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.leave_shared_scope(enclosing_scope);

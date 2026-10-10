@@ -295,12 +295,18 @@ pub struct NodeArenas {
 struct KindsSeen {
     yield_: bool,
     global: bool,
+    static_var: bool,
+    reference: bool,
+    capture_by_ref: bool,
 }
 
 impl KindsSeen {
     fn merge(&mut self, other: KindsSeen) {
         self.yield_ |= other.yield_;
         self.global |= other.global;
+        self.static_var |= other.static_var;
+        self.reference |= other.reference;
+        self.capture_by_ref |= other.capture_by_ref;
     }
 }
 
@@ -588,6 +594,11 @@ impl NodeArenas {
     }
 
     pub fn alloc_closure(&mut self, value: ClosurePayload) -> ClosureId {
+        if let ClosurePayload::Closure(closure) = &value
+            && self.closure_uses(&closure.uses).iter().any(|u| u.by_ref)
+        {
+            self.kinds_seen.capture_by_ref = true;
+        }
         idx_with_base(self.closures.alloc(value), self.closures_base)
     }
 
@@ -994,8 +1005,10 @@ impl NodeArenas {
                 )
                 .expect("expression arena exhausted")
         );
-        if matches!(node.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_)) {
-            self.kinds_seen.yield_ = true;
+        match node.kind {
+            ExprKind::Yield(..) | ExprKind::YieldFrom(_) => self.kinds_seen.yield_ = true,
+            ExprKind::AssignRef(..) => self.kinds_seen.reference = true,
+            _ => {}
         }
         let local_id = self.exprs.alloc(node);
         assert_eq!(u32::from(local_id.into_raw()), self.expr_spans.len() as u32);
@@ -1014,8 +1027,11 @@ impl NodeArenas {
                 )
                 .expect("statement arena exhausted")
         );
-        if matches!(node.kind, StmtKind::Global(_)) {
-            self.kinds_seen.global = true;
+        match node.kind {
+            StmtKind::Global(_) => self.kinds_seen.global = true,
+            StmtKind::StaticVar(_) => self.kinds_seen.static_var = true,
+            StmtKind::Foreach { by_ref: true, .. } => self.kinds_seen.reference = true,
+            _ => {}
         }
         let local_id = self.stmts.alloc(node);
         assert_eq!(u32::from(local_id.into_raw()), self.stmt_spans.len() as u32);
@@ -1164,6 +1180,28 @@ impl NodeArenas {
     #[inline]
     pub fn has_global_statement(&self) -> bool {
         self.kinds_seen.global
+    }
+
+    /// Whether the arena holds a `static` variable statement.
+    #[inline]
+    pub fn has_static_var_statement(&self) -> bool {
+        self.kinds_seen.static_var
+    }
+
+    /// Whether the arena holds a closure with a `use (&$x)`.
+    #[inline]
+    pub fn has_closure_use_by_ref(&self) -> bool {
+        self.kinds_seen.capture_by_ref
+    }
+
+    /// Whether the arena holds a node that binds a variable to a global, a
+    /// static variable or a place: a `global` or `static` statement, a
+    /// reference assignment, a `foreach` by reference or a closure using a
+    /// variable by reference.
+    #[inline]
+    pub fn binds_shared_variables(&self) -> bool {
+        let kinds = &self.kinds_seen;
+        kinds.global || kinds.static_var || kinds.reference || kinds.capture_by_ref
     }
 
     /// Looks up an expression in this file's expression arena.
@@ -3593,6 +3631,47 @@ mod arena_tests {
         assert_eq!(
             kinds("<?php function f() { global $x; return \"{$x}\"; }"),
             (false, true)
+        );
+    }
+
+    #[test]
+    fn arenas_note_the_nodes_that_bind_shared_variables() {
+        let kinds = |source: &str| {
+            let file = crate::parse_watching(source, None, None).expect("the file parses");
+            let arenas = &file.arenas;
+            (
+                arenas.has_static_var_statement(),
+                arenas.has_closure_use_by_ref(),
+                arenas.binds_shared_variables(),
+            )
+        };
+        assert_eq!(
+            kinds("<?php function f($a) { $b = $a; return fn() => $b; }"),
+            (false, false, false)
+        );
+        assert_eq!(
+            kinds("<?php function f() { static $n = 0; }"),
+            (true, false, true)
+        );
+        assert_eq!(
+            kinds("<?php function f() { $x = 1; return function () use (&$x) {}; }"),
+            (false, true, true)
+        );
+        assert_eq!(
+            kinds("<?php function f() { return function () use ($x) {}; }"),
+            (false, false, false)
+        );
+        assert_eq!(
+            kinds("<?php function f(&$a) { $b = &$a; }"),
+            (false, false, true)
+        );
+        assert_eq!(
+            kinds("<?php function f($a) { foreach ($a as &$v) {} }"),
+            (false, false, true)
+        );
+        assert_eq!(
+            kinds("<?php function f() { global $g; }"),
+            (false, false, true)
         );
     }
 

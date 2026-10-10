@@ -956,7 +956,8 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner.arenas();
         let body_stmts = f.body_stmts(arenas);
         let previous_assigned_variables = self.enter_assigned_variables(arenas, body_stmts);
-        let mut scope = crate::checker::shared_scope::SharedScope::of(
+        let scope = crate::checker::shared_scope::LazyShared::of_statements(
+            self.syntax_tree_owner(),
             self.registry,
             arenas,
             body_stmts,
@@ -965,8 +966,9 @@ impl<'a> Checker<'a> {
             // with its namespace, a method's as written.
             Some((class_name.map(Name::from), Name::from(f.fq_name()))),
             false,
+            false,
+            params,
         );
-        scope.expose_parameters(params);
         let enclosing_scope = self.enter_shared_scope(scope);
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
