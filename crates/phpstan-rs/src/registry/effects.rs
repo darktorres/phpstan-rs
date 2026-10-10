@@ -296,6 +296,9 @@ pub(crate) struct Condition {
     /// The object the argument runs on when the declaration binds it to one
     /// (`Closure::call`); `None` for the argument's own `$this`.
     this: Option<Transfer>,
+    /// The argument is not called but destroyed, the declaration writing
+    /// over the by-reference parameter it is passed at.
+    destroys: bool,
 }
 
 impl Condition {
@@ -305,6 +308,7 @@ impl Condition {
         Condition {
             at: self.at,
             this: self.this.as_ref().map(|this| this.through(transfer)),
+            destroys: self.destroys,
         }
     }
 
@@ -1189,6 +1193,8 @@ struct Site<'r> {
 struct Passed {
     runs: RunList,
     params: Vec<Condition>,
+    /// What dies if the declaration writes over the parameter.
+    destroys: Option<RunList>,
 }
 
 /// Where a call passes a parameter of a declaration it runs.
@@ -1755,6 +1761,37 @@ impl Registry {
         {
             Some(text) if !text.contains("::") => Passing::Default(function_named(self, text)),
             _ => Passing::Unknown,
+        }
+    }
+
+    /// `passing` for a parameter the declaration writes over: an argument
+    /// left out passes its default, which holds no object when its type says
+    /// so.
+    fn passing_destroyed<'c>(&self, call: &'c CallWrites, key: &DeclKey, at: u32) -> Passing<'c> {
+        match self.passing(call, key, at) {
+            Passing::Unknown => {
+                let objectless = self
+                    .declaration(key)
+                    .and_then(|sig| sig.params.get(at as usize))
+                    .filter(|param| {
+                        !param.variadic
+                            && param.has_default
+                            && !call.arguments.iter().any(|arg| match arg {
+                                ArgAt::Position(position) => *position == at,
+                                ArgAt::Named(name) => name.as_str() == param.name.as_ref(),
+                                ArgAt::Spread => true,
+                            })
+                    })
+                    .and_then(|param| param.default_ty.as_ref())
+                    .and_then(element_classes)
+                    .is_some_and(|classes| classes.is_empty());
+                if objectless {
+                    Passing::Default(RunList::new())
+                } else {
+                    Passing::Unknown
+                }
+            }
+            passing => passing,
         }
     }
 
@@ -2685,8 +2722,20 @@ fn run_passed<'g>(
         return;
     };
     let default;
-    let (runs, params) = match registry.passing(site.call, &callee_key, condition.at) {
+    let passing = if condition.destroys {
+        registry.passing_destroyed(site.call, &callee_key, condition.at)
+    } else {
+        registry.passing(site.call, &callee_key, condition.at)
+    };
+    let (runs, params) = match passing {
         Passing::Argument(at) => match site.passed.iter().find(|(passed, _)| *passed == at) {
+            Some((_, passed)) if condition.destroys => match &passed.destroys {
+                Some(destroys) => (&destroys[..], &[][..]),
+                None => {
+                    into.effect = Effect::unknown();
+                    return;
+                }
+            },
             Some((_, passed)) => (&passed.runs[..], &passed.params[..]),
             None => {
                 into.effect = Effect::unknown();
@@ -2694,7 +2743,12 @@ fn run_passed<'g>(
             }
         },
         Passing::Default(runs) => {
-            default = runs;
+            // A default is no value the caller holds.
+            default = if condition.destroys {
+                RunList::new()
+            } else {
+                runs
+            };
             (&default[..], &[][..])
         }
         Passing::Unknown => {
@@ -2728,6 +2782,7 @@ fn run_passed<'g>(
                 .as_ref()
                 .map(|this| this.through(transfer))
                 .or_else(|| param.this.clone()),
+            destroys: false,
         });
     }
 }
@@ -3036,6 +3091,25 @@ struct Reach<'r> {
 }
 
 impl Reach<'_> {
+    /// The destructors that run if the declaration a call reaches writes
+    /// over the by-reference parameter its argument `at` is passed at: those
+    /// of the objects the argument and its elements hold; `None` when they
+    /// may be code not known.
+    fn argument_destroys(&self, call: &CallWrites, at: &ArgAt) -> Option<RunList> {
+        let Some((_, place)) = call.places.iter().find(|(passed, _)| passed == at) else {
+            return Some(RunList::new());
+        };
+        let holder = self
+            .ctx
+            .argument(at, Some(place))
+            .join(self.ctx.elements(at, Some(place)));
+        if holder == Holder::none() {
+            return Some(RunList::new());
+        }
+        let targets = self.implicit_holder_targets(holder, false, &Operation::Destroy)?;
+        Some(targets.into_list())
+    }
+
     /// The declarations the argument of `call` passed `at` runs when it is
     /// called, each with what its own `$this` is to the caller, `transfer`
     /// for a closure the caller wrote; `None` when it may run code not
@@ -3550,6 +3624,16 @@ impl Reach<'_> {
         operation: &Operation,
     ) -> Option<Targets> {
         let (holder, same) = self.ctx.operand(on);
+        self.implicit_holder_targets(holder, same, operation)
+    }
+
+    /// `implicit_call_targets` for an operand already found to be `holder`.
+    fn implicit_holder_targets(
+        &self,
+        holder: Holder,
+        same: bool,
+        operation: &Operation,
+    ) -> Option<Targets> {
         let (scope, rebindable) = (self.ctx.scope_name(), self.ctx.rebindable());
         let scoped = |hooks: Option<bool>| ImplicitKey {
             holder: holder.clone(),
@@ -4161,16 +4245,22 @@ impl Registry {
                     effect.join_transferred(&settled.effect, transfer);
                     let mut runs = RunList::new();
                     for condition in &settled.runs {
-                        let passing = if passes_arguments(&call.callee, key) {
-                            self.passing(call, key, condition.at)
-                        } else {
+                        let passing = if !passes_arguments(&call.callee, key) {
                             Passing::Unknown
+                        } else if condition.destroys {
+                            self.passing_destroyed(call, key, condition.at)
+                        } else {
+                            self.passing(call, key, condition.at)
                         };
                         let passed = match passing {
+                            Passing::Argument(at) if condition.destroys => {
+                                reach.argument_destroys(call, at)
+                            }
                             Passing::Argument(at) => {
                                 let written = condition.bound(transfer, &Transfer::Same);
                                 reach.argument_runs(call, at, &written)
                             }
+                            Passing::Default(_) if condition.destroys => Some(RunList::new()),
                             Passing::Default(runs) => Some(runs),
                             Passing::Unknown => None,
                         };
@@ -4368,6 +4458,15 @@ impl<'r> Resolve<'r> {
         let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
         let aliased = Rc::new(self.aliased(sig_params));
         let mut level = self.level(facts, &lost[0], &aliased, facts.bindings.iter().collect());
+        level.overwrites = sig_params
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| {
+                p.by_ref
+                    && (facts.computed || facts.overwritten.iter().any(|n| n == p.name.as_ref()))
+            })
+            .map(|(at, p)| (!p.variadic).then_some(at as u32))
+            .collect();
         if !facts.computed {
             level.params = sig_params
                 .iter()
@@ -4613,6 +4712,7 @@ impl<'r> Resolve<'r> {
             aliased: Rc::clone(aliased),
             runs: Default::default(),
             params_run: Default::default(),
+            overwrites: Vec::new(),
             outer: None,
             class_name: std::cell::OnceCell::new(),
             this_holder: std::cell::OnceCell::new(),
@@ -4626,6 +4726,7 @@ fn reads_variables(origin: &Origin) -> bool {
     match origin {
         Origin::Elements(inner) => reads_variables(inner),
         Origin::Taken(_, from, held) => from.iter().chain(held.iter()).any(reads_variables),
+        Origin::Written(_) => true,
         Origin::Place(place) => matches!(place.root, Root::Variable(Some(_))),
         Origin::Returned(Callee::Method { receiver, .. }) => {
             matches!(receiver, Receiver::Variable(_) | Receiver::Origins(_))
@@ -4691,6 +4792,9 @@ struct Level<'r> {
     runs: std::cell::RefCell<Vec<(u32, Transfer)>>,
     // The declaration's parameters whose arguments its calls run.
     params_run: std::cell::RefCell<Vec<Condition>>,
+    // The positions of the parameters taken by reference the body writes
+    // over, whose arguments then die; `None` for a variadic one.
+    overwrites: Vec<Option<u32>>,
     // For an arrow function or a first-class callable, which take every
     // variable around them by value: what the code that wrote it knows of
     // the object a variable it does not write holds.
@@ -4894,9 +4998,11 @@ impl<'r> Level<'r> {
             Transfer::Same => None,
             other => Some(other.clone()),
         };
-        self.params_run
-            .borrow_mut()
-            .push(Condition { at: *at, this });
+        self.params_run.borrow_mut().push(Condition {
+            at: *at,
+            this,
+            destroys: false,
+        });
         true
     }
 
@@ -5040,12 +5146,23 @@ impl<'r> Level<'r> {
             let (run, transfer) = self.registry.effect_run(&holder.closure(id), &transfer);
             calls.push((run, transfer, None));
         }
+        let mut runs = self.params_run.take();
+        for &at in &self.overwrites {
+            match at {
+                Some(at) => runs.push(Condition {
+                    at,
+                    this: None,
+                    destroys: true,
+                }),
+                None => own = Effect::unknown(),
+            }
+        }
         Classification {
             own,
             calls,
             sets,
             sites,
-            runs: self.params_run.take(),
+            runs,
         }
     }
 
@@ -5119,7 +5236,15 @@ impl<'r> Level<'r> {
                 runs.extend(closures.into_iter().map(|(id, transfer)| {
                     self.registry.effect_run(&holder.closure(id), &transfer)
                 }));
-                out.push((at, Passed { runs, params }));
+                let destroys = reach.argument_destroys(call, at);
+                out.push((
+                    at,
+                    Passed {
+                        runs,
+                        params,
+                        destroys,
+                    },
+                ));
             }
         }
         out
@@ -5204,6 +5329,20 @@ impl<'r> Level<'r> {
                 .outer
                 .and_then(|outer| outer(name.as_str()))
                 .unwrap_or(Holder::Unknown),
+        }
+    }
+
+    /// The object the variable `name` holds of what the scope writes it.
+    fn written_holder(&self, name: &Name) -> Holder {
+        if self.lost.contains(name.as_str()) || self.facts.computed {
+            return Holder::Unknown;
+        }
+        match self.origins.get(name.as_str()) {
+            Some(origins) => origins.iter().fold(Holder::none(), |held, origin| {
+                held.join(self.operand_origin(origin).0)
+            }),
+            None if self.facts.reassigned.contains(name) => Holder::Unknown,
+            None => Holder::none(),
         }
     }
 
@@ -5391,6 +5530,7 @@ impl<'r> Level<'r> {
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::Elements(inner) => (self.elements_holder(inner), false),
             Origin::Taken(callee, from, held) => (self.taken_holder(callee, from, held), false),
+            Origin::Written(name) => (self.written_holder(name), false),
             Origin::New(Some(class)) => (
                 self.made_holder(
                     named_classes(registry, self.class_name(), class).unwrap_or_default(),
@@ -6002,7 +6142,7 @@ impl syntax::canonical::Canonical for Effect {
 
 syntax::canonical_struct!(Settled { effect, runs });
 
-syntax::canonical_struct!(Condition { at, this });
+syntax::canonical_struct!(Condition { at, this, destroys });
 
 syntax::canonical_enum!(Transfer {
     Same,

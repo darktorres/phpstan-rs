@@ -661,6 +661,10 @@ pub struct Checker<'a> {
     // arguments are checked - the one read-looking position where PHP
     // accepts an empty dim, since it creates the element.
     pub(crate) by_ref_empty_dim_args: std::cell::RefCell<rustc_hash::FxHashSet<syntax::span::Span>>,
+    /// The types by-reference arguments had before the call they are passed
+    /// to replaced them with its parameters', by where they are.
+    pub(crate) byref_before:
+        std::cell::RefCell<rustc_hash::FxHashMap<syntax::span::Span, types::Type>>,
     // The type of every legal write to a private property, keyed by the
     // class whose scope performs it and the property's exact-case ID.
     pub(crate) property_assign_facts: PropertyAssignFacts,
@@ -1393,6 +1397,7 @@ impl<'a> Checker<'a> {
             enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
+            byref_before: Default::default(),
             property_assign_facts: FxHashMap::default(),
             named_argument_call_facts: FxHashMap::default(),
             property_type_sites: Vec::new(),

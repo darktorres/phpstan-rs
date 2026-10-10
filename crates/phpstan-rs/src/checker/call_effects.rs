@@ -42,6 +42,9 @@ struct TypedCall<'c, 'a> {
     /// The object an operation's operand is, and whether it is the scope's
     /// own `$this`, for an operation PHP may run code for.
     operand: Option<(Holder, bool)>,
+    /// What the by-reference arguments were before the call replaced them
+    /// with the parameters' types, by where they are.
+    before: rustc_hash::FxHashMap<syntax::span::Span, Type>,
 }
 
 impl TypedCall<'_, '_> {
@@ -59,7 +62,15 @@ impl TypedCall<'_, '_> {
     }
 
     fn inferred(&self, e: &ExprNode) -> Holder {
-        holder_of(&self.checker.infer_expr(e, self.locals))
+        holder_of(&self.type_of(e))
+    }
+
+    /// The type of the argument `e`, before the call.
+    fn type_of(&self, e: &ExprNode) -> Type {
+        match self.before.get(&self.checker.expr_span(e.id)) {
+            Some(before) => before.clone(),
+            None => self.checker.infer_expr(e, self.locals),
+        }
     }
 
     /// What the scope knows of the object the variable `name` holds, for a
@@ -182,7 +193,7 @@ impl CallContext for TypedCall<'_, '_> {
 
     fn elements(&self, at: &ArgAt, _: Option<&Place>) -> Holder {
         self.arg(at).map_or(Holder::Unknown, |arg| {
-            elements_holder_of(&self.checker.infer_expr(arg, self.locals))
+            elements_holder_of(&self.type_of(arg))
         })
     }
 
@@ -384,6 +395,14 @@ impl Checker<'_> {
         let Some(mut call) = call_of(arenas, e.id) else {
             return;
         };
+        let before = args
+            .iter()
+            .filter_map(|arg| {
+                let span = self.expr_span(arg.value);
+                let ty = self.byref_before.borrow_mut().remove(&span)?;
+                Some((span, ty))
+            })
+            .collect();
         // An array callable on a value the context cannot name is not
         // followed: it may run anything.
         call.callables = call
@@ -412,6 +431,7 @@ impl Checker<'_> {
                 args,
                 written: Default::default(),
                 operand: None,
+                before,
             };
             let mut effect = self.registry.call_effect(&call, &ctx);
             effect.join(&ctx.written.borrow());
@@ -463,6 +483,7 @@ impl Checker<'_> {
                 args: &[],
                 written: Default::default(),
                 operand: Some((operand, this)),
+                before: Default::default(),
             };
             self.registry.call_effect(&call, &ctx)
         };
@@ -577,6 +598,7 @@ impl Checker<'_> {
                 args: &[],
                 written: Default::default(),
                 operand: None,
+                before: Default::default(),
             };
             let mut effect = self.registry.call_effect(&call, &ctx);
             effect.join(&ctx.written.borrow());

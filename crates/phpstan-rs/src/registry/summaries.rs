@@ -338,6 +338,9 @@ pub(crate) enum Origin {
     /// array of elements, when the function is the builtin that does so
     /// (`takes_elements`); what the callee returns otherwise.
     Taken(Callee, Box<[Origin]>, Box<[Origin]>),
+    /// What the body writes the variable, not the argument a parameter taken
+    /// by reference started as.
+    Written(Name),
 }
 
 impl PartialEq for Narrowing {
@@ -382,6 +385,7 @@ impl PartialEq for Origin {
             (Origin::Declared(a), Origin::Declared(b)) => a.canonical_text() == b.canonical_text(),
             (Origin::Elements(a), Origin::Elements(b)) => a == b,
             (Origin::Taken(a, x, p), Origin::Taken(b, y, q)) => a == b && x == y && p == q,
+            (Origin::Written(a), Origin::Written(b)) => a == b,
             _ => false,
         }
     }
@@ -411,6 +415,7 @@ impl Hash for Origin {
                 from.hash(state);
                 held.hash(state);
             }
+            Origin::Written(name) => name.hash(state),
         }
     }
 }
@@ -426,7 +431,7 @@ impl Origin {
     /// written in decides it.
     fn context_free(&self) -> bool {
         match self {
-            Origin::Place(_) | Origin::Returned(_) => false,
+            Origin::Place(_) | Origin::Returned(_) | Origin::Written(_) => false,
             Origin::Elements(inner) => inner.context_free(),
             Origin::Taken(..) => false,
             _ => true,
@@ -910,6 +915,10 @@ pub(crate) struct WriteFacts {
     /// The variables the body assigns, which a declared type of a parameter
     /// then no longer describes.
     pub(crate) reassigned: Box<[Name]>,
+    /// The variables the body assigns over, or an element of: the value one
+    /// held when the body started, if it is a parameter taken by reference,
+    /// stops being held there.
+    pub(crate) overwritten: Box<[Name]>,
     /// Every place the body writes.
     pub(crate) writes: Box<[Place]>,
     /// What its variables are bound to; `None` for a variable whose name is
@@ -1142,6 +1151,11 @@ impl BodySummary {
     ) -> BodySummary {
         let mut walk = Summarizer {
             names: file,
+            by_ref_params: params
+                .iter()
+                .filter(|param| param.by_ref)
+                .map(|param| param.name.name.clone())
+                .collect(),
             ..Summarizer::default()
         };
         for param in params.iter().filter(|param| param.promotion.is_some()) {
@@ -1355,6 +1369,7 @@ struct ElementRef {
 #[derive(Default)]
 struct Scope {
     reassigned: FxHashSet<Name>,
+    overwritten: FxHashSet<Name>,
     writes: Vec<Place>,
     bindings: Vec<(Option<Name>, Binding)>,
     // What each variable written holds: what the body made, or `None` once
@@ -1385,6 +1400,8 @@ impl Scope {
     fn finish(self, all_written: bool) -> WriteFacts {
         let mut reassigned: Vec<Name> = self.reassigned.into_iter().collect();
         reassigned.sort();
+        let mut overwritten: Vec<Name> = self.overwritten.into_iter().collect();
+        overwritten.sort();
         let mut made: Vec<(Name, Option<Made>)> = self
             .made
             .into_iter()
@@ -1399,6 +1416,7 @@ impl Scope {
         origins.sort_by(|a, b| a.0.cmp(&b.0));
         WriteFacts {
             reassigned: reassigned.into_boxed_slice(),
+            overwritten: overwritten.into_boxed_slice(),
             writes: self.writes.into_boxed_slice(),
             bindings: self.bindings.into_boxed_slice(),
             made: made.into_boxed_slice(),
@@ -1467,6 +1485,8 @@ struct Summarizer<'a> {
     // The inline `@var` tags of the statement the walk is in that assign
     // their variable there: the type it is taken to hold.
     declared: Vec<(Name, Type)>,
+    // The body's parameters taken by reference.
+    by_ref_params: FxHashSet<Name>,
 }
 
 const READ: u8 = 1;
@@ -2529,7 +2549,20 @@ impl Summarizer<'_> {
         match item {
             Some(element_ref) => element_ref.overwritten = true,
             None => {
-                self.implicit(arenas, lhs, Operation::Destroy);
+                match self.by_ref_param_of(arenas, lhs) {
+                    // The argument it started as is destroyed in the code
+                    // that passed it.
+                    Some(name) => {
+                        if plain_variable(arenas, lhs).is_some() {
+                            self.implicit_on(
+                                Some(vec![Origin::Written(name.clone())]),
+                                Operation::Destroy,
+                            );
+                        }
+                        self.scope.overwritten.insert(name);
+                    }
+                    None => self.implicit(arenas, lhs, Operation::Destroy),
+                }
                 // The arrays it held die with it.
                 if let Some(contents) =
                     plain_variable(arenas, lhs).and_then(|name| self.contents_held(&name))
@@ -2538,6 +2571,13 @@ impl Summarizer<'_> {
                 }
             }
         }
+    }
+
+    /// The parameter taken by reference of the body whose value, or an
+    /// element of it, an assignment or `unset` of `target` overwrites.
+    fn by_ref_param_of(&self, arenas: &NodeArenas, target: ExprId) -> Option<Name> {
+        overwritten_variable(arenas, target)
+            .filter(|name| self.current.is_none() && self.by_ref_params.contains(name))
     }
 
     /// What the arrays the variable `name` holds hold, with what the
@@ -3072,6 +3112,19 @@ fn plain_variable(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
     }
 }
 
+/// The variable whose value, or an element of it, an assignment to `id`
+/// overwrites.
+fn overwritten_variable(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
+    let mut id = id;
+    loop {
+        let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+        match &e.kind {
+            ExprKind::Index(base, Some(_)) => id = *base,
+            _ => return plain_variable(arenas, id),
+        }
+    }
+}
+
 /// The variable the statement `id` assigns, when it is an expression
 /// statement doing only that.
 fn assigned_variable(arenas: &NodeArenas, id: StmtId) -> Option<Name> {
@@ -3344,7 +3397,16 @@ impl Visitor for Summarizer<'_> {
             match &stmt.kind {
                 StmtKind::Unset(targets) => {
                     for &target in arenas.expr_ids(targets) {
-                        self.implicit(arenas, target, Operation::Destroy);
+                        match self.by_ref_param_of(arenas, target) {
+                            // Unsetting the parameter leaves what it
+                            // refers to held by the code that passed it.
+                            Some(name) => {
+                                if plain_variable(arenas, target).is_none() {
+                                    self.scope.overwritten.insert(name);
+                                }
+                            }
+                            None => self.implicit(arenas, target, Operation::Destroy),
+                        }
                         self.write(arenas, target, None, Some(vec![Origin::NoObject]));
                         self.mark(arenas, target, UNSET);
                     }
@@ -3973,6 +4035,7 @@ syntax::canonical_enum!(Origin {
     Declared(ty),
     Elements(inner),
     Taken(callee, from, held),
+    Written(name),
 });
 
 syntax::canonical_enum!(ArgAt {
@@ -4003,6 +4066,7 @@ syntax::canonical_struct!(CallWrites {
 
 syntax::canonical_struct!(WriteFacts {
     reassigned,
+    overwritten,
     writes,
     bindings,
     made,

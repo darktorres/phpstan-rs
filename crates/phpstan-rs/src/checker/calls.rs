@@ -189,6 +189,11 @@ impl<'a> Checker<'a> {
                 locals.declare_var(name, Type::mixed(), self.expr_span(arg_expr.id));
                 continue;
             }
+            if let Some(before) = locals.get_var(name) {
+                self.byref_before
+                    .borrow_mut()
+                    .insert(self.expr_span(arg_expr.id), before.clone());
+            }
             // The callee may write anything its own native type allows.
             locals.clear_native_var(name);
             locals.set_native_var(name, param.ty_native().clone());
