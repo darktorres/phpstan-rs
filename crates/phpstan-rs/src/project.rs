@@ -1688,15 +1688,15 @@ impl Project {
             })
             .collect();
         let functions: Vec<_> = files
-            .par_iter()
-            .map(|(file, references, _)| (*file, references.to_vec()))
+            .iter()
+            .map(|(file, references, _)| (*file, &**references))
             .collect();
         let signatures: Vec<_> = files
-            .par_iter()
-            .map(|(file, _, references)| (*file, references.to_vec()))
+            .iter()
+            .map(|(file, _, references)| (*file, &**references))
             .collect();
-        self.dependents = ReferenceIndex::from_file_refs(functions);
-        self.signature_dependents = ReferenceIndex::from_file_refs(signatures);
+        self.dependents = ReferenceIndex::from_file_refs(&functions);
+        self.signature_dependents = ReferenceIndex::from_file_refs(&signatures);
         self.use_sites
             .extend_files(std::mem::take(&mut self.pending_use_sites));
         self.duplicate_fn_sites
@@ -4438,6 +4438,9 @@ enum FileIdPostingList {
 
 const REFERENCE_INDEX_SHARDS: usize = 32;
 
+/// Files whose references one task buckets.
+const REFERENCE_CHUNK_FILES: usize = 256;
+
 /// The reverse-reference map split by the hash of its own `RefKey`. A
 /// load can prepare each file's shard buckets concurrently and merge those
 /// buckets independently; incremental edits route directly to one shard.
@@ -4487,34 +4490,37 @@ impl ReferenceIndex {
         }
     }
 
-    fn from_file_refs(files: Vec<(FileId, Vec<deps::RefKey>)>) -> Self {
-        let per_file: Vec<[Vec<(deps::RefKey, FileId)>; REFERENCE_INDEX_SHARDS]> = files
-            .into_par_iter()
-            .map(|(file, references)| {
-                let mut buckets = std::array::from_fn(|_| Vec::new());
-                for key in references {
-                    buckets[Self::shard(&key)].push((key, file));
+    /// The index of what each file references. A key is cloned only when
+    /// it is first met; a file's list is read where it lies. Files are
+    /// bucketed in chunks and the chunks merged in order, so a posting list
+    /// is built in file order.
+    fn from_file_refs(files: &[(FileId, &[deps::RefKey])]) -> Self {
+        type Bucket<'k> = Vec<(&'k deps::RefKey, FileId)>;
+        let per_chunk: Vec<[Bucket; REFERENCE_INDEX_SHARDS]> = files
+            .par_chunks(REFERENCE_CHUNK_FILES)
+            .map(|chunk| {
+                let mut buckets: [Bucket; REFERENCE_INDEX_SHARDS] =
+                    std::array::from_fn(|_| Vec::new());
+                for (file, references) in chunk {
+                    for key in *references {
+                        buckets[Self::shard(key)].push((key, *file));
+                    }
                 }
                 buckets
             })
             .collect();
-        let mut buckets: [Vec<(deps::RefKey, FileId)>; REFERENCE_INDEX_SHARDS] =
-            std::array::from_fn(|_| Vec::new());
-        for mut file_buckets in per_file {
-            for (bucket, file_bucket) in buckets.iter_mut().zip(&mut file_buckets) {
-                bucket.append(file_bucket);
-            }
-        }
-        let shards: Vec<_> = buckets
+        let shards: Vec<_> = (0..REFERENCE_INDEX_SHARDS)
             .into_par_iter()
-            .map(|entries| {
+            .map(|at| {
                 let mut shard: FxHashMap<deps::RefKey, FileIdPostingList> = FxHashMap::default();
-                shard.reserve(entries.len());
-                for (key, file) in entries {
-                    match shard.get_mut(&key) {
-                        Some(files) => files.insert(file),
-                        None => {
-                            shard.insert(key, FileIdPostingList::One(file));
+                shard.reserve(per_chunk.iter().map(|chunk| chunk[at].len()).sum());
+                for chunk in &per_chunk {
+                    for (key, file) in &chunk[at] {
+                        match shard.get_mut(*key) {
+                            Some(files) => files.insert(*file),
+                            None => {
+                                shard.insert((*key).clone(), FileIdPostingList::One(*file));
+                            }
                         }
                     }
                 }
@@ -4667,14 +4673,58 @@ mod posting_list_tests {
     }
 
     #[test]
+    fn a_chunked_reference_index_equals_one_built_a_file_at_a_time() {
+        let names = [
+            "Alpha",
+            "alpha",
+            "Beta",
+            "App\\LIMIT",
+            "app\\LIMIT",
+            "gamma",
+        ];
+        let lists: Vec<(FileId, Vec<deps::RefKey>)> = (0..700usize)
+            .map(|at| {
+                let mut keys = vec![
+                    deps::RefKey::class_text(names[at % names.len()]),
+                    deps::RefKey::constant_text(names[(at / 3) % names.len()]),
+                    deps::RefKey::function_text(names[(at / 7) % names.len()]),
+                ];
+                keys.dedup();
+                (FileId::new(at + 1), keys)
+            })
+            .collect();
+        let borrowed: Vec<_> = lists
+            .iter()
+            .map(|(file, keys)| (*file, &keys[..]))
+            .collect();
+        let built = ReferenceIndex::from_file_refs(&borrowed);
+        let mut one_at_a_time = ReferenceIndex::default();
+        for (file, keys) in &lists {
+            for key in keys {
+                one_at_a_time.insert(key.clone(), *file);
+            }
+        }
+        let mut left: Vec<_> = built.shards.iter().flatten().collect();
+        let mut right: Vec<_> = one_at_a_time.shards.iter().flatten().collect();
+        assert_eq!(left.len(), right.len());
+        left.sort_by_key(|(key, _)| (key.name().as_str().to_owned(), format!("{key:?}")));
+        right.sort_by_key(|(key, _)| (key.name().as_str().to_owned(), format!("{key:?}")));
+        for ((lk, lf), (rk, rf)) in left.into_iter().zip(right) {
+            assert_eq!(lk.name().as_str(), rk.name().as_str());
+            assert!(lk == rk);
+            assert_eq!(lf.iter().collect::<Vec<_>>(), rf.iter().collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
     fn parallel_reference_index_build_and_edits_keep_sorted_file_postings() {
         let first = FileId::new(1);
         let second = FileId::new(7);
         let class = deps::RefKey::class(&Name::from("Demo"));
         let folded = deps::RefKey::class(&Name::from("dEMO"));
-        let mut index = ReferenceIndex::from_file_refs(vec![
-            (first, vec![class.clone()]),
-            (second, vec![folded]),
+        let mut index = ReferenceIndex::from_file_refs(&[
+            (first, &[class.clone()][..]),
+            (second, &[folded][..]),
         ]);
         assert_eq!(
             index
