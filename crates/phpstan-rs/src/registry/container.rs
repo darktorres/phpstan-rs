@@ -221,9 +221,15 @@ pub(super) enum Source {
 impl Source {
     pub(super) fn read(&self, offset: u64, len: u64) -> Result<Vec<u8>, String> {
         let len = usize::try_from(len).map_err(|_| "a cache range is too large".to_string())?;
-        let mut bytes = vec![0; len];
-        self.read_into(offset, &mut bytes)?;
-        Ok(bytes)
+        match self {
+            Source::File { file, .. } => read_vec_at(file, offset, len)
+                .map_err(|error| format!("reading cache record at {offset}: {error}")),
+            Source::Memory(_) => {
+                let mut bytes = vec![0; len];
+                self.read_into(offset, &mut bytes)?;
+                Ok(bytes)
+            }
+        }
     }
 
     /// Fills `into` from the bytes at `offset`.
@@ -288,6 +294,30 @@ impl Source {
         }
         Ok(bytes)
     }
+}
+
+/// `len` bytes of `file` at `offset`, read into the vector's own spare
+/// capacity, so they are not zeroed first.
+#[cfg(unix)]
+fn read_vec_at(file: &File, mut offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    let mut bytes: Vec<u8> = Vec::with_capacity(len);
+    while bytes.len() < len {
+        match rustix::io::pread(file, rustix::buffer::spare_capacity(&mut bytes), offset) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(read) => offset += read as u64,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    bytes.truncate(len);
+    Ok(bytes)
+}
+
+#[cfg(not(unix))]
+fn read_vec_at(file: &File, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = vec![0; len];
+    read_exact_at(file, offset, &mut bytes)?;
+    Ok(bytes)
 }
 
 #[cfg(unix)]

@@ -43,6 +43,9 @@ serde_json.workspace = true
 sqlparser.workspace = true
 toml.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [features]
 default = ["pcre-validate"]
 # Leaves the allocator to the system's: for comparing it with mimalloc.
