@@ -599,7 +599,7 @@ release-profile regression test for an `@method` tag. The three library tests an
 fixtures listed above are the regression set. *Ledger:* R05.9 (new), with R05.5 and R05.6
 annotated.
 
-**RV-15 — Low. A test asserts a debug-only panic.**
+**RV-15 — Low. A test asserts a debug-only panic. Fixed.** The test now accepts a panic in debug or `None` in release, and fails only if a stale id returns a live declaration.
 `switching_registry_bases_invalidates_the_previous_id_generation` expects `class_by_id` on a
 stale id to panic. The panic comes from `debug_check_id_generation`, which is compiled out
 in release. In release the stale id returns `None` (`class_declarations` is keyed by the full

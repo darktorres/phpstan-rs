@@ -1084,10 +1084,12 @@ mod tests {
                 .map(|(owner, _)| owner),
             Some(syntax::name::Name::from("ParentDemo"))
         );
+        // A debug build panics on a stale id; a release build answers `None`.
+        // Either is correct. Returning a declaration for the stale id is not.
         let stale_read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             registry.class_by_id(old_id)
         }));
-        assert!(stale_read.is_err());
+        assert!(stale_read.map_or(true, |declaration| declaration.is_none()));
     }
 
     #[test]
