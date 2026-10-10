@@ -421,7 +421,7 @@ rv9_mixed_param(mixed $o, C $c)    -> mismatch, actual type "int"
 
 The `mixed` control takes the Maybe branch, so the predicate's No is the cause. The `object` call also reports `argument.type` on the same line; that is a separate diagnostic. The ledger's F00-R4 wording ("keeps both branches for mixed or extensible unknown objects") is inaccurate for `object`. *Required:* return `Maybe` for `ObjectWithoutClass`, `ObjectShape`, object-bearing intersections, and object-bounded templates, with a fixture for each. *Ledger:* R05.8 (new).
 
-**RV-10 — Mechanism confirmed; consequence not reproduced. Spread arguments.** `resolve_call_args` skips spread arguments (calls.rs:956), so for `strlen(...$x)` the graph's argument 0 is `Type::mixed()` (builtin_calls.rs:2301). The invalidation step (call_effects.rs:405–412) indexes the raw call arguments, so index 0 names the spread source expression, not the unpacked element. A PHP probe did not reproduce a missed invalidation: `rv10_spread` (`strlen(...$list)` with `$list: list<C>`) invalidated `$c->p`, exactly as the direct call `rv10_direct` does. I did not trace which path performs that invalidation, so the ledger's claim that a Stringable element's side effects can be missed is unproven. *Required:* identify the path that invalidates in the spread case before claiming either outcome. *Ledger:* F05.4 text corrected; R05.2 acceptance should include the spread case.
+**RV-10 — No missed-invalidation defect reproduced; spread callback dispatch remains unproven.** `resolve_call_args` skips spread arguments (calls.rs:956), so for `strlen(...$x)` the graph's argument 0 is `Type::mixed()` (builtin_calls.rs:2301). The raw formal slot is unresolved; `forget_catalog_string_arguments_may_change` then takes its conservative fallback, joins spread-element types, and applies generic `Operation::String` invalidation. The PHP probe's `rv10_spread` (`strlen(...$list)` with `$list: list<C>`) therefore invalidates `$c->p` through fallback, as does direct `rv10_direct`. This does not show graph-selected callback invocation or precise spread-element handling; the result is conservative invalidation. *Disposition:* the earlier claim of a specific missed invalidation is withdrawn. Keep spread catalog dispatch outside the accepted R05.2.1 scope until binding can identify the unpacked formal element.
 
 **RV-11 — Active, Medium. The runtime witness no longer describes the checked-in fixture.**
 `results/runtime/hybrid-call-8.5.4.json` records the `runtime.php` digest `9b38a3ea…`, from
@@ -1055,3 +1055,54 @@ Commits `f307c252` and `9f895cff` are accepted with notes. `7617797e`, `94bce99a
 `69da8569` and `c513c52e` need fixes. The open items for the next author pass are RV-27,
 RV-28 and RV-29 (Medium), with RV-30 and RV-31 (Low). The third pass's RV-24 is retracted
 in its mechanism, and the rest of its text stands.
+
+## Author remediation pass (2026-10-10)
+
+This pass implements remediations for the fourth review's remaining findings and
+the earlier open Stringable, linked-module, and campaign-integrity findings.
+Implementation, artifact regeneration, and validation are complete for the
+claims listed below. Independent acceptance remains open; the actual SVF replay
+and full resource campaign were unavailable in this pass.
+
+- **RV-9 / RV-17 / nullable-template gap:** the Stringable predicate now keeps a
+  `Maybe` branch for object types without an exact class identity and recognizes
+  registered trait-composed `__toString` methods in weak-argument and call
+  transfer checks. Nullable templates preserve the possible null deprecation.
+  Regressions cover bare objects, object shapes, intersections, object-bounded
+  templates, trait methods, and nullable templates. All 1,234 PHPStan library
+  tests pass, including these regressions; independent acceptance remains open.
+- **RV-21 / RV-22:** the dependency-test graph helper now uses an independent
+  literal event mapping, paired with a literal regression for the production
+  `event_domains` table. The evaluator completion matrix now includes native
+  unwind as a cleanup replacement for every pending completion kind. All 112
+  semantics tests pass.
+- **RV-11 / RV-12 / RV-26:** the 13-sentinel Hybrid/CALL witness is paired with
+  `runtime-hybrid-call-13.php`, restored from its source commit; the current
+  16-sentinel `runtime.php` remains separately represented. SVF replay now
+  validates the fixture selected by the witness, locked source digests, the
+  link-manifest digest, and supplied linked-bitcode identity. The root lock is
+  refreshed and its live source/manifest checks pass. Actual replay remains
+  pending because the pinned linked PHP bitcode is unavailable here.
+- **RV-27:** measurements bind preserved Clang stdout archives to captured
+  producer bytes and GCC sidecar archives to paths derived from successful
+  compile commands. The artifacts, measurements, and correspondence are
+  regenerated; all 21 focused Python tests pass, including producer/path,
+  digest, archive-mutation, malformed-run, and CIR-artifact cases.
+- **RV-13 / RV-18:** campaign admission waits for completed resource proof and
+  fails closed on missing completion data. Pointer/build steps are checked;
+  completion manifests bind unique steps, expected exits, and measurement
+  digests. CIR rejections are explicit unsupported outcomes. PHP and stock-DVF
+  paths are supplied by the caller rather than fixed `/tmp` paths. All 21
+  focused Python tests pass; the resource-limited end-to-end campaign was not
+  rerun.
+- **RV-20 / RV-28 / RV-30 / RV-31:** the ledger scopes R02.3 as Partial,
+  documents which throw-state effects the checker consumes, removes the
+  contradictory R02.2 sentence, and the correspondence record identifies GCC
+  CFG reachability as heuristic.
+- **RV-23:** the earlier 61-file implementation commit exists. This remediation
+  is reconciled against its tests and artifacts and committed as
+  `Close PHP catalog review remediation gaps` in the current worktree history.
+
+The independent-review gate remains open. After implementation and validation,
+the reviewer should recheck the changed transfer logic, campaign evidence
+binding, regenerated artifacts, and amended statuses before F00.5 closes.

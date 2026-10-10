@@ -1,0 +1,60 @@
+void cleanup ()
+{
+  try
+    {
+      {
+        struct Guard guard;
+
+        try
+          {
+            try
+              {
+                event (1);
+                may_throw ();
+                event (3);
+              }
+            finally
+              {
+                Guard::~Guard (&guard);
+              }
+          }
+        finally
+          {
+            guard = {CLOBBER(eos)};
+          }
+      }
+    }
+  catch
+    {
+      catch (NULL)
+        {
+          try
+            {
+              _1 = __builtin_eh_pointer (0);
+              __cxa_begin_catch (_1);
+              event (4);
+            }
+          finally
+            {
+              __cxa_end_catch ();
+            }
+        }
+    }
+}
+
+
+void Guard::~Guard (struct Guard * const this)
+{
+  try
+    {
+      {
+        event (2);
+      }
+    }
+  catch
+    {
+      <<<eh_must_not_throw (__cxa_call_terminate)>>>
+    }
+}
+
+

@@ -249,7 +249,18 @@
     "max_rss_kib": 83160,
     "user_seconds": 0.01,
     "system_seconds": 0.01,
-    "exit_status": 0
+    "exit_status": 0,
+    "stdout_capture_path": "/tmp/php-catalog-comparison/final/cleanup-ast-0.out",
+    "stdout_capture_sha256": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242",
+    "stdout_archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup-ast-0.out",
+    "stdout_sha256": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242",
+    "output_artifacts": [
+      {
+        "path": "/tmp/php-catalog-comparison/final/cleanup-ast-0.out",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup-ast-0.out",
+        "sha256": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242"
+      }
+    ]
   },
   {
     "name": "cleanup-llvm-emit-0",
@@ -293,7 +304,18 @@
     "max_rss_kib": 70784,
     "user_seconds": 0.01,
     "system_seconds": 0.01,
-    "exit_status": 0
+    "exit_status": 0,
+    "stdout_capture_path": "/tmp/php-catalog-comparison/final/cleanup-llvm-read-0.out",
+    "stdout_capture_sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672",
+    "stdout_archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup-llvm-read-0.out",
+    "stdout_sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672",
+    "output_artifacts": [
+      {
+        "path": "/tmp/php-catalog-comparison/final/cleanup-llvm-read-0.out",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup-llvm-read-0.out",
+        "sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672"
+      }
+    ]
   },
   {
     "name": "cleanup-ast-1",
@@ -446,7 +468,23 @@
     "max_rss_kib": 27296,
     "user_seconds": 0.02,
     "system_seconds": 0.01,
-    "exit_status": 0
+    "exit_status": 0,
+    "stdout_capture_path": "/tmp/php-catalog-comparison/final/cleanup-gimple.out",
+    "stdout_capture_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup-gimple.out",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_artifacts": [
+      {
+        "path": "/tmp/php-catalog-comparison/final/cleanup.cpp.007t.gimple",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup.cpp.007t.gimple",
+        "sha256": "13382af7b554b6311ec0c5b19607898badc21692f60f1c3ea91faf982e81b254"
+      },
+      {
+        "path": "/tmp/php-catalog-comparison/final/cleanup.cpp.016t.cfg",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/cleanup.cpp.016t.cfg",
+        "sha256": "bcc38851be4314d1e254a2939dad10f6a78d75d8c9f64dcde56511138ce38e8f"
+      }
+    ]
   },
   {
     "name": "cleanup-cir",
@@ -1383,7 +1421,18 @@
     "max_rss_kib": 102708,
     "user_seconds": 0.38,
     "system_seconds": 0.05,
-    "exit_status": 0
+    "exit_status": 0,
+    "stdout_capture_path": "/tmp/php-catalog-comparison/final/php-type-ast-0.out",
+    "stdout_capture_sha256": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067",
+    "stdout_archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type-ast-0.out",
+    "stdout_sha256": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067",
+    "output_artifacts": [
+      {
+        "path": "/tmp/php-catalog-comparison/final/php-type-ast-0.out",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type-ast-0.out",
+        "sha256": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067"
+      }
+    ]
   },
   {
     "name": "php-type-llvm-emit-0",
@@ -1449,7 +1498,18 @@
     "max_rss_kib": 89632,
     "user_seconds": 0.15,
     "system_seconds": 0.02,
-    "exit_status": 0
+    "exit_status": 0,
+    "stdout_capture_path": "/tmp/php-catalog-comparison/final/php-type-llvm-read-0.out",
+    "stdout_capture_sha256": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f",
+    "stdout_archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type-llvm-read-0.out",
+    "stdout_sha256": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f",
+    "output_artifacts": [
+      {
+        "path": "/tmp/php-catalog-comparison/final/php-type-llvm-read-0.out",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type-llvm-read-0.out",
+        "sha256": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f"
+      }
+    ]
   },
   {
     "name": "php-type-ast-1",
@@ -1712,7 +1772,23 @@
     "max_rss_kib": 86256,
     "user_seconds": 0.69,
     "system_seconds": 0.11,
-    "exit_status": 0
+    "exit_status": 0,
+    "stdout_capture_path": "/tmp/php-catalog-comparison/final/php-type-gimple.out",
+    "stdout_capture_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type-gimple.out",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_artifacts": [
+      {
+        "path": "/tmp/php-catalog-comparison/final/php-type.c.007t.gimple",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type.c.007t.gimple",
+        "sha256": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2"
+      },
+      {
+        "path": "/tmp/php-catalog-comparison/final/php-type.c.016t.cfg",
+        "archive_path": "/home/torres/projects/phpstan-rs-master3/tools/php-catalog/experiments/comparison/results/main/php-type.c.016t.cfg",
+        "sha256": "16fd020bcfd952490217b6d24ddb2b76c420aa59df10fd37d77de68a83deaab9"
+      }
+    ]
   },
   {
     "name": "php-type-cir",

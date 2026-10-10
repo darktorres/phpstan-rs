@@ -329,21 +329,26 @@ impl<'a> Checker<'a> {
             let weak_string_value_accepted = weak_strlen_string_coercion
                 && arg_ty.union_members().iter().all(|member| {
                     let relation = self.relation();
+                    let implicit_stringable = member.as_object().is_some_and(|(class, _)| {
+                        self.registry.lookup_method(class, "__toString").is_some()
+                    });
                     relation.is_super_type_of(&param_ty, member).yes()
                         || member.is_scalar().yes()
                         || member.is_null().yes()
+                        || member.is_null().maybe()
                         || relation
                             .is_super_type_of(
                                 &Type::object("Stringable".into(), Vec::new()),
                                 member,
                             )
                             .yes()
+                        || implicit_stringable
                 });
             let null_to_string_is_deprecated = weak_strlen_string_coercion
                 && arg_ty
                     .union_members()
                     .iter()
-                    .any(|member| member.is_null().yes())
+                    .any(|member| member.is_null().yes() || member.is_null().maybe())
                 && self
                     .registry
                     .php_supports_somewhere(PhpFeature::DeprecatesNullToInternalScalarParameter)

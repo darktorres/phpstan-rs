@@ -4,31 +4,119 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
 from evaluation import EnforcedRunner, recipes
+from campaign import expected_exit_code
 from run import HERE, digest
 
 
-def instrumented(cache, runner):
+def require_success(success, name):
+    if not success:
+        raise RuntimeError(f"campaign step failed: {name}")
+
+
+def finish_expected_exit_codes(measurements, cir_results):
+    cir_by_name = {item['name'] + '-cir': item for item in cir_results}
+    if len(cir_by_name) != len(cir_results):
+        raise ValueError('CIR outcome manifest contains duplicate translation units')
+    cir_runs = {record['name'] for record in measurements if record['name'].endswith('-cir')}
+    if cir_runs != set(cir_by_name):
+        raise ValueError('CIR outcome manifest does not match executed CIR commands')
+    expected = {}
+    for record in measurements:
+        name = record['name']
+        if name not in cir_by_name:
+            expected[name] = expected_exit_code(name)
+            continue
+        result = cir_by_name[name]
+        if result.get('stderr_sha256') != record.get('stderr_sha256') or re.fullmatch(
+            r'[0-9a-f]{64}', str(result.get('stderr_sha256', ''))
+        ) is None:
+            raise ValueError(f'{name}: CIR outcome does not bind the producer stderr digest')
+        if result.get('imported') is True:
+            output_path = result.get('output_path')
+            output_sha256 = result.get('output_sha256')
+            if (result.get('exit_code') != 0 or result.get('classification') != 'emitted'
+                    or not isinstance(output_path, str)
+                    or re.fullmatch(r'[0-9a-f]{64}', str(output_sha256)) is None
+                    or not Path(output_path).is_file()
+                    or digest(Path(output_path)) != output_sha256):
+                raise ValueError(f'{name}: successful CIR outcome is malformed')
+        elif (result.get('exit_code') != 1
+              or result.get('classification') != 'frontend rejected this translation unit; retained as unsupported evidence'
+              or not isinstance(result.get('stderr_sha256'), str)):
+            raise ValueError(f'{name}: CIR rejection is not an explicitly classified unsupported result')
+        expected[name] = result['exit_code']
+    return expected
+
+
+def validate_campaign_completion(cache):
+    measurements_path = cache / 'campaign/measurements.json'
+    marker_path = cache / 'campaign/completed.json'
+    measurements = json.loads(measurements_path.read_text())
+    marker = json.loads(marker_path.read_text())
+    names = [record['name'] for record in measurements]
+    if len(set(names)) != len(names):
+        raise ValueError('campaign measurements contain duplicate step names')
+    if marker.get('schema') != 1 or marker.get('status') != 'complete':
+        raise ValueError('campaign completion marker has no successful schema/status')
+    if marker.get('step_count') != len(measurements) or marker.get('steps') != names:
+        raise ValueError('campaign completion marker does not bind the measured steps')
+    expected = {record['name']: expected_exit_code(record['name']) for record in measurements}
+    if marker.get('expected_exit_codes') != expected:
+        raise ValueError('campaign completion marker has an unexpected exit-code policy')
+    if marker.get('measurements_sha256') != digest(measurements_path):
+        raise ValueError('campaign measurement digest differs from completion marker')
+    failures = [record['name'] for record in measurements
+                if record.get('exit_code') != expected_exit_code(record['name'])]
+    if failures:
+        raise ValueError(f"campaign contains failed steps: {failures}")
+
+
+def validate_finish_completion(output, cir_results):
+    output = Path(output)
+    measurements_path = output / 'measurements.json'
+    marker = json.loads((output / 'completed.json').read_text())
+    measurements = json.loads(measurements_path.read_text())
+    names = [record.get('name') for record in measurements]
+    if any(not isinstance(name, str) for name in names) or len(set(names)) != len(names):
+        raise ValueError('finish measurements contain missing or duplicate step names')
+    expected = finish_expected_exit_codes(measurements, cir_results)
+    if marker.get('schema') != 1 or marker.get('status') != 'complete':
+        raise ValueError('finish completion marker has no successful schema/status')
+    if marker.get('step_count') != len(measurements) or marker.get('steps') != names:
+        raise ValueError('finish completion marker does not bind the measured steps')
+    if marker.get('expected_exit_codes') != expected:
+        raise ValueError('finish completion marker has an unexpected exit-code policy')
+    if marker.get('measurements_sha256') != digest(measurements_path):
+        raise ValueError('finish measurement digest differs from completion marker')
+    failures = [record['name'] for record in measurements
+                if record.get('exit_code') != expected[record['name']]]
+    if failures:
+        raise ValueError(f'finish campaign contains failed steps: {failures}')
+
+
+def instrumented(cache, runner, php_source):
     whole = cache/'whole-clang/php-cli.bc'
     helper = runner.output/'instrument'
     for name in ['instrument', 'closure']:
         command = ['clang++-21', '-std=c++17', '-O1', '-I/usr/lib/llvm-21/include', HERE/(name+'.cpp'),
             '-L/usr/lib/llvm-21/lib', '-lLLVM-21', '-o', runner.output/name]
-        assert runner.run(name+'-build', command, timeout=300)
+        require_success(runner.run(name+'-build', command, timeout=300), name+'-build')
     modified, sites = runner.output/'php-instrumented.bc', runner.output/'sites.json'
-    assert runner.run('instrument-whole', [helper, whole, modified, sites], timeout=600)
-    assert runner.run('instrument-verify', ['opt-21', '-passes=verify', '-disable-output', modified], timeout=600)
+    require_success(runner.run('instrument-whole', [helper, whole, modified, sites], timeout=600), 'instrument-whole')
+    require_success(runner.run('instrument-verify', ['opt-21', '-passes=verify', '-disable-output', modified], timeout=600), 'instrument-verify')
     manifest = json.loads((cache/'whole-clang/link-manifest.json').read_text())
-    php = Path('/tmp/php-catalog-comparison/php-src')
+    php = php_source
     asm = [php/x['object'] for x in manifest['objects'] if x.get('reason') == 'native-assembly-boundary']
     binary = runner.output/'php-instrumented'
-    assert runner.run('instrument-link', ['clang-21', '-O0', '-no-pie', '-Wl,--export-dynamic', modified,
-        HERE/'target_runtime.c', *asm, '-lm', '-o', binary], timeout=600)
-    runner.run('instrumented-runtime', [binary, '-n', HERE/'runtime.php'], timeout=180)
-    runner.run('instrument-symbols', ['nm', '-n', binary])
+    require_success(runner.run('instrument-link', ['clang-21', '-O0', '-no-pie', '-Wl,--export-dynamic', modified,
+        HERE/'target_runtime.c', *asm, '-lm', '-o', binary], timeout=600), 'instrument-link')
+    require_success(runner.run('instrumented-runtime', [binary, '-n', HERE/'runtime.php'], timeout=180), 'instrumented-runtime')
+    require_success(runner.run('instrument-symbols', ['nm', '-n', binary]), 'instrument-symbols')
     symbols = {}
     for line in (runner.output/'instrument-symbols.out').read_text().splitlines():
         words = line.split()
@@ -50,20 +138,20 @@ def instrumented(cache, runner):
             for site, targets in sorted(observations.items())],
         evidence='positive witnesses; unobserved sites remain open'), indent=2)+'\n')
     roots='zif_array_map,zif_array_walk,zif_array_filter,zif_usort,zif_count,zif_strlen,zif_session_start,zif_session_set_save_handler,ps_call_handler,zend_call_function,_php_stream_open_wrapper_ex,_php_stream_free'
-    runner.run('native-closure-audit', [runner.output/'closure', whole, roots], timeout=600)
+    require_success(runner.run('native-closure-audit', [runner.output/'closure', whole, roots], timeout=600), 'native-closure-audit')
 
 
 def gcc_profile(cache, runner):
     php = cache/'php-src-gcc'
     environment = dict(os.environ)
-    environment['PATH'] = '/tmp/php-catalog-comparison/deps/usr/bin:' + environment['PATH']
-    environment['BISON_PKGDATADIR'] = '/tmp/php-catalog-comparison/deps/usr/share/bison'
-    assert runner.run('gcc-buildconf', ['./buildconf', '--force'], cwd=php, env=environment)
+    environment['PATH'] = str(cache/'deps/usr/bin') + ':' + environment['PATH']
+    environment['BISON_PKGDATADIR'] = str(cache/'deps/usr/share/bison')
+    require_success(runner.run('gcc-buildconf', ['./buildconf', '--force'], cwd=php, env=environment), 'gcc-buildconf')
     environment.update(CC='gcc', CXX='g++', CFLAGS='-O0 -g')
-    assert runner.run('gcc-configure', ['./configure', '--disable-all', '--disable-cgi', '--disable-phpdbg',
-        '--without-pear', '--enable-cli', '--enable-session'], cwd=php, env=environment, timeout=600)
-    assert runner.run('gcc-build', ['make', '-j2'], cwd=php, env=environment, timeout=1800)
-    assert runner.run('gcc-runtime', [php/'sapi/cli/php', '-n', HERE/'runtime.php'])
+    require_success(runner.run('gcc-configure', ['./configure', '--disable-all', '--disable-cgi', '--disable-phpdbg',
+        '--without-pear', '--enable-cli', '--enable-session'], cwd=php, env=environment, timeout=600), 'gcc-configure')
+    require_success(runner.run('gcc-build', ['make', '-j2'], cwd=php, env=environment, timeout=1800), 'gcc-build')
+    require_success(runner.run('gcc-runtime', [php/'sapi/cli/php', '-n', HERE/'runtime.php']), 'gcc-runtime')
     commands, linked, link = recipes(php)
     manifest = dict(link_command=link, php_config_sha256=digest(php/'main/php_config.h'),
         vm_header_sha256=digest(php/'Zend/zend_vm_execute.h'), binary_sha256=digest(php/'sapi/cli/php'),
@@ -77,20 +165,21 @@ def gcc_profile(cache, runner):
         output=runner.output/('gcc-'+str(i)+'.o')
         success=runner.run('gcc-'+str(i)+'-gimple', ['gcc','-fdump-tree-gimple','-fdump-tree-cfg','-fdump-tree-eh',
             *flags,'-c',source,'-o',output],cwd=php,timeout=600)
+        require_success(success, 'gcc-'+str(i)+'-gimple')
         manifest['objects'].append(dict(object=target,source=str(source),source_sha256=digest(source),
             imported=success,command=recipe['command']))
         (runner.output/'gcc-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 
 
-def cir_profile(cache, runner):
+def cir_profile(cache, runner, php_source):
     build=cache/'cir-full-build'
     if not runner.run('cir-build', ['cmake','--build',build,'--target','clang','--parallel','8'],timeout=14400):
-        return
+        raise RuntimeError('CIR compiler build failed; source-level CIR rejections cannot be classified')
     compiler=build/'bin/clang'
     fixture_inputs=[('dispatch',HERE/'dispatch.c',[]),('platform',HERE/'platform.c',[]),
         ('cleanup',HERE/'cleanup.cpp',['-std=c++17']),
         ('cleanup-windows',HERE/'cleanup.cpp',['-std=c++17','--target=x86_64-pc-windows-msvc','-fexceptions','-fcxx-exceptions'])]
-    php=Path('/tmp/php-catalog-comparison/php-src')
+    php=php_source
     commands, linked, _=recipes(php)
     for target in linked:
         recipe=commands[target]; source=Path(recipe['source'])
@@ -101,7 +190,19 @@ def cir_profile(cache, runner):
     for name, source, flags in fixture_inputs:
         result=runner.run(name+'-cir', [compiler,'-fclangir','-S','-Xclang','-emit-cir',*flags,
             source,'-o',runner.output/(name+'.cir')],cwd=php,timeout=600)
-        results.append(dict(name=name,imported=result))
+        measurement=runner.measurements[-1]
+        if not result and (measurement.get('stopped') is not None
+                           or measurement.get('exit_code') != 1):
+            raise RuntimeError(f"{name}-cir failed outside the classified unsupported-source outcome")
+        cir_path = runner.output/(name+'.cir')
+        results.append(dict(
+            name=name,
+            imported=result,
+            exit_code=measurement['exit_code'],
+            classification=("emitted" if result else "frontend rejected this translation unit; retained as unsupported evidence"),
+            stderr_sha256=digest(runner.output/(name+'-cir.err')),
+            **(dict(output_path=str(cir_path.resolve()), output_sha256=digest(cir_path)) if result else {}),
+        ))
         (runner.output/'cir-imports.json').write_text(json.dumps(results,indent=2)+'\n')
 
 
@@ -109,29 +210,59 @@ def main():
     parser=argparse.ArgumentParser(__doc__)
     parser.add_argument('--cache',type=Path,required=True)
     parser.add_argument('--stage',choices=['all','gcc','cir'],default='all')
+    parser.add_argument('--php-binary',type=Path)
+    parser.add_argument('--php-source',type=Path)
+    parser.add_argument('--stock-dvf',type=Path)
     args=parser.parse_args();cache=args.cache.resolve()
     ready=cache/'campaign/completed.json'
     while not ready.exists():time.sleep(1)
+    validate_campaign_completion(cache)
     runner=EnforcedRunner(cache/('finish' if args.stage=='all' else 'finish-'+args.stage))
     if args.stage=='gcc':
         gcc_profile(cache,runner)
         return
     if args.stage=='cir':
-        cir_profile(cache,runner)
+        if args.php_source is None:
+            parser.error('--php-source is required for --stage cir')
+        cir_profile(cache,runner,args.php_source.resolve())
         return
-    runner.run('binary-retry', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', cache/'campaign/layout-clang-21',
-        '--php', '/tmp/php-catalog-comparison/php-src/sapi/cli/php', '--output', runner.output/'binary-results.json'], timeout=300)
-    for candidate, binary in [('stock',Path('/tmp/php-catalog-comparison/svf-build/bin/dvf')),
+    if args.php_binary is None or args.php_source is None or args.stock_dvf is None:
+        parser.error('--php-binary, --php-source, and --stock-dvf are required for --stage all')
+    php_binary = args.php_binary.resolve()
+    php_source = args.php_source.resolve()
+    stock_dvf = args.stock_dvf.resolve()
+    if not php_binary.is_file() or not stock_dvf.is_file() or not (php_source/'Zend/zend_API.c').is_file():
+        parser.error('the supplied PHP source tree and measured binaries must exist')
+    require_success(runner.run('binary-retry', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', cache/'campaign/layout-clang-21',
+        '--php', php_binary, '--output', runner.output/'binary-results.json'], timeout=300), 'binary-retry')
+    for candidate, binary in [('stock',stock_dvf),
                               ('compact',cache/'campaign/dvf-compact')]:
         for name, flags in [('constants',['-model-consts=true']),
                             ('arrays',['-model-arrays=true']),
                             ('constants-arrays',['-model-consts=true','-model-arrays=true'])]:
-            runner.run('layout-'+candidate+'-'+name, [binary,'-dfs','-query=funptr','-stat','-print-query-pts',
-                *flags,cache/'campaign/layout_cases-promoted.bc'])
-    instrumented(cache,runner)
+            step='layout-'+candidate+'-'+name
+            require_success(runner.run(step, [binary,'-dfs','-query=funptr','-stat','-print-query-pts',
+                *flags,cache/'campaign/layout_cases-promoted.bc']), step)
+    instrumented(cache,runner,php_source)
     gcc_profile(cache,runner)
-    cir_profile(cache,runner)
-    (runner.output/'completed.json').write_text('{}\n')
+    cir_profile(cache,runner,php_source)
+    measurements_path=runner.output/'measurements.json'
+    measurements=json.loads(measurements_path.read_text())
+    names=[record['name'] for record in measurements]
+    if len(set(names)) != len(names):
+        raise RuntimeError('finish campaign measurements contain duplicate step names')
+    cir_results=json.loads((runner.output/'cir-imports.json').read_text())
+    expected_codes=finish_expected_exit_codes(measurements, cir_results)
+    failures=[record['name'] for record in measurements
+              if record.get('exit_code') != expected_codes[record['name']]]
+    if failures:
+        raise RuntimeError(f"finish campaign has failed steps: {failures}")
+    (runner.output/'completed.json').write_text(json.dumps({
+        'schema': 1, 'status': 'complete', 'step_count': len(measurements),
+        'steps': names,
+        'expected_exit_codes': expected_codes,
+        'measurements_sha256': digest(measurements_path)}, indent=2)+'\n')
+    validate_finish_completion(runner.output, cir_results)
 
 
 if __name__=='__main__':main()

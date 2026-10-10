@@ -4,12 +4,13 @@
   "cflags": "-O0 -g",
   "fixtures": [
     {
-      "path": "tools/php-catalog/experiments/comparison/runtime.php",
+      "path": "tools/php-catalog/experiments/comparison/runtime-hybrid-call-13.php",
       "sha256": "9b38a3ea63cf5cf42e7dc553924f38fab4046d2297011b03a144c2270f5d38cc",
       "sentinels_passed": 13,
       "hybrid_output": "tools/php-catalog/experiments/comparison/results/runtime/php-hybrid-vm.out",
       "call_output": "tools/php-catalog/experiments/comparison/results/runtime/php-call-vm.out",
-      "output_sha256": "2bd72db611daeac4b383eed0b0352ac80581ab6c7e58e8cb13a8b505f9411c04"
+      "output_sha256": "2bd72db611daeac4b383eed0b0352ac80581ab6c7e58e8cb13a8b505f9411c04",
+      "fixture_role": "preserved historical 13-sentinel source from PHP commit e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03; current 16-sentinel fixture is recorded separately"
     },
     {
       "path": "campaign/php-vm-strlen-sentinel.php",

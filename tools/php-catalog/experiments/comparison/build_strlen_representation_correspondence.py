@@ -16,6 +16,53 @@ def load(path: Path):
     return json.loads(path.read_text())
 
 
+def validate_measurement_output(measurements, run_name, artifact_path):
+    runs = [record for record in measurements if record.get("name") == run_name]
+    if len(runs) != 1 or runs[0].get("exit_code") != 0:
+        raise ValueError(f"{run_name}: expected exactly one successful command record")
+    record = runs[0]
+    resolved_path = str(artifact_path.resolve())
+    if record.get("stdout_path") == resolved_path:
+        actual = sha(artifact_path)
+        if record.get("stdout_sha256") != actual:
+            raise ValueError(f"{run_name}: captured stdout digest differs for {resolved_path}")
+        return actual
+    if record.get("stdout_archive_path") == resolved_path:
+        actual = sha(artifact_path)
+        capture_path = record.get("stdout_capture_path")
+        capture_digest = record.get("stdout_capture_sha256")
+        if record.get("stdout_sha256") != actual or capture_digest != actual:
+            raise ValueError(f"{run_name}: archived stdout digest differs from captured producer bytes")
+        if capture_path and Path(capture_path).is_file() and sha(Path(capture_path)) != capture_digest:
+            raise ValueError(f"{run_name}: producer stdout capture changed after archival")
+        return actual
+    artifacts = runs[0].get("output_artifacts")
+    if not isinstance(artifacts, list):
+        raise ValueError(f"{run_name}: command record does not bind output artifact digests to this path")
+    command = record.get("command", [])
+    if "-o" not in command or "-c" not in command:
+        raise ValueError(f"{run_name}: non-stdout artifact has no compiler output command")
+    output = Path(command[command.index("-o") + 1])
+    source = Path(command[command.index("-c") + 1])
+    suffix = ".007t.gimple" if artifact_path.name.endswith(".007t.gimple") else (
+        ".016t.cfg" if artifact_path.name.endswith(".016t.cfg") else None
+    )
+    if suffix is None:
+        raise ValueError(f"{run_name}: unsupported compiler sidecar suffix: {artifact_path.name}")
+    expected = output.parent / (output.stem + source.suffix + suffix)
+    matches = [item for item in artifacts if isinstance(item, dict)
+               and item.get("path") == str(expected.resolve())
+               and item.get("archive_path") == resolved_path]
+    if len(matches) != 1:
+        if artifact_path.resolve() != expected.resolve():
+            raise ValueError(f"{run_name}: sidecar path is not the compiler output derived from its command")
+        raise ValueError(f"{run_name}: output digest is not bound to {resolved_path}")
+    actual = sha(artifact_path)
+    if matches[0].get("sha256") != actual:
+        raise ValueError(f"{run_name}: recorded output digest differs for {resolved_path}")
+    return actual
+
+
 def reachable(blocks, start, target) -> bool:
     by_id = {block["id"]: block for block in blocks}
     pending, seen = [start], set()
@@ -109,6 +156,8 @@ def main() -> None:
     if len(ast_runs) != 1 or len(llvm_emit_runs) != 1 or len(llvm_read_runs) != 1 or any(
         m.get("exit_code") != 0 for m in ast_runs + llvm_emit_runs + llvm_read_runs):
         raise SystemExit("Clang AST/LLVM campaign command records are missing or failed")
+    validate_measurement_output(clang_measurements, "php-type-ast-0", args.clang_ast)
+    validate_measurement_output(clang_measurements, "php-type-llvm-read-0", args.clang_llvm)
     ast_command = ast_runs[0].get("command", [])
     llvm_emit_command = llvm_emit_runs[0].get("command", [])
     source_path = str(args.source.resolve())
@@ -170,6 +219,8 @@ def main() -> None:
     gcc_runs = [m for m in gcc_measurements if m.get("name") == "php-type-gimple"]
     if len(gcc_runs) != 1 or gcc_runs[0].get("exit_code") != 0:
         raise SystemExit("GCC GIMPLE/CFG campaign command record is missing or failed")
+    validate_measurement_output(gcc_measurements, "php-type-gimple", args.gcc_gimple)
+    validate_measurement_output(gcc_measurements, "php-type-gimple", args.gcc_cfg)
     gcc_command = gcc_runs[0].get("command", [])
     if ("-fdump-tree-gimple" not in gcc_command or "-fdump-tree-cfg" not in gcc_command
             or source_path not in gcc_command
@@ -219,6 +270,9 @@ def main() -> None:
     if set(cleanup_runs) != required_cleanup_runs or any(
         m.get("exit_code") != 0 for m in cleanup_runs.values()):
         raise SystemExit("cleanup counterexample campaign records are missing or failed")
+    validate_measurement_output(cleanup_measurements, "cleanup-ast-0", args.cleanup_ast)
+    validate_measurement_output(cleanup_measurements, "cleanup-gimple", args.cleanup_gimple)
+    validate_measurement_output(cleanup_measurements, "cleanup-llvm-read-0", args.cleanup_llvm)
     cleanup_path = str(args.cleanup_source.resolve())
     if any(cleanup_path not in m.get("command", []) for m in cleanup_runs.values()
            if m["name"] != "cleanup-llvm-read-0"):
@@ -256,7 +310,9 @@ def main() -> None:
                            "length_field_load": llvm_length_load,
                            "length_to_result_store": llvm_length_to_result,
                            "result_store_reaches_return": llvm_path},
-            "gcc_gimple_cfg": {"status": "matched", "gimple_parser_call": gcc_parse,
+            "gcc_gimple_cfg": {"status": "structural match using heuristic CFG reconstruction",
+                               "reachability_method": "successors parsed from goto <bb N>; conditional fallthrough inferred from textual if-blocks and ordinary fallthrough inferred from block order; this is not a verified GCC CFG",
+                               "gimple_parser_call": gcc_parse,
                                "gimple_length_to_result": gcc_len_return,
                                "cfg_parser_to_result_to_exit_path": gcc_path},
             "cir": {"status": cir_status,

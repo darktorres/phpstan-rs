@@ -79,6 +79,44 @@ def validate_recorded_outputs(runtime: dict[str, object], root: Path) -> None:
                 )
 
 
+def validate_linked_source_identity(linked_bitcode: Path, lock: dict[str, object],
+                                    link_manifest: dict[str, object],
+                                    link_manifest_path: Path) -> str:
+    source_commit = lock.get("php_commit")
+    if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise ValueError("source lock lacks a full PHP commit identity")
+    if link_manifest.get("php_commit") != source_commit:
+        raise ValueError("linked-module manifest and source lock name different PHP commits")
+    expected_manifest_hash = lock.get("link_manifest_sha256")
+    if not isinstance(expected_manifest_hash, str) or digest(link_manifest_path) != expected_manifest_hash:
+        raise ValueError("linked-module manifest digest differs from the source lock")
+    expected_hash = link_manifest.get("linked_bitcode_sha256")
+    if not isinstance(expected_hash, str) or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+        raise ValueError("linked-module manifest lacks a valid bitcode digest")
+    if not linked_bitcode.is_file():
+        raise ValueError(f"linked bitcode is unavailable: {linked_bitcode}")
+    actual_hash = digest(linked_bitcode)
+    if actual_hash != expected_hash:
+        raise ValueError(
+            f"linked bitcode is not the module bound to PHP {source_commit}: "
+            f"expected {expected_hash}, got {actual_hash}"
+        )
+    return source_commit
+
+
+def validate_source_lock(source_root: Path, source_digests: dict[str, str]) -> None:
+    if not isinstance(source_digests, dict) or not source_digests:
+        raise ValueError("comparison source lock is empty or malformed")
+    for relative, expected in source_digests.items():
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            raise ValueError("comparison source lock contains a malformed entry")
+        path = (source_root / relative).resolve()
+        if source_root.resolve() not in path.parents:
+            raise ValueError(f"locked source path escapes comparison directory: {relative}")
+        if not path.is_file() or digest(path) != expected:
+            raise ValueError(f"comparison source lock digest mismatch: {relative}")
+
+
 def run_checked(command: list[str]) -> bytes:
     result = subprocess.run(command, capture_output=True, check=False)
     if result.returncode != 0:
@@ -146,15 +184,27 @@ def main() -> None:
 
     runtime_path = ROOT / "tools/php-catalog/experiments/comparison/results/runtime/hybrid-call-8.5.4.json"
     runtime = json.loads(runtime_path.read_text())
-    source_commit = "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03"
+    source_lock = json.loads((ROOT / "tools/php-catalog/experiments/comparison/results/lock.json").read_text())
+    link_manifest_path = ROOT / "tools/php-catalog/experiments/comparison/results/evaluation/link-manifest.json"
+    link_manifest = json.loads(link_manifest_path.read_text())
+    validate_source_lock(HERE, source_lock.get("source_sha256"))
+    source_commit = source_lock.get("php_commit")
+    if link_manifest.get("php_commit") != source_commit:
+        raise ValueError("linked-module manifest and source lock name different PHP commits")
     if runtime["source_commit"] != source_commit or "string-coercion-callback" not in runtime["result"]["runtime_php_sentinels"]:
         raise ValueError("locked runtime witness does not include the Stringable callback sentinel")
-    fixture_relative_path = "tools/php-catalog/experiments/comparison/runtime.php"
+    fixtures = runtime.get("fixtures")
+    if not isinstance(fixtures, list) or len(fixtures) != 2 or not isinstance(fixtures[0], dict):
+        raise ValueError("locked runtime witness lacks its historical and sentinel fixture records")
+    fixture_relative_path = fixtures[0].get("path")
+    if not isinstance(fixture_relative_path, str):
+        raise ValueError("locked runtime fixture path is malformed")
     runtime_file = ROOT / fixture_relative_path
     validate_runtime_fixture(runtime, runtime_file, fixture_relative_path)
     validate_recorded_outputs(runtime, ROOT)
     if "string-coercion-callback" not in runtime_file.read_text():
         raise ValueError("current runtime callback fixture lacks the witnessed sentinel")
+    validate_linked_source_identity(args.linked_bitcode, source_lock, link_manifest, link_manifest_path)
 
     with tempfile.TemporaryDirectory(prefix="strlen-svf-capsules-") as temp_dir:
         capsule_path = Path(temp_dir) / "strlen-native-demand.bc"

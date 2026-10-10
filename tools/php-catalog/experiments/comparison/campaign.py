@@ -177,10 +177,10 @@ def compact_build(cache, original, runner):
     command[command.index('-o') + 1] = str(replacement)
     for flag in ['-MT', '-MF']:
         at = command.index(flag); del command[at:at+2]
-    assert runner.run('compact-compile', command, cwd=original, timeout=300)
+    require_success(runner.run('compact-compile', command, cwd=original, timeout=300), 'compact-compile')
     library = runner.output / 'libSvfLLVM.a'
     shutil.copy2(original / 'lib/libSvfLLVM.a', library)
-    assert runner.run('compact-archive', ['llvm-ar-21', 'r', library, replacement])
+    require_success(runner.run('compact-archive', ['llvm-ar-21', 'r', library, replacement]), 'compact-archive')
     line = next(x for x in commands if ' -o bin/dvf ' in x)
     command = shlex.split(line.split('&&')[1])
     binary = runner.output / 'dvf-compact'
@@ -189,7 +189,7 @@ def compact_build(cache, original, runner):
     command = [x for x in command if not x.startswith('--dependency-file=')]
     # The corresponding standalone -Xlinker must be removed as well.
     command = [x for i, x in enumerate(command) if not (x == '-Xlinker' and (i+1 == len(command) or not command[i+1].startswith('-')))]
-    assert runner.run('compact-link', command, cwd=original, timeout=300)
+    require_success(runner.run('compact-link', command, cwd=original, timeout=300), 'compact-link')
     (runner.output / 'compact-lock.json').write_text(json.dumps(dict(
         source_commit=subprocess.check_output(['git', '-C', str(cache/'svf-compact'), 'rev-parse', 'HEAD'], text=True).strip(),
         patch_sha256=digest(HERE/'svf-compact.patch'), adapted_source_sha256=digest(cache/'svf-compact/svf-llvm/lib/LLVMModule.cpp'),
@@ -221,56 +221,119 @@ def run_cbmc_campaign(cache, runner):
         validate_cbmc_run(name, actual, references[name], exit_code)
 
 
-def complementary(cache, runner):
+def require_success(success, step):
+    if not success:
+        raise RuntimeError(f"campaign step failed: {step}")
+
+
+def expected_exit_code(step):
+    expectation = CBMC_EXPECTATIONS.get(step)
+    return 0 if expectation is None else expectation['command_exit_code']
+
+
+def wait_for_enforcing_worker(report_path, timeout_seconds=6 * 60 * 60,
+                              sleep=time.sleep, monotonic=time.monotonic,
+                              exists=Path.exists, read_text=Path.read_text):
+    """Wait for a published enforcing result; never admit work on missing proof."""
+    report_path = Path(report_path)
+    deadline = monotonic() + timeout_seconds
+    while monotonic() < deadline:
+        if exists(report_path):
+            try:
+                report = json.loads(read_text(report_path))
+            except (OSError, json.JSONDecodeError):
+                sleep(1)
+                continue
+            if 'exit_code' in report:
+                if report.get('aggregate_hard_limit_enforced') is not True:
+                    raise RuntimeError("initial worker published a result without enforced resource proof")
+                if not isinstance(report.get('memory_peak_bytes'), int) or not isinstance(
+                    report.get('memory_events'), str
+                ):
+                    raise RuntimeError("initial worker result lacks completed resource measurements")
+                return report
+            cgroup = report.get('cgroup')
+            if cgroup and not Path(cgroup).exists():
+                raise RuntimeError("enforcing worker cgroup disappeared before publishing exit_code")
+        sleep(1)
+    raise TimeoutError(f"timed out waiting for enforcing result: {report_path}")
+
+
+def complementary(cache, runner, php_binary):
     run_cbmc_campaign(cache, runner)
-    runner.run('smt', [cache/'smt-python/bin/python', HERE/'smt_cases.py', runner.output/'smt-results.json'])
+    require_success(runner.run('smt', [cache/'smt-python/bin/python', HERE/'smt_cases.py', runner.output/'smt-results.json']), 'smt')
     for compiler in ['clang-21', 'gcc']:
         binary = runner.output / ('layout-'+compiler)
-        assert runner.run('layout-build-'+compiler, [compiler, '-O0', '-g', '-no-pie', HERE/'layout_cases.c', '-o', binary])
-        assert runner.run('layout-runtime-'+compiler, [binary])
-    runner.run('binary', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', runner.output/'layout-clang-21',
-        '--php', cache/'php-src-gcc/sapi/cli/php' if (cache/'php-src-gcc/sapi/cli/php').exists() else '/tmp/php-catalog-comparison/php-src/sapi/cli/php',
-        '--output', runner.output/'binary-results.json'], timeout=300)
+        require_success(runner.run('layout-build-'+compiler, [compiler, '-O0', '-g', '-no-pie', HERE/'layout_cases.c', '-o', binary]), 'layout-build-'+compiler)
+        require_success(runner.run('layout-runtime-'+compiler, [binary]), 'layout-runtime-'+compiler)
+    require_success(runner.run('binary', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', runner.output/'layout-clang-21',
+        '--php', php_binary,
+        '--output', runner.output/'binary-results.json'], timeout=300), 'binary')
 
 
 def pointer_cases(cache, original, compact, runner):
     for fixture in ['dispatch', 'external', 'layout_cases']:
         bc = runner.output / (fixture+'.bc')
-        assert runner.run(fixture+'-emit', ['clang-21', '-O0', '-g', '-Xclang', '-disable-O0-optnone',
-            '-emit-llvm', '-c', HERE/(fixture+'.c'), '-o', bc])
+        require_success(runner.run(fixture+'-emit', ['clang-21', '-O0', '-g', '-Xclang', '-disable-O0-optnone',
+            '-emit-llvm', '-c', HERE/(fixture+'.c'), '-o', bc]), fixture+'-emit')
         promoted = runner.output / (fixture+'-promoted.bc')
-        assert runner.run(fixture+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted])
+        require_success(runner.run(fixture+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted]), fixture+'-promote')
         for name, binary in [('stock', original/'bin/dvf'), ('compact', compact)]:
-            runner.run(fixture+'-'+name, [binary, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted])
+            step = fixture+'-'+name
+            require_success(runner.run(step, [binary, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted]), step)
     for size in [64, 65536, 16777216, 67108864, 268435456]:
         bc = runner.output / ('growth-'+str(size)+'.bc')
-        assert runner.run('growth-'+str(size)+'-emit', ['clang-21', '-O0', '-g', '-Xclang', '-disable-O0-optnone',
-            '-DPAYLOAD_BYTES='+str(size), '-emit-llvm', '-c', HERE/'dispatch.c', '-o', bc])
+        require_success(runner.run('growth-'+str(size)+'-emit', ['clang-21', '-O0', '-g', '-Xclang', '-disable-O0-optnone',
+            '-DPAYLOAD_BYTES='+str(size), '-emit-llvm', '-c', HERE/'dispatch.c', '-o', bc]), 'growth-'+str(size)+'-emit')
         promoted = runner.output / ('growth-'+str(size)+'-promoted.bc')
-        assert runner.run('growth-'+str(size)+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted])
-        runner.run('growth-'+str(size)+'-compact', [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted])
-    runner.run('whole-compact-dda', [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts',
-        cache/'whole-clang/php-cli-promoted.bc'], timeout=1800)
+        require_success(runner.run('growth-'+str(size)+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted]), 'growth-'+str(size)+'-promote')
+        step = 'growth-'+str(size)+'-compact'
+        require_success(runner.run(step, [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted]), step)
+    require_success(runner.run('whole-compact-dda', [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts',
+        cache/'whole-clang/php-cli-promoted.bc'], timeout=1800), 'whole-compact-dda')
+
+
+def publish_completion(runner):
+    measurements_path = runner.output / 'measurements.json'
+    measurements = json.loads(measurements_path.read_text())
+    names = [record.get('name') for record in measurements]
+    if any(not isinstance(name, str) for name in names) or len(set(names)) != len(names):
+        raise RuntimeError('cannot publish completion; measurement step names are missing or duplicated')
+    failures = [record['name'] for record in measurements
+                if record.get('exit_code') != expected_exit_code(record['name'])]
+    if failures:
+        raise RuntimeError(f"cannot publish completion; failed steps: {failures}")
+    manifest = {
+        'schema': 1,
+        'status': 'complete',
+        'step_count': len(measurements),
+        'steps': names,
+        'expected_exit_codes': {record['name']: expected_exit_code(record['name'])
+                                for record in measurements},
+        'measurements_sha256': digest(measurements_path),
+    }
+    (runner.output / 'completed.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
 def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--stock-build', type=Path, required=True)
+    parser.add_argument('--php-binary', type=Path, required=True)
     args = parser.parse_args()
     cache, original = args.cache.resolve(), args.stock_build.resolve()
+    php_binary = args.php_binary.resolve()
+    if not php_binary.is_file():
+        parser.error('--php-binary must name the exact measured PHP executable')
     # Admission is serial across campaigns. The first full-link job was started
     # before this script; let its enforcing cgroup finish before admitting more.
     report = cache/'stock-whole-kernel/whole-svf-dda.cgroup.json'
-    while report.exists() and 'exit_code' not in json.loads(report.read_text()):
-        if not Path(json.loads(report.read_text())['cgroup']).exists():
-            break
-        time.sleep(1)
+    wait_for_enforcing_worker(report)
     runner = EnforcedRunner(cache/'campaign')
-    complementary(cache, runner)
+    complementary(cache, runner, php_binary)
     compact = compact_build(cache, original, runner)
     pointer_cases(cache, original, compact, runner)
-    (runner.output/'completed.json').write_text('{}\n')
+    publish_completion(runner)
 
 
 if __name__ == '__main__':

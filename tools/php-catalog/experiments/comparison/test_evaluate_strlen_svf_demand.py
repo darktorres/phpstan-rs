@@ -63,22 +63,57 @@ Ptr 66572 \tPointsTo: {empty}
         runtime = json.loads(witness_path.read_text())
         EVALUATOR.validate_recorded_outputs(runtime, EVALUATOR.ROOT)
 
-    def test_main_stops_before_tool_execution_when_checked_in_fixture_is_stale(self):
+    def test_linked_bitcode_must_match_the_php_source_manifest(self):
+        payload = b"module bytes"
+        expected = hashlib.sha256(payload).hexdigest()
+        lock = {"php_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03"}
+        manifest = {"php_commit": lock["php_commit"], "linked_bitcode_sha256": expected}
         with tempfile.TemporaryDirectory() as temporary:
+            bitcode = Path(temporary) / "php-cli.bc"
+            manifest_path = Path(temporary) / "link-manifest.json"
+            bitcode.write_bytes(payload)
+            manifest_path.write_text(json.dumps(manifest))
+            lock["link_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            self.assertEqual(EVALUATOR.validate_linked_source_identity(bitcode, lock, manifest, manifest_path), lock["php_commit"])
+            bitcode.write_bytes(payload + b" altered")
+            with self.assertRaisesRegex(ValueError, "not the module bound"):
+                EVALUATOR.validate_linked_source_identity(bitcode, lock, manifest, manifest_path)
+            bitcode.write_bytes(payload)
+            bad_manifest = {**manifest, "php_commit": "0" * 40}
+            manifest_path.write_text(json.dumps(bad_manifest))
+            lock["link_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError, "different PHP commits"):
+                EVALUATOR.validate_linked_source_identity(bitcode, lock, bad_manifest, manifest_path)
+
+    def test_source_lock_rejects_changed_runner_or_fixture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "run.py"
+            source.write_bytes(b"pinned runner")
+            lock = {"run.py": hashlib.sha256(source.read_bytes()).hexdigest()}
+            EVALUATOR.validate_source_lock(root, lock)
+            source.write_bytes(b"changed runner")
+            with self.assertRaisesRegex(ValueError, "digest mismatch: run.py"):
+                EVALUATOR.validate_source_lock(root, lock)
+
+    def test_main_stops_before_tool_execution_when_linked_module_is_unpinned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            linked_bitcode = Path(temporary) / "php-cli.bc"
+            linked_bitcode.write_bytes(b"not the pinned module")
             with patch.object(
                 sys,
                 "argv",
                 [
                     str(SCRIPT),
                     "--linked-bitcode",
-                    "/missing/php-cli.bc",
+                    str(linked_bitcode),
                     "--svf-bin",
                     "/missing/svf",
                     "--output",
                     temporary,
                 ],
             ):
-                with self.assertRaisesRegex(ValueError, "runtime fixture digest mismatch"):
+                with self.assertRaisesRegex(ValueError, "not the module bound"):
                     EVALUATOR.main()
 
 

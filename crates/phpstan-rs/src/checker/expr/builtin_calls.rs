@@ -440,7 +440,10 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                     return php_semantics::Truth::Maybe;
                 };
                 let members = argument.union_members();
-                if members.iter().any(|member| member.is_null().yes()) {
+                if members
+                    .iter()
+                    .any(|member| member.is_null().yes() || member.is_null().maybe())
+                {
                     if members.len() == 1 && members[0].is_null().yes() {
                         php_semantics::Truth::Yes
                     } else {
@@ -468,7 +471,9 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                         continue;
                     }
                     if let Some((class, _)) = member.as_object() {
-                        if self.registry.is_subclass_of(class, "Stringable") {
+                        if self.registry.is_subclass_of(class, "Stringable")
+                            || self.registry.lookup_method(class, "__toString").is_some()
+                        {
                             may_cast = true;
                         } else if self
                             .registry
@@ -480,6 +485,12 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                             may_cast = true;
                             may_not_cast = true;
                         }
+                    } else if member.is_object().maybe() || member.is_object().yes() {
+                        // Object without an exact class identity (bare `object`,
+                        // object shapes, intersections, and bounded templates)
+                        // may carry `__toString`; neither branch is provable.
+                        may_cast = true;
+                        may_not_cast = true;
                     } else {
                         may_not_cast = true;
                     }
@@ -668,7 +679,9 @@ fn parser_acceptance_for_strlen(
                     if !weak_scalar_coercions {
                         rejects = true;
                     } else if let Some((class, _)) = member.as_object() {
-                        if registry.is_subclass_of(class, "Stringable") {
+                        if registry.is_subclass_of(class, "Stringable")
+                            || registry.lookup_method(class, "__toString").is_some()
+                        {
                             accepts = true;
                         } else if registry
                             .class_by_name(class)

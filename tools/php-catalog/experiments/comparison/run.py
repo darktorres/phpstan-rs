@@ -86,6 +86,8 @@ class Runner:
         record = dict(name=name, command=list(map(str, command)), cwd=str(cwd or Path.cwd()),
                       elapsed_seconds=round(time.monotonic() - start, 4),
                       sampled_group_peak_bytes=sampled_peak,
+                      stdout_path=str(stdout.resolve()), stdout_sha256=digest(stdout),
+                      stderr_path=str(stderr.resolve()), stderr_sha256=digest(stderr),
                       exit_code=process.returncode, stopped=stopped, **measured)
         self.measurements.append(record)
         (self.output / 'measurements.json').write_text(json.dumps(self.measurements, indent=2) + '\n')

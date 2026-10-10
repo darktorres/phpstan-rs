@@ -53,7 +53,6 @@ fn exact_dynamic_strlen_preserves_argument_diagnostics_once() {
 }
 
 #[test]
-#[ignore = "RV-9: the Stringable predicate answers No for a bare object; remove when fixed"]
 fn bare_object_argument_invalidates_property_narrowing_like_mixed() {
     let src = "<?php\n\
         class C {\n\
@@ -78,6 +77,75 @@ fn bare_object_argument_invalidates_property_narrowing_like_mixed() {
         .filter(|d| d.identifier.ends_with("assertType"))
         .count();
     assert_eq!(mismatches, 2, "both calls must invalidate $c->p");
+}
+
+#[test]
+fn object_shapes_intersections_and_templates_keep_possible_stringable_branch() {
+    let src = "<?php\n\
+        class C { public int $p = 0; }\n\
+        function viaShape(object{} $o, C $c): void {\n\
+            $c->p = 1; strlen($o); assertType('int', $c->p);\n\
+        }\n\
+        /** @param object&Countable $o */\n\
+        function viaIntersection(object $o, C $c): void {\n\
+            $c->p = 1; strlen($o); assertType('int', $c->p);\n\
+        }\n\
+        /** @template T of object\n\
+         *  @param T $o\n\
+         */\n\
+        function viaObjectTemplate(object $o, C $c): void {\n\
+            $c->p = 1; strlen($o); assertType('int', $c->p);\n\
+        }\n";
+    let diagnostics = diagnostics_at_php_8_5_4(src);
+    let mismatches = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.identifier.ends_with("assertType"))
+        .collect::<Vec<_>>();
+    assert!(
+        mismatches.is_empty(),
+        "unknown object forms must retain a possible Stringable transfer: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn trait_provided_tostring_is_accepted_by_strlen() {
+    let diagnostics = diagnostics_at_php_8_5_4(
+        "<?php\n\
+        trait ConvertsToString { public function __toString(): string { return 'x'; } }\n\
+        final class Traited { use ConvertsToString; }\n\
+        function check(Traited $value): void { strlen($value); }\n",
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.identifier.as_str() == "argument.type"),
+        "PHP 8 implicitly makes a class with trait-provided __toString Stringable: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn nullable_template_keeps_strlen_null_deprecation_possible() {
+    let diagnostics = diagnostics_at_php_8_5_4(
+        "<?php\n\
+        /** @template T of string|null\n\
+         *  @param T $value\n\
+         */\n\
+        function fromTemplate($value): void { strlen($value); }\n\
+        function fromUnion(string|null $value): void { strlen($value); }\n",
+    );
+    let null_deprecations = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Passing null to parameter #1 ($string) of function strlen is deprecated")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        null_deprecations.len(),
+        2,
+        "nullable template and explicit nullable union must both retain the null diagnostic branch: {diagnostics:#?}"
+    );
 }
 
 #[test]
@@ -140,6 +208,38 @@ fn caught_stringable_throw_keeps_only_reachable_straight_line_writes() {
     assert!(
         mismatches.is_empty(),
         "callback throw must include only reachable pre-throw writes: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn stringable_throw_preserves_catch_narrowing_and_normal_path_narrowing() {
+    let src = "<?php\n\
+        final class ThrowingString implements Stringable {\n\
+            public function __toString(): string { throw new RuntimeException(); }\n\
+        }\n\
+        final class PlainString implements Stringable {\n\
+            public function __toString(): string { return 'ok'; }\n\
+        }\n\
+        function caught(ThrowingString $value, string|null $candidate): void {\n\
+            if (is_string($candidate)) {\n\
+                try { strlen($value); }\n\
+                catch (Throwable $error) { assertType('string', $candidate); }\n\
+            }\n\
+        }\n\
+        function normal(PlainString $value, string|null $candidate): void {\n\
+            if (is_string($candidate)) {\n\
+                strlen($value);\n\
+                assertType('string', $candidate);\n\
+            }\n\
+        }\n";
+    let diagnostics = diagnostics_at_php_8_5_4(src);
+    let mismatches = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.identifier.ends_with("assertType"))
+        .collect::<Vec<_>>();
+    assert!(
+        mismatches.is_empty(),
+        "strlen's normal and PHP-throw paths must preserve unrelated refinements: {diagnostics:#?}"
     );
 }
 

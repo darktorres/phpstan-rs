@@ -191,11 +191,12 @@ consume. The native `zif_strlen` chain has pinned source/layout/LLVM evidence,
 and the direct opcode path now has locked compiler/VM source facts plus paired
 opcode/runtime observations for the enumerated cases. Weak scalar success,
 parser rejection, and null-handler outcomes have runtime evidence; exact throw
-values/state, callback effects, release behavior, unknown behavior, and broader
+values/state, generalized callback effects, release behavior, unknown behavior, and broader
 strict exceptional transfers remain open. In particular,
-the checker’s separately applied `Operation::String` invalidation must not be
-counted as graph evidence for ordered callback mutation or exceptional-state
-retention. Follow-up implementation and calibration are tracked under R01.6,
+the checker consumes graph-selected invocation outcomes for bounded same-file
+callback/destructor summaries and preserves PHP-throw string-argument
+invalidation, but `Operation::String` alone is not evidence for exact callback
+ordering or generalized heap-state transfer. Follow-up implementation and calibration are tracked under R01.6,
 R02.2–R02.3, R02.7, R04.1, and R05.2; RV-16's artifact/source-linkage gap is
 implemented with independent acceptance pending.
 
@@ -208,9 +209,11 @@ length-to-result assignment. The [generated correspondence record](tools/php-cat
 records hashes for all input artifacts. These representations agree on that
 selected path; this does not establish equivalence for all branches or effects.
 The builder binds the Clang summaries to the source-hashed representation
-manifest and successful source compile records, and checks the GCC dump command
-record and source path before accepting the GIMPLE/CFG artifacts.
-It also checks the locked PHP commit, verifies the cleanup fixture hash against
+manifest and successful source compile records. Each AST/LLVM/GCC/cleanup input
+must also match an output digest recorded on its successful producer measurement;
+missing or changed bindings fail closed. GCC CFG reachability uses a documented
+textual reconstruction heuristic over `goto <bb N>` and fallthrough; it is not
+a verified GCC CFG. The builder checks the locked PHP commit, verifies the cleanup fixture hash against
 the campaign input record, and requires successful cleanup AST, GIMPLE, and
 LLVM command records before reporting the exception counterexample.
 
@@ -733,7 +736,7 @@ The earlier task-history list named only 28 milestone commits. A complete path-s
 
 - **F00:** `599c2508` introduced the trace contract; `5df391b9` recorded the CBMC result; `e62c000e` revised the contract and added the self-review. The contract is still not independently accepted. At the time of the commit-by-commit review, the CBMC replay needed a fail-closed result checker and property-to-clause crosswalk; R00.4 has since completed that scoped accounting and enforcement work. The reduced C model remains separate from PHP semantic validation.
 - **F01:** `9df6d5d3`, `80795f6e`, `d5f7598f`, `7cb0c627`, `d3c3fa63`, `eee12e0f`, `a0b083a8`, and `dab7e44f` add the graph, worklist, catalog/evidence boundary, PHP flow host, certificate replay, and array/reference fixtures. The focused semantic tests pass 60/60 in the reviewed historical state. The implementation remains a trusted-host post-fixpoint checker, not a proof of PHP semantics. R01.1 supplies typed assumptions and fail-closed reference validation; R01.2 rejects cycles across the combined evidence/assumption graph; R01.3 validates catalog-entry release ranges at insertion and manifest load; R01.4 checks N/A dependencies and propagates open dependencies transitively. Trusted validators and canonical-order enforcement remain under R01.7–R01.8.
-- **F02:** `043f2c78`, `4e7d29a3`, `2b6afb95`, `47f5e62a`, `08499695`, `0a2f229e`, and `8217e557` add compiler/framework campaigns, CIR records, and the source-to-LLVM `strlen` witness. The witness is pinned to one linked module and demonstrates a narrow Return slice; it does not interpret general LLVM behavior or establish source/CFG semantic equivalence (R02.2–R02.3). R02.1 now rejects runtime fixture drift and validates the preserved Hybrid/CALL output digests. The historical 13-sentinel witness still does not match the later current fixture, so replay fails closed until the evidence is regenerated for that fixture.
+- **F02:** `043f2c78`, `4e7d29a3`, `2b6afb95`, `47f5e62a`, `08499695`, `0a2f229e`, and `8217e557` add compiler/framework campaigns, CIR records, and the source-to-LLVM `strlen` witness. The witness is pinned to one linked module and demonstrates a narrow Return slice; it does not interpret general LLVM behavior or establish source/CFG semantic equivalence (R02.2–R02.3). R02.1 rejects runtime fixture drift and verifies preserved Hybrid/CALL outputs; the historical 13-sentinel witness is now paired with its preserved historical fixture, while the current 16-sentinel fixture has a separate TAILCALL/CALL record.
 - **F03:** `74229f12`, `fe1cab81`, and `9b384e8c` document pointer-service limits and add the empty-target regression. The capsule omits construction/handler initialization, so its empty set is incomplete. The replay records the supplied bitcode hash but labels it with a fixed PHP source commit without checking the association; it also does not reject callback fixture hash drift (R03.1, R03.4).
 - **F04:** `bd1b0272`, `68ec8f18`, `017fe4c7`, plus shared changes in `a0b083a8` and `dab7e44f`, add the bounded value/reference host and conservative missing-read behavior. The fixtures establish the stated minimum cases only; broader PHP value semantics and syntax lowering remain deferred (R22.1).
 - **F05:** `9b1c449e`, `bb274ed4`, `df437149`, `d6bcf2c1`, `93d950ee`, `ea4f4b50`, and `09acd24e` add patch-aware selection, the exact `strlen` artifact path, scalar/null coercion, memoization, and invocation invalidation. The historical single-unpack probe passed but did not cover multiple unpack sources or named arguments after an unpack. R05.2.1 now resolves the graph's formal argument through the signature and has regression coverage for both forms and multiple unpack sources; targeted and full library tests pass in the current worktree. Profile applicability and the uncovered callback/destructor cases remain open (R05.1 and R05.2). R05.2.2–R05.2.4 now implement bounded ordered callback/destructor transfers; independent acceptance of that implementation remains pending. The independently tracked optimized/fixture failures describe the earlier evaluation run and are not re-evaluated by this focused subtask.

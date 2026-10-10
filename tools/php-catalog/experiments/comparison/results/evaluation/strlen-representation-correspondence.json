@@ -21,8 +21,8 @@
       "sha256": "86a9b25c1abc529b455992da2f1c6ec8883f11cb6b783fd29204ce203bfed875"
     },
     "clang_measurements": {
-      "bytes": 118409,
-      "sha256": "af5f9969bc3f5cd3b0ea6c3c5dc82a1f299a54ac776d3050fc30562126c4da69"
+      "bytes": 123665,
+      "sha256": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a"
     },
     "cleanup_ast": {
       "bytes": 2255,
@@ -37,8 +37,8 @@
       "sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672"
     },
     "cleanup_measurements": {
-      "bytes": 118409,
-      "sha256": "af5f9969bc3f5cd3b0ea6c3c5dc82a1f299a54ac776d3050fc30562126c4da69"
+      "bytes": 123665,
+      "sha256": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a"
     },
     "cleanup_source": {
       "bytes": 226,
@@ -53,8 +53,8 @@
       "sha256": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2"
     },
     "gcc_measurements": {
-      "bytes": 118409,
-      "sha256": "af5f9969bc3f5cd3b0ea6c3c5dc82a1f299a54ac776d3050fc30562126c4da69"
+      "bytes": 123665,
+      "sha256": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a"
     },
     "source": {
       "bytes": 64968,
@@ -99,7 +99,8 @@
       "cfg_parser_to_result_to_exit_path": true,
       "gimple_length_to_result": true,
       "gimple_parser_call": true,
-      "status": "matched"
+      "reachability_method": "successors parsed from goto <bb N>; conditional fallthrough inferred from textual if-blocks and ordinary fallthrough inferred from block order; this is not a verified GCC CFG",
+      "status": "structural match using heuristic CFG reconstruction"
     },
     "source": {
       "function": "zif_strlen",

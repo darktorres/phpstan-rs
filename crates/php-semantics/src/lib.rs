@@ -2758,6 +2758,113 @@ mod tests {
         }
     }
 
+    #[test]
+    fn event_domain_contract_matches_literal_expected_mapping() {
+        let operand = Operand::Literal(Bytes(b"x".to_vec()));
+        let cases = [
+            (
+                Event::Read {
+                    storage: operand.clone(),
+                },
+                vec![Domain::UserRead],
+            ),
+            (
+                Event::Write {
+                    storage: operand.clone(),
+                    value: operand.clone(),
+                },
+                vec![Domain::UserWrite],
+            ),
+            (
+                Event::Invoke {
+                    callable: operand.clone(),
+                    arguments: vec![],
+                    result: 0,
+                },
+                vec![Domain::Invocation],
+            ),
+            (
+                Event::Release {
+                    value: operand.clone(),
+                },
+                vec![Domain::Release],
+            ),
+            (
+                Event::EmitDiagnostic {
+                    kind: DiagnosticKind::NullToInternalScalarParameterDeprecated,
+                    argument: 0,
+                },
+                vec![Domain::Diagnostic],
+            ),
+            (
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::Assign {
+                        destination: Bytes(b"a".to_vec()),
+                        source: Bytes(b"b".to_vec()),
+                    },
+                },
+                vec![Domain::UserRead, Domain::UserWrite],
+            ),
+            (
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::Unset {
+                        local: Bytes(b"a".to_vec()),
+                    },
+                },
+                vec![Domain::UserWrite],
+            ),
+            (
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::BindReference {
+                        left: Bytes(b"a".to_vec()),
+                        right: Bytes(b"b".to_vec()),
+                    },
+                },
+                vec![Domain::UserRead, Domain::UserWrite],
+            ),
+            (
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArraySet {
+                        array: Bytes(b"a".to_vec()),
+                        key: ArrayKey::Int(0),
+                        source: Bytes(b"b".to_vec()),
+                    },
+                },
+                vec![Domain::UserRead, Domain::UserWrite],
+            ),
+            (
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayGet {
+                        destination: Bytes(b"a".to_vec()),
+                        array: Bytes(b"b".to_vec()),
+                        key: ArrayKey::Int(0),
+                    },
+                },
+                vec![Domain::UserRead, Domain::UserWrite],
+            ),
+            (
+                Event::PhpFlow {
+                    instruction: PhpFlowInstruction::ArrayBindReference {
+                        array: Bytes(b"a".to_vec()),
+                        key: ArrayKey::Int(0),
+                        local: Bytes(b"b".to_vec()),
+                    },
+                },
+                vec![Domain::UserRead, Domain::UserWrite],
+            ),
+            (
+                Event::Unknown {
+                    domains: vec![Domain::Output, Domain::UserWrite],
+                    reason: Bytes(b"opaque".to_vec()),
+                },
+                vec![Domain::Output, Domain::UserWrite],
+            ),
+        ];
+        for (event, expected) in cases {
+            assert_eq!(event_domains(&event), expected, "{event:?}");
+        }
+    }
+
     fn graph(events: Vec<Event>, terminator: Terminator) -> BehaviorGraph {
         let mut applicable = Vec::new();
         for event in &events {
@@ -2817,7 +2924,17 @@ mod tests {
                 let dependencies = match event {
                     Event::Read { .. } => vec![Domain::UserRead],
                     Event::Write { .. } => vec![Domain::UserWrite],
-                    Event::PhpFlow { .. } => event_domains(event),
+                    Event::PhpFlow {
+                        instruction:
+                            PhpFlowInstruction::Assign { .. }
+                            | PhpFlowInstruction::BindReference { .. }
+                            | PhpFlowInstruction::ArraySet { .. }
+                            | PhpFlowInstruction::ArrayGet { .. }
+                            | PhpFlowInstruction::ArrayBindReference { .. },
+                    } => vec![Domain::UserRead, Domain::UserWrite],
+                    Event::PhpFlow {
+                        instruction: PhpFlowInstruction::Unset { .. },
+                    } => vec![Domain::UserWrite],
                     _ => vec![],
                 };
                 coverage
@@ -4845,15 +4962,16 @@ mod tests {
         let replacement_kinds = [
             CompletionKind::Normal,
             CompletionKind::PhpThrow,
+            CompletionKind::NativeUnwind,
             CompletionKind::Fatal,
             CompletionKind::Suspended,
         ];
         for pending_kind in pending_kinds {
             for replacement_kind in replacement_kinds {
-                let mut graph = if matches!(
-                    pending_kind,
-                    CompletionKind::PhpThrow | CompletionKind::NativeUnwind
-                ) {
+                let mut graph = if pending_kind == CompletionKind::NativeUnwind
+                    || (pending_kind == CompletionKind::PhpThrow
+                        && replacement_kind != CompletionKind::NativeUnwind)
+                {
                     graph(
                         vec![Event::Invoke {
                             callable: Operand::Argument(0),
@@ -4861,6 +4979,11 @@ mod tests {
                             result: 1,
                         }],
                         Terminator::Return(None),
+                    )
+                } else if pending_kind == CompletionKind::PhpThrow {
+                    graph(
+                        vec![],
+                        Terminator::Throw(Operand::Literal(Bytes(b"initial throw".to_vec()))),
                     )
                 } else {
                     let terminator = match pending_kind {
@@ -4890,28 +5013,49 @@ mod tests {
                     CompletionKind::PhpThrow => {
                         Terminator::Throw(Operand::Literal(Bytes(b"throw".to_vec())))
                     }
+                    CompletionKind::NativeUnwind => Terminator::Resume,
                     CompletionKind::Fatal => {
                         Terminator::Fatal(Operand::Literal(Bytes(b"fatal".to_vec())))
                     }
                     CompletionKind::Suspended => {
                         Terminator::Suspend(Operand::Literal(Bytes(b"suspended".to_vec())))
                     }
-                    CompletionKind::NativeUnwind => unreachable!(),
                 };
-                graph.blocks.push(Block::new(vec![], replacement));
+                let replacement_events = if replacement_kind == CompletionKind::NativeUnwind {
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(1),
+                        arguments: vec![],
+                        result: 2,
+                    }]
+                } else {
+                    vec![]
+                };
+                graph
+                    .blocks
+                    .push(Block::new(replacement_events, replacement));
                 close_unmodeled_domains(&mut graph);
                 let mut host = Host {
                     throw_invoke: pending_kind == CompletionKind::PhpThrow,
-                    native_unwind_invoke: pending_kind == CompletionKind::NativeUnwind,
+                    native_unwind_invoke: pending_kind == CompletionKind::NativeUnwind
+                        || replacement_kind == CompletionKind::NativeUnwind,
                     ..Host::default()
                 };
-                let arguments = if matches!(
-                    pending_kind,
-                    CompletionKind::PhpThrow | CompletionKind::NativeUnwind
-                ) {
+                let arguments = if pending_kind == CompletionKind::NativeUnwind
+                    || (pending_kind == CompletionKind::PhpThrow
+                        && replacement_kind != CompletionKind::NativeUnwind)
+                {
                     vec!["callback".into()]
                 } else {
-                    vec![]
+                    vec!["cleanup".into()]
+                };
+                let arguments = if replacement_kind == CompletionKind::NativeUnwind
+                    && pending_kind != CompletionKind::NativeUnwind
+                {
+                    vec!["cleanup".into()]
+                } else if pending_kind == CompletionKind::NativeUnwind {
+                    vec!["callback".into(), "cleanup".into()]
+                } else {
+                    arguments
                 };
                 let result = evaluate(&graph, &arguments, &receiver(), vec![], &mut host);
                 let supported = pending_kind == CompletionKind::PhpThrow
@@ -4935,6 +5079,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn evaluator_rejects_native_unwind_replacement_during_cleanup() {
+        let mut graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 1,
+            }],
+            Terminator::Return(None),
+        );
+        graph.blocks[0].exceptional.native_unwind = Some(1);
+        let cleanup = Block::new(
+            vec![Event::Invoke {
+                callable: Operand::Argument(1),
+                arguments: vec![],
+                result: 2,
+            }],
+            Terminator::Resume,
+        );
+        graph.blocks.push(cleanup);
+        close_unmodeled_domains(&mut graph);
+
+        let mut host = Host {
+            native_unwind_invoke: true,
+            ..Host::default()
+        };
+        let result = evaluate(
+            &graph,
+            &["initial".into(), "cleanup".into()],
+            &receiver(),
+            vec![],
+            &mut host,
+        );
+        assert_eq!(
+            result,
+            Err(GraphError::UnsupportedCleanupReplacement {
+                pending: CompletionKind::NativeUnwind,
+                replacement: CompletionKind::NativeUnwind,
+            })
+        );
     }
 
     #[test]

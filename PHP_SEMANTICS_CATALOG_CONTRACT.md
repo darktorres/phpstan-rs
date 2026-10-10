@@ -281,7 +281,9 @@ prerequisite assumption IDs, supporting evidence IDs, and validator ID/version.
 Manifest validation resolves assumption references only in the assumption
 namespace, requires evidence assumptions to propagate into coverage, rejects
 malformed scopes or records, and checks the combined evidence/assumption
-support graph for cycles. Context matching alone does not establish an
+support graph for cycles. Loading or structurally validating a manifest only
+establishes that its records are well-formed and internally linked; it does not
+establish any assumption or authorize a validator. Context matching alone does not establish an
 assumption: trusted catalog-backed projection and evaluation validate the
 assumption under a deployment-owned policy, and certificate replay repeats that
 validation. Context-free graph validation and evaluation reject closed facts
