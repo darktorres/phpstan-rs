@@ -1,9 +1,9 @@
 //! A checked scope's variables and the facts recorded about them.
 
 use super::keys::KeyTableRef;
-use syntax::name::NameKey;
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
+use syntax::name::NameKey;
 
 /// A checked scope's variable-name-to-inferred-type bindings, plus an
 /// opt-in, parallel declaration-span side-channel the LSP's local-variable-
@@ -313,7 +313,10 @@ impl Locals {
     }
 
     /// `get_provenance` of the variable `name`.
-    pub(crate) fn get_provenance_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<&ProvenanceSet> {
+    pub(crate) fn get_provenance_var<N: NameKey + ?Sized>(
+        &self,
+        name: &N,
+    ) -> Option<&ProvenanceSet> {
         self.provenance.get(&self.find_var(name)?)
     }
 
@@ -516,6 +519,27 @@ impl Locals {
         self.types
             .iter()
             .filter_map(|(key, ty)| match keys.data(*key) {
+                KeyData::Var(name) => Some((name.clone(), ty)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The variables of the scope among `names`, by name, with their types,
+    /// in the order `variables` gives them.
+    pub(crate) fn variables_named(&self, names: &[&str]) -> Vec<(syntax::name::Name, &Type)> {
+        let keys = self.keys.borrow();
+        let mut found: Vec<(LocalKey, &Type)> = names
+            .iter()
+            .filter_map(|name| {
+                let key = keys.find_var(*name)?;
+                Some((key, self.types.get(&key)?))
+            })
+            .collect();
+        found.sort_by_key(|(key, _)| *key);
+        found
+            .into_iter()
+            .filter_map(|(key, ty)| match keys.data(key) {
                 KeyData::Var(name) => Some((name.clone(), ty)),
                 _ => None,
             })

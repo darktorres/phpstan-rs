@@ -3114,20 +3114,21 @@ pub fn literal_string_value<'a>(
 
 /// Whether `name` (without its `$`) is one of PHP's superglobals.
 pub fn is_superglobal(name: &str) -> bool {
-    matches!(
-        name,
-        "GLOBALS"
-            | "_GET"
-            | "_POST"
-            | "_REQUEST"
-            | "_SERVER"
-            | "_SESSION"
-            | "_COOKIE"
-            | "_FILES"
-            | "_ENV"
-            | "argv"
-            | "argc"
-    )
+    matches!(name.as_bytes().first(), Some(b'G' | b'_' | b'a'))
+        && matches!(
+            name,
+            "GLOBALS"
+                | "_GET"
+                | "_POST"
+                | "_REQUEST"
+                | "_SERVER"
+                | "_SESSION"
+                | "_COOKIE"
+                | "_FILES"
+                | "_ENV"
+                | "argv"
+                | "argc"
+        )
 }
 
 /// Whether `name` is a PHP or PHPDoc keyword type rather than a class name.

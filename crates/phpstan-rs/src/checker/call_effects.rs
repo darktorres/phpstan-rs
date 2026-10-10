@@ -28,6 +28,11 @@ use crate::registry::{
     CallContext, Effect, Holder, Storage, Transfer, Written, elements_holder_of, holder_of,
 };
 
+/// The superglobals every scope holds, `$GLOBALS` apart.
+const SUPERGLOBALS_BUT_GLOBALS: [&str; 10] = [
+    "_GET", "_POST", "_REQUEST", "_SERVER", "_SESSION", "_COOKIE", "_FILES", "_ENV", "argv", "argc",
+];
+
 /// What a call's caller knows of it, from the types the checker inferred.
 struct TypedCall<'c, 'a> {
     checker: &'c Checker<'a>,
@@ -635,8 +640,7 @@ impl Checker<'_> {
         let anything = effect.is_anything();
         let storages: Vec<&Storage> = effect.storages().into_iter().flatten().collect();
         let mut stale: Vec<LocalKey> = Vec::new();
-        let keys: Vec<LocalKey> = locals.synthetic_keys().copied().collect();
-        for key in keys {
+        for &key in locals.synthetic_keys() {
             let written = match locals.data(key) {
                 KeyData::Prop { base, prop } => {
                     self.object_written(&storages, anything, base, Some(&prop), &scope, locals)
@@ -809,7 +813,12 @@ impl Checker<'_> {
         let classes: Vec<String> = if class.eq_ignore_ascii_case("static") {
             own.map(|own| {
                 std::iter::once(own.to_string())
-                    .chain(self.registry.subclasses_shared(own).iter().map(|c| c.to_string()))
+                    .chain(
+                        self.registry
+                            .subclasses_shared(own)
+                            .iter()
+                            .map(|c| c.to_string()),
+                    )
                     .collect()
             })
             .unwrap_or_default()
@@ -874,7 +883,21 @@ impl Checker<'_> {
         }
         // Every variable is a global at a file's top level, and may be one
         // after a `global $$n`; the superglobals are everywhere.
-        for (name, _) in locals.variables() {
+        let every_variable = scope.top_level || scope.any_global;
+        let variables = if every_variable {
+            locals.variables()
+        } else {
+            let found = locals.variables_named(&SUPERGLOBALS_BUT_GLOBALS);
+            debug_assert!(
+                found.iter().map(|(name, _)| name).eq(locals
+                    .variables()
+                    .iter()
+                    .map(|(name, _)| name)
+                    .filter(|name| is_superglobal(name) && ***name != *"GLOBALS")),
+            );
+            found
+        };
+        for (name, _) in variables {
             let global = scope.top_level
                 || scope.any_global
                 || (is_superglobal(&name) && *name != *"GLOBALS");

@@ -170,9 +170,10 @@ impl KeyTable {
     /// The key of the variable `name` when it has been made.
     pub(crate) fn find_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<LocalKey> {
         self.index
-            .find(hash_var(name.key_hash()), |&k| {
-                matches!(&self.data[k.0 as usize], KeyData::Var(held) if name.is_key_of(held))
-            })
+            .find(
+                hash_var(name.key_hash()),
+                |&k| matches!(&self.data[k.0 as usize], KeyData::Var(held) if name.is_key_of(held)),
+            )
             .copied()
     }
 

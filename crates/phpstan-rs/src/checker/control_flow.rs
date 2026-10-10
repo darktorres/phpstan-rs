@@ -457,6 +457,17 @@ pub(crate) fn merge_scopes(
     for (key, then_native) in then_locals.natives() {
         match else_locals.native(key) {
             Some(else_native) => {
+                // Two equal types union to the first, so the copy of the
+                // then-scope already holds the merged native.
+                if then_native.is_same_node(else_native) || then_native == else_native {
+                    debug_assert!(
+                        relation.union(then_native.clone(), else_native.clone()) == *then_native
+                    );
+                    if !patched {
+                        merged.set_native(key, then_native.clone());
+                    }
+                    continue;
+                }
                 if patched {
                     // `set_native` keeps no `mixed`, so what the copy holds
                     // goes first.
