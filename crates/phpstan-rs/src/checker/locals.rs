@@ -525,6 +525,18 @@ impl Locals {
             .collect()
     }
 
+    /// Calls `visit` with each variable of the scope and its type, in the
+    /// order `variables` gives them, without collecting them. The key table
+    /// stays borrowed for the walk, so `visit` must not intern a key.
+    pub(crate) fn each_variable(&self, mut visit: impl FnMut(&syntax::name::Name, &Type)) {
+        let keys = self.keys.borrow();
+        for (key, ty) in self.types.iter() {
+            if let KeyData::Var(name) = keys.data(*key) {
+                visit(name, ty);
+            }
+        }
+    }
+
     /// The variables of the scope among `names`, by name, with their types,
     /// in the order `variables` gives them.
     pub(crate) fn variables_named(&self, names: &[&str]) -> Vec<(syntax::name::Name, &Type)> {

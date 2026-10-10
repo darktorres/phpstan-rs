@@ -884,8 +884,32 @@ impl Checker<'_> {
         // Every variable is a global at a file's top level, and may be one
         // after a `global $$n`; the superglobals are everywhere.
         let every_variable = scope.top_level || scope.any_global;
-        let variables = if every_variable {
-            locals.variables()
+        let mut visit = |name: &Name| {
+            let global = scope.top_level
+                || scope.any_global
+                || (is_superglobal(name) && **name != *"GLOBALS");
+            let top_level_of = scope.top_level.then_some(self.current_file_id).flatten();
+            if global && global_written(name, top_level_of) {
+                let shared = if scope.top_level {
+                    Shared::TopLevel {
+                        global: name.clone(),
+                        named: !anything
+                            && !is_superglobal(name)
+                            && !storages
+                                .iter()
+                                .any(|storage| matches!(storage, Storage::Global(None)))
+                            && storages.iter().any(|storage| {
+                                matches!(storage, Storage::Global(Some(global)) if global == name)
+                            }),
+                    }
+                } else {
+                    Shared::Global(name.clone())
+                };
+                out.push((name.clone(), shared));
+            }
+        };
+        if every_variable {
+            locals.each_variable(|name, _| visit(name));
         } else {
             let found = locals.variables_named(&SUPERGLOBALS_BUT_GLOBALS);
             debug_assert!(
@@ -895,30 +919,8 @@ impl Checker<'_> {
                     .map(|(name, _)| name)
                     .filter(|name| is_superglobal(name) && ***name != *"GLOBALS")),
             );
-            found
-        };
-        for (name, _) in variables {
-            let global = scope.top_level
-                || scope.any_global
-                || (is_superglobal(&name) && *name != *"GLOBALS");
-            let top_level_of = scope.top_level.then_some(self.current_file_id).flatten();
-            if global && global_written(&name, top_level_of) {
-                let shared = if scope.top_level {
-                    Shared::TopLevel {
-                        global: name.clone(),
-                        named: !anything
-                            && !is_superglobal(&name)
-                            && !storages
-                                .iter()
-                                .any(|storage| matches!(storage, Storage::Global(None)))
-                            && storages.iter().any(|storage| {
-                                matches!(storage, Storage::Global(Some(global)) if *global == name)
-                            }),
-                    }
-                } else {
-                    Shared::Global(name.clone())
-                };
-                out.push((name, shared));
+            for (name, _) in &found {
+                visit(name);
             }
         }
         let own_function = |class: &Option<Name>, function: &Name| {
