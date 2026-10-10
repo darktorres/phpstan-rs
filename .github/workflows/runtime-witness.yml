@@ -1,0 +1,64 @@
+# Runs the recorded strlen runtime fixtures on official PHP 8.5.11 binaries and
+# compares their stdout with the committed outputs. Manual for now: a
+# platform's result is reviewed before the catalog gains a profile for that
+# platform.
+name: runtime-witness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: linux (official php:8.5.11-cli image)
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the fixtures on the pinned official image
+        run: >-
+          python3 tools/php-catalog/experiments/comparison/check_runtime_outputs.py
+          --docker php@sha256:01a109229f4465bc9ef042d9198f09a4d9da7775a825dbd8572dcdbd8756c4d3
+
+  windows:
+    name: windows (official PHP 8.5.11 zip)
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch and verify the official PHP 8.5.11 build
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://downloads.php.net/~windows/releases/php-8.5.11-Win32-vs17-x64.zip -OutFile php.zip
+          $hash = (Get-FileHash php.zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne 'c83d5a1e0d760fb026ce695d8a70a73a4c81ac224b3e5c425406b23a7d53e1de') {
+            throw "php-8.5.11-Win32-vs17-x64.zip has unexpected sha256 $hash"
+          }
+          Expand-Archive -Path php.zip -DestinationPath php
+      - name: Run the fixtures on the official build
+        shell: pwsh
+        run: python tools/php-catalog/experiments/comparison/check_runtime_outputs.py --php "$env:GITHUB_WORKSPACE\php\php.exe"
+
+  macos:
+    name: macos (Homebrew php 8.5.11)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install and verify Homebrew's PHP 8.5.11
+        run: |
+          brew install php
+          php_bin="$(brew --prefix php)/bin/php"
+          version="$("$php_bin" -r 'echo PHP_VERSION;')"
+          if [ "$version" != "8.5.11" ]; then
+            echo "expected PHP 8.5.11, Homebrew provides $version" >&2
+            exit 1
+          fi
+          echo "PHP_BIN=$php_bin" >> "$GITHUB_ENV"
+      - name: Run the fixtures on Homebrew's build
+        run: python3 tools/php-catalog/experiments/comparison/check_runtime_outputs.py --php "$PHP_BIN"
