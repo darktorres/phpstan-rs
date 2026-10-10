@@ -563,6 +563,9 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
                         arenas.qualified_name(name)?.clone(),
                     ))]
                 }
+                Some(ExprKind::Variable(name)) if **name != *"this" => {
+                    vec![Origin::Returned(Callee::Value(Some(name.clone())))]
+                }
                 _ => return None,
             },
             ExprKind::MethodCall(recv, method, _, _) => vec![Origin::Returned(Callee::Method {
@@ -891,6 +894,10 @@ pub(crate) struct ClosureFacts {
     /// parameters, by value, as an arrow function and a first-class callable
     /// take them.
     pub(crate) captures: Option<Box<[(Name, bool)]>>,
+    /// The classes the objects it returns may be of, when its declared return
+    /// type says no more than classes by name and what is no object; `None`
+    /// when it returns anything else, or declares nothing.
+    pub(crate) returns: Option<Box<[Name]>>,
     pub(crate) facts: WriteFacts,
 }
 
@@ -952,6 +959,45 @@ fn hint_classes(hint: Option<&TypeHint>, arenas: &NodeArenas) -> Option<Box<[Qua
             }
         }
         Some(())
+    }
+    let mut out = Vec::new();
+    add(hint?, arenas, &mut out)?;
+    Some(out.into_boxed_slice())
+}
+
+/// The classes the objects of a value of the declared type `hint` may be of,
+/// when it admits no value that holds objects without being one: `None`
+/// for an array, `iterable`, `mixed`, `object`, `callable`, a type relative to
+/// the class, and what is not declared.
+fn return_classes(hint: Option<&TypeHint>, arenas: &NodeArenas) -> Option<Box<[Name]>> {
+    fn add(hint: &TypeHint, arenas: &NodeArenas, out: &mut Vec<Name>) -> Option<()> {
+        match &hint.kind {
+            TypeHintKind::Keyword(native, _) => match native {
+                NativeType::Int
+                | NativeType::Float
+                | NativeType::String
+                | NativeType::Bool
+                | NativeType::Void
+                | NativeType::Never
+                | NativeType::Null
+                | NativeType::True
+                | NativeType::False => Some(()),
+                _ => None,
+            },
+            TypeHintKind::Name(names) => {
+                for name in arenas.qualified_names(names) {
+                    out.push(name.resolved_class_name()?.clone());
+                }
+                Some(())
+            }
+            TypeHintKind::Nullable(inner) => add(inner, arenas, out),
+            TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
+                for member in arenas.type_hints(members) {
+                    add(member, arenas, out)?;
+                }
+                Some(())
+            }
+        }
     }
     let mut out = Vec::new();
     add(hint?, arenas, &mut out)?;
@@ -1398,6 +1444,7 @@ impl Summarizer<'_> {
                 within: None,
                 params: Box::new([]),
                 captures: None,
+                returns: None,
                 facts: WriteFacts {
                     anything: true,
                     ..WriteFacts::default()
@@ -1415,6 +1462,7 @@ impl Summarizer<'_> {
         id: ExprId,
         params: &[Param],
         captures: Option<Box<[(Name, bool)]>>,
+        returns: Option<Box<[Name]>>,
         walk: impl FnOnce(&mut Summarizer),
     ) {
         let id = self.closure_id(id);
@@ -1456,6 +1504,7 @@ impl Summarizer<'_> {
                 .map(|param| ClosureParam::of(param, arenas))
                 .collect(),
             captures,
+            returns,
             facts: scope.finish(true),
         };
     }
@@ -3272,6 +3321,7 @@ impl Visitor for Summarizer<'_> {
                         id,
                         arenas.params(closure.params.clone()),
                         Some(captures),
+                        return_classes(closure.return_type.as_deref(), arenas),
                         |walk| {
                             arena::walk_expr(walk, arenas, id);
                         },
@@ -3288,6 +3338,7 @@ impl Visitor for Summarizer<'_> {
                         id,
                         arenas.params(arrow.params.clone()),
                         None,
+                        return_classes(arrow.return_type.as_deref(), arenas),
                         |walk| arena::walk_expr(walk, arenas, id),
                     );
                     self.closures -= 1;
@@ -3300,7 +3351,7 @@ impl Visitor for Summarizer<'_> {
                         )
                     });
                     self.impure_unless_in_closure(dynamic);
-                    self.closure(arenas, id, &[], None, |walk| {
+                    self.closure(arenas, id, &[], None, None, |walk| {
                         walk.record_call(arenas, *call);
                         if let Some(own) = walk.scope.calls.last_mut() {
                             own.arguments = Box::new([ArgAt::Spread]);
@@ -3545,6 +3596,7 @@ syntax::canonical_struct!(ClosureFacts {
     within,
     params,
     captures,
+    returns,
     facts,
 });
 

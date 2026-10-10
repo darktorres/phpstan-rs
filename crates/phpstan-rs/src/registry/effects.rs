@@ -4603,6 +4603,7 @@ impl<'r> Resolve<'r> {
             params: FxHashMap::default(),
             made: FxHashMap::default(),
             origins,
+            closures: &self.summary.closures,
             base: FxHashMap::default(),
             solved: Default::default(),
             origin_holders: Default::default(),
@@ -4697,6 +4698,8 @@ struct Level<'r> {
     // asked.
     class_name: std::cell::OnceCell<Option<Name>>,
     this_holder: std::cell::OnceCell<Holder>,
+    // The closures the body wrote.
+    closures: &'r [ClosureFacts],
 }
 
 impl CallContext for Level<'_> {
@@ -5641,6 +5644,30 @@ impl<'r> Level<'r> {
                                 }
                             }
                         }
+                    }
+                }
+                held
+            }
+            // What the closures a variable only ever holds are declared to
+            // return.
+            Callee::Value(Some(name)) => {
+                let Some(Made::Closure(ids)) = self.made.get(name.as_str()) else {
+                    return Holder::Unknown;
+                };
+                let mut held = Holder::none();
+                for id in ids.iter() {
+                    let Some(returns) = self
+                        .closures
+                        .get(*id as usize)
+                        .and_then(|closure| closure.returns.as_deref())
+                    else {
+                        return Holder::Unknown;
+                    };
+                    if returns.is_empty() {
+                        held = held.join(of(&Type::null()));
+                    }
+                    for class in returns {
+                        held = held.join(of(&Type::object(class.clone(), Vec::new())));
                     }
                 }
                 held
