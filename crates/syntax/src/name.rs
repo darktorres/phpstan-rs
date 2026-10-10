@@ -1788,6 +1788,30 @@ impl NameCache {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cache_name_table_reads_each_text_from_its_range_and_interns_once() {
+        let texts = ["", "Alpha", "beta\\Gamma", "é"];
+        let table = CacheNameTable::new(texts.iter().map(|t| t.to_string()).collect());
+        assert_eq!(table.len(), 4);
+        for (at, text) in texts.iter().enumerate() {
+            assert_eq!(table.text(at as u32), Some(*text));
+            assert_eq!(table.name(at as u32).unwrap().as_str(), *text);
+        }
+        assert_eq!(table.text(4), None);
+        assert!(table.name(4).is_none());
+        let first = table.name(1).unwrap();
+        assert!(first.same_allocation(&table.name(1).unwrap()));
+        assert!(first.same_allocation(&Name::from("Alpha")));
+        let shared = std::sync::Arc::new(b"ab".to_vec());
+        let over = CacheNameTable::from_buffer(shared, vec![(0, 1), (1, 2), (0, 2)]);
+        assert_eq!(
+            (0..3).map(|i| over.text(i).unwrap()).collect::<Vec<_>>(),
+            ["a", "b", "ab"]
+        );
+    }
+
     #[test]
     fn the_lowercase_name_is_made_once_and_is_its_own_lowercase() {
         let mixed = Name::from("Foo\\Bar");

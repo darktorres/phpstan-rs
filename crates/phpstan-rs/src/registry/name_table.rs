@@ -1717,6 +1717,54 @@ mod tests {
     }
 
     #[test]
+    fn a_built_base_finds_by_its_index_what_the_binary_search_finds() {
+        let texts: Vec<String> = (0..2000)
+            .map(|i| format!("Vendor{}\\Package{}\\Class{i}", i % 17, i % 101))
+            .collect();
+        for fold in [true, false] {
+            let entries: Vec<(Name, Arc<u32>)> = texts
+                .iter()
+                .zip(0u32..)
+                .map(|(text, value)| (Name::from(text.as_str()), Arc::new(value)))
+                .collect();
+            let base = Base::built_shared(entries, fold);
+            for (text, value) in texts.iter().zip(0u32..) {
+                let key = if fold {
+                    text.to_ascii_lowercase()
+                } else {
+                    text.clone()
+                };
+                let at = base.find(&key).unwrap_or_else(|| panic!("{key}"));
+                assert_eq!(base.value(at), Some(&value));
+                if fold {
+                    assert_eq!(base.find_by(text.as_str()), Some(at), "{text}");
+                    assert_eq!(base.find_by(text.to_ascii_uppercase().as_str()), Some(at));
+                } else {
+                    assert_eq!(base.find(&text.to_ascii_lowercase()), None);
+                }
+            }
+            for i in 2000..2200 {
+                let absent = format!("vendor0\\package0\\class{i}");
+                assert_eq!(base.find(&absent), None);
+                if fold {
+                    assert_eq!(base.find_by(absent.as_str()), None);
+                }
+            }
+            assert_eq!(base.find(""), None);
+        }
+    }
+
+    #[test]
+    fn a_built_base_of_one_name_and_of_none_answers() {
+        let none: Base<u32> = Base::built_shared(Vec::new(), true);
+        assert_eq!(none.find("a"), None);
+        let one = Base::built_shared(vec![(Name::from("Only"), Arc::new(1u32))], true);
+        assert_eq!(one.find("only"), Some(0));
+        assert_eq!(one.find_by("ONLY"), Some(0));
+        assert_eq!(one.find("other"), None);
+    }
+
+    #[test]
     fn freezing_keeps_what_a_table_holds() {
         let reader = stored(&[("One", 1), ("Two", 2)]);
         let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();

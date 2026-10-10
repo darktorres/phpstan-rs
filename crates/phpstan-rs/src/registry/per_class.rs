@@ -165,3 +165,69 @@ impl<R: SlotRef, V> FromIterator<(R, V)> for PerClass<R, V> {
         table
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(local: u32, generation: u32) -> ClassId {
+        ClassId::project_in_generation(local, generation)
+    }
+
+    fn method(local: u32, generation: u32, slot: u16) -> MethodRef {
+        MethodRef::new(id(local, generation), slot)
+    }
+
+    fn entries(table: &PerClass<MethodRef, u32>) -> Vec<(MethodRef, u32)> {
+        let mut found: Vec<_> = table
+            .iter()
+            .map(|(member, value)| (member, *value))
+            .collect();
+        found.sort_by_key(|(member, _)| (member.class(), member.slot()));
+        found
+    }
+
+    #[test]
+    fn two_generations_of_one_class_number_do_not_share_slots() {
+        let mut table = PerClass::default();
+        table.insert(method(3, 1, 2), 10);
+        table.insert(method(3, 2, 2), 20);
+        assert_eq!(table.get(&method(3, 1, 2)), Some(&10));
+        assert_eq!(table.get(&method(3, 2, 2)), Some(&20));
+        assert_eq!(table.get(&method(3, 3, 2)), None);
+        assert_eq!(table.get(&method(3, 1, 1)), None);
+    }
+
+    #[test]
+    fn a_gap_in_the_slots_holds_nothing_and_insert_if_absent_keeps_the_first() {
+        let mut table = PerClass::default();
+        assert!(table.insert_if_absent(method(1, 1, 4), 1));
+        assert!(!table.insert_if_absent(method(1, 1, 4), 2));
+        assert_eq!(table.get(&method(1, 1, 4)), Some(&1));
+        assert!(!table.contains_key(&method(1, 1, 0)));
+        assert_eq!(table.of_class(id(1, 1)).count(), 1);
+        assert_eq!(table.insert(method(1, 1, 4), 3), Some(1));
+    }
+
+    #[test]
+    fn retain_remove_and_retag_move_whole_classes() {
+        let mut table = PerClass::default();
+        table.insert(method(1, 1, 0), 1);
+        table.insert(method(1, 1, 2), 2);
+        table.insert(method(2, 1, 0), 3);
+        table.insert(method(3, 1, 1), 4);
+
+        table.retain_classes(|class| class.local() != 2);
+        assert!(!table.contains_key(&method(2, 1, 0)));
+
+        table.remove_class(id(3, 1));
+        assert!(!table.contains_key(&method(3, 1, 1)));
+
+        table.retag_classes(|old| id(old.local(), old.generation() + 1));
+        assert_eq!(
+            entries(&table),
+            vec![(method(1, 2, 0), 1), (method(1, 2, 2), 2)]
+        );
+        assert_eq!(table.get(&method(1, 1, 0)), None);
+    }
+}

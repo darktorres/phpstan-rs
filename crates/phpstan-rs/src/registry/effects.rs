@@ -6213,6 +6213,55 @@ mod join_transferred_tests {
             }
         }
     }
+
+    fn shared(effect: &Effect, other: &Effect) -> bool {
+        match (&effect.0, &other.0) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn a_join_that_adds_nothing_leaves_a_shared_effect_shared() {
+        let name = |text: &str| Some(Name::from(text));
+        let held = Effect(Some(Arc::new(BTreeSet::from([
+            Storage::Global(name("g")),
+            Storage::Own(name("a")),
+        ]))));
+        let subset = Effect(Some(Arc::new(BTreeSet::from([Storage::Global(name("g"))]))));
+
+        let mut copy = held.clone();
+        assert!(shared(&copy, &held));
+        assert!(!copy.join(&subset));
+        assert!(!copy.join(&Effect::nothing()));
+        assert!(!copy.join_transferred(&subset, &Transfer::Same));
+        assert!(!copy.join_transferred(&held, &Transfer::Same));
+        assert!(shared(&copy, &held));
+    }
+
+    #[test]
+    fn a_join_that_adds_unshares_and_leaves_the_original_alone() {
+        let name = |text: &str| Some(Name::from(text));
+        let held = Effect(Some(Arc::new(BTreeSet::from([Storage::Global(name("g"))]))));
+        let extra = Effect(Some(Arc::new(BTreeSet::from([Storage::Global(name("h"))]))));
+
+        let mut copy = held.clone();
+        assert!(copy.join(&extra));
+        assert!(!shared(&copy, &held));
+        assert_eq!(held.storages().map(BTreeSet::len), Some(1));
+        assert_eq!(copy.storages().map(BTreeSet::len), Some(2));
+
+        let mut moved = held.clone();
+        assert!(moved.join_transferred(
+            &Effect(Some(Arc::new(BTreeSet::from([Storage::Own(name("p"))])))),
+            &Transfer::Other(name("k")),
+        ));
+        assert_eq!(held.storages().map(BTreeSet::len), Some(1));
+        assert!(moved.storages().unwrap().contains(&Storage::Property {
+            class: name("k"),
+            prop: name("p"),
+        }));
+    }
 }
 
 #[cfg(test)]
