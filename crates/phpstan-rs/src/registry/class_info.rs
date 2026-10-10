@@ -394,6 +394,7 @@ pub struct ClassReflection {
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
+    #[serde(serialize_with = "serialize_by_position")]
     pub(in crate::registry) redeclared_methods: FxHashMap<u32, FunctionReflection>,
     pub(in crate::registry) properties: Shared<NameMap<Arc<PropertyReflection>>>,
     // Declaration order is kept: a listing of constants (a `match`
@@ -2274,4 +2275,15 @@ fn native_const_type(cc: &syntax::ast::ClassConst, arenas: &NodeArenas) -> Optio
 fn class_and_args(ty: &Type) -> Option<(Name, Vec<Type>)> {
     ty.as_object()
         .map(|(name, args)| (Name::from(name), args.to_vec()))
+}
+
+/// A table of positions as a map in the order of the positions, which two
+/// tables of the same entries need not share otherwise.
+fn serialize_by_position<S: serde::Serializer>(
+    table: &FxHashMap<u32, FunctionReflection>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut entries: Vec<_> = table.iter().collect();
+    entries.sort_unstable_by_key(|(position, _)| **position);
+    serializer.collect_map(entries)
 }
