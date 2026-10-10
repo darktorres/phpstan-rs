@@ -32,7 +32,7 @@ means the required evidence has not been produced or independently reviewed;
 **Reviewed evidence and current disposition:** Narrow weak `strlen` parser/cast source checks, runtime callback sentinel, strict/weak and Stringable fixtures exist. Review: The `strlen` builder checks selected `zend_API.c` parser gates, the `__toString` dispatch source, LLVM data-flow, and positive runtime sentinels in locked profiles. Strict/weak fixtures cover the tested behavior. The evidence does not validate every host transfer, callback mutation, thrown outcome, release/destructor effect, or unsupported PHP behavior. General source-to-host audit and callback effect/throw modeling remain open; see [F00 review](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md).
 
 - **R00.3 — Open** (depends on: R00.1, R00.2)
-  Build a source-to-host matrix for weak/strict strlen, casts, Stringable dispatch, callback mutation/throw, release, and unknown behavior. List affected state/result/exit components and required domains. Acceptance: every closed fact has source, assumptions, transfer, and positive/negative/contradictory cases; unsupported behavior stays open.
+  Build a source-to-host matrix for weak/strict strlen, casts, Stringable dispatch, callback mutation/throw, release, and unknown behavior. Include the `ZEND_STRLEN` opcode path (`zend_compile.c:4062–4079`), which is what a single plain-argument `strlen` compiles to, not only `zif_strlen`; the artifact models only the latter (RV-16). List affected state/result/exit components and required domains. Acceptance: every closed fact has source, assumptions, transfer, and positive/negative/contradictory cases; unsupported behavior stays open.
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F00.4 — Partial: Specify distinct, validated assumption identities
@@ -106,7 +106,9 @@ means the required evidence has not been produced or independently reviewed;
   Calibrate a production host for the selected closed slice; retain havoc/open coverage elsewhere. Acceptance requires source checks, graph certificates, and positive, negative, contradictory runtime cases to agree.
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
-### F02.1 — Complete: Lock PHP 8.5.4 source, compiler, build, and linked artifacts
+### F02.1 — Partial: Lock PHP 8.5.4 source, compiler, build, and linked artifacts
+
+**Status note (second review, 2026-10-09):** downgraded from Complete. The lock file records source hashes for `run.py` and `runtime.php` that no longer match the tree (RV-19). The compiler identities, source commit and linked-bitcode hash do verify. See the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#second-review-pass-unchecked-items-2026-10-09).
 
 **Reviewed evidence and current disposition:** Source commit, compiler identities, build/link manifests, and runtime profiles are recorded. Review: PHP 8.5.4 source commit, compiler/tool versions, build and link manifests, binary identities, and Hybrid/CALL runtime profiles are recorded. This does not cover other platforms, SAPIs, builds, or extensions. None for the locked experimental profile.
 
@@ -213,7 +215,10 @@ means the required evidence has not been produced or independently reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 - **R05.8 — Open** (depends on: R05.2)
-  Return `Maybe`, not `No`, for any member that may be an object but is not `Repr::Object` or `EnumCase`: bare `object`, object shapes, object-bearing intersections, and object-bounded templates. The Stringable predicate answers No for them today, and a PHP probe reproduces the miss: a bare `object` argument leaves `$c->p` narrowed to `1` after `strlen($o)`, where a `mixed` argument invalidates it (RV-9). The null predicate shows the same family: `@template T of string|null` gets no null deprecation where `?string` does (not traced; see the review record). Acceptance: fixtures for each of those forms, with a `__toString` that writes state, and the predicate answering `Maybe`.
+  Return `Maybe`, not `No`, for any member that may be an object but is not `Repr::Object` or `EnumCase`: bare `object`, object shapes, object-bearing intersections, and object-bounded templates. The Stringable predicate answers No for them today, and a PHP probe reproduces the miss: a bare `object` argument leaves `$c->p` narrowed to `1` after `strlen($o)`, where a `mixed` argument invalidates it (RV-9). Trait-supplied `__toString` is also a false positive: the checker reports `expects string, Traited given` where PHP accepts it (RV-17). The null predicate shows the same family: `@template T of string|null` gets no null deprecation where `?string` does (not traced; see the review record). Acceptance: fixtures for each of those forms, with a `__toString` that writes state, and the predicate answering `Maybe`.
+
+- **R05.9 — Open** (depends on: None)
+  Hoist the side-effecting `debug_assert!` calls in `registry/resolve.rs` (lines 459 and 1602, from commits `32fb0a32` and `d28d22a1`) so that the call runs in every profile and only the check is debug-only. Add a release-profile regression test for an `@method` tag and for a `@mixin` member. Acceptance: the gate-profile library and fixture runs show no failures from this cause (RV-14).
 
 ### F05.5 — Partial: Prevent duplicate legacy application for catalog-covered calls
 
@@ -233,13 +238,15 @@ means the required evidence has not been produced or independently reviewed;
 
 ### F05.7 — Open: Resolve the full fixture-suite failures found during evaluation
 
+**Status note (second review, 2026-10-09):** the cause is found. Side-effecting `debug_assert!` calls in `registry/resolve.rs` drop `@method` and `@mixin` members in release-profile builds (RV-14, row R05.9). Hoisting them fixes three library tests and all eight PHPDoc fixtures. One library test asserts a debug-only panic (RV-15). The suites stay Open until R05.9 and R05.6 are done and both suites are rerun.
+
 **Reviewed evidence and current disposition:** The current focused `strlen` set passes 16 fixtures. A fresh full optimized fixture run passed 3,954/3,962; eight `@method`/`@mixin` PHPDoc fixtures failed. A separate fresh optimized library run passed 1,198/1,202; four project/registry tests failed. Each of those four library failures reproduced alone; only the deferred-registry case was compared with parent `3129ece5`. Review: The current focused `strlen_` set passes 16 fixtures. A fresh full optimized fixture run passed 3,954/3,962. Its eight failures are `a_method_tags_own_templates_are_inferred_and_validated`; `a_method_tag_enforces_its_own_argument_types`; `a_method_tag_enforces_its_own_return_type`; `a_method_tag_synthesizes_a_callable_virtual_method`; `a_method_with_no_return_type_defaults_to_mixed`; `a_mixin_makes_the_target_s_public_methods_callable`; and `a_method_tag_parameter_type_referencing_an_unknown_class_is_flagged` plus `a_method_tag_return_type_referencing_an_unknown_class_is_flagged`. A separate fresh optimized library run passed 1,198/1,202; its four failures are `deferred_registry_passes_all_run_through_the_real_project_path`, `switching_registry_bases_invalidates_the_previous_id_generation`, `trait_mixin_and_phpdoc_members_live_in_host_topology`, and `mixin_and_phpdoc_method_topology_survives_freeze_and_cache_round_trip`. All four library failures reproduced alone; only the deferred-registry case was checked against parent `3129ece5`. These are two different suites and both failure sets remain open. Do not claim a clean optimized gate until each set is resolved or baseline-established. Establish or resolve both failure sets independently. Compare the remaining three library failures against the parent; establish a baseline for the eight PHPDoc fixture failures. Do not combine the two suites' failure counts.
 
-- **R05.5 — Open** (depends on: None)
-  Compare each of the eight PHPDoc fixture failures with parent/control; attribute and fix regressions or record an accepted baseline.
+- **R05.5 — Open** (depends on: R05.9)
+  Compare each of the eight PHPDoc fixture failures with parent/control; attribute and fix regressions or record an accepted baseline. Second-review result: all eight are caused by the side-effect defect in R05.9, and hoisting that defect makes all eight pass, so only the fix and a rerun remain.
   Not yet evidenced as complete; see parent F task for the audited implementation state.
-- **R05.6 — Open** (depends on: None)
-  Compare the remaining three library failures with parent/control; attribute and fix regressions or record baseline dispositions. The deferred-registry case already has a control check.
+- **R05.6 — Open** (depends on: R05.9)
+  Compare the remaining three library failures with parent/control; attribute and fix regressions or record baseline dispositions. The deferred-registry case already has a control check. Second-review result: three of the four are the R05.9 defect; the fourth, `switching_registry_bases_invalidates_the_previous_id_generation`, asserts a debug-only panic and should accept `None` in release (RV-15).
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 - **R05.7 — Open** (depends on: R05.2, R05.3, R05.4, R05.5, R05.6)
   Rerun optimized fixture and library suites separately; require both to pass or every remaining failure to have an approved baseline disposition.
@@ -272,7 +279,7 @@ means the required evidence has not been produced or independently reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 - **R06.4 — Open** (depends on: None)
-  Make the serial campaign wait for the first enforcing worker to publish its proof and finish before admitting other memory-intensive jobs. `campaign.py` currently skips the wait when the proof file does not yet exist. Acceptance: a delayed-worker test demonstrates no second job starts before the first worker exits. The loop also breaks when the cgroup path disappears without an `exit_code` record, which admits the next job (RV-13).
+  Make the serial campaign wait for the first enforcing worker to publish its proof and finish before admitting other memory-intensive jobs. `campaign.py` currently skips the wait when the proof file does not yet exist. Acceptance: a delayed-worker test demonstrates no second job starts before the first worker exits. The loop also breaks when the cgroup path disappears without an `exit_code` record, which admits the next job (RV-13). The pointer-query runs (`campaign.py` lines 74, 81–82) are unasserted, and `completed.json` is written regardless of results, so a completed marker means every step ran, not that each succeeded. `finish_campaign.py` also hard-codes `/tmp` paths for the PHP and stock `dvf` binaries (RV-18).
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F06.5 — Open: Calibrate defaults and record final producer/solver decision

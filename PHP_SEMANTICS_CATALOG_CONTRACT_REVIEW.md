@@ -478,3 +478,162 @@ maintainer. The ledger has been updated to match: R00.1 moves from Blocked to Op
 recorded, findings open). F00.2, F00.4, and F01.2 move from Complete to Partial, for RV-1 and
 RV-4. Rows R01.2, R01.3, R01.4, R01.5, R01.6, R02.1, R00.4, R06.4, R05.8 (new), and F05.4
 carry the findings. F00 stays Open.
+
+---
+
+## Second review pass: unchecked items (2026-10-09)
+
+This pass works through the items the first record listed as not verified. Each item
+states what was read or run. Claims that were only checked by name are marked as such.
+Scratch probes and reruns live in the session scratchpad, not the repository. Nothing
+here was committed.
+
+### Results by item
+
+- **F02.1 (was Complete, now Partial).** Source commit `e5e09d06` matches both PHP trees.
+  clang 21.1.8 and gcc 15.2.0 match the lock. The linked bitcode hash `e3427ce8…` matches
+  `whole-clang/php-cli.bc`. Of the lock's eleven `source_sha256` entries, two no longer
+  match: `runtime.php` (already RV-11) and `run.py`, which changed in `4e7d29a3` after the
+  lock was written in `043f2c78`. See RV-19.
+- **F01.3 (Complete stands).** Each claimed category has a test. Dropped transfer candidate:
+  `lib.rs` `post_fixpoint_validator_rejects_a_dropped_transfer_candidate`. Dropped result
+  or pending throw: `…_dropped_result_or_pending_throw`. Missing successor or exit: the
+  `omitted` and `missing_exit` cases in `published_post_fixpoint_certificate_is_revalidatable_and_graph_bound`.
+  Graph change: the `CertificateGraphMismatch` case in that test. Falsely closed coverage:
+  `lib.rs` around line 2843, in a PhpFlow test.
+- **F04.1 (Complete stands).** The `php_value.rs` tests (lines 675–803) assert concrete
+  values for copy isolation, nested copies, identity, rebinding and unset. Callback
+  mutation across cleanup is covered by `php_flow_array_reference_copy_tracks_callback_writes_across_cleanup`,
+  and across normal and throw states by `php_flow_host_composes_callback_writes_with_normal_and_throw_states`.
+- **F02.3 (Partial stands).** Every figure in the report matches its source. GCC: 523
+  commands exit 0, 505 with dump sets, 18 without, 13 sentinels (`gcc-profile.json`). CIR:
+  523 objects, 44 emitted, 479 failed, 8.41%, 204 frontend crashes, StaticAssert 246,
+  pointer casts 89, function decay 34, ptrdiff 31, 11.8 MB, and 36 of 44 lowered and
+  verified (`cir-campaign.json`, `cir-lowering.json`). Clang CFG: I re-ran the bypass check
+  from `checks.py` on `cleanup-ast-0.out`. The `may_throw` exceptional edge reaches
+  `event(4)` without passing the `Guard` destructor block. The LLVM export does not show
+  this, and the native trace `[1,2,4]` runs the destructor. So the loss is in the Clang CFG
+  export, not in program behaviour. The inputs are under `/tmp/php-catalog-comparison`,
+  outside the repository.
+- **F03.2 (Partial stands).** In `strlen-native-demand-svf.json`, the Stringable target at
+  `zend_API.c:769` is empty in the default, blackhole and expanded runs with no
+  out-of-budget query. In the low-budget run it is empty with one out-of-budget query.
+  `finding.empty_target_is_not_closed` is recorded.
+- **F03.3 (Open stands).** No Rust crate reads `query_points_to` or `out_of_budget_query_count`.
+  The Python tests pass (5 of 5). The `php-catalog` tool has no Rust tests.
+- **F05.3 (Partial stands).** The argument check (`checker/calls/parameters.rs:307`) and
+  return inference both call `catalog_builtin_return_type`, so they share its memo. The
+  null diagnostic comes from the same evaluation.
+- **F05.5 (Partial stands).** The covered-call early return (`call_effects.rs:405–415`)
+  skips the legacy builtin run, as the ledger says. The cross-consumer audit is still open.
+- **F06.1, F06.3, F06.5 (Open or Partial, consistent).** The plan sections the ledger cites
+  exist (§2.3, §6, §7). No code under `crates/` or `tools/` implements the regional
+  candidate or a same-slice comparison. F06.4: the measurement files exist, and no same-slice
+  cost report does.
+- **R03.1, R03.3 (Open stands).** No native-summary validator exists in the crates. The
+  capsule lacks object construction, as the F03.2 record shows.
+- **F00.3 source claims (partly confirmed; two gaps found).** I checked the PHP 8.5.4 source
+  (`e5e09d06`):
+  - `zend_parse_arg_str_weak` (`Zend/zend_API.c:758–781`) casts objects through
+    `cast_object`. `zend_std_cast_object_tostring` (`Zend/zend_object_handlers.c:2468`)
+    dispatches `__toString`. A non-string return is a thrown error, which the graph leaves
+    open.
+  - The null-deprecation message matches the runtime fixture.
+  - Strict mode rejects before any conversion, as the strict runtime fixture shows.
+  - Implicit `Stringable` is added at compile time for a non-trait `__toString`
+    (`zend_compile.c:8226–8239, 8319`). A trait supplies it at inheritance time
+    (`zend_inheritance.c:3723`).
+  - Gap 1 (RV-16): a single plain-argument `strlen` compiles to `ZEND_STRLEN`
+    (`zend_compile.c:4062–4079`, reached via `zend_try_compile_special_func`). Only spread
+    or named-argument calls use `zif_strlen`. The artifact models `zif_strlen`. The
+    runtime witnesses exercise the opcode for scalars, null and direct Stringable, but no
+    source-matrix row covers the opcode handler.
+  - Gap 2 (RV-17): the checker reports a false `argument.type` for a trait-supplied
+    `__toString`. PHP accepts it: `strlen(new Traited())` returns 1 and `instanceof
+    Stringable` is true.
+- **CBMC mapping (R00.4).** All 93 valid-run properties are CBMC's, not the contract's.
+  Ten are explicit checks at `contracts.c:37–50` (`main.assertion.1`–`10`). Two are
+  unwinding checks (`main.unwind.0`, `.1`). The other 81 are generated memory, overflow and
+  pointer checks of the harness. The invalid run adds `main.assertion.11` at line 55, which
+  is the expected failure. Mapping: assertions 4–5 (a throw keeps the prior write and skips
+  later events) correspond to contract row 1. Assertions 6–7 (normal event order)
+  correspond to the ordinary sequential rows. Assertion 11 corresponds to the
+  invalid-composition row. Assertions 1–3 and 8–10 (aliasing, a callback pointer copied in
+  a struct, a retained callback) have no clause in the contract. The harness restricts
+  dereferenced callbacks to two functions, so an unknown callback is not modeled at all. The
+  low-budget run's expected failure is `main.unwind.0`, an unwinding assertion, which is a
+  valid negative control. Every property is C-model-only.
+- **campaign.py (RV-18).** Pointer-query runs at lines 74, 81 and 82 are unasserted, and
+  line 103 writes `completed.json` unconditionally. `finish_campaign.py` waits for that
+  marker, runs its own unasserted layout runs, writes its own marker, and hard-codes `/tmp`
+  paths for the PHP binary and stock `dvf`.
+- **Test quality (semantics crate).** All 68 tests contain an assertion. Scanning for
+  presence-only checks flagged one test, my `manifest_rejects_unresolved_evidence_assumptions`,
+  which I then tightened to `MissingEvidence`. The checker's 1200-plus tests and the fixtures
+  were not audited.
+- **F05.7 root cause (RV-14, RV-15).** Four library tests fail in the gate profile and pass
+  in debug. The eight PHPDoc fixtures fail in the gate CLI and pass once the cause below is
+  removed. The gate CLI reproduces `call to undefined method` for every `@method` tag, and
+  `@mixin` members are missing too. The cause is side-effecting `debug_assert!` calls in
+  `registry/resolve.rs`. Hoisting the side effects out of the macros, in a build I reverted
+  afterwards, makes three library tests and all eight fixtures pass. The fourth library test
+  is a test-design issue, not a release bug.
+- **RV-3 (decided).** The empty dependency list on the locked `Return` is defensible. `strlen`
+  takes its argument by value, and PHP strings are immutable. The envelope is either the
+  exact length of a constant-string argument, or a nonnegative range for anything else.
+  No callback can change a length that is already computed, or the nonnegativity of a
+  normal return. The justification must still be written into the contract or ledger, which
+  the ledger update below does.
+
+### New findings
+
+**RV-14 — Active, High. Side-effecting `debug_assert!` calls drop registry members in release-profile builds.**
+`registry/resolve.rs:459` runs `add_member_entry` inside `debug_assert_eq!`, and line 1602
+runs `set_shared_method_result` inside `debug_assert!`. Under `debug_assertions = false`
+(the gate profile) neither call runs, so `@method` and `@mixin` members never enter the
+registry. A scan of every `debug_assert` under `crates/` found no other side effects, and
+its one other hit is a read-only query. The sites date from commits `32fb0a32` ("Move composed
+method topology into registry results") and `d28d22a1` ("Move remaining Piwigo results onto
+declaration IDs"), both 2026-10-06. *Required:* hoist both calls out of the macros, then add a
+release-profile regression test for an `@method` tag. The three library tests and eight
+fixtures listed above are the regression set. *Ledger:* R05.9 (new), with R05.5 and R05.6
+annotated.
+
+**RV-15 — Low. A test asserts a debug-only panic.**
+`switching_registry_bases_invalidates_the_previous_id_generation` expects `class_by_id` on a
+stale id to panic. The panic comes from `debug_check_id_generation`, which is compiled out
+in release. In release the stale id returns `None` (`class_declarations` is keyed by the full
+id, generation included), which is the safe answer. *Required:* assert `None` in release, or
+gate the test with `cfg(debug_assertions)`. *Ledger:* R05.6.
+
+**RV-16 — Latent, Medium. The `ZEND_STRLEN` opcode path has no source matrix row.**
+See the F00.3 result above. The modeled semantics agree with the handler on the observables I
+checked. The gap is evidence, not a known divergence. *Ledger:* R00.3 acceptance.
+
+**RV-17 — Active, Medium. A trait-supplied `__toString` gives a false `argument.type`.**
+The checker reports `expects string, Traited given` for a class that uses a trait with
+`__toString`. The PHP oracle accepts it. Probe output (gate build, current HEAD):
+`Parameter #1 $string of function strlen expects string, Traited given. (argument.type)`.
+The `instanceof Stringable` answer for trait classes was not separately probed. *Ledger:* R05.8
+(extended).
+
+**RV-18 — Active, Medium. The comparison campaign fails open.**
+`campaign.py` runs the pointer queries without checking results and writes `completed.json`
+unconditionally. `finish_campaign.py` waits on that marker and hard-codes `/tmp` binaries.
+A completed marker therefore means every step ran, not that every step succeeded.
+*Ledger:* R06.4.
+
+**RV-19 — Low. The lock file is stale.**
+`results/lock.json` records a `run.py` hash that predates `4e7d29a3`, and a `runtime.php`
+hash that predates `644350cf`. Compiler identities, the source commit, and the linked-bitcode
+hash all verify. *Ledger:* F02.1 downgraded to Partial until the lock is regenerated.
+
+### Reviewer disposition after the second pass
+
+The first record's "Not verified" list is now answered as follows. Items confirmed as
+stated: F01.3, F02.3, F03.2, F03.3, F04.1, F05.3, F05.5, and the F06 narrative items. New
+findings: RV-14 through RV-19. Corrections: F02.1 downgraded to Partial, and the F05.7
+failures are now explained rather than open. Still not verified: the checker's test suite
+beyond the catalog area, the 1200-plus checker tests, the full optimized fixture run (I
+checked only the eight named fixtures), R05.1 source portability, and the cross-consumer
+audit in R05.3.
