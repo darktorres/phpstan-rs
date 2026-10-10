@@ -7,6 +7,7 @@
 #![allow(clippy::mutable_key_type)]
 
 pub mod ast;
+pub mod cache_blob;
 pub mod canonical;
 pub mod declarations;
 pub mod lexer;

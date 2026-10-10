@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use rustc_hash::FxHashMap;
+use syntax::cache_blob::{BlobWriter, parse_section};
 use syntax::name::{CacheNameEncoder, CacheNameTable};
 
 use crate::{Repr, Type};
@@ -21,8 +22,7 @@ struct Encoder {
     indexes: FxHashMap<usize, u32>,
     /// Keeps each type met alive, so the address it is filed under stays its.
     kept: Vec<Type>,
-    ends: Vec<u32>,
-    blob: Vec<u8>,
+    forms: BlobWriter,
 }
 
 type SharedEncoder = RefCell<Encoder>;
@@ -47,12 +47,7 @@ fn index_in(table: &SharedEncoder, ty: &Type) -> Result<u32, String> {
     let form = syntax::stack::guard(|| postcard::to_allocvec(ty.repr()))
         .map_err(|error| error.to_string())?;
     let mut table = table.borrow_mut();
-    let index = u32::try_from(table.ends.len())
-        .map_err(|_| "a cache file has too many distinct types".to_string())?;
-    table.blob.extend_from_slice(&form);
-    let end = u32::try_from(table.blob.len())
-        .map_err(|_| "a cache file's types outgrew its address space".to_string())?;
-    table.ends.push(end);
+    let index = table.forms.push(&form)?;
     table.kept.push(ty.clone());
     table.indexes.insert(address, index);
     Ok(index)
@@ -61,19 +56,10 @@ fn index_in(table: &SharedEncoder, ty: &Type) -> Result<u32, String> {
 /// The table section of the file `names` belongs to: the count, the end of
 /// each form (little-endian `u32`s), then the forms.
 pub fn section(names: &CacheNameEncoder) -> Vec<u8> {
-    let table = names.extension_if::<SharedEncoder>();
-    let table = table.as_ref().map(|table| table.borrow());
-    let (ends, blob): (&[u32], &[u8]) = match &table {
-        Some(table) => (&table.ends, &table.blob),
-        None => (&[], &[]),
-    };
-    let mut out = Vec::with_capacity(4 + 4 * ends.len() + blob.len());
-    out.extend_from_slice(&(ends.len() as u32).to_le_bytes());
-    for end in ends {
-        out.extend_from_slice(&end.to_le_bytes());
+    match names.extension_if::<SharedEncoder>() {
+        Some(table) => table.borrow().forms.section(),
+        None => BlobWriter::default().section(),
     }
-    out.extend_from_slice(blob);
-    out
 }
 
 /// A file's types as read: each form's place in the file's buffer and the
@@ -96,31 +82,8 @@ pub fn attach(
     buffer: &Arc<Vec<u8>>,
     range: Range<usize>,
 ) -> Result<(), String> {
-    let section = buffer
-        .get(range.clone())
-        .ok_or("its type table lies outside the file")?;
-    let count = section
-        .get(..4)
-        .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four bytes")) as usize)
-        .ok_or("its type table has no count")?;
-    let blob_start = count
-        .checked_mul(4)
-        .and_then(|ends| ends.checked_add(4))
-        .filter(|start| *start <= section.len())
-        .ok_or("its type table is shorter than its count")?;
-    let blob_len = section.len() - blob_start;
-    let mut forms = Vec::with_capacity(count);
-    let mut start = 0usize;
-    for at in 0..count {
-        let bytes = &section[4 + 4 * at..8 + 4 * at];
-        let end = u32::from_le_bytes(bytes.try_into().expect("four bytes")) as usize;
-        if end < start || end > blob_len {
-            return Err("its type table has a form out of order".to_string());
-        }
-        forms.push(range.start + blob_start + start..range.start + blob_start + end);
-        start = end;
-    }
-    let types = (0..count).map(|_| OnceLock::new()).collect();
+    let forms = parse_section(buffer, range)?;
+    let types = (0..forms.len()).map(|_| OnceLock::new()).collect();
     names.set_extension(Arc::new(Table {
         buffer: Arc::clone(buffer),
         forms,
