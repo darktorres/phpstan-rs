@@ -90,16 +90,33 @@ impl RefKey {
 /// kind, the key's own hash, then its PHP-folded bytes. Equal keys compare
 /// equal under the same rules as `RefKey`'s `Eq` and `Hash` implementations.
 pub fn sort_ref_keys(keys: &mut [RefKey]) {
-    keys.sort_unstable_by(|a, b| {
-        let mut ah = rustc_hash::FxHasher::default();
-        let mut bh = rustc_hash::FxHasher::default();
-        std::hash::Hash::hash(a, &mut ah);
-        std::hash::Hash::hash(b, &mut bh);
-        a.tag()
-            .cmp(&b.tag())
-            .then_with(|| ah.finish().cmp(&bh.finish()))
-            .then_with(|| ref_key_folded_cmp(a, b))
+    use std::hash::{Hash, Hasher};
+    let mut order: Vec<(u8, u64, u32)> = keys
+        .iter()
+        .enumerate()
+        .map(|(at, key)| {
+            let mut hasher = rustc_hash::FxHasher::default();
+            key.hash(&mut hasher);
+            (key.tag(), hasher.finish(), at as u32)
+        })
+        .collect();
+    order.sort_unstable_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| ref_key_folded_cmp(&keys[a.2 as usize], &keys[b.2 as usize]))
     });
+    // Put the key `order[at]` names at `at`, following each cycle of the
+    // permutation once.
+    for start in 0..order.len() {
+        let mut at = start;
+        while order[at].2 as usize != start {
+            let from = order[at].2 as usize;
+            keys.swap(at, from);
+            order[at].2 = at as u32;
+            at = from;
+        }
+        order[at].2 = at as u32;
+    }
 }
 
 pub fn ref_keys_are_sorted(keys: &[RefKey]) -> bool {
@@ -357,5 +374,45 @@ impl Recorder {
                 end,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::*;
+
+    fn by_comparator(keys: &mut [RefKey]) {
+        use std::hash::{Hash, Hasher};
+        keys.sort_unstable_by(|a, b| {
+            let mut ah = rustc_hash::FxHasher::default();
+            let mut bh = rustc_hash::FxHasher::default();
+            a.hash(&mut ah);
+            b.hash(&mut bh);
+            a.tag()
+                .cmp(&b.tag())
+                .then_with(|| ah.finish().cmp(&bh.finish()))
+                .then_with(|| ref_key_folded_cmp(a, b))
+        });
+    }
+
+    #[test]
+    fn the_cached_hash_sort_gives_the_order_of_the_comparator_that_hashed_each_time() {
+        let mut keys = Vec::new();
+        for i in 0..500 {
+            keys.push(RefKey::class_text(&format!("App\\Mod{}\\Class{i}", i % 7)));
+            keys.push(RefKey::function_text(&format!("app\\f{i}")));
+            keys.push(RefKey::constant_text(&format!("App\\Mod{}\\C{i}", i % 3)));
+            keys.push(RefKey::global_variable(&format!("g{i}")));
+        }
+        let mut expected = keys.clone();
+        by_comparator(&mut expected);
+        sort_ref_keys(&mut keys);
+        assert_eq!(keys.len(), expected.len());
+        assert!(
+            keys.iter()
+                .zip(&expected)
+                .all(|(a, b)| a.tag() == b.tag() && a.name().as_str() == b.name().as_str())
+        );
+        assert!(ref_keys_are_sorted(&keys));
     }
 }
