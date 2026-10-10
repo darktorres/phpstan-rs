@@ -212,6 +212,17 @@ pub enum AssumptionValidation {
     MissingEvidence(Digest),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssumptionGraphValidationError {
+    Graph(GraphError),
+    Trust(ValidatorTrustError),
+    EntryNotApplicable(EntryKey),
+    NotEstablished {
+        assumption: Digest,
+        decision: AssumptionValidation,
+    },
+}
+
 impl ValidatorTrustPolicy {
     pub fn validate(&self) -> Result<(), ValidatorTrustError> {
         for (index, root) in self.roots.iter().enumerate() {
@@ -515,7 +526,10 @@ impl CatalogManifest {
             {
                 return Err(CatalogError::DigestMismatch(record.id));
             }
-            record.graph.validate().map_err(CatalogError::Graph)?;
+            record
+                .graph
+                .validate_structure()
+                .map_err(CatalogError::Graph)?;
             if graph_ids.contains(&record.id) {
                 return Err(CatalogError::DigestMismatch(record.id));
             }
@@ -725,7 +739,7 @@ impl Catalog {
             }
         }
         self.validate_assumption_references()?;
-        graph.validate().map_err(CatalogError::Graph)?;
+        graph.validate_structure().map_err(CatalogError::Graph)?;
         let id = graph
             .canonical_digest()
             .map_err(|_| CatalogError::GraphEncoding)?;
@@ -830,7 +844,82 @@ impl Catalog {
     }
 
     pub fn project(&self, key: &EntryKey, domain: Domain) -> Option<Projection<'_>> {
+        self.project_inner(key, domain, false)
+    }
+
+    pub fn project_with_assumption_context(
+        &self,
+        key: &EntryKey,
+        domain: Domain,
+        target: &TargetScenario,
+        loaded_program: Option<Digest>,
+        policy: &ValidatorTrustPolicy,
+        executors: &[&dyn AssumptionValidatorExecutor],
+    ) -> Result<Option<AssumptionProjection<'_>>, AssumptionGraphValidationError> {
+        let Some(selection) = self.select_for_scenario(key, target) else {
+            return Ok(None);
+        };
+        let assumptions = self.validate_graph_assumptions(
+            selection.graph,
+            key,
+            target,
+            loaded_program,
+            policy,
+            executors,
+        )?;
+        let policy_key = policy.cache_key().map_err(|_| {
+            AssumptionGraphValidationError::Trust(ValidatorTrustError::PolicyEncoding)
+        })?;
+        Ok(
+            Self::project_selection(selection, domain, true).map(|projection| {
+                AssumptionProjection {
+                    projection,
+                    context: crate::AssumptionCertificateContext {
+                        entry_key: key.normalized(),
+                        target: target.clone(),
+                        loaded_program,
+                        policy_key,
+                        assumptions,
+                    },
+                }
+            }),
+        )
+    }
+
+    fn select_for_scenario(
+        &self,
+        key: &EntryKey,
+        target: &TargetScenario,
+    ) -> Option<Selection<'_>> {
+        let entry = self
+            .entries
+            .get(&key.normalized())?
+            .iter()
+            .find(|entry| entry.applicability.test(target) == Applicability::Yes)?;
+        Some(Selection {
+            entry,
+            graph: self
+                .graphs
+                .get(&entry.graph)
+                .expect("entry graph is installed with the entry"),
+        })
+    }
+
+    fn project_inner(
+        &self,
+        key: &EntryKey,
+        domain: Domain,
+        allow_closed_assumptions: bool,
+    ) -> Option<Projection<'_>> {
         let selection = self.select(key)?;
+        Self::project_selection(selection, domain, allow_closed_assumptions)
+    }
+
+    fn project_selection(
+        selection: Selection<'_>,
+        domain: Domain,
+        allow_closed_assumptions: bool,
+    ) -> Option<Projection<'_>> {
         let coverage = selection
             .graph
             .coverage
@@ -857,6 +946,15 @@ impl Catalog {
                 .iter()
                 .position(|domain| *domain == item.domain)
         });
+        if !allow_closed_assumptions
+            && std::iter::once(coverage)
+                .chain(dependencies.iter().copied())
+                .any(|item| {
+                    matches!(item.coverage, crate::Coverage::Closed) && !item.assumptions.is_empty()
+                })
+        {
+            return None;
+        }
         Some(Projection {
             entry: selection.entry,
             coverage,
@@ -1089,6 +1187,57 @@ impl Catalog {
         ))
     }
 
+    pub fn validate_graph_assumptions(
+        &self,
+        graph: &BehaviorGraph,
+        key: &EntryKey,
+        target: &TargetScenario,
+        loaded_program: Option<Digest>,
+        policy: &ValidatorTrustPolicy,
+        executors: &[&dyn AssumptionValidatorExecutor],
+    ) -> Result<Vec<Digest>, AssumptionGraphValidationError> {
+        graph
+            .validate_structure()
+            .map_err(AssumptionGraphValidationError::Graph)?;
+        let graph_id = graph.canonical_digest().map_err(|_| {
+            AssumptionGraphValidationError::Graph(GraphError::CanonicalEncodingFailed)
+        })?;
+        let applies = self.entries.get(&key.normalized()).is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry.graph == graph_id && entry.applicability.test(target) == Applicability::Yes
+            })
+        });
+        if !applies {
+            return Err(AssumptionGraphValidationError::EntryNotApplicable(
+                key.clone(),
+            ));
+        }
+        let mut required = Vec::new();
+        for item in &graph.coverage {
+            if !matches!(item.coverage, crate::Coverage::Closed) {
+                continue;
+            }
+            for id in &item.assumptions {
+                if !required.contains(id) {
+                    required.push(*id);
+                }
+            }
+        }
+        for id in &required {
+            let decision = self
+                .validate_assumption(*id, target, loaded_program, policy, executors)
+                .map_err(AssumptionGraphValidationError::Trust)?;
+            if !matches!(decision, AssumptionValidation::Established { .. }) {
+                return Err(AssumptionGraphValidationError::NotEstablished {
+                    assumption: *id,
+                    decision,
+                });
+            }
+        }
+        required.sort();
+        Ok(required)
+    }
+
     pub fn entry_count(&self) -> usize {
         self.entries.values().map(Vec::len).sum()
     }
@@ -1174,6 +1323,12 @@ pub struct Projection<'a> {
     pub coverage: &'a DomainCoverage,
     /// Transitive domain dependencies in canonical `Domain::ALL` order.
     pub dependencies: Vec<&'a DomainCoverage>,
+}
+
+#[derive(Debug)]
+pub struct AssumptionProjection<'a> {
+    pub projection: Projection<'a>,
+    pub context: crate::AssumptionCertificateContext,
 }
 
 #[cfg(test)]
@@ -1449,6 +1604,27 @@ mod tests {
             Ok(AssumptionValidation::UntrustedValidator)
         );
         assert_eq!(stale_executor.calls.get(), 0);
+
+        let stale_version_executor = TestValidator {
+            identity: AssumptionValidator {
+                version: Bytes(b"0".to_vec()),
+                ..catalog.explain_assumption(id).unwrap().validator.clone()
+            },
+            implementation: Digest([0x53; 32]),
+            result: Applicability::Yes,
+            calls: std::cell::Cell::new(0),
+        };
+        assert_eq!(
+            catalog.validate_assumption(
+                id,
+                &scenario(None),
+                None,
+                &policy,
+                &[&stale_version_executor]
+            ),
+            Ok(AssumptionValidation::UntrustedValidator)
+        );
+        assert_eq!(stale_version_executor.calls.get(), 0);
     }
 
     #[test]
@@ -2058,11 +2234,38 @@ mod tests {
             graph.validate(),
             Err(GraphError::UnestablishedAssumption(Domain::Return))
         );
-        assert_eq!(
-            catalog.add_entry(function(b"core", b"strlen"), graph),
-            Err(CatalogError::Graph(GraphError::UnestablishedAssumption(
-                Domain::Return
-            )))
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph)
+            .unwrap();
+        assert!(
+            catalog
+                .project(&function(b"core", b"strlen"), Domain::Return)
+                .is_none()
+        );
+        let implementation = Digest([0x81; 32]);
+        let executor = TestValidator {
+            identity: catalog
+                .explain_assumption(assumption_id)
+                .unwrap()
+                .validator
+                .clone(),
+            implementation,
+            result: Applicability::Yes,
+            calls: std::cell::Cell::new(0),
+        };
+        let policy = trust_policy(executor.identity.clone(), implementation);
+        assert!(
+            catalog
+                .project_with_assumption_context(
+                    &function(b"core", b"strlen"),
+                    Domain::Return,
+                    &scenario(None),
+                    None,
+                    &policy,
+                    &[&executor]
+                )
+                .unwrap()
+                .is_some()
         );
     }
 

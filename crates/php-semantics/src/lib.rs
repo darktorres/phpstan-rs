@@ -14,11 +14,12 @@ mod catalog;
 mod php_value;
 mod target;
 pub use catalog::{
-    AssumptionKind, AssumptionRecord, AssumptionScope, AssumptionValidation, AssumptionValidator,
-    AssumptionValidatorExecutor, Catalog, CatalogEntry, CatalogError, CatalogManifest,
-    CatalogTargetSelection, EntryKey, EvidenceKind, EvidenceRecord, GraphRecord, Projection,
-    Selection, SupportNode, ValidatorPin, ValidatorRevocation, ValidatorTrustDecision,
-    ValidatorTrustError, ValidatorTrustPolicy, ValidatorTrustRoot, VariantSelection,
+    AssumptionGraphValidationError, AssumptionKind, AssumptionProjection, AssumptionRecord,
+    AssumptionScope, AssumptionValidation, AssumptionValidator, AssumptionValidatorExecutor,
+    Catalog, CatalogEntry, CatalogError, CatalogManifest, CatalogTargetSelection, EntryKey,
+    EvidenceKind, EvidenceRecord, GraphRecord, Projection, Selection, SupportNode, ValidatorPin,
+    ValidatorRevocation, ValidatorTrustDecision, ValidatorTrustError, ValidatorTrustPolicy,
+    ValidatorTrustRoot, VariantSelection,
 };
 pub use php_value::{
     ArrayId, ArrayKey, Binding, ObjectId, PhpCallbackOutcome, PhpFlowHost, PhpState, PhpValue,
@@ -356,6 +357,21 @@ pub enum GraphError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssumptionCertificateError {
+    MissingContext,
+    InvalidTrustPolicy,
+    ContextChanged,
+    Validation(AssumptionGraphValidationError),
+    Graph(GraphError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssumptionEvaluationError {
+    Validation(AssumptionGraphValidationError),
+    Graph(GraphError),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionKind {
     PhpThrow,
@@ -404,6 +420,21 @@ impl BehaviorGraph {
     }
 
     pub fn validate(&self) -> Result<(), GraphError> {
+        self.validate_with_assumptions(&[])
+    }
+
+    pub(crate) fn validate_structure(&self) -> Result<(), GraphError> {
+        self.validate_inner(None)
+    }
+
+    pub(crate) fn validate_with_assumptions(
+        &self,
+        established: &[Digest],
+    ) -> Result<(), GraphError> {
+        self.validate_inner(Some(established))
+    }
+
+    fn validate_inner(&self, established: Option<&[Digest]>) -> Result<(), GraphError> {
         if self.schema_major != SCHEMA_MAJOR {
             return Err(GraphError::UnsupportedSchema(self.schema_major));
         }
@@ -560,7 +591,7 @@ impl BehaviorGraph {
                 return Err(GraphError::UnknownTransferWithoutOpenCoverage(domain));
             }
         }
-        validate_domain_dependencies(&self.coverage)?;
+        validate_domain_dependencies_with_assumptions(&self.coverage, established)?;
         validate_required_domain_dependencies(self, &colors, &self.coverage)?;
         Ok(())
     }
@@ -592,10 +623,21 @@ fn transitive_domain_dependencies(domain: Domain, coverage: &[DomainCoverage]) -
 }
 
 fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), GraphError> {
-    // Assumption IDs have no established meaning outside a validated catalog
-    // manifest. A graph alone cannot use one to support closed coverage.
+    validate_domain_dependencies_with_assumptions(coverage, Some(&[]))
+}
+
+fn validate_domain_dependencies_with_assumptions(
+    coverage: &[DomainCoverage],
+    established: Option<&[Digest]>,
+) -> Result<(), GraphError> {
     for item in coverage {
-        if matches!(item.coverage, Coverage::Closed) && !item.assumptions.is_empty() {
+        if matches!(item.coverage, Coverage::Closed)
+            && established.is_some_and(|established| {
+                item.assumptions
+                    .iter()
+                    .any(|assumption| !established.contains(assumption))
+            })
+        {
             return Err(GraphError::UnestablishedAssumption(item.domain));
         }
         let mut dependencies = Vec::new();
@@ -939,6 +981,15 @@ pub struct CertifiedFrame<V, S> {
 /// Replayable inputs, the final per-block invariant, and the observable exits
 /// used by an independent one-step post-fixpoint validation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssumptionCertificateContext {
+    pub entry_key: EntryKey,
+    pub target: TargetScenario,
+    pub loaded_program: Option<Digest>,
+    pub policy_key: Digest,
+    pub assumptions: Vec<Digest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PostFixpointCertificate<V, S> {
     pub graph_digest: Digest,
     pub initial: CertifiedFrame<V, S>,
@@ -948,6 +999,7 @@ pub struct PostFixpointCertificate<V, S> {
     pub candidates: Vec<CertifiedFrame<V, S>>,
     pub exits: Vec<Exit<V, S>>,
     pub coverage: Vec<DomainCoverage>,
+    pub assumption_context: Option<AssumptionCertificateContext>,
 }
 
 impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
@@ -955,7 +1007,56 @@ impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
     where
         H: SemanticHost<Value = V, State = S>,
     {
-        graph.validate()?;
+        self.validate_inner(graph, host, &[])
+    }
+
+    pub fn validate_with_assumption_context<H>(
+        &self,
+        graph: &BehaviorGraph,
+        host: &H,
+        catalog: &Catalog,
+        entry_key: &EntryKey,
+        target: &TargetScenario,
+        loaded_program: Option<Digest>,
+        policy: &ValidatorTrustPolicy,
+        executors: &[&dyn AssumptionValidatorExecutor],
+    ) -> Result<(), AssumptionCertificateError>
+    where
+        H: SemanticHost<Value = V, State = S>,
+    {
+        let Some(context) = &self.assumption_context else {
+            return Err(AssumptionCertificateError::MissingContext);
+        };
+        let policy_key = policy
+            .cache_key()
+            .map_err(|_| AssumptionCertificateError::InvalidTrustPolicy)?;
+        if context.entry_key != *entry_key
+            || context.target != *target
+            || context.loaded_program != loaded_program
+            || context.policy_key != policy_key
+        {
+            return Err(AssumptionCertificateError::ContextChanged);
+        }
+        let validated = catalog
+            .validate_graph_assumptions(graph, entry_key, target, loaded_program, policy, executors)
+            .map_err(AssumptionCertificateError::Validation)?;
+        if validated != context.assumptions {
+            return Err(AssumptionCertificateError::ContextChanged);
+        }
+        self.validate_inner(graph, host, &validated)
+            .map_err(AssumptionCertificateError::Graph)
+    }
+
+    fn validate_inner<H>(
+        &self,
+        graph: &BehaviorGraph,
+        host: &H,
+        established_assumptions: &[Digest],
+    ) -> Result<(), GraphError>
+    where
+        H: SemanticHost<Value = V, State = S>,
+    {
+        graph.validate_with_assumptions(established_assumptions)?;
         let graph_digest = graph
             .canonical_digest()
             .map_err(|_| GraphError::CanonicalEncodingFailed)?;
@@ -1032,7 +1133,10 @@ impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
         }) {
             return Err(GraphError::InvalidComposedCoverage);
         }
-        validate_domain_dependencies(&self.coverage)?;
+        validate_domain_dependencies_with_assumptions(
+            &self.coverage,
+            Some(established_assumptions),
+        )?;
         for replayed in &replayed_coverage {
             let Some(certified) = self
                 .coverage
@@ -1851,7 +1955,58 @@ pub fn evaluate<H: SemanticHost>(
     initial: H::State,
     host: &mut H,
 ) -> Result<Evaluation<H::Value, H::State>, GraphError> {
-    graph.validate()?;
+    evaluate_inner(graph, arguments, receiver, initial, &[], None, host)
+}
+
+pub fn evaluate_with_assumption_context<H: SemanticHost>(
+    graph: &BehaviorGraph,
+    catalog: &Catalog,
+    entry_key: &EntryKey,
+    target: &TargetScenario,
+    loaded_program: Option<Digest>,
+    policy: &ValidatorTrustPolicy,
+    executors: &[&dyn AssumptionValidatorExecutor],
+    arguments: &[H::Value],
+    receiver: &H::Value,
+    initial: H::State,
+    host: &mut H,
+) -> Result<Evaluation<H::Value, H::State>, AssumptionEvaluationError> {
+    let assumptions = catalog
+        .validate_graph_assumptions(graph, entry_key, target, loaded_program, policy, executors)
+        .map_err(AssumptionEvaluationError::Validation)?;
+    let context = AssumptionCertificateContext {
+        entry_key: entry_key.clone(),
+        target: target.clone(),
+        loaded_program,
+        policy_key: policy.cache_key().map_err(|_| {
+            AssumptionEvaluationError::Validation(AssumptionGraphValidationError::Trust(
+                ValidatorTrustError::PolicyEncoding,
+            ))
+        })?,
+        assumptions: assumptions.clone(),
+    };
+    evaluate_inner(
+        graph,
+        arguments,
+        receiver,
+        initial,
+        &assumptions,
+        Some(context),
+        host,
+    )
+    .map_err(AssumptionEvaluationError::Graph)
+}
+
+fn evaluate_inner<H: SemanticHost>(
+    graph: &BehaviorGraph,
+    arguments: &[H::Value],
+    receiver: &H::Value,
+    initial: H::State,
+    established_assumptions: &[Digest],
+    assumption_context: Option<AssumptionCertificateContext>,
+    host: &mut H,
+) -> Result<Evaluation<H::Value, H::State>, GraphError> {
+    graph.validate_with_assumptions(established_assumptions)?;
     let initial_frame = Frame {
         block: graph.entry,
         state: initial,
@@ -2226,8 +2381,9 @@ pub fn evaluate<H: SemanticHost>(
         candidates: transfer_candidates.iter().map(certified_frame).collect(),
         exits: exits.clone(),
         coverage: evaluation_coverage.clone(),
+        assumption_context,
     };
-    post_fixpoint.validate(graph, host)?;
+    post_fixpoint.validate_inner(graph, host, established_assumptions)?;
     Ok(Evaluation {
         exits,
         coverage: evaluation_coverage,
@@ -2590,6 +2746,7 @@ mod tests {
             candidates: candidates.iter().map(certified_frame).collect(),
             exits: vec![],
             coverage: graph.coverage.clone(),
+            assumption_context: None,
         }
     }
     fn coverage_for(applicable: &[Domain]) -> Vec<DomainCoverage> {
@@ -2634,6 +2791,219 @@ mod tests {
             }
         }
         coverage
+    }
+
+    struct AcceptingAssumptionValidator {
+        identity: AssumptionValidator,
+        implementation: Digest,
+    }
+
+    impl AssumptionValidatorExecutor for AcceptingAssumptionValidator {
+        fn validator(&self) -> AssumptionValidator {
+            self.identity.clone()
+        }
+
+        fn implementation(&self) -> Digest {
+            self.implementation
+        }
+
+        fn validate(
+            &self,
+            _: &AssumptionRecord,
+            evidence: &[EvidenceRecord],
+            _: &[AssumptionRecord],
+            _: &TargetScenario,
+            _: Option<Digest>,
+        ) -> Applicability {
+            assert!(!evidence.is_empty());
+            Applicability::Yes
+        }
+    }
+
+    fn assumption_target() -> TargetScenario {
+        TargetScenario {
+            release: VersionRange::minor(8, 5),
+            os: Some(Bytes(b"linux".to_vec())),
+            arch: Some(Bytes(b"x86_64".to_vec())),
+            sapi: Some(Bytes(b"cli".to_vec())),
+            zts: Some(false),
+            debug: Some(false),
+            extensions: Some(vec![]),
+            ini: Some(vec![]),
+        }
+    }
+
+    fn assumption_trust_policy(
+        validator: AssumptionValidator,
+        implementation: Digest,
+    ) -> ValidatorTrustPolicy {
+        ValidatorTrustPolicy {
+            revision: 1,
+            roots: vec![ValidatorTrustRoot {
+                id: Bytes(b"phase-f-root".to_vec()),
+                fingerprint: Digest([0x91; 32]),
+            }],
+            pins: vec![ValidatorPin {
+                validator,
+                implementation,
+                root: Bytes(b"phase-f-root".to_vec()),
+            }],
+            revocations: vec![],
+        }
+    }
+
+    #[test]
+    fn trusted_assumption_flows_through_evaluation_and_certificate_replay() {
+        let validator = AssumptionValidator {
+            id: Bytes(b"phase-f-validator".to_vec()),
+            version: Bytes(b"1".to_vec()),
+        };
+        let implementation = Digest([0x92; 32]);
+        let evidence = EvidenceRecord {
+            kind: EvidenceKind::ModelContract,
+            source_digest: Digest([0x93; 32]),
+            site: Some(Bytes(b"assumption integration test".to_vec())),
+            rule_version: Bytes(b"test-v1".to_vec()),
+            assumptions: vec![],
+            dependencies: vec![],
+        };
+        let mut catalog = Catalog::default();
+        let evidence_id = catalog.add_evidence(evidence).unwrap();
+        let assumption = AssumptionRecord {
+            kind: AssumptionKind::TargetProfile,
+            claim: Bytes(b"the validation test target is supported".to_vec()),
+            scope: AssumptionScope {
+                target: TargetPredicate::any(),
+                loaded_program: None,
+            },
+            prerequisites: vec![],
+            supporting_evidence: vec![evidence_id],
+            validator: validator.clone(),
+        };
+        let assumption_id = catalog.add_assumption(assumption).unwrap();
+        let mut graph = graph(vec![], Terminator::Return(None));
+        for item in &mut graph.coverage {
+            item.evidence = vec![evidence_id];
+        }
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .assumptions = vec![assumption_id];
+        let key = EntryKey::Function {
+            extension: Bytes(b"core".to_vec()),
+            name: Bytes(b"assumption_test".to_vec()),
+        };
+        catalog.add_entry(key.clone(), graph.clone()).unwrap();
+        let catalog = Catalog::from_json(&catalog.manifest().to_json().unwrap()).unwrap();
+
+        let executor = AcceptingAssumptionValidator {
+            identity: validator.clone(),
+            implementation,
+        };
+        let executors: [&dyn AssumptionValidatorExecutor; 1] = [&executor];
+        let policy = assumption_trust_policy(validator, implementation);
+        let target = assumption_target();
+        assert_eq!(
+            evaluate(&graph, &[], &receiver(), vec![], &mut Host::default()),
+            Err(GraphError::UnestablishedAssumption(Domain::Return))
+        );
+        let evaluation = evaluate_with_assumption_context(
+            &graph,
+            &catalog,
+            &key,
+            &target,
+            None,
+            &policy,
+            &executors,
+            &[],
+            &receiver(),
+            vec![],
+            &mut Host::default(),
+        )
+        .unwrap();
+        evaluation
+            .post_fixpoint
+            .validate_with_assumption_context(
+                &graph,
+                &Host::default(),
+                &catalog,
+                &key,
+                &target,
+                None,
+                &policy,
+                &executors,
+            )
+            .unwrap();
+        let persisted: PostFixpointCertificate<String, Vec<String>> =
+            serde_json::from_str(&serde_json::to_string(&evaluation.post_fixpoint).unwrap())
+                .unwrap();
+        persisted
+            .validate_with_assumption_context(
+                &graph,
+                &Host::default(),
+                &catalog,
+                &key,
+                &target,
+                None,
+                &policy,
+                &executors,
+            )
+            .unwrap();
+
+        let mut revoked = policy.clone();
+        revoked.revision = 2;
+        revoked.revocations.push(ValidatorRevocation {
+            validator_id: Bytes(b"phase-f-validator".to_vec()),
+            version: Bytes(b"1".to_vec()),
+            effective_revision: 2,
+        });
+        assert_eq!(
+            persisted.validate_with_assumption_context(
+                &graph,
+                &Host::default(),
+                &catalog,
+                &key,
+                &target,
+                None,
+                &revoked,
+                &executors,
+            ),
+            Err(AssumptionCertificateError::ContextChanged)
+        );
+        let mut other_target = target.clone();
+        other_target.os = Some(Bytes(b"windows".to_vec()));
+        assert_eq!(
+            persisted.validate_with_assumption_context(
+                &graph,
+                &Host::default(),
+                &catalog,
+                &key,
+                &other_target,
+                None,
+                &policy,
+                &executors,
+            ),
+            Err(AssumptionCertificateError::ContextChanged)
+        );
+        let other_key = EntryKey::Function {
+            extension: Bytes(b"core".to_vec()),
+            name: Bytes(b"different_function".to_vec()),
+        };
+        assert_eq!(
+            persisted.validate_with_assumption_context(
+                &graph,
+                &Host::default(),
+                &catalog,
+                &other_key,
+                &target,
+                None,
+                &policy,
+                &executors,
+            ),
+            Err(AssumptionCertificateError::ContextChanged)
+        );
     }
 
     fn close_unmodeled_domains(graph: &mut BehaviorGraph) {

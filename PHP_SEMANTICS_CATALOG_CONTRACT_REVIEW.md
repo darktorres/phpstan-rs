@@ -611,11 +611,12 @@ recursively validates prerequisites, and calls exactly one executor only after t
 executor identity/digest matches the pin. Tests cover exact pins, stale executors,
 revocation/cache invalidation, unknown program context, and transitive support.
 Executor loading and root configuration remain deployment trust boundaries; the
-deployment loader must verify implementation bytes. Graph validation still rejects
-closed coverage that cites assumptions because this contextual result is not threaded
-into graph evaluation. That leaves the end-to-end consumption/replay part open as
-R01.7.a in the ledger; the R01.7 implementation is partial, not complete. This is
-author evidence; independent acceptance is pending.
+deployment loader must verify implementation bytes. Context-free graph validation,
+evaluation, and projection remain fail-closed. Catalog-backed projection and evaluation
+now validate assumption-backed closed coverage for the selected entry/context, and
+certificate replay reruns those checks under the current trust policy. The integration
+is tracked as R01.7.a in the ledger. This is author evidence; independent acceptance is
+pending.
 
 ### New findings
 
