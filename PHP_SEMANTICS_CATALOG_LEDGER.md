@@ -118,7 +118,7 @@ means the required evidence has not been produced or independently reviewed;
 
 - **R02.2 — Implementation complete; independent acceptance pending** (depends on: None)
   Added `build_strlen_representation_correspondence.py` and generated the hash-recorded [cross-compiler correspondence](tools/php-catalog/experiments/comparison/results/evaluation/strlen-representation-correspondence.json). For the selected `zif_strlen` slice, the builder checks source-to-Clang AST/CFG member access and result assignment, Clang translation-unit LLVM's `_zend_string.len` load and same-value zval result store, and matching GCC GIMPLE/CFG parser and result paths. It binds Clang summary metrics to the source-hashed representation manifest and validates successful source compile/dump command records; GCC and Clang agree on this bounded normal path. The cleanup counterexample records GCC GIMPLE and Clang LLVM exceptional cleanup, while the Clang AST CFG omits an explicit destructor edge. CIR emission for `zend_builtin_functions.c` failed, so no CIR semantic correspondence is claimed. This is structural correspondence for the selected demand, not full transfer equivalence; unsupported coverage and artifact provenance limits are recorded in the JSON. Independent review remains required.
-  Validation: generator completed on the preserved PHP 8.5.4 campaign artifacts; Python compile passed, a second generation was byte-for-byte identical, and `git diff --check` passed.
+  Validation: generator completed on the preserved PHP 8.5.4 campaign artifacts; Python compile passed, a second generation was byte-for-byte identical, a mutated Clang source digest was rejected, and `git diff --check` passed.
 
 ### F02.4 — Partial: Establish implicit-operation and normal/CALL behavior
 

@@ -59,6 +59,9 @@ def main() -> None:
     parser.add_argument("--gcc-cfg", type=Path, required=True)
     parser.add_argument("--gcc-measurements", type=Path, required=True)
     parser.add_argument("--cir-log", type=Path, required=True)
+    parser.add_argument("--campaign-inputs", type=Path, required=True)
+    parser.add_argument("--cleanup-source", type=Path, required=True)
+    parser.add_argument("--cleanup-measurements", type=Path, required=True)
     parser.add_argument("--cleanup-ast", type=Path, required=True)
     parser.add_argument("--cleanup-gimple", type=Path, required=True)
     parser.add_argument("--cleanup-llvm", type=Path, required=True)
@@ -72,6 +75,9 @@ def main() -> None:
         raise SystemExit(f"unexpected locked PHP source digest: {source_hash}")
     if "ZEND_FUNCTION(strlen)" not in source or "RETVAL_LONG(ZSTR_LEN(s));" not in source:
         raise SystemExit("source lacks the locked strlen registration/return expression")
+    campaign_inputs = load(args.campaign_inputs)
+    if campaign_inputs.get("php_commit") != "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03":
+        raise SystemExit("compiler campaign does not record the locked PHP source commit")
 
     ast_doc, llvm_doc = load(args.clang_ast), load(args.clang_llvm)
     ast_fn = next((f for f in ast_doc["functions"] if f.get("name") == "zif_strlen"), None)
@@ -201,6 +207,22 @@ def main() -> None:
     llvm_cleanup = next((f for f in cleanup_llvm.get("functions", [])
                          if f.get("name") == "cleanup"), None)
     cleanup_gimple = args.cleanup_gimple.read_text()
+    cleanup_hash = sha(args.cleanup_source)
+    expected_cleanup_hash = campaign_inputs.get("fixture_sha256", {}).get("cleanup.cpp")
+    if not expected_cleanup_hash or cleanup_hash != expected_cleanup_hash:
+        raise SystemExit("cleanup fixture differs from the source hash recorded by the campaign")
+    cleanup_measurements = load(args.cleanup_measurements)
+    required_cleanup_runs = {"cleanup-ast-0", "cleanup-gimple", "cleanup-llvm-emit-0",
+                             "cleanup-llvm-read-0"}
+    cleanup_runs = {m.get("name"): m for m in cleanup_measurements
+                    if m.get("name") in required_cleanup_runs}
+    if set(cleanup_runs) != required_cleanup_runs or any(
+        m.get("exit_code") != 0 for m in cleanup_runs.values()):
+        raise SystemExit("cleanup counterexample campaign records are missing or failed")
+    cleanup_path = str(args.cleanup_source.resolve())
+    if any(cleanup_path not in m.get("command", []) for m in cleanup_runs.values()
+           if m["name"] != "cleanup-llvm-read-0"):
+        raise SystemExit("cleanup campaign command does not identify the hashed fixture")
     if ast_cleanup is None or llvm_cleanup is None:
         raise SystemExit("cleanup counterexample lacks AST or LLVM representation")
     ast_has_destructor_edge = any(
@@ -220,7 +242,7 @@ def main() -> None:
     report = {
         "schema": 1,
         "source_sha256": source_hash,
-        "provenance_note": "Clang AST/LLVM summaries are cross-checked against the source-bound representation manifest and successful source compilation records; GCC dump inputs are tied to the successful source-bound dump command. The raw dump digests are recorded below. CIR input is checked against the same source digest.",
+        "provenance_note": "Clang AST/LLVM summaries are cross-checked against the source-bound representation manifest and successful source compile records; GCC dump inputs are tied to the successful source-bound dump command. CIR input is checked against the same source digest. Cleanup fixture bytes are verified against the campaign input lock, and its AST/GCC/LLVM command records are checked.",
         "scope": "PHP 8.5.4 zif_strlen parse-to-byte-length-return slice plus a separate C++ cleanup counterexample",
         "strlen_correspondence": {
             "source": {"function": "zif_strlen", "parser": "Z_PARAM_STR(s)",

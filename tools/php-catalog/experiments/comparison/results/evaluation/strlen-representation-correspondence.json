@@ -1,5 +1,9 @@
 {
   "artifacts": {
+    "campaign_inputs": {
+      "bytes": 14503,
+      "sha256": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f"
+    },
     "cir_log": {
       "bytes": 1078652,
       "sha256": "43fb1371160e9346f669dfad71350b2d0dd228517784e78700c5cdd81ea4167a"
@@ -32,6 +36,14 @@
       "bytes": 4665,
       "sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672"
     },
+    "cleanup_measurements": {
+      "bytes": 118409,
+      "sha256": "af5f9969bc3f5cd3b0ea6c3c5dc82a1f299a54ac776d3050fc30562126c4da69"
+    },
+    "cleanup_source": {
+      "bytes": 226,
+      "sha256": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6"
+    },
     "gcc_cfg": {
       "bytes": 412240,
       "sha256": "16fd020bcfd952490217b6d24ddb2b76c420aa59df10fd37d77de68a83deaab9"
@@ -56,7 +68,7 @@
     "gcc_gimple_has_exceptional_finally_destructor": true,
     "llvm_has_unwind_cleanup_blocks": true
   },
-  "provenance_note": "Clang AST/LLVM summaries are cross-checked against the source-bound representation manifest and successful source compilation records; GCC dump inputs are tied to the successful source-bound dump command. The raw dump digests are recorded below. CIR input is checked against the same source digest.",
+  "provenance_note": "Clang AST/LLVM summaries are cross-checked against the source-bound representation manifest and successful source compile records; GCC dump inputs are tied to the successful source-bound dump command. CIR input is checked against the same source digest. Cleanup fixture bytes are verified against the campaign input lock, and its AST/GCC/LLVM command records are checked.",
   "schema": 1,
   "scope": "PHP 8.5.4 zif_strlen parse-to-byte-length-return slice plus a separate C++ cleanup counterexample",
   "source_sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505",

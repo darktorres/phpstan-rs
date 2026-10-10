@@ -196,6 +196,9 @@ selected path; this does not establish equivalence for all branches or effects.
 The builder binds the Clang summaries to the source-hashed representation
 manifest and successful source compile records, and checks the GCC dump command
 record and source path before accepting the GIMPLE/CFG artifacts.
+It also checks the locked PHP commit, verifies the cleanup fixture hash against
+the campaign input record, and requires successful cleanup AST, GIMPLE, and
+LLVM command records before reporting the exception counterexample.
 
 The cleanup fixture supplies a counterexample to assuming CFG and LLVM
 exception behavior coincide: GCC GIMPLE records a `finally` destructor, and
