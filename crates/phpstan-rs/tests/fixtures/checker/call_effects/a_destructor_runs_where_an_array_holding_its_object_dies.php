@@ -387,3 +387,58 @@ function theCallerSeesTheAppendedObjectDie(): void
     aLoopOverwritesWhatItAppended();
     assertType('int|null', Flag::$value);
 }
+
+function anAliasOfAnArrayOfQuietObjects(): void
+{
+    $list = [new Quiet()];
+    $alias = &$list;
+}
+
+function theCallerSeesNothingRunForTheAlias(): void
+{
+    Flag::$value = null;
+    anAliasOfAnArrayOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function anAliasIsWrittenAnObject(): void
+{
+    $list = [];
+    $alias = &$list;
+    $alias = new Resets();
+}
+
+function theCallerSeesTheObjectWrittenThroughTheAliasDie(): void
+{
+    Flag::$value = null;
+    anAliasIsWrittenAnObject();
+    assertType('int|null', Flag::$value);
+}
+
+function anAliasIsAppendedAnObject(): void
+{
+    $list = [];
+    $alias = &$list;
+    $alias[] = new Resets();
+}
+
+function theCallerSeesTheObjectAppendedThroughTheAliasDie(): void
+{
+    Flag::$value = null;
+    anAliasIsAppendedAnObject();
+    assertType('int|null', Flag::$value);
+}
+
+function aVariableBoundToAReferenceLosesItsValue(): void
+{
+    $kept = new Resets();
+    $other = [];
+    $kept = &$other;
+}
+
+function theCallerSeesTheReboundObjectDie(): void
+{
+    Flag::$value = null;
+    aVariableBoundToAReferenceLosesItsValue();
+    assertType('int|null', Flag::$value);
+}

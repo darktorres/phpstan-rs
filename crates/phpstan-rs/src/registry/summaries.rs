@@ -1048,6 +1048,7 @@ impl BodySummary {
             walk.write_this_property(&param.name.name);
         }
         arena::walk_stmts(&mut walk, arenas, body);
+        walk.merge_references();
         if ends {
             let by_ref = params
                 .iter()
@@ -1219,6 +1220,17 @@ fn record_property_assigned(
 /// Origins, not known when `None`.
 type MaybeOrigins = Option<Vec<Origin>>;
 
+/// `known` with `more` added, not known once either is not.
+fn extend_known(known: &mut MaybeOrigins, more: MaybeOrigins) {
+    *known = match (known.take(), more) {
+        (Some(mut all), Some(more)) => {
+            all.extend(more);
+            Some(all)
+        }
+        _ => None,
+    };
+}
+
 /// A variable a `foreach` by reference bound to the elements of another.
 #[derive(Debug)]
 struct ElementRef {
@@ -1230,6 +1242,8 @@ struct ElementRef {
     // Whether the body assigns the variable, which destroys the element it
     // is the reference to.
     overwritten: bool,
+    // Whether the variable is bound to the other itself, not to its elements.
+    whole: bool,
 }
 
 /// What one scope writes, as the walk finds it: the body's own, or a
@@ -1423,6 +1437,7 @@ impl Summarizer<'_> {
             .last()
             .map(|enclosing| enclosing.shared.clone())
             .unwrap_or_default();
+        self.merge_references();
         self.destroy_locals(&by_ref, &shared);
         self.narrowed = narrowed;
         let Some(enclosing) = self.enclosing.pop() else {
@@ -1707,6 +1722,22 @@ impl Summarizer<'_> {
                 scope.reassigned.insert(name.clone());
             }
         }
+    }
+
+    /// The value the variable `name` holds dies when it is bound to a place:
+    /// what it was written, and the objects in the arrays it held.
+    fn destroy_held(&mut self, name: &Name) {
+        let Some(origins) = self.scope.origins.get(name).cloned() else {
+            return;
+        };
+        let contents = self
+            .scope
+            .contents
+            .get(name)
+            .cloned()
+            .unwrap_or(Some(Vec::new()));
+        self.implicit_on(origins, Operation::Destroy);
+        self.implicit_on(contents, Operation::Destroy);
     }
 
     fn bind(&mut self, variable: Option<Name>, binding: Binding) {
@@ -1995,6 +2026,49 @@ impl Summarizer<'_> {
         }
     }
 
+    /// What the variables bound to elements of another, or to the other
+    /// itself, were written is held by the other: its origins, when the
+    /// binding is to the variable itself, and the objects in the arrays it
+    /// holds.
+    fn merge_references(&mut self) {
+        for index in 0..self.scope.element_refs.len() {
+            let element_ref = &self.scope.element_refs[index];
+            let (subject, item, whole) = (
+                element_ref.subject.clone(),
+                element_ref.item.clone(),
+                element_ref.whole,
+            );
+            let written = element_ref.written.clone();
+            let item_contents = self
+                .scope
+                .contents
+                .get(&item)
+                .cloned()
+                .unwrap_or(Some(Vec::new()));
+            let (origins, contents) = if whole {
+                (written, item_contents)
+            } else {
+                let both = written.zip(item_contents).map(|(mut all, held)| {
+                    all.extend(held);
+                    all
+                });
+                (Some(Vec::new()), both)
+            };
+            let held = self
+                .scope
+                .origins
+                .entry(subject.clone())
+                .or_insert_with(|| Some(Vec::new()));
+            extend_known(held, origins);
+            let held = self
+                .scope
+                .contents
+                .entry(subject)
+                .or_insert_with(|| Some(Vec::new()));
+            extend_known(held, contents);
+        }
+    }
+
     /// The variables the scope wrote die when it ends, but for the
     /// parameters taken by reference, the variables bound to a place,
     /// global or static, and those `shared` with the scope around it.
@@ -2026,30 +2100,6 @@ impl Summarizer<'_> {
             })
             .collect();
         locals.sort_by(|a, b| a.0.cmp(&b.0));
-        for (name, _, contents) in &mut locals {
-            for element_ref in self
-                .scope
-                .element_refs
-                .iter()
-                .filter(|r| r.subject == *name)
-            {
-                let held = element_ref.written.clone();
-                let held_contents = self
-                    .scope
-                    .contents
-                    .get(&element_ref.item)
-                    .cloned()
-                    .unwrap_or(Some(Vec::new()));
-                *contents = match (contents.take(), held, held_contents) {
-                    (Some(mut all), Some(held), Some(held_contents)) => {
-                        all.extend(held);
-                        all.extend(held_contents);
-                        Some(all)
-                    }
-                    _ => None,
-                };
-            }
-        }
         let overwritten: Vec<MaybeOrigins> = self
             .scope
             .element_refs
@@ -2057,6 +2107,15 @@ impl Summarizer<'_> {
             .filter(|r| r.overwritten)
             .map(|r| {
                 let mut all = r.written.clone()?;
+                if r.whole {
+                    all.extend(
+                        self.scope
+                            .origins
+                            .get(&r.subject)
+                            .cloned()
+                            .unwrap_or(Some(Vec::new()))?,
+                    );
+                }
                 for name in [&r.subject, &r.item] {
                     all.extend(
                         self.scope
@@ -2847,6 +2906,7 @@ impl Visitor for Summarizer<'_> {
                             let element = Place::of(arenas, *subject)
                                 .unwrap_or_else(|| Place::root(Root::Value))
                                 .then(Step::Element);
+                            self.destroy_held(name);
                             self.bind(Some(name.clone()), Binding::Reference(element));
                         }
                         Some(ExprKind::Destructure(items, _)) => {
@@ -2874,6 +2934,7 @@ impl Visitor for Summarizer<'_> {
                                     item,
                                     written: Some(Vec::new()),
                                     overwritten: false,
+                                    whole: false,
                                 });
                             }
                             _ => self.write(arenas, *subject, None, None),
@@ -3042,11 +3103,26 @@ impl Visitor for Summarizer<'_> {
                         Some(ExprKind::Variable(name)) if **name != *"this" => {
                             let place =
                                 Place::of(arenas, *rhs).unwrap_or_else(|| Place::root(Root::Value));
+                            self.destroy_held(name);
                             self.bind(Some(name.clone()), Binding::Reference(place));
+                            match plain_variable(arenas, *rhs)
+                                .filter(|of| self.scope.contents.contains_key(of))
+                            {
+                                Some(subject) => self.scope.element_refs.push(ElementRef {
+                                    subject,
+                                    item: name.clone(),
+                                    written: Some(Vec::new()),
+                                    overwritten: false,
+                                    whole: true,
+                                }),
+                                None => self.write(arenas, *rhs, None, None),
+                            }
                         }
-                        _ => self.write(arenas, *lhs, None, None),
+                        _ => {
+                            self.write(arenas, *lhs, None, None);
+                            self.write(arenas, *rhs, None, None);
+                        }
                     }
-                    self.write(arenas, *rhs, None, None);
                     self.reassign(arenas, *lhs);
                 }
                 ExprKind::Unary(
