@@ -205,6 +205,16 @@ fn cmp_ascii_folded(a: &str, b: &str) -> std::cmp::Ordering {
         .cmp(b.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
+/// Whether `text` is `self`, `parent` or `static`, in any case.
+#[inline]
+fn is_self_parent_or_static(text: &str) -> bool {
+    match text.len() {
+        4 => text.eq_ignore_ascii_case("self"),
+        6 => text.eq_ignore_ascii_case("parent") || text.eq_ignore_ascii_case("static"),
+        _ => false,
+    }
+}
+
 /// `name` without a leading `\`.
 fn without_backslash(name: &Name) -> Name {
     match name.strip_prefix('\\') {
@@ -365,10 +375,7 @@ impl Recorder {
                 self.add(key(&name.written));
             }
             ResolvedName::Unresolved => {
-                if !["self", "parent", "static"]
-                    .iter()
-                    .any(|keyword| name.is_keyword(keyword))
-                {
+                if !is_self_parent_or_static(name.written.as_str()) {
                     self.add(key(&name.written));
                 }
             }
