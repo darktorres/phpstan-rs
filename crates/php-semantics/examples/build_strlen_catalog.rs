@@ -2412,6 +2412,15 @@ mod tests {
         let source_path = std::path::PathBuf::from(
             "/home/torres/.cache/php-catalog-evaluation/php-src-gcc/Zend/zend_builtin_functions.c",
         );
+        // The witness's locked PHP tree is a local build input, not vendored
+        // here; skip where it is absent, as the drift tests do for local DDL.
+        if !source_path.exists() {
+            eprintln!(
+                "skipping: locked PHP source {} not found",
+                source_path.display()
+            );
+            return;
+        }
         let path = repository_root.join(
             "tools/php-catalog/experiments/comparison/results/evaluation/strlen-abrupt-outcomes-witness-8.5.4.json",
         );
