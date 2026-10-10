@@ -785,6 +785,84 @@ fn widen_extension_types(members: Vec<Type>) -> Vec<Type> {
 /// for whatever's left ungeneralizable (a variable whose branches
 /// genuinely have different key sets).
 pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
+    #[cfg(debug_assertions)]
+    let reference = generalize_by_key_set_reference(members.clone());
+    let generalized = generalize_by_key_set_grouped(members);
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        generalized == reference,
+        "the grouped generalisation differs from the pairwise one"
+    );
+    generalized
+}
+
+fn generalize_by_key_set_grouped(members: Vec<Type>) -> Vec<Type> {
+    // A shape's keys, sorted, and whether it's sealed.
+    type KeySet = (Vec<ShapeKey>, bool);
+    // Each key set's first member, kept for the case it stays alone, and
+    // the shapes that have it, in the order the key sets first appear.
+    let mut groups: Vec<(Type, Vec<Arc<Shape>>)> = Vec::new();
+    let mut group_of: FxHashMap<KeySet, usize> = FxHashMap::default();
+    let mut passthrough: Vec<Type> = Vec::new();
+    for m in members {
+        let Repr::ArrayShape(shape) = m.repr() else {
+            passthrough.push(m);
+            continue;
+        };
+        let shape = Arc::clone(shape);
+        let mut keys: Vec<ShapeKey> = shape.fields().iter().map(|f| f.key.clone()).collect();
+        keys.sort();
+        match group_of.entry((keys, shape.is_sealed())) {
+            std::collections::hash_map::Entry::Occupied(found) => {
+                groups[*found.get()].1.push(shape);
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(groups.len());
+                groups.push((m, vec![shape]));
+            }
+        }
+    }
+    for (first, variants) in groups {
+        if variants.len() == 1 {
+            passthrough.push(first);
+            continue;
+        }
+        let fields = variants[0]
+            .fields()
+            .iter()
+            .map(|first| {
+                let mut ty: Option<Type> = None;
+                let mut optional = false;
+                for shape in &variants {
+                    let field = shape.field(&first.key).unwrap();
+                    ty = Some(match ty {
+                        None => field.ty.clone(),
+                        Some(acc) => Type::union(acc, field.ty.clone()),
+                    });
+                    optional |= field.optional;
+                }
+                ShapeField::new(first.key.clone(), ty.unwrap(), optional)
+            })
+            .collect();
+        let tails: (Vec<Type>, Vec<Type>) = variants
+            .iter()
+            .filter_map(|shape| shape.unsealed.as_deref().cloned())
+            .unzip();
+        let unsealed = tails
+            .0
+            .into_iter()
+            .union_all()
+            .zip(tails.1.into_iter().union_all())
+            .map(Box::new);
+        passthrough.push(Type::array_shape(Shape::from_parts(fields, unsealed, None)));
+    }
+    passthrough
+}
+
+/// `generalize_by_key_set` by comparing each shape's key set with every
+/// group's.
+#[cfg(debug_assertions)]
+fn generalize_by_key_set_reference(members: Vec<Type>) -> Vec<Type> {
     // A shape's keys, sorted, and whether it's sealed.
     type KeySet = (Vec<ShapeKey>, bool);
     let mut groups: Vec<(KeySet, Vec<Shape>)> = Vec::new();
