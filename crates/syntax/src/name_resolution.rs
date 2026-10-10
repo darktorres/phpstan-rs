@@ -12,9 +12,9 @@ use crate::name::Name;
 /// nothing and a lookup of a name allocates nothing.
 #[derive(Debug, Clone, Default)]
 struct UseMap {
-    classes: rustc_hash::FxHashMap<ImportKey<true>, Name>,
-    functions: rustc_hash::FxHashMap<ImportKey<true>, Name>,
-    constants: rustc_hash::FxHashMap<ImportKey<false>, Name>,
+    classes: ImportTable<true>,
+    functions: ImportTable<true>,
+    constants: ImportTable<false>,
 }
 
 /// The name an import is known by: the part of `name` from `from` on,
@@ -37,41 +37,74 @@ impl<const FOLDED: bool> ImportKey<FOLDED> {
     }
 }
 
-impl<const FOLDED: bool> PartialEq for ImportKey<FOLDED> {
-    fn eq(&self, other: &Self) -> bool {
-        self.text() == other.text()
-    }
+/// The imports of one key space, filed under the hash of the name they are
+/// known by: the hash that ignores case for a space that does, so a name in
+/// any case is looked up as written, with no lowercase copy.
+#[derive(Debug, Clone)]
+struct ImportTable<const FOLDED: bool> {
+    table: hashbrown::HashTable<(ImportKey<FOLDED>, Name)>,
 }
 
-impl<const FOLDED: bool> Eq for ImportKey<FOLDED> {}
-
-impl<const FOLDED: bool> std::hash::Hash for ImportKey<FOLDED> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.text().hash(state);
-    }
-}
-
-impl<const FOLDED: bool> std::borrow::Borrow<str> for ImportKey<FOLDED> {
-    fn borrow(&self) -> &str {
-        self.text()
-    }
-}
-
-/// Calls `f` with `text` in ASCII lowercase, built on the stack when it is
-/// short.
-fn with_folded<R>(text: &str, f: impl FnOnce(&str) -> R) -> R {
-    if !text.bytes().any(|b| b.is_ascii_uppercase()) {
-        return f(text);
-    }
-    let mut buffer = [0u8; 128];
-    if let Some(bytes) = buffer.get_mut(..text.len()) {
-        bytes.copy_from_slice(text.as_bytes());
-        bytes.make_ascii_lowercase();
-        if let Ok(folded) = std::str::from_utf8(bytes) {
-            return f(folded);
+impl<const FOLDED: bool> Default for ImportTable<FOLDED> {
+    fn default() -> Self {
+        ImportTable {
+            table: hashbrown::HashTable::new(),
         }
     }
-    f(&text.to_ascii_lowercase())
+}
+
+impl<const FOLDED: bool> ImportTable<FOLDED> {
+    fn hash_of(text: &str) -> u64 {
+        if FOLDED {
+            crate::name::folded_hash(text.as_bytes())
+        } else {
+            crate::name::text_hash(text)
+        }
+    }
+
+    fn same(left: &str, right: &str) -> bool {
+        if FOLDED {
+            left.eq_ignore_ascii_case(right)
+        } else {
+            left == right
+        }
+    }
+
+    fn clear(&mut self) {
+        self.table.clear();
+    }
+
+    fn insert(&mut self, key: ImportKey<FOLDED>, path: Name) {
+        let hash = Self::hash_of(key.text());
+        match self
+            .table
+            .find_mut(hash, |(known, _)| Self::same(known.text(), key.text()))
+        {
+            Some((_, known)) => *known = path,
+            None => {
+                self.table
+                    .insert_unique(hash, (key, path), |(known, _)| Self::hash_of(known.text()));
+            }
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<&Name> {
+        self.table
+            .find(Self::hash_of(name), |(known, _)| {
+                Self::same(known.text(), name)
+            })
+            .map(|(_, path)| path)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&ImportKey<FOLDED>, &Name)> {
+        self.table.iter().map(|(key, path)| (key, path))
+    }
+}
+
+impl<const FOLDED: bool> crate::canonical::Canonical for ImportTable<FOLDED> {
+    fn canonical(&self, p: &mut crate::canonical::Printer) {
+        p.map(self.iter());
+    }
 }
 
 impl UseMap {
@@ -94,8 +127,8 @@ impl UseMap {
     /// What `name` was imported from in `kind`'s key space.
     fn get(&self, kind: UseKind, name: &str) -> Option<&Name> {
         match kind {
-            UseKind::Class => with_folded(name, |folded| self.classes.get(folded)),
-            UseKind::Function => with_folded(name, |folded| self.functions.get(folded)),
+            UseKind::Class => self.classes.get(name),
+            UseKind::Function => self.functions.get(name),
             UseKind::Const => self.constants.get(name),
         }
     }
