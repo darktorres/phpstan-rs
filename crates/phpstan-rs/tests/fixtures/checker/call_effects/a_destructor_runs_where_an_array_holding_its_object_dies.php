@@ -252,3 +252,43 @@ function theCallerSeesTheClosureArrayDie(): void
     aClosureStoresIntoASharedArray();
     assertType('int|null', Flag::$value);
 }
+
+function aBuiltinFillsAnArrayByReference(): void
+{
+    $list = [];
+    array_push($list, new Resets());
+}
+
+function theCallerSeesTheBuiltinFilledArrayDie(): void
+{
+    Flag::$value = null;
+    aBuiltinFillsAnArrayByReference();
+    assertType('int|null', Flag::$value);
+}
+
+function anArrayIsReferencedByAnotherVariable(): void
+{
+    $list = [new Resets()];
+    $alias = &$list;
+}
+
+function theCallerSeesTheReferencedArrayDie(): void
+{
+    Flag::$value = null;
+    anArrayIsReferencedByAnotherVariable();
+    assertType('int|null', Flag::$value);
+}
+
+function aForeachBindsAnElementByReference(): void
+{
+    $list = [new Resets()];
+    foreach ($list as &$item) {
+    }
+}
+
+function theCallerSeesTheForeachArrayDie(): void
+{
+    Flag::$value = null;
+    aForeachBindsAnElementByReference();
+    assertType('int|null', Flag::$value);
+}
