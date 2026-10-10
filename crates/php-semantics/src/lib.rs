@@ -3541,7 +3541,7 @@ mod tests {
     }
 
     #[test]
-    fn widening_is_reflected_in_domain_precision() {
+    fn widening_preserves_the_transferred_lower_bound_and_reflects_precision() {
         let graph = BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
             entry: 0,
@@ -3566,13 +3566,21 @@ mod tests {
             growing_loop: true,
             ..Host::default()
         };
-        let result = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        // The entry interval [0,1] transfers to [1,2]. Widening drops the
+        // upper bound, so this asserts only that the transferred lower bound
+        // remains 1; it does not test upper-bound preservation.
+        let initial = encode_count_interval(0, Some(1));
+        let result = evaluate(&graph, &[], &receiver(), initial.clone(), &mut host).unwrap();
         assert!(
             result
                 .exits
                 .iter()
                 .any(|exit| matches!(exit, Exit::Normal { .. }))
         );
+        assert!(result.exits.iter().any(|exit| match exit {
+            Exit::Normal { state, .. } => count_interval(state) == (1, None),
+            _ => false,
+        }));
         for domain in [Domain::UserWrite, Domain::Return] {
             assert_eq!(
                 result
@@ -3699,7 +3707,22 @@ mod tests {
             coverage: coverage_for(&[Domain::UserWrite, Domain::Return]),
         };
         let mut host = Host::default();
-        let result = evaluate(&graph, &[], &receiver(), vec![], &mut host).unwrap();
+        let initial = vec!["entry-state".to_string()];
+        let result = evaluate(&graph, &[], &receiver(), initial.clone(), &mut host).unwrap();
+        assert!(
+            result
+                .post_fixpoint
+                .solution
+                .iter()
+                .any(|frame| frame.block == graph.entry && frame.state == initial)
+        );
+        assert_eq!(
+            result.exits,
+            vec![Exit::Normal {
+                value: None,
+                state: vec!["entry-state".into(), "write".into()],
+            }]
+        );
         result.post_fixpoint.validate(&graph, &host).unwrap();
 
         let encoded = serde_json::to_vec(&result.post_fixpoint).unwrap();

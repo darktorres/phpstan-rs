@@ -636,3 +636,69 @@ failures are now explained rather than open. Still not verified: the checker's t
 beyond the catalog area, the 1200-plus checker tests, the full optimized fixture run (I
 checked only the eight named fixtures), R05.1 source portability, and the cross-consumer
 audit in R05.3.
+
+## Author follow-up for R00.2 (2026-10-09)
+
+The contract now defines a host-relative representation using `gammaV` and
+`gammaS`, states entry, transfer, predicate, join/widening, exit, and
+projection obligations, and narrows the evaluator's claim to a structural
+post-fixpoint conditional on those host laws. It explicitly says the generic
+API does not prove PHP semantic soundness or return explicit trace sets. It
+also separates evidence provenance from trust, requires a pinned trusted
+validator root, and makes unsupported pending-fatal, suspension, and
+native-unwind cleanup compositions fail closed. This addresses C-1 as a
+contract amendment, not as reviewer acceptance; a fresh independent pass must
+check the relation against the evaluator and current tests before R00.2 closes.
+
+The regression
+`published_post_fixpoint_certificate_is_revalidatable_and_graph_bound` now
+starts from a non-empty entry state, verifies the certificate retains it at
+the entry frame, and verifies the normal exit contains that state plus the
+event's write. Existing tests cover event outcomes, branch joins, widening
+containment, dependency projections, and completion-kind exits. The cleanup
+cases identified by RV-1 remain failing/ignored and are assigned to R01.5;
+the amended contract does not claim they pass.
+
+## Follow-up review findings for R00.2 (2026-10-09)
+
+The maintainer supplied a follow-up review from Claude against the uncommitted
+R00.2 changes. Its verdict was **not accepted yet**. It accepted the
+host-relative definition and cleanup caveat, and identified five remaining
+points:
+
+- **S-1:** state/value/completion coverage over finite paths needed an explicit
+  induction argument from entry coverage, sound transfers and predicates,
+  successor closure, and exit inclusion. Full trace-prefix coverage must not
+  be claimed because the API does not represent trace sets.
+- **S-2:** remove the unimplemented "separately justified graph observation"
+  escape hatch for observable effects.
+- **S-3:** define a missing result ID as undefined on all states represented by
+  that frame, and explain why partial result definitions cannot be joined.
+- **S-4:** add a regression where distinct concrete entry states remain
+  represented through join and widening, not only a single-state write.
+- **S-5:** the amendment needs a fresh independent review before R00.2 closes.
+
+The author addressed S-1 through S-3 in the contract and added a widening
+regression for S-4. A subsequent review found that the test's wording
+overstated its upper-bound coverage, so it is narrowed to the lower-bound
+property. See the following independent re-review disposition.
+
+## Independent re-review disposition for R00.2 (2026-10-09)
+
+The maintainer supplied Claude's re-review of the updated, uncommitted tree.
+The reviewer confirmed the finite-path induction against the validator,
+accepted removal of the graph-observation escape hatch, and accepted the
+undefined-result denotation. It rejected the widening test's claim that it
+preserved distinct entry states because widening deliberately drops the upper
+bound. It also noted that the cleanup rule is normative while the evaluator
+still violates it for pending fatal, suspension, and native-unwind outcomes.
+
+The author narrowed the test to
+`widening_preserves_the_transferred_lower_bound_and_reflects_precision` and
+documented that it asserts the widened exit is `[1,*]` without testing
+upper-bound preservation. The contract now
+explicitly says its cleanup rule is not implemented and R00.2 closes as a
+definition only; conformance remains under RV-1/R01.5. The reviewer stated
+that these two corrections allow R00.2 to close as a definition, with R01.5
+carrying cleanup conformance. This is the review disposition; it does not
+claim that cleanup behavior is fixed.
