@@ -307,6 +307,16 @@ impl CatalogManifest {
         if self.schema_major != crate::SCHEMA_MAJOR {
             return Err(CatalogError::UnsupportedManifest(self.schema_major));
         }
+        // Check graph structure before content IDs so malformed cyclic input
+        // receives the actionable cycle diagnostic instead of only a digest
+        // mismatch. Well-formed content-addressed cycles are not constructible
+        // without a hash fixed point, but untrusted manifests still need a
+        // direct, fail-closed structural check.
+        let evidence = self.evidence.iter().cloned().collect();
+        let assumptions = self.assumptions.iter().cloned().collect();
+        if let Some(cycle) = find_support_cycle(&evidence, &assumptions) {
+            return Err(CatalogError::CyclicSupport(cycle));
+        }
         let mut graph_ids = Vec::new();
         for record in &self.graphs {
             if record
@@ -408,11 +418,6 @@ impl CatalogManifest {
                     return Err(CatalogError::MissingAssumption(*id));
                 }
             }
-        }
-        let evidence = self.evidence.iter().cloned().collect();
-        let assumptions = self.assumptions.iter().cloned().collect();
-        if let Some(cycle) = find_support_cycle(&evidence, &assumptions) {
-            return Err(CatalogError::CyclicSupport(cycle));
         }
         Ok(())
     }
@@ -847,6 +852,32 @@ mod tests {
             cycle
                 .iter()
                 .all(|node| matches!(node, SupportNode::Assumption(_)))
+        );
+    }
+
+    #[test]
+    fn manifest_reports_assumption_cycles_before_content_id_mismatches() {
+        let (evidence, assumptions) = support_graph_records(
+            &[],
+            &[
+                (1, vec![Digest([2; 32])], vec![]),
+                (2, vec![Digest([1; 32])], vec![]),
+            ],
+        );
+        let manifest = CatalogManifest {
+            schema_major: SCHEMA_MAJOR,
+            entries: vec![],
+            graphs: vec![],
+            evidence: evidence.into_iter().collect(),
+            assumptions: assumptions.into_iter().collect(),
+        };
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::CyclicSupport(vec![
+                SupportNode::Assumption(Digest([1; 32])),
+                SupportNode::Assumption(Digest([2; 32])),
+                SupportNode::Assumption(Digest([1; 32])),
+            ]))
         );
     }
 
