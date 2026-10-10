@@ -789,3 +789,15 @@ inputs remain unchanged, while ordered blocks and events remain
 order-sensitive. Regression coverage exercises each collection family and
 confirms reordered events still produce distinct graph digests. This is author
 evidence; independent acceptance is pending.
+
+## Author follow-up for R02.1 (2026-10-10)
+
+`evaluate_strlen_svf_demand.py` now binds replay to the exact runtime fixture
+path and SHA-256 recorded by the witness, and checks the recorded output hash
+against both captured Hybrid and CALL output files. Regression tests prove
+that a matching fixture is accepted, a one-byte change is rejected, and both
+output artifacts still match their recorded hash. The checked-in fixture is
+currently newer than the 13-sentinel witness (`94dc6509…` versus
+`9b38a3ea…`), so replay fails before making a claim about the stale witness.
+This closes the fail-open mechanism; it does not reconcile or replace the
+historical witness. This is author evidence; independent acceptance is pending.

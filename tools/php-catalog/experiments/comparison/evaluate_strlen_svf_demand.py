@@ -33,6 +33,52 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def validate_runtime_fixture(
+    runtime: dict[str, object], fixture_path: Path, expected_path: str
+) -> str:
+    fixtures = runtime.get("fixtures")
+    if not isinstance(fixtures, list):
+        raise ValueError("runtime witness lacks its fixture inventory")
+    if any(not isinstance(fixture, dict) for fixture in fixtures):
+        raise ValueError("runtime witness fixture inventory contains a malformed record")
+    matches = [fixture for fixture in fixtures if fixture.get("path") == expected_path]
+    if len(matches) != 1:
+        raise ValueError(f"runtime witness must record exactly one {expected_path} fixture")
+    expected = matches[0].get("sha256")
+    if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise ValueError(f"runtime witness has an invalid SHA-256 for {expected_path}")
+    actual = digest(fixture_path)
+    if actual != expected:
+        raise ValueError(
+            f"runtime fixture digest mismatch for {expected_path}: "
+            f"expected {expected}, got {actual}"
+        )
+    return expected
+
+
+def validate_recorded_outputs(runtime: dict[str, object], root: Path) -> None:
+    fixtures = runtime.get("fixtures")
+    if not isinstance(fixtures, list) or any(
+        not isinstance(fixture, dict) for fixture in fixtures
+    ):
+        raise ValueError("runtime witness lacks a valid fixture inventory")
+    for fixture in fixtures:
+        expected = fixture.get("output_sha256")
+        if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+            raise ValueError("runtime witness has an invalid output SHA-256")
+        for field in ("hybrid_output", "call_output"):
+            relative_path = fixture.get(field)
+            if not isinstance(relative_path, str):
+                raise ValueError(f"runtime witness lacks {field}")
+            output_path = root / relative_path
+            actual = digest(output_path)
+            if actual != expected:
+                raise ValueError(
+                    f"runtime output digest mismatch for {relative_path}: "
+                    f"expected {expected}, got {actual}"
+                )
+
+
 def run_checked(command: list[str]) -> bytes:
     result = subprocess.run(command, capture_output=True, check=False)
     if result.returncode != 0:
@@ -103,7 +149,10 @@ def main() -> None:
     source_commit = "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03"
     if runtime["source_commit"] != source_commit or "string-coercion-callback" not in runtime["result"]["runtime_php_sentinels"]:
         raise ValueError("locked runtime witness does not include the Stringable callback sentinel")
-    runtime_file = ROOT / "tools/php-catalog/experiments/comparison/runtime.php"
+    fixture_relative_path = "tools/php-catalog/experiments/comparison/runtime.php"
+    runtime_file = ROOT / fixture_relative_path
+    validate_runtime_fixture(runtime, runtime_file, fixture_relative_path)
+    validate_recorded_outputs(runtime, ROOT)
     if "string-coercion-callback" not in runtime_file.read_text():
         raise ValueError("current runtime callback fixture lacks the witnessed sentinel")
 
