@@ -1403,7 +1403,7 @@ impl Session {
         let bytes: &[u8] = buf;
         let content_hash = ContentHash::of(bytes);
         let cache_key = if cacheable {
-            file_cache::key(bytes, path, is_stub, index_use_sites)
+            file_cache::key(content_hash, path, is_stub, index_use_sites)
         } else {
             None
         };
@@ -1449,6 +1449,7 @@ impl Session {
                 Some(names),
                 file_id,
                 scratch,
+                content_hash,
             ),
             Err(_) => super::parse_file_with_names_and_file_id_and_worker_scratch(
                 path,
@@ -1457,6 +1458,7 @@ impl Session {
                 Some(names),
                 file_id,
                 scratch,
+                content_hash,
             ),
         })) else {
             return Read::Unread;

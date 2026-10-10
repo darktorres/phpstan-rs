@@ -3965,6 +3965,7 @@ pub(crate) fn parse_file_recording<'a>(
         record,
         Origin::Path(Arc::from(path)),
         None,
+        None,
     )
 }
 
@@ -3984,6 +3985,7 @@ pub(crate) fn parse_file_recording_with_file_id<'a>(
         record,
         Origin::File(file_id),
         None,
+        None,
     )
 }
 
@@ -3994,6 +3996,7 @@ pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
     names: Option<&mut syntax::name::NameCache>,
     file_id: FileId,
     scratch: syntax::WorkerScratch<'_>,
+    content_hash: source::ContentHash,
 ) -> Result<ParsedFile, ParseError> {
     parse_file_recording_with_origin(
         path,
@@ -4003,9 +4006,11 @@ pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
         None,
         Origin::File(file_id),
         Some(scratch),
+        Some(content_hash),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_file_recording_with_origin<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
@@ -4014,9 +4019,11 @@ fn parse_file_recording_with_origin<'a>(
     record: Option<&mut ParseRecord>,
     origin: Origin,
     scratch: Option<syntax::WorkerScratch<'_>>,
+    content_hash: Option<source::ContentHash>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
-    let content_hash = source::ContentHash::of_source(source);
+    let content_hash = content_hash.unwrap_or_else(|| source::ContentHash::of_source(source));
+    debug_assert_eq!(content_hash, source::ContentHash::of_source(source));
     let Parsed {
         tree,
         references,

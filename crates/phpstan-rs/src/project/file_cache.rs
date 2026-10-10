@@ -306,16 +306,20 @@ pub(super) struct Key {
     file: PathBuf,
 }
 
-/// The entry of a file with these `bytes`, named `path`, parsed as
-/// `is_stub` says and with use sites indexed as `index_use_sites` says;
+/// The entry of a file whose bytes hash to `content`, named `path`, parsed
+/// as `is_stub` says and with use sites indexed as `index_use_sites` says;
 /// `None` when the cache is off.
-pub(super) fn key(bytes: &[u8], path: &Path, is_stub: bool, index_use_sites: bool) -> Option<Key> {
+pub(super) fn key(
+    content: ContentHash,
+    path: &Path,
+    is_stub: bool,
+    index_use_sites: bool,
+) -> Option<Key> {
     let directory = directory()?;
     let mut hasher = twox_hash::XxHash3_128::new();
-    hasher.write(bytes);
-    // What follows is length-prefixed, so the bytes and the path can't
+    hasher.write(&content.to_le_bytes());
+    // What follows is length-prefixed, so the hash and the path can't
     // trade places.
-    hasher.write(&(bytes.len() as u64).to_le_bytes());
     let path_bytes = path.as_os_str().as_encoded_bytes();
     hasher.write(path_bytes);
     hasher.write(&(path_bytes.len() as u64).to_le_bytes());

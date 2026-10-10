@@ -17,6 +17,10 @@ impl ContentHash {
         ContentHash(twox_hash::XxHash3_128::oneshot(bytes))
     }
 
+    pub fn to_le_bytes(self) -> [u8; 16] {
+        self.0.to_le_bytes()
+    }
+
     /// The hash of a source, as the bytes it is.
     pub fn of_source(source: syntax::Source<'_>) -> ContentHash {
         match source {
