@@ -4815,9 +4815,13 @@ fn reads_variables(origin: &Origin) -> bool {
         Origin::Taken(_, from, held) => from.iter().chain(held.iter()).any(reads_variables),
         Origin::Written(_) => true,
         Origin::Place(place) => matches!(place.root, Root::Variable(Some(_))),
-        Origin::Returned(Callee::Method { receiver, .. }) => {
-            matches!(receiver, Receiver::Variable(_) | Receiver::Origins(_))
-        }
+        Origin::Returned(callee) => matches!(
+            &**callee,
+            Callee::Method {
+                receiver: Receiver::Variable(_) | Receiver::Origins(_),
+                ..
+            }
+        ),
         _ => false,
     }
 }

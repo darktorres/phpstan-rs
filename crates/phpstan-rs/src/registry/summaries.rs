@@ -14,6 +14,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
@@ -221,7 +222,7 @@ pub(crate) enum Receiver {
     Static(QualifiedName, Name),
     /// A value whose origins the body shows: a call's result, an element,
     /// a `new`, a constant.
-    Origins(Box<[Origin]>),
+    Origins(Arc<[Origin]>),
     /// Any other value.
     Unknown,
 }
@@ -255,7 +256,7 @@ pub(crate) enum Callee {
     /// What PHP runs for an operation on a value, no call written: on a
     /// value from `on`, or from anywhere when `None`.
     Implicit {
-        on: Option<Box<[Origin]>>,
+        on: Option<Arc<[Origin]>>,
         operation: Operation,
     },
     /// `parent::$property::get()`, or `::set()` when `set`: the parent
@@ -314,7 +315,7 @@ pub(crate) enum Origin {
     /// The value at the place.
     Place(Place),
     /// What the call returns.
-    Returned(Callee),
+    Returned(Arc<Callee>),
     /// An object `new` made of the class named (`self`, `static` and
     /// `parent` as written); `None` for a class computed at run time.
     New(Option<QualifiedName>),
@@ -332,12 +333,12 @@ pub(crate) enum Origin {
     Declared(Type),
     /// The objects held in the elements, at any depth, of an array from the
     /// origin.
-    Elements(Box<Origin>),
+    Elements(Arc<Origin>),
     /// What a call of the function takes out of the arrays from the first
     /// origins, and out of the objects the second hold: an element, or an
     /// array of elements, when the function is the builtin that does so
     /// (`takes_elements`); what the callee returns otherwise.
-    Taken(Callee, Box<[Origin]>, Box<[Origin]>),
+    Taken(Arc<Callee>, Arc<[Origin]>, Arc<[Origin]>),
     /// What the body writes the variable, not the argument a parameter taken
     /// by reference started as.
     Written(Name),
@@ -459,7 +460,7 @@ impl Origin {
             | Origin::New(_)
             | Origin::Anonymous(_)
             | Origin::Caught(_) => None,
-            origin => Some(Origin::Elements(Box::new(origin))),
+            origin => Some(Origin::Elements(Arc::new(origin))),
         }
     }
 
@@ -597,24 +598,30 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
                         });
                     match taken {
                         Some(from) => vec![Origin::Taken(
-                            Callee::Function(name),
+                            Arc::new(Callee::Function(name)),
                             from.into(),
-                            Box::new([]),
+                            Arc::from([]),
                         )],
-                        None => vec![Origin::Returned(Callee::Function(name))],
+                        None => vec![Origin::Returned(Arc::new(Callee::Function(name)))],
                     }
                 }
                 Some(ExprKind::Variable(name)) if **name != *"this" => {
-                    vec![Origin::Returned(Callee::Value(Some(name.clone())))]
+                    vec![Origin::Returned(Arc::new(Callee::Value(Some(
+                        name.clone(),
+                    ))))]
                 }
                 _ => return None,
             },
-            ExprKind::MethodCall(recv, method, _, _) => vec![Origin::Returned(Callee::Method {
-                receiver: receiver(arenas, *recv),
-                method: Some(method.name.clone()),
-            })],
+            ExprKind::MethodCall(recv, method, _, _) => {
+                vec![Origin::Returned(Arc::new(Callee::Method {
+                    receiver: receiver(arenas, *recv),
+                    method: Some(method.name.clone()),
+                }))]
+            }
             ExprKind::StaticCall(target, method, _) => {
-                vec![Origin::Returned(static_callee(arenas, target, method))]
+                vec![Origin::Returned(Arc::new(static_callee(
+                    arenas, target, method,
+                )))]
             }
             ExprKind::New(callee, _) => vec![Origin::New(
                 match arenas
@@ -1753,7 +1760,7 @@ impl Summarizer<'_> {
                     (Root::Variable(Some(name)), []) if self.scope.contents.contains_key(name) => {
                         out.extend(self.scope.contents[name].as_ref()?.iter().cloned());
                     }
-                    _ => out.push(Origin::Elements(Box::new(origin.clone()))),
+                    _ => out.push(Origin::Elements(Arc::new(origin.clone()))),
                 },
                 other => out.extend(other.clone().elements()),
             }
@@ -1929,37 +1936,35 @@ impl Summarizer<'_> {
         }
     }
 
-    fn narrow_callee(&self, callee: Callee) -> Callee {
-        match callee {
-            Callee::Method { receiver, method } => Callee::Method {
-                receiver: self.narrow_receiver(receiver),
-                method,
-            },
-            Callee::Implicit { on, operation } => Callee::Implicit {
-                on: on.map(|on| {
-                    on.into_vec()
-                        .into_iter()
-                        .map(|origin| self.narrow_origin(origin))
+    fn narrow_callee(&self, callee: Arc<Callee>) -> Arc<Callee> {
+        match &*callee {
+            Callee::Method { receiver, method } => Arc::new(Callee::Method {
+                receiver: self.narrow_receiver(receiver.clone()),
+                method: method.clone(),
+            }),
+            Callee::Implicit { on, operation } => Arc::new(Callee::Implicit {
+                on: on.as_ref().map(|on| {
+                    on.iter()
+                        .map(|origin| self.narrow_origin(origin.clone()))
                         .collect()
                 }),
-                operation,
-            },
-            other => other,
+                operation: operation.clone(),
+            }),
+            _ => callee,
         }
     }
 
     fn narrow_receiver(&self, receiver: Receiver) -> Receiver {
         match receiver {
             Receiver::Variable(name) if self.narrowing_of(&name).is_some() => {
-                Receiver::Origins(Box::new([Origin::Place(
+                Receiver::Origins(Arc::new([Origin::Place(
                     self.narrow_place(Place::root(Root::Variable(Some(name)))),
                 )]))
             }
             Receiver::Origins(origins) => Receiver::Origins(
                 origins
-                    .into_vec()
-                    .into_iter()
-                    .map(|origin| self.narrow_origin(origin))
+                    .iter()
+                    .map(|origin| self.narrow_origin(origin.clone()))
                     .collect(),
             ),
             other => other,
@@ -2019,7 +2024,7 @@ impl Summarizer<'_> {
                 continue;
             }
             let operation = operation.clone();
-            let on = self.take_known_contents(on.to_vec()).into_boxed_slice();
+            let on: Arc<[Origin]> = self.take_known_contents(on.to_vec()).into();
             self.scope.calls[index].callee = Callee::Implicit {
                 on: Some(on),
                 operation,
@@ -2039,7 +2044,7 @@ impl Summarizer<'_> {
     fn take_known_contents_of(&self, origin: Origin) -> Origin {
         match origin {
             Origin::Elements(inner) if inner.mentions_taken() => {
-                Origin::Elements(Box::new(self.take_known_contents_of(*inner)))
+                Origin::Elements(Arc::new(self.take_known_contents_of((*inner).clone())))
             }
             Origin::Taken(callee, from, held) => {
                 let mut arrays = Vec::new();
@@ -2390,7 +2395,7 @@ impl Summarizer<'_> {
         };
         let new = self.scope.implicit.find(hash, |&at| implicit(at)).is_none();
         let callee = Callee::Implicit {
-            on: on.map(Vec::into_boxed_slice),
+            on: on.map(Arc::from),
             operation,
         };
         #[cfg(debug_assertions)]
@@ -2955,7 +2960,7 @@ fn receiver(arenas: &NodeArenas, id: ExprId) -> Receiver {
             Receiver::Static((**class).clone(), prop.name.clone())
         }
         _ => match origins_of(arenas, id) {
-            Some(origins) => Receiver::Origins(origins.into_boxed_slice()),
+            Some(origins) => Receiver::Origins(origins.into()),
             None => Receiver::Unknown,
         },
     }
@@ -4142,15 +4147,15 @@ mod tests {
     #[test]
     fn the_elements_of_an_origin_are_not_the_origin() {
         let inner = place("list");
-        let elements = Origin::Elements(Box::new(inner.clone()));
+        let elements = Origin::Elements(Arc::new(inner.clone()));
         assert_ne!(inner, elements);
         assert_ne!(hash_of(&inner), hash_of(&elements));
-        assert_eq!(elements, Origin::Elements(Box::new(inner.clone())));
+        assert_eq!(elements, Origin::Elements(Arc::new(inner.clone())));
         assert_ne!(
             syntax::canonical::print(&inner),
             syntax::canonical::print(&elements)
         );
-        assert_ne!(elements, Origin::Elements(Box::new(place("other"))));
+        assert_ne!(elements, Origin::Elements(Arc::new(place("other"))));
     }
 
     #[test]
@@ -4161,15 +4166,15 @@ mod tests {
         assert!(Origin::New(None).elements().is_none());
         assert_eq!(
             place("list").elements(),
-            Some(Origin::Elements(Box::new(place("list"))))
+            Some(Origin::Elements(Arc::new(place("list"))))
         );
     }
 
     #[test]
     fn the_elements_of_a_place_depend_on_the_scope_as_the_place_does() {
-        assert!(!Origin::Elements(Box::new(place("list"))).context_free());
+        assert!(!Origin::Elements(Arc::new(place("list"))).context_free());
         assert!(
-            Origin::Elements(Box::new(Origin::Constant(QualifiedName {
+            Origin::Elements(Arc::new(Origin::Constant(QualifiedName {
                 written: Name::from("LIST"),
                 resolved: ResolvedName::Exact(Name::from("LIST")),
                 span: syntax::span::Span::default(),
