@@ -315,7 +315,7 @@ pub(crate) enum Origin {
     /// The value at the place.
     Place(Place),
     /// What the call returns.
-    Returned(Arc<Callee>),
+    Returned(#[serde(with = "super::callee_table")] Arc<Callee>),
     /// An object `new` made of the class named (`self`, `static` and
     /// `parent` as written); `None` for a class computed at run time.
     New(Option<QualifiedName>),
@@ -338,7 +338,11 @@ pub(crate) enum Origin {
     /// origins, and out of the objects the second hold: an element, or an
     /// array of elements, when the function is the builtin that does so
     /// (`takes_elements`); what the callee returns otherwise.
-    Taken(Arc<Callee>, Arc<[Origin]>, Arc<[Origin]>),
+    Taken(
+        #[serde(with = "super::callee_table")] Arc<Callee>,
+        Arc<[Origin]>,
+        Arc<[Origin]>,
+    ),
     /// What the body writes the variable, not the argument a parameter taken
     /// by reference started as.
     Written(Name),
