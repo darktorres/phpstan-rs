@@ -995,6 +995,110 @@ impl Registry {
 
     /// The class id local for a declaration placed without one reserved:
     /// above every name held and every local the project has handed out.
+    /// Empties the tables a built declaration is inserted into, leaving the
+    /// registry as `isolated_base` made it. The destructure names every
+    /// field, so a field added to `Registry` stops this compiling until it is
+    /// classed: cleared here, or one that inserting a built declaration and
+    /// the id and change bookkeeping it runs never write.
+    fn reset_isolated(&mut self) {
+        let Registry {
+            id_generation: _,
+            relation_generation: _,
+            reach_memo: _,
+            purity_results: _,
+            function_results: _,
+            function_results_cache: _,
+            deferred_function_results: _,
+            classes,
+            class_declarations,
+            class_ids,
+            project_class_names,
+            class_local_floor,
+            function_local_floor,
+            configured_assertions: _,
+            configured_class_argument_returns: _,
+            functions,
+            function_declarations,
+            function_ids,
+            project_function_names,
+            global_constants: _,
+            global_variables: _,
+            phpstan_class_files: _,
+            doctrine_entity_index: _,
+            resolved_declarations: _,
+            changed,
+            phpstan_stubs_loaded: _,
+            scope: _,
+            scoped_names: _,
+            php_versions: _,
+            unconditionally_declared_classes,
+            built_in_stub_classes,
+            unconditionally_declared_functions,
+            function_decl_sites,
+            stub_provided_functions,
+            names_with_assert_tags: _,
+            base_assert_tagged: _,
+            ancestors_by_id: _,
+            ancestor_names_cache: _,
+            phpstan_ancestry: _,
+            subtype_children: _,
+            trait_users: _,
+            recorded_parents: _,
+            member_owners: _,
+            member_owners_cache: _,
+            class_const_types: _,
+            class_const_types_by_id: _,
+            class_const_types_cache: _,
+            class_constant_results: _,
+            class_constant_results_cache: _,
+            class_constant_names: _,
+            class_method_results: _,
+            class_method_results_cache: _,
+            class_property_results: _,
+            class_property_results_cache: _,
+            class_property_topology: _,
+            class_property_topology_cache: _,
+            class_type_results: _,
+            class_type_results_cache: _,
+            deferred_class_results: _,
+            deferred_types_ready: _,
+            class_reference_results: _,
+            class_reference_results_cache: _,
+            imported_type_aliases: _,
+            imported_type_aliases_cache: _,
+            class_member_topology: _,
+            class_member_topology_cache: _,
+            effects: _,
+            effects_cache: _,
+            stub_effect_results: _,
+            stub_holding_classes: _,
+            builtin_methods_running_code: _,
+            base_builtin_methods_running_code: _,
+            methods_by_name: _,
+            unset_properties: _,
+            stream_wrappers: _,
+            global_sites: _,
+            global_scopes: _,
+            include_targets: _,
+        } = self;
+        *class_local_floor = Default::default();
+        *function_local_floor = Default::default();
+        *classes = Default::default();
+        *class_declarations = Default::default();
+        *class_ids = Default::default();
+        *project_class_names = Default::default();
+        *functions = Default::default();
+        *function_declarations = Default::default();
+        *function_ids = Default::default();
+        *project_function_names = Default::default();
+        *changed = Default::default();
+        *unconditionally_declared_classes = Default::default();
+        *built_in_stub_classes = Default::default();
+        *unconditionally_declared_functions = Default::default();
+        *function_decl_sites = Default::default();
+        *stub_provided_functions = Default::default();
+    }
+
     fn next_class_local(&mut self) -> u32 {
         let local = u32::try_from(self.project_class_names.len())
             .expect("project class id range exhausted")

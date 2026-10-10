@@ -103,6 +103,30 @@ impl BuiltDecl {
 /// it: its content hash, its order, its name and its file.
 type PhpstanClassFile = (u64, u32, Name, std::path::PathBuf);
 
+/// A declaration to insert: its order, whether its file is analysed, and the
+/// class and function ids reserved for it.
+type Input = (usize, BuiltDecl, bool, Option<u32>, Option<u32>);
+
+#[derive(PartialEq)]
+enum Update {
+    Class {
+        name: Name,
+        id: ClassId,
+        declaration: Arc<ClassReflection>,
+        unconditional: bool,
+        changed: bool,
+    },
+    Function {
+        name: Name,
+        id: FnId,
+        declaration: Arc<FunctionReflection>,
+        unconditional: bool,
+        stub_provided: bool,
+        site: Option<Option<u32>>,
+        changed: bool,
+    },
+}
+
 impl Registry {
     /// `pub(crate)` for the same reason as `flatten_traits` - lets
     /// `Project` index one file's statements into an already-built
@@ -568,7 +592,6 @@ impl Registry {
 
         const SHARDS: usize = 32;
         const SHARD_BITS: u32 = 5;
-        type Input = (usize, BuiltDecl, bool, Option<u32>, Option<u32>);
         let per_worker: Vec<[Vec<Input>; SHARDS]> = declarations
             .into_par_iter()
             .enumerate()
@@ -604,28 +627,10 @@ impl Registry {
             }
         }
 
-        enum Update {
-            Class {
-                name: Name,
-                id: ClassId,
-                declaration: Arc<ClassReflection>,
-                unconditional: bool,
-                changed: bool,
-            },
-            Function {
-                name: Name,
-                id: FnId,
-                declaration: Arc<FunctionReflection>,
-                unconditional: bool,
-                stub_provided: bool,
-                site: Option<Option<u32>>,
-                changed: bool,
-            },
-        }
-
         let updates: Vec<Vec<Update>> = buckets
             .into_par_iter()
             .map(|mut entries| {
+                let mut isolated = self.isolated_base();
                 entries.sort_unstable_by_key(|entry| entry.0);
                 let mut groups: FxHashMap<(u8, Name), Vec<Input>> = FxHashMap::default();
                 for entry in entries {
@@ -644,56 +649,20 @@ impl Registry {
                     .into_iter()
                     .filter_map(|((kind, _), mut entries)| {
                         entries.sort_unstable_by_key(|entry| entry.0);
-                        let name = match &entries[0].1 {
-                            BuiltDecl::Class { name, .. } | BuiltDecl::Function { name, .. } => {
-                                name.clone()
-                            }
-                            BuiltDecl::GlobalConst { .. } => unreachable!(),
-                        };
-                        let mut isolated = if kind == b'c' {
-                            self.isolated_class_slot(&name)
-                        } else {
-                            self.isolated_function_slot(&name)
-                        };
-                        for (_, declaration, analyzed, class_local, function_local) in entries {
-                            isolated.insert_built_decl_with_ids(
-                                declaration,
-                                analyzed,
-                                class_local,
-                                function_local,
+                        #[cfg(debug_assertions)]
+                        let kept = entries.clone();
+                        isolated.reset_isolated();
+                        let update = self.build_update(&mut isolated, kind, entries);
+                        #[cfg(debug_assertions)]
+                        {
+                            let mut fresh = self.isolated_base();
+                            let expected = self.build_update(&mut fresh, kind, kept);
+                            assert!(
+                                update == expected,
+                                "a reused isolated registry built what a fresh one does"
                             );
                         }
-
-                        if kind == b'c' {
-                            let id = isolated.class_ids.get(&name).copied()?;
-                            let declaration = isolated.class_declarations.get(&id).cloned()?;
-                            Some(Update::Class {
-                                name: name.clone(),
-                                id,
-                                declaration,
-                                unconditional: isolated
-                                    .unconditionally_declared_classes
-                                    .contains(&name),
-                                changed: isolated.changed.classes.contains(name.lower()),
-                            })
-                        } else {
-                            let id = isolated.function_ids.get(&name).copied()?;
-                            let declaration = isolated.function_declarations.get(&id).cloned()?;
-                            let folded = function_key(name.as_str());
-                            Some(Update::Function {
-                                name: name.clone(),
-                                id,
-                                declaration,
-                                unconditional: isolated
-                                    .unconditionally_declared_functions
-                                    .contains(folded.as_ref()),
-                                stub_provided: isolated
-                                    .stub_provided_functions
-                                    .contains(folded.as_ref()),
-                                site: isolated.function_decl_sites.get(folded.as_ref()).copied(),
-                                changed: isolated.changed.functions.contains(name.lower()),
-                            })
-                        }
+                        update
                     })
                     .collect()
             })
@@ -770,6 +739,54 @@ impl Registry {
         }
     }
 
+    /// The result of inserting one name's declarations, in order, into
+    /// `isolated` after seeding it with what this registry holds of the name.
+    fn build_update(
+        &self,
+        isolated: &mut Registry,
+        kind: u8,
+        entries: Vec<Input>,
+    ) -> Option<Update> {
+        let name = match &entries[0].1 {
+            BuiltDecl::Class { name, .. } | BuiltDecl::Function { name, .. } => name.clone(),
+            BuiltDecl::GlobalConst { .. } => unreachable!(),
+        };
+        if kind == b'c' {
+            self.seed_isolated_class(isolated, &name);
+        } else {
+            self.seed_isolated_function(isolated, &name);
+        }
+        for (_, declaration, analyzed, class_local, function_local) in entries {
+            isolated.insert_built_decl_with_ids(declaration, analyzed, class_local, function_local);
+        }
+        if kind == b'c' {
+            let id = isolated.class_ids.get(&name).copied()?;
+            let declaration = isolated.class_declarations.get(&id).cloned()?;
+            Some(Update::Class {
+                name: name.clone(),
+                id,
+                declaration,
+                unconditional: isolated.unconditionally_declared_classes.contains(&name),
+                changed: isolated.changed.classes.contains(name.lower()),
+            })
+        } else {
+            let id = isolated.function_ids.get(&name).copied()?;
+            let declaration = isolated.function_declarations.get(&id).cloned()?;
+            let folded = function_key(name.as_str());
+            Some(Update::Function {
+                name: name.clone(),
+                id,
+                declaration,
+                unconditional: isolated
+                    .unconditionally_declared_functions
+                    .contains(folded.as_ref()),
+                stub_provided: isolated.stub_provided_functions.contains(folded.as_ref()),
+                site: isolated.function_decl_sites.get(folded.as_ref()).copied(),
+                changed: isolated.changed.functions.contains(name.lower()),
+            })
+        }
+    }
+
     /// An empty registry that reads declarations as this one does.
     #[allow(clippy::field_reassign_with_default)]
     fn isolated_base(&self) -> Registry {
@@ -780,8 +797,7 @@ impl Registry {
         isolated
     }
 
-    fn isolated_class_slot(&self, name: &Name) -> Registry {
-        let mut isolated = self.isolated_base();
+    fn seed_isolated_class(&self, isolated: &mut Registry, name: &Name) {
         if let Some(id) = self.class_ids.get(name).copied() {
             isolated.class_ids.insert(name.clone(), id);
             if let Some(declaration) = self.classes.get_shared(name) {
@@ -800,11 +816,9 @@ impl Registry {
         if self.built_in_stub_classes.contains_key(name) {
             isolated.built_in_stub_classes.insert(name.clone(), ());
         }
-        isolated
     }
 
-    fn isolated_function_slot(&self, name: &Name) -> Registry {
-        let mut isolated = self.isolated_base();
+    fn seed_isolated_function(&self, isolated: &mut Registry, name: &Name) {
         let folded = function_key(name.as_str());
         if let Some(id) = self.function_ids.get(name).copied() {
             isolated.function_ids.insert(name.clone(), id);
@@ -834,7 +848,6 @@ impl Registry {
         if let Some(site) = self.function_decl_sites.get(folded.as_ref()).copied() {
             isolated.function_decl_sites.insert(folded_key(name), site);
         }
-        isolated
     }
 
     /// Merges a load's global constants by name in parallel. Constant
@@ -1560,6 +1573,19 @@ mod declaration_batch_tests {
             batched
                 .unconditionally_declared_functions
                 .contains("target")
+        );
+    }
+}
+
+#[cfg(test)]
+mod isolated_tests {
+    use super::*;
+
+    #[test]
+    fn the_registry_size_is_printed_for_the_moves_it_costs() {
+        eprintln!(
+            "size_of::<Registry>() = {}",
+            std::mem::size_of::<Registry>()
         );
     }
 }
