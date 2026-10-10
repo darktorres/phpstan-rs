@@ -481,47 +481,79 @@ impl TokenStream {
         ))
     }
 
+    /// `payload_at` for a caller that holds `cursor`, the index of the first
+    /// payload entry for a token at or after its own position: a lookahead
+    /// of a few tokens finds its entry within a few steps of the cursor.
+    #[inline]
+    pub fn payload_from(&self, token: usize, cursor: usize) -> Option<&TokenPayload> {
+        let found = self.payloads[cursor.min(self.payloads.len())..]
+            .iter()
+            .take_while(|entry| entry.token as usize <= token)
+            .find(|entry| entry.token as usize == token)
+            .map(|entry| &entry.payload);
+        debug_assert_eq!(
+            found.map(std::ptr::from_ref),
+            self.payload_at(token).map(std::ptr::from_ref)
+        );
+        found
+    }
+
     /// Returns a borrowed token view at `index`, with an EOF view past the
     /// stream. This is the parser's non-allocating lookahead surface.
     pub fn token_at(&self, index: usize) -> TokenRef<'_> {
+        self.token_at_via(index, |token| self.payload_at(token))
+    }
+
+    /// `token_at` for a caller that holds a payload cursor.
+    #[inline]
+    pub fn token_at_from(&self, index: usize, cursor: usize) -> TokenRef<'_> {
+        self.token_at_via(index, |token| self.payload_from(token, cursor))
+    }
+
+    #[inline]
+    fn token_at_via<'a>(
+        &'a self,
+        index: usize,
+        payload_at: impl Fn(usize) -> Option<&'a TokenPayload>,
+    ) -> TokenRef<'a> {
         use TokenKind as K;
         use TokenPayload as P;
         use TokenRef as R;
         let kind = self.kind_at(index);
         match kind {
-            K::InlineHtml => R::InlineHtml(match self.payload_at(index) {
+            K::InlineHtml => R::InlineHtml(match payload_at(index) {
                 Some(P::InlineHtml(html)) => *html,
                 _ => self.span_at(index),
             }),
-            K::DocComment => match self.payload_at(index) {
+            K::DocComment => match payload_at(index) {
                 Some(P::DocComment(text)) => R::DocComment(text),
                 _ => R::DocComment(""),
             },
-            K::Variable => match self.payload_at(index) {
+            K::Variable => match payload_at(index) {
                 Some(P::Name(id)) => self.name(*id).map_or(R::Eof, R::Variable),
                 _ => R::Eof,
             },
-            K::Integer => match self.payload_at(index) {
+            K::Integer => match payload_at(index) {
                 Some(P::Integer(value)) => R::Integer(*value),
                 _ => R::Eof,
             },
-            K::Float => match self.payload_at(index) {
+            K::Float => match payload_at(index) {
                 Some(P::Float(value)) => R::Float(*value),
                 _ => R::Eof,
             },
-            K::StringLit => match self.payload_at(index) {
+            K::StringLit => match payload_at(index) {
                 Some(P::String(value)) => R::StringLit(value),
                 _ => R::Eof,
             },
-            K::InterpString => match self.payload_at(index) {
+            K::InterpString => match payload_at(index) {
                 Some(P::Interpolation(parts)) => R::InterpString(parts),
                 _ => R::Eof,
             },
-            K::ShellExec => match self.payload_at(index) {
+            K::ShellExec => match payload_at(index) {
                 Some(P::Shell(parts)) => R::ShellExec(parts),
                 _ => R::Eof,
             },
-            K::Identifier => match self.payload_at(index) {
+            K::Identifier => match payload_at(index) {
                 Some(P::Name(id)) => self.name(*id).map_or(R::Eof, R::Identifier),
                 _ => R::Eof,
             },

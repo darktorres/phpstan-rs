@@ -34,6 +34,13 @@ impl Parser<'_> {
         self.token_ref(offset)
     }
 
+    /// The kind of the token `offset` places past the current one, with no
+    /// view of the token built.
+    #[inline]
+    pub(crate) fn peek_kind(&self, offset: usize) -> TokenKind {
+        self.token_stream.kind_at(self.pos.saturating_add(offset))
+    }
+
     /// Scans forward (without consuming) through any of `abstract`/
     /// `final`/`readonly` to see if a `class` keyword eventually follows -
     /// the only thing that actually confirms a class declaration is
@@ -118,7 +125,7 @@ impl Parser<'_> {
     }
 
     pub fn at_eof(&self) -> bool {
-        self.peek().kind() == TokenKind::Eof
+        self.peek_kind(0) == TokenKind::Eof
     }
 
     /// Advances past the current token without materializing it; callers
@@ -128,7 +135,7 @@ impl Parser<'_> {
     }
 
     fn take_payload_of(&mut self, kind: TokenKind) -> Option<TokenPayload> {
-        if self.peek().kind() != kind {
+        if self.peek_kind(0) != kind {
             return None;
         }
         let payload = self.take_payload()?;
@@ -186,7 +193,7 @@ impl Parser<'_> {
     /// token, which the kinds alone settle.
     #[inline]
     pub(crate) fn check(&self, t: &Token<'_>) -> bool {
-        self.peek().kind() == t.kind()
+        self.peek_kind(0) == t.kind()
     }
 
     pub(crate) fn eat(&mut self, t: &Token<'_>) -> bool {

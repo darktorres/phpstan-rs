@@ -77,6 +77,9 @@ pub struct Parser<'a> {
     pub(crate) pos: usize,
     payload_pos: usize,
     doc_pos: usize,
+    /// The token the next unread doc comment precedes; none left is the
+    /// largest index.
+    next_doc_before: usize,
     current_docs: Option<Box<crate::lexer::DocGroup>>,
     last_name_id: Option<crate::name::NameId>,
     // Where the last consumed token ended, and its span.
@@ -438,6 +441,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             payload_pos: 0,
             doc_pos: 0,
+            next_doc_before: 0,
             current_docs: None,
             last_name_id: None,
             last_end: 0,
@@ -498,6 +502,11 @@ impl<'a> Parser<'a> {
         {
             self.doc_pos += 1;
         }
+        self.next_doc_before = self
+            .token_stream
+            .docs
+            .get(self.doc_pos)
+            .map_or(usize::MAX, |doc| doc.before as usize);
         let entries = &self.token_stream.docs[first..self.doc_pos];
         self.current_docs = match entries {
             [] => None,
@@ -550,13 +559,14 @@ impl<'a> Parser<'a> {
         self.pos += 1;
         self.last_name_id = None;
         self.current_docs = None;
-        if kind != TokenKind::Eof {
+        if kind != TokenKind::Eof && self.pos == self.next_doc_before {
             self.load_current_docs();
         }
     }
 
     pub(crate) fn token_ref(&self, offset: usize) -> TokenRef<'_> {
-        self.token_stream.token_at(self.pos.saturating_add(offset))
+        self.token_stream
+            .token_at_from(self.pos.saturating_add(offset), self.payload_pos)
     }
 
     pub(crate) fn take_payload(&mut self) -> Option<TokenPayload> {
@@ -778,6 +788,7 @@ impl Parser<'_> {
         self.pos = last;
         self.payload_pos = self.token_stream.payloads.len();
         self.doc_pos = self.token_stream.docs.len();
+        self.next_doc_before = usize::MAX;
         self.current_docs = None;
         self.last_span = eof;
         self.last_end = eof.end;
