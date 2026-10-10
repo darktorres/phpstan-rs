@@ -4524,12 +4524,15 @@ impl ReferenceIndex {
                 for chunk in &per_chunk {
                     for (key, file) in &chunk[at] {
                         match shard.get_mut(*key) {
-                            Some(files) => files.insert(*file),
+                            Some(files) => files.push_unsorted(*file),
                             None => {
                                 shard.insert((*key).clone(), FileIdPostingList::One(*file));
                             }
                         }
                     }
+                }
+                for files in shard.values_mut() {
+                    files.sort_and_dedup();
                 }
                 shard
             })
@@ -4545,6 +4548,26 @@ impl syntax::canonical::Canonical for ReferenceIndex {
 }
 
 impl FileIdPostingList {
+    /// Adds `file` at the end, whatever the order: `sort_and_dedup` puts the
+    /// list right once a batch is in.
+    fn push_unsorted(&mut self, file: FileId) {
+        match self {
+            Self::One(existing) if *existing == file => {}
+            Self::One(existing) => *self = Self::Many(vec![*existing, file]),
+            Self::Many(files) => files.push(file),
+        }
+    }
+
+    fn sort_and_dedup(&mut self) {
+        if let Self::Many(files) = self {
+            files.sort_unstable();
+            files.dedup();
+            if let [only] = files[..] {
+                *self = Self::One(only);
+            }
+        }
+    }
+
     fn insert(&mut self, file: FileId) {
         match self {
             Self::One(existing) if *existing == file => {}
