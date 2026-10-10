@@ -248,6 +248,19 @@ fn trait_mixin_and_phpdoc_members_live_in_host_topology() {
     for (slot, name) in entries.iter().enumerate() {
         assert_eq!(r.member_slot("Host", name), Some(slot as u16));
     }
+    let id = *r.class_ids.get("Host").unwrap();
+    let with_slots: Vec<_> = r
+        .members_with_slots(id)
+        .map(|(method, entry)| (method.slot(), entry.name.to_string()))
+        .collect();
+    let expected: Vec<_> = entries
+        .iter()
+        .enumerate()
+        .map(|(slot, name)| (slot as u16, name.clone()))
+        .collect();
+    assert_eq!(with_slots, expected);
+    assert_eq!(r.declared_method_name("Host", "TRAITALIAS"), "traitAlias");
+    assert_eq!(r.declared_method_name("Host", "absent"), "absent");
 }
 
 #[test]

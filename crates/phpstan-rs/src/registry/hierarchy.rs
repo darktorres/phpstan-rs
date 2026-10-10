@@ -240,6 +240,45 @@ impl Registry {
             )
     }
 
+    /// The entries of `member_entries`, each with the reference its name
+    /// resolves to. An entry's position is its slot when every name holds
+    /// one slot; a class where two entries share a name takes each entry's
+    /// slot by its name.
+    pub(crate) fn members_with_slots(
+        &self,
+        class: ClassId,
+    ) -> impl Iterator<Item = (super::MethodRef, &MethodEntry)> {
+        let info = self.class_by_id(class);
+        let topology = self.class_member_topology.get(&class);
+        let declared = info.map_or(0, |info| info.member_order.len());
+        let positional = info.is_none_or(|info| info.member_slots.len() == declared)
+            && topology.is_none_or(|topology| topology.slots.len() == topology.entries.len());
+        info.into_iter()
+            .flat_map(|info| info.member_order.iter())
+            .chain(
+                topology
+                    .into_iter()
+                    .flat_map(|topology| topology.entries.iter()),
+            )
+            .enumerate()
+            .filter_map(move |(at, entry)| {
+                let slot = if positional {
+                    u16::try_from(at).ok()?
+                } else {
+                    info.and_then(|info| info.member_slots.get(&entry.name).copied())
+                        .or_else(|| topology.and_then(|t| t.slots.get(&entry.name).copied()))?
+                };
+                #[cfg(debug_assertions)]
+                if positional {
+                    let by_name = info
+                        .and_then(|info| info.member_slots.get(&entry.name).copied())
+                        .or_else(|| topology.and_then(|t| t.slots.get(&entry.name).copied()));
+                    assert_eq!(by_name, Some(slot), "member slot differs from position");
+                }
+                Some((super::MethodRef::new(class, slot), entry))
+            })
+    }
+
     pub(crate) fn member_slot<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
         &self,
         class: &K,
@@ -347,51 +386,48 @@ impl Registry {
             .insert_if_absent(method, signature)
     }
 
+    /// The member entry `class` holds for `method`, found with one lookup
+    /// of the class.
+    fn method_entry<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
+        &self,
+        class: &K,
+        method: &M,
+    ) -> Option<&MethodEntry> {
+        let (_, id) = self.class_ids.get_with_name(class)?;
+        let id = *id;
+        let method = &syntax::name::Hashed::new(method);
+        let slot = self
+            .class_by_id(id)
+            .and_then(|info| info.member_slots.get(method).copied())
+            .or_else(|| {
+                self.class_member_topology
+                    .get(&id)
+                    .and_then(|topology| topology.slots.get(method).copied())
+            })?;
+        self.member_entry_by_ref(super::MethodRef::new(id, slot))
+    }
+
     pub(crate) fn method_is_abstract<K: TableKey + ?Sized, M: FoldKey + ?Sized>(
         &self,
         class: &K,
         method: &M,
     ) -> bool {
-        self.member_slot(class, method)
-            .and_then(|slot| {
-                self.class_ids
-                    .get(class)
-                    .copied()
-                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
-            })
+        self.method_entry(class, method)
             .is_some_and(|entry| entry.is_abstract)
     }
 
     pub(crate) fn method_is_static<K: TableKey + ?Sized>(&self, class: &K, method: &str) -> bool {
-        self.member_slot(class, method)
-            .and_then(|slot| {
-                self.class_ids
-                    .get(class)
-                    .copied()
-                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
-            })
+        self.method_entry(class, method)
             .is_some_and(|entry| entry.is_static)
     }
 
     pub(crate) fn method_is_final(&self, class: &str, method: &str) -> bool {
-        self.member_slot(class, method)
-            .and_then(|slot| {
-                self.class_ids
-                    .get(class)
-                    .copied()
-                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
-            })
+        self.method_entry(class, method)
             .is_some_and(|entry| entry.is_final)
     }
 
     pub(crate) fn method_is_final_by_phpdoc(&self, class: &str, method: &str) -> bool {
-        self.member_slot(class, method)
-            .and_then(|slot| {
-                self.class_ids
-                    .get(class)
-                    .copied()
-                    .and_then(|id| self.member_entry_by_ref(super::MethodRef::new(id, slot)))
-            })
+        self.method_entry(class, method)
             .is_some_and(|entry| entry.is_final_by_phpdoc)
     }
 
@@ -991,10 +1027,8 @@ impl Registry {
     /// `method` as `owner` declares it (method names resolve
     /// case-insensitively; messages spell them as declared).
     pub(crate) fn declared_method_name(&self, owner: &str, method: &str) -> String {
-        self.method_names(owner)
-            .find(|name| name.eq_ignore_ascii_case(method))
-            .map(ToString::to_string)
-            .unwrap_or_else(|| method.to_string())
+        self.method_entry(owner, method)
+            .map_or_else(|| method.to_string(), |entry| entry.name.to_string())
     }
 
     /// Iterates the methods this class declares or composes, in its local
@@ -1633,8 +1667,11 @@ impl Registry {
     /// replaces a declaration keeps its place in the declaration map; only
     /// result-only names are appended.
     pub fn property_names<'a>(&'a self, class: &str) -> impl Iterator<Item = &'a Name> + 'a {
-        let declared = self.class(class).map(|(_, _, info)| &info.properties);
-        let results = self.class_ids.get(class).copied().map(|id| {
+        let id = self.class_ids.get(class).copied();
+        let declared = id
+            .and_then(|id| self.class_by_id(id))
+            .map(|info| &info.properties);
+        let results = id.map(|id| {
             self.property_results_for_class(id)
                 .filter_map(move |(property, _)| self.property_name_by_ref(property))
         });

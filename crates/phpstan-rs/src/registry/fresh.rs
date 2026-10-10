@@ -300,17 +300,17 @@ impl Registry {
                 let Some(class_id) = registry.class_ids.get(class).copied() else {
                     return found;
                 };
-                for method in registry.method_names(class) {
-                    let Some(sig) = registry.lookup_own_method(class, method) else {
+                for (method, _) in registry.members_with_slots(class_id) {
+                    let Some(sig) = registry.method_by_ref(method) else {
                         continue;
                     };
-                    let Some(slot) = registry.member_slot(class, method) else {
-                        continue;
-                    };
-                    if !registry.method_is_static(class, method) {
+                    if !registry
+                        .member_entry_by_ref(method)
+                        .is_some_and(|entry| entry.is_static)
+                    {
                         continue;
                     }
-                    let declaration = Declaration::Method(MethodRef::new(class_id, slot));
+                    let declaration = Declaration::Method(method);
                     found.extend(registry.fresh_node(bodies, declaration, sig));
                 }
                 found

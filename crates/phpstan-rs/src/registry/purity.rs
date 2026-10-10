@@ -254,8 +254,9 @@ impl Registry {
                 let Some(class_id) = registry.class_ids.get(class_name).copied() else {
                     return per_class;
                 };
-                for method_name in registry.method_names(class_name) {
-                    let Some(sig) = registry.lookup_own_method(class_name, method_name) else {
+                for (method, entry) in registry.members_with_slots(class_id) {
+                    let method_name = &entry.name;
+                    let Some(sig) = registry.method_by_ref(method) else {
                         continue;
                     };
                     if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
@@ -266,10 +267,7 @@ impl Registry {
                     else {
                         continue;
                     };
-                    let Some(slot) = registry.member_slot(class_name, method_name) else {
-                        continue;
-                    };
-                    per_class.push((MethodRef::new(class_id, slot), deps));
+                    per_class.push((method, deps));
                 }
                 per_class
             })

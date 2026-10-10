@@ -1816,8 +1816,9 @@ impl Registry {
                 // its parents' methods to their owners, and the owners
                 // already found (a class's methods mostly share a few).
                 let mut parent_maps: Option<Vec<&FoldedMap<Name>>> = None;
-                for method_name in registry.method_names(class_name) {
-                    let Some(sig) = registry.lookup_own_method(class_name, method_name) else {
+                for (method, entry) in registry.members_with_slots(class_id) {
+                    let method_name = &entry.name;
+                    let Some(sig) = registry.method_by_ref(method) else {
                         continue;
                     };
                     let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
@@ -1988,8 +1989,7 @@ impl Registry {
                         .reconcile_with_native(sig.return_type_native.clone())
                     });
                     if !param_fills.is_empty() || return_fill.is_some() {
-                        let slot = registry.member_slot(class_name, method_name)?;
-                        per_class.push((MethodRef::new(class_id, slot), param_fills, return_fill));
+                        per_class.push((method, param_fills, return_fill));
                     }
                 }
                 (!per_class.is_empty()).then_some((class_id, per_class))
@@ -2461,10 +2461,8 @@ impl Registry {
                     return Vec::new();
                 };
                 registry
-                    .member_entries(class)
-                    .filter_map(|entry| {
-                        let slot = registry.member_slot(class, &entry.name)?;
-                        let method = MethodRef::new(class_id, slot);
+                    .members_with_slots(class_id)
+                    .filter_map(|(method, _)| {
                         let sig = registry.method_by_ref(method)?;
                         Some(sig_fixes(SigId::Method(method), Some(class), sig))
                     })
@@ -2652,10 +2650,8 @@ impl Registry {
                     return Vec::new();
                 };
                 registry
-                    .member_entries(class)
-                    .filter_map(move |entry| {
-                        let slot = registry.member_slot(class, &entry.name)?;
-                        let method = MethodRef::new(class_id, slot);
+                    .members_with_slots(class_id)
+                    .filter_map(move |(method, _)| {
                         let sig = registry.method_by_ref(method)?;
                         let fixed = fixed_sig(registry, sig, &lookup)?;
                         Some((method, fixed))
