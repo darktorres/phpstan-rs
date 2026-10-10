@@ -1965,11 +1965,13 @@ impl Registry {
         if builtin_runs::probed(&name) {
             return Some(name.into());
         }
-        let class = key.class.as_deref()?;
-        self.all_ancestor_names(class).iter().find_map(|ancestor| {
-            let name = format!("{}::{}", ancestor.to_ascii_lowercase(), key.member);
-            builtin_runs::probed(&name).then(|| name.into())
-        })
+        let class = key.class.as_ref()?;
+        self.all_ancestor_names_of(class)
+            .iter()
+            .find_map(|ancestor| {
+                let name = format!("{}::{}", ancestor.to_ascii_lowercase(), key.member);
+                builtin_runs::probed(&name).then(|| name.into())
+            })
     }
 
     /// The builtin classes `class` is: itself and its ancestors, lowercased.
@@ -3305,7 +3307,7 @@ impl Reach<'_> {
                 Transfer::Same => self.ctx.own_class().into_iter().collect(),
                 Transfer::Other(Some(class)) => vec![class.clone()],
                 Transfer::Other(None) | Transfer::Made | Transfer::Static => {
-                    vec![Name::from(&**owner)]
+                    vec![owner.clone()]
                 }
             };
             for receiver in &receivers {

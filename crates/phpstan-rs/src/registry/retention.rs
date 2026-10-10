@@ -576,10 +576,7 @@ impl Registry {
     /// Whether `class`, or a class it extends or uses, declares a property
     /// with a hook that has a body.
     fn has_property_hooks(&self, class: &Name) -> bool {
-        let mut classes: Vec<Name> = self
-            .all_ancestor_names(class.as_str())
-            .into_iter()
-            .collect();
+        let mut classes: Vec<Name> = self.all_ancestor_names_of(class).into_iter().collect();
         classes.push(class.clone());
         classes.iter().any(|class| {
             self.property_names(class.as_str()).any(|property| {

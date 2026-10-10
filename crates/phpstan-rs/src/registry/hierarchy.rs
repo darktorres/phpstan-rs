@@ -754,8 +754,13 @@ impl Registry {
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
     pub(crate) fn all_ancestor_names(&self, class: &str) -> NameSet {
+        self.all_ancestor_names_of(&Name::from(class))
+    }
+
+    /// `all_ancestor_names` for a caller that already holds the interned name.
+    pub(crate) fn all_ancestor_names_of(&self, class: &Name) -> NameSet {
         let mut seen: FxHashSet<Name> = FxHashSet::default();
-        let mut stack: Vec<Name> = vec![Name::from(class)];
+        let mut stack: Vec<Name> = vec![class.clone()];
         let mut result = NameSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
