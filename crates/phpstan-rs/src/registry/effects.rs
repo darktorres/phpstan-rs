@@ -1562,11 +1562,14 @@ impl Registry {
             .collect();
         let methods: Vec<(&Name, &Name, &FunctionReflection)> = registry
             .own_classes_by_id()
-            .flat_map(|(_, class, _)| {
-                registry.method_names(class).filter_map(move |method| {
-                    let sig = registry.lookup_own_method(class, method)?;
-                    (!never_runs(registry, class, method, sig)).then_some((class, method, sig))
-                })
+            .flat_map(|(id, class, _)| {
+                registry
+                    .members_with_slots(id)
+                    .filter_map(move |(at, entry)| {
+                        let method = &entry.name;
+                        let sig = registry.method_by_ref(at)?;
+                        (!never_runs(registry, class, method, sig)).then_some((class, method, sig))
+                    })
             })
             .collect();
         let mut classified: Vec<(EffectIx, Classification<'_>)> = functions
