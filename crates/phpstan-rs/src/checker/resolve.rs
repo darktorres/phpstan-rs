@@ -47,19 +47,24 @@ impl<'a> Checker<'a> {
                     None => resolved.clone(),
                 }
             }
-            _ => Name::from(self.resolve_class_name(name)),
+            Some(resolved) => Name::from(self.canonical_class_name(resolved.as_str())),
+            None => Name::from(name.written.as_str()),
         };
-        debug_assert_eq!(value, Name::from(self.resolve_class_name(name)));
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            value.as_str(),
+            match name.resolved_class() {
+                Some(resolved) => self.canonical_class_name(resolved),
+                None => name.written.to_string(),
+            }
+        );
         value
     }
 
     /// The fully-qualified class a class name written in code names, in
     /// its declared spelling when the class is known.
     pub(crate) fn resolve_class_name(&self, name: &QualifiedName) -> String {
-        match name.resolved_class() {
-            Some(resolved) => self.canonical_class_name(resolved),
-            None => name.written.to_string(),
-        }
+        self.resolve_class_name_value(name).to_string()
     }
 
     /// `name`, a fully-qualified class name, in its declared spelling

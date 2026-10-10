@@ -1,6 +1,6 @@
 use crate::checker::{Checker, TemplateBindings};
 use crate::registry::FunctionReflection;
-use types::Type;
+use types::{Name, Type};
 
 impl<'a> Checker<'a> {
     /// Thin delegation to `Registry::class_template_bindings` - kept
@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
         sig: &'a FunctionReflection,
         class: &str,
         type_args: &[Type],
-        owner: &str,
+        owner: &Name,
     ) -> std::borrow::Cow<'a, FunctionReflection> {
         // `(scope, bindings)` pairs to try, in order - almost always
         // exactly one (`owner` itself, the overwhelmingly common case of
@@ -71,14 +71,14 @@ impl<'a> Checker<'a> {
 
         if self
             .registry
-            .class_by_name(owner)
+            .class(owner).map(|(_, _, c)| c)
             .is_some_and(|c| !c.templates().is_empty())
         {
             let mut bindings = self.class_template_bindings(class, type_args, owner);
             // An erased receiver's template is its declared default
             // (`@template T = 'array'`, so a conditional on `T` resolves),
             // or else its bound: what a value of it is surely known to be.
-            if let Some(info) = self.registry.class_by_name(owner) {
+            if let Some(info) = self.registry.class(owner).map(|(_, _, c)| c) {
                 let bounds = self.registry.effective_template_bounds_by_name(owner);
                 for name in info.templates() {
                     if !bindings.contains_key(name.as_ref())
