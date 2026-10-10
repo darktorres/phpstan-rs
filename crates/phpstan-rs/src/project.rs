@@ -3145,13 +3145,23 @@ impl Project {
             let tree = file
                 .tree()
                 .expect("analyzed file retains its syntax tree for the PHPStan API pass");
-            diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
-                tree.arenas(),
-                file.ast(),
-                &file.line_index,
-                &self.registry,
-                Some(self.package_name(path)),
-            ));
+            let check = || {
+                checker::phpstan_api::check_phpstan_api_usage(
+                    tree.arenas(),
+                    file.ast(),
+                    &file.line_index,
+                    &self.registry,
+                    Some(self.package_name(path)),
+                )
+            };
+            if self.phpstan_api_pass_needed(file) {
+                diagnostics.extend(check());
+            } else {
+                debug_assert!(
+                    check().is_empty(),
+                    "the PHPStan API pass found something in a file it was skipped for"
+                );
+            }
             // `into_diagnostics` above already sorted the checker's own
             // diagnostics into span order - re-sort once more now that
             // `check_phpstan_api_usage`'s own (already span-ordered
@@ -3166,6 +3176,29 @@ impl Project {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Whether the PHPStan API pass can find anything in `file`. It reports
+    /// a name that resolves into the `PHPStan\` namespace, which the file
+    /// spells; a rule that reads a class's ancestry, which a class the
+    /// file declares or refers to has; or a static call whose method a
+    /// PHPStan class declares, whose receiver the file refers to.
+    fn phpstan_api_pass_needed(&self, file: &FileState) -> bool {
+        if file.facts.mentions & checker::phpstan_api::MENTIONS_PHPSTAN != 0 {
+            return true;
+        }
+        if !self.registry.has_phpstan_ancestry() {
+            return false;
+        }
+        let reaches = |class: &Name| self.registry.class_has_phpstan_ancestry(class.as_str());
+        file.classes
+            .iter()
+            .chain(&file.anonymous_classes)
+            .any(reaches)
+            || file.references.iter().any(|key| match key {
+                deps::RefKey::Class(class) => reaches(class),
+                _ => false,
+            })
     }
 
     /// Runs every `rules` entry's own `check_class`/
@@ -3739,6 +3772,7 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
     checker::includes::WATCH,
     crate::registry::bodies::WATCH,
     checker::global_constants::WATCH,
+    checker::phpstan_api::WATCH,
 ]);
 
 /// What the tree `ast` refers to, and what its declarations do: from the

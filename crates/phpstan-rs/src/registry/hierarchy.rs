@@ -632,6 +632,11 @@ impl Registry {
             .collect();
     }
 
+    /// Whether any class reaches a `PHPStan\` name.
+    pub(crate) fn has_phpstan_ancestry(&self) -> bool {
+        !self.phpstan_ancestry.is_empty()
+    }
+
     /// Whether `class` has a name under `PHPStan\` among what it extends,
     /// implements or uses, transitively: the gate of the rules that read
     /// the PHPStan API's use from a class that is part of an extension.
