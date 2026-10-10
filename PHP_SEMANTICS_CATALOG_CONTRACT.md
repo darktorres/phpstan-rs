@@ -162,10 +162,15 @@ no semantic fact for that domain. This prevents a closed native wrapper from
 concealing an unresolved PHP callback.
 
 Coverage entries also name the domains required to justify each result. A
-closed result cannot depend on an open domain, and catalog projections return
-the transitive dependency closure so consumers can retain it in their query.
-During evaluation, newly open child domains propagate through these dependencies
-and widen dependent parent domains instead of leaving them closed.
+closed result cannot depend directly or transitively on an open domain or a
+`NotApplicable` domain. `NotApplicable` contributes no fact and cannot justify a
+closed result. Dependency cycles are invalid regardless of coverage status.
+Catalog projections return the complete transitive dependency closure so
+consumers can retain it in their query. During evaluation, newly open child
+domains propagate through every dependency edge, including edges through
+`NotApplicable` intermediates, and widen dependent parent domains instead of
+leaving them closed. An intermediate `NotApplicable` domain remains
+`NotApplicable`; only the dependent claim is widened.
 
 ## Composition rules
 
@@ -253,6 +258,7 @@ without treating them as established. See R01.7 for the remaining trust rules.
 | A graph labels a domain closed while containing an unknown transfer that affects it, or supplies no coverage/evidence. | Its negative claims are unsupported by the actual transfer graph. | `unknown_transfer_cannot_be_marked_closed_or_reasonless`; `every_domain_requires_a_coverage_decision_and_evidence` |
 | A return refinement drops a possible write or throw effect by declaring a dependency open. | A projected fact is closed only when every required semantic domain is justified, including effects and exceptional outcomes that can change its preconditions. | `graph_rejects_closed_return_coverage_with_open_domain_dependency`; `closed_return_refinement_cannot_drop_an_open_throw_path`; `projection_includes_transitive_domain_dependencies` |
 | A child opens a domain required by the parent return while the parent return remains closed. | Uncertainty propagates through declared semantic dependencies. | `open_child_dependency_opens_the_parent_result_domain` |
+| A closed result depends on a `NotApplicable` domain, or reaches an open domain through an N/A intermediate. | N/A contributes no fact and cannot support a closed result; reachable open uncertainty widens the dependent result across every edge. | `closed_return_cannot_depend_on_not_applicable_domain`; `closed_return_cannot_reach_an_open_domain_through_not_applicable`; `open_dependency_propagates_through_not_applicable_intermediate` |
 | Two closed domains justify each other through a dependency cycle without a fixed-point certificate. | Circular dependency metadata alone provides no independent basis for either negative claim. | `graph_rejects_cyclic_closed_domain_dependencies_without_a_certificate` |
 | A closed wrapper invokes an open child but retains its own closed return coverage, or omits child coverage entirely or by domain. | The wrapper's result may depend on child behavior, so child uncertainty must compose into the result and incomplete metadata must not default to closed. | `open_child_coverage_opens_a_closed_parent_domain`; `incomplete_child_coverage_rejects_the_evaluation`; `omitted_child_coverage_rejects_the_evaluation` |
 | An invoked child marks its invocation domain not applicable while returning a complete coverage vector. | A composed call necessarily has invocation behavior; a full vector cannot make that fact inapplicable. | `invoked_child_cannot_mark_invocation_not_applicable` |

@@ -1213,7 +1213,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV-2: a closed return reaches an open domain through a N/A dependency; remove when fixed"]
     fn closed_return_cannot_reach_an_open_domain_through_not_applicable() {
         let mut catalog = Catalog::default();
         let id = catalog.add_evidence(evidence_record()).unwrap();
@@ -1238,19 +1237,42 @@ mod tests {
             }
         }
         let key = function(b"core", b"strlen");
-        if catalog.add_entry(key.clone(), graph).is_ok() {
-            let selection = catalog.select(&key).unwrap();
-            let returned = selection
-                .graph
-                .coverage
-                .iter()
-                .find(|item| item.domain == Domain::Return)
-                .unwrap();
-            assert!(
-                !matches!(returned.coverage, Coverage::Closed),
-                "closed return depends on an open write"
-            );
-        }
+        assert_eq!(
+            catalog.add_entry(key, graph),
+            Err(CatalogError::Graph(GraphError::ClosedDomainDependsOnOpen {
+                domain: Domain::Return,
+                dependency: Domain::UserWrite,
+            }))
+        );
+    }
+
+    #[test]
+    fn closed_return_cannot_depend_on_not_applicable_domain() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(id);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::Diagnostic);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Diagnostic)
+            .unwrap()
+            .coverage = Coverage::NotApplicable;
+        assert_eq!(
+            catalog.add_entry(function(b"core", b"strlen"), graph),
+            Err(CatalogError::Graph(
+                GraphError::ClosedDomainDependsOnNotApplicable {
+                    domain: Domain::Return,
+                    dependency: Domain::Diagnostic,
+                }
+            ))
+        );
     }
 
     #[test]

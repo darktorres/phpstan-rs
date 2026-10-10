@@ -321,6 +321,7 @@ pub enum GraphError {
     UnknownTransferWithoutOpenCoverage(Domain),
     DuplicateDomainDependency(Domain),
     ClosedDomainDependsOnOpen { domain: Domain, dependency: Domain },
+    ClosedDomainDependsOnNotApplicable { domain: Domain, dependency: Domain },
     UnestablishedAssumption(Domain),
     CyclicDomainDependency(Domain),
     ApplicableDomainMarkedNotApplicable(Domain),
@@ -531,6 +532,31 @@ impl BehaviorGraph {
     }
 }
 
+fn transitive_domain_dependencies(domain: Domain, coverage: &[DomainCoverage]) -> Vec<Domain> {
+    let mut pending = coverage
+        .iter()
+        .find(|item| item.domain == domain)
+        .map_or_else(Vec::new, |item| item.dependencies.clone());
+    let mut seen = vec![domain];
+    let mut dependencies = Vec::new();
+    while let Some(dependency) = pending.pop() {
+        if seen.contains(&dependency) {
+            continue;
+        }
+        seen.push(dependency);
+        dependencies.push(dependency);
+        if let Some(item) = coverage.iter().find(|item| item.domain == dependency) {
+            pending.extend(item.dependencies.iter().copied());
+        }
+    }
+    dependencies.sort_by_key(|dependency| {
+        Domain::ALL
+            .iter()
+            .position(|candidate| candidate == dependency)
+    });
+    dependencies
+}
+
 fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), GraphError> {
     // Assumption IDs have no established meaning outside a validated catalog
     // manifest. A graph alone cannot use one to support closed coverage.
@@ -544,17 +570,6 @@ fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), Graph
                 return Err(GraphError::DuplicateDomainDependency(item.domain));
             }
             dependencies.push(*dependency);
-            if matches!(item.coverage, Coverage::Closed)
-                && coverage.iter().any(|candidate| {
-                    candidate.domain == *dependency
-                        && matches!(candidate.coverage, Coverage::Open { .. })
-                })
-            {
-                return Err(GraphError::ClosedDomainDependsOnOpen {
-                    domain: item.domain,
-                    dependency: *dependency,
-                });
-            }
         }
     }
 
@@ -573,16 +588,9 @@ fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), Graph
             _ => {}
         }
         colors[index] = 1;
-        if let Some(item) = coverage.iter().find(|item| item.domain == domain)
-            && matches!(item.coverage, Coverage::Closed)
-        {
+        if let Some(item) = coverage.iter().find(|item| item.domain == domain) {
             for dependency in &item.dependencies {
-                if coverage.iter().any(|candidate| {
-                    candidate.domain == *dependency
-                        && matches!(candidate.coverage, Coverage::Closed)
-                }) {
-                    visit(*dependency, coverage, colors)?;
-                }
+                visit(*dependency, coverage, colors)?;
             }
         }
         colors[index] = 2;
@@ -591,8 +599,34 @@ fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), Graph
 
     let mut colors = vec![0u8; Domain::ALL.len()];
     for item in coverage {
+        visit(item.domain, coverage, &mut colors)?;
+    }
+
+    for item in coverage {
         if matches!(item.coverage, Coverage::Closed) {
-            visit(item.domain, coverage, &mut colors)?;
+            let dependencies = transitive_domain_dependencies(item.domain, coverage);
+            if let Some(dependency) = dependencies.iter().find(|dependency| {
+                coverage.iter().any(|candidate| {
+                    candidate.domain == **dependency
+                        && matches!(candidate.coverage, Coverage::Open { .. })
+                })
+            }) {
+                return Err(GraphError::ClosedDomainDependsOnOpen {
+                    domain: item.domain,
+                    dependency: *dependency,
+                });
+            }
+            if let Some(dependency) = dependencies.iter().find(|dependency| {
+                coverage.iter().any(|candidate| {
+                    candidate.domain == **dependency
+                        && matches!(candidate.coverage, Coverage::NotApplicable)
+                })
+            }) {
+                return Err(GraphError::ClosedDomainDependsOnNotApplicable {
+                    domain: item.domain,
+                    dependency: *dependency,
+                });
+            }
         }
     }
     Ok(())
@@ -848,7 +882,8 @@ fn propagate_open_dependencies(coverage: &mut [DomainCoverage]) {
             if !matches!(coverage[index].coverage, Coverage::Closed) {
                 continue;
             }
-            let dependencies = coverage[index].dependencies.clone();
+            let domain = coverage[index].domain;
+            let dependencies = transitive_domain_dependencies(domain, coverage);
             let open_dependencies: Vec<_> = dependencies
                 .iter()
                 .filter_map(|dependency| {
@@ -2214,6 +2249,21 @@ mod tests {
         }
     }
 
+    fn dependency_coverage(
+        domain: Domain,
+        coverage: Coverage,
+        dependencies: Vec<Domain>,
+    ) -> DomainCoverage {
+        DomainCoverage {
+            domain,
+            coverage,
+            precision: Precision::Exact,
+            dependencies,
+            evidence: vec![Digest([4; 32])],
+            assumptions: vec![],
+        }
+    }
+
     fn composed_coverage(open_domain: Option<Domain>) -> Vec<DomainCoverage> {
         Domain::ALL
             .into_iter()
@@ -3157,6 +3207,12 @@ mod tests {
             .unwrap();
         returned.coverage = Coverage::Closed;
         returned.dependencies.push(Domain::UserWrite);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::UserWrite)
+            .unwrap()
+            .coverage = Coverage::Closed;
         let mut host = Host {
             nested_open: Some(Domain::UserWrite),
             ..Host::default()
@@ -3175,6 +3231,165 @@ mod tests {
             }
         );
         assert!(returned.dependencies.contains(&Domain::UserWrite));
+    }
+
+    #[test]
+    fn closed_open_and_not_applicable_dependency_pairs_have_explicit_rules() {
+        let open = || Coverage::Open {
+            reasons: vec![Bytes(b"open".to_vec())],
+        };
+        let cases = [
+            (Coverage::Closed, Coverage::Closed, Ok(())),
+            (
+                Coverage::Closed,
+                open(),
+                Err(GraphError::ClosedDomainDependsOnOpen {
+                    domain: Domain::Return,
+                    dependency: Domain::Diagnostic,
+                }),
+            ),
+            (
+                Coverage::Closed,
+                Coverage::NotApplicable,
+                Err(GraphError::ClosedDomainDependsOnNotApplicable {
+                    domain: Domain::Return,
+                    dependency: Domain::Diagnostic,
+                }),
+            ),
+            (open(), Coverage::Closed, Ok(())),
+            (open(), open(), Ok(())),
+            (open(), Coverage::NotApplicable, Ok(())),
+            (Coverage::NotApplicable, Coverage::Closed, Ok(())),
+            (Coverage::NotApplicable, open(), Ok(())),
+            (Coverage::NotApplicable, Coverage::NotApplicable, Ok(())),
+        ];
+        for (parent, dependency, expected) in cases {
+            let coverage = vec![
+                dependency_coverage(Domain::Return, parent, vec![Domain::Diagnostic]),
+                dependency_coverage(Domain::Diagnostic, dependency, vec![]),
+            ];
+            assert_eq!(validate_domain_dependencies(&coverage), expected);
+        }
+    }
+
+    #[test]
+    fn closed_dependency_through_not_applicable_is_checked_transitively() {
+        let coverage = vec![
+            dependency_coverage(Domain::Return, Coverage::Closed, vec![Domain::Diagnostic]),
+            dependency_coverage(
+                Domain::Diagnostic,
+                Coverage::NotApplicable,
+                vec![Domain::UserWrite],
+            ),
+            open_coverage(Domain::UserWrite, b"unmodeled write"),
+        ];
+        assert_eq!(
+            validate_domain_dependencies(&coverage),
+            Err(GraphError::ClosedDomainDependsOnOpen {
+                domain: Domain::Return,
+                dependency: Domain::UserWrite,
+            })
+        );
+
+        let no_open_leaf = vec![
+            dependency_coverage(Domain::Return, Coverage::Closed, vec![Domain::Diagnostic]),
+            dependency_coverage(Domain::Diagnostic, Coverage::NotApplicable, vec![]),
+        ];
+        assert_eq!(
+            validate_domain_dependencies(&no_open_leaf),
+            Err(GraphError::ClosedDomainDependsOnNotApplicable {
+                domain: Domain::Return,
+                dependency: Domain::Diagnostic,
+            })
+        );
+    }
+
+    #[test]
+    fn open_dependency_propagates_through_not_applicable_intermediate() {
+        let mut coverage = vec![
+            dependency_coverage(Domain::Return, Coverage::Closed, vec![Domain::Diagnostic]),
+            dependency_coverage(
+                Domain::Diagnostic,
+                Coverage::NotApplicable,
+                vec![Domain::UserWrite],
+            ),
+            open_coverage(Domain::UserWrite, b"unmodeled write"),
+        ];
+        propagate_open_dependencies(&mut coverage);
+        assert_eq!(
+            coverage
+                .iter()
+                .find(|item| item.domain == Domain::Return)
+                .unwrap()
+                .coverage,
+            Coverage::Open {
+                reasons: vec![Bytes(b"unmodeled write".to_vec())]
+            }
+        );
+        assert_eq!(validate_domain_dependencies(&coverage), Ok(()));
+
+        let mut composed = coverage_for(&[Domain::Return]);
+        composed
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::Diagnostic);
+        composed
+            .iter_mut()
+            .find(|item| item.domain == Domain::Diagnostic)
+            .unwrap()
+            .dependencies
+            .push(Domain::UserWrite);
+        let mut child = coverage_for(&[]);
+        child
+            .iter_mut()
+            .find(|item| item.domain == Domain::UserWrite)
+            .unwrap()
+            .coverage = Coverage::Open {
+            reasons: vec![Bytes(b"child write unknown".to_vec())],
+        };
+        merge_coverage(&mut composed, &child).unwrap();
+        assert_eq!(
+            composed
+                .iter()
+                .find(|item| item.domain == Domain::Return)
+                .unwrap()
+                .coverage,
+            Coverage::Open {
+                reasons: vec![Bytes(b"child write unknown".to_vec())]
+            }
+        );
+        assert_eq!(
+            composed
+                .iter()
+                .find(|item| item.domain == Domain::Diagnostic)
+                .unwrap()
+                .coverage,
+            Coverage::NotApplicable
+        );
+    }
+
+    #[test]
+    fn dependency_cycles_through_open_and_not_applicable_domains_are_rejected() {
+        let coverage = vec![
+            dependency_coverage(
+                Domain::Return,
+                Coverage::Open {
+                    reasons: vec![Bytes(b"open".to_vec())],
+                },
+                vec![Domain::Diagnostic],
+            ),
+            dependency_coverage(
+                Domain::Diagnostic,
+                Coverage::NotApplicable,
+                vec![Domain::Return],
+            ),
+        ];
+        assert_eq!(
+            validate_domain_dependencies(&coverage),
+            Err(GraphError::CyclicDomainDependency(Domain::Return))
+        );
     }
 
     #[test]
