@@ -414,3 +414,339 @@ function theCallerSees_anExecResultCodeOverQuietObjects(): void
     anExecResultCodeOverQuietObjects();
     assertType('null', Flag::$value);
 }
+
+function anArrayPopOfQuietObjects(): void
+{
+    $l = [new Quiet()]; array_pop($l);
+}
+
+function theCallerSees_anArrayPopOfQuietObjects(): void
+{
+    Flag::$value = null;
+    anArrayPopOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function anArrayPopOfLoudObjects(): void
+{
+    $l = [new Resets()]; array_pop($l);
+}
+
+function theCallerSees_anArrayPopOfLoudObjects(): void
+{
+    Flag::$value = null;
+    anArrayPopOfLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function anArrayPopKeptInAVariableOfQuietObjects(): void
+{
+    $l = [new Quiet()]; $x = array_pop($l);
+}
+
+function theCallerSees_anArrayPopKeptInAVariableOfQuietObjects(): void
+{
+    Flag::$value = null;
+    anArrayPopKeptInAVariableOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function anArrayShiftOfQuietObjects(): void
+{
+    $l = [new Quiet()]; array_shift($l);
+}
+
+function theCallerSees_anArrayShiftOfQuietObjects(): void
+{
+    Flag::$value = null;
+    anArrayShiftOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function anArrayShiftOfNumbers(): void
+{
+    $l = [1, 2]; array_shift($l);
+}
+
+function theCallerSees_anArrayShiftOfNumbers(): void
+{
+    Flag::$value = null;
+    anArrayShiftOfNumbers();
+    assertType('null', Flag::$value);
+}
+
+function anEndOfQuietObjects(): void
+{
+    $l = [new Quiet()]; end($l);
+}
+
+function theCallerSees_anEndOfQuietObjects(): void
+{
+    Flag::$value = null;
+    anEndOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aResetOfQuietObjects(): void
+{
+    $l = [new Quiet()]; reset($l);
+}
+
+function theCallerSees_aResetOfQuietObjects(): void
+{
+    Flag::$value = null;
+    aResetOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aNextOfQuietObjects(): void
+{
+    $l = [new Quiet()]; next($l); prev($l); current($l);
+}
+
+function theCallerSees_aNextOfQuietObjects(): void
+{
+    Flag::$value = null;
+    aNextOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aSpliceOfQuietObjects(): void
+{
+    $l = [new Quiet(), 1]; array_splice($l, 0, 1);
+}
+
+function theCallerSees_aSpliceOfQuietObjects(): void
+{
+    Flag::$value = null;
+    aSpliceOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aSpliceOfLoudObjects(): void
+{
+    $l = [new Resets(), 1]; array_splice($l, 0, 1);
+}
+
+function theCallerSees_aSpliceOfLoudObjects(): void
+{
+    Flag::$value = null;
+    aSpliceOfLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function aPopOfNestedQuietArrays(): void
+{
+    $l = [[new Quiet()]]; array_pop($l);
+}
+
+function theCallerSees_aPopOfNestedQuietArrays(): void
+{
+    Flag::$value = null;
+    aPopOfNestedQuietArrays();
+    assertType('null', Flag::$value);
+}
+
+function aPopOfNestedLoudArrays(): void
+{
+    $l = [[new Resets()]]; array_pop($l);
+}
+
+function theCallerSees_aPopOfNestedLoudArrays(): void
+{
+    Flag::$value = null;
+    aPopOfNestedLoudArrays();
+    assertType('int|null', Flag::$value);
+}
+
+function aPopInALoopThatAppendsLoudObjects(): void
+{
+    $l = []; for ($i = 0; $i < 2; $i++) { array_pop($l); $l[] = new Resets(); }
+}
+
+function theCallerSees_aPopInALoopThatAppendsLoudObjects(): void
+{
+    Flag::$value = null;
+    aPopInALoopThatAppendsLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function aPopInALoopThatAppendsQuietObjects(): void
+{
+    $l = []; for ($i = 0; $i < 2; $i++) { array_pop($l); $l[] = new Quiet(); }
+}
+
+function theCallerSees_aPopInALoopThatAppendsQuietObjects(): void
+{
+    Flag::$value = null;
+    aPopInALoopThatAppendsQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aPopOfAnArrayFilledLater(): void
+{
+    $l = []; array_pop($l); $l[] = new Quiet();
+}
+
+function theCallerSees_aPopOfAnArrayFilledLater(): void
+{
+    Flag::$value = null;
+    aPopOfAnArrayFilledLater();
+    assertType('null', Flag::$value);
+}
+
+function aWalkOverQuietObjects(): void
+{
+    $l = [new Quiet()]; array_walk($l, function ($x) {});
+}
+
+function theCallerSees_aWalkOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aWalkOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aWalkOverLoudObjects(): void
+{
+    $l = [new Resets()]; array_walk($l, function ($x) {});
+}
+
+function theCallerSees_aWalkOverLoudObjects(): void
+{
+    Flag::$value = null;
+    aWalkOverLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function aRecursiveWalkOverQuietObjects(): void
+{
+    $l = [[new Quiet()]]; array_walk_recursive($l, function ($x) {});
+}
+
+function theCallerSees_aRecursiveWalkOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aRecursiveWalkOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aWalkWithAByReferenceCallbackStoringLoudObjects(): void
+{
+    $l = [1]; array_walk($l, function (&$x) { $x = new Resets(); });
+}
+
+function theCallerSees_aWalkWithAByReferenceCallbackStoringLoudObjects(): void
+{
+    Flag::$value = null;
+    aWalkWithAByReferenceCallbackStoringLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function countOfAnArrayLiteralAfterQuietObjects(): void
+{
+    $l = [new Quiet()]; count([]); implode(',', []);
+}
+
+function theCallerSees_countOfAnArrayLiteralAfterQuietObjects(): void
+{
+    Flag::$value = null;
+    countOfAnArrayLiteralAfterQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function countOfAnArrayLiteralAfterLoudObjects(): void
+{
+    $l = [new Resets()]; count([]);
+}
+
+function theCallerSees_countOfAnArrayLiteralAfterLoudObjects(): void
+{
+    Flag::$value = null;
+    countOfAnArrayLiteralAfterLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function getoptWithAnArrayLiteral(): void
+{
+    $l = [new Quiet()]; getopt('a', ['b']);
+}
+
+function theCallerSees_getoptWithAnArrayLiteral(): void
+{
+    Flag::$value = null;
+    getoptWithAnArrayLiteral();
+    assertType('null', Flag::$value);
+}
+
+function sscanfResultAfterQuietObjects(): void
+{
+    $l = [new Quiet()]; $r = sscanf('1', '%d');
+}
+
+function theCallerSees_sscanfResultAfterQuietObjects(): void
+{
+    Flag::$value = null;
+    sscanfResultAfterQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function sscanfResultAfterLoudObjects(): void
+{
+    $l = [new Resets()]; $r = sscanf('1', '%d');
+}
+
+function theCallerSees_sscanfResultAfterLoudObjects(): void
+{
+    Flag::$value = null;
+    sscanfResultAfterLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function settypeToObjectOfQuietObjects(): void
+{
+    $v = [new Quiet()]; settype($v, 'object');
+}
+
+function theCallerSees_settypeToObjectOfQuietObjects(): void
+{
+    Flag::$value = null;
+    settypeToObjectOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function settypeToObjectOfLoudObjects(): void
+{
+    $v = [new Resets()]; settype($v, 'object');
+}
+
+function theCallerSees_settypeToObjectOfLoudObjects(): void
+{
+    Flag::$value = null;
+    settypeToObjectOfLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function settypeToArrayOfLoudObjects(): void
+{
+    $v = [new Resets()]; settype($v, 'array');
+}
+
+function theCallerSees_settypeToArrayOfLoudObjects(): void
+{
+    Flag::$value = null;
+    settypeToArrayOfLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function settypeToObjectThenOverwritten(): void
+{
+    $v = [new Resets()]; settype($v, 'object'); $v = 1;
+}
+
+function theCallerSees_settypeToObjectThenOverwritten(): void
+{
+    Flag::$value = null;
+    settypeToObjectThenOverwritten();
+    assertType('int|null', Flag::$value);
+}

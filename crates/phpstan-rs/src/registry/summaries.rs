@@ -333,6 +333,11 @@ pub(crate) enum Origin {
     /// The objects held in the elements, at any depth, of an array from the
     /// origin.
     Elements(Box<Origin>),
+    /// What a call of the function takes out of the arrays from the first
+    /// origins, and out of the objects the second hold: an element, or an
+    /// array of elements, when the function is the builtin that does so
+    /// (`takes_elements`); what the callee returns otherwise.
+    Taken(Callee, Box<[Origin]>, Box<[Origin]>),
 }
 
 impl PartialEq for Narrowing {
@@ -376,6 +381,7 @@ impl PartialEq for Origin {
             (Origin::ClassConstant(a, x), Origin::ClassConstant(b, y)) => a == b && x == y,
             (Origin::Declared(a), Origin::Declared(b)) => a.canonical_text() == b.canonical_text(),
             (Origin::Elements(a), Origin::Elements(b)) => a == b,
+            (Origin::Taken(a, x, p), Origin::Taken(b, y, q)) => a == b && x == y && p == q,
             _ => false,
         }
     }
@@ -400,6 +406,11 @@ impl Hash for Origin {
             }
             Origin::Declared(ty) => ty.canonical_text().hash(state),
             Origin::Elements(inner) => inner.hash(state),
+            Origin::Taken(callee, from, held) => {
+                callee.hash(state);
+                from.hash(state);
+                held.hash(state);
+            }
         }
     }
 }
@@ -417,7 +428,18 @@ impl Origin {
         match self {
             Origin::Place(_) | Origin::Returned(_) => false,
             Origin::Elements(inner) => inner.context_free(),
+            Origin::Taken(..) => false,
             _ => true,
+        }
+    }
+
+    /// Whether it is, or is the elements of, what a call takes out of an
+    /// array.
+    fn mentions_taken(&self) -> bool {
+        match self {
+            Origin::Taken(..) => true,
+            Origin::Elements(inner) => inner.mentions_taken(),
+            _ => false,
         }
     }
 
@@ -553,15 +575,29 @@ fn origins_of(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
             | ExprKind::DynamicStaticPropertyFetch(..) => {
                 vec![Origin::Place(Place::of(arenas, e.id)?)]
             }
-            ExprKind::Call(callee, _) => match arenas
+            ExprKind::Call(callee, args) => match arenas
                 .peeled(*callee)
                 .and_then(|id| arenas.expr(id))
                 .map(|callee| &callee.kind)
             {
                 Some(ExprKind::Name(name)) => {
-                    vec![Origin::Returned(Callee::Function(
-                        arenas.qualified_name(name)?.clone(),
-                    ))]
+                    let name = arenas.qualified_name(name)?.clone();
+                    let taken = takes_elements(&name.written)
+                        .then(|| arenas.args(args.clone()))
+                        .and_then(|args| match args {
+                            [first, ..] if !first.spread && first.name.is_none() => {
+                                origins_of(arenas, first.value)
+                            }
+                            _ => None,
+                        });
+                    match taken {
+                        Some(from) => vec![Origin::Taken(
+                            Callee::Function(name),
+                            from.into(),
+                            Box::new([]),
+                        )],
+                        None => vec![Origin::Returned(Callee::Function(name))],
+                    }
                 }
                 Some(ExprKind::Variable(name)) if **name != *"this" => {
                     vec![Origin::Returned(Callee::Value(Some(name.clone())))]
@@ -671,6 +707,24 @@ fn element_origins(origins: Vec<Origin>) -> Option<Vec<Origin>> {
             _ => None,
         })
         .collect()
+}
+
+/// Whether `name`, as written, is a builtin that returns an element of its
+/// first argument, an array of them, or the elements it removes from it.
+pub(crate) fn takes_elements(name: &str) -> bool {
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    [
+        "array_pop",
+        "array_shift",
+        "array_splice",
+        "reset",
+        "end",
+        "next",
+        "prev",
+        "current",
+    ]
+    .iter()
+    .any(|taker| name.eq_ignore_ascii_case(taker))
 }
 
 /// Whether the value `e` evaluates to may be a string, as an operand of a
@@ -1906,6 +1960,90 @@ impl Summarizer<'_> {
         })
     }
 
+    /// Every `Taken` origin the scope holds, taking from the variables it
+    /// tracks the contents of what they hold at the end of the walk.
+    fn resolve_taken(&mut self) {
+        let has = |origins: &[Origin]| origins.iter().any(Origin::mentions_taken);
+        let names: Vec<Name> = self.scope.origins.keys().cloned().collect();
+        for name in names {
+            for contents in [false, true] {
+                let map = if contents {
+                    &self.scope.contents
+                } else {
+                    &self.scope.origins
+                };
+                let Some(Some(origins)) = map.get(&name) else {
+                    continue;
+                };
+                if !has(origins) {
+                    continue;
+                }
+                let resolved = self.take_known_contents(origins.clone());
+                let map = if contents {
+                    &mut self.scope.contents
+                } else {
+                    &mut self.scope.origins
+                };
+                map.insert(name.clone(), Some(resolved));
+            }
+        }
+        for index in 0..self.scope.calls.len() {
+            let Callee::Implicit {
+                on: Some(on),
+                operation,
+            } = &self.scope.calls[index].callee
+            else {
+                continue;
+            };
+            if !has(on) {
+                continue;
+            }
+            let operation = operation.clone();
+            let on = self.take_known_contents(on.to_vec()).into_boxed_slice();
+            self.scope.calls[index].callee = Callee::Implicit {
+                on: Some(on),
+                operation,
+            };
+        }
+    }
+
+    /// The arrays a `Taken` origin takes from that are variables the walk
+    /// tracks the contents of hold what it takes: the origins of those.
+    fn take_known_contents(&self, origins: Vec<Origin>) -> Vec<Origin> {
+        origins
+            .into_iter()
+            .map(|origin| self.take_known_contents_of(origin))
+            .collect()
+    }
+
+    fn take_known_contents_of(&self, origin: Origin) -> Origin {
+        match origin {
+            Origin::Elements(inner) if inner.mentions_taken() => {
+                Origin::Elements(Box::new(self.take_known_contents_of(*inner)))
+            }
+            Origin::Taken(callee, from, held) => {
+                let mut arrays = Vec::new();
+                let mut held = held.to_vec();
+                for array in from.iter() {
+                    let tracked = match array {
+                        Origin::Place(Place {
+                            root: Root::Variable(Some(name)),
+                            steps,
+                            ..
+                        }) if steps.is_empty() => self.scope.contents.get(name),
+                        _ => None,
+                    };
+                    match tracked {
+                        Some(Some(contents)) => held.extend(contents.iter().cloned()),
+                        _ => arrays.push(array.clone()),
+                    }
+                }
+                Origin::Taken(callee, arrays.into(), held.into())
+            }
+            origin => origin,
+        }
+    }
+
     /// The object `id` is, as far as the guards around the walk show.
     fn receiver(&self, arenas: &NodeArenas, id: ExprId) -> Receiver {
         let receiver = receiver(arenas, id);
@@ -2085,6 +2223,7 @@ impl Summarizer<'_> {
     /// holds.
     fn merge_references(&mut self) {
         self.merge_element_refs();
+        self.resolve_taken();
     }
 
     fn merge_element_refs(&mut self) {
@@ -2345,7 +2484,9 @@ impl Summarizer<'_> {
             }
             if let Some(place) = self.place_read(arenas, arg.value) {
                 places.push((at, place));
-            } else if holds_no_object(arenas, arg.value) {
+            } else if holds_no_object(arenas, arg.value)
+                || self.array_holds_no_object(arenas, arg.value)
+            {
                 objectless.push(at);
             }
         }
@@ -2358,6 +2499,20 @@ impl Summarizer<'_> {
             callables: callables.into_iter().collect(),
             fills,
         });
+    }
+
+    /// Whether the value `id` is an array literal that holds no object at any
+    /// depth.
+    fn array_holds_no_object(&self, arenas: &NodeArenas, id: ExprId) -> bool {
+        matches!(
+            arenas
+                .peeled(id)
+                .and_then(|id| arenas.expr(id))
+                .map(|e| &e.kind),
+            Some(ExprKind::ArrayLiteral(_))
+        ) && self
+            .contents_of(arenas, id)
+            .is_some_and(|contents| contents.iter().all(Origin::runs_nothing))
     }
 
     /// What dies where `lhs` is assigned over: the value it held and the
@@ -2442,8 +2597,9 @@ impl Summarizer<'_> {
             let tracked = self.scope.contents.contains_key(&variable);
             let followed = match fill {
                 Fill::Overwrites | Fill::Appends => true,
-                Fill::Settype => settype_to_scalar(arenas, args),
+                Fill::Settype => settype_to(arenas, args).is_some(),
                 Fill::Keeps | Fill::Stores(_) | Fill::Splice => tracked,
+                Fill::Walk => tracked && walk_takes_by_value(arenas, args),
                 Fill::Exec => unreachable!(),
             };
             if !followed {
@@ -2454,7 +2610,7 @@ impl Summarizer<'_> {
         let mut at = Vec::with_capacity(writes.len());
         for (position, variable, fill, value) in writes {
             match fill {
-                Fill::Keeps => {}
+                Fill::Keeps | Fill::Walk => {}
                 Fill::Stores(from) => {
                     let stored = self.stored_by(arenas, &args[from.min(args.len())..], false);
                     self.note_contents(&variable, stored);
@@ -2462,6 +2618,17 @@ impl Summarizer<'_> {
                 Fill::Splice => {
                     let stored = self.stored_by(arenas, &args[3.min(args.len())..], true);
                     self.note_contents(&variable, stored);
+                }
+                Fill::Settype if settype_to(arenas, args) == Some(SettypeTo::Object) => {
+                    // An object stays itself; an array becomes a `stdClass`
+                    // holding its elements, which the variable still holds.
+                    let class = arenas.expr_span(value).map(|span| QualifiedName {
+                        written: Name::from("stdClass"),
+                        resolved: ResolvedName::Exact(Name::from("stdClass")),
+                        span,
+                    });
+                    self.write(arenas, value, None, Some(vec![Origin::New(class)]));
+                    self.reassign(arenas, value);
                 }
                 Fill::Overwrites | Fill::Settype => {
                     self.destroy_overwritten(arenas, value);
@@ -2794,6 +2961,9 @@ enum Fill {
     /// `settype`, which writes no object unless it is given `object` or
     /// `array`.
     Settype,
+    /// `array_walk`, which writes what its callback assigns to the elements
+    /// it takes by reference, so nothing when it takes none.
+    Walk,
 }
 
 /// The by-reference arguments of a builtin, positions `first` to `last`, and
@@ -2819,6 +2989,7 @@ pub(crate) fn filler(name: &str) -> Option<Filler> {
         | "krsort" | "natsort" | "natcasesort" | "shuffle" | "array_pop" | "array_shift"
         | "reset" | "end" | "next" | "prev" => at(0, 0, Fill::Keeps),
         "array_multisort" => at(0, usize::MAX, Fill::Keeps),
+        "array_walk" | "array_walk_recursive" => at(0, 0, Fill::Walk),
         "array_splice" => at(0, 0, Fill::Splice),
         "preg_match" | "preg_match_all" | "similar_text" | "getopt" | "is_callable" => {
             at(2, 2, Fill::Overwrites)
@@ -2835,24 +3006,62 @@ pub(crate) fn filler(name: &str) -> Option<Filler> {
     }
 }
 
-/// Whether the second argument of a `settype` call is a literal naming a type
-/// that holds no object.
-fn settype_to_scalar(arenas: &NodeArenas, args: &[Arg]) -> bool {
+/// Whether the second argument of an `array_walk` call is a closure or an
+/// arrow function that takes none of its parameters by reference.
+fn walk_takes_by_value(arenas: &NodeArenas, args: &[Arg]) -> bool {
+    let Some(callback) = args
+        .get(1)
+        .and_then(|arg| arenas.peeled(arg.value))
+        .and_then(|id| arenas.expr(id))
+    else {
+        return false;
+    };
+    let params = match &callback.kind {
+        ExprKind::Closure(id) => match arenas.closure(*id) {
+            Some(ClosurePayload::Closure(closure)) => closure.params.clone(),
+            _ => return false,
+        },
+        ExprKind::ArrowFn(id) => match arenas.closure(*id) {
+            Some(ClosurePayload::ArrowFn(arrow)) => arrow.params.clone(),
+            _ => return false,
+        },
+        _ => return false,
+    };
+    arenas.params(params).iter().all(|param| !param.by_ref)
+}
+
+/// What a `settype` call turns its variable into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettypeTo {
+    Scalar,
+    Object,
+}
+
+/// What the second argument of a `settype` call, a literal, names.
+fn settype_to(arenas: &NodeArenas, args: &[Arg]) -> Option<SettypeTo> {
     let Some(ExprKind::Literal(Literal::String(payload))) = args
         .get(1)
         .and_then(|arg| arenas.peeled(arg.value))
         .and_then(|id| arenas.expr(id))
         .map(|e| &e.kind)
     else {
-        return false;
+        return None;
     };
-    arenas.string_bytes(payload).is_some_and(|bytes| {
-        [
-            "int", "integer", "float", "double", "string", "bool", "boolean", "null",
-        ]
-        .iter()
-        .any(|ty| bytes.eq_ignore_ascii_case(ty.as_bytes()))
-    })
+    let bytes = arenas.string_bytes(payload)?;
+    let is = |names: &[&str]| {
+        names
+            .iter()
+            .any(|n| bytes.eq_ignore_ascii_case(n.as_bytes()))
+    };
+    if is(&[
+        "int", "integer", "float", "double", "string", "bool", "boolean", "null",
+    ]) {
+        Some(SettypeTo::Scalar)
+    } else if is(&["object"]) {
+        Some(SettypeTo::Object)
+    } else {
+        None
+    }
 }
 
 fn plain_variable(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
@@ -3763,6 +3972,7 @@ syntax::canonical_enum!(Origin {
     ClassConstant(class, constant),
     Declared(ty),
     Elements(inner),
+    Taken(callee, from, held),
 });
 
 syntax::canonical_enum!(ArgAt {

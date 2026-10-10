@@ -4625,6 +4625,7 @@ impl<'r> Resolve<'r> {
 fn reads_variables(origin: &Origin) -> bool {
     match origin {
         Origin::Elements(inner) => reads_variables(inner),
+        Origin::Taken(_, from, held) => from.iter().chain(held.iter()).any(reads_variables),
         Origin::Place(place) => matches!(place.root, Root::Variable(Some(_))),
         Origin::Returned(Callee::Method { receiver, .. }) => {
             matches!(receiver, Receiver::Variable(_) | Receiver::Origins(_))
@@ -5389,6 +5390,7 @@ impl<'r> Level<'r> {
             ),
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::Elements(inner) => (self.elements_holder(inner), false),
+            Origin::Taken(callee, from, held) => (self.taken_holder(callee, from, held), false),
             Origin::New(Some(class)) => (
                 self.made_holder(
                     named_classes(registry, self.class_name(), class).unwrap_or_default(),
@@ -5476,8 +5478,29 @@ impl<'r> Level<'r> {
                     .map_or(Holder::Unknown, elements_holder_of)
             }
             Origin::Elements(inner) => self.elements_holder(inner),
+            Origin::Taken(callee, from, held) => self.taken_holder(callee, from, held),
             _ => Holder::Unknown,
         }
+    }
+
+    /// What a call of `callee` takes out of the arrays from `from`: their
+    /// elements when it is a builtin that does so, else what it returns.
+    fn taken_holder(&self, callee: &Callee, from: &[Origin], held: &[Origin]) -> Holder {
+        let takes = match callee {
+            Callee::Function(name) => self
+                .registry
+                .resolve_function(name)
+                .is_some_and(|(resolved, _)| crate::registry::summaries::takes_elements(resolved)),
+            _ => false,
+        };
+        if !takes {
+            return self.returned_holder(callee);
+        }
+        let found = held.iter().fold(Holder::none(), |all, origin| {
+            all.join(self.origin_holder(origin).0)
+        });
+        from.iter()
+            .fold(found, |all, origin| all.join(self.elements_holder(origin)))
     }
 
     /// The object what a call of `callee` returns may be, by the return
@@ -5563,6 +5586,14 @@ impl<'r> Level<'r> {
         let registry = self.registry;
         match callee {
             Callee::Function(name) => match registry.resolve_function(name) {
+                // They return strings, numbers and null, whatever their
+                // declared type says.
+                Some((resolved, _))
+                    if resolved.eq_ignore_ascii_case("sscanf")
+                        || resolved.eq_ignore_ascii_case("fscanf") =>
+                {
+                    Holder::none()
+                }
                 Some((_, sig)) => of(sig.return_type()),
                 // A call to no function throws.
                 None => Holder::none(),
