@@ -5,3 +5,4 @@ mod helpers;
 mod locals_keys;
 mod method_memo;
 mod narrowing;
+mod walk_gates;
