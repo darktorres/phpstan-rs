@@ -320,11 +320,11 @@ impl<'p> Resolver<'p> {
         // form: a path-repository package is a `vendor/<name>` symlink to a
         // directory outside `vendor/`, and still belongs to vendor context.
         let resolved = self.canonical(raw)?;
-        if resolved.starts_with(self.vendor_dir) {
+        if is_within(&resolved, self.vendor_dir) {
             return Some(resolved);
         }
         let lexical = lexically_normalized(raw);
-        (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&self.vendor_as_written))
+        (is_within(&lexical, self.vendor_dir) || is_within(&lexical, &self.vendor_as_written))
             .then_some(lexical)
     }
 
@@ -477,6 +477,22 @@ fn path_of(bytes: &[u8]) -> &Path {
 #[cfg(not(unix))]
 fn path_of(bytes: &[u8]) -> &Path {
     Path::new(std::str::from_utf8(bytes).unwrap_or_default())
+}
+
+/// `path.starts_with(root)` for two normalised paths (no `.`, `..`, doubled
+/// or trailing separators), as a byte comparison: the root's bytes, then the
+/// end of the path or a separator.
+#[cfg(unix)]
+fn is_within(path: &Path, root: &Path) -> bool {
+    let path = path.as_os_str().as_encoded_bytes();
+    let root = root.as_os_str().as_encoded_bytes();
+    path.starts_with(root)
+        && (path.len() == root.len() || root.last() == Some(&b'/') || path[root.len()] == b'/')
+}
+
+#[cfg(not(unix))]
+fn is_within(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
 }
 
 /// `path` with `.` and `..` components folded away, without resolving
