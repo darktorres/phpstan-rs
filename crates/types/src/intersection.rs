@@ -22,11 +22,12 @@ impl Relation<'_> {
     /// members sharing no value make `never`.
     pub fn intersect(&self, members: Vec<Type>) -> Type {
         syntax::stack::guard(|| {
-            let mut flat: Vec<Type> = Vec::new();
+            let mut flat: Vec<Type> = Vec::with_capacity(members.len());
             for member in members {
-                match member.into_repr() {
-                    Repr::Intersection(inner) => flat.extend(inner),
-                    other => flat.push(Type::new(other)),
+                if let Repr::Intersection(inner) = member.repr() {
+                    flat.extend(inner.iter().cloned());
+                } else {
+                    flat.push(member);
                 }
             }
             if flat.contains(&Type::never()) {
@@ -75,18 +76,18 @@ impl Relation<'_> {
                     });
                     continue;
                 }
-                match member.into_repr() {
+                match member.repr() {
                     Repr::Array(key, value) => {
                         array = Some(match array {
-                            None => (Type::clone(&key), Type::clone(&value)),
+                            None => (key.clone(), value.clone()),
                             Some((k, v)) => (
-                                self.narrower(k, Type::clone(&key)),
-                                self.narrower(v, Type::clone(&value)),
+                                self.narrower(k, key.clone()),
+                                self.narrower(v, value.clone()),
                             ),
                         });
                     }
                     Repr::ArrayShape(s) => {
-                        let s = std::sync::Arc::unwrap_or_clone(s);
+                        let s = Shape::clone(s);
                         shape = match shape {
                             None => Some(s),
                             Some(acc) => match self.intersect_shapes(&acc, &s) {
@@ -95,10 +96,9 @@ impl Relation<'_> {
                             },
                         };
                     }
-                    other => {
-                        let other = Type::new(other);
-                        if !rest.contains(&other) {
-                            rest.push(other);
+                    _ => {
+                        if !rest.contains(&member) {
+                            rest.push(member);
                         }
                     }
                 }
@@ -181,9 +181,9 @@ impl Relation<'_> {
             Repr::Union(ms) => ms.iter().collect(),
             _ => vec![native],
         };
-        let inferred_members = match inferred.into_repr() {
-            Repr::Union(ms) => ms,
-            other => vec![Type::new(other)],
+        let inferred_members = match inferred.repr() {
+            Repr::Union(ms) => ms.clone(),
+            _ => vec![inferred],
         };
         let mut kept: Vec<Type> = Vec::new();
         for m in inferred_members {

@@ -189,13 +189,12 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
         }
         let mut distinct = DistinctMembers::default();
         for operand in operands {
-            match operand.into_repr() {
-                Repr::Union(inner) => {
-                    for member in inner {
-                        distinct.insert(member);
-                    }
+            if let Repr::Union(inner) = operand.repr() {
+                for member in inner {
+                    distinct.insert(member.clone());
                 }
-                other => distinct.insert(Type::new(other)),
+            } else {
+                distinct.insert(operand);
             }
         }
         let mut members = distinct.into_members();
