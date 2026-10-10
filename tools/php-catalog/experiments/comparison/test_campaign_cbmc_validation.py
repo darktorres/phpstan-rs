@@ -34,6 +34,39 @@ class CbmcValidationTests(unittest.TestCase):
                     CAMPAIGN.CBMC_EXPECTATIONS[name]['command_exit_code'],
                 )
 
+    def test_property_digest_is_independent_of_the_checkout_that_ran_cbmc(self):
+        # A transcript records the checkout where CBMC ran. Moving that root
+        # elsewhere must not change the digest, or CI checkouts would fail.
+        for name, document in self.references.items():
+            with self.subTest(name=name):
+                moved = json.loads(
+                    json.dumps(document).replace(
+                        '/home/torres/projects/phpstan-rs-master3',
+                        '/home/ci/work/another-checkout',
+                    )
+                )
+                self.assertIn('/home/ci/work/another-checkout', json.dumps(moved))
+                self.assertEqual(
+                    CAMPAIGN._property_records_digest(moved),
+                    CAMPAIGN._property_records_digest(document),
+                )
+
+    def test_property_digest_refuses_a_transcript_that_names_two_roots(self):
+        document = copy.deepcopy(self.references['cbmc-contracts'])
+        for block in document:
+            for prop in block.get('result', []):
+                location = prop.get('sourceLocation', {})
+                if location.get('file', '').startswith('/home/'):
+                    location['file'] = '/elsewhere/tools/php-catalog/experiments/comparison/contracts.c'
+                    break
+            else:
+                continue
+            break
+        self.assertNotEqual(
+            CAMPAIGN._property_records_digest(document),
+            CAMPAIGN._property_records_digest(self.references['cbmc-contracts']),
+        )
+
     def test_missing_property_is_rejected(self):
         document = copy.deepcopy(self.references['cbmc-contracts'])
         for block in document:

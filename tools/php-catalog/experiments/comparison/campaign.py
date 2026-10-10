@@ -78,28 +78,39 @@ def _cbmc_summary(document):
     return properties, prover_statuses[0], verification_messages[0]
 
 
+CHECKOUT_MARKER = '/tools/php-catalog/'
+
+
+def _checkout_root(path):
+    """The checkout that holds an absolute path, identified by its tools/ suffix."""
+    if isinstance(path, str) and path.startswith('/') and CHECKOUT_MARKER in path:
+        return path[:path.index(CHECKOUT_MARKER)]
+    return None
+
+
 def _property_records_digest(document):
-    repository = HERE.parents[3]
+    # Transcripts name the checkout that ran CBMC, which need not be this one.
+    # Source paths are reduced to the part under tools/php-catalog/, and a
+    # working directory equal to the transcript's own checkout root becomes
+    # '.', so the digest is the same in every checkout. A transcript whose
+    # source paths name more than one checkout root is not normalized.
+    properties = [prop for item in document for prop in item.get('result', [])]
+    roots = {_checkout_root(prop.get('sourceLocation', {}).get('file'))
+             for prop in properties} - {None}
+    root = roots.pop() if len(roots) == 1 else None
+
     def normalize(value, key=None):
         if isinstance(value, dict):
             return {child_key: normalize(child, child_key) for child_key, child in value.items()}
         if isinstance(value, list):
             return [normalize(child) for child in value]
-        if key in ('file', 'workingDirectory') and isinstance(value, str):
-            path = Path(value)
-            if path.is_absolute():
-                try:
-                    relative = path.relative_to(repository)
-                    return '.' if key == 'workingDirectory' and not relative.parts else str(relative)
-                except ValueError:
-                    pass
+        if key == 'file' and _checkout_root(value) is not None:
+            return value[value.index(CHECKOUT_MARKER) + 1:]
+        if key == 'workingDirectory' and root is not None and value == root:
+            return '.'
         return value
 
-    records = [
-        normalize(prop)
-        for item in document
-        for prop in item.get('result', [])
-    ]
+    records = [normalize(prop) for prop in properties]
     canonical = json.dumps(
         sorted(records, key=lambda item: item['property']),
         sort_keys=True,

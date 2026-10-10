@@ -16,24 +16,49 @@ def load(path: Path):
     return json.loads(path.read_text())
 
 
+CHECKOUT_MARKER = '/tools/php-catalog/'
+REPOSITORY = Path(__file__).resolve().parents[3]
+
+
+def portable(path):
+    """A path reduced to the part under tools/php-catalog/, so that recorded
+    paths from another checkout compare equal to this checkout's paths."""
+    text = str(path)
+    if text.startswith('/') and CHECKOUT_MARKER in text:
+        return text[text.index(CHECKOUT_MARKER) + 1:]
+    return text
+
+
+def same_path(recorded, actual):
+    return recorded is not None and portable(recorded) == portable(actual)
+
+
+def local_path(recorded):
+    """The file a recorded path names in this checkout."""
+    text = str(recorded)
+    if text.startswith('/') and CHECKOUT_MARKER in text:
+        return REPOSITORY / portable(text)
+    return Path(text)
+
+
 def validate_measurement_output(measurements, run_name, artifact_path):
     runs = [record for record in measurements if record.get("name") == run_name]
     if len(runs) != 1 or runs[0].get("exit_code") != 0:
         raise ValueError(f"{run_name}: expected exactly one successful command record")
     record = runs[0]
     resolved_path = str(artifact_path.resolve())
-    if record.get("stdout_path") == resolved_path:
+    if same_path(record.get("stdout_path"), resolved_path):
         actual = sha(artifact_path)
         if record.get("stdout_sha256") != actual:
             raise ValueError(f"{run_name}: captured stdout digest differs for {resolved_path}")
         return actual
-    if record.get("stdout_archive_path") == resolved_path:
+    if same_path(record.get("stdout_archive_path"), resolved_path):
         actual = sha(artifact_path)
         capture_path = record.get("stdout_capture_path")
         capture_digest = record.get("stdout_capture_sha256")
         if record.get("stdout_sha256") != actual or capture_digest != actual:
             raise ValueError(f"{run_name}: archived stdout digest differs from captured producer bytes")
-        if capture_path and Path(capture_path).is_file() and sha(Path(capture_path)) != capture_digest:
+        if capture_path and local_path(capture_path).is_file() and sha(local_path(capture_path)) != capture_digest:
             raise ValueError(f"{run_name}: producer stdout capture changed after archival")
         return actual
     artifacts = runs[0].get("output_artifacts")
@@ -51,10 +76,10 @@ def validate_measurement_output(measurements, run_name, artifact_path):
         raise ValueError(f"{run_name}: unsupported compiler sidecar suffix: {artifact_path.name}")
     expected = output.parent / (output.stem + source.suffix + suffix)
     matches = [item for item in artifacts if isinstance(item, dict)
-               and item.get("path") == str(expected.resolve())
-               and item.get("archive_path") == resolved_path]
+               and same_path(item.get("path"), str(expected.resolve()))
+               and same_path(item.get("archive_path"), resolved_path)]
     if len(matches) != 1:
-        if artifact_path.resolve() != expected.resolve():
+        if not same_path(str(artifact_path.resolve()), str(expected.resolve())):
             raise ValueError(f"{run_name}: sidecar path is not the compiler output derived from its command")
         raise ValueError(f"{run_name}: output digest is not bound to {resolved_path}")
     actual = sha(artifact_path)
@@ -274,7 +299,7 @@ def main() -> None:
     validate_measurement_output(cleanup_measurements, "cleanup-gimple", args.cleanup_gimple)
     validate_measurement_output(cleanup_measurements, "cleanup-llvm-read-0", args.cleanup_llvm)
     cleanup_path = str(args.cleanup_source.resolve())
-    if any(cleanup_path not in m.get("command", []) for m in cleanup_runs.values()
+    if any(not any(same_path(arg, cleanup_path) for arg in m.get("command", [])) for m in cleanup_runs.values()
            if m["name"] != "cleanup-llvm-read-0"):
         raise SystemExit("cleanup campaign command does not identify the hashed fixture")
     if ast_cleanup is None or llvm_cleanup is None:
