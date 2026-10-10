@@ -7,7 +7,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     Applicability, BehaviorGraph, Digest, Domain, DomainCoverage, GraphError, SemanticHost,
-    TargetPredicate, TargetScenario, TargetSet, evaluate,
+    TargetError, TargetPredicate, TargetScenario, TargetSet, evaluate,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -182,6 +182,7 @@ pub enum CatalogError {
     MissingEvidence(Digest),
     MissingAssumption(Digest),
     InvalidAssumption(Digest),
+    InvalidTargetPredicate(TargetError),
     UnpropagatedEvidenceAssumption {
         evidence: Digest,
         assumption: Digest,
@@ -335,6 +336,10 @@ impl CatalogManifest {
         }
         let mut entry_keys = Vec::new();
         for entry in &self.entries {
+            entry
+                .applicability
+                .validate()
+                .map_err(CatalogError::InvalidTargetPredicate)?;
             if entry.key != entry.key.normalized()
                 || entry_keys.contains(&(entry.key.clone(), entry.applicability.clone()))
             {
@@ -497,6 +502,9 @@ impl Catalog {
         applicability: TargetPredicate,
         graph: BehaviorGraph,
     ) -> Result<CatalogEntry, CatalogError> {
+        applicability
+            .validate()
+            .map_err(CatalogError::InvalidTargetPredicate)?;
         let key = key.normalized();
         if self.entries.get(&key).is_some_and(|entries| {
             entries
@@ -1513,7 +1521,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV-7: an inverted release predicate is accepted on catalog add; remove when validated"]
     fn inverted_release_predicate_is_rejected_on_add() {
         let mut catalog = Catalog::default();
         let id = catalog.add_evidence(evidence_record()).unwrap();
@@ -1532,10 +1539,82 @@ mod tests {
             }),
             ..TargetPredicate::any()
         };
-        assert!(
-            catalog
-                .add_variant(function(b"core", b"strlen"), inverted, graph(id))
-                .is_err()
+        assert_eq!(
+            catalog.add_variant(function(b"core", b"strlen"), inverted, graph(id)),
+            Err(CatalogError::InvalidTargetPredicate(
+                crate::TargetError::InvalidVersionRange
+            ))
         );
+    }
+
+    #[test]
+    fn valid_release_boundaries_are_accepted_on_add_and_manifest_load() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let key = function(b"core", b"versioned");
+        let predicates = [
+            TargetPredicate::any(),
+            TargetPredicate {
+                release: Some(VersionRange::exact(crate::ReleaseVersion {
+                    major: 0,
+                    minor: 0,
+                    patch: 0,
+                })),
+                ..TargetPredicate::any()
+            },
+            TargetPredicate {
+                release: Some(VersionRange::exact(crate::ReleaseVersion {
+                    major: u16::MAX,
+                    minor: u16::MAX,
+                    patch: u16::MAX,
+                })),
+                ..TargetPredicate::any()
+            },
+            TargetPredicate {
+                release: Some(VersionRange::minor(8, 5)),
+                ..TargetPredicate::any()
+            },
+        ];
+        for predicate in predicates {
+            catalog
+                .add_variant(key.clone(), predicate, graph(id))
+                .unwrap();
+        }
+        Catalog::from_manifest(catalog.manifest()).unwrap();
+    }
+
+    #[test]
+    fn manifest_load_rejects_inverted_release_predicates() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        catalog
+            .add_variant(
+                function(b"core", b"versioned"),
+                TargetPredicate {
+                    release: Some(VersionRange::minor(8, 5)),
+                    ..TargetPredicate::any()
+                },
+                graph(id),
+            )
+            .unwrap();
+        let mut manifest = catalog.manifest();
+        manifest.entries[0].applicability.release = Some(VersionRange {
+            min: crate::ReleaseVersion {
+                major: 8,
+                minor: 5,
+                patch: 4,
+            },
+            max: crate::ReleaseVersion {
+                major: 8,
+                minor: 5,
+                patch: 0,
+            },
+        });
+        let error = CatalogError::InvalidTargetPredicate(crate::TargetError::InvalidVersionRange);
+        assert_eq!(manifest.validate(), Err(error.clone()));
+        assert!(matches!(
+            Catalog::from_manifest(manifest),
+            Err(actual) if actual == error
+        ));
     }
 }
