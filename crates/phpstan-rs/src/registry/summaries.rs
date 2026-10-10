@@ -22,7 +22,7 @@ use types::Type;
 use crate::registry::name_context::resolve_names_in_type;
 
 use crate::registry::fresh::{FreshCall, FreshReturns};
-use crate::registry::retention::{ParamUse, ParamUses};
+use crate::registry::retention::{ParamUse, ParamUses, ThisCall, ThisUse};
 
 /// A call a body's purity is conditional on, in the form the body wrote it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -3154,11 +3154,25 @@ syntax::canonical_struct!(BodySummary {
 syntax::canonical_enum!(FreshCall {
     Function(name),
     Static(class, method),
+    New(class),
 });
 
 syntax::canonical_struct!(FreshReturns { calls });
 
-syntax::canonical_struct!(ParamUses { params });
+syntax::canonical_struct!(ParamUses { params, this });
+
+syntax::canonical_struct!(ThisUse {
+    kept,
+    passed,
+    calls,
+    accesses_properties,
+});
+
+syntax::canonical_enum!(ThisCall {
+    Method(name),
+    SelfMethod(name),
+    ParentMethod(name),
+});
 
 syntax::canonical_struct!(ParamUse { kept, passed });
 

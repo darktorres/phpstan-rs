@@ -79,6 +79,22 @@ pub(crate) struct PurityResults {
     /// they made (`Registry::resolve_fresh`).
     pub(crate) fresh_functions: FxHashSet<FnId>,
     pub(crate) fresh_methods: FxHashSet<MethodRef>,
+    /// For each class of the program in scope, whether the object `new`
+    /// makes of it, or `clone` copies of it, may be reachable by code other
+    /// than its maker once the constructor or `__clone` has returned
+    /// (`Registry::resolve_constructor_leaks`).
+    pub(crate) object_leaks: FxHashMap<ClassId, ObjectLeaks>,
+    /// Some class in `object_leaks` leaks the objects it makes.
+    pub(crate) any_object_leaks: bool,
+}
+
+/// Whether a class leaks the object it makes.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ObjectLeaks {
+    /// Its constructor keeps `$this` or lets code it cannot see reach it.
+    pub(crate) constructor: bool,
+    /// Its `__clone` does.
+    pub(crate) clone: bool,
 }
 
 impl Registry {
@@ -94,6 +110,7 @@ impl Registry {
         let candidates = self.classify_purity(bodies);
         self.run_purity_fixed_point(&candidates);
         self.resolve_retention(bodies);
+        self.resolve_constructor_leaks(bodies);
         self.resolve_fresh(bodies);
         self.resolve_effects(bodies);
     }
@@ -166,6 +183,14 @@ impl Registry {
         self.purity_results
             .fresh_methods
             .retain(|method| !class_ids.contains(&method.class()));
+        self.purity_results
+            .object_leaks
+            .retain(|id, _| !class_ids.contains(id));
+        self.purity_results.any_object_leaks = self
+            .purity_results
+            .object_leaks
+            .values()
+            .any(|leaks| leaks.constructor || leaks.clone);
         self.purity_results
             .method_dependencies
             .retain(|method, _| !class_ids.contains(&method.class()));

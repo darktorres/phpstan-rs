@@ -12,14 +12,15 @@
 //! and keeps nothing on the way releases it.
 
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
 use crate::registry::bodies::BodySource;
 use crate::registry::effects::builtin_releases;
-use crate::registry::{FnId, Registry};
+use crate::registry::purity::ObjectLeaks;
+use crate::registry::{ClassId, FnId, FunctionReflection, Registry};
 
 /// What a body does with one parameter.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -31,10 +32,45 @@ pub(crate) struct ParamUse {
     pub(crate) passed: Vec<(QualifiedName, u32)>,
 }
 
-/// What a body does with its parameters.
+/// A method a body calls on `$this`, which then runs with the same object.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum ThisCall {
+    /// `$this->m()`, `static::m()`: looked up on the class of the object.
+    Method(Name),
+    /// `self::m()`: looked up on the class the body is declared in.
+    SelfMethod(Name),
+    /// `parent::m()`: looked up on the parent of the class the body is
+    /// declared in.
+    ParentMethod(Name),
+}
+
+/// What a method body does with `$this`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ThisUse {
+    /// The body keeps the object past the call, or may: it is returned,
+    /// stored, passed on to code not known, or bound in a closure.
+    pub(crate) kept: bool,
+    /// The functions the body passes the object to, each with the position
+    /// it takes there.
+    pub(crate) passed: Vec<(QualifiedName, u32)>,
+    /// The methods the body calls on the object.
+    pub(crate) calls: Vec<ThisCall>,
+    /// The body reads or writes a property of the object, which a magic
+    /// accessor or a hook may run code for.
+    pub(crate) accesses_properties: bool,
+}
+
+impl ThisUse {
+    fn is_empty(&self) -> bool {
+        !self.kept && self.passed.is_empty() && self.calls.is_empty() && !self.accesses_properties
+    }
+}
+
+/// What a body does with its parameters and with `$this`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ParamUses {
     pub(crate) params: Box<[ParamUse]>,
+    pub(crate) this: ThisUse,
 }
 
 impl ParamUses {
@@ -45,10 +81,9 @@ impl ParamUses {
         params: &[Param],
         body: &[StmtId],
     ) -> Option<Box<ParamUses>> {
-        if params.is_empty() {
-            return None;
-        }
         let mut uses = Uses {
+            this: ThisUse::default(),
+            in_callable: false,
             index: FxHashMap::default(),
             uses: params
                 .iter()
@@ -67,9 +102,14 @@ impl ParamUses {
             for used in &mut uses.uses {
                 used.kept = true;
             }
+            uses.this.kept = true;
+        }
+        if params.is_empty() && uses.this.is_empty() {
+            return None;
         }
         Some(Box::new(ParamUses {
             params: uses.uses.into_boxed_slice(),
+            this: uses.this,
         }))
     }
 }
@@ -77,6 +117,10 @@ impl ParamUses {
 struct Uses {
     index: FxHashMap<Name, usize>,
     uses: Vec<ParamUse>,
+    this: ThisUse,
+    /// The expression being read is the target of a first-class callable,
+    /// which binds `$this`.
+    in_callable: bool,
     /// The body reads its variables or its arguments some way a use of the
     /// name does not show, or its frame outlives the call.
     reads_all: bool,
@@ -84,8 +128,28 @@ struct Uses {
 
 impl Uses {
     fn keep(&mut self, name: &Name) {
+        if name.as_str() == "this" {
+            self.this.kept = true;
+        }
         if let Some(&at) = self.index.get(name) {
             self.uses[at].kept = true;
+        }
+    }
+
+    /// Whether `id` is `$this`.
+    fn is_this(arenas: &NodeArenas, id: ExprId) -> bool {
+        Self::variable(arenas, id).is_some_and(|name| name.as_str() == "this")
+    }
+
+    /// A call of a method on `$this` or a relative class, with `args`.
+    fn this_call(&mut self, arenas: &NodeArenas, call: ThisCall, args: &ArgRange) {
+        if self.in_callable {
+            self.this.kept = true;
+        } else {
+            self.this.calls.push(call);
+        }
+        for arg in arenas.args(args.clone()) {
+            self.visit_expr(arenas, arg.value);
         }
     }
 
@@ -132,6 +196,11 @@ impl Uses {
                 for (at, arg) in args.iter().enumerate() {
                     positional &= !arg.spread;
                     match Self::variable(arenas, arg.value) {
+                        Some(variable)
+                            if positional && arg.name.is_none() && variable.as_str() == "this" =>
+                        {
+                            self.this.passed.push((name.clone(), at as u32));
+                        }
                         Some(variable)
                             if positional
                                 && arg.name.is_none()
@@ -189,10 +258,52 @@ impl Visitor for Uses {
         let Some(e) = arenas.expr(id) else { return };
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => self.keep(name),
-            ExprKind::PropertyAccess(base, _, _) => self.kept_by_none(arenas, *base),
+            ExprKind::PropertyAccess(base, _, _) => {
+                self.this.accesses_properties |= Self::is_this(arenas, *base);
+                self.kept_by_none(arenas, *base);
+            }
             ExprKind::DynamicPropertyAccess(base, name, _) => {
+                self.this.accesses_properties |= Self::is_this(arenas, *base);
                 self.kept_by_none(arenas, *base);
                 self.visit_expr(arenas, *name);
+            }
+            ExprKind::MethodCall(base, method, args, _) if Self::is_this(arenas, *base) => {
+                self.this_call(arenas, ThisCall::Method(method.name.clone()), args);
+            }
+            ExprKind::StaticCall(target, method, args)
+                if target.as_name().is_some_and(|class| {
+                    ["self", "static", "parent"].iter().any(|relative| {
+                        class
+                            .written
+                            .trim_start_matches('\\')
+                            .eq_ignore_ascii_case(relative)
+                    })
+                }) =>
+            {
+                let written = target
+                    .as_name()
+                    .map(|class| class.written.as_str())
+                    .unwrap_or("");
+                let written = written.trim_start_matches('\\');
+                let call = if written.eq_ignore_ascii_case("parent") {
+                    ThisCall::ParentMethod(method.name.clone())
+                } else if written.eq_ignore_ascii_case("self") {
+                    ThisCall::SelfMethod(method.name.clone())
+                } else {
+                    ThisCall::Method(method.name.clone())
+                };
+                self.this_call(arenas, call, args);
+            }
+            ExprKind::FirstClassCallable(inner) => {
+                let outer = std::mem::replace(&mut self.in_callable, true);
+                self.visit_expr(arenas, *inner);
+                self.in_callable = outer;
+            }
+            ExprKind::ArrowFn(closure) => {
+                if let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*closure) {
+                    self.this.kept |= !arrow.is_static;
+                }
+                arena::walk_expr(self, arenas, id);
             }
             ExprKind::Assign(lhs, rhs) => {
                 self.kept_by_none(arenas, *lhs);
@@ -219,6 +330,7 @@ impl Visitor for Uses {
             // with it.
             ExprKind::Closure(closure) => {
                 if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
+                    self.this.kept |= !closure.is_static;
                     for u in arenas.closure_uses(&closure.uses) {
                         self.keep(&u.name.name);
                     }
@@ -347,5 +459,167 @@ impl Registry {
         }
         self.function(declared)
             .is_some_and(|(id, _, _)| self.purity_results.released_parameters.contains(&(id, at)))
+    }
+}
+
+impl Registry {
+    /// Settles, for each class in scope, whether the object `new` makes of
+    /// it, or `clone` copies of it, stays unreachable by code but its
+    /// maker's once the constructor, or `__clone`, has returned.
+    pub(crate) fn resolve_constructor_leaks(&mut self, bodies: &dyn BodySource) {
+        let names = self.scoped_class_names();
+        let registry: &Registry = self;
+        let found: Vec<(ClassId, ObjectLeaks)> = names
+            .par_iter()
+            .with_min_len(crate::registry::PASS_CHUNK)
+            .filter_map(|class| {
+                let id = registry.class_ids.get(class).copied()?;
+                Some((
+                    id,
+                    ObjectLeaks {
+                        constructor: registry.method_leaks_this(bodies, class, "__construct"),
+                        clone: registry.method_leaks_this(bodies, class, "__clone"),
+                    },
+                ))
+            })
+            .collect();
+        self.purity_results
+            .object_leaks
+            .extend(found.iter().copied());
+        self.purity_results.any_object_leaks = self
+            .purity_results
+            .object_leaks
+            .values()
+            .any(|leaks| leaks.constructor || leaks.clone);
+    }
+
+    /// Whether running `method` on an object of `class` may leave code but
+    /// the caller's able to reach the object; a class with no such method
+    /// leaves none.
+    fn method_leaks_this(&self, bodies: &dyn BodySource, class: &Name, method: &str) -> bool {
+        let Some((owner, sig)) = self.lookup_method_with_owner(class, method) else {
+            return false;
+        };
+        let mut seen = FxHashSet::default();
+        self.this_leaks(bodies, class, &owner, &Name::from(method), sig, &mut seen)
+    }
+
+    /// Whether the body of `method`, declared in `owner` and run on an
+    /// object of `class`, keeps the object, or calls what does.
+    fn this_leaks(
+        &self,
+        bodies: &dyn BodySource,
+        class: &Name,
+        owner: &Name,
+        method: &Name,
+        sig: &FunctionReflection,
+        seen: &mut FxHashSet<(Name, Name)>,
+    ) -> bool {
+        if sig.is_stub || !seen.insert((owner.lowered().clone(), method.lowered().clone())) {
+            return false;
+        }
+        let Some(summary) = bodies.summary(&sig.provenance) else {
+            return true;
+        };
+        let Some(uses) = summary.parameters.as_deref() else {
+            return false;
+        };
+        let this = &uses.this;
+        if this.kept
+            || this
+                .passed
+                .iter()
+                .any(|(callee, at)| !self.releases_argument(callee, *at))
+        {
+            return true;
+        }
+        let mut called: Vec<(Name, Name, &FunctionReflection)> = Vec::new();
+        for call in &this.calls {
+            let found = match call {
+                ThisCall::Method(name) => self
+                    .lookup_method_with_owner(owner, name.as_str())
+                    .filter(|(_, own)| own.visibility() == Visibility::Private)
+                    .or_else(|| self.lookup_method_with_owner(class, name.as_str()))
+                    .map(|(declared, sig)| (declared, name, sig)),
+                ThisCall::SelfMethod(name) => self
+                    .lookup_method_with_owner(owner, name.as_str())
+                    .map(|(declared, sig)| (declared, name, sig)),
+                ThisCall::ParentMethod(name) => self
+                    .class_references_by_name(owner)
+                    .and_then(|references| references.extends.first())
+                    .and_then(|parent| self.lookup_method_with_owner(parent, name.as_str()))
+                    .map(|(declared, sig)| (declared, name, sig)),
+            };
+            match found {
+                Some((declared, name, sig)) => called.push((declared, name.clone(), sig)),
+                None => match self.lookup_method_with_owner(class, "__call") {
+                    Some((declared, sig)) => called.push((declared, Name::from("__call"), sig)),
+                    None => return true,
+                },
+            }
+        }
+        if this.accesses_properties {
+            if self.has_property_hooks(class) {
+                return true;
+            }
+            for magic in ["__get", "__set", "__isset", "__unset"] {
+                if let Some((declared, sig)) = self.lookup_method_with_owner(class, magic) {
+                    called.push((declared, Name::from(magic), sig));
+                }
+            }
+        }
+        called.into_iter().any(|(declared, name, sig)| {
+            self.this_leaks(bodies, class, &declared, &name, sig, seen)
+        })
+    }
+
+    /// Whether `class`, or a class it extends or uses, declares a property
+    /// with a hook that has a body.
+    fn has_property_hooks(&self, class: &Name) -> bool {
+        let mut classes: Vec<Name> = self
+            .all_ancestor_names(class.as_str())
+            .into_iter()
+            .collect();
+        classes.push(class.clone());
+        classes.iter().any(|class| {
+            self.property_names(class.as_str()).any(|property| {
+                self.lookup_property(class.as_str(), property.as_str())
+                    .is_some_and(|declared| declared.get_hook_body || declared.set_hook_body)
+            })
+        })
+    }
+
+    /// Whether an object made by `new` of the class written as `class`
+    /// (`None` for one not known: `clone`, `new $c`, `new class`) may be
+    /// reachable by code but its maker's.
+    pub(crate) fn new_may_leak(&self, class: Option<&QualifiedName>) -> bool {
+        let Some(class) = class else {
+            return self.purity_results.any_object_leaks;
+        };
+        match class
+            .resolved_class()
+            .and_then(|name| self.lookup_class(name))
+        {
+            Some((name, _)) => self.class_constructor_leaks(name),
+            None => self.purity_results.any_object_leaks,
+        }
+    }
+
+    /// Whether an object `new` makes of `class` may be reachable by code
+    /// but its maker's once the constructor has returned.
+    pub(crate) fn class_constructor_leaks(&self, class: &str) -> bool {
+        if self.is_builtin_class(class) {
+            return false;
+        }
+        self.class_ids
+            .get(class)
+            .and_then(|id| self.purity_results.object_leaks.get(id))
+            .is_none_or(|leaks| leaks.constructor)
+    }
+
+    /// Whether an object made by `new` or `clone` of a class not known may
+    /// be reachable by code but its maker's.
+    pub(crate) fn unknown_object_may_leak(&self) -> bool {
+        self.purity_results.any_object_leaks
     }
 }

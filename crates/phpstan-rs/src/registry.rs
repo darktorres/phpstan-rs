@@ -1087,6 +1087,7 @@ impl Registry {
             self.purity_results
                 .fresh_methods
                 .retain(|method| method.class() != id);
+            self.purity_results.object_leaks.remove(&id);
             self.class_const_types.retain(|(class, _), _| *class != id);
             self.class_const_types_by_id.remove(&id);
             self.class_constant_results

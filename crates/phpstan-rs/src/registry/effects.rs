@@ -5073,6 +5073,29 @@ impl<'r> Level<'r> {
         }
     }
 
+    /// The object made by `new` of one of `classes`: one nothing else holds,
+    /// unless a constructor lets code reach it.
+    fn made_holder(&self, classes: NameList) -> Holder {
+        if classes
+            .iter()
+            .any(|class| self.registry.class_constructor_leaks(class.as_str()))
+        {
+            Holder::Classes(sorted_classes(classes))
+        } else {
+            Holder::Made(Some(shared_names(classes)))
+        }
+    }
+
+    /// The object made by `clone`, `new $c` or `new class`, of a class not
+    /// known.
+    fn made_unknown_holder(&self) -> Holder {
+        if self.registry.unknown_object_may_leak() {
+            Holder::Unknown
+        } else {
+            Holder::Made(None)
+        }
+    }
+
     /// The object the variable `name` holds: what the body made, by its
     /// class; a parameter it never writes, by its declared type; one whose
     /// every value comes from where the scope shows, by what that holds,
@@ -5081,10 +5104,10 @@ impl<'r> Level<'r> {
     fn variable_holder(&self, name: &Name) -> Holder {
         if let Some(made) = self.made.get(name.as_str()) {
             return match made {
-                Made::Object(Some(class)) => Holder::Made(Some(shared_names(
+                Made::Object(Some(class)) => self.made_holder(
                     named_classes(self.registry, self.class_name(), class).unwrap_or_default(),
-                ))),
-                Made::Object(None) => Holder::Made(None),
+                ),
+                Made::Object(None) => self.made_unknown_holder(),
                 Made::Closure(_) => Holder::Made(Some(vec![Name::from("Closure")].into())),
             };
         }
@@ -5297,13 +5320,13 @@ impl<'r> Level<'r> {
             ),
             Origin::Returned(callee) => (self.returned_holder(callee), false),
             Origin::New(Some(class)) => (
-                Holder::Made(Some(shared_names(
+                self.made_holder(
                     named_classes(registry, self.class_name(), class).unwrap_or_default(),
-                ))),
+                ),
                 false,
             ),
-            Origin::New(None) | Origin::Anonymous(None) => (Holder::Made(None), false),
-            Origin::Anonymous(Some(name)) => (Holder::Made(Some(vec![name.clone()].into())), false),
+            Origin::New(None) | Origin::Anonymous(None) => (self.made_unknown_holder(), false),
+            Origin::Anonymous(Some(name)) => (self.made_holder(smallvec![name.clone()]), false),
             Origin::Constant(name) => {
                 let (primary, fallback) = name.candidates();
                 let found = registry

@@ -24,6 +24,9 @@ pub(crate) enum FreshCall {
     Function(QualifiedName),
     /// A static method called through a class named in the call.
     Static(QualifiedName, Name),
+    /// An object made by `new` of the class written, or of a class not
+    /// known (`clone`, `new $c`, `new class`).
+    New(Option<QualifiedName>),
 }
 
 /// The calls a body that returns only objects it made depends on.
@@ -106,10 +109,16 @@ impl Returns {
     fn source(arenas: &NodeArenas, id: ExprId) -> Option<Source> {
         let e = arenas.expr(arenas.peeled(id)?)?;
         match &e.kind {
-            ExprKind::New(..)
-            | ExprKind::NewAnonymousClass(_)
-            | ExprKind::Clone(..)
-            | ExprKind::Literal(_) => Some(Source::Made),
+            ExprKind::Literal(_) => Some(Source::Made),
+            ExprKind::New(callee, _) => Some(Source::Call(FreshCall::New(
+                match &arenas.expr(arenas.peeled(*callee)?)?.kind {
+                    ExprKind::Name(name) => Some(arenas.qualified_name(name)?.clone()),
+                    _ => None,
+                },
+            ))),
+            ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => {
+                Some(Source::Call(FreshCall::New(None)))
+            }
             ExprKind::Call(callee, _) => match &arenas.expr(arenas.peeled(*callee)?)?.kind {
                 ExprKind::Name(name) => Some(Source::Call(FreshCall::Function(
                     arenas.qualified_name(name)?.clone(),
@@ -372,6 +381,12 @@ impl Registry {
         let returns = bodies.summary(&sig.provenance)?.fresh.as_deref()?;
         let mut calls = Vec::with_capacity(returns.calls.len());
         for call in returns.calls.iter() {
+            if let FreshCall::New(class) = call {
+                if self.new_may_leak(class.as_ref()) {
+                    return None;
+                }
+                continue;
+            }
             calls.push(self.fresh_call(call)?);
         }
         Some(Node { declaration, calls })
@@ -388,6 +403,7 @@ impl Registry {
                 let (id, _, _) = self.function(declared)?;
                 Some(Declaration::Function(id))
             }
+            FreshCall::New(_) => None,
             FreshCall::Static(class, method) => {
                 let (class_name, _) = self.lookup_class(class.resolved_class()?)?;
                 let (owner, sig) = self.lookup_method_with_owner(class_name, method)?;

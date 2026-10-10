@@ -419,6 +419,15 @@ fn root_is_computed(arenas: &NodeArenas, id: ExprId) -> bool {
     })
 }
 
+/// An object made by `new` of `class` (`None` for a class not known), which
+/// no other code can reach unless a constructor leaks it.
+fn made_unless_leaked(registry: Option<&Registry>, class: Option<&QualifiedName>) -> Held {
+    match registry {
+        Some(registry) if !registry.new_may_leak(class) => Held::Made,
+        _ => Held::Other,
+    }
+}
+
 /// What the scope made or wrote that `e` evaluates to: an object made by
 /// `new` or `clone`, or given back by a function that returns only objects
 /// it made.
@@ -430,7 +439,17 @@ fn held_by(registry: Option<&Registry>, arenas: &NodeArenas, id: ExprId) -> Held
         return Held::Other;
     };
     syntax::stack::guard(|| match &e.kind {
-        ExprKind::New(..) | ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => Held::Made,
+        ExprKind::New(callee, _) => {
+            let class = match arenas.peeled(*callee).and_then(|id| arenas.expr(id)) {
+                Some(ExprNode {
+                    kind: ExprKind::Name(name),
+                    ..
+                }) => arenas.qualified_name(name),
+                _ => None,
+            };
+            made_unless_leaked(registry, class)
+        }
+        ExprKind::NewAnonymousClass(_) | ExprKind::Clone(..) => made_unless_leaked(registry, None),
         ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::FirstClassCallable(_) => {
             Held::Closures(vec![(id, BodySummary::of_closure(arenas, id))])
         }
