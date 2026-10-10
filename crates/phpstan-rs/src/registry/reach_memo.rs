@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
-use super::effect_table::{EffectIx, EffectTable, TransferTable};
+use super::effect_table::{EffectIx, EffectTable, TransferIx, TransferTable};
 use super::effects::{
-    BuiltinBase, DeclKey, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Run,
+    BuiltinBase, DeclKey, Effect, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Run,
     Transfer,
 };
 
@@ -185,6 +185,11 @@ pub(crate) struct ReachMemo {
     pub(crate) effect_ixs: OnceMap<DeclKey, EffectIx>,
     pub(crate) effects: EffectTable,
     pub(crate) transfers: TransferTable,
+    /// What a call of a declaration writes, written as a transfer says, by
+    /// handle, transfer and whether the declaration's own effect (not the
+    /// one that holds when what it runs is not known) is asked. Made over
+    /// the settled effects, so it is dropped when they are replaced.
+    pub(crate) transferred: OnceMap<(EffectIx, TransferIx, bool), Effect>,
     /// Whether a shared set (by address; the cell keeps the set alive) holds
     /// a declaration run with the caller's own `$this`.
     pub(crate) shared_scoped: OnceMap<usize, (SharedTargets, bool)>,

@@ -33,6 +33,34 @@ const SUPERGLOBALS_BUT_GLOBALS: [&str; 10] = [
     "_GET", "_POST", "_REQUEST", "_SERVER", "_SESSION", "_COOKIE", "_FILES", "_ENV", "argv", "argc",
 ];
 
+/// What an operation on a value may write, by the operation, the value's
+/// holder and whether it is the scope's own `$this`, for the class, file and
+/// kind of function-like the answers were made in.
+#[derive(Default)]
+pub(crate) struct OperationEffects {
+    scope: Option<(Option<String>, Option<FileId>, bool)>,
+    answers: rustc_hash::FxHashMap<(Operation, Holder, bool), Effect>,
+}
+
+impl OperationEffects {
+    /// The answers, emptied when they were made in another scope.
+    fn in_scope(&mut self, class: Option<&str>, file: Option<FileId>, rebindable: bool) {
+        let same = self.scope.as_ref().is_some_and(|(c, f, r)| {
+            c.as_deref() == class && *f == file && *r == rebindable
+        });
+        if !same {
+            self.answers.clear();
+            self.scope = Some((class.map(str::to_owned), file, rebindable));
+        }
+    }
+}
+
+fn effect_memo_enabled() -> bool {
+    static ENABLED: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| std::env::var_os("PHPSTAN_RS_NO_EFFECT_MEMO").is_none());
+    *ENABLED
+}
+
 /// What a call's caller knows of it, from the types the checker inferred.
 struct TypedCall<'c, 'a> {
     checker: &'c Checker<'a>,
@@ -467,18 +495,18 @@ impl Checker<'_> {
         } else {
             holder_of(ty)
         };
-        let call = CallWrites {
-            callee: Callee::Implicit {
-                on: None,
-                operation,
-            },
-            arguments: Box::new([]),
-            places: Box::new([]),
-            objectless: Box::new([]),
-            callables: Box::new([]),
-            fills: Box::new([]),
-        };
-        let effect = {
+        let compute = |operand: Holder, locals: &Locals| {
+            let call = CallWrites {
+                callee: Callee::Implicit {
+                    on: None,
+                    operation: operation.clone(),
+                },
+                arguments: Box::new([]),
+                places: Box::new([]),
+                objectless: Box::new([]),
+                callables: Box::new([]),
+                fills: Box::new([]),
+            };
             let ctx = TypedCall {
                 checker: self,
                 locals,
@@ -491,6 +519,36 @@ impl Checker<'_> {
                 before: Default::default(),
             };
             self.registry.call_effect(&call, &ctx)
+        };
+        let effect = if effect_memo_enabled() {
+            let key = (operation.clone(), operand, this);
+            let known = {
+                let mut memo = self.operation_effects.borrow_mut();
+                memo.in_scope(
+                    self.current_class.as_deref(),
+                    self.current_file_id,
+                    self.shared_scope.closure,
+                );
+                memo.answers.get(&key).cloned()
+            };
+            match known {
+                Some(effect) => {
+                    syntax::stats::count(syntax::stats::Counter::OperationsHit);
+                    debug_assert_eq!(effect, compute(key.1.clone(), locals));
+                    effect
+                }
+                None => {
+                    syntax::stats::count(syntax::stats::Counter::OperationsMiss);
+                    let effect = compute(key.1.clone(), locals);
+                    self.operation_effects
+                        .borrow_mut()
+                        .answers
+                        .insert(key, effect.clone());
+                    effect
+                }
+            }
+        } else {
+            compute(operand, locals)
         };
         self.forget_effect(&effect, locals);
     }

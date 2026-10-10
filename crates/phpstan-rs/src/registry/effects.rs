@@ -1531,6 +1531,7 @@ impl Registry {
     }
 
     pub(crate) fn rebuild_effect_ids(&mut self, effects: FxHashMap<DeclKey, Settled>) {
+        self.reach_memo.transferred = Default::default();
         self.effects = effects
             .into_iter()
             .map(|(key, settled)| (self.effect_id_for(&key), settled))
@@ -1671,6 +1672,7 @@ impl Registry {
         // A closure's effect is taken where it runs; no call names it. Keep
         // its result through settlement, then omit it from the registry.
         let effects = settlements.into_effects(registry);
+        self.reach_memo.transferred = Default::default();
         self.effects = effects;
     }
 
@@ -1719,6 +1721,29 @@ impl Registry {
     /// may write, as settled.
     fn settled_effect(&self, key: &DeclKey) -> Effect {
         self.settled_effect_by_ix(self.effect_ix(key))
+    }
+
+    /// What a call of the declaration `ix` stands for writes when its own
+    /// `$this` is what `transfer` says: its own effect when `own`, else
+    /// `settled_effect_by_ix`'s.
+    fn transferred_effect(&self, ix: EffectIx, transfer: TransferIx, own: bool) -> Effect {
+        let compute = || {
+            let base = if own {
+                match self.settled_of(ix) {
+                    Some(settled) => settled.effect.clone(),
+                    None => self.declaration_effect(ix),
+                }
+            } else {
+                self.settled_effect_by_ix(ix)
+            };
+            base.transferred(self.transfer_of(transfer))
+        };
+        let effect = self
+            .reach_memo
+            .transferred
+            .get_or_compute((ix, transfer, own), compute);
+        debug_assert_eq!(effect, compute());
+        effect
     }
 
     /// `settled_effect` for the declaration `ix` stands for.
@@ -4239,17 +4264,24 @@ impl Registry {
             return Effect::unknown();
         };
         let mut effect = Effect::nothing();
-        for (ix, transfer) in targets {
+        for (ix, bound) in targets {
             let key = self.effect_key(ix);
-            let transfer = self.transfer_of(transfer);
+            let transfer = self.transfer_of(bound);
             let runs = match self.builtin_of(ix) {
                 Some(sig) => match reach.builtin_runs(key, sig, transfer, call) {
                     Some(runs) => runs,
                     None => return Effect::unknown(),
                 },
                 None => {
-                    let settled = self.settled_by_ix(ix);
-                    effect.join_transferred(&settled.effect, transfer);
+                    let fallback;
+                    let settled = match self.settled_of(ix) {
+                        Some(settled) => settled,
+                        None => {
+                            fallback = Settled::of(self.declaration_effect(ix));
+                            &fallback
+                        }
+                    };
+                    effect.join(&self.transferred_effect(ix, bound, true));
                     let mut runs = RunList::new();
                     for condition in &settled.runs {
                         let passing = if !passes_arguments(&call.callee, key) {
@@ -4283,7 +4315,7 @@ impl Registry {
                 }
             };
             for (run, bound) in runs.iter() {
-                effect.join_transferred(&self.settled_effect_by_ix(run), self.transfer_of(bound));
+                effect.join(&self.transferred_effect(run, bound, false));
             }
             if effect.is_anything() {
                 break;
