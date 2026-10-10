@@ -200,19 +200,11 @@ impl<'a> Checker<'a> {
                         .union_of(vec![prop_sig.ty().clone(), doc.clone()]),
                     None => prop_sig.ty().clone(),
                 };
-                self.check_type_class_names_exist(
-                    &checked,
-                    format!("property {fqn}::${}", p.name),
-                    p.span,
-                );
+                let property_label = format!("property {fqn}::${}", p.name);
+                self.check_type_class_names_exist(&checked, property_label.clone(), p.span);
                 // `property.trait` - see `check_type_trait_refs`'s
                 // own doc comment.
-                self.check_type_trait_refs(
-                    prop_sig.ty(),
-                    format!("property {fqn}::${}", p.name),
-                    p.span,
-                    "property.trait",
-                );
+                self.check_type_trait_refs(prop_sig.ty(), property_label, p.span, "property.trait");
                 // `class.nameCase` for this PHPDoc-typed property position.
                 let property_doc_text = p
                     .doc_comment
