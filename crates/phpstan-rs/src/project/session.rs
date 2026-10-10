@@ -167,8 +167,11 @@ struct LoadState {
 /// How `read_and_parse_file` treats one file.
 struct ParseOptions {
     /// Whether the file may be read from and stored in the per-file cache,
-    /// which a context file may.
+    /// which every file may that no editor holds.
     cacheable: bool,
+    /// Whether the file keeps its tree, which an entry does not hold: a hit
+    /// parses the file again and takes everything else from the entry.
+    needs_tree: bool,
     /// Whether its use sites are indexed with its parse.
     index_use_sites: bool,
     /// Whether the parse takes the thread's node arenas, which a file that
@@ -1370,7 +1373,8 @@ impl Session {
                 self.is_stub_at(&placed.absolute),
                 state,
                 ParseOptions {
-                    cacheable: context && !held && !keeps_tree,
+                    cacheable: !held && (!context || !keeps_tree),
+                    needs_tree: keeps_tree,
                     index_use_sites,
                     reuse_scratch: !keeps_tree,
                 },
@@ -1407,6 +1411,7 @@ impl Session {
     ) -> Read {
         let ParseOptions {
             cacheable,
+            needs_tree,
             index_use_sites,
             reuse_scratch,
         } = options;
@@ -1429,17 +1434,24 @@ impl Session {
         } else {
             None
         };
+        let mut cached_derivations = None;
+        let mut had_entry = false;
         if let Some(key) = &cache_key
             && let Some(cached) = file_cache::load(key, file_id)
         {
-            let len = cached.len;
-            if let Some(parsed) = cached.into_parsed(path, content_hash) {
-                return Read::Loaded(Box::new(ReadFile {
-                    len,
-                    source: String::new(),
-                    parsed,
-                    cache_key: None,
-                }));
+            if needs_tree {
+                had_entry = true;
+                cached_derivations = Some(cached);
+            } else {
+                let len = cached.len;
+                if let Some(parsed) = cached.into_parsed(path, content_hash) {
+                    return Read::Loaded(Box::new(ReadFile {
+                        len,
+                        source: String::new(),
+                        parsed,
+                        cache_key: None,
+                    }));
+                }
             }
         }
         // Whether the file is UTF-8 is settled here, once, and the lexer
@@ -1472,6 +1484,7 @@ impl Session {
                 file_id,
                 scratch,
                 content_hash,
+                cached_derivations,
             ),
             Err(_) => super::parse_file_with_names_and_file_id_and_worker_scratch(
                 path,
@@ -1481,6 +1494,7 @@ impl Session {
                 file_id,
                 scratch,
                 content_hash,
+                cached_derivations,
             ),
         })) else {
             return Read::Unread;
@@ -1496,6 +1510,8 @@ impl Session {
             Err(_) if index_use_sites => String::from_utf8_lossy(bytes).into_owned(),
             _ => String::new(),
         };
+        // An entry that was read is not written again.
+        let cache_key = if had_entry { None } else { cache_key };
         Read::Loaded(Box::new(ReadFile {
             len,
             source,

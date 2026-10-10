@@ -1758,7 +1758,10 @@ impl Project {
     /// Indexes `parsed`'s use sites ahead of `install_parsed_file`, so a
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
-        if let Some(tree) = &parsed.tree {
+        // A file read from the cache arrives with them indexed.
+        if let Some(tree) = &parsed.tree
+            && parsed.class_fn_refs.is_none()
+        {
             parsed.class_fn_refs = Some(self.class_fn_refs_of(tree, source));
         }
     }
@@ -4010,6 +4013,7 @@ pub(crate) fn parse_file_recording<'a>(
         Origin::Path(Arc::from(path)),
         None,
         None,
+        None,
     )
 }
 
@@ -4030,10 +4034,11 @@ pub(crate) fn parse_file_recording_with_file_id<'a>(
         Origin::File(file_id),
         None,
         None,
+        None,
     )
 }
 
-pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
+pub(in crate::project) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
@@ -4041,6 +4046,7 @@ pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
     file_id: FileId,
     scratch: syntax::WorkerScratch<'_>,
     content_hash: source::ContentHash,
+    cached: Option<file_cache::CachedFile>,
 ) -> Result<ParsedFile, ParseError> {
     parse_file_recording_with_origin(
         path,
@@ -4051,6 +4057,7 @@ pub(crate) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
         Origin::File(file_id),
         Some(scratch),
         Some(content_hash),
+        cached,
     )
 }
 
@@ -4064,10 +4071,48 @@ fn parse_file_recording_with_origin<'a>(
     origin: Origin,
     scratch: Option<syntax::WorkerScratch<'_>>,
     content_hash: Option<source::ContentHash>,
+    cached: Option<file_cache::CachedFile>,
 ) -> Result<ParsedFile, ParseError> {
     let source = source.into();
     let content_hash = content_hash.unwrap_or_else(|| source::ContentHash::of_source(source));
     debug_assert_eq!(content_hash, source::ContentHash::of_source(source));
+    let parsed = parse_recording(path, source, names, record, scratch)?;
+    // A file whose entry was read takes everything the tree gives from the
+    // entry, and keeps the tree and the ignore comments of this parse.
+    let Some(mut from_entry) = cached.and_then(|entry| entry.into_parsed(path, content_hash))
+    else {
+        return Ok(derive_file(path, is_stub, &origin, content_hash, parsed));
+    };
+    #[cfg(debug_assertions)]
+    let (tree, ignores) = {
+        let mut computed = derive_file(path, is_stub, &origin, content_hash, parsed);
+        let tree = computed.tree.take().expect("the derivation keeps the tree");
+        let ignores = std::mem::take(&mut computed.ignores);
+        let use_sites = from_entry.class_fn_refs.take();
+        assert_eq!(
+            syntax::canonical::print(&computed),
+            syntax::canonical::print(&from_entry),
+            "the entry for {} holds what the file gives",
+            path.display()
+        );
+        from_entry.class_fn_refs = use_sites;
+        (tree, ignores)
+    };
+    #[cfg(not(debug_assertions))]
+    let (tree, ignores) = (parsed.tree, parsed.ignores);
+    from_entry.tree = Some(tree);
+    from_entry.ignores = ignores;
+    Ok(from_entry)
+}
+
+/// Everything the file gives from its parse.
+fn derive_file(
+    path: &Path,
+    is_stub: bool,
+    origin: &Origin,
+    content_hash: source::ContentHash,
+    parsed: Parsed,
+) -> ParsedFile {
     let Parsed {
         tree,
         references,
@@ -4075,7 +4120,7 @@ fn parse_file_recording_with_origin<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_recording(path, source, names, record, scratch)?;
+    } = parsed;
     let ast = tree.statements();
     let file_declarations::FileDeclarations {
         functions,
@@ -4086,7 +4131,7 @@ fn parse_file_recording_with_origin<'a>(
         duplicate_fn_sites,
         duplicate_class_sites,
         declared_classes,
-    } = file_declarations::collect(tree.arenas(), ast, path, is_stub, &origin, &facts);
+    } = file_declarations::collect(tree.arenas(), ast, path, is_stub, origin, &facts);
     let (references, declaration_references) = file_references(tree.arenas(), ast, references);
     // The anonymous classes are the declarations built last, one per
     // `new class`, so the file's own walk need not be repeated for them.
@@ -4100,7 +4145,7 @@ fn parse_file_recording_with_origin<'a>(
     let bodies = FileBodies::of_file(tree.arenas(), ast, &facts);
     let global_facts = Arc::new(GlobalFacts::of(tree.arenas(), ast));
     let pest_facts = PestFacts::of(path, tree.arenas(), ast);
-    Ok(ParsedFile {
+    ParsedFile {
         tree: Some(tree),
         lex_warnings,
         functions,
@@ -4123,7 +4168,7 @@ fn parse_file_recording_with_origin<'a>(
         class_fn_refs: None,
         owner: None,
         content_hash,
-    })
+    }
 }
 
 impl ParsedFile {
