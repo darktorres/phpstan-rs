@@ -624,12 +624,12 @@ impl Registry {
     }
 
     /// The selected class declaration for a PHP class name, through its ID.
-    pub fn class_by_name(&self, name: &str) -> Option<&ClassReflection> {
+    pub fn class_by_name<K: TableKey + ?Sized>(&self, name: &K) -> Option<&ClassReflection> {
         self.class(name).map(|(_, _, declaration)| declaration)
     }
 
     /// Whether this Registry has an active declaration for `name`.
-    pub fn has_class(&self, name: &str) -> bool {
+    pub fn has_class<K: TableKey + ?Sized>(&self, name: &K) -> bool {
         self.class_by_name(name).is_some()
     }
 

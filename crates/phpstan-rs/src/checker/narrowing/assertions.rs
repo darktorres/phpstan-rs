@@ -395,7 +395,7 @@ impl<'a> Checker<'a> {
             }
             // An enum case is an instance of its enum for member lookup.
             match ty.single_object_class() {
-                Some(class) => self.registry.has_class(class.as_str()) && !has_member(class),
+                Some(class) => self.registry.has_class(class) && !has_member(class),
                 None => false,
             }
         })

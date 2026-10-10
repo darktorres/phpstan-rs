@@ -1435,7 +1435,7 @@ impl<'a> Checker<'a> {
                                     .contains(&(receiver, method.to_string())))
                         );
                     if !method_exists_guarded
-                        && self.registry.has_class(class.as_str())
+                        && self.registry.has_class(class)
                         && self.member_confirmed_missing(&recv_ty, |c| {
                             self.registry.lookup_method(c, method).is_some()
                                 || self.registry.lookup_method(c, "__call").is_some()
@@ -3387,7 +3387,7 @@ impl<'a> Checker<'a> {
                             span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
-                    } else if self.registry.has_class(class.as_str())
+                    } else if self.registry.has_class(class)
                         && self.registry.lookup_method(class, "__callStatic").is_none()
                     {
                         // Same leniency as MethodCall's own undefined-
@@ -3401,7 +3401,7 @@ impl<'a> Checker<'a> {
                             0,
                             "staticMethod.notFound",
                         );
-                    } else if !self.registry.has_class(class.as_str())
+                    } else if !self.registry.has_class(class)
                         && !Self::class_guarded(class, locals)
                     {
                         // Mirrors real PHPStan's `StaticMethodCallCheck`'s
@@ -5115,7 +5115,7 @@ impl<'a> Checker<'a> {
                         let recv_ty = self.check_expr(recv, locals, label);
                         let recv_class = recv_ty.first_object_class().cloned();
                         if let Some(class) = &recv_class
-                            && self.registry.has_class(class.as_str())
+                            && self.registry.has_class(class)
                         {
                             if self.member_confirmed_missing(&recv_ty, |c| {
                                 self.registry.lookup_method(c, method).is_some()
@@ -5189,7 +5189,7 @@ impl<'a> Checker<'a> {
                     }
                     ExprKind::StaticCall(target, method, _) => {
                         if let Some(class) = self.resolve_static_target_class(target, locals, label)
-                            && self.registry.has_class(class.as_str())
+                            && self.registry.has_class(&class)
                         {
                             self.check_call_site_method_name_case(
                                 &class,
@@ -5812,7 +5812,7 @@ impl<'a> Checker<'a> {
                                 let canonical = self.resolve_class_name(name);
                                 let templates = self
                                     .registry
-                                    .class_by_name(canonical.as_str())
+                                    .class_by_name(&canonical)
                                     .map(|info| info.templates().as_slice())
                                     .unwrap_or(&[]);
                                 if templates.is_empty() {
@@ -5870,7 +5870,7 @@ impl<'a> Checker<'a> {
                                         .rposition(|t| bindings.contains_key(t.as_ref()))
                                         .map(|i| i + 1)
                                         .unwrap_or(0);
-                                    let info = self.registry.class_by_name(canonical.as_str());
+                                    let info = self.registry.class_by_name(&canonical);
                                     let bounds = self
                                         .registry
                                         .effective_template_bounds_by_name(canonical.as_str());
@@ -6958,7 +6958,7 @@ impl<'a> Checker<'a> {
             Some(current) if forwards_static_binding(target) => {
                 let own = self
                     .registry
-                    .class_by_name(current.as_str())
+                    .class_by_name(current)
                     .map(|_| self.registry.own_template_args(current))
                     .unwrap_or_default();
                 self.substitute_class_templates(sig, current, &own, &owner)
@@ -7485,7 +7485,7 @@ impl<'a> Checker<'a> {
             .lookup_class(&class)
             .map(|(canonical, _)| canonical.to_string())
             .unwrap_or(class);
-        if !self.registry.has_class(class.as_str()) {
+        if !self.registry.has_class(&class) {
             // Mirrors real PHPStan's `AccessStaticPropertiesCheck`/
             // `ClassConstantRule`'s "class doesn't exist at all"
             // half, for both a static-property and a
@@ -7884,7 +7884,7 @@ impl<'a> Checker<'a> {
             let Some((class_name, _)) = ty.as_object() else {
                 return ty.clone();
             };
-            let Some(info) = self.registry.class_by_name(class_name.as_str()) else {
+            let Some(info) = self.registry.class_by_name(class_name) else {
                 return ty.clone();
             };
             let cases: Vec<Type> = info

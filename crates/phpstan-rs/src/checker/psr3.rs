@@ -402,7 +402,7 @@ impl<'a> Checker<'a> {
                 || m.is_enum_case()
                 || m.as_object().is_some_and(|(class, _)| {
                     self.registry
-                        .class_by_name(class.as_str())
+                        .class_by_name(class)
                         .is_some_and(|info| info.kind() == ClassKind::Enum)
                 })
         })

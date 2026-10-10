@@ -1114,7 +1114,7 @@ impl Workspace {
                 Some(format_signature(fqn, registry.lookup_function(fqn)?))
             }
             navigation::Resolved::Class(fqn) => {
-                let info = registry.class_by_name(fqn.as_str())?;
+                let info = registry.class_by_name(fqn)?;
                 let kind = match info.kind() {
                     ClassKind::Class => "class",
                     ClassKind::Interface => "interface",

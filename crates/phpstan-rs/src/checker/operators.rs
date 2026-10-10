@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
             } else if m.is_object().yes()
                 && m.object_class_names()
                     .iter()
-                    .any(|c| self.registry.has_class(c.as_str()))
+                    .any(|c| self.registry.has_class(c))
             {
                 self.instance_of_any(m, &["SimpleXMLElement", "GMP", "BcMath\\Number"])
             } else {
