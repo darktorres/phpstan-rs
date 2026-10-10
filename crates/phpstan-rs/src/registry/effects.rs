@@ -588,11 +588,14 @@ fn closure_parent(key: &DeclKey) -> Option<(DeclKey, u32)> {
     ))
 }
 
-fn function_key(name: &(impl KeyName + ?Sized)) -> DeclKey {
+pub(crate) fn function_key(name: &(impl KeyName + ?Sized)) -> DeclKey {
     DeclKey::new(None, name.lowered_name())
 }
 
-fn method_key(class: &(impl KeyName + ?Sized), method: &(impl KeyName + ?Sized)) -> DeclKey {
+pub(crate) fn method_key(
+    class: &(impl KeyName + ?Sized),
+    method: &(impl KeyName + ?Sized),
+) -> DeclKey {
     DeclKey::new(Some(class.lowered_name()), method.lowered_name())
 }
 
@@ -875,6 +878,18 @@ mod builtin_runs {
     /// lowercased) was reached.
     pub(super) fn probed(name: &str) -> bool {
         PROBED.binary_search(&name).is_ok()
+    }
+
+    /// Whether a probed method has this name (lowercased), on any class.
+    pub(super) fn probed_member(member: &str) -> bool {
+        static MEMBERS: std::sync::LazyLock<rustc_hash::FxHashSet<&'static str>> =
+            std::sync::LazyLock::new(|| {
+                PROBED
+                    .iter()
+                    .filter_map(|name| name.split_once("::").map(|(_, member)| member))
+                    .collect()
+            });
+        MEMBERS.contains(member)
     }
 
     /// What the builtin was seen to run through its arguments.
@@ -1969,6 +1984,9 @@ impl Registry {
             return Some(name.into());
         }
         let class = key.class.as_ref()?;
+        if !builtin_runs::probed_member(&key.member) {
+            return None;
+        }
         self.all_ancestor_names_of(class)
             .iter()
             .find_map(|ancestor| {
@@ -2009,10 +2027,9 @@ impl Registry {
     /// anything otherwise.
     fn stub_effect(&self, ix: EffectIx, sig: &FunctionReflection) -> Effect {
         let runs_code = self
-            .stub_effect_results
-            .get(self.reach_memo.effects.id(ix))
-            .copied()
-            .unwrap_or_else(|| self.stub_runs_code(self.effect_key(ix), sig));
+            .reach_memo
+            .stub_runs
+            .get_or_compute(ix, || self.stub_runs_code(self.effect_key(ix), sig));
         if runs_code {
             Effect::unknown()
         } else {
@@ -2020,46 +2037,31 @@ impl Registry {
         }
     }
 
-    /// Rebuilds stub behavior facts after declaration and hierarchy results
-    /// are ready. The map is immutable while effect settlement runs in
-    /// parallel, and stores the memo by the declaration's stable ID rather
-    /// than on its mutable signature.
+    /// Rebuilds the stub classes whose objects may run what they hold,
+    /// after declaration and hierarchy results are ready. The set is
+    /// immutable while effect settlement runs in parallel.
     fn prepare_stub_effect_results(&mut self) {
-        let mut results = FxHashMap::default();
-        for (name, _) in self.function_ids.iter() {
-            let Some((_, declared, sig)) = self.function(name) else {
-                continue;
-            };
-            if sig.is_stub {
-                let key = function_key(declared.as_str());
-                results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
-            }
-        }
         let mut holding = FxHashSet::default();
         for (class, _) in self.class_ids.iter() {
             for method in self.method_names(class) {
                 let Some(sig) = self.lookup_own_method(class, method) else {
                     continue;
                 };
-                if sig.is_stub {
-                    let key = method_key(class, method);
-                    results.insert(self.effect_id_for(&key), self.stub_runs_code(&key, sig));
-                    if self.builtin_entry(&key).is_none()
-                        && sig
-                            .params
-                            .iter()
-                            .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES))
-                    {
-                        holding.insert(class.to_ascii_lowercase());
-                    }
+                if sig.is_stub
+                    && sig
+                        .params
+                        .iter()
+                        .any(|p| p.ty.mentions_any(&CODE_RUNNING_PARAMETER_TYPES))
+                    && self.builtin_entry(&method_key(class, method)).is_none()
+                {
+                    holding.insert(class.to_ascii_lowercase());
                 }
             }
         }
-        self.stub_effect_results = results;
         self.stub_holding_classes = holding;
     }
 
-    fn stub_runs_code(&self, key: &DeclKey, sig: &FunctionReflection) -> bool {
+    pub(crate) fn stub_runs_code(&self, key: &DeclKey, sig: &FunctionReflection) -> bool {
         let takes_code = sig
             .params
             .iter()

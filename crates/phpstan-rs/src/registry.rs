@@ -550,14 +550,9 @@ pub struct Registry {
     // translates them back to generation-checked EffectIds.
     #[serde(skip)]
     effects_cache: Option<Vec<(effects::DeclKey, effects::Settled)>>,
-    // Whether a stub may run code passed to it, keyed by the same stable
-    // declaration IDs used by effect settlement. Rebuilt before each effects
-    // pass; unlike the signature, this is a derived Registry result.
-    #[serde(skip)]
-    pub(crate) stub_effect_results: FxHashMap<effects::EffectId, bool>,
     // The stub classes, lowercased, that no run of PHP has seen and that
     // have a method taking code or an object, whose other methods may run
-    // what that one keeps. Rebuilt with `stub_effect_results`.
+    // what that one keeps. Rebuilt before each effects pass.
     #[serde(skip)]
     pub(crate) stub_holding_classes: FxHashSet<String>,
     // The builtin methods that run code passed to them
@@ -1070,7 +1065,6 @@ impl Registry {
             class_member_topology_cache: _,
             effects: _,
             effects_cache: _,
-            stub_effect_results: _,
             stub_holding_classes: _,
             builtin_methods_running_code: _,
             base_builtin_methods_running_code: _,
@@ -1342,7 +1336,6 @@ impl Registry {
         self.deferred_function_results.clear();
         self.deferred_class_results.clear();
         // Declarations remain as built. Finishing results are reset by ID.
-        self.stub_effect_results.clear();
         self.stub_holding_classes.clear();
     }
 
@@ -1553,7 +1546,6 @@ impl Registry {
             class_results: class_results_before.clone(),
         };
         if scope.is_all() {
-            self.stub_effect_results.clear();
             self.stub_holding_classes.clear();
             self.class_const_types.clear();
             self.class_const_types_by_id.clear();
@@ -1602,7 +1594,6 @@ impl Registry {
             .collect();
         self.function_results
             .retain(|id, _| !changed_function_ids.contains(id));
-        self.stub_effect_results.clear();
         self.stub_holding_classes.clear();
         body_scope.map(|_| snapshot(self))
     }
@@ -1630,7 +1621,6 @@ impl Registry {
         self.functions = self.functions_for_cache();
         // IDs may be reassigned from project to stub space below. The next
         // effect pass rebuilds this ephemeral memo against the frozen IDs.
-        self.stub_effect_results.clear();
         self.stub_holding_classes.clear();
         self.base_assert_tagged = Arc::new(self.names_with_assert_tags.clone());
         self.base_builtin_methods_running_code =
@@ -2837,7 +2827,6 @@ impl Registry {
             .drain()
             .map(|(id, settled)| (id.with_generation(generation), settled))
             .collect();
-        base.stub_effect_results.clear();
         base.stub_holding_classes.clear();
         *self = base;
         self.advance_relation_generation();

@@ -4,7 +4,7 @@
 use super::helpers::build_registry;
 use crate::project::Project;
 use crate::registry::container::{Reader, Writer};
-use crate::registry::{MethodRef, Registry, Storage, effects::EffectId};
+use crate::registry::{Registry, Storage};
 use syntax::name::Name;
 use types::Type;
 
@@ -570,31 +570,25 @@ fn trait_method_effects_use_host_method_results_and_survive_cache_round_trip() {
 }
 
 #[test]
-fn stub_effect_memos_live_on_the_registry_and_use_function_ids() {
+fn a_stub_runs_code_when_it_takes_a_callable() {
     let registry = Project::built_stubs(false);
-    let (id, _, signature) = registry.function("array_walk").expect("stub function");
+    let (_, _, signature) = registry.function("array_walk").expect("stub function");
     assert!(signature.is_stub);
-    assert_eq!(
-        registry.stub_effect_results.get(&EffectId::Function(id)),
-        Some(&true),
-        "array_walk runs the callable argument and the memo belongs to its function ID"
-    );
-    let date_time = *registry.class_ids.get("DateTime").expect("stub class");
-    let format_slot = registry
-        .member_slot("DateTime", "format")
-        .expect("stub method");
-    assert_eq!(
-        registry
-            .stub_effect_results
-            .get(&EffectId::Method(MethodRef::new(date_time, format_slot))),
-        Some(&false),
-        "DateTime::format has a method-ID entry and runs no passed code"
-    );
-
-    let back = round_trip(&registry);
+    let key = crate::registry::effects::function_key("array_walk");
     assert!(
-        back.stub_effect_results.is_empty(),
-        "the runtime memo is rebuilt for the loaded registry rather than serialized"
+        registry.stub_runs_code(&key, signature),
+        "array_walk runs the callable argument"
+    );
+    let format = registry
+        .lookup_own_method("DateTime", "format")
+        .expect("stub method");
+    let key = crate::registry::effects::method_key(
+        &syntax::name::Name::from("DateTime"),
+        &syntax::name::Name::from("format"),
+    );
+    assert!(
+        !registry.stub_runs_code(&key, format),
+        "DateTime::format runs no passed code"
     );
 }
 

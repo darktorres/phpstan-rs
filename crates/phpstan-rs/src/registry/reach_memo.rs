@@ -179,6 +179,8 @@ pub(crate) struct ReachMemo {
     pub(crate) hook_declarations: OnceMap<(Name, Option<Name>, bool), Arc<[HookDeclaration]>>,
     /// Whether objects of a builtin class run what they were made with.
     pub(crate) stub_holds_code: OnceMap<String, bool>,
+    /// Whether a call of a stub, by handle, may run code it was given.
+    pub(crate) stub_runs: OnceMap<EffectIx, bool>,
     /// The handle a declaration's key stands for in the effects pass.
     pub(crate) effect_ixs: OnceMap<DeclKey, EffectIx>,
     pub(crate) effects: EffectTable,
