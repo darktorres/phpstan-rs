@@ -1315,8 +1315,6 @@ struct Scope {
     // The variables a `foreach` by reference bound to the elements of the
     // variable, in that order: what they hold, the elements hold.
     element_refs: Vec<ElementRef>,
-    // The variables declared `static`.
-    statics: FxHashSet<Name>,
     computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
@@ -2087,18 +2085,6 @@ impl Summarizer<'_> {
     /// holds.
     fn merge_references(&mut self) {
         self.merge_element_refs();
-        // A static variable holds on to an object between calls, which then
-        // is not one the call made: it is known to hold what is no object
-        // only.
-        for name in self.scope.statics.clone() {
-            if let Some(origins) = self.scope.origins.get_mut(&name)
-                && origins
-                    .as_ref()
-                    .is_some_and(|all| all.iter().any(|origin| !origin.runs_nothing()))
-            {
-                *origins = None;
-            }
-        }
     }
 
     fn merge_element_refs(&mut self) {
@@ -2137,6 +2123,22 @@ impl Summarizer<'_> {
                 .entry(subject)
                 .or_insert_with(|| Some(Vec::new()));
             extend_known(held, contents);
+        }
+        // A variable bound to the whole of another holds what the other does.
+        for index in 0..self.scope.element_refs.len() {
+            let element_ref = &self.scope.element_refs[index];
+            if !element_ref.whole {
+                continue;
+            }
+            let (subject, item) = (element_ref.subject.clone(), element_ref.item.clone());
+            let origins = self.scope.origins.get(&subject).cloned();
+            let contents = self.scope.contents.get(&subject).cloned();
+            if let Some(origins) = origins {
+                self.scope.origins.insert(item.clone(), origins);
+            }
+            if let Some(contents) = contents {
+                self.scope.contents.insert(item, contents);
+            }
         }
     }
 
@@ -2374,13 +2376,35 @@ impl Summarizer<'_> {
             None => {
                 self.implicit(arenas, lhs, Operation::Destroy);
                 // The arrays it held die with it.
-                if let Some(contents) = plain_variable(arenas, lhs)
-                    .and_then(|name| self.scope.contents.get(&name).cloned())
+                if let Some(contents) =
+                    plain_variable(arenas, lhs).and_then(|name| self.contents_held(&name))
                 {
                     self.implicit_on(contents, Operation::Destroy);
                 }
             }
         }
+    }
+
+    /// What the arrays the variable `name` holds hold, with what the
+    /// variables bound to the whole of it have written so far; `None` when
+    /// it is not tracked.
+    fn contents_held(&self, name: &Name) -> Option<MaybeOrigins> {
+        let mut held = self.scope.contents.get(name).cloned()?;
+        for element_ref in self
+            .scope
+            .element_refs
+            .iter()
+            .filter(|r| r.whole && r.subject == *name)
+        {
+            let through = self
+                .scope
+                .contents
+                .get(&element_ref.item)
+                .cloned()
+                .unwrap_or(Some(Vec::new()));
+            extend_known(&mut held, through);
+        }
+        Some(held)
     }
 
     /// The arguments of a call written as a builtin that writes what it
@@ -3241,7 +3265,6 @@ impl Visitor for Summarizer<'_> {
                         // calls before wrote the same.
                         self.scope.origins.insert(name.clone(), origins);
                         self.scope.contents.insert(name.clone(), contents);
-                        self.scope.statics.insert(name);
                     }
                 }
                 _ => {}

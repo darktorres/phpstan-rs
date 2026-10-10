@@ -258,3 +258,159 @@ function theCallerSeesNothingRunForQuietObjectsMatchedOver(): void
     aByReferenceParameterIsMatchedOver($kept);
     assertType('null', Flag::$value);
 }
+
+function aMultisortOfQuietObjects(): void
+{
+    $a = [new Quiet()]; $b = [1]; array_multisort($a, SORT_DESC, $b);
+}
+
+function theCallerSees_aMultisortOfQuietObjects(): void
+{
+    Flag::$value = null;
+    aMultisortOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aMultisortOfLoudObjects(): void
+{
+    $a = [new Resets()]; $b = [1]; array_multisort($a, SORT_DESC, $b);
+}
+
+function theCallerSees_aMultisortOfLoudObjects(): void
+{
+    Flag::$value = null;
+    aMultisortOfLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function anIsCallableNameOverQuietObjects(): void
+{
+    $n = [new Quiet()]; is_callable('strlen', false, $n);
+}
+
+function theCallerSees_anIsCallableNameOverQuietObjects(): void
+{
+    Flag::$value = null;
+    anIsCallableNameOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aSystemResultOverQuietObjects(): void
+{
+    $c = [new Quiet()]; system('x', $c);
+}
+
+function theCallerSees_aSystemResultOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aSystemResultOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aPassthruResultOverQuietObjects(): void
+{
+    $c = [new Quiet()]; passthru('x', $c);
+}
+
+function theCallerSees_aPassthruResultOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aPassthruResultOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aSimilarTextPercentOverQuietObjects(): void
+{
+    $p = [new Quiet()]; similar_text('a', 'b', $p);
+}
+
+function theCallerSees_aSimilarTextPercentOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aSimilarTextPercentOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aParseStrResultOverQuietObjects(): void
+{
+    $r = [new Quiet()]; parse_str('a=1', $r);
+}
+
+function theCallerSees_aParseStrResultOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aParseStrResultOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aMatchAllWithFlagsOverQuietObjects(): void
+{
+    $m = [new Quiet()]; preg_match_all('/x/', 'y', $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+}
+
+function theCallerSees_aMatchAllWithFlagsOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aMatchAllWithFlagsOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aMatchWithUnmatchedAsNullOverLoudObjects(): void
+{
+    $m = [new Resets()]; preg_match('/x/', 'y', $m, PREG_UNMATCHED_AS_NULL);
+}
+
+function theCallerSees_aMatchWithUnmatchedAsNullOverLoudObjects(): void
+{
+    Flag::$value = null;
+    aMatchWithUnmatchedAsNullOverLoudObjects();
+    assertType('int|null', Flag::$value);
+}
+
+function aReplaceCountOverQuietObjects(): void
+{
+    $c = [new Quiet()]; preg_replace('/x/', 'y', 'z', -1, $c);
+}
+
+function theCallerSees_aReplaceCountOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aReplaceCountOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aStrReplaceCountOverQuietObjects(): void
+{
+    $c = [new Quiet()]; str_replace('a', 'b', 'c', $c);
+}
+
+function theCallerSees_aStrReplaceCountOverQuietObjects(): void
+{
+    Flag::$value = null;
+    aStrReplaceCountOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aSettypeOfLoudArrayToBool(): void
+{
+    $v = [new Resets()]; settype($v, 'bool');
+}
+
+function theCallerSees_aSettypeOfLoudArrayToBool(): void
+{
+    Flag::$value = null;
+    aSettypeOfLoudArrayToBool();
+    assertType('int|null', Flag::$value);
+}
+
+function anExecResultCodeOverQuietObjects(): void
+{
+    $c = [new Quiet()]; exec('x', $o, $c);
+}
+
+function theCallerSees_anExecResultCodeOverQuietObjects(): void
+{
+    Flag::$value = null;
+    anExecResultCodeOverQuietObjects();
+    assertType('null', Flag::$value);
+}
