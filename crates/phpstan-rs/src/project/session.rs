@@ -397,7 +397,13 @@ impl Finalize {
         results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
     ) -> Vec<String> {
         for diagnostics in results.values_mut() {
+            let made = diagnostics.len();
             diagnostics.retain(|d| self.cutoff.reports(d));
+            syntax::stats::add(syntax::stats::Counter::DiagnosticsBuilt, made as u64);
+            syntax::stats::add(
+                syntax::stats::Counter::DiagnosticsBelowLevel,
+                (made - diagnostics.len()) as u64,
+            );
         }
         project.apply_inline_ignores(results, self.report_unmatched_ignores);
         let stale = self.filter_by_path(results);
