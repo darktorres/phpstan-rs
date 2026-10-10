@@ -1127,10 +1127,22 @@ impl Session {
             Some(bytes) => buf.extend_from_slice(bytes),
             None => {
                 let mut file = std::fs::File::open(self.root.join(path))?;
-                if let Ok(meta) = file.metadata() {
-                    buf.reserve(usize::try_from(meta.len()).unwrap_or(0));
+                match file.metadata() {
+                    Ok(meta) => {
+                        // One byte past the length tells a file that grew
+                        // since the length was read; reading to the end then
+                        // takes the rest.
+                        let len = meta.len().saturating_add(1);
+                        buf.reserve(usize::try_from(len).unwrap_or(0));
+                        let read = (&mut file).take(len).read_to_end(buf)?;
+                        if read as u64 == len {
+                            file.read_to_end(buf)?;
+                        }
+                    }
+                    Err(_) => {
+                        file.read_to_end(buf)?;
+                    }
                 }
-                file.read_to_end(buf)?;
             }
         }
         Ok(())
