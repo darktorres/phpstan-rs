@@ -21,6 +21,29 @@ fn diagnostics_at_php_8_5_4(src: &str) -> Vec<diagnostics::Diagnostic> {
 }
 
 #[test]
+fn exact_dynamic_strlen_preserves_argument_diagnostics_once() {
+    let direct = diagnostics_at_php_8_5_4("<?php function f(): void { strlen([]); }");
+    let dynamic = diagnostics_at_php_8_5_4("<?php function f(): void { $fn = 'strlen'; $fn([]); }");
+    let argument_errors = |diagnostics: &[diagnostics::Diagnostic]| {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.identifier.as_str() == "argument.type")
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let direct_errors = argument_errors(&direct);
+    let dynamic_errors = argument_errors(&dynamic);
+    assert_eq!(direct_errors.len(), 1, "direct control: {direct:#?}");
+    assert_eq!(
+        dynamic_errors.len(),
+        1,
+        "exact-name dynamic call: {dynamic:#?}"
+    );
+    assert_eq!(dynamic_errors, direct_errors);
+}
+
+#[test]
 #[ignore = "RV-9: the Stringable predicate answers No for a bare object; remove when fixed"]
 fn bare_object_argument_invalidates_property_narrowing_like_mixed() {
     let src = "<?php\n\
