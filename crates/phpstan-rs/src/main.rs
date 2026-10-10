@@ -130,6 +130,7 @@ fn main() {
         },
     }
     phpstan_rs::heap::end_of_run();
+    #[cfg(feature = "memo-stats")]
     if std::env::var_os("PHPSTAN_RS_MEMO_STATS").is_some() {
         for (name, count) in phpstan_rs::stats::table() {
             eprintln!("stats {name} {count}");

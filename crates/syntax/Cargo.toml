@@ -21,6 +21,8 @@ stacker.workspace = true
 [features]
 # `arbitrary::Arbitrary` for tokens, for the token-stream fuzz target.
 fuzzing = ["dep:arbitrary"]
+# Counts memo and cache hit rates (`stats`), printed with `PHPSTAN_RS_MEMO_STATS=1`.
+memo-stats = []
 
 [dev-dependencies]
 criterion.workspace = true

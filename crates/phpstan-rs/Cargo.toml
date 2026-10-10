@@ -49,6 +49,9 @@ default = ["pcre-validate"]
 system-allocator = []
 hotpath = ["hotpath/hotpath"]
 hotpath-alloc = ["hotpath/hotpath-alloc"]
+# Counts memo and cache hit rates, printed at the end of a run with
+# `PHPSTAN_RS_MEMO_STATS=1` (see `syntax::stats`).
+memo-stats = ["syntax/memo-stats"]
 # One-shot heap profiler (https://docs.rs/dhat): swaps in `dhat::Alloc` as
 # the global allocator and dumps a `dhat-heap.json` on clean exit, showing
 # which call sites hold live bytes at peak (not just alloc/dealloc churn,

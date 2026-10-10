@@ -52,6 +52,7 @@ use super::effect_table::{ByRefParams, EffectIx, TransferIx, TransferTable};
 use super::reach_memo::{ReturnedKey, SharedTargets, StaticTarget};
 use syntax::ast::{ClassKind, QualifiedName, ResolvedName, Visibility};
 use syntax::name::Name;
+use syntax::stats::{self, Counter};
 
 use crate::file_id::FileId;
 use crate::registry::bodies::BodySource;
@@ -3906,12 +3907,20 @@ impl Reach<'_> {
     /// `class` itself: none when the class has no body for it, or only a
     /// `@method` tag or an abstract method declares it.
     fn implicit_method(&self, class: &Name, method: &Name) -> Option<DeclKey> {
-        self.registry
-            .reach_memo
-            .implicit_method
-            .get_or_compute((class.lowered().clone(), method.lowered().clone()), || {
+        let mut computed = false;
+        let found = self.registry.reach_memo.implicit_method.get_or_compute(
+            (class.lowered().clone(), method.lowered().clone()),
+            || {
+                computed = true;
                 self.compute_implicit_method(class, method)
-            })
+            },
+        );
+        stats::count(if computed {
+            Counter::ImplicitMethodMiss
+        } else {
+            Counter::ImplicitMethodHit
+        });
+        found
     }
 
     fn compute_implicit_method(&self, class: &Name, method: &Name) -> Option<DeclKey> {
@@ -5336,11 +5345,16 @@ impl<'r> Level<'r> {
         let Some(key) = self.returned_key(callee) else {
             return self.compute_returned_holder(callee);
         };
-        let held = self
-            .registry
-            .reach_memo
-            .returned
-            .get_or_compute(key, || self.compute_returned_holder(callee));
+        let mut computed = false;
+        let held = self.registry.reach_memo.returned.get_or_compute(key, || {
+            computed = true;
+            self.compute_returned_holder(callee)
+        });
+        stats::count(if computed {
+            Counter::ReturnedHolderMiss
+        } else {
+            Counter::ReturnedHolderHit
+        });
         debug_assert_eq!(held, self.compute_returned_holder(callee));
         held
     }

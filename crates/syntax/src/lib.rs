@@ -20,8 +20,8 @@ pub mod php_string;
 pub mod printer;
 pub mod references;
 pub mod span;
-pub mod stats;
 pub mod stack;
+pub mod stats;
 pub mod token;
 pub mod visit;
 

@@ -1,12 +1,15 @@
 //! Counters for the memos and caches whose worth is a hit rate, printed at the
-//! end of a run with `PHPSTAN_RS_MEMO_STATS=1`.
+//! end of a run with `PHPSTAN_RS_MEMO_STATS=1`. They exist only with the
+//! `memo-stats` feature: without it every counter call does nothing.
 //!
 //! A counter is a cell its thread alone writes, so an event costs a load
 //! and a store: no lock, no atomic read-modify-write, no allocation. Each
 //! thread's cells are registered once, and the report sums them, so a
 //! worker that never exits is counted too.
 
+#[cfg(feature = "memo-stats")]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "memo-stats")]
 use std::sync::{Arc, Mutex};
 
 macro_rules! counters {
@@ -18,7 +21,9 @@ macro_rules! counters {
             $($variant),+
         }
 
+        #[cfg_attr(not(feature = "memo-stats"), allow(dead_code))]
         const NAMES: &[&str] = &[$($name),+];
+        #[cfg_attr(not(feature = "memo-stats"), allow(dead_code))]
         const COUNT: usize = NAMES.len();
     };
 }
@@ -53,10 +58,13 @@ counters! {
     DiagnosticsBelowLevel => "diagnostics.below_level",
 }
 
+#[cfg(feature = "memo-stats")]
 struct Cells([AtomicU64; COUNT]);
 
+#[cfg(feature = "memo-stats")]
 static THREADS: Mutex<Vec<Arc<Cells>>> = Mutex::new(Vec::new());
 
+#[cfg(feature = "memo-stats")]
 thread_local! {
     static LOCAL: Arc<Cells> = {
         let cells = Arc::new(Cells([const { AtomicU64::new(0) }; COUNT]));
@@ -69,6 +77,7 @@ thread_local! {
 }
 
 /// Counts `by` events of `counter` on this thread.
+#[cfg(feature = "memo-stats")]
 #[inline]
 pub fn add(counter: Counter, by: u64) {
     let _ = LOCAL.try_with(|cells| {
@@ -77,13 +86,21 @@ pub fn add(counter: Counter, by: u64) {
     });
 }
 
+/// Counts `by` events of `counter` on this thread: nothing without the
+/// `memo-stats` feature.
+#[cfg(not(feature = "memo-stats"))]
+#[inline]
+pub fn add(_counter: Counter, _by: u64) {}
+
 /// Counts one event of `counter`.
 #[inline]
 pub fn count(counter: Counter) {
     add(counter, 1);
 }
 
-/// The sum of every thread's count of `counter`.
+/// The sum of every thread's count of `counter`; zero without the
+/// `memo-stats` feature.
+#[cfg(feature = "memo-stats")]
 pub fn total(counter: Counter) -> u64 {
     THREADS
         .lock()
@@ -93,8 +110,24 @@ pub fn total(counter: Counter) -> u64 {
         .sum()
 }
 
+/// The sum of every thread's count of `counter`; zero without the
+/// `memo-stats` feature.
+#[cfg(not(feature = "memo-stats"))]
+pub fn total(_counter: Counter) -> u64 {
+    0
+}
+
 /// Every counter that was counted, as `(name, count)` in declaration
 /// order, then each `site.hit`/`site.miss` pair as `site.rate` in percent.
+/// Empty without the `memo-stats` feature.
+#[cfg(not(feature = "memo-stats"))]
+pub fn table() -> Vec<(String, u64)> {
+    Vec::new()
+}
+
+/// Every counter that was counted, as `(name, count)` in declaration
+/// order, then each `site.hit`/`site.miss` pair as `site.rate` in percent.
+#[cfg(feature = "memo-stats")]
 pub fn table() -> Vec<(String, u64)> {
     let mut sums = [0u64; COUNT];
     for cells in THREADS
@@ -128,7 +161,7 @@ pub fn table() -> Vec<(String, u64)> {
     rows
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "memo-stats"))]
 mod tests {
     use super::*;
 

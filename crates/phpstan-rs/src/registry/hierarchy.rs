@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use syntax::name::NameSet;
 use syntax::name::{FoldKey, FoldedMap, Name, NameMap};
+use syntax::stats::{self, Counter};
 
 use rayon::prelude::*;
 
@@ -681,11 +682,20 @@ impl Registry {
     }
 
     fn descendants(&self, class: &(impl KeyName + ?Sized), with_traits: bool) -> Arc<[Name]> {
-        self.reach_memo
-            .descendants
-            .get_or_compute((class.lowered_name(), with_traits), || {
-                self.walk_descendants(class.text(), with_traits)
-            })
+        let mut computed = false;
+        let below =
+            self.reach_memo
+                .descendants
+                .get_or_compute((class.lowered_name(), with_traits), || {
+                    computed = true;
+                    self.walk_descendants(class.text(), with_traits)
+                });
+        stats::count(if computed {
+            Counter::DescendantsMiss
+        } else {
+            Counter::DescendantsHit
+        });
+        below
     }
 
     /// The classes below `class`, found by walking the graph.
