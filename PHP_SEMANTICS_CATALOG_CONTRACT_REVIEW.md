@@ -917,6 +917,7 @@ witness against the current fixture, or pin the old fixture, and say which in th
   The committed pair is consistent (see the strlen artifact entry above).
 - The earlier claim that the regenerated artifact is byte-for-byte reproducible was checked
   against the working-tree builder and artifact only. It has not been checked at `HEAD`.
+- RV-24 is retracted in its mechanism by the fourth pass (see its RV-24 entry there); the rest of its text stands.
 
 ### Not verified in this pass
 
@@ -934,3 +935,123 @@ The committed commits close RV-1, RV-2, RV-4, RV-5, RV-6, RV-7 and RV-8 in their
 form, and RV-11 is enforced but its evidence is still stale (RV-26). They add the typed assumption, trust, cycle, cleanup-matrix and CBMC fail-closed machinery
 the earlier records asked for. The open items for the next author pass are RV-20, RV-21,
 RV-23, RV-24 and RV-26 (Medium or higher), and the verification gaps listed above.
+
+---
+
+## Fourth review pass: commits f307c252..9f895cff and c513c52e (2026-10-10)
+
+Scope: the five commits that followed the third pass's last reviewed commit (`f307c252`
+through `69da8569`, which are the builder, provenance, callback-throw and documentation
+commits), and the third pass record itself (`c513c52e`). Each commit was read as a diff and
+checked by running the code or regenerating the artifact at that commit. The uncommitted
+working tree is not part of this pass.
+
+### What was checked
+
+- **Correspondence builder** (`f307c252`, `7617797e`, `94bce99a`). Each commit's builder,
+  run on the same recorded inputs, reproduces that commit's committed
+  `strlen-representation-correspondence.json` byte for byte. The `HEAD` builder reproduces
+  the `HEAD` artifact. The Clang AST campaign records the `/tmp` copy of the locked PHP
+  source, and the builder requires that path. Passing the repository copy is refused, as
+  intended. The `HEAD` rebuild that failed earlier was caused by this path choice.
+- **Callback throw model** (`9f895cff`). At that commit, the semantics library tests pass
+  (109), the catalog example tests pass (5), and `php-8.5.4-strlen.json` regenerates
+  byte-for-byte from `strlen-llvm-operation-inventory.json` and
+  `strlen-weak-scalars-8.5.4.json`. The checker's `catalog` unit tests pass (5, one
+  pre-existing RV-9 ignore), including `stringable_invocation_keeps_observed_php_throw_path`.
+  All 16 `strlen` fixtures pass. The `PhpThrow` coverage of the `__toString` graph is `Open`.
+  No reference to the retired `callback-observation-v1` rule remains.
+- **Documentation** (`69da8569`). The `Unknown` event row matches the host, which returns a
+  Normal exit with unchanged state (`builtin_calls.rs:523`). The R02.4 to R02.7 open rows
+  match the committed matrix.
+
+### Findings
+
+**RV-27 — Medium, provenance. The builder does not bind input files to their recorded commands.**
+Commits `7617797e` and `94bce99a` added checks that a campaign command names the pinned
+source and exited successfully. None of them checks that an input file is the output of
+that command. For the Clang AST summary, only the source path appears in the command. For
+the GCC dumps, the only file check is the name suffix (`.007t.gimple`, `.016t.cfg`). For
+the cleanup counterexample, the GIMPLE, AST and LLVM summaries are not compared with their
+commands' outputs. Reproduced: with a fabricated `cleanup_gimple` file containing
+`finally` and `Guard::~Guard (&guard)`, which no recorded command produced, the builder
+exits 0 and reports `gcc_gimple_has_exceptional_finally_destructor: true`. The JSON
+provenance note ("tied to the successful source-bound dump command") and the ledger's
+R02.2 validation line ("a mutated Clang source digest was rejected", which exercises only
+the source digest) both overstate the binding. *Required:* compare each input's path or
+digest with the output argument of its recorded command, or record output digests in the
+measurement records and check them. Add a mutation test for each bound input.
+
+**RV-28 — Medium, documentation. Committed rows say the checker does not consume throw-state effects.**
+`69da8569` states, in R05.2, that "the checker still does not consume ... throw-state
+effects", and the F05.4 row says "stateful ordered writes/throws are not consumed by the
+checker." Since `9f895cff`, `catalog_php_throw_invocation_at` (`checker.rs:2440`) feeds
+`expr.rs:248`, which records a throw state with `forget_catalog_string_arguments_may_change`
+applied. The statement is therefore wrong for string-argument invalidation on the throw
+path. It remains right for ordered callback writes, invalid returns and destructor effects.
+*Required:* restate both rows to name what is consumed and what is not.
+
+**RV-29 — Medium, coverage. The strlen throw path inside `try` has one fixture.** Before
+`9f895cff`, `strlen` produced no `PhpThrow` exit, so the throw-state path in `expr.rs:248`
+was inactive for it. The commit activates it for `strlen($stringable)` inside a `try`. The
+fixture `strlen_catalog_stringable_conversion_preserves_callback_effects` covers only the
+write-before-throw case (the write survives into the catch). It does not cover catch-side
+narrowing or invalidation of string-argument facts on that path. The host unit test checks
+the exit set, not the checker's behavior. *Required:* add a fixture that narrows a variable
+inside a `catch` after a Stringable-throwing `strlen`, and one that checks the variable's
+type after a non-throwing call on the same path.
+
+**RV-30 — Low, documentation. R02.2 contains a contradictory sentence.** The F02 paragraph
+in `f307c252` and carried by `7617797e` and `94bce99a` says "A systematic AST/CFG-to-LLVM
+semantic correspondence adapter and broad transfer comparison are absent. Complete
+systematic AST/CFG-to-LLVM comparison adapters and broader semantic correspondence." The
+first sentence describes the state before R02.2; the second reads as unfinished work and
+contradicts the R02.2 entry, which says the adapter is implemented. *Required:* delete the
+pre-R02.2 sentence and keep the remaining-work statement, if any, under R02.7 or R02.5.
+
+**RV-31 — Low, limitation. The GCC CFG reachability is an approximation.** `gcc_cfg_blocks`
+(in `f307c252`) reconstructs successors from `goto <bb N>` and falls through to the next
+block only after `if (` blocks, or after a block with no successor that is not
+`__builtin_unreachable` or `return;`. The `gcc_path` result therefore depends on this
+heuristic. The JSON and ledger describe the result as a structural correspondence, which
+is the right scope, but the reconstruction is not a verified CFG. *Required:* none for
+acceptance; note the heuristic next to the GCC path result in the JSON.
+
+**RV-24 — retracted in its mechanism (correction to the third pass).** The third pass said
+that the strlen bridge returns `None` on any non-normal exit, so Stringable calls fall back
+to the legacy path. That is wrong. `catalog_builtin_return_type` (`builtin_calls.rs`,
+around line 2766) returns `None` only for a `Normal` exit with no value, or when the Return
+coverage is not `Closed`. `PhpThrow`, `NativeUnwind`, `Fatal` and `Suspended` exits keep
+the normal return type. The `PhpThrow` observations feed
+`php_throw_without_string_invocation` and `php_throw_invoked_string_arguments`, which the
+checker's throw-state path consumes (RV-28, RV-29). The third pass's probe claim that
+outputs were identical "under" the fallback was made under the wrong mechanism and is not
+verified. The real issue is the new throw-state behavior, recorded as RV-28 and RV-29.
+
+### Commit verdicts
+
+| Commit | Subject | Verdict | Basis |
+|---|---|---|---|
+| `f307c252` | Record bounded strlen compiler correspondence | Accept with notes | Reproduces its artifact. RV-30, RV-31. |
+| `7617797e` | Bind compiler correspondence to campaign provenance | Needs fix | Reproduces its artifact. RV-27. |
+| `94bce99a` | Verify cleanup evidence provenance | Needs fix | Reproduces its artifact. RV-27 reproduced. |
+| `9f895cff` | Model observed strlen callback throws | Accept with notes | Tests and regeneration pass. RV-29. |
+| `69da8569` | Track remaining strlen remediation gaps | Needs fix | Docs. RV-28, RV-30. |
+| `c513c52e` | Record third review pass | Needs fix | RV-24 mechanism retracted here. |
+
+### Not verified in this pass
+
+- The full library and fixture suites at `HEAD`. The checker's catalog unit tests and the
+  strlen fixtures were run at `9f895cff`, not at `HEAD`.
+- The Python builder has no unit tests in the repository. Its behavior was checked by
+  reproduction only.
+- Other sources of input-artifact provenance were not traced beyond the cases in RV-27.
+- The checker outputs for the spread and `object` probes cited in the third pass. They
+  remain unverified until re-probed at `9f895cff`.
+
+### Reviewer disposition
+
+Commits `f307c252` and `9f895cff` are accepted with notes. `7617797e`, `94bce99a`,
+`69da8569` and `c513c52e` need fixes. The open items for the next author pass are RV-27,
+RV-28 and RV-29 (Medium), with RV-30 and RV-31 (Low). The third pass's RV-24 is retracted
+in its mechanism, and the rest of its text stands.
