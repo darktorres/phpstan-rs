@@ -4899,16 +4899,11 @@ impl<'r> Level<'r> {
         true
     }
 
-    /// Whether every one of `targets` is `array_push` or `array_unshift`, the
-    /// builtins that put the other arguments in the first and nothing else.
-    fn fills_only(&self, targets: &Targets) -> bool {
-        let mut any = false;
-        let only = targets.ixs().all(|ix| {
-            any = true;
-            let key = self.registry.effect_key(ix);
-            key.class.is_none() && matches!(key.member.as_str(), "array_push" | "array_unshift")
-        });
-        any && only
+    /// Whether `ix` is a builtin whose by-reference writes the summary
+    /// applied to the variables (see `summaries::filler`).
+    fn is_filler(&self, ix: EffectIx) -> bool {
+        let key = self.registry.effect_key(ix);
+        key.class.is_none() && crate::registry::summaries::filler(key.member.as_str()).is_some()
     }
 
     /// What each of the scope's calls reaches, and the places they may
@@ -4936,12 +4931,13 @@ impl<'r> Level<'r> {
             // A closure the body wrote or a parameter's argument, called:
             // what it takes by reference is not looked up.
             let unknown_params = (self.runs.borrow().len(), self.params_run.borrow().len()) != ran;
-            let fills = call.fills.is_some() && self.fills_only(&targets);
             for (at, place) in call.places.iter() {
-                if fills && call.fills.as_ref() == Some(at) {
-                    continue;
-                }
-                if unknown_params || targets.ixs().any(|ix| self.by_ref_at(ix, at)) {
+                let filled = call.fills.contains(at);
+                if unknown_params
+                    || targets
+                        .ixs()
+                        .any(|ix| !(filled && self.is_filler(ix)) && self.by_ref_at(ix, at))
+                {
                     written_args.push(place);
                 }
             }

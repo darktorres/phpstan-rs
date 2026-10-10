@@ -842,10 +842,10 @@ pub(crate) struct CallWrites {
     /// literal, a constant, a `::class` name.
     pub(crate) objectless: Box<[ArgAt]>,
     pub(crate) callables: Box<[(ArgAt, Callable)]>,
-    /// The argument the call fills with the others if it is the builtin it
-    /// is written as (`array_push`, `array_unshift`): the variable then holds
-    /// what they hold, nothing else.
-    pub(crate) fills: Option<ArgAt>,
+    /// The arguments the call writes, if it is the builtin it is written as,
+    /// in a way the summary already applied to the variable (`array_push`,
+    /// `sort`, `preg_match`, see `filler`): they are not lost to the call.
+    pub(crate) fills: Box<[ArgAt]>,
 }
 
 /// What a body or a closure in it writes, before any declaration is looked
@@ -2256,7 +2256,7 @@ impl Summarizer<'_> {
             places: Box::new([]),
             objectless: Box::new([]),
             callables: Box::new([]),
-            fills: None,
+            fills: Box::new([]),
         });
     }
 
@@ -2358,31 +2358,117 @@ impl Summarizer<'_> {
         });
     }
 
-    /// The first argument of a call written as `array_push` or
-    /// `array_unshift` of a variable the walk tracks the contents of, which
-    /// then holds the objects in the other arguments too.
-    fn fills(&mut self, arenas: &NodeArenas, callee: &Callee, args: &[Arg]) -> Option<ArgAt> {
+    /// What dies where `lhs` is assigned over: the value it held and the
+    /// arrays that held, unless it is the item of a by-reference loop, which
+    /// only notes that it was overwritten.
+    fn destroy_overwritten(&mut self, arenas: &NodeArenas, lhs: ExprId) {
+        let item = plain_variable(arenas, lhs).and_then(|name| {
+            self.scope
+                .element_refs
+                .iter_mut()
+                .rev()
+                .find(|r| r.item == name)
+        });
+        match item {
+            Some(element_ref) => element_ref.overwritten = true,
+            None => {
+                self.implicit(arenas, lhs, Operation::Destroy);
+                // The arrays it held die with it.
+                if let Some(contents) = plain_variable(arenas, lhs)
+                    .and_then(|name| self.scope.contents.get(&name).cloned())
+                {
+                    self.implicit_on(contents, Operation::Destroy);
+                }
+            }
+        }
+    }
+
+    /// The arguments of a call written as a builtin that writes what it
+    /// takes by reference in a way `filler` describes, with the writes
+    /// applied to the variables; empty when the call is not one, or an
+    /// argument it writes is not a variable the walk can follow.
+    fn fills(&mut self, arenas: &NodeArenas, callee: &Callee, args: &[Arg]) -> Box<[ArgAt]> {
         let Callee::Function(name) = callee else {
-            return None;
+            return Box::new([]);
         };
         let written = name.written.as_str();
         let written = written.strip_prefix('\\').unwrap_or(written);
-        if !(written.eq_ignore_ascii_case("array_push")
-            || written.eq_ignore_ascii_case("array_unshift"))
-            || args.iter().any(|arg| arg.spread || arg.name.is_some())
-        {
-            return None;
+        let Some(filler) = filler(written) else {
+            return Box::new([]);
+        };
+        if args.iter().any(|arg| arg.spread || arg.name.is_some()) {
+            return Box::new([]);
         }
-        let (first, rest) = args.split_first()?;
-        let variable = plain_variable(arenas, first.value)
-            .filter(|variable| self.scope.contents.contains_key(variable))?;
-        let stored = rest.iter().try_fold(Vec::new(), |mut all, arg| {
-            all.extend(self.origins(arenas, arg.value)?);
+        let mut writes = Vec::new();
+        for (position, arg) in args.iter().enumerate() {
+            if position < filler.first || position > filler.last {
+                continue;
+            }
+            let fill = match (filler.fill, position) {
+                (Fill::Exec, 1) => Fill::Appends,
+                (Fill::Exec, _) => Fill::Overwrites,
+                (fill, _) => fill,
+            };
+            let Some(variable) = plain_variable(arenas, arg.value) else {
+                if filler.last == usize::MAX && holds_no_object(arenas, arg.value) {
+                    continue;
+                }
+                return Box::new([]);
+            };
+            let tracked = self.scope.contents.contains_key(&variable);
+            let followed = match fill {
+                Fill::Overwrites | Fill::Appends => true,
+                Fill::Settype => settype_to_scalar(arenas, args),
+                Fill::Keeps | Fill::Stores(_) | Fill::Splice => tracked,
+                Fill::Exec => unreachable!(),
+            };
+            if !followed {
+                return Box::new([]);
+            }
+            writes.push((position, variable, fill, arg.value));
+        }
+        let mut at = Vec::with_capacity(writes.len());
+        for (position, variable, fill, value) in writes {
+            match fill {
+                Fill::Keeps => {}
+                Fill::Stores(from) => {
+                    let stored = self.stored_by(arenas, &args[from.min(args.len())..], false);
+                    self.note_contents(&variable, stored);
+                }
+                Fill::Splice => {
+                    let stored = self.stored_by(arenas, &args[3.min(args.len())..], true);
+                    self.note_contents(&variable, stored);
+                }
+                Fill::Overwrites | Fill::Settype => {
+                    self.destroy_overwritten(arenas, value);
+                    self.write(arenas, value, None, Some(vec![Origin::NoObject]));
+                    self.reassign(arenas, value);
+                }
+                Fill::Appends => {
+                    self.write(arenas, value, None, Some(vec![Origin::NoObject]));
+                    self.reassign(arenas, value);
+                }
+                Fill::Exec => unreachable!(),
+            }
+            at.push(ArgAt::Position(position as u32));
+        }
+        at.into_boxed_slice()
+    }
+
+    /// What the arguments `args`, stored as elements of an array, hold: the
+    /// objects of their origins and contents; `None` when that is not known,
+    /// or, with `arrays`, when one of them may be an object rather than an
+    /// array whose elements are stored.
+    fn stored_by(&mut self, arenas: &NodeArenas, args: &[Arg], arrays: bool) -> MaybeOrigins {
+        args.iter().try_fold(Vec::new(), |mut all, arg| {
+            let origins = self.origins(arenas, arg.value)?;
+            if arrays && origins.iter().any(|origin| *origin != Origin::NoObject) {
+                return None;
+            }
+            all.extend(origins);
             all.extend(self.contents_of(arenas, arg.value)?);
             Some(all)
-        });
-        self.note_contents(&variable, stored);
-        Some(ArgAt::Position(0))
+        })
     }
 
     /// What the body made that `e` evaluates to, when it is that.
@@ -2420,7 +2506,7 @@ impl Summarizer<'_> {
             places: Box::new([]),
             objectless: Box::new([]),
             callables: Box::new([]),
-            fills: None,
+            fills: Box::new([]),
         });
     }
 
@@ -2666,6 +2752,85 @@ fn written_in(arenas: &NodeArenas, nodes: &[Node]) -> FxHashSet<Name> {
 }
 
 /// The variable the expression `id` is, when it is a plain one.
+/// What a builtin writes into an argument it takes by reference.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fill {
+    /// The elements it holds, in another order or fewer: nothing new.
+    Keeps,
+    /// The arguments from the position on, as elements.
+    Stores(usize),
+    /// The elements of the argument at 3, which must be an array.
+    Splice,
+    /// A new value that holds no object: strings, numbers, arrays of them.
+    Overwrites,
+    /// The same, added to what is there.
+    Appends,
+    /// `exec`: the output is added to, the result code overwritten.
+    Exec,
+    /// `settype`, which writes no object unless it is given `object` or
+    /// `array`.
+    Settype,
+}
+
+/// The by-reference arguments of a builtin, positions `first` to `last`, and
+/// what it writes in them.
+#[derive(Clone, Copy)]
+pub(crate) struct Filler {
+    first: usize,
+    last: usize,
+    fill: Fill,
+}
+
+/// How the builtin `name`, as written, writes the arguments it takes by
+/// reference, when the summary can say.
+pub(crate) fn filler(name: &str) -> Option<Filler> {
+    let mut buffer = [0u8; 32];
+    let lower = buffer.get_mut(..name.len())?;
+    lower.copy_from_slice(name.as_bytes());
+    lower.make_ascii_lowercase();
+    let at = |first, last, fill| Some(Filler { first, last, fill });
+    match std::str::from_utf8(lower).ok()? {
+        "array_push" | "array_unshift" => at(0, 0, Fill::Stores(1)),
+        "sort" | "rsort" | "usort" | "uasort" | "uksort" | "asort" | "arsort" | "ksort"
+        | "krsort" | "natsort" | "natcasesort" | "shuffle" | "array_pop" | "array_shift"
+        | "reset" | "end" | "next" | "prev" => at(0, 0, Fill::Keeps),
+        "array_multisort" => at(0, usize::MAX, Fill::Keeps),
+        "array_splice" => at(0, 0, Fill::Splice),
+        "preg_match" | "preg_match_all" | "similar_text" | "getopt" | "is_callable" => {
+            at(2, 2, Fill::Overwrites)
+        }
+        "preg_replace" | "preg_replace_callback" => at(4, 4, Fill::Overwrites),
+        "preg_replace_callback_array" | "str_replace" | "str_ireplace" => {
+            at(3, 3, Fill::Overwrites)
+        }
+        "parse_str" | "mb_parse_str" | "system" | "passthru" => at(1, 1, Fill::Overwrites),
+        "exec" => at(1, 2, Fill::Exec),
+        "sscanf" | "fscanf" => at(2, usize::MAX, Fill::Overwrites),
+        "settype" => at(0, 0, Fill::Settype),
+        _ => None,
+    }
+}
+
+/// Whether the second argument of a `settype` call is a literal naming a type
+/// that holds no object.
+fn settype_to_scalar(arenas: &NodeArenas, args: &[Arg]) -> bool {
+    let Some(ExprKind::Literal(Literal::String(payload))) = args
+        .get(1)
+        .and_then(|arg| arenas.peeled(arg.value))
+        .and_then(|id| arenas.expr(id))
+        .map(|e| &e.kind)
+    else {
+        return false;
+    };
+    arenas.string_bytes(payload).is_some_and(|bytes| {
+        [
+            "int", "integer", "float", "double", "string", "bool", "boolean", "null",
+        ]
+        .iter()
+        .any(|ty| bytes.eq_ignore_ascii_case(ty.as_bytes()))
+    })
+}
+
 fn plain_variable(arenas: &NodeArenas, id: ExprId) -> Option<Name> {
     let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
     match &e.kind {
@@ -3155,25 +3320,7 @@ impl Visitor for Summarizer<'_> {
                                 | ExprKind::Index(_, Some(_))
                         )
                     ) {
-                        let item = plain_variable(arenas, *lhs).and_then(|name| {
-                            self.scope
-                                .element_refs
-                                .iter_mut()
-                                .rev()
-                                .find(|r| r.item == name)
-                        });
-                        match item {
-                            Some(element_ref) => element_ref.overwritten = true,
-                            None => {
-                                self.implicit(arenas, *lhs, Operation::Destroy);
-                                // The arrays it held die with it.
-                                if let Some(contents) = plain_variable(arenas, *lhs)
-                                    .and_then(|name| self.scope.contents.get(&name).cloned())
-                                {
-                                    self.implicit_on(contents, Operation::Destroy);
-                                }
-                            }
-                        }
+                        self.destroy_overwritten(arenas, *lhs);
                     }
                     self.write(arenas, *lhs, made, origins.clone());
                     self.note_stored(arenas, *lhs, *rhs, origins.as_deref());
