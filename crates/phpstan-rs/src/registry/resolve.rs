@@ -269,6 +269,7 @@ impl Registry {
                                             is_final: entry.is_final,
                                             is_static: entry.is_static,
                                             is_final_by_phpdoc: entry.is_final_by_phpdoc,
+                                            is_constructor: syntax::ast::is_constructor_name(&alias.alias),
                                         },
                                         Arc::clone(&shared_sig),
                                     ));
@@ -291,6 +292,7 @@ impl Registry {
                                     is_final: entry.is_final,
                                     is_static: entry.is_static,
                                     is_final_by_phpdoc: entry.is_final_by_phpdoc,
+                                    is_constructor: syntax::ast::is_constructor_name(&name),
                                 },
                                 shared_sig,
                             ));
@@ -468,6 +470,7 @@ impl Registry {
                         methods.push((
                             MethodRef::new(class_id, slot),
                             MethodEntry {
+                                is_constructor: syntax::ast::is_constructor_name(&name),
                                 name,
                                 is_abstract: false,
                                 is_final: false,
@@ -1598,6 +1601,7 @@ impl Registry {
                                 is_final: entry.is_final,
                                 is_static: entry.is_static,
                                 is_final_by_phpdoc: entry.is_final_by_phpdoc,
+                                is_constructor: syntax::ast::is_constructor_name(&name),
                             },
                             shared_sig,
                         ));
@@ -1874,7 +1878,7 @@ impl Registry {
                     // real vendored userland base class (Symfony's
                     // `Command`, Doctrine's console commands, ...), which
                     // must still participate in this pass normally.
-                    if syntax::ast::is_constructor_name(method_name)
+                    if entry.is_constructor
                         && registry.built_in_stub_classes.contains_key(owner)
                     {
                         continue;
@@ -1892,7 +1896,7 @@ impl Registry {
                         // (`resolveMethodPhpDocFromParentClass`'s
                         // `$lowercaseMethodName !== '__construct'` guard):
                         // match by parameter name instead.
-                        if syntax::ast::is_constructor_name(method_name) {
+                        if entry.is_constructor {
                             for (i, p) in sig.params.iter().enumerate() {
                                 if p.has_own_doc {
                                     continue;

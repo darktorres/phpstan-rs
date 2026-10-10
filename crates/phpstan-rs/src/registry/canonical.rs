@@ -83,6 +83,7 @@ canonical_struct!(MethodEntry {
     is_final,
     is_static,
     is_final_by_phpdoc,
+    is_constructor,
 });
 
 canonical_struct!(PropertyReflection {

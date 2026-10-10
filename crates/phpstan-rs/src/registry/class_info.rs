@@ -357,6 +357,8 @@ pub(crate) struct MethodEntry {
     pub(crate) is_final: bool,
     pub(crate) is_static: bool,
     pub(crate) is_final_by_phpdoc: bool,
+    /// `name` is `__construct`.
+    pub(crate) is_constructor: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1085,6 +1087,7 @@ impl ClassReflection {
                     is_final: final_methods.contains(method_name),
                     is_static: static_methods.contains(method_name),
                     is_final_by_phpdoc: final_methods_by_phpdoc.contains(method_name),
+                    is_constructor: syntax::ast::is_constructor_name(method_name),
                 });
             }
         }
@@ -2103,6 +2106,7 @@ impl ClassReflection {
                     is_final: false,
                     is_static: true,
                     is_final_by_phpdoc: false,
+                    is_constructor: syntax::ast::is_constructor_name(builtin),
                 })
             {
                 self.set_method_static(builtin, true);
