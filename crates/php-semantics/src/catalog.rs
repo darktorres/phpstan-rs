@@ -838,7 +838,10 @@ mod tests {
         catalog
             .add_entry(function(b"core", b"strlen"), graph(id))
             .unwrap();
-        assert!(Catalog::from_manifest(catalog.manifest()).is_err());
+        assert!(matches!(
+            Catalog::from_manifest(catalog.manifest()),
+            Err(CatalogError::MissingEvidence(_))
+        ));
     }
 
     #[test]
