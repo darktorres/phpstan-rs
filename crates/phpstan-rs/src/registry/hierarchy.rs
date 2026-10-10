@@ -555,19 +555,79 @@ impl Registry {
         false
     }
 
+    /// The classes that reach a name under `PHPStan\`, all of them at
+    /// once: the classes that list one directly, and every class that
+    /// extends, implements or uses one of those, transitively. The same
+    /// set `class_reaches_phpstan_name` finds class by class.
+    fn phpstan_ancestry_ids(&self) -> FxHashSet<ClassId> {
+        let mut children: FxHashMap<ClassId, Vec<ClassId>> = FxHashMap::default();
+        let mut reached: FxHashSet<ClassId> = FxHashSet::default();
+        let mut work: Vec<ClassId> = Vec::new();
+        for (_, id) in self.class_ids.iter() {
+            let Some(references) = self.class_references(*id) else {
+                continue;
+            };
+            let mut direct = false;
+            for parent in references
+                .extends
+                .iter()
+                .chain(references.implements)
+                .chain(references.uses)
+            {
+                direct |= crate::registry::is_phpstan_namespace(parent);
+                if let Some(parent_id) = self.class_ids.get(parent) {
+                    children.entry(*parent_id).or_default().push(*id);
+                }
+            }
+            if direct && reached.insert(*id) {
+                work.push(*id);
+            }
+        }
+        while let Some(id) = work.pop() {
+            for child in children.get(&id).into_iter().flatten() {
+                if reached.insert(*child) {
+                    work.push(*child);
+                }
+            }
+        }
+        reached
+    }
+
+    /// The verdict of `class_reaches_phpstan_name` for every class, when the
+    /// scope holds them all; none otherwise, where one walk per class is
+    /// cheaper than the graph.
+    fn phpstan_ancestry_all(&self) -> Option<FxHashSet<ClassId>> {
+        if !self.scope.is_all() {
+            return None;
+        }
+        let reached = self.phpstan_ancestry_ids();
+        #[cfg(debug_assertions)]
+        for (name, id) in self.class_ids.iter() {
+            assert_eq!(
+                reached.contains(id),
+                self.class_reaches_phpstan_name(name),
+                "{name}"
+            );
+        }
+        Some(reached)
+    }
+
     /// Rebuilds the ID-addressed PHPStan-ancestry verdicts after loading a
     /// cached registry, whose declaration IDs are assigned when it freezes.
     pub(crate) fn rebuild_phpstan_ancestry_ids(&mut self) {
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
+        let all = registry.phpstan_ancestry_all();
         self.phpstan_ancestry = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
-                registry
-                    .class_reaches_phpstan_name(name)
-                    .then(|| registry.class_ids.get(name).copied())
-                    .flatten()
+                let id = registry.class_ids.get(name).copied()?;
+                match &all {
+                    Some(all) => all.contains(&id),
+                    None => registry.class_reaches_phpstan_name(name),
+                }
+                .then_some(id)
             })
             .collect();
     }
@@ -591,16 +651,19 @@ impl Registry {
     pub fn precompute_ancestor_names(&mut self) {
         let class_names = self.scoped_class_names();
         let registry: &Registry = self;
+        let all = registry.phpstan_ancestry_all();
         let ancestor_names: FxHashMap<_, _> = class_names
             .par_iter()
             .with_min_len(crate::registry::PASS_CHUNK)
             .filter_map(|name| {
+                let id = *registry.class_ids.get(name)?;
+                let reaches = match &all {
+                    Some(all) => all.contains(&id),
+                    None => registry.class_reaches_phpstan_name(name),
+                };
                 Some((
-                    *registry.class_ids.get(name)?,
-                    (
-                        registry.class_extends_implements_closure(name),
-                        registry.class_reaches_phpstan_name(name),
-                    ),
+                    id,
+                    (registry.class_extends_implements_closure(name), reaches),
                 ))
             })
             .collect();
