@@ -297,36 +297,56 @@ impl TypeNode {
     /// internal quotes aren't re-escaped), but always something `types::
     /// parse_type_string` parses into the same underlying `Type`.
     pub fn to_source_string(&self) -> String {
+        let mut out = String::new();
+        self.write_source(&mut out);
+        out
+    }
+
+    /// `to_source_string` appended to `out`.
+    pub fn write_source(&self, out: &mut String) {
+        use std::fmt::Write;
+
+        fn list(nodes: &[TypeNode], separator: &str, out: &mut String) {
+            for (at, node) in nodes.iter().enumerate() {
+                if at > 0 {
+                    out.push_str(separator);
+                }
+                node.write_source(out);
+            }
+        }
+
         match self {
-            TypeNode::Identifier(s) => s.clone(),
-            TypeNode::Nullable(inner) => format!("?{}", inner.to_source_string()),
-            TypeNode::Union(members) => members
-                .iter()
-                .map(TypeNode::to_source_string)
-                .collect::<Vec<_>>()
-                .join("|"),
-            TypeNode::Intersection(members) => members
-                .iter()
-                .map(TypeNode::to_source_string)
-                .collect::<Vec<_>>()
-                .join("&"),
-            TypeNode::Wildcard => "*".to_string(),
+            TypeNode::Identifier(s) => out.push_str(s),
+            TypeNode::Nullable(inner) => {
+                out.push('?');
+                inner.write_source(out);
+            }
+            TypeNode::Union(members) => list(members, "|", out),
+            TypeNode::Intersection(members) => list(members, "&", out),
+            TypeNode::Wildcard => out.push('*'),
             TypeNode::VarianceArg(ArgVariance::Covariant, inner) => {
-                format!("covariant {}", inner.to_source_string())
+                out.push_str("covariant ");
+                inner.write_source(out);
             }
             TypeNode::VarianceArg(ArgVariance::Contravariant, inner) => {
-                format!("contravariant {}", inner.to_source_string())
+                out.push_str("contravariant ");
+                inner.write_source(out);
             }
-            TypeNode::Generic(name, args) => format!(
-                "{name}<{}>",
-                args.iter()
-                    .map(TypeNode::to_source_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            TypeNode::ArrayOf(inner) => format!("{}[]", inner.to_source_string()),
+            TypeNode::Generic(name, args) => {
+                out.push_str(name);
+                out.push('<');
+                list(args, ", ", out);
+                out.push('>');
+            }
+            TypeNode::ArrayOf(inner) => {
+                inner.write_source(out);
+                out.push_str("[]");
+            }
             TypeNode::OffsetAccess(base, offset) => {
-                format!("{}[{}]", base.to_source_string(), offset.to_source_string())
+                base.write_source(out);
+                out.push('[');
+                offset.write_source(out);
+                out.push(']');
             }
             TypeNode::ArrayShape {
                 keyword,
@@ -334,36 +354,50 @@ impl TypeNode {
                 sealed,
                 unsealed_type,
             } => {
-                let mut parts: Vec<String> = fields
-                    .iter()
-                    .map(|f| {
-                        let value = f.ty.to_source_string();
-                        match &f.key {
-                            Some(key) => {
-                                let key = match key {
-                                    ShapeKey::Int(n) => n.to_string(),
-                                    ShapeKey::String(s) => format!("'{s}'"),
-                                    ShapeKey::Identifier(s) => s.clone(),
-                                };
-                                let opt = if f.optional { "?" } else { "" };
-                                format!("{key}{opt}: {value}")
+                out.push_str(keyword);
+                out.push('{');
+                for (at, f) in fields.iter().enumerate() {
+                    if at > 0 {
+                        out.push_str(", ");
+                    }
+                    if let Some(key) = &f.key {
+                        match key {
+                            ShapeKey::Int(n) => {
+                                let _ = write!(out, "{n}");
                             }
-                            None => value,
+                            ShapeKey::String(s) => {
+                                let _ = write!(out, "'{s}'");
+                            }
+                            ShapeKey::Identifier(s) => out.push_str(s),
                         }
-                    })
-                    .collect();
-                if !*sealed {
-                    parts.push(match unsealed_type {
-                        Some((Some(key), value)) => format!(
-                            "...<{}, {}>",
-                            key.to_source_string(),
-                            value.to_source_string()
-                        ),
-                        Some((None, value)) => format!("...<{}>", value.to_source_string()),
-                        None => "...".to_string(),
-                    });
+                        if f.optional {
+                            out.push('?');
+                        }
+                        out.push_str(": ");
+                    }
+                    f.ty.write_source(out);
                 }
-                format!("{keyword}{{{}}}", parts.join(", "))
+                if !*sealed {
+                    if !fields.is_empty() {
+                        out.push_str(", ");
+                    }
+                    match unsealed_type {
+                        Some((Some(key), value)) => {
+                            out.push_str("...<");
+                            key.write_source(out);
+                            out.push_str(", ");
+                            value.write_source(out);
+                            out.push('>');
+                        }
+                        Some((None, value)) => {
+                            out.push_str("...<");
+                            value.write_source(out);
+                            out.push('>');
+                        }
+                        None => out.push_str("..."),
+                    }
+                }
+                out.push('}');
             }
             TypeNode::Callable {
                 keyword,
@@ -371,62 +405,80 @@ impl TypeNode {
                 params,
                 return_type,
             } => {
-                let keyword = if templates.is_empty() {
-                    keyword.clone()
-                } else {
-                    let list: Vec<String> = templates
-                        .iter()
-                        .map(|t| {
-                            let mut s = t.name.clone();
-                            if let Some(b) = &t.bound {
-                                s.push_str(&format!(" of {}", b.to_source_string()));
-                            }
-                            if let Some(l) = &t.lower {
-                                s.push_str(&format!(" super {}", l.to_source_string()));
-                            }
-                            if let Some(d) = &t.default {
-                                s.push_str(&format!(" = {}", d.to_source_string()));
-                            }
-                            s
-                        })
-                        .collect();
-                    format!("{keyword}<{}>", list.join(", "))
-                };
-                let params_str = params
-                    .iter()
-                    .map(|p| {
-                        let mut s = p.ty.to_source_string();
-                        if p.by_ref {
-                            s.push('&');
+                out.push_str(keyword);
+                if !templates.is_empty() {
+                    out.push('<');
+                    for (at, t) in templates.iter().enumerate() {
+                        if at > 0 {
+                            out.push_str(", ");
                         }
-                        if p.variadic {
-                            s.push_str("...");
+                        out.push_str(&t.name);
+                        if let Some(b) = &t.bound {
+                            out.push_str(" of ");
+                            b.write_source(out);
                         }
-                        if p.optional {
-                            s.push('=');
+                        if let Some(l) = &t.lower {
+                            out.push_str(" super ");
+                            l.write_source(out);
                         }
-                        s
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                match return_type {
-                    Some(rt) => format!("{keyword}({params_str}): {}", rt.to_source_string()),
-                    None => format!("{keyword}({params_str})"),
+                        if let Some(d) = &t.default {
+                            out.push_str(" = ");
+                            d.write_source(out);
+                        }
+                    }
+                    out.push('>');
+                }
+                out.push('(');
+                for (at, p) in params.iter().enumerate() {
+                    if at > 0 {
+                        out.push_str(", ");
+                    }
+                    p.ty.write_source(out);
+                    if p.by_ref {
+                        out.push('&');
+                    }
+                    if p.variadic {
+                        out.push_str("...");
+                    }
+                    if p.optional {
+                        out.push('=');
+                    }
+                }
+                out.push(')');
+                if let Some(rt) = return_type {
+                    out.push_str(": ");
+                    rt.write_source(out);
                 }
             }
             TypeNode::IntRange(min, max) => {
-                let min = min
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "min".to_string());
-                let max = max
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "max".to_string());
-                format!("int<{min}, {max}>")
+                out.push_str("int<");
+                match min {
+                    Some(n) => {
+                        let _ = write!(out, "{n}");
+                    }
+                    None => out.push_str("min"),
+                }
+                out.push_str(", ");
+                match max {
+                    Some(n) => {
+                        let _ = write!(out, "{n}");
+                    }
+                    None => out.push_str("max"),
+                }
+                out.push('>');
             }
-            TypeNode::IntLiteral(n) => n.to_string(),
-            TypeNode::FloatLiteral(n) => format!("{n:?}"),
-            TypeNode::StringLiteral(s) => format!("'{s}'"),
-            TypeNode::ConstFetch { class, const_name } => format!("{class}::{const_name}"),
+            TypeNode::IntLiteral(n) => {
+                let _ = write!(out, "{n}");
+            }
+            TypeNode::FloatLiteral(n) => {
+                let _ = write!(out, "{n:?}");
+            }
+            TypeNode::StringLiteral(s) => {
+                let _ = write!(out, "'{s}'");
+            }
+            TypeNode::ConstFetch { class, const_name } => {
+                let _ = write!(out, "{class}::{const_name}");
+            }
             TypeNode::Conditional {
                 subject,
                 negated,
@@ -435,15 +487,20 @@ impl TypeNode {
                 if_false,
             } => {
                 let is = if *negated { "is not" } else { "is" };
-                format!(
-                    "({subject} {is} {} ? {} : {})",
-                    target.to_source_string(),
-                    if_true.to_source_string(),
-                    if_false.to_source_string()
-                )
+                let _ = write!(out, "({subject} {is} ");
+                target.write_source(out);
+                out.push_str(" ? ");
+                if_true.write_source(out);
+                out.push_str(" : ");
+                if_false.write_source(out);
+                out.push(')');
             }
-            TypeNode::Paren(inner) => format!("({})", inner.to_source_string()),
-            TypeNode::Error => String::new(),
+            TypeNode::Paren(inner) => {
+                out.push('(');
+                inner.write_source(out);
+                out.push(')');
+            }
+            TypeNode::Error => {}
         }
     }
 }
