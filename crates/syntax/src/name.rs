@@ -1823,8 +1823,6 @@ mod tests {
         assert!(mixed.eq_ignore_case(&Name::from("FOO\\BAR")));
     }
 
-    use super::*;
-
     /// Texts that differ in case, and in what is not ASCII, from a small
     /// alphabet so that many collide as one name ignoring case.
     fn random_texts(count: usize, seed: u64) -> Vec<String> {
