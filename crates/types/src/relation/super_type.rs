@@ -607,18 +607,32 @@ mod relation_memo {
 
     const SEGMENT_LIMIT: usize = 1 << 16;
 
-    type Entries = FxHashMap<(usize, usize), (Type, Type, TrinaryLogic)>;
+    /// The relation generation, then the node addresses of the two types.
+    /// An entry of another generation is never found for a query of this one,
+    /// and ages out with the segment that holds it.
+    type Key = (u64, usize, usize);
+    type Entries = FxHashMap<Key, (Type, Type, TrinaryLogic)>;
 
-    #[derive(Default)]
     struct Memo {
-        generation: Option<u64>,
         previous: Entries,
         current: Entries,
+        /// One flag per evaluation in progress: whether it read an answer
+        /// that is only provisional.
+        active: Vec<bool>,
+    }
+
+    impl Memo {
+        const fn new() -> Memo {
+            Memo {
+                previous: Entries::with_hasher(rustc_hash::FxBuildHasher),
+                current: Entries::with_hasher(rustc_hash::FxBuildHasher),
+                active: Vec::new(),
+            }
+        }
     }
 
     thread_local! {
-        static ANSWERS: RefCell<Memo> = RefCell::new(Memo::default());
-        static ACTIVE_EVALUATIONS: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) };
+        static ANSWERS: RefCell<Memo> = const { RefCell::new(Memo::new()) };
         #[cfg(test)]
         static ENABLED_FOR_TESTS: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     }
@@ -627,8 +641,8 @@ mod relation_memo {
 
     impl Drop for EvaluationGuard {
         fn drop(&mut self) {
-            ACTIVE_EVALUATIONS.with(|active| {
-                active.borrow_mut().pop();
+            ANSWERS.with(|memo| {
+                memo.borrow_mut().active.pop();
             });
         }
     }
@@ -644,8 +658,8 @@ mod relation_memo {
     }
 
     pub(super) fn mark_provisional() {
-        ACTIVE_EVALUATIONS.with(|active| {
-            for provisional in active.borrow_mut().iter_mut() {
+        ANSWERS.with(|memo| {
+            for provisional in memo.borrow_mut().active.iter_mut() {
                 *provisional = true;
             }
         });
@@ -660,37 +674,27 @@ mod relation_memo {
         if !enabled() {
             return compute();
         }
-        let key = (sup.node_address(), sub.node_address());
-        if let Some(known) = ANSWERS.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            if memo.generation != Some(generation) {
-                memo.generation = Some(generation);
-                memo.previous.clear();
-                memo.current.clear();
-            }
+        let key = (generation, sup.node_address(), sub.node_address());
+        let known = ANSWERS.with(|memo| {
+            let memo = memo.borrow();
             memo.current
                 .get(&key)
                 .or_else(|| memo.previous.get(&key))
                 .map(|entry| entry.2)
-        }) {
+        });
+        if let Some(known) = known {
             return known;
         }
-        ACTIVE_EVALUATIONS.with(|active| active.borrow_mut().push(false));
+        ANSWERS.with(|memo| memo.borrow_mut().active.push(false));
         let evaluation = EvaluationGuard;
         let answer = compute();
-        let provisional =
-            ACTIVE_EVALUATIONS.with(|active| active.borrow().last().copied().unwrap_or(true));
+        let provisional = ANSWERS.with(|memo| memo.borrow().active.last().copied().unwrap_or(true));
         drop(evaluation);
         if provisional {
             return answer;
         }
         ANSWERS.with(|memo| {
             let mut memo = memo.borrow_mut();
-            if memo.generation != Some(generation) {
-                memo.generation = Some(generation);
-                memo.previous.clear();
-                memo.current.clear();
-            }
             if memo.current.len() >= SEGMENT_LIMIT {
                 memo.previous = std::mem::take(&mut memo.current);
             }
@@ -728,6 +732,23 @@ mod relation_memo {
             answer(72, &sup, &sub, || {
                 calls.set(calls.get() + 1);
                 No
+            }),
+            No
+        );
+        assert_eq!(calls.get(), 2);
+
+        // Going back to an earlier generation finds its answer again.
+        assert_eq!(
+            answer(71, &sup, &sub, || {
+                calls.set(calls.get() + 1);
+                No
+            }),
+            Yes
+        );
+        assert_eq!(
+            answer(72, &sup, &sub, || {
+                calls.set(calls.get() + 1);
+                Yes
             }),
             No
         );
