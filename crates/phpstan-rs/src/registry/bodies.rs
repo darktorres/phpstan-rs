@@ -37,6 +37,11 @@ pub trait BodySource: Sync {
     /// wrappers.
     fn stream_wrappers(&self, out: &mut StreamWrappers);
 
+    /// Whether any file at hand names something that writes a property
+    /// without a write in its code (`MENTIONS_PROPERTY_WRITER`); a source
+    /// that cannot say answers yes.
+    fn names_property_writer(&self) -> bool;
+
     /// Every file at hand.
     fn files(&self) -> Vec<LoadedFile<'_>>;
 }
@@ -74,6 +79,10 @@ impl BodySource for NoBodies {
     fn unset_properties(&self, _: &mut UnsetProperties) {}
 
     fn stream_wrappers(&self, _: &mut StreamWrappers) {}
+
+    fn names_property_writer(&self) -> bool {
+        false
+    }
 
     fn files(&self) -> Vec<LoadedFile<'_>> {
         Vec::new()
@@ -166,6 +175,32 @@ pub(crate) const MENTIONS_STREAM_WRAPPER: u32 = 1 << 4;
 
 /// The spellings that set `MENTIONS_STREAM_WRAPPER`.
 pub(crate) const WATCH: &[(&str, u32)] = &[("stream_wrapper_register", MENTIONS_STREAM_WRAPPER)];
+
+/// The bit of a file's `FileFacts::mentions` that notes it names something
+/// that writes a property without a write in the code: reflection, the
+/// fetch modes that fill an object, unserialisation, or a wrapper that
+/// exposes an object's properties as array elements. Names are also noted
+/// when a string is one, as a callable is.
+pub(crate) const MENTIONS_PROPERTY_WRITER: u32 = 1 << 7;
+
+/// The spellings that set `MENTIONS_PROPERTY_WRITER`.
+pub(crate) const PROPERTY_WRITER_WATCH: &[(&str, u32)] = &[
+    ("setvalue", MENTIONS_PROPERTY_WRITER),
+    ("setrawvaluewithoutlazyinitialization", MENTIONS_PROPERTY_WRITER),
+    ("unserialize", MENTIONS_PROPERTY_WRITER),
+    ("igbinary_unserialize", MENTIONS_PROPERTY_WRITER),
+    ("msgpack_unserialize", MENTIONS_PROPERTY_WRITER),
+    ("fetchobject", MENTIONS_PROPERTY_WRITER),
+    ("fetch_object", MENTIONS_PROPERTY_WRITER),
+    ("mysqli_fetch_object", MENTIONS_PROPERTY_WRITER),
+    ("fetch_class", MENTIONS_PROPERTY_WRITER),
+    ("fetch_into", MENTIONS_PROPERTY_WRITER),
+    ("fetch_props_late", MENTIONS_PROPERTY_WRITER),
+    ("setfetchmode", MENTIONS_PROPERTY_WRITER),
+    ("arrayobject", MENTIONS_PROPERTY_WRITER),
+    ("arrayiterator", MENTIONS_PROPERTY_WRITER),
+    ("recursivearrayiterator", MENTIONS_PROPERTY_WRITER),
+];
 
 /// The classes code registers as stream wrappers with
 /// `stream_wrapper_register()`: only such a class has its methods run by a
@@ -635,6 +670,10 @@ impl BodySource for FileBodies {
 
     fn stream_wrappers(&self, out: &mut StreamWrappers) {
         out.add(&self.wrappers);
+    }
+
+    fn names_property_writer(&self) -> bool {
+        true
     }
 
     fn files(&self) -> Vec<LoadedFile<'_>> {

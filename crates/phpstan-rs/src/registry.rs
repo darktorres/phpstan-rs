@@ -575,6 +575,10 @@ pub struct Registry {
     // (`registry::effects`).
     #[serde(skip)]
     unset_properties: Arc<bodies::UnsetProperties>,
+    // The properties no code of the loaded program writes once the object
+    // is made, as the last finish found them (`registry::effects`).
+    #[serde(skip)]
+    property_stability: Arc<effects::PropertyStability>,
     // The classes the loaded files register as stream wrappers, as the last
     // finish found them (`registry::effects`).
     #[serde(skip)]
@@ -1110,6 +1114,7 @@ impl Registry {
             base_builtin_methods_running_code: _,
             methods_by_name: _,
             unset_properties: _,
+            property_stability: _,
             stream_wrappers: _,
             global_sites: _,
             global_scopes: _,

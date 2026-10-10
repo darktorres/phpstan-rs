@@ -792,6 +792,9 @@ impl Checker<'_> {
         {
             return false;
         }
+        if self.stable_place(base, prop, locals) {
+            return false;
+        }
         if anything {
             return true;
         }
@@ -835,6 +838,44 @@ impl Checker<'_> {
                         declared.is_readonly() && !declared.readonly_by_phpdoc()
                     })
             })
+    }
+
+    /// Whether `prop` of the value at `base`, or an element of the property
+    /// the key `base` is (when `prop` is `None`), is a property no code of
+    /// the loaded program writes once the object is made.
+    fn stable_place(&self, base: LocalKey, prop: Option<&Name>, locals: &Locals) -> bool {
+        // A constructor runs on the object while the scope knows it: a call
+        // to the parent's constructor writes what the facts are about.
+        if self.current_method.as_deref().is_some_and(|method| {
+            method.eq_ignore_ascii_case("__construct") || method.eq_ignore_ascii_case("__clone")
+        }) {
+            return false;
+        }
+        let (base, prop) = match prop {
+            Some(prop) => (base, prop.clone()),
+            None => {
+                let mut key = base;
+                loop {
+                    match locals.data(key) {
+                        KeyData::Index { base, .. } | KeyData::VarIndex { base, .. } => key = base,
+                        KeyData::Prop { base, prop } => break (base, prop),
+                        _ => return false,
+                    }
+                }
+            }
+        };
+        let Some(ty) = self.key_type(base, locals) else {
+            return false;
+        };
+        if !ty.is_object().yes() {
+            return false;
+        }
+        let classes = ty.object_class_names();
+        let assume = self.settings.rules.assume_no_external_property_writers;
+        !classes.is_empty()
+            && classes
+                .iter()
+                .all(|class| self.registry.property_is_stable(class, &prop, assume))
     }
 
     /// Whether the element facts of the value at `base` rest on arrays and

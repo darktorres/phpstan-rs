@@ -1,0 +1,2 @@
+[rules]
+assume_no_external_property_writers = true

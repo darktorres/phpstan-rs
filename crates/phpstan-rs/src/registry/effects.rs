@@ -1125,6 +1125,95 @@ struct Classification<'r> {
     sites: Vec<Site<'r>>,
     /// The parameters whose argument the body runs itself.
     runs: Vec<Condition>,
+    /// The properties the body writes other than as a constructor does.
+    property_writes: PropertyWrites,
+}
+
+/// The properties code writes after the object is made: by name, since a
+/// write through a variable, a reference or a callback does not say which
+/// class it is on. A write by `$this` in a constructor or `__clone` is not
+/// among them.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct PropertyWrites {
+    // Sorted, each once, once settled.
+    names: Vec<Name>,
+    /// Some write is to a property not known, or from code not known.
+    all: bool,
+}
+
+impl PropertyWrites {
+    fn everything() -> Self {
+        PropertyWrites {
+            names: Vec::new(),
+            all: true,
+        }
+    }
+
+    fn note(&mut self, prop: Option<&Name>) {
+        match prop {
+            Some(prop) => self.names.push(prop.clone()),
+            None => self.all = true,
+        }
+    }
+
+    fn merge(&mut self, other: &PropertyWrites) {
+        self.all |= other.all;
+        self.names.extend(other.names.iter().cloned());
+    }
+
+    fn settle(&mut self) {
+        self.names.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+        self.names.dedup();
+    }
+
+    /// Whether no code of the loaded program writes `prop` but a
+    /// constructor of the class, or `__clone`, on its `$this`.
+    pub(crate) fn never_written_after_construction(&self, prop: &str) -> bool {
+        !self.all
+            && self
+                .names
+                .binary_search_by(|name| name.as_str().cmp(prop))
+                .is_err()
+    }
+}
+
+/// The properties code of the loaded program writes after the object is
+/// made, and whether a file names something that writes one without a write
+/// in the code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PropertyStability {
+    writes: PropertyWrites,
+    external_writers: bool,
+}
+
+/// Before the effects are settled nothing is known to be stable.
+impl Default for PropertyStability {
+    fn default() -> Self {
+        PropertyStability {
+            writes: PropertyWrites::everything(),
+            external_writers: true,
+        }
+    }
+}
+
+impl syntax::canonical::Canonical for PropertyStability {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let PropertyStability {
+            writes,
+            external_writers,
+        } = self;
+        p.node(
+            "PropertyStability",
+            &[("writes", writes), ("external_writers", external_writers)],
+        );
+    }
+}
+
+impl syntax::canonical::Canonical for PropertyWrites {
+    fn canonical(&self, p: &mut syntax::canonical::Printer) {
+        let PropertyWrites { names, all } = self;
+        p.node("PropertyWrites", &[("names", names), ("all", all)]);
+    }
 }
 
 /// A set of declarations, by id, each with what its own `$this` is to the
@@ -1175,7 +1264,9 @@ static WAVES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1
 
 impl Classification<'_> {
     fn anything() -> Self {
-        Classification::of(Effect::anything())
+        let mut classification = Classification::of(Effect::anything());
+        classification.property_writes = PropertyWrites::everything();
+        classification
     }
 
     fn unknown() -> Self {
@@ -1189,6 +1280,7 @@ impl Classification<'_> {
             sets: Vec::new(),
             sites: Vec::new(),
             runs: Vec::new(),
+            property_writes: PropertyWrites::default(),
         }
     }
 }
@@ -1669,9 +1761,18 @@ impl Registry {
                 ),
             }
         });
+        let mut stability = PropertyStability {
+            writes: PropertyWrites::default(),
+            external_writers: bodies.names_property_writer(),
+        };
+        for (_, classification) in &classified {
+            stability.writes.merge(&classification.property_writes);
+        }
+        stability.writes.settle();
         // A closure's effect is taken where it runs; no call names it. Keep
         // its result through settlement, then omit it from the registry.
         let effects = settlements.into_effects(registry);
+        self.property_stability = Arc::new(stability);
         self.reach_memo.transferred = Default::default();
         self.effects = effects;
     }
@@ -1956,6 +2057,34 @@ impl Registry {
             _ if rebindable => true,
             visibility => !sees(self, &owner, visibility, scope),
         }
+    }
+
+    /// Whether the property `prop` of an object of `class` holds, once the
+    /// object is made, what the constructor gave it: no code of the loaded
+    /// program writes a property of that name but a constructor, or
+    /// `__clone`, on its `$this`, and no file names something that writes
+    /// one without a write in its code. `assume_encapsulated` leaves out
+    /// that second condition for a property that is not public.
+    pub(crate) fn property_is_stable<K: TableKey + ?Sized>(
+        &self,
+        class: &K,
+        prop: &str,
+        assume_encapsulated: bool,
+    ) -> bool {
+        let Some((owner, declared)) = self.lookup_property_with_owner(class, prop) else {
+            return false;
+        };
+        if declared.from_tag()
+            || declared.is_static()
+            || self.unset_properties.may_unset(prop)
+            || self.is_builtin_class(&owner)
+        {
+            return false;
+        }
+        let stability = &*self.property_stability;
+        (!stability.external_writers
+            || (assume_encapsulated && declared.visibility() != Visibility::Public))
+            && stability.writes.never_written_after_construction(prop)
     }
 
     /// The class whose hook runs for an access to `property` of an object
@@ -4455,11 +4584,22 @@ impl<'r> Resolve<'r> {
                 0 => key.clone(),
                 _ => key.closure(at as u32 - 1),
             };
-            let classification = match found {
+            let constructs = at == 0
+                && sig.is_some()
+                && self.class.is_some()
+                && ["__construct", "__clone"]
+                    .iter()
+                    .any(|name| self.member.as_str().eq_ignore_ascii_case(name));
+            let property_writes = level.property_writes(
+                found.as_ref().map(|(_, written)| &written[..]),
+                constructs,
+            );
+            let mut classification = match found {
                 Some((targets, written_args)) => level.classify(key, targets, written_args),
                 None if level.facts.anything => Classification::anything(),
                 None => Classification::unknown(),
             };
+            classification.property_writes = property_writes;
             out.push((scope_key, classification));
         }
         out
@@ -5136,6 +5276,64 @@ impl<'r> Level<'r> {
         key.class.is_none() && crate::registry::summaries::filler(key.member.as_str()).is_some()
     }
 
+    /// The properties the scope writes other than as a constructor does, in
+    /// the sense of `PropertyWrites`: `constructs` when the scope is the
+    /// body of a constructor or `__clone`. `written` is what its calls may
+    /// write by reference, when that is known; else every place they are
+    /// passed.
+    fn property_writes(&self, written: Option<&[&Place]>, constructs: bool) -> PropertyWrites {
+        let facts: &'r WriteFacts = self.facts;
+        if facts.anything {
+            return PropertyWrites::everything();
+        }
+        let mut out = PropertyWrites::default();
+        let passed: Vec<&Place> = match written {
+            Some(written) => written.to_vec(),
+            None => facts
+                .calls
+                .iter()
+                .flat_map(|call| call.places.iter().map(|(_, place)| place))
+                .collect(),
+        };
+        for place in facts.writes.iter().chain(passed) {
+            let Some(at) = place
+                .steps
+                .iter()
+                .rposition(|step| matches!(step, Step::Property(_)))
+            else {
+                continue;
+            };
+            let Step::Property(prop) = &place.steps[at] else {
+                unreachable!();
+            };
+            if constructs && at == 0 && matches!(place.root, Root::This) {
+                continue;
+            }
+            out.note(prop.as_ref());
+        }
+        // A reference to a property, or to an element of an object being
+        // iterated, is written wherever it goes.
+        for (_, binding) in self.bindings.iter().copied() {
+            let Binding::Reference(target) = binding else {
+                continue;
+            };
+            if let Some(Step::Property(prop)) = target
+                .steps
+                .iter()
+                .rev()
+                .find(|step| matches!(step, Step::Property(_)))
+            {
+                out.note(prop.as_ref());
+            } else if let [rest @ .., Step::Element] = &target.steps[..] {
+                match self.value_holder(&target.root, target.narrowing.as_ref(), rest) {
+                    Holder::Classes(classes) if classes.is_empty() => {}
+                    _ => out.all = true,
+                }
+            }
+        }
+        out
+    }
+
     /// What each of the scope's calls reaches, and the places they may
     /// write by reference; `None` when a call may run code not known, or the
     /// scope may write anything.
@@ -5286,6 +5484,7 @@ impl<'r> Level<'r> {
             sets,
             sites,
             runs,
+            property_writes: PropertyWrites::default(),
         }
     }
 

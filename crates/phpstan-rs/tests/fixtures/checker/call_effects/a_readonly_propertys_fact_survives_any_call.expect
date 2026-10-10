@@ -1,1 +1,1 @@
-no diagnostics
+37:18-37:29 property.readOnlyByPhpDocAssignByRef L3 | @readonly property CallEffects\\ReadonlyFacts\\Documented::$name is assigned by reference.

@@ -207,12 +207,18 @@ impl<'a> Lexer<'a> {
                 self.decoded_payload(raw)
             }
         };
+        if !escaped {
+            self.note_string(start, end);
+        }
         self.pos = end + 1; // closing '
         Token::StringLit(string)
     }
 
     pub(crate) fn lex_double_quoted(&mut self) -> Token {
-        Token::InterpString(self.lex_interpolated_run(b'"'))
+        let start = self.pos + 1;
+        let token = Token::InterpString(self.lex_interpolated_run(b'"'));
+        self.note_string(start, self.pos.saturating_sub(1));
+        token
     }
 
     pub(crate) fn lex_backtick(&mut self) -> Token {

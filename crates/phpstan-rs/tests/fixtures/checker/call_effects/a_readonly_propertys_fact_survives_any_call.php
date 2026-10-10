@@ -15,6 +15,11 @@ final class Plain
     public function __construct(public readonly ?string $name, public ?int $id)
     {
     }
+
+    public function renumber(int $id): void
+    {
+        $this->id = $id;
+    }
 }
 
 final class Documented
@@ -25,6 +30,12 @@ final class Documented
     public function __construct(?string $name)
     {
         $this->name = $name;
+    }
+
+    public function alias(): void
+    {
+        $name = &$this->name;
+        $name = null;
     }
 }
 

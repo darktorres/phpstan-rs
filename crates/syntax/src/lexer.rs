@@ -318,6 +318,9 @@ impl SyntaxMarks {
 pub struct WatchList(pub &'static [&'static [(&'static str, u32)]]);
 
 impl WatchList {
+    /// The length of the longest spelling a string literal is looked up by.
+    const LONGEST: usize = 48;
+
     /// The bits of the spellings equal to `text` in any case.
     fn bits(&self, text: &str) -> u32 {
         let mut bits = 0;
@@ -468,6 +471,18 @@ impl<'a> Lexer<'a> {
         let (name, bits, _) = self.name_and_bits(text);
         self.facts.mentions |= bits;
         name
+    }
+
+    /// Notes the watched spellings a string literal is, whose body is
+    /// `src[start..end]`: a function named by a string is called by the name.
+    fn note_string(&mut self, start: usize, end: usize) {
+        let Some(watch) = self.watch else { return };
+        if end <= start || end - start > WatchList::LONGEST {
+            return;
+        }
+        if let Some(text) = self.text.and_then(|text| text.get(start..end)) {
+            self.facts.mentions |= watch.bits(text);
+        }
     }
 
     fn name_and_bits(&mut self, text: &str) -> (Name, u32, Option<NameId>) {

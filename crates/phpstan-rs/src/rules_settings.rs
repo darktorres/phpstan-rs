@@ -63,6 +63,12 @@ pub struct RulesSettings {
     /// unused and misplaced dependencies, PSR-4 locations, required
     /// extensions, `provide`, `scripts`, `config.platform.php`.
     pub check_composer_hygiene: bool,
+    /// No code outside the code the project loads writes a private or
+    /// protected property: no reflection, hydrator or unserialisation
+    /// fills one. A property of that kind that no loaded code writes once
+    /// the object is made then keeps what a constructor gave it, though
+    /// the project names something that writes properties that way.
+    pub assume_no_external_property_writers: bool,
 }
 
 impl config::Section for RulesSettings {

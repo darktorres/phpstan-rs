@@ -359,6 +359,12 @@ impl BodySource for file_table::FileTable<FileState> {
         }
     }
 
+    fn names_property_writer(&self) -> bool {
+        self.values().any(|file| {
+            file.facts.mentions & crate::registry::bodies::MENTIONS_PROPERTY_WRITER != 0
+        })
+    }
+
     fn files(&self) -> Vec<crate::registry::bodies::LoadedFile<'_>> {
         self.iter_with_ids()
             .map(|(id, path, file)| crate::registry::bodies::LoadedFile {
@@ -3784,6 +3790,7 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
     crate::registry::bodies::WATCH,
     checker::global_constants::WATCH,
     checker::phpstan_api::WATCH,
+    crate::registry::bodies::PROPERTY_WRITER_WATCH,
 ]);
 
 /// What the tree `ast` refers to, and what its declarations do: from the
