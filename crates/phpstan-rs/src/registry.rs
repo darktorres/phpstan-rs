@@ -12,6 +12,7 @@ pub mod access_attributes;
 mod anonymous_class;
 mod assertion_table;
 pub mod bodies;
+mod body_passes;
 pub(crate) mod canonical;
 mod class_info;
 use class_info::{ResolvedTypeImport, TraitAlias};

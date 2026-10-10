@@ -17,7 +17,10 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
+use smallvec::SmallVec;
+
 use crate::registry::bodies::BodySource;
+use crate::registry::body_passes::{Pass, Wants};
 use crate::registry::effects::builtin_releases;
 use crate::registry::purity::ObjectLeaks;
 use crate::registry::{ClassId, FnId, FunctionReflection, Registry};
@@ -75,17 +78,28 @@ pub(crate) struct ParamUses {
 
 impl ParamUses {
     /// What the body `body` of a function with the parameters `params` does
-    /// with them; `None` when it has none. `yields` is whether `body` has a
-    /// `yield`.
-    pub(crate) fn of(
+    /// with them, by a walk of its own; `None` when it has none.
+    #[cfg(debug_assertions)]
+    pub(crate) fn reference(
         arenas: &NodeArenas,
         params: &[Param],
         body: &[StmtId],
         yields: bool,
     ) -> Option<Box<ParamUses>> {
+        let mut uses = Uses::new(params, yields);
+        arena::walk_stmts(&mut uses, arenas, body);
+        uses.finish(params)
+    }
+}
+
+impl Uses {
+    /// The walk's state for a function with the parameters `params`.
+    /// `yields` is whether its body has a `yield`.
+    pub(crate) fn new(params: &[Param], yields: bool) -> Uses {
         let mut uses = Uses {
             this: ThisUse::default(),
             in_callable: false,
+            callables: Vec::new(),
             index: FxHashMap::default(),
             uses: params
                 .iter()
@@ -99,30 +113,37 @@ impl ParamUses {
         for (at, param) in params.iter().enumerate() {
             uses.index.insert(param.name.name.clone(), at);
         }
-        arena::walk_stmts(&mut uses, arenas, body);
-        if uses.reads_all {
-            for used in &mut uses.uses {
+        uses
+    }
+
+    /// What the body does with the parameters `params`, once walked; `None`
+    /// when it has none.
+    pub(crate) fn finish(mut self, params: &[Param]) -> Option<Box<ParamUses>> {
+        if self.reads_all {
+            for used in &mut self.uses {
                 used.kept = true;
             }
-            uses.this.kept = true;
+            self.this.kept = true;
         }
-        if params.is_empty() && uses.this.is_empty() {
+        if params.is_empty() && self.this.is_empty() {
             return None;
         }
         Some(Box::new(ParamUses {
-            params: uses.uses.into_boxed_slice(),
-            this: uses.this,
+            params: self.uses.into_boxed_slice(),
+            this: self.this,
         }))
     }
 }
 
-struct Uses {
+pub(crate) struct Uses {
     index: FxHashMap<Name, usize>,
     uses: Vec<ParamUse>,
     this: ThisUse,
     /// The expression being read is the target of a first-class callable,
     /// which binds `$this`.
     in_callable: bool,
+    /// The first-class callables being read, with the flag they replaced.
+    callables: Vec<(ExprId, bool)>,
     /// The body reads its variables or its arguments some way a use of the
     /// name does not show, or its frame outlives the call.
     reads_all: bool,
@@ -239,6 +260,224 @@ fn reads_variables_by_name(name: &str) -> bool {
     .any(|reader| name.eq_ignore_ascii_case(reader))
 }
 
+impl Uses {
+    /// A use of `id` that keeps nothing of the value it evaluates to, as
+    /// the children it asks to have visited.
+    fn kept_child(arenas: &NodeArenas, id: ExprId, wanted: &mut SmallVec<[ExprId; 4]>) {
+        if Self::variable(arenas, id).is_none() {
+            wanted.push(id);
+        }
+    }
+
+    /// A call of a method on `$this` or a relative class, whose arguments
+    /// are then read.
+    fn this_call_wants(&mut self, arenas: &NodeArenas, call: ThisCall, args: &ArgRange) -> Wants {
+        if self.in_callable {
+            self.this.kept = true;
+        } else {
+            self.this.calls.push(call);
+        }
+        Wants::Exprs(
+            arenas
+                .args(args.clone())
+                .iter()
+                .map(|arg| arg.value)
+                .collect(),
+        )
+    }
+
+    fn call_wants(&mut self, arenas: &NodeArenas, callee: ExprId, args: &ArgRange) -> Wants {
+        let args = arenas.args(args.clone());
+        match arenas.peeled(callee).and_then(|id| arenas.expr(id)) {
+            Some(ExprNode {
+                kind: ExprKind::Variable(_),
+                ..
+            }) => {
+                // Calling the value keeps nothing of it.
+                Wants::Exprs(args.iter().map(|arg| arg.value).collect())
+            }
+            Some(ExprNode {
+                kind: ExprKind::Name(name),
+                ..
+            }) => {
+                let Some(name) = arenas.qualified_name(name) else {
+                    return Wants::All;
+                };
+                if reads_variables_by_name(&name.written) {
+                    self.reads_all = true;
+                }
+                let mut wanted = SmallVec::new();
+                let mut positional = true;
+                for (at, arg) in args.iter().enumerate() {
+                    positional &= !arg.spread;
+                    match Self::variable(arenas, arg.value) {
+                        Some(variable)
+                            if positional && arg.name.is_none() && variable.as_str() == "this" =>
+                        {
+                            self.this.passed.push((name.clone(), at as u32));
+                        }
+                        Some(variable)
+                            if positional
+                                && arg.name.is_none()
+                                && self.index.contains_key(variable) =>
+                        {
+                            let param = self.index[variable];
+                            self.uses[param].passed.push((name.clone(), at as u32));
+                        }
+                        _ => wanted.push(arg.value),
+                    }
+                }
+                Wants::Exprs(wanted)
+            }
+            _ => Wants::All,
+        }
+    }
+}
+
+impl Pass for Uses {
+    fn stmt(&mut self, arenas: &NodeArenas, id: StmtId) -> Wants {
+        let Some(stmt) = arenas.stmt(id) else {
+            return Wants::None;
+        };
+        match &stmt.kind {
+            StmtKind::Unset(targets) => {
+                let mut wanted = SmallVec::new();
+                for target in arenas.expr_ids(targets) {
+                    Self::kept_child(arenas, *target, &mut wanted);
+                }
+                Wants::Exprs(wanted)
+            }
+            _ => Wants::All,
+        }
+    }
+
+    fn leave_expr(&mut self, id: ExprId) {
+        if let Some(&(callable, outer)) = self.callables.last()
+            && callable == id
+        {
+            self.in_callable = outer;
+            self.callables.pop();
+        }
+    }
+
+    fn expr(&mut self, arenas: &NodeArenas, id: ExprId) -> Wants {
+        let Some(e) = arenas.expr(id) else {
+            return Wants::None;
+        };
+        match &e.kind {
+            ExprKind::Variable(name) => {
+                self.keep(name);
+                Wants::None
+            }
+            ExprKind::PropertyAccess(base, _, _) => {
+                self.this.accesses_properties |= Self::is_this(arenas, *base);
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *base, &mut wanted);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::DynamicPropertyAccess(base, name, _) => {
+                self.this.accesses_properties |= Self::is_this(arenas, *base);
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *base, &mut wanted);
+                wanted.push(*name);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::MethodCall(base, method, args, _) if Self::is_this(arenas, *base) => {
+                self.this_call_wants(arenas, ThisCall::Method(method.name.clone()), args)
+            }
+            ExprKind::StaticCall(target, method, args)
+                if target.as_name().is_some_and(|class| {
+                    ["self", "static", "parent"].iter().any(|relative| {
+                        class
+                            .written
+                            .trim_start_matches('\\')
+                            .eq_ignore_ascii_case(relative)
+                    })
+                }) =>
+            {
+                let written = target
+                    .as_name()
+                    .map(|class| class.written.as_str())
+                    .unwrap_or("");
+                let written = written.trim_start_matches('\\');
+                let call = if written.eq_ignore_ascii_case("parent") {
+                    ThisCall::ParentMethod(method.name.clone())
+                } else if written.eq_ignore_ascii_case("self") {
+                    ThisCall::SelfMethod(method.name.clone())
+                } else {
+                    ThisCall::Method(method.name.clone())
+                };
+                self.this_call_wants(arenas, call, args)
+            }
+            ExprKind::FirstClassCallable(inner) => {
+                let outer = std::mem::replace(&mut self.in_callable, true);
+                self.callables.push((id, outer));
+                Wants::Exprs(SmallVec::from_slice(&[*inner]))
+            }
+            ExprKind::ArrowFn(closure) => {
+                if let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*closure) {
+                    self.this.kept |= !arrow.is_static;
+                }
+                Wants::All
+            }
+            ExprKind::Assign(lhs, rhs) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *lhs, &mut wanted);
+                wanted.push(*rhs);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Binary(BinOp::Identical | BinOp::NotIdentical, a, b) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *a, &mut wanted);
+                Self::kept_child(arenas, *b, &mut wanted);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Instanceof(subject, target) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *subject, &mut wanted);
+                if let InstanceofTarget::Expr(target) = target {
+                    wanted.push(*target);
+                }
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Isset(items) => {
+                let mut wanted = SmallVec::new();
+                for item in arenas.expr_ids(items) {
+                    Self::kept_child(arenas, *item, &mut wanted);
+                }
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Empty(item) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *item, &mut wanted);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Call(callee, args) => self.call_wants(arenas, *callee, args),
+            // A closure's body is a scope of its own; what it captures stays
+            // with it.
+            ExprKind::Closure(closure) => {
+                if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
+                    self.this.kept |= !closure.is_static;
+                    for u in arenas.closure_uses(&closure.uses) {
+                        self.keep(&u.name.name);
+                    }
+                }
+                Wants::None
+            }
+            ExprKind::DynamicVariable(_)
+            | ExprKind::Eval(_)
+            | ExprKind::Include(..)
+            | ExprKind::Yield(..)
+            | ExprKind::YieldFrom(_) => {
+                self.reads_all = true;
+                Wants::All
+            }
+            _ => Wants::All,
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
 impl Visitor for Uses {
     fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 

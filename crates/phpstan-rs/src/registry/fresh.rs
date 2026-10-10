@@ -14,7 +14,10 @@ use syntax::ast::*;
 use syntax::name::Name;
 use syntax::visit::arena::{self, Visitor};
 
+use smallvec::{SmallVec, smallvec};
+
 use crate::registry::bodies::BodySource;
+use crate::registry::body_passes::{Pass, Wants};
 use crate::registry::{FnId, MethodRef, Registry};
 
 /// A call whose result a body returns, or assigns to a variable it returns.
@@ -37,9 +40,9 @@ pub(crate) struct FreshReturns {
 
 impl FreshReturns {
     /// What a function with the parameters `params` and the body `body`
-    /// returns, when it returns only objects it made. `yields` is whether
-    /// `body` has a `yield`.
-    pub(crate) fn of(
+    /// returns, when it returns only objects it made, by a walk of its own.
+    #[cfg(debug_assertions)]
+    pub(crate) fn reference(
         arenas: &NodeArenas,
         params: &[Param],
         body: &[StmtId],
@@ -48,10 +51,7 @@ impl FreshReturns {
         if yields {
             return None;
         }
-        let mut walk = Returns::default();
-        for param in params {
-            walk.bad.insert(param.name.name.clone());
-        }
+        let mut walk = Returns::new(params);
         arena::walk_stmts(&mut walk, arenas, body);
         walk.finish()
     }
@@ -66,7 +66,7 @@ enum Source {
 }
 
 #[derive(Default)]
-struct Returns {
+pub(crate) struct Returns {
     /// A return is of something that may be held elsewhere.
     spoiled: bool,
     /// The variables that are returned.
@@ -81,7 +81,16 @@ struct Returns {
 }
 
 impl Returns {
-    fn finish(self) -> Option<Box<FreshReturns>> {
+    /// The walk's state for a function with the parameters `params`.
+    pub(crate) fn new(params: &[Param]) -> Returns {
+        let mut walk = Returns::default();
+        for param in params {
+            walk.bad.insert(param.name.name.clone());
+        }
+        walk
+    }
+
+    pub(crate) fn finish(self) -> Option<Box<FreshReturns>> {
         if self.spoiled {
             return None;
         }
@@ -160,6 +169,151 @@ impl Returns {
     }
 }
 
+impl Returns {
+    /// A use of `id` that lets nothing leave the object it evaluates to,
+    /// as the children it asks to have visited.
+    fn kept_child(arenas: &NodeArenas, id: ExprId, wanted: &mut SmallVec<[ExprId; 4]>) {
+        if Self::variable(arenas, id).is_none() {
+            wanted.push(id);
+        }
+    }
+}
+
+impl Pass for Returns {
+    fn catch_clause(&mut self, clause: &CatchClause) {
+        if let Some(var) = &clause.var {
+            self.bad.insert(var.name.clone());
+        }
+    }
+
+    fn stmt(&mut self, arenas: &NodeArenas, id: StmtId) -> Wants {
+        let Some(stmt) = arenas.stmt(id) else {
+            return Wants::None;
+        };
+        match &stmt.kind {
+            StmtKind::Return(Some(value)) => match Self::variable(arenas, *value) {
+                Some(name) => {
+                    self.returned.insert(name.clone());
+                    Wants::None
+                }
+                None => match Self::source(arenas, *value) {
+                    Some(source) => {
+                        self.direct.push(source);
+                        // The arguments of what is returned are evaluated.
+                        Wants::All
+                    }
+                    None => {
+                        self.spoiled = true;
+                        Wants::None
+                    }
+                },
+            },
+            StmtKind::Global(vars) => {
+                for var in arenas.global_vars(vars.clone()) {
+                    match var {
+                        GlobalVar::Name(name) => {
+                            self.bad.insert(name.name.clone());
+                        }
+                        GlobalVar::Dynamic(_) => self.spoiled = true,
+                    }
+                }
+                Wants::None
+            }
+            StmtKind::StaticVar(vars) => {
+                for variable in arenas.static_vars(vars.clone()) {
+                    self.bad.insert(variable.name.name.clone());
+                }
+                Wants::None
+            }
+            StmtKind::Unset(targets) => {
+                let mut wanted = SmallVec::new();
+                for target in arenas.expr_ids(targets) {
+                    Self::kept_child(arenas, *target, &mut wanted);
+                }
+                Wants::Exprs(wanted)
+            }
+            _ => Wants::All,
+        }
+    }
+
+    fn expr(&mut self, arenas: &NodeArenas, id: ExprId) -> Wants {
+        let Some(e) = arenas.expr(id) else {
+            return Wants::None;
+        };
+        match &e.kind {
+            ExprKind::Variable(name) => {
+                self.bad.insert(name.clone());
+                Wants::None
+            }
+            ExprKind::PropertyAccess(base, _, _) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *base, &mut wanted);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::DynamicPropertyAccess(base, name, _) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *base, &mut wanted);
+                wanted.push(*name);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Assign(lhs, rhs) => {
+                let mut wanted = SmallVec::new();
+                match (Self::variable(arenas, *lhs), Self::source(arenas, *rhs)) {
+                    (Some(name), Some(source)) => {
+                        self.assigned.entry(name.clone()).or_default().push(source);
+                    }
+                    (Some(name), None) => {
+                        self.bad.insert(name.clone());
+                    }
+                    (None, _) => wanted.push(*lhs),
+                }
+                wanted.push(*rhs);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Binary(BinOp::Identical | BinOp::NotIdentical, a, b) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *a, &mut wanted);
+                Self::kept_child(arenas, *b, &mut wanted);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Instanceof(subject, target) => {
+                let mut wanted = SmallVec::new();
+                Self::kept_child(arenas, *subject, &mut wanted);
+                if let InstanceofTarget::Expr(target) = target {
+                    wanted.push(*target);
+                }
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Isset(items) => {
+                let mut wanted = SmallVec::new();
+                for item in arenas.expr_ids(items) {
+                    Self::kept_child(arenas, *item, &mut wanted);
+                }
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Empty(item) => {
+                let mut wanted: SmallVec<[ExprId; 4]> = smallvec![];
+                Self::kept_child(arenas, *item, &mut wanted);
+                Wants::Exprs(wanted)
+            }
+            ExprKind::Closure(closure) => {
+                if let Some(ClosurePayload::Closure(closure)) = arenas.closure(*closure) {
+                    for u in arenas.closure_uses(&closure.uses) {
+                        self.bad.insert(u.name.name.clone());
+                    }
+                }
+                Wants::None
+            }
+            ExprKind::DynamicVariable(_) | ExprKind::Eval(_) | ExprKind::Include(..) => {
+                self.spoiled = true;
+                Wants::None
+            }
+            _ => Wants::All,
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
 impl Visitor for Returns {
     fn visit_function_decl(&mut self, _: &NodeArenas, _: &FunctionDecl) {}
 
