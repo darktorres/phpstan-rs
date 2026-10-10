@@ -813,6 +813,9 @@ pub struct Checker<'a> {
     // include path, which is what its include guards are found by; true
     // until said otherwise.
     pub(crate) include_guards_possible: bool,
+    /// The bits of `FileFacts::mentions` of the file being checked; every
+    /// bit is set until said otherwise.
+    pub(crate) file_mentions: u32,
     // Where the file first spells each syntax its tree does not keep
     // (`syntax_versions`).
     pub(crate) syntax_marks: syntax::SyntaxMarks,
@@ -1021,7 +1024,7 @@ mod expr;
 mod function_decl;
 mod function_like_declarations;
 mod generics;
-mod global_constants;
+pub(crate) mod global_constants;
 mod imports;
 mod impossible_instanceof;
 pub(crate) mod includes;
@@ -1420,6 +1423,7 @@ impl<'a> Checker<'a> {
             rebind_target_classes: NameSet::default(),
             closure_rebind_possible: true,
             include_guards_possible: true,
+            file_mentions: u32::MAX,
             syntax_marks: syntax::SyntaxMarks::default(),
             rebind_escape_all: false,
             probe_span: Cell::new(None),
@@ -2044,6 +2048,12 @@ impl<'a> Checker<'a> {
         self.include_guards_possible = possible;
     }
 
+    /// The spellings the file being checked names, as `FileFacts::mentions`
+    /// has them.
+    pub fn set_file_mentions(&mut self, mentions: u32) {
+        self.file_mentions = mentions;
+    }
+
     /// Where the file being checked first spells each syntax its tree
     /// does not keep.
     pub fn set_syntax_marks(&mut self, marks: syntax::SyntaxMarks) {
@@ -2073,7 +2083,17 @@ impl<'a> Checker<'a> {
             } else {
                 Vec::new()
             };
-        self.constant_facts = global_constants::constant_facts(arenas, stmts);
+        self.constant_facts = if self.file_mentions & global_constants::MENTIONS_MAGIC != 0 {
+            global_constants::constant_facts(arenas, stmts)
+        } else {
+            debug_assert!(
+                global_constants::constant_facts(arenas, stmts)
+                    .magic_in_closure
+                    .is_empty(),
+                "a file that does not name __FUNCTION__ or __METHOD__ has none in a closure"
+            );
+            Default::default()
+        };
         if self.current_file.is_some() {
             self.include_constant_initializers =
                 includes::file_constant_initializers(arenas, stmts);

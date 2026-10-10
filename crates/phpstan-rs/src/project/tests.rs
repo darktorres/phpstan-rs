@@ -7,6 +7,7 @@ mod declarations;
 mod duplicate_classes;
 mod duplicate_functions;
 mod file_discovery_and_misc;
+mod file_mentions;
 mod file_removal;
 mod incremental_updates;
 mod inline_ignore_comments;

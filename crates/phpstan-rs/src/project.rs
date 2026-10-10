@@ -3052,6 +3052,7 @@ impl Project {
             file.facts.mentions & checker::includes::MENTIONS_GUARD != 0,
         );
         checker.set_syntax_marks(file.facts.syntax);
+        checker.set_file_mentions(file.facts.mentions);
         Some((checker, ast))
     }
 
@@ -3737,6 +3738,7 @@ static WATCHED: syntax::WatchList = syntax::WatchList(&[
     checker::unused::REBIND_WATCH,
     checker::includes::WATCH,
     crate::registry::bodies::WATCH,
+    checker::global_constants::WATCH,
 ]);
 
 /// What the tree `ast` refers to, and what its declarations do: from the
