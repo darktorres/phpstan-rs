@@ -552,6 +552,12 @@ fn main() {
                 Terminator::Return(Some(Operand::StringByteLength(0))),
             ),
         ],
+        // The closed Return fact is the nonnegative byte-length envelope of
+        // Argument(0). Its expression does not consume the __toString Invoke
+        // result, and this graph contains no explicit user-state Read/Write.
+        // The callback may affect other domains (left open below), but those
+        // effects cannot make this value envelope negative, so Return's
+        // mandatory transfer-dependency set is empty.
         coverage: Domain::ALL
             .iter()
             .copied()

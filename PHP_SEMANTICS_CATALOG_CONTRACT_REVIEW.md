@@ -593,6 +593,16 @@ here was committed.
   normal return. The justification must still be written into the contract or ledger, which
   the ledger update below does.
 
+**R01.6 remediation status (2026-10-10):** the updated contract and evaluation report now
+record why the locked `StringByteLength(Argument(0))` return has no required dependency.
+`BehaviorGraph::validate` checks graph-derived dependencies for modeled reads/writes,
+including supported PHP-throw cleanup returns, consumed invocation results/guards, and
+invocation-derived exceptional projections; it continues to require each `Unknown` event's
+affected domains to remain open. Mutation tests
+remove required edges and confirm rejection. The locked builder was rerun against the pinned
+PHP source, LLVM inventory, and runtime witness and reproduced the checked-in catalog byte for
+byte. This is author evidence; fresh independent acceptance remains pending.
+
 ### New findings
 
 **RV-14 — Active, High. Side-effecting `debug_assert!` calls drop registry members in release-profile builds.**

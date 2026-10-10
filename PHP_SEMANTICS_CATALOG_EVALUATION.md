@@ -165,6 +165,16 @@ opcode path.
 | **Object release and destructor consequences.** Parser/cast source releases temporary object references; standard cast also releases the object (`zend_API.c:758–779`; `zend_object_handlers.c:2468–2495`). | No `Release` event exists in this host graph. The separate checker effect invalidation is not a model of reference counts, destructor order, or exceptions. Components/domains: host state, `Release`, `UserRead`, `UserWrite`, `ExternalRead`, `ExternalWrite`, and reachable exit domains (`PhpThrow`, `Fatal`, `Suspension`). | No positive/negative/contradictory source-runtime matrix for destructor effects, exceptions, or release timing in the artifact witness. | **Open.** Do not infer no effects from the absence of graph events. |
 | **Unknown event.** There is no corresponding PHP source operation: it is a graph abstraction event. | `CatalogTypeHost::Event::Unknown` returns Normal with unchanged state, while graph coverage leaves non-Return/non-Diagnostic domains open. This no-op is not a conservative PHP unknown-call transfer. Components/domains: all state, result and exits; all 14 catalog domains (`Invocation`, `UserRead`, `UserWrite`, `ExternalRead`, `ExternalWrite`, `Diagnostic`, `Autoload`, `Output`, `Release`, `Retention`, `Return`, `PhpThrow`, `Fatal`, `Suspension`) are required to make a complete unknown-operation claim. | No concrete PHP test can validate an unspecified abstract event. The contract requires unsupported behavior to stay open; current checker host's no-op is implementation behavior, not evidence that effects are absent. | **Open / host-model limitation.** Fail-closed handling or sound unknown transfer belongs to R01.6 and broader host calibration. |
 
+The locked `Return` coverage intentionally has no domain dependencies. Its
+checked expression is `StringByteLength(Argument(0))`; the `__toString` event's
+result is unused, and the graph contains no explicit `Read`, `Write`, or
+PHP-flow state operation on the normal path. Thus the narrow nonnegative
+byte-length result does not depend on callback effects. R01.6 makes this
+exception checkable: changing the graph to consume an invocation result or to
+execute a modeled state operation requires the corresponding dependency edge;
+unknown events keep each declared affected domain open, and declared dependent
+projections widen through those open domains.
+
 The matrix distinguishes source facts from what the graph and checker actually
 consume. The native `zif_strlen` chain has pinned source/layout/LLVM evidence;
 the usual direct opcode path does not. Weak scalar positives and selected

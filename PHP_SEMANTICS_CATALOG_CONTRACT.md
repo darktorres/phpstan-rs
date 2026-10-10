@@ -173,6 +173,30 @@ domains propagate through every dependency edge, including edges through
 leaving them closed. An intermediate `NotApplicable` domain remains
 `NotApplicable`; only the dependent claim is widened.
 
+Required dependencies are checked against the graph, not trusted as a
+producer-supplied list. A closed normal-return projection must include
+`UserRead` and `UserWrite` when a reachable normal path, including a supported
+pending-PHP-throw cleanup that returns normally, executes a corresponding
+read/write or PHP-flow state operation. A projection that directly returns an
+invocation result, or branches on an invocation result through an explicit
+operand predicate, must include `Invocation`. Closed PHP-throw, fatal, and
+suspension projections in a graph with an `Invoke` transfer must also depend on
+`Invocation`, because that transfer can produce those completions. A graph
+`Unknown` transfer must keep every listed affected domain open; if an exit
+projection itself is affected, that projection must be listed and remain open. These rules are the
+checked dependency table for the reviewed transfer slice; graph validation
+rechecks them after child coverage is composed, so a domain that starts as
+`NotApplicable` cannot become closed with missing edges. Additional transfer
+kinds require an explicit rule before their result projections can be closed.
+An empty dependency list is
+valid only when the checked graph has no required edge. In the locked `strlen`
+slice, `Return` is `StringByteLength(Argument(0))`; its `__toString` result is
+not consumed, the graph has no explicit user-state read/write, and the narrow
+nonnegative byte-length envelope is invariant under the open callback effects.
+Therefore its empty `Return` dependency list is intentional. Unknown or
+unreviewed host predicates must remain `Maybe` unless their transfer and
+dependencies have been established.
+
 ## Composition rules
 
 Sequential composition passes each normal state and result into the next

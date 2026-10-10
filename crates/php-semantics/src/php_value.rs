@@ -332,10 +332,10 @@ impl PhpFlowHost {
                 } else {
                     Precision::Widened
                 },
-                dependencies: if domain == Domain::Return {
-                    vec![Domain::PhpThrow]
-                } else {
-                    vec![]
+                dependencies: match domain {
+                    Domain::Return => vec![Domain::PhpThrow],
+                    Domain::PhpThrow => vec![Domain::Invocation],
+                    _ => vec![],
                 },
                 evidence: vec![self.evidence],
                 assumptions: vec![],

@@ -344,6 +344,10 @@ pub enum GraphError {
     CanonicalEncodingFailed,
     ResumeWithoutPendingOutcome,
     InvalidComposedCoverage,
+    MissingRequiredDomainDependency {
+        domain: Domain,
+        dependency: Domain,
+    },
     UnsupportedCleanupReplacement {
         pending: CompletionKind,
         replacement: CompletionKind,
@@ -505,31 +509,7 @@ impl BehaviorGraph {
                 continue;
             }
             for event in &block.events {
-                let required = match event {
-                    Event::Read { .. } => vec![Domain::UserRead],
-                    Event::Write { .. } => vec![Domain::UserWrite],
-                    Event::Invoke { .. } => vec![Domain::Invocation],
-                    Event::EmitDiagnostic { .. } => vec![Domain::Diagnostic],
-                    Event::PhpFlow {
-                        instruction: PhpFlowInstruction::Assign { .. },
-                    } => vec![Domain::UserRead, Domain::UserWrite],
-                    Event::PhpFlow {
-                        instruction: PhpFlowInstruction::Unset { .. },
-                    } => vec![Domain::UserWrite],
-                    Event::PhpFlow {
-                        instruction: PhpFlowInstruction::BindReference { .. },
-                    } => vec![Domain::UserRead, Domain::UserWrite],
-                    Event::PhpFlow {
-                        instruction: PhpFlowInstruction::ArraySet { .. },
-                    } => vec![Domain::UserRead, Domain::UserWrite],
-                    Event::PhpFlow {
-                        instruction: PhpFlowInstruction::ArrayGet { .. },
-                    } => vec![Domain::UserRead, Domain::UserWrite],
-                    Event::PhpFlow {
-                        instruction: PhpFlowInstruction::ArrayBindReference { .. },
-                    } => vec![Domain::UserRead, Domain::UserWrite],
-                    Event::Unknown { domains, .. } => domains.clone(),
-                };
+                let required = event_domains(event);
                 for domain in required {
                     if !required_domains.contains(&domain) {
                         required_domains.push(domain);
@@ -556,7 +536,6 @@ impl BehaviorGraph {
                 return Err(GraphError::ApplicableDomainMarkedNotApplicable(domain));
             }
         }
-        validate_domain_dependencies(&self.coverage)?;
         for item in &self.coverage {
             if matches!(item.coverage, Coverage::Open { ref reasons } if reasons.is_empty()) {
                 return Err(GraphError::OpenWithoutReason(item.domain));
@@ -579,6 +558,8 @@ impl BehaviorGraph {
                 return Err(GraphError::UnknownTransferWithoutOpenCoverage(domain));
             }
         }
+        validate_domain_dependencies(&self.coverage)?;
+        validate_required_domain_dependencies(self, &colors, &self.coverage)?;
         Ok(())
     }
 }
@@ -678,6 +659,242 @@ fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), Graph
                     dependency: *dependency,
                 });
             }
+        }
+    }
+    Ok(())
+}
+
+/// Semantic domains directly exercised by an event contract. This table is
+/// shared by applicability and projection-dependency validation so adding a
+/// transfer cannot silently bypass either check.
+fn event_domains(event: &Event) -> Vec<Domain> {
+    match event {
+        Event::Read { .. } => vec![Domain::UserRead],
+        Event::Write { .. } => vec![Domain::UserWrite],
+        Event::Invoke { .. } => vec![Domain::Invocation],
+        Event::EmitDiagnostic { .. } => vec![Domain::Diagnostic],
+        Event::PhpFlow { instruction } => match instruction {
+            PhpFlowInstruction::Assign { .. }
+            | PhpFlowInstruction::BindReference { .. }
+            | PhpFlowInstruction::ArraySet { .. }
+            | PhpFlowInstruction::ArrayGet { .. }
+            | PhpFlowInstruction::ArrayBindReference { .. } => {
+                vec![Domain::UserRead, Domain::UserWrite]
+            }
+            PhpFlowInstruction::Unset { .. } => vec![Domain::UserWrite],
+        },
+        Event::Unknown { domains, .. } => domains.clone(),
+    }
+}
+
+fn validate_required_domain_dependencies(
+    graph: &BehaviorGraph,
+    reachable: &[u8],
+    coverage: &[DomainCoverage],
+) -> Result<(), GraphError> {
+    let mut normal_reachable = vec![false; graph.blocks.len()];
+    let mut pending = vec![graph.entry];
+    while let Some(block_id) = pending.pop() {
+        let index = block_id as usize;
+        if normal_reachable[index] {
+            continue;
+        }
+        normal_reachable[index] = true;
+        match graph.blocks[index].terminator {
+            Terminator::Goto(to) => pending.push(to),
+            Terminator::Branch { yes, no, .. } => {
+                pending.push(yes);
+                pending.push(no);
+            }
+            Terminator::Return(_)
+            | Terminator::Throw(_)
+            | Terminator::Fatal(_)
+            | Terminator::Suspend(_)
+            | Terminator::Resume => {}
+        }
+    }
+    // Cleanup entered for a pending PHP throw can itself return normally.
+    // Include those cleanup blocks in Return's dependency analysis, but do not
+    // treat a cleanup path ending in Resume or another completion as normal.
+    let mut normal_predecessors = vec![Vec::new(); graph.blocks.len()];
+    let mut can_reach_return = vec![false; graph.blocks.len()];
+    let mut reverse_worklist = Vec::new();
+    for (index, block) in graph.blocks.iter().enumerate() {
+        match block.terminator {
+            Terminator::Goto(to) => normal_predecessors[to as usize].push(index as u32),
+            Terminator::Branch { yes, no, .. } => {
+                normal_predecessors[yes as usize].push(index as u32);
+                normal_predecessors[no as usize].push(index as u32);
+            }
+            Terminator::Return(_) => {
+                can_reach_return[index] = true;
+                reverse_worklist.push(index as u32);
+            }
+            _ => {}
+        }
+    }
+    while let Some(block_id) = reverse_worklist.pop() {
+        for predecessor in &normal_predecessors[block_id as usize] {
+            let predecessor_index = *predecessor as usize;
+            if !can_reach_return[predecessor_index] {
+                can_reach_return[predecessor_index] = true;
+                reverse_worklist.push(*predecessor);
+            }
+        }
+    }
+    let cleanup_entries: Vec<u32> = graph
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| reachable[*index] == 2)
+        .filter_map(|(_, block)| block.exceptional.php_throw)
+        .filter(|target| can_reach_return[*target as usize])
+        .collect();
+    let mut pending = cleanup_entries;
+    while let Some(block_id) = pending.pop() {
+        let index = block_id as usize;
+        if normal_reachable[index] || !can_reach_return[index] {
+            continue;
+        }
+        normal_reachable[index] = true;
+        match graph.blocks[index].terminator {
+            Terminator::Goto(to) if can_reach_return[to as usize] => pending.push(to),
+            Terminator::Branch { yes, no, .. } => {
+                if can_reach_return[yes as usize] {
+                    pending.push(yes);
+                }
+                if can_reach_return[no as usize] {
+                    pending.push(no);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut projections = Vec::new();
+    for (index, block) in graph.blocks.iter().enumerate() {
+        if reachable[index] != 2 {
+            continue;
+        }
+        let projection = match block.terminator {
+            Terminator::Return(_) => Some(Domain::Return),
+            Terminator::Throw(_) => Some(Domain::PhpThrow),
+            Terminator::Fatal(_) => Some(Domain::Fatal),
+            Terminator::Suspend(_) => Some(Domain::Suspension),
+            Terminator::Goto(_) | Terminator::Branch { .. } | Terminator::Resume => None,
+        };
+        if let Some(projection) = projection
+            && !projections.contains(&projection)
+        {
+            projections.push(projection);
+        }
+    }
+
+    let has_return_projection = projections.contains(&Domain::Return);
+    let mut required = Vec::<(Domain, Domain)>::new();
+    for (index, block) in graph.blocks.iter().enumerate() {
+        if reachable[index] != 2 {
+            continue;
+        }
+        for event in &block.events {
+            match event {
+                // A normal-return projection includes the post-event user
+                // state. Its declared result dependencies must therefore
+                // include each modeled read/write domain on the graph.
+                Event::Read { .. } if has_return_projection && normal_reachable[index] => {
+                    required.push((Domain::Return, Domain::UserRead));
+                }
+                Event::Write { .. } if has_return_projection && normal_reachable[index] => {
+                    required.push((Domain::Return, Domain::UserWrite));
+                }
+                Event::PhpFlow { instruction }
+                    if has_return_projection && normal_reachable[index] =>
+                {
+                    let domains = event_domains(event);
+                    match instruction {
+                        PhpFlowInstruction::Assign { .. }
+                        | PhpFlowInstruction::BindReference { .. }
+                        | PhpFlowInstruction::ArraySet { .. }
+                        | PhpFlowInstruction::ArrayGet { .. }
+                        | PhpFlowInstruction::ArrayBindReference { .. }
+                        | PhpFlowInstruction::Unset { .. } => {
+                            required.extend(
+                                domains
+                                    .into_iter()
+                                    .map(|dependency| (Domain::Return, dependency)),
+                            );
+                        }
+                    }
+                }
+                Event::Invoke { .. } => {
+                    for projection in [Domain::PhpThrow, Domain::Fatal, Domain::Suspension] {
+                        required.push((projection, Domain::Invocation));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // A projection that consumes an invocation result depends on the event
+    // contract that produced it. Merely having an unrelated invocation in the
+    // graph does not make a value-only projection depend on callback effects.
+    for (index, block) in graph.blocks.iter().enumerate() {
+        if reachable[index] != 2 || !normal_reachable[index] {
+            continue;
+        }
+        let output_operand = match &block.terminator {
+            Terminator::Return(Some(operand)) => Some((Domain::Return, operand)),
+            Terminator::Throw(operand) => Some((Domain::PhpThrow, operand)),
+            Terminator::Fatal(operand) => Some((Domain::Fatal, operand)),
+            Terminator::Suspend(operand) => Some((Domain::Suspension, operand)),
+            _ => None,
+        };
+        if let Some((projection, Operand::Result(result_id))) = output_operand
+            && graph.blocks.iter().enumerate().any(|(index, producer)| {
+                reachable[index] == 2
+                    && producer.events.iter().any(
+                        |event| matches!(event, Event::Invoke { result, .. } if result == result_id),
+                    )
+            })
+        {
+            required.push((projection, Domain::Invocation));
+        }
+        if let Terminator::Branch {
+            predicate:
+                Predicate::IsLiteral {
+                    value: Operand::Result(result_id),
+                    ..
+                },
+            ..
+        } = &block.terminator
+            && projections.contains(&Domain::Return)
+            && graph.blocks.iter().enumerate().any(|(producer_index, producer)| {
+                reachable[producer_index] == 2
+                    && producer.events.iter().any(
+                        |event| matches!(event, Event::Invoke { result, .. } if result == result_id),
+                    )
+            })
+        {
+            required.push((Domain::Return, Domain::Invocation));
+        }
+    }
+
+    required.sort_by_key(|(domain, dependency)| {
+        (
+            Domain::ALL.iter().position(|candidate| candidate == domain),
+            Domain::ALL
+                .iter()
+                .position(|candidate| candidate == dependency),
+        )
+    });
+    required.dedup();
+    for (domain, dependency) in required {
+        if coverage.iter().any(|item| {
+            item.domain == domain
+                && matches!(item.coverage, Coverage::Closed)
+                && !item.dependencies.contains(&dependency)
+        }) {
+            return Err(GraphError::MissingRequiredDomainDependency { domain, dependency });
         }
     }
     Ok(())
@@ -1054,6 +1271,53 @@ fn merge_coverage(
     Ok(())
 }
 
+fn merge_graph_coverage(
+    graph: &BehaviorGraph,
+    current: &mut Vec<DomainCoverage>,
+    additions: &[DomainCoverage],
+) -> Result<(), GraphError> {
+    merge_coverage(current, additions)?;
+    let mut composed_graph = graph.clone();
+    composed_graph.coverage.clone_from(current);
+    let mut reachable = vec![false; graph.blocks.len()];
+    let mut pending = vec![graph.entry];
+    while let Some(block_id) = pending.pop() {
+        let index = block_id as usize;
+        if reachable[index] {
+            continue;
+        }
+        reachable[index] = true;
+        let block = &graph.blocks[index];
+        match block.terminator {
+            Terminator::Goto(to) => pending.push(to),
+            Terminator::Branch { yes, no, .. } => {
+                pending.push(yes);
+                pending.push(no);
+            }
+            Terminator::Return(_)
+            | Terminator::Throw(_)
+            | Terminator::Fatal(_)
+            | Terminator::Suspend(_)
+            | Terminator::Resume => {}
+        }
+        pending.extend(
+            [
+                block.exceptional.php_throw,
+                block.exceptional.native_unwind,
+                block.exceptional.fatal,
+                block.exceptional.suspended,
+            ]
+            .into_iter()
+            .flatten(),
+        );
+    }
+    let reachable = reachable
+        .into_iter()
+        .map(|is_reachable| u8::from(is_reachable) * 2)
+        .collect::<Vec<_>>();
+    validate_required_domain_dependencies(&composed_graph, &reachable, current)
+}
+
 /// Execute a finite graph with a finite host-provided state join. Cycles are
 /// evaluated with host joins and widening after three growing updates. The
 /// host's transfer, join, widening, and subsumption methods must be monotone.
@@ -1344,7 +1608,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                         return Err(GraphError::InvalidComposedCoverage);
                     }
                 }
-                merge_coverage(replayed_coverage, outcome.coverage())?;
+                merge_graph_coverage(graph, replayed_coverage, outcome.coverage())?;
                 match outcome {
                     EventExit::Normal { result, state, .. } => {
                         let mut next_values = values.clone();
@@ -1632,7 +1896,7 @@ pub fn evaluate<H: SemanticHost>(
                             state,
                             coverage,
                         } => {
-                            merge_coverage(&mut evaluation_coverage, &coverage)?;
+                            merge_graph_coverage(graph, &mut evaluation_coverage, &coverage)?;
                             let mut next_values = values.clone();
                             if let Some((id, value)) = result {
                                 next_values.retain(|(existing, _)| *existing != id);
@@ -1646,7 +1910,7 @@ pub fn evaluate<H: SemanticHost>(
                             coverage,
                         } => {
                             check_cleanup_replacement(&pending, CompletionKind::PhpThrow)?;
-                            merge_coverage(&mut evaluation_coverage, &coverage)?;
+                            merge_graph_coverage(graph, &mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.php_throw {
                                 enqueue(
                                     host,
@@ -1673,7 +1937,7 @@ pub fn evaluate<H: SemanticHost>(
                             coverage,
                         } => {
                             check_cleanup_replacement(&pending, CompletionKind::NativeUnwind)?;
-                            merge_coverage(&mut evaluation_coverage, &coverage)?;
+                            merge_graph_coverage(graph, &mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.native_unwind {
                                 enqueue(
                                     host,
@@ -1700,7 +1964,7 @@ pub fn evaluate<H: SemanticHost>(
                             coverage,
                         } => {
                             check_cleanup_replacement(&pending, CompletionKind::Fatal)?;
-                            merge_coverage(&mut evaluation_coverage, &coverage)?;
+                            merge_graph_coverage(graph, &mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.fatal {
                                 enqueue(
                                     host,
@@ -1727,7 +1991,7 @@ pub fn evaluate<H: SemanticHost>(
                             coverage,
                         } => {
                             check_cleanup_replacement(&pending, CompletionKind::Suspended)?;
-                            merge_coverage(&mut evaluation_coverage, &coverage)?;
+                            merge_graph_coverage(graph, &mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.suspended {
                                 enqueue(
                                     host,
@@ -2257,11 +2521,54 @@ mod tests {
         {
             applicable.push(domain);
         }
+        let mut coverage = coverage_for(&applicable);
+        if matches!(terminator, Terminator::Return(_)) {
+            coverage
+                .iter_mut()
+                .find(|item| item.domain == Domain::Return)
+                .expect("return coverage")
+                .dependencies
+                .clear();
+            for event in &events {
+                let dependencies = match event {
+                    Event::Read { .. } => vec![Domain::UserRead],
+                    Event::Write { .. } => vec![Domain::UserWrite],
+                    Event::PhpFlow { .. } => event_domains(event),
+                    _ => vec![],
+                };
+                coverage
+                    .iter_mut()
+                    .find(|item| item.domain == Domain::Return)
+                    .expect("return coverage")
+                    .dependencies
+                    .extend(dependencies);
+            }
+            if let Terminator::Return(Some(Operand::Result(result_id))) = &terminator
+                && events.iter().any(
+                    |event| matches!(event, Event::Invoke { result, .. } if result == result_id),
+                )
+            {
+                coverage
+                    .iter_mut()
+                    .find(|item| item.domain == Domain::Return)
+                    .expect("return coverage")
+                    .dependencies
+                    .push(Domain::Invocation);
+            }
+            let returned = coverage
+                .iter_mut()
+                .find(|item| item.domain == Domain::Return)
+                .expect("return coverage");
+            returned.dependencies.sort_by_key(|dependency| {
+                Domain::ALL.iter().position(|domain| domain == dependency)
+            });
+            returned.dependencies.dedup();
+        }
         BehaviorGraph {
             schema_major: SCHEMA_MAJOR,
             entry: 0,
             blocks: vec![Block::new(events, terminator)],
-            coverage: coverage_for(&applicable),
+            coverage,
         }
     }
     fn test_certificate(
@@ -2284,7 +2591,7 @@ mod tests {
         }
     }
     fn coverage_for(applicable: &[Domain]) -> Vec<DomainCoverage> {
-        Domain::ALL
+        let mut coverage: Vec<_> = Domain::ALL
             .into_iter()
             .map(|domain| DomainCoverage {
                 domain,
@@ -2298,7 +2605,298 @@ mod tests {
                 evidence: vec![Digest([1; 32])],
                 assumptions: vec![],
             })
-            .collect()
+            .collect();
+        if applicable.contains(&Domain::Return) {
+            let dependencies = [Domain::Invocation, Domain::UserRead, Domain::UserWrite];
+            coverage
+                .iter_mut()
+                .find(|item| item.domain == Domain::Return)
+                .expect("return coverage")
+                .dependencies
+                .extend(
+                    dependencies
+                        .into_iter()
+                        .filter(|dependency| applicable.contains(dependency)),
+                );
+        }
+        if applicable.contains(&Domain::Invocation) {
+            for projection in [Domain::PhpThrow, Domain::Fatal, Domain::Suspension] {
+                if applicable.contains(&projection) {
+                    coverage
+                        .iter_mut()
+                        .find(|item| item.domain == projection)
+                        .expect("exit coverage")
+                        .dependencies
+                        .push(Domain::Invocation);
+                }
+            }
+        }
+        coverage
+    }
+
+    fn close_unmodeled_domains(graph: &mut BehaviorGraph) {
+        for item in &mut graph.coverage {
+            if matches!(item.coverage, Coverage::NotApplicable) {
+                item.coverage = Coverage::Closed;
+            }
+        }
+        if graph.blocks.iter().any(|block| {
+            block
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Invoke { .. }))
+        }) {
+            for projection in [Domain::PhpThrow, Domain::Fatal, Domain::Suspension] {
+                let item = graph
+                    .coverage
+                    .iter_mut()
+                    .find(|item| item.domain == projection)
+                    .unwrap();
+                if !item.dependencies.contains(&Domain::Invocation) {
+                    item.dependencies.push(Domain::Invocation);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn removing_required_state_dependency_from_closed_return_is_rejected() {
+        let mut result_graph = graph(
+            vec![Event::Write {
+                storage: Operand::Argument(0),
+                value: Operand::Literal(Bytes(b"written".to_vec())),
+            }],
+            Terminator::Return(None),
+        );
+        let returned = result_graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        assert!(returned.dependencies.contains(&Domain::UserWrite));
+        returned.dependencies.clear();
+        assert_eq!(
+            result_graph.validate(),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::Return,
+                dependency: Domain::UserWrite,
+            })
+        );
+
+        result_graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::UserWrite);
+        assert_eq!(result_graph.validate(), Ok(()));
+    }
+
+    #[test]
+    fn cleanup_return_dependencies_include_supported_pending_throw_path() {
+        let mut graph = graph(
+            vec![],
+            Terminator::Throw(Operand::Literal(Bytes(b"pending".to_vec()))),
+        );
+        graph.blocks[0].exceptional.php_throw = Some(1);
+        graph.blocks.push(Block::new(
+            vec![Event::Write {
+                storage: Operand::Argument(0),
+                value: Operand::Literal(Bytes(b"cleanup-write".to_vec())),
+            }],
+            Terminator::Return(None),
+        ));
+        graph.coverage = coverage_for(&[Domain::UserWrite, Domain::PhpThrow, Domain::Return]);
+        let returned = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        assert!(returned.dependencies.contains(&Domain::UserWrite));
+        returned.dependencies.clear();
+        assert_eq!(
+            graph.validate(),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::Return,
+                dependency: Domain::UserWrite,
+            })
+        );
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::UserWrite);
+        assert_eq!(graph.validate(), Ok(()));
+    }
+
+    #[test]
+    fn result_projection_requires_invocation_dependency_only_when_consumed() {
+        let mut result_graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 7,
+            }],
+            Terminator::Return(Some(Operand::Result(7))),
+        );
+        let returned = result_graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        assert!(returned.dependencies.contains(&Domain::Invocation));
+        returned.dependencies.clear();
+        assert_eq!(
+            result_graph.validate(),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::Return,
+                dependency: Domain::Invocation,
+            })
+        );
+
+        result_graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::Invocation);
+        assert_eq!(result_graph.validate(), Ok(()));
+
+        let unrelated_invoke = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 7,
+            }],
+            Terminator::Return(Some(Operand::IntRange {
+                min: Some(0),
+                max: None,
+            })),
+        );
+        assert!(
+            unrelated_invoke
+                .coverage
+                .iter()
+                .find(|item| item.domain == Domain::Return)
+                .unwrap()
+                .dependencies
+                .is_empty()
+        );
+        assert_eq!(unrelated_invoke.validate(), Ok(()));
+    }
+
+    #[test]
+    fn return_guard_on_invocation_result_requires_invocation_dependency() {
+        let mut graph = BehaviorGraph {
+            schema_major: SCHEMA_MAJOR,
+            entry: 0,
+            blocks: vec![
+                Block::new(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![],
+                        result: 7,
+                    }],
+                    Terminator::Branch {
+                        predicate: Predicate::IsLiteral {
+                            value: Operand::Result(7),
+                            expected: Bytes(b"expected".to_vec()),
+                        },
+                        yes: 1,
+                        no: 2,
+                    },
+                ),
+                Block::new(vec![], Terminator::Return(None)),
+                Block::new(vec![], Terminator::Return(None)),
+            ],
+            coverage: coverage_for(&[Domain::Invocation, Domain::Return]),
+        };
+        let returned = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        returned.dependencies.clear();
+        assert_eq!(
+            graph.validate(),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::Return,
+                dependency: Domain::Invocation,
+            })
+        );
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .dependencies
+            .push(Domain::Invocation);
+        assert_eq!(graph.validate(), Ok(()));
+    }
+
+    #[test]
+    fn invocation_exception_projection_requires_invocation_dependency() {
+        let mut graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 7,
+            }],
+            Terminator::Throw(Operand::Literal(Bytes(b"throw".to_vec()))),
+        );
+        let thrown = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::PhpThrow)
+            .unwrap();
+        assert!(thrown.dependencies.contains(&Domain::Invocation));
+        thrown.dependencies.clear();
+        assert_eq!(
+            graph.validate(),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::PhpThrow,
+                dependency: Domain::Invocation,
+            })
+        );
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::PhpThrow)
+            .unwrap()
+            .dependencies
+            .push(Domain::Invocation);
+        assert_eq!(graph.validate(), Ok(()));
+    }
+
+    #[test]
+    fn composed_closed_invocation_exits_require_dependency_edges() {
+        let graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 7,
+            }],
+            Terminator::Return(None),
+        );
+        let mut composed = graph.coverage.clone();
+        let mut complete_child = coverage_for(&Domain::ALL);
+        complete_child
+            .iter_mut()
+            .find(|item| item.domain == Domain::PhpThrow)
+            .unwrap()
+            .dependencies
+            .clear();
+        assert_eq!(
+            merge_graph_coverage(&graph, &mut composed, &complete_child),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::PhpThrow,
+                dependency: Domain::Invocation,
+            })
+        );
     }
     fn receiver() -> String {
         "receiver".into()
@@ -2344,7 +2942,14 @@ mod tests {
                     Coverage::Closed
                 },
                 precision: Precision::Exact,
-                dependencies: vec![],
+                dependencies: if matches!(
+                    domain,
+                    Domain::PhpThrow | Domain::Fatal | Domain::Suspension
+                ) {
+                    vec![Domain::Invocation]
+                } else {
+                    vec![]
+                },
                 evidence: vec![Digest([2; 32])],
                 assumptions: if Some(domain) == open_domain {
                     vec![Digest([3; 32])]
@@ -2977,7 +3582,10 @@ mod tests {
             .coverage = Coverage::Closed;
         assert_eq!(
             falsely_closed.validate(&graph, &host),
-            Err(GraphError::InvalidComposedCoverage)
+            Err(GraphError::ClosedDomainDependsOnOpen {
+                domain: Domain::Return,
+                dependency: Domain::Invocation,
+            })
         );
     }
 
@@ -3752,11 +4360,7 @@ mod tests {
                     CompletionKind::NativeUnwind => unreachable!(),
                 };
                 graph.blocks.push(Block::new(vec![], replacement));
-                for item in &mut graph.coverage {
-                    if matches!(item.coverage, Coverage::NotApplicable) {
-                        item.coverage = Coverage::Closed;
-                    }
-                }
+                close_unmodeled_domains(&mut graph);
                 let mut host = Host {
                     throw_invoke: pending_kind == CompletionKind::PhpThrow,
                     native_unwind_invoke: pending_kind == CompletionKind::NativeUnwind,
@@ -3867,11 +4471,7 @@ mod tests {
                 CompletionKind::Normal => unreachable!(),
             }
             graph.blocks.push(Block::new(vec![], Terminator::Resume));
-            for item in &mut graph.coverage {
-                if matches!(item.coverage, Coverage::NotApplicable) {
-                    item.coverage = Coverage::Closed;
-                }
-            }
+            close_unmodeled_domains(&mut graph);
             let mut host = Host {
                 throw_invoke: pending_kind == CompletionKind::PhpThrow,
                 native_unwind_invoke: pending_kind == CompletionKind::NativeUnwind,
@@ -3935,11 +4535,7 @@ mod tests {
             Terminator::Goto(4),
         ));
         g.blocks.push(Block::new(vec![], Terminator::Resume));
-        for item in &mut g.coverage {
-            if matches!(item.coverage, Coverage::NotApplicable) {
-                item.coverage = Coverage::Closed;
-            }
-        }
+        close_unmodeled_domains(&mut g);
         let mut host = Host {
             throw_invoke: true,
             maybe_always: true,
@@ -4610,11 +5206,7 @@ mod tests {
         // The helper only derives applicability from the entry block, so a
         // cleanup block's own domains start as not applicable. Close them so the
         // graph is valid and an error cannot make the check pass vacuously.
-        for item in &mut graph.coverage {
-            if matches!(item.coverage, Coverage::NotApplicable) {
-                item.coverage = Coverage::Closed;
-            }
-        }
+        close_unmodeled_domains(graph);
         assert_eq!(graph.validate(), Ok(()), "the test graph must be valid");
         match evaluate(graph, arguments, &receiver(), vec![], &mut host) {
             Ok(evaluation) => {
