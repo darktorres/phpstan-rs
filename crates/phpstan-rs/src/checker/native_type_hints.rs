@@ -173,7 +173,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let suggested_ty = self.suggested_type(&suggested, Some(fqn));
-            let redeclared_incompatibly = self.registry.subclasses(fqn).iter().any(|name| {
+            let redeclared_incompatibly = self.registry.subclasses_shared(fqn).iter().any(|name| {
                 self.registry.class_by_name(name).is_some_and(|info| {
                     info.consts().get(&constant.name.name).is_some_and(|child| {
                         child.native_ty().as_ref().is_none_or(|child_ty| {
@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
     /// Whether some class overriding `class::method` declares no return
     /// type, or one outside `suggested`.
     fn overriding_returns_block(&self, class: &str, method: &str, suggested: &Type) -> bool {
-        self.registry.subclasses(class).iter().any(|name| {
+        self.registry.subclasses_shared(class).iter().any(|name| {
             self.registry
                 .lookup_method_with_owner(name, method)
                 .is_some_and(|(owner, overriding)| {

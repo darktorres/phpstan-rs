@@ -43,7 +43,7 @@ pub(crate) fn find_dead_abstract_classes<'a>(
             // Only a real, instantiable class counts as a witness - an
             // abstract subclass proves nothing about whether this class
             // can ever actually be constructed.
-            !registry.subclasses(declaration.name).iter().any(|name| {
+            !registry.subclasses_shared(declaration.name).iter().any(|name| {
                 registry
                     .class_by_name(name)
                     .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())

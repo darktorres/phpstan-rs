@@ -809,7 +809,7 @@ impl Checker<'_> {
         let classes: Vec<String> = if class.eq_ignore_ascii_case("static") {
             own.map(|own| {
                 std::iter::once(own.to_string())
-                    .chain(self.registry.subclasses(own).iter().map(|c| c.to_string()))
+                    .chain(self.registry.subclasses_shared(own).iter().map(|c| c.to_string()))
                     .collect()
             })
             .unwrap_or_default()
