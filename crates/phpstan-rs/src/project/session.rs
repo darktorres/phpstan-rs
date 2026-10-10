@@ -961,6 +961,7 @@ impl Session {
             overlays,
             sql_reflection,
             sql_schema,
+            report_cutoff: None,
         };
 
         Ok(Session {
@@ -1051,6 +1052,14 @@ impl Session {
             },
             root: self.root.clone(),
         }
+    }
+
+    /// The session for a run whose report is final: the checks leave a
+    /// finding below the session's cutoff unmade, which nothing after them
+    /// would have read (the cutoff is the first step of `Finalize::apply`).
+    pub fn reporting_only_at_cutoff(mut self) -> Self {
+        self.settings.report_cutoff = Some(self.cutoff);
+        self
     }
 
     /// The session for a project kept for edits, as the language server

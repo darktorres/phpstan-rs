@@ -111,4 +111,6 @@ pub struct CheckSettings {
     /// Whether the Pest extension is active: Pest's test closures bind
     /// `$this` only then.
     pub pest: bool,
+    /// See `ProjectSettings::report_cutoff`.
+    pub report_cutoff: Option<diagnostics::LevelCutoff>,
 }

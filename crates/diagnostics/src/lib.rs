@@ -207,11 +207,14 @@ impl LevelCutoff {
 
     /// Whether a report at this cutoff shows `diagnostic`.
     pub fn reports(&self, diagnostic: &Diagnostic) -> bool {
-        diagnostic.level <= self.rule
-            && diagnostic.found_from <= self.found
-            && diagnostic
-                .found_below
-                .is_none_or(|below| self.found < below)
+        self.admits(diagnostic.level, diagnostic.found_from, diagnostic.found_below)
+    }
+
+    /// Whether a report at this cutoff shows a finding with these levels.
+    pub fn admits(&self, level: u8, found_from: u8, found_below: Option<u8>) -> bool {
+        level <= self.rule
+            && found_from <= self.found
+            && found_below.is_none_or(|below| self.found < below)
     }
 }
 
@@ -328,6 +331,11 @@ impl DiagnosticBuilder {
             within: Some(text.into()),
         });
         self
+    }
+
+    /// Whether a report at `cutoff` shows the finding being built.
+    pub fn reported_at(&self, cutoff: &LevelCutoff) -> bool {
+        cutoff.admits(self.level, self.found_from, self.found_below)
     }
 
     /// The diagnostic, at the lines and columns the span has in the file

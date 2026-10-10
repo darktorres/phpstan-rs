@@ -1988,8 +1988,7 @@ impl<'a> Checker<'a> {
         level: u8,
         identifier: impl Into<diagnostics::Identifier>,
     ) {
-        self.diagnostics
-            .push(DiagnosticBuilder::new(message, span, level, identifier).build(&self.line_index));
+        self.report_builder(DiagnosticBuilder::new(message, span, level, identifier));
     }
 
     /// `report`, for a finding made only from configured level
@@ -2012,6 +2011,13 @@ impl<'a> Checker<'a> {
     /// positional signature has room for without every plain call site
     /// paying for arguments it never uses.
     pub(crate) fn report_builder(&mut self, builder: DiagnosticBuilder) {
+        if let Some(cutoff) = &self.settings.report_cutoff
+            && !builder.reported_at(cutoff)
+        {
+            syntax::stats::add(syntax::stats::Counter::DiagnosticsBuilt, 1);
+            syntax::stats::add(syntax::stats::Counter::DiagnosticsBelowLevel, 1);
+            return;
+        }
         self.diagnostics.push(builder.build(&self.line_index));
     }
 

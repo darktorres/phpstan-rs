@@ -730,6 +730,10 @@ pub struct ProjectSettings {
     pub overlays: crate::assertion_tables::OverlaySettings,
     pub sql_reflection: Option<sql::config::SqlReflectionConfig>,
     pub sql_schema: Option<sql::schema::SchemaCatalog>,
+    /// The cutoff the report will apply to everything the checks find, when
+    /// no one reads a finding below it: the checks then leave such a
+    /// finding unmade.
+    pub report_cutoff: Option<diagnostics::LevelCutoff>,
 }
 
 /// Where `Project::insert_numbered_file` puts a file.
@@ -959,6 +963,7 @@ impl Project {
             overlays,
             sql_reflection,
             sql_schema,
+            report_cutoff,
         } = settings;
         self.working_dir = working_dir;
         self.absolute_root = absolute_root;
@@ -999,6 +1004,7 @@ impl Project {
                 .collect(),
             language_extensions: active.language_extensions,
             pest: active.pest,
+            report_cutoff,
         };
 
         self.sql.set_config(sql_reflection);

@@ -97,7 +97,7 @@ pub fn prepare(
         pool,
     )?;
     Ok(CheckRun {
-        session,
+        session: session.reporting_only_at_cutoff(),
         baseline_path,
         baseline_mode,
         baseline_per_identifier,
