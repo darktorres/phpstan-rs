@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use composer::manifest::lexically_normalized;
+use rustc_hash::FxHashMap;
 
 /// Whether a file is checked (`Analysed`) or only read for the
 /// declarations it gives the files that are (`Context`).
@@ -33,6 +34,9 @@ pub struct Classified {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FileRoles {
     analysed: Vec<AnalysedRoot>,
+    /// The `pruned` lists of the analysed roots, by directory: a path is
+    /// under a root exactly when that root is one of its ancestors.
+    analysed_by_dir: FxHashMap<PathBuf, Vec<&'static [&'static str]>>,
     stubs: Vec<PathBuf>,
 }
 
@@ -52,10 +56,12 @@ impl FileRoles {
     /// Adds an analysed root that leaves out what is under a directory
     /// named in `pruned`.
     pub fn with_pruned_analysed(mut self, dir: &Path, pruned: &'static [&'static str]) -> Self {
-        self.analysed.push(AnalysedRoot {
-            dir: lexically_normalized(dir),
-            pruned,
-        });
+        let dir = lexically_normalized(dir);
+        self.analysed_by_dir
+            .entry(dir.clone())
+            .or_default()
+            .push(pruned);
+        self.analysed.push(AnalysedRoot { dir, pruned });
         self
     }
 
@@ -83,10 +89,24 @@ impl FileRoles {
                 crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
             );
         }
-        self.analysed.iter().any(|root| {
-            path.strip_prefix(&root.dir)
-                .is_ok_and(|below| !crate::project::path_under_excluded_dir(below, root.pruned))
-        })
+        let found = path.ancestors().any(|ancestor| {
+            self.analysed_by_dir.get(ancestor).is_some_and(|lists| {
+                path.strip_prefix(ancestor).is_ok_and(|below| {
+                    lists
+                        .iter()
+                        .any(|pruned| !crate::project::path_under_excluded_dir(below, pruned))
+                })
+            })
+        });
+        #[cfg(debug_assertions)]
+        {
+            let scanned = self.analysed.iter().any(|root| {
+                path.strip_prefix(&root.dir)
+                    .is_ok_and(|below| !crate::project::path_under_excluded_dir(below, root.pruned))
+            });
+            debug_assert_eq!(found, scanned, "{path:?}");
+        }
+        found
     }
 
     pub fn is_stub(&self, path: &Path) -> bool {
