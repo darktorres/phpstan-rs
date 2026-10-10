@@ -500,7 +500,7 @@ impl<'a> Checker<'a> {
                             "varTag.differentVariable",
                         )),
                         Some(name) => found.push((
-                            format!("Variable ${name} in PHPDoc tag @var does not exist."),
+                            var_tag_variable_not_found(name),
                             "varTag.variableNotFound",
                         )),
                     }
@@ -603,7 +603,7 @@ impl<'a> Checker<'a> {
                         None => unnamed += 1,
                         Some(name) if defined(name) => {}
                         Some(name) => found.push((
-                            format!("Variable ${name} in PHPDoc tag @var does not exist."),
+                            var_tag_variable_not_found(name),
                             "varTag.variableNotFound",
                         )),
                     }
@@ -2066,4 +2066,16 @@ pub(super) fn assigned_variable_names(arenas: &NodeArenas, target: ExprId) -> Ve
             .collect(),
         _ => Vec::new(),
     })
+}
+
+/// The `varTag.variableNotFound` message, built in one allocation: one is
+/// made for every tag naming a variable the statement does not define.
+fn var_tag_variable_not_found(name: &str) -> String {
+    const HEAD: &str = "Variable $";
+    const TAIL: &str = " in PHPDoc tag @var does not exist.";
+    let mut message = String::with_capacity(HEAD.len() + name.len() + TAIL.len());
+    message.push_str(HEAD);
+    message.push_str(name);
+    message.push_str(TAIL);
+    message
 }

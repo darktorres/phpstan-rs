@@ -299,9 +299,15 @@ impl<'a> Checker<'a> {
             .map(|arenas| arenas.attributes(f.attrs.clone()))
             .unwrap_or_default();
         let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
-        let label = match class_name {
-            Some(c) => format!("{c}::{}", f.name),
-            None => f.name.to_string(),
+        let label: std::borrow::Cow<'_, str> = match class_name {
+            Some(c) => {
+                let mut label = String::with_capacity(c.len() + 2 + f.name.len());
+                label.push_str(c);
+                label.push_str("::");
+                label.push_str(&f.name);
+                label.into()
+            }
+            None => (&*f.name).into(),
         };
         // A method's docblock is already covered by `check_unknown_
         // phpstan_tags_in_class`'s per-class walk (`checker.rs`'s
