@@ -9,10 +9,12 @@ license.workspace = true
 name = "composer"
 
 [dependencies]
+postcard.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 syntax.workspace = true
+twox-hash.workspace = true
 
 [lints]
 workspace = true

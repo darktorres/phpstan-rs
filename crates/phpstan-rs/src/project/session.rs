@@ -876,6 +876,7 @@ impl Session {
                     &composer_root,
                     &manifest_root,
                     Arc::clone(&listings),
+                    super::file_cache::vendor_directory(),
                 );
                 if composer_root == canonical_root {
                     composer_php_versions = declared_php_versions(&package);

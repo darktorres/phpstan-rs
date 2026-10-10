@@ -44,12 +44,18 @@ pub struct VendorContext {
 /// Composer project (no `composer.json`) or hasn't been installed yet (no
 /// `vendor/composer/`).
 pub fn discover_vendor_context(project_dir: &Path) -> VendorContext {
-    discover_vendor_context_in(project_dir, &DirTable::default())
+    discover_vendor_context_in(project_dir, &DirTable::default(), None)
 }
 
 /// `discover_vendor_context`, listing each directory through `table`,
-/// which whoever walks the same directories reads too.
-pub fn discover_vendor_context_in(project_dir: &Path, table: &DirTable) -> VendorContext {
+/// which whoever walks the same directories reads too. `cache` is the
+/// directory the extraction of the generated autoloader is kept in, when
+/// there is one.
+pub fn discover_vendor_context_in(
+    project_dir: &Path,
+    table: &DirTable,
+    cache: Option<&Path>,
+) -> VendorContext {
     if !project_dir.join("composer.json").is_file() {
         return VendorContext::default();
     }
@@ -73,7 +79,7 @@ pub fn discover_vendor_context_in(project_dir: &Path, table: &DirTable) -> Vendo
     // what should be a quiet "skip this source of context" degrade.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let mut ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir, table);
+    let mut ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir, table, cache);
     std::panic::set_hook(default_hook);
 
     // Composer's own bootstrap loader class - unlike every other file
@@ -96,10 +102,11 @@ fn discover_inner(
     vendor_dir: &Path,
     base_dir: &Path,
     table: &DirTable,
+    cache: Option<&Path>,
 ) -> VendorContext {
     let static_path = composer_dir.join("autoload_static.php");
     if static_path.is_file()
-        && let Some(ctx) = parse_static_file(&static_path, vendor_dir, base_dir, table)
+        && let Some(ctx) = parse_static_file(&static_path, vendor_dir, base_dir, table, cache)
     {
         return ctx;
     }
@@ -111,14 +118,37 @@ fn parse_static_file(
     vendor_dir: &Path,
     base_dir: &Path,
     table: &DirTable,
+    cache: Option<&Path>,
 ) -> Option<VendorContext> {
     let generated_dir = path.parent()?;
-    let parsed = parse_generated_file(path)?;
-    let class = find_class_decl(&parsed)?;
-    let def = parsed.arenas.class(class.def)?;
-
+    let bytes = std::fs::read(path).ok()?;
+    let extracted = extracted_from(&bytes, cache)?;
     let mut ctx = VendorContext::default();
     let mut resolver = Resolver::new(vendor_dir, base_dir, generated_dir, table);
+    resolver.resolve_files(&extracted.files, &mut ctx.files);
+    resolver.resolve_dirs(&extracted.dirs, &mut ctx.dirs);
+    resolver.settle(&mut ctx);
+    Some(ctx)
+}
+
+/// What the generated autoloader file with these bytes lists, from `cache`
+/// when it holds the extraction for exactly these bytes, else by parsing
+/// the file (and keeping the result there).
+fn extracted_from(bytes: &[u8], cache: Option<&Path>) -> Option<Extracted> {
+    let entry = cache.map(|dir| {
+        let hash = twox_hash::XxHash3_128::oneshot(bytes);
+        dir.join(format!("{hash:032x}.bin"))
+    });
+    if let Some(entry) = &entry
+        && let Ok(stored) = std::fs::read(entry)
+        && let Ok(extracted) = postcard::from_bytes::<Extracted>(&stored)
+    {
+        return Some(extracted);
+    }
+    let parsed = syntax::parse(bytes).ok()?;
+    let class = find_class_decl(&parsed)?;
+    let def = parsed.arenas.class(class.def)?;
+    let mut extracted = Extracted::default();
     for prop in def.properties(&parsed.arenas) {
         if !prop.is_static {
             continue;
@@ -127,15 +157,33 @@ fn parse_static_file(
             continue;
         };
         match prop.name.as_ref() {
-            "classMap" | "files" => {
-                resolver.collect_files(&parsed.arenas, *default, &mut ctx.files)
-            }
-            "prefixDirsPsr4" => resolver.collect_dirs(&parsed.arenas, *default, &mut ctx.dirs),
+            "classMap" | "files" => extract_files(&parsed.arenas, *default, &mut extracted.files),
+            "prefixDirsPsr4" => extract_dirs(&parsed.arenas, *default, &mut extracted.dirs),
             _ => {}
         }
     }
-    resolver.settle(&mut ctx);
-    Some(ctx)
+    if let Some(entry) = &entry {
+        store(entry, &extracted);
+    }
+    Some(extracted)
+}
+
+/// Writes `extracted` to `entry` through a temporary file, so a reader
+/// never sees half of it; a failure leaves the cache without the entry.
+fn store(entry: &Path, extracted: &Extracted) {
+    let Ok(encoded) = postcard::to_allocvec(extracted) else {
+        return;
+    };
+    let Some(dir) = entry.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let temporary = entry.with_extension(format!("{}.tmp", std::process::id()));
+    if std::fs::write(&temporary, encoded).is_ok() && std::fs::rename(&temporary, entry).is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
 }
 
 fn parse_separate_files(
@@ -149,13 +197,17 @@ fn parse_separate_files(
     for name in ["autoload_classmap.php", "autoload_files.php"] {
         let path = composer_dir.join(name);
         if let Some((parsed, arr)) = parse_top_level_array(&path) {
-            resolver.collect_files(&parsed.arenas, arr, &mut ctx.files);
+            let mut files = Vec::new();
+            extract_files(&parsed.arenas, arr, &mut files);
+            resolver.resolve_files(&files, &mut ctx.files);
         }
     }
     for name in ["autoload_psr4.php", "autoload_namespaces.php"] {
         let path = composer_dir.join(name);
         if let Some((parsed, arr)) = parse_top_level_array(&path) {
-            resolver.collect_dirs(&parsed.arenas, arr, &mut ctx.dirs);
+            let mut dirs = Vec::new();
+            extract_dirs(&parsed.arenas, arr, &mut dirs);
+            resolver.resolve_dirs(&dirs, &mut ctx.dirs);
         }
     }
     resolver.settle(&mut ctx);
@@ -240,38 +292,18 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_files(&mut self, arenas: &NodeArenas, array: ExprId, out: &mut Vec<PathBuf>) {
-        let Some(array) = arenas.expr(array) else {
-            return;
-        };
-        let ExprKind::ArrayLiteral(items) = &array.kind else {
-            return;
-        };
-        for item in arenas.array_items(items.clone()) {
-            if let Some(path) = self.path(arenas, item.value) {
+    fn resolve_files(&mut self, files: &[PathExpr], out: &mut Vec<PathBuf>) {
+        for expr in files {
+            if let Some(path) = self.path(expr) {
                 out.push(path);
             }
         }
     }
 
-    fn collect_dirs(&mut self, arenas: &NodeArenas, array: ExprId, out: &mut Vec<PathBuf>) {
-        let Some(array) = arenas.expr(array) else {
-            return;
-        };
-        let ExprKind::ArrayLiteral(items) = &array.kind else {
-            return;
-        };
-        for item in arenas.array_items(items.clone()) {
-            let Some(value) = arenas.expr(item.value) else {
-                continue;
-            };
-            let ExprKind::ArrayLiteral(dirs) = &value.kind else {
-                continue;
-            };
-            for dir_item in arenas.array_items(dirs.clone()) {
-                if let Some(path) = self.path(arenas, dir_item.value) {
-                    out.push(path);
-                }
+    fn resolve_dirs(&mut self, dirs: &[PathExpr], out: &mut Vec<PathBuf>) {
+        for expr in dirs {
+            if let Some(path) = self.path(expr) {
+                out.push(path);
             }
         }
     }
@@ -281,14 +313,8 @@ impl<'p> Resolver<'p> {
     /// load-bearing case) resolves outside `vendor_dir` entirely - a
     /// `$baseDir`/`__DIR__`-with-extra-`/..`-rooted, first-party location,
     /// which must never be silently treated as vendor context.
-    fn path(&mut self, arenas: &NodeArenas, expr: ExprId) -> Option<PathBuf> {
-        let raw = eval_concat(
-            arenas,
-            expr,
-            self.vendor_dir,
-            self.base_dir,
-            self.generated_dir,
-        )?;
+    fn path(&mut self, expr: &PathExpr) -> Option<PathBuf> {
+        let raw = expr.render(self.vendor_dir, self.base_dir, self.generated_dir);
         let raw = path_of(&raw);
         // Containment is decided on the path as written, not its canonical
         // form: a path-repository package is a `vendor/<name>` symlink to a
@@ -471,59 +497,125 @@ fn lexically_normalized(path: &Path) -> PathBuf {
     out
 }
 
-/// The bytes of the literal string a generated autoloader file's path
-/// expression evaluates to, built into one buffer. Required because real
-/// generated code chains multiple concatenations (`__DIR__ . '/..' .
-/// '/pkg/path'`), not a flat two-operand shape.
-fn eval_concat(
-    arenas: &NodeArenas,
-    expr: ExprId,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    append_concat(arenas, expr, vendor_dir, base_dir, generated_dir, &mut out)?;
-    Some(out)
+/// A path expression of a generated autoloader, as the pieces its
+/// concatenation is made of, before any directory is filled in. What the
+/// autoloader file says and nothing of the file system, so it can be kept
+/// for as long as the file is the same.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PathExpr(Vec<Piece>);
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+enum Piece {
+    Bytes(Vec<u8>),
+    /// The directory containing the generated file itself, i.e.
+    /// `vendor/composer/`.
+    GeneratedDir,
+    VendorDir,
+    BaseDir,
 }
 
-/// Appends to `out` what `expr` evaluates to; where it does not evaluate
-/// to a literal string, `out` holds what came before and is not used.
-fn append_concat(
-    arenas: &NodeArenas,
-    expr: ExprId,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-    out: &mut Vec<u8>,
-) -> Option<()> {
-    fn bytes_of(dir: &Path) -> &[u8] {
-        dir.as_os_str().as_encoded_bytes()
+impl PathExpr {
+    /// The bytes the expression evaluates to, built into one buffer.
+    fn render(&self, vendor_dir: &Path, base_dir: &Path, generated_dir: &Path) -> Vec<u8> {
+        fn bytes_of(dir: &Path) -> &[u8] {
+            dir.as_os_str().as_encoded_bytes()
+        }
+        let mut out = Vec::new();
+        for piece in &self.0 {
+            match piece {
+                Piece::Bytes(bytes) => out.extend_from_slice(bytes),
+                Piece::GeneratedDir => out.extend_from_slice(bytes_of(generated_dir)),
+                Piece::VendorDir => out.extend_from_slice(bytes_of(vendor_dir)),
+                Piece::BaseDir => out.extend_from_slice(bytes_of(base_dir)),
+            }
+        }
+        out
     }
+}
+
+/// What a generated autoloader file lists: the files to load and the
+/// directories to load recursively, in the order the file lists them.
+#[derive(Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Extracted {
+    files: Vec<PathExpr>,
+    dirs: Vec<PathExpr>,
+}
+
+/// The path expression `expr` is, where it evaluates to a literal string
+/// built from string literals, `__DIR__`, `$vendorDir` and `$baseDir`.
+/// Required because real generated code chains multiple concatenations
+/// (`__DIR__ . '/..' . '/pkg/path'`), not a flat two-operand shape.
+fn path_expr(arenas: &NodeArenas, expr: ExprId) -> Option<PathExpr> {
+    let mut pieces = Vec::new();
+    append_pieces(arenas, expr, &mut pieces)?;
+    Some(PathExpr(pieces))
+}
+
+fn append_pieces(arenas: &NodeArenas, expr: ExprId, out: &mut Vec<Piece>) -> Option<()> {
     syntax::stack::guard(|| {
         let expr = arenas.peeled(expr)?;
         let expr = arenas.expr(expr)?;
         match &expr.kind {
             ExprKind::Literal(Literal::String(s)) => {
-                out.extend_from_slice(arenas.string_bytes(s)?);
+                let bytes = arenas.string_bytes(s)?;
+                match out.last_mut() {
+                    Some(Piece::Bytes(last)) => last.extend_from_slice(bytes),
+                    _ => out.push(Piece::Bytes(bytes.to_vec())),
+                }
             }
-            // The directory containing the generated file itself, i.e.
-            // `vendor/composer/` - `autoload_static.php` concatenates `/..`
-            // or `/../..` onto this to reach `vendor/` or the project root.
+            // `autoload_static.php` concatenates `/..` or `/../..` onto this
+            // to reach `vendor/` or the project root.
             ExprKind::Name(n) if arenas.qualified_name(n).is_some_and(|n| n == "__DIR__") => {
-                out.extend_from_slice(bytes_of(generated_dir))
+                out.push(Piece::GeneratedDir)
             }
             // Only appears in the separate, non-static autoload_*.php files.
-            ExprKind::Variable(n) if **n == *"vendorDir" => {
-                out.extend_from_slice(bytes_of(vendor_dir))
-            }
-            ExprKind::Variable(n) if **n == *"baseDir" => out.extend_from_slice(bytes_of(base_dir)),
+            ExprKind::Variable(n) if **n == *"vendorDir" => out.push(Piece::VendorDir),
+            ExprKind::Variable(n) if **n == *"baseDir" => out.push(Piece::BaseDir),
             ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-                append_concat(arenas, *lhs, vendor_dir, base_dir, generated_dir, out)?;
-                append_concat(arenas, *rhs, vendor_dir, base_dir, generated_dir, out)?;
+                append_pieces(arenas, *lhs, out)?;
+                append_pieces(arenas, *rhs, out)?;
             }
             _ => return None,
         }
         Some(())
     })
+}
+
+/// The values of the array literal at `array`, as path expressions.
+fn extract_files(arenas: &NodeArenas, array: ExprId, out: &mut Vec<PathExpr>) {
+    let Some(array) = arenas.expr(array) else {
+        return;
+    };
+    let ExprKind::ArrayLiteral(items) = &array.kind else {
+        return;
+    };
+    for item in arenas.array_items(items.clone()) {
+        if let Some(path) = path_expr(arenas, item.value) {
+            out.push(path);
+        }
+    }
+}
+
+/// The values of the arrays that are the values of the array literal at
+/// `array`, as path expressions.
+fn extract_dirs(arenas: &NodeArenas, array: ExprId, out: &mut Vec<PathExpr>) {
+    let Some(array) = arenas.expr(array) else {
+        return;
+    };
+    let ExprKind::ArrayLiteral(items) = &array.kind else {
+        return;
+    };
+    for item in arenas.array_items(items.clone()) {
+        let Some(value) = arenas.expr(item.value) else {
+            continue;
+        };
+        let ExprKind::ArrayLiteral(dirs) = &value.kind else {
+            continue;
+        };
+        for dir_item in arenas.array_items(dirs.clone()) {
+            if let Some(path) = path_expr(arenas, dir_item.value) {
+                out.push(path);
+            }
+        }
+    }
 }

@@ -45,8 +45,10 @@ struct PendingVendorInner {
 
 impl PendingVendor {
     /// Starts discovering the vendor context of the project at `root`.
-    pub fn spawn(root: PathBuf, table: Arc<DirTable>) -> PendingVendor {
-        let thread = std::thread::spawn(move || vendor::discover_vendor_context_in(&root, &table));
+    pub fn spawn(root: PathBuf, table: Arc<DirTable>, cache: Option<PathBuf>) -> PendingVendor {
+        let thread = std::thread::spawn(move || {
+            vendor::discover_vendor_context_in(&root, &table, cache.as_deref())
+        });
         PendingVendor(Arc::new(PendingVendorInner {
             found: OnceLock::new(),
             thread: Mutex::new(Some(thread)),
@@ -95,14 +97,20 @@ impl PackageContext {
     /// the root as analysed paths spell it, which the manifest's own paths
     /// follow.
     pub fn load(root: &Path, spelled_root: &Path) -> PackageContext {
-        PackageContext::load_in(root, spelled_root, Arc::default())
+        PackageContext::load_in(root, spelled_root, Arc::default(), None)
     }
 
-    /// `load`, listing the vendor directories through `table`.
-    pub fn load_in(root: &Path, spelled_root: &Path, table: Arc<DirTable>) -> PackageContext {
+    /// `load`, listing the vendor directories through `table` and keeping
+    /// what the generated autoloader lists in `cache`, when there is one.
+    pub fn load_in(
+        root: &Path,
+        spelled_root: &Path,
+        table: Arc<DirTable>,
+        cache: Option<PathBuf>,
+    ) -> PackageContext {
         PackageContext {
             manifest: ComposerManifest::load(spelled_root, root),
-            vendor: PendingVendor::spawn(root.to_path_buf(), table),
+            vendor: PendingVendor::spawn(root.to_path_buf(), table, cache),
         }
     }
 

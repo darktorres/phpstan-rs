@@ -70,6 +70,17 @@ fn directory() -> Option<&'static Path> {
         .as_deref()
 }
 
+/// The directory of this build's extractions of generated autoloaders, when
+/// the cache is on.
+pub(super) fn vendor_directory() -> Option<PathBuf> {
+    directory()?;
+    Some(
+        crate::registry::cache_dir()?
+            .join("vendor_autoload")
+            .join(crate::registry::cache_key()),
+    )
+}
+
 /// What a file of a context parse is stored as.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct CachedFile {
