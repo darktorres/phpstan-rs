@@ -267,12 +267,11 @@ R04.1. Each row includes dependencies and acceptance evidence.
 
 ## Independent review record (2026-10-09)
 
-**Reviewer:** a fresh Claude session (Haiku 5.5), started at the maintainer's request to
-review the F00 contract and the ledger claims that depend on it. It did not write the
-contract, either self-review, or the ledger. It is a model, not a human reviewer, and it
-shares a model family with the authoring work. Whether this satisfies R00.1's "someone
-other than this author" requirement is for the maintainer to decide. A human review is
-still needed before F00 closes.
+**Reviewer:** a fresh Claude session, started at the maintainer's request to review the F00
+contract and the ledger claims that depend on it. The maintainer reports that the ledger was
+being worked by Codex, and the reviewer did not write the contract, either self-review, or the
+ledger, so the reviewer is independent of that work. It is a model, not a human reviewer. Whether a human should sign
+off on the contract's semantics before F00 closes is for the maintainer to decide.
 
 **Scope:** the contract, the two self-reviews, and every ledger claim that touches F00,
 F01.1–F01.4, F02.2, F02.4, F03.1, F05.2, F05.4–F05.6, F06.2, and R02.1–R06.4. Code read:
