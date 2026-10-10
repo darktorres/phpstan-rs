@@ -43,14 +43,26 @@ impl ShapeKey {
     pub fn from_type(ty: &Type) -> Option<ShapeKey> {
         match ty.repr() {
             Repr::IntLiteral(n) => Some(ShapeKey::Int(*n)),
-            Repr::StringLiteral(s) => Some(ShapeKey::from_bytes(s.as_bytes())),
+            Repr::StringLiteral(s) => Some(
+                match std::str::from_utf8(s.as_bytes())
+                    .ok()
+                    .and_then(canonical_int_key)
+                {
+                    Some(n) => ShapeKey::Int(n),
+                    None => ShapeKey::Str(s.clone()),
+                },
+            ),
             _ => None,
         }
     }
 
     /// Whether this key is the string `name` (or the int it spells).
     pub fn is(&self, name: &str) -> bool {
-        *self == ShapeKey::from_name(name)
+        let spelled = canonical_int_key(name);
+        match self {
+            ShapeKey::Int(n) => spelled == Some(*n),
+            ShapeKey::Str(s) => spelled.is_none() && s.as_bytes() == name.as_bytes(),
+        }
     }
 }
 

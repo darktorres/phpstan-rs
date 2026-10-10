@@ -221,3 +221,39 @@ fn many_shapes_over_few_keys_merge_as_the_pairwise_loops_do() {
         }
     }
 }
+
+#[test]
+fn a_long_union_keeps_each_member_once_in_the_order_it_met_them() {
+    let mut members = Vec::new();
+    for round in 0..3 {
+        for n in 0..40 {
+            members.push(Type::string_literal(format!("s{n}").into()));
+        }
+        members.push(Type::object(
+            if round == 1 { "Foo" } else { "foo" }.into(),
+            Vec::new(),
+        ));
+    }
+    let union = Type::union_of(members);
+    let found = union.union_members();
+    assert_eq!(found.len(), 41);
+    for (n, member) in found.iter().take(40).enumerate() {
+        assert_eq!(*member, Type::string_literal(format!("s{n}").into()));
+    }
+    assert_eq!(found[40], Type::object("foo".into(), Vec::new()));
+}
+
+#[test]
+fn a_shape_key_from_a_type_and_by_name_is_the_key_of_its_text() {
+    for text in ["0", "7", "-3", "01", "-0", "a", "", "9223372036854775808", "é"] {
+        let from_type = ShapeKey::from_type(&Type::string_literal(text.into()));
+        assert_eq!(from_type, Some(ShapeKey::from_name(text)), "{text:?}");
+        for other in ["0", "7", "-3", "a", ""] {
+            assert_eq!(
+                ShapeKey::from_name(text).is(other),
+                ShapeKey::from_name(text) == ShapeKey::from_name(other),
+                "{text:?} is {other:?}"
+            );
+        }
+    }
+}

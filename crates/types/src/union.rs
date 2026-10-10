@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::{AccessoryKind, ClassHierarchy, Repr, Shape, ShapeField, ShapeKey, Type};
@@ -121,6 +121,42 @@ fn union_types_impl(a: Type, b: Type, hierarchy: Option<&dyn ClassHierarchy>) ->
     union_types_many(vec![a, b], hierarchy)
 }
 
+/// The members of a union in the order they were first met, each once. A
+/// short list is searched; a long one is looked up in a set, which `Type`'s
+/// hash, the same for types that are equal, makes sound.
+#[derive(Default)]
+struct DistinctMembers {
+    members: Vec<Type>,
+    set: Option<FxHashSet<Type>>,
+}
+
+impl DistinctMembers {
+    /// Past this many members the set is made.
+    const SEARCHED: usize = 24;
+
+    fn insert(&mut self, member: Type) {
+        match &mut self.set {
+            Some(set) => {
+                if set.insert(member.clone()) {
+                    self.members.push(member);
+                }
+            }
+            None => {
+                if !self.members.contains(&member) {
+                    self.members.push(member);
+                    if self.members.len() > Self::SEARCHED {
+                        self.set = Some(self.members.iter().cloned().collect());
+                    }
+                }
+            }
+        }
+    }
+
+    fn into_members(self) -> Vec<Type> {
+        self.members
+    }
+}
+
 /// The union of `operands` in one normalization: the members of every
 /// union operand and every other operand, in order of first occurrence,
 /// then each rule over all of them once.
@@ -151,24 +187,18 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
         {
             return merged;
         }
-        let mut members: Vec<Type> = Vec::new();
+        let mut distinct = DistinctMembers::default();
         for operand in operands {
             match operand.into_repr() {
                 Repr::Union(inner) => {
                     for member in inner {
-                        if !members.contains(&member) {
-                            members.push(member);
-                        }
+                        distinct.insert(member);
                     }
                 }
-                other => {
-                    let other = Type::new(other);
-                    if !members.contains(&other) {
-                        members.push(other);
-                    }
-                }
+                other => distinct.insert(Type::new(other)),
             }
         }
+        let mut members = distinct.into_members();
         // Same `Mixed`-absorption the fast-path check above already gives a
         // *bare* `Mixed` operand - here for a `Mixed` that only surfaces
         // once flattened out of a multi-member `Union` operand (real shape:
