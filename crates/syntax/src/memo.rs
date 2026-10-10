@@ -10,8 +10,6 @@
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use rustc_hash::FxHashMap;
-
 const SHARDS: usize = 64;
 /// How many texts a shard holds before it is emptied, and how many bytes
 /// of them, unless the memo is made with limits of its own.
@@ -19,16 +17,23 @@ const SHARD_ENTRIES: usize = 256;
 const SHARD_BYTES: usize = 256 * 1024;
 
 struct Shard<V> {
-    entries: FxHashMap<Box<str>, Arc<V>>,
+    entries: hashbrown::HashTable<(Box<str>, Arc<V>)>,
     bytes: usize,
     hits: u64,
     misses: u64,
 }
 
+/// The hash a text is sharded and filed under.
+fn hash_of(raw: &str) -> u64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    raw.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl<V> Default for Shard<V> {
     fn default() -> Self {
         Shard {
-            entries: FxHashMap::default(),
+            entries: hashbrown::HashTable::new(),
             bytes: 0,
             hits: 0,
             misses: 0,
@@ -68,12 +73,11 @@ impl<V> Memo<V> {
     /// The value `parse` gives for `raw`: the one kept for that text, else
     /// the one made now, which is kept.
     pub fn get(&self, raw: &str, parse: impl FnOnce(&str) -> V) -> Arc<V> {
-        let mut hasher = rustc_hash::FxHasher::default();
-        raw.hash(&mut hasher);
-        let shard = &self.shards[(hasher.finish() >> 20) as usize % SHARDS];
+        let hash = hash_of(raw);
+        let shard = &self.shards[(hash >> 20) as usize % SHARDS];
         {
             let mut shard = lock(shard);
-            if let Some(found) = shard.entries.get(raw) {
+            if let Some((_, found)) = shard.entries.find(hash, |(text, _)| &**text == raw) {
                 let found = Arc::clone(found);
                 shard.hits += 1;
                 return found;
@@ -88,8 +92,17 @@ impl<V> Memo<V> {
             shard.entries.clear();
             shard.bytes = 0;
         }
-        shard.bytes += raw.len();
-        shard.entries.insert(raw.into(), Arc::clone(&value));
+        match shard.entries.find_mut(hash, |(text, _)| &**text == raw) {
+            Some((_, kept)) => *kept = Arc::clone(&value),
+            None => {
+                shard.bytes += raw.len();
+                shard
+                    .entries
+                    .insert_unique(hash, (raw.into(), Arc::clone(&value)), |(text, _)| {
+                        hash_of(text)
+                    });
+            }
+        }
         value
     }
 
