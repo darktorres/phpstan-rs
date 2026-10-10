@@ -21,7 +21,7 @@ def main():
                         help='Also measure the 64 MiB buffer (about 2 GiB in stock SVF).')
     args = parser.parse_args()
     root, probe, svf = args.output.resolve(), args.probe.resolve(), args.svf.resolve()
-    aux = Runner(root / 'aux')
+    aux = Runner(root / 'auxiliary')
     names = 'scalar,array_callback,by_reference,exception_cleanup,owner_dispatch,retain,trigger,copy_payload,copied_dispatch,unknown_copy,ordered_dispatch'
     for mode in ['dataflow', 'dataflow-low-budget']:
         aux.run('cpp-' + mode, [probe, mode, names, HERE / 'dispatch.c', '--', '-x', 'c++', '-std=c++17'])

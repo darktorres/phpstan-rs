@@ -90,7 +90,7 @@
     "contracts.c": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8",
     "external_impl.c": "a4f5784284b749d4d23c060fa08ab2b2745a4f689d432ba7f2810dea5bb6f5b9",
     "smt_worker.py": "8f1de1eba876268f49b5de5a551cafad9481449751dcdad867a8488683cd8860",
-    "auxiliary.py": "c1b44a46420da6d704a665f6d339311f23fe81892406128ebefb70fbef0609aa"
+    "auxiliary.py": "2fe45f3c1301923431596a1bd11d455a600017e9938764a93c0fb1c08044ef77"
   },
   "source_hash_note": "Source hashes describe files at pause; actual executed commands and successful companion/patch identities are retained separately.",
   "followup_cbmc_validation": {

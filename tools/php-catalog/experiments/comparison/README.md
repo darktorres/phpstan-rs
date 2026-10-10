@@ -99,7 +99,7 @@ python3 tools/php-catalog/experiments/comparison/auxiliary.py \
   --historical /home/torres/.cache/php-catalog/8.4 --large-growth
 python3 tools/php-catalog/experiments/comparison/checks.py \
   --results /tmp/php-catalog-comparison/rerun \
-  --aux /tmp/php-catalog-comparison/rerun-auxiliary/aux \
+  --aux /tmp/php-catalog-comparison/rerun-auxiliary/auxiliary \
   --external /tmp/php-catalog-comparison/rerun-auxiliary/external-comparison \
   --output /tmp/php-catalog-comparison/rerun-findings.json
 ```
