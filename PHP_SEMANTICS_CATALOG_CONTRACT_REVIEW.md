@@ -709,12 +709,15 @@ The CBMC accounting and fail-open campaign finding RV-8 is resolved for the
 three recorded runs. The evaluation report maps every property from the 93-
 property valid run, 94-property invalid-composition run, and two-property
 low-budget run, including the C-only scope and analogous Rust/PHP evidence.
-`campaign.py` now pins each reviewed property-ID/status inventory by digest,
-checks the expected CBMC summary and process exit, and rejects changed,
-missing, duplicate, or unreviewed properties. Seven regression tests pass,
-including a campaign-runner dispatch check. All three commands also passed
-through the actual `EnforcedRunner` with resource enforcement, producing the
-expected output hashes and exit codes. The follow-up evidence, runner and test
-hashes, and tool digest are recorded under `followup_cbmc_validation` in the
-evaluation lock. This resolves only the campaign-accounting defect; it does
-not extend the reduced C model's claims to PHP semantics.
+`campaign.py` now pins each reviewed property-ID/status inventory and complete
+normalized property-record digest, checks the pinned CBMC binary, C source
+files, and reference transcripts, then validates property IDs, statuses,
+descriptions, source locations, counterexample traces, summary, and process
+exit. It rejects changed, missing, duplicate, or unreviewed properties. Ten
+regression tests pass, including campaign dispatch and lock mutation checks.
+All three commands also passed through the actual
+`EnforcedRunner` with resource enforcement, producing the expected output
+hashes and exit codes. The follow-up evidence, runner and test hashes, and
+tool digest are recorded under `followup_cbmc_validation` in the evaluation
+lock. This resolves only the campaign-accounting defect; it does not extend
+the reduced C model's claims to PHP semantics.

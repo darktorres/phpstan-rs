@@ -541,22 +541,23 @@ tests, as called out in the table, but those tests neither instantiate nor
 prove the C properties. No CBMC property instantiates the PHP evaluator or
 validates its host transfers.
 
-`campaign.py` now treats the checked-in outputs as a reviewed property
-inventory pinned by a SHA-256 over each sorted property-ID/status map, and
-fails closed unless each rerun has the exact expected property IDs/statuses,
-summary, and process exit: all-success/exit-zero for the valid
-run; only `main.assertion.11` failing/exit-nonzero for the invalid run; and only
-`main.unwind.0` failing/exit-nonzero for the low-budget control. It also checks
-the reference transcript's expected summary, rejects duplicate IDs, and loads
-references before writing run outputs. Six Python regressions exercise the
-recorded cases and reject missing properties, changed outcomes, incorrect exit
-status, reference-inventory drift, and unreviewed run modes; a seventh test
-exercises the campaign runner's command dispatch and exit-code handling. All
-three runs were also invoked through the actual `EnforcedRunner`, including its
-systemd/cgroup resource proof, and were validated with the expected 93/94/2
-property counts and exit codes 0/10/10. Their output hashes, measured exits,
-resource-enforcement results, and updated source hashes are in the evaluation
-lock. The harness source and its `--unwind` settings remain C-model
+`campaign.py` first checks the locked CBMC executable, the `contracts.c` and
+`loop_contract.c` source digests, and the checked-in reference transcript
+digests. It pins each run's sorted property-ID/status map and a digest of the
+complete normalized property records, including descriptions, source
+locations, and counterexample traces, then fails closed
+unless the run has the exact expected records, summary, and process exit:
+all-success/exit-zero for the valid run; only `main.assertion.11` failing/exit
+10 for the invalid run; and only `main.unwind.0` failing/exit 10 for the
+low-budget control. It rejects duplicate IDs and loads references before
+writing run outputs. Ten Python regressions cover the recorded cases, missing
+properties, changed outcomes/descriptions/source locations/traces, incorrect exits,
+binary/source/reference digest drift, and unreviewed modes. All three runs
+were invoked through the actual `EnforcedRunner`, including its systemd/cgroup
+resource proof, and validated with the expected 93/94/2 property counts and
+exit codes 0/10/10. Their output hashes, measured exits,
+resource-enforcement results, and source hashes are in the evaluation lock.
+The harness source and its `--unwind` settings remain C-model
 evidence; this enforcement closes only the campaign's CBMC result-accounting
 gap.
 

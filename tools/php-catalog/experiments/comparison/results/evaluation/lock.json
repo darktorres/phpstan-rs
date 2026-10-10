@@ -97,8 +97,8 @@
     "date": "2026-10-10",
     "cbmc_version": "6.6.0",
     "cbmc_binary_sha256": "bf215bba2dbf514c69bb32f353a5f94aea150ab87735a9e1b4d5b3bcd745058a",
-    "campaign_py_sha256": "dd5d74618b235333582339a6e3a5d3f31e8bb51e0de65ebb96ecaa1890626aed",
-    "test_py_sha256": "363e01b4b847e8eb213cb075a1d0a71c8dd35f740eaba28413edc941e4ccd74c",
+    "campaign_py_sha256": "265afc75e49b51583dd89463827345350a5151c674deea986ee15636594867e9",
+    "test_py_sha256": "49fb14b0a129d0aa8ea1e31b2880bac1dfe827750b02463870a7cb3a48904356",
     "runs": {
       "cbmc-contracts": {
         "command": [
@@ -115,7 +115,8 @@
         "reviewed_reference_sha256": "c201f70eb6499d955c244335ea72915fb4ce44c650f5aa06144e9c12e65eb3ed",
         "property_inventory_sha256": "6bd71b545e0bc3afbb0656a3d71a5e3b26283140667c9c1ed2ac467788becdaa",
         "source": "contracts.c",
-        "source_sha256": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8"
+        "source_sha256": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8",
+        "property_records_sha256": "f23be01e9010e452819fce1e8f424b00a8f27c3e39fdc33303895be5a6ade5b8"
       },
       "cbmc-invalid-composition": {
         "command": [
@@ -133,7 +134,8 @@
         "reviewed_reference_sha256": "2c8ef8d2e1f917e498965c13fcccbb81d6abc244baedff34278ef5c947f7e722",
         "property_inventory_sha256": "9e21a1001834e1caf17db0c6451c1b44e09096fe017586f3d4f10119df713b4b",
         "source": "contracts.c",
-        "source_sha256": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8"
+        "source_sha256": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8",
+        "property_records_sha256": "efaccde9e2b4d4187b8e4e7ce1014031240840d25d350f8387dc57c6beab143a"
       },
       "cbmc-low-budget": {
         "command": [
@@ -150,37 +152,38 @@
         "reviewed_reference_sha256": "ba01c9ced4f644958dcc72bf22498ca3640c3c19e62c4dea75982a80ba9c7efd",
         "property_inventory_sha256": "b678de42e03800fdc16c45f27a57319266d309212da908464344a0e1dc7efa74",
         "source": "loop_contract.c",
-        "source_sha256": "9cb4ea22d4940e63a0e2042d9995d43fdb91808e24e87acb462a6cd28e90c5c0"
+        "source_sha256": "9cb4ea22d4940e63a0e2042d9995d43fdb91808e24e87acb462a6cd28e90c5c0",
+        "property_records_sha256": "0f98872fb894bbefb8a6ed24bd3631534d3e3807fcd0e47bbc13eeb266ee13f4"
       }
     },
     "cbmc_binary_path": "/home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc",
     "python_validation": {
       "command": "python3 -m unittest tools/php-catalog/experiments/comparison/test_campaign_cbmc_validation.py",
-      "tests": 7,
+      "tests": 10,
       "result": "passed"
     },
     "enforced_runner_replay": {
-      "output_directory": "/tmp/php-catalog-r004-enforced-run",
+      "output_directory": "/tmp/php-catalog-r004-enforced-final4",
       "resource_enforcement": "aggregate_hard_limit_enforced for all three runs",
       "runs": {
         "cbmc-contracts": {
           "exit_code": 0,
           "aggregate_hard_limit_enforced": true,
-          "elapsed_seconds": 0.3364,
+          "elapsed_seconds": 0.3229,
           "stdout_sha256": "c201f70eb6499d955c244335ea72915fb4ce44c650f5aa06144e9c12e65eb3ed",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
         "cbmc-invalid-composition": {
           "exit_code": 10,
           "aggregate_hard_limit_enforced": true,
-          "elapsed_seconds": 0.3364,
+          "elapsed_seconds": 0.3553,
           "stdout_sha256": "2c8ef8d2e1f917e498965c13fcccbb81d6abc244baedff34278ef5c947f7e722",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         },
         "cbmc-low-budget": {
           "exit_code": 10,
           "aggregate_hard_limit_enforced": true,
-          "elapsed_seconds": 0.164,
+          "elapsed_seconds": 0.1902,
           "stdout_sha256": "ba01c9ced4f644958dcc72bf22498ca3640c3c19e62c4dea75982a80ba9c7efd",
           "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }

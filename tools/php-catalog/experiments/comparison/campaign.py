@@ -21,6 +21,7 @@ CBMC_EXPECTATIONS = {
         'verification_message': 'VERIFICATION SUCCESSFUL',
         'property_count': 93,
         'inventory_sha256': '6bd71b545e0bc3afbb0656a3d71a5e3b26283140667c9c1ed2ac467788becdaa',
+        'property_records_sha256': 'f23be01e9010e452819fce1e8f424b00a8f27c3e39fdc33303895be5a6ade5b8',
         'failures': set(),
     },
     'cbmc-invalid-composition': {
@@ -29,6 +30,7 @@ CBMC_EXPECTATIONS = {
         'verification_message': 'VERIFICATION FAILED',
         'property_count': 94,
         'inventory_sha256': '9e21a1001834e1caf17db0c6451c1b44e09096fe017586f3d4f10119df713b4b',
+        'property_records_sha256': 'efaccde9e2b4d4187b8e4e7ce1014031240840d25d350f8387dc57c6beab143a',
         'failures': {'main.assertion.11'},
     },
     'cbmc-low-budget': {
@@ -37,6 +39,7 @@ CBMC_EXPECTATIONS = {
         'verification_message': 'VERIFICATION FAILED',
         'property_count': 2,
         'inventory_sha256': 'b678de42e03800fdc16c45f27a57319266d309212da908464344a0e1dc7efa74',
+        'property_records_sha256': '0f98872fb894bbefb8a6ed24bd3631534d3e3807fcd0e47bbc13eeb266ee13f4',
         'failures': {'main.unwind.0'},
     },
 }
@@ -75,6 +78,56 @@ def _cbmc_summary(document):
     return properties, prover_statuses[0], verification_messages[0]
 
 
+def _property_records_digest(document):
+    repository = HERE.parents[3]
+    def normalize(value, key=None):
+        if isinstance(value, dict):
+            return {child_key: normalize(child, child_key) for child_key, child in value.items()}
+        if isinstance(value, list):
+            return [normalize(child) for child in value]
+        if key in ('file', 'workingDirectory') and isinstance(value, str):
+            path = Path(value)
+            if path.is_absolute():
+                try:
+                    relative = path.relative_to(repository)
+                    return '.' if key == 'workingDirectory' and not relative.parts else str(relative)
+                except ValueError:
+                    pass
+        return value
+
+    records = [
+        normalize(prop)
+        for item in document
+        for prop in item.get('result', [])
+    ]
+    canonical = json.dumps(
+        sorted(records, key=lambda item: item['property']),
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def validate_cbmc_inputs(cache, runs, lock_path=None):
+    """Check that CBMC and every source file match the follow-up lock record."""
+    lock_path = lock_path or HERE / 'results/evaluation/lock.json'
+    lock = json.loads(Path(lock_path).read_text())
+    followup = lock['followup_cbmc_validation']
+    cbmc = Path(cache) / 'deps/usr/bin/cbmc'
+    if hashlib.sha256(cbmc.read_bytes()).hexdigest() != followup['cbmc_binary_sha256']:
+        raise ValueError('CBMC binary digest differs from the reviewed follow-up lock')
+    for name, source, _ in runs:
+        locked_source = followup['runs'][name]
+        if locked_source['source'] != source:
+            raise ValueError(f'{name}: locked source name differs from campaign configuration')
+        source_path = HERE / source
+        if hashlib.sha256(source_path.read_bytes()).hexdigest() != locked_source['source_sha256']:
+            raise ValueError(f'{name}: source digest differs from the reviewed follow-up lock')
+        reference = HERE / 'results/evaluation' / (name + '.out')
+        if hashlib.sha256(reference.read_bytes()).hexdigest() != locked_source['reviewed_reference_sha256']:
+            raise ValueError(f'{name}: checked-in result transcript differs from the reviewed follow-up lock')
+
+
 def validate_cbmc_run(name, actual_document, reference_document, command_exit_code):
     """Fail closed unless a bounded CBMC run matches its reviewed result shape."""
     if name not in CBMC_EXPECTATIONS:
@@ -97,6 +150,10 @@ def validate_cbmc_run(name, actual_document, reference_document, command_exit_co
     ).hexdigest()
     if actual_inventory != expected['inventory_sha256'] or reference_inventory != expected['inventory_sha256']:
         raise ValueError(f'{name}: property inventory digest differs from the reviewed baseline')
+    if _property_records_digest(actual_document) != expected['property_records_sha256']:
+        raise ValueError(f'{name}: property records differ from the reviewed baseline')
+    if _property_records_digest(reference_document) != expected['property_records_sha256']:
+        raise ValueError(f'{name}: checked-in property records differ from the reviewed baseline')
     if actual != reference:
         missing = sorted(reference.keys() - actual.keys())
         added = sorted(actual.keys() - reference.keys())
@@ -149,6 +206,7 @@ def run_cbmc_campaign(cache, runner):
         ('cbmc-invalid-composition', 'contracts.c', ['--unwind', '4', '-DINVALID_COMPOSITION']),
         ('cbmc-low-budget', 'loop_contract.c', ['--unwind', '2']),
     ]
+    validate_cbmc_inputs(cache, cbmc_runs)
     # Read the committed property inventory before running: the output directory
     # may be reused, and must never become its own oracle.
     references = {

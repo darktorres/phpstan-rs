@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name('campaign.py')
@@ -75,6 +76,86 @@ class CbmcValidationTests(unittest.TestCase):
                 'cbmc-contracts', self.references['cbmc-contracts'], reference, 0
             )
 
+    def test_property_description_and_source_change_are_rejected(self):
+        for field, value in [('description', 'different assertion with the same ID'),
+                             ('line', '999')]:
+            document = copy.deepcopy(self.references['cbmc-contracts'])
+            for block in document:
+                for prop in block.get('result', []):
+                    if prop['property'] == 'main.assertion.1':
+                        if field == 'line':
+                            prop['sourceLocation'][field] = value
+                        else:
+                            prop[field] = value
+                        break
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, 'property records'):
+                    CAMPAIGN.validate_cbmc_run(
+                        'cbmc-contracts', document, self.references['cbmc-contracts'], 0
+                    )
+
+    def test_counterexample_trace_change_is_rejected(self):
+        document = copy.deepcopy(self.references['cbmc-invalid-composition'])
+        for block in document:
+            for prop in block.get('result', []):
+                if prop['property'] == 'main.assertion.11':
+                    prop['trace'][0]['stepType'] = 'changed-step'
+        with self.assertRaisesRegex(ValueError, 'property records'):
+            CAMPAIGN.validate_cbmc_run(
+                'cbmc-invalid-composition',
+                document,
+                self.references['cbmc-invalid-composition'],
+                10,
+            )
+
+    def test_campaign_runner_rejects_unlocked_cbmc_inputs(self):
+        source = SCRIPT.parent / 'contracts.c'
+        source_digest = CAMPAIGN.digest(source)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / 'cache'
+            cbmc = cache / 'deps/usr/bin/cbmc'
+            cbmc.parent.mkdir(parents=True)
+            cbmc.write_bytes(b'pinned-test-cbmc')
+            lock = root / 'lock.json'
+            lock.write_text(json.dumps({
+                'followup_cbmc_validation': {
+                    'cbmc_binary_sha256': CAMPAIGN.digest(cbmc),
+                    'runs': {
+                        'cbmc-contracts': {
+                            'source': 'contracts.c',
+                            'source_sha256': source_digest,
+                            'reviewed_reference_sha256': CAMPAIGN.digest(
+                                SCRIPT.parent / 'results/evaluation/cbmc-contracts.out'
+                            ),
+                        }
+                    },
+                }
+            }))
+            runs = [('cbmc-contracts', 'contracts.c', ['--unwind', '4'])]
+            CAMPAIGN.validate_cbmc_inputs(cache, runs, lock)
+
+            record = json.loads(lock.read_text())
+            record['followup_cbmc_validation']['runs']['cbmc-contracts']['source_sha256'] = '0' * 64
+            lock.write_text(json.dumps(record))
+            with self.assertRaisesRegex(ValueError, 'source digest'):
+                CAMPAIGN.validate_cbmc_inputs(cache, runs, lock)
+
+            record['followup_cbmc_validation']['runs']['cbmc-contracts']['source_sha256'] = source_digest
+            record['followup_cbmc_validation']['runs']['cbmc-contracts']['reviewed_reference_sha256'] = '0' * 64
+            lock.write_text(json.dumps(record))
+            with self.assertRaisesRegex(ValueError, 'result transcript'):
+                CAMPAIGN.validate_cbmc_inputs(cache, runs, lock)
+
+            record['followup_cbmc_validation']['runs']['cbmc-contracts']['reviewed_reference_sha256'] = CAMPAIGN.digest(
+                SCRIPT.parent / 'results/evaluation/cbmc-contracts.out'
+            )
+            lock.write_text(json.dumps(record))
+
+            cbmc.write_bytes(b'changed-cbmc')
+            with self.assertRaisesRegex(ValueError, 'CBMC binary digest'):
+                CAMPAIGN.validate_cbmc_inputs(cache, runs, lock)
+
     def test_unknown_run_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'No reviewed CBMC expectation'):
             CAMPAIGN.validate_cbmc_run('cbmc-new-mode', [], [], True)
@@ -100,7 +181,9 @@ class CbmcValidationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             runner = TranscriptRunner(Path(temporary))
-            CAMPAIGN.run_cbmc_campaign(Path('/locked/cache'), runner)
+            with patch.object(CAMPAIGN, 'validate_cbmc_inputs') as validate_inputs:
+                CAMPAIGN.run_cbmc_campaign(Path('/locked/cache'), runner)
+            validate_inputs.assert_called_once()
             self.assertEqual(
                 [name for name, _, _ in runner.calls],
                 list(CAMPAIGN.CBMC_EXPECTATIONS),
@@ -117,8 +200,9 @@ class CbmcValidationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             runner = TranscriptRunner(Path(temporary), {'cbmc-invalid-composition': 1})
-            with self.assertRaisesRegex(ValueError, 'command exit'):
-                CAMPAIGN.run_cbmc_campaign(Path('/locked/cache'), runner)
+            with patch.object(CAMPAIGN, 'validate_cbmc_inputs'):
+                with self.assertRaisesRegex(ValueError, 'command exit'):
+                    CAMPAIGN.run_cbmc_campaign(Path('/locked/cache'), runner)
 
 
 if __name__ == '__main__':
