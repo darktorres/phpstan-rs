@@ -489,7 +489,8 @@ impl Registry {
             .collect();
         for (class_id, methods) in resolved {
             for (method, entry, signature) in methods {
-                debug_assert_eq!(self.add_member_entry(class_id, entry), Some(method));
+                let added = self.add_member_entry(class_id, entry);
+                debug_assert_eq!(added, Some(method));
                 self.set_method_result(method, signature);
             }
         }
@@ -1625,7 +1626,8 @@ impl Registry {
             let inserted = self.add_member_entry(class_id, entry);
             debug_assert_eq!(inserted, Some(method_ref));
             if inserted.is_some() {
-                debug_assert!(self.set_shared_method_result(method_ref, sig));
+                let set = self.set_shared_method_result(method_ref, sig);
+                debug_assert!(set);
             }
         }
         for (class_id, name, sig) in property_additions {
