@@ -480,6 +480,60 @@ it is neither a demand summary nor a closure certificate.
   composition is rejected. A loop whose possible bound exceeds its configured
   unwinding is rejected through the unwinding assertion. These are independent
   reference contracts, not full php-src verification or unbounded summaries.
+
+#### R00.4 CBMC property accounting and enforcement
+
+The three checked-in JSON UI transcripts were parsed property by property.
+The 93 properties in `cbmc-contracts.out` all report `SUCCESS`, with
+`cProverStatus=success` and `VERIFICATION SUCCESSFUL`. The invalid-composition
+run retains those same 93 successful property IDs and adds only
+`main.assertion.11` as `FAILURE`; its command exits 10, with
+`cProverStatus=failure`. The `cbmc-low-budget` run has
+`main.assertion.1=SUCCESS` and `main.unwind.0=FAILURE`; the latter is the
+expected unwinding assertion from `loop_contract.c` at `--unwind 2`, and that
+command also exits 10. This is a boundedness negative control, not a failed
+semantic invariant.
+
+| Recorded properties | Count and outcome | Contract mapping and evidence limit |
+| --- | --- | --- |
+| `main.assertion.1`–`.3` | 3, all successful | The loop computes `value`, callback count, and each result for a nondeterministic length constrained to at most 3 (`contracts.c:34–39`). These are C-only harness invariants; no distinct contract clause or PHP/Rust test asserts this bounded loop relation. |
+| `main.assertion.4`–`.5` | 2, successful in the valid run | A throwing callback increments state, then the wrapper records release and does not append the later normal event (`contracts.c:41–42`). This illustrates the contract's callback-write-before-throw and no-normal-continuation counterexample row. The CBMC property is C-only; Rust has the analogous `callback_throw_preserves_prior_write_and_skips_later_events` regression, while PHP runtime coverage observes a narrower Stringable write/throw case. Neither derives this C assertion from PHP source. |
+| `main.assertion.6`–`.7` | 2, successful | A normal callback path records callback, release, and normal-continuation order (`contracts.c:43–45`). The CBMC property is C-only; corresponding event order is separately exercised by Rust semantic fixtures and PHP runtime callback-order sentinels, but those do not prove this C harness property. |
+| `main.assertion.8`–`.10` | 3, successful | Same-address alias writes (`:46`), a callback copied through an aggregate (`:47–48`), and a retained callback and pointer (`:49–50`). The contract has no corresponding aliasing, aggregate-copy, or retained-pointer clauses. These are C-only examples; the harness only reaches the two known callback functions, and the PHP/Rust evidence does not check these exact C properties. |
+| `main.array_bounds.*` | 10, all successful | Generated CBMC array-bound checks across `main`, `increment`, `throwing`, `release_value`, and `invoke`. They establish harness memory safety for this bounded C model, not catalog semantics. |
+| `*.overflow.*` | 7, all successful | Generated signed-overflow checks in those C functions. Harness-safety evidence only. |
+| `*.pointer_dereference.*` | 45, all successful | Generated dereference checks across `main`, callbacks, `invoke`, alias writes, and the copied callback. Harness-safety evidence only; they do not prove unknown PHP callback behavior. |
+| `memcpy.pointer*` | 16, all successful | Two generated `pointer` object-bound checks plus 14 pointer-arithmetic checks for the aggregate copy. Harness-safety evidence only. |
+| `through_copy.precondition_instance.*` | 3, all successful | CBMC's `memcpy` overlap/readable/writable precondition instances. Harness-safety evidence only. |
+| `main.unwind.0`–`.1` | 2, both successful at `--unwind 4` | Unwinding assertions for the bounded loop (`length <= 3`). These show that this run's chosen bound covers this loop; they are not unbounded proofs. |
+| Invalid-run `main.assertion.11` | 1 expected failure, at `contracts.c:55` | Deliberately asserts that callback mutation and pending-throw state were erased. The counterexample rejects that invalid composition in the reduced C model. The same contract clause has an analogous Rust regression; this CBMC counterexample itself remains C-only and is not a PHP semantic proof. |
+| Low-budget `main.unwind.0` | 1 expected failure, at `loop_contract.c:7` | With `length < 100` and `--unwind 2`, CBMC finds a possible path beyond the unwind bound. The failure correctly prevents treating the incomplete bounded run as proof. |
+
+All 93 valid-run properties are therefore accounted for: 10 explicit
+assertions, 81 generated bounds/overflow/pointer/precondition checks, and 2
+unwinding assertions. The invalid run has the same 93 plus the intentional
+counterexample, for 94 total. Only assertions 4–7 and 11 connect to rows in the
+PHP semantic contract, and only as reduced examples. All CBMC results are
+C-model-only; selected contract clauses have analogous independent Rust or PHP
+tests, as called out in the table, but those tests neither instantiate nor
+prove the C properties. No CBMC property instantiates the PHP evaluator or
+validates its host transfers.
+
+`campaign.py` now treats the checked-in outputs as a reviewed property
+inventory pinned by a SHA-256 over each sorted property-ID/status map, and
+fails closed unless each rerun has the exact expected property IDs/statuses,
+summary, and process exit: all-success/exit-zero for the valid
+run; only `main.assertion.11` failing/exit-nonzero for the invalid run; and only
+`main.unwind.0` failing/exit-nonzero for the low-budget control. It also checks
+the reference transcript's expected summary, rejects duplicate IDs, and loads
+references before writing run outputs. Six Python regressions exercise the
+recorded cases and reject missing properties, changed outcomes, incorrect exit
+status, reference-inventory drift, and unreviewed run modes. Replaying all three
+commands with locked CBMC 6.6.0 produced the expected 93/94/2 property counts and exit codes
+0/10/10. The harness source and its `--unwind` settings remain C-model
+evidence; this enforcement closes only the campaign's CBMC result-accounting
+gap.
+
 - **Z3 5.1.0:** SMT-LIB child-process probes check contradictory guards,
   width-specific overflow, signed/unsigned comparison, extension casts, pointer
   identity, resource exhaustion, unsupported logic, and malformed input. Only
@@ -579,7 +633,7 @@ the corresponding rows in the [authoritative ledger](PHP_SEMANTICS_CATALOG_LEDGE
 
 The earlier task-history list named only 28 milestone commits. A complete path-scoped history query finds 108 commits touching Phase F implementation, tests, evaluation records, or comparison evidence. I reviewed those changes by implementation/evidence area against the current code and tests; the list below records the full commit inventory. This was an author review; it does not satisfy F00.5's independent-review requirement. `git show --check` passed for the implementation and documentation changes. It reported trailing whitespace in captured raw compiler/SVF logs in `043f2c78`, `4e7d29a3`, and blank EOF lines in `fe1cab81`; these are retained tool outputs, not source-code defects.
 
-- **F00:** `599c2508` introduced the trace contract; `5df391b9` recorded the CBMC result; `e62c000e` revised the contract and added the self-review. The contract is still not independently accepted. The CBMC campaign's replay needs a fail-closed result checker and property-to-clause crosswalk (R00.1, R00.4).
+- **F00:** `599c2508` introduced the trace contract; `5df391b9` recorded the CBMC result; `e62c000e` revised the contract and added the self-review. The contract is still not independently accepted. At the time of the commit-by-commit review, the CBMC replay needed a fail-closed result checker and property-to-clause crosswalk; R00.4 has since completed that scoped accounting and enforcement work. The reduced C model remains separate from PHP semantic validation.
 - **F01:** `9df6d5d3`, `80795f6e`, `d5f7598f`, `7cb0c627`, `d3c3fa63`, `eee12e0f`, `a0b083a8`, and `dab7e44f` add the graph, worklist, catalog/evidence boundary, PHP flow host, certificate replay, and array/reference fixtures. The focused semantic tests pass 60/60. The implementation remains a trusted-host post-fixpoint checker, not a proof of PHP semantics. Review confirmed missing typed assumption validation, dependency-cycle checks, range validation, N/A dependency semantics, and canonical-order enforcement (R01.1–R01.8).
 - **F02:** `043f2c78`, `4e7d29a3`, `2b6afb95`, `47f5e62a`, `08499695`, `0a2f229e`, and `8217e557` add compiler/framework campaigns, CIR records, and the source-to-LLVM `strlen` witness. The witness is pinned to one linked module and demonstrates a narrow Return slice; it does not interpret general LLVM behavior or establish source/CFG semantic equivalence (R02.2–R02.3). The runtime callback fixture hash is recorded but not enforced during regeneration (R02.1).
 - **F03:** `74229f12`, `fe1cab81`, and `9b384e8c` document pointer-service limits and add the empty-target regression. The capsule omits construction/handler initialization, so its empty set is incomplete. The replay records the supplied bitcode hash but labels it with a fixed PHP source commit without checking the association; it also does not reject callback fixture hash drift (R03.1, R03.4).

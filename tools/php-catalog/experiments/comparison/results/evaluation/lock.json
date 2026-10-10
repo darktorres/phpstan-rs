@@ -92,5 +92,72 @@
     "smt_worker.py": "8f1de1eba876268f49b5de5a551cafad9481449751dcdad867a8488683cd8860",
     "auxiliary.py": "c1b44a46420da6d704a665f6d339311f23fe81892406128ebefb70fbef0609aa"
   },
-  "source_hash_note": "Source hashes describe files at pause; actual executed commands and successful companion/patch identities are retained separately."
+  "source_hash_note": "Source hashes describe files at pause; actual executed commands and successful companion/patch identities are retained separately.",
+  "followup_cbmc_validation": {
+    "date": "2026-10-10",
+    "cbmc_version": "6.6.0",
+    "cbmc_binary_sha256": "bf215bba2dbf514c69bb32f353a5f94aea150ab87735a9e1b4d5b3bcd745058a",
+    "campaign_py_sha256": "0802d6ab0ea8ed3126713c824521017e6dceb6ed96855d6e9af3136900338da4",
+    "test_py_sha256": "e3e5c1fd365c70d7c98d25096d19e6a1715380c4cf5dc31b6ad0ed23e5e448b6",
+    "runs": {
+      "cbmc-contracts": {
+        "command": [
+          "--unwinding-assertions",
+          "--bounds-check",
+          "--pointer-check",
+          "--json-ui",
+          "--unwind",
+          "4"
+        ],
+        "exit_code": 0,
+        "property_count": 93,
+        "output_sha256": "c201f70eb6499d955c244335ea72915fb4ce44c650f5aa06144e9c12e65eb3ed",
+        "reviewed_reference_sha256": "c201f70eb6499d955c244335ea72915fb4ce44c650f5aa06144e9c12e65eb3ed",
+        "property_inventory_sha256": "6bd71b545e0bc3afbb0656a3d71a5e3b26283140667c9c1ed2ac467788becdaa",
+        "source": "contracts.c",
+        "source_sha256": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8"
+      },
+      "cbmc-invalid-composition": {
+        "command": [
+          "--unwinding-assertions",
+          "--bounds-check",
+          "--pointer-check",
+          "--json-ui",
+          "--unwind",
+          "4",
+          "-DINVALID_COMPOSITION"
+        ],
+        "exit_code": 10,
+        "property_count": 94,
+        "output_sha256": "2c8ef8d2e1f917e498965c13fcccbb81d6abc244baedff34278ef5c947f7e722",
+        "reviewed_reference_sha256": "2c8ef8d2e1f917e498965c13fcccbb81d6abc244baedff34278ef5c947f7e722",
+        "property_inventory_sha256": "9e21a1001834e1caf17db0c6451c1b44e09096fe017586f3d4f10119df713b4b",
+        "source": "contracts.c",
+        "source_sha256": "c0b1fa46959c7d8a34678209159c7a11dec11895f78ce512eeb56412ca4f3cd8"
+      },
+      "cbmc-low-budget": {
+        "command": [
+          "--unwinding-assertions",
+          "--bounds-check",
+          "--pointer-check",
+          "--json-ui",
+          "--unwind",
+          "2"
+        ],
+        "exit_code": 10,
+        "property_count": 2,
+        "output_sha256": "ba01c9ced4f644958dcc72bf22498ca3640c3c19e62c4dea75982a80ba9c7efd",
+        "reviewed_reference_sha256": "ba01c9ced4f644958dcc72bf22498ca3640c3c19e62c4dea75982a80ba9c7efd",
+        "property_inventory_sha256": "b678de42e03800fdc16c45f27a57319266d309212da908464344a0e1dc7efa74",
+        "source": "loop_contract.c",
+        "source_sha256": "9cb4ea22d4940e63a0e2042d9995d43fdb91808e24e87acb462a6cd28e90c5c0"
+      }
+    },
+    "cbmc_binary_path": "/home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc",
+    "python_validation": {
+      "command": "python3 -m unittest tools/php-catalog/experiments/comparison/test_campaign_cbmc_validation.py",
+      "tests": 6,
+      "result": "passed"
+    }
+  }
 }

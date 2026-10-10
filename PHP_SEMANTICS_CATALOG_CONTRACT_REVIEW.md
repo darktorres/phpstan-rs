@@ -702,3 +702,18 @@ definition only; conformance remains under RV-1/R01.5. The reviewer stated
 that these two corrections allow R00.2 to close as a definition, with R01.5
 carrying cleanup conformance. This is the review disposition; it does not
 claim that cleanup behavior is fixed.
+
+## Author follow-up for R00.4 (2026-10-10)
+
+The CBMC accounting and fail-open campaign finding RV-8 is resolved for the
+three recorded runs. The evaluation report maps every property from the 93-
+property valid run, 94-property invalid-composition run, and two-property
+low-budget run, including the C-only scope and analogous Rust/PHP evidence.
+`campaign.py` now pins each reviewed property-ID/status inventory by digest,
+checks the expected CBMC summary and process exit, and rejects changed,
+missing, duplicate, or unreviewed properties. Six regression tests pass. A
+replay with CBMC 6.6.0 produced the same output bytes as the three reviewed
+transcripts, with exit codes 0, 10, and 10. The follow-up evidence, runner and
+test hashes, and tool digest are recorded under `followup_cbmc_validation` in
+the evaluation lock. This resolves only the campaign-accounting defect; it
+does not extend the reduced C model's claims to PHP semantics.

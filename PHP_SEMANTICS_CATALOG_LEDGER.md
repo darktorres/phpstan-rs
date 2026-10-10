@@ -22,9 +22,8 @@ means the required evidence has not been produced or independently reviewed;
 
 **Reviewed evidence and current disposition:** Locked CBMC replay passes 93 valid-contract properties; invalid composition yields the expected `main.assertion.11` counterexample among 94. Review: The locked CBMC replay records 93 valid-contract properties and the expected invalid-composition counterexample among 94. This checks the listed algebraic counterexamples; it does not prove arbitrary host transfers or every concrete PHP trace. Keep counterexamples synchronized with any contract changes.
 
-- **R00.4 — Open** (depends on: None)
-  Map each recorded CBMC property to a contract clause and classify it as reduced C-model-only or cross-checked by Rust/PHP. Account for all 93 valid and 94 invalid-run properties, expected main.assertion.11, --unwind 4 and loop bound; keep claims scoped to the C model. Make the campaign fail closed on unexpected CBMC exit/property results instead of only recording command output. `complementary()` in `campaign.py` does not assert the CBMC steps, and `run()` reports success only for exit 0, so expected CBMC failures are recorded and ignored. The `cbmc-low-budget` run (`loop_contract.c`, `--unwind 2`; one unwinding-assertion failure, `main.unwind.0`) is not classified anywhere in the ledger or evaluation (RV-8).
-  Not yet evidenced as complete; see parent F task for the audited implementation state.
+- **R00.4 — Complete (reduced C-model accounting and fail-closed CBMC runs)**
+  The [evaluation report's R00.4 accounting](PHP_SEMANTICS_CATALOG_EVALUATION.md#r004-cbmc-property-accounting-and-enforcement) maps all 93 valid-run properties, all 94 invalid-run properties, and both low-budget properties by category and contract relation; it marks every result C-model-only and classifies `main.assertion.11` and `main.unwind.0` as expected negative controls. `campaign.py` now validates exact property IDs/statuses, CBMC summary, and command exit against the reviewed outputs, with Python regressions. All three locked CBMC 6.6.0 commands were rerun and yielded the expected 93/94/2 properties and exit codes 0/10/10. This closes only the accounting/enforcement task; it does not prove PHP or Rust evaluator semantics.
 
 ### F00.3 — Partial: Validate host transfer functions against PHP source behavior
 
