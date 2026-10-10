@@ -2732,6 +2732,10 @@ fn run_passed<'g>(
     }
 }
 
+/// How many arrays deep the elements of a place are followed for the objects
+/// they hold.
+const ELEMENT_DEPTH: u32 = 8;
+
 /// The classes `ty` may be an object of: `Some` with each one named, `None`
 /// when it may be an object of a class not named (`object`, `mixed`).
 pub(crate) fn object_classes(ty: &Type) -> Option<NameList> {
@@ -2915,7 +2919,13 @@ pub(crate) fn holder_of(ty: &Type) -> Holder {
 
 /// The holder of a value of the type `ty` declared on a member of `owner`,
 /// reached through an object of `class`.
-fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &Name) -> Holder {
+fn declared_holder(
+    registry: &Registry,
+    ty: &Type,
+    class: &str,
+    owner: &Name,
+    of: fn(&Type) -> Holder,
+) -> Holder {
     let mut ty = ty.bind_static(class).bind_self(owner);
     if let Some(parent) = registry
         .class_references_by_name(owner)
@@ -2923,7 +2933,7 @@ fn declared_holder(registry: &Registry, ty: &Type, class: &str, owner: &Name) ->
     {
         ty = ty.bind_parent(parent);
     }
-    holder_of(&ty)
+    of(&ty)
 }
 
 /// The variable `place` is, with no step from it.
@@ -3825,7 +3835,7 @@ impl Reach<'_> {
                     .lookup_method_with_owner(candidate, &well_known().get_iterator)
                 {
                     Some((owner, sig)) => {
-                        declared_holder(registry, sig.return_type(), candidate, &owner)
+                        declared_holder(registry, sig.return_type(), candidate, &owner, holder_of)
                     }
                     None => Holder::Unknown,
                 };
@@ -4570,6 +4580,7 @@ impl<'r> Resolve<'r> {
 /// of the scope holds.
 fn reads_variables(origin: &Origin) -> bool {
     match origin {
+        Origin::Elements(inner) => reads_variables(inner),
         Origin::Place(place) => matches!(place.root, Root::Variable(Some(_))),
         Origin::Returned(Callee::Method { receiver, .. }) => {
             matches!(receiver, Receiver::Variable(_) | Receiver::Origins(_))
@@ -5319,6 +5330,7 @@ impl<'r> Level<'r> {
                 false,
             ),
             Origin::Returned(callee) => (self.returned_holder(callee), false),
+            Origin::Elements(inner) => (self.elements_holder(inner), false),
             Origin::New(Some(class)) => (
                 self.made_holder(
                     named_classes(registry, self.class_name(), class).unwrap_or_default(),
@@ -5361,6 +5373,52 @@ impl<'r> Level<'r> {
                 }
                 (Holder::listed(found), false)
             }
+        }
+    }
+
+    /// The objects held in the elements, at any depth, of an array from
+    /// `origin`: those a declared type names, and any object when none does.
+    fn elements_holder(&self, origin: &Origin) -> Holder {
+        match origin {
+            Origin::Place(place) => {
+                // An object is no array; what it holds is not followed.
+                match self.value_holder(&place.root, place.narrowing.as_ref(), &place.steps) {
+                    Holder::Classes(classes) | Holder::Made(Some(classes))
+                        if !classes.is_empty() =>
+                    {
+                        return Holder::none();
+                    }
+                    _ => {}
+                }
+                let mut steps = place.steps.to_vec();
+                let mut found = Holder::none();
+                for _ in 0..ELEMENT_DEPTH {
+                    steps.push(Step::Element);
+                    found = found.join(self.value_holder(
+                        &place.root,
+                        place.narrowing.as_ref(),
+                        &steps,
+                    ));
+                    if found == Holder::Unknown {
+                        break;
+                    }
+                }
+                found
+            }
+            Origin::Returned(callee) => self.returned_holder_of(callee, elements_holder_of),
+            Origin::Declared(ty) if self.known_type(ty) => elements_holder_of(ty),
+            Origin::Constant(name) => {
+                let (primary, fallback) = name.candidates();
+                self.registry
+                    .global_constants()
+                    .get(primary)
+                    .or_else(|| {
+                        fallback.and_then(|name| self.registry.global_constants().get(name))
+                    })
+                    .map_or(Holder::Unknown, elements_holder_of)
+            }
+            Origin::Elements(inner) => self.elements_holder(inner),
+            _ => Holder::Unknown,
         }
     }
 
@@ -5438,10 +5496,16 @@ impl<'r> Level<'r> {
     }
 
     fn compute_returned_holder(&self, callee: &Callee) -> Holder {
+        self.returned_holder_of(callee, holder_of)
+    }
+
+    /// The holder `of` gives the type a call of `callee` returns, joined over
+    /// its targets.
+    fn returned_holder_of(&self, callee: &Callee, of: fn(&Type) -> Holder) -> Holder {
         let registry = self.registry;
         match callee {
             Callee::Function(name) => match registry.resolve_function(name) {
-                Some((_, sig)) => holder_of(sig.return_type()),
+                Some((_, sig)) => of(sig.return_type()),
                 // A call to no function throws.
                 None => Holder::none(),
             },
@@ -5458,7 +5522,7 @@ impl<'r> Level<'r> {
                 for class in classes.iter() {
                     let found = match registry.lookup_method_with_owner(class, method) {
                         Some((owner, sig)) if !sig.is_magic => {
-                            declared_holder(registry, sig.return_type(), class, &owner)
+                            declared_holder(registry, sig.return_type(), class, &owner, of)
                         }
                         // `__call`, or a method of a class below.
                         _ => {
@@ -5474,6 +5538,7 @@ impl<'r> Level<'r> {
                                     sig.return_type(),
                                     &owner,
                                     &owner,
+                                    of,
                                 ));
                             }
                             found
@@ -5499,6 +5564,7 @@ impl<'r> Level<'r> {
                                 sig.return_type(),
                                 target,
                                 &owner,
+                                of,
                             ));
                         }
                         _ => {
@@ -5511,6 +5577,7 @@ impl<'r> Level<'r> {
                                         sig.return_type(),
                                         target,
                                         &owner,
+                                        of,
                                     ));
                                 }
                             }
@@ -5534,7 +5601,7 @@ impl<'r> Level<'r> {
                 };
                 match registry.lookup_property_with_owner(parent, property) {
                     Some((owner, declared)) => {
-                        declared_holder(registry, declared.ty(), parent, &owner)
+                        declared_holder(registry, declared.ty(), parent, &owner, of)
                     }
                     None => Holder::Unknown,
                 }

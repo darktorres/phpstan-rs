@@ -746,23 +746,7 @@ impl<'a> Checker<'a> {
                 }
                 // The result of an expression statement is destroyed where
                 // it was made.
-                if matches!(
-                    e.kind,
-                    ExprKind::New(..)
-                        | ExprKind::Clone(..)
-                        | ExprKind::Call(..)
-                        | ExprKind::MethodCall(..)
-                        | ExprKind::DynamicMethodCall(..)
-                        | ExprKind::StaticCall(..)
-                        | ExprKind::DynamicStaticCall(..)
-                ) {
-                    self.forget_what_an_operation_may_change(
-                        &ty,
-                        false,
-                        crate::registry::summaries::Operation::Destroy,
-                        locals,
-                    );
-                }
+                self.forget_what_a_temporary_destroys(e, &ty, locals);
                 self.check_no_discard_statement(e, locals);
                 self.check_new_exception_discarded(e, locals);
                 // NoopRule's own supported slice - see `checker::noop`'s

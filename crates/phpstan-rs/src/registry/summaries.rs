@@ -330,6 +330,9 @@ pub(crate) enum Origin {
     ClassConstant(QualifiedName, Name),
     /// A value of this type, as an inline `@var` says.
     Declared(Type),
+    /// The objects held in the elements, at any depth, of an array from the
+    /// origin.
+    Elements(Box<Origin>),
 }
 
 impl PartialEq for Narrowing {
@@ -372,6 +375,7 @@ impl PartialEq for Origin {
             (Origin::Constant(a), Origin::Constant(b)) => a == b,
             (Origin::ClassConstant(a, x), Origin::ClassConstant(b, y)) => a == b && x == y,
             (Origin::Declared(a), Origin::Declared(b)) => a.canonical_text() == b.canonical_text(),
+            (Origin::Elements(a), Origin::Elements(b)) => a == b,
             _ => false,
         }
     }
@@ -395,6 +399,7 @@ impl Hash for Origin {
                 constant.hash(state);
             }
             Origin::Declared(ty) => ty.canonical_text().hash(state),
+            Origin::Elements(inner) => inner.hash(state),
         }
     }
 }
@@ -409,7 +414,26 @@ impl Origin {
     /// Whether it is the same from any scope: no variable of the scope it is
     /// written in decides it.
     fn context_free(&self) -> bool {
-        !matches!(self, Origin::Place(_) | Origin::Returned(_))
+        match self {
+            Origin::Place(_) | Origin::Returned(_) => false,
+            Origin::Elements(inner) => inner.context_free(),
+            _ => true,
+        }
+    }
+
+    /// Where the objects held in the elements of an array from here come
+    /// from; `None` when it holds none a destructor is run for: no array, or
+    /// an object whose properties are not followed.
+    fn elements(self) -> Option<Origin> {
+        match self {
+            Origin::NoObject
+            | Origin::Arithmetic
+            | Origin::Closure
+            | Origin::New(_)
+            | Origin::Anonymous(_)
+            | Origin::Caught(_) => None,
+            origin => Some(Origin::Elements(Box::new(origin))),
+        }
     }
 
     /// Whether a value from here is no object PHP runs code of for an
@@ -606,6 +630,25 @@ fn is_temporary(arenas: &NodeArenas, id: ExprId) -> bool {
         Some(
             ExprKind::New(..)
                 | ExprKind::Clone(..)
+                | ExprKind::Call(..)
+                | ExprKind::MethodCall(..)
+                | ExprKind::DynamicMethodCall(..)
+                | ExprKind::StaticCall(..)
+                | ExprKind::DynamicStaticCall(..)
+        )
+    )
+}
+
+/// Whether the expression `id` is an array made where it is written: an array
+/// literal, or what a call gives.
+fn holds_elements_made_here(arenas: &NodeArenas, id: ExprId) -> bool {
+    matches!(
+        arenas
+            .peeled(id)
+            .and_then(|id| arenas.expr(id))
+            .map(|e| &e.kind),
+        Some(
+            ExprKind::ArrayLiteral(..)
                 | ExprKind::Call(..)
                 | ExprKind::MethodCall(..)
                 | ExprKind::DynamicMethodCall(..)
@@ -1173,6 +1216,9 @@ fn record_property_assigned(
     }
 }
 
+/// Origins, not known when `None`.
+type MaybeOrigins = Option<Vec<Origin>>;
+
 /// What one scope writes, as the walk finds it: the body's own, or a
 /// closure's.
 #[derive(Default)]
@@ -1186,6 +1232,9 @@ struct Scope {
     // Where what each variable written holds comes from, or `None` once it
     // is written a value not known.
     origins: FxHashMap<Name, Option<Vec<Origin>>>,
+    // Where the objects held in the arrays each variable written holds come
+    // from, or `None` once they are not known.
+    contents: FxHashMap<Name, Option<Vec<Origin>>>,
     computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
@@ -1472,6 +1521,9 @@ impl Summarizer<'_> {
     /// `None`: in the scope the walk is in, and in those sharing it by
     /// reference.
     fn note_variable(&mut self, name: Name, made: Option<Made>, origins: Option<Vec<Origin>>) {
+        let contents = origins
+            .as_deref()
+            .and_then(|origins| self.contents_from_origins(origins));
         for (depth, scope) in self.scopes_sharing(&name).into_iter().enumerate() {
             let held = scope
                 .made
@@ -1496,6 +1548,122 @@ impl Summarizer<'_> {
                 _ => *known = None,
             }
         }
+        self.note_contents(&name, contents);
+    }
+
+    /// That the variable `name` holds, in the arrays it holds, objects from
+    /// `contents`, not known when `None`: in the scope the walk is in, and
+    /// in those sharing it by reference.
+    fn note_contents(&mut self, name: &Name, contents: Option<Vec<Origin>>) {
+        for (depth, scope) in self.scopes_sharing(name).into_iter().enumerate() {
+            let contents = contents
+                .as_ref()
+                .filter(|contents| depth == 0 || contents.iter().all(Origin::context_free));
+            let known = scope
+                .contents
+                .entry(name.clone())
+                .or_insert_with(|| Some(Vec::new()));
+            match (known.as_mut(), contents) {
+                (Some(known), Some(contents)) => {
+                    for origin in contents {
+                        if !known.contains(origin) {
+                            known.push(origin.clone());
+                        }
+                    }
+                }
+                _ => *known = None,
+            }
+        }
+    }
+
+    /// Where the objects held in the elements, at any depth, of an array
+    /// from `origins` come from; `None` when that is not known.
+    fn contents_from_origins(&self, origins: &[Origin]) -> Option<Vec<Origin>> {
+        let mut out = Vec::new();
+        for origin in origins {
+            match origin {
+                Origin::Place(place) => match (&place.root, &*place.steps) {
+                    (Root::Variable(Some(name)), []) if self.scope.contents.contains_key(name) => {
+                        out.extend(self.scope.contents[name].as_ref()?.iter().cloned());
+                    }
+                    _ => out.push(Origin::Elements(Box::new(origin.clone()))),
+                },
+                other => out.extend(other.clone().elements()),
+            }
+        }
+        Some(out)
+    }
+
+    /// Where the objects held in the elements, at any depth, of the array
+    /// the value `id` is come from, and those it holds directly when it is
+    /// an array literal; `None` when that is not known.
+    fn contents_of(&self, arenas: &NodeArenas, id: ExprId) -> Option<Vec<Origin>> {
+        let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+        syntax::stack::guard(|| match &e.kind {
+            ExprKind::ArrayLiteral(items) => {
+                let mut out = Vec::new();
+                for item in arenas.array_items(items.clone()) {
+                    if item.spread {
+                        out.extend(self.contents_from_origins(&self.origins(arenas, item.value)?)?);
+                    } else {
+                        out.extend(self.origins(arenas, item.value)?);
+                        out.extend(self.contents_of(arenas, item.value)?);
+                    }
+                }
+                Some(out)
+            }
+            ExprKind::Ternary(cond, then, otherwise) => {
+                let mut out = self.contents_of(arenas, (*then).unwrap_or(*cond))?;
+                out.extend(self.contents_of(arenas, *otherwise)?);
+                Some(out)
+            }
+            ExprKind::Binary(BinOp::Coalesce, l, r) => {
+                let mut out = self.contents_of(arenas, *l)?;
+                out.extend(self.contents_of(arenas, *r)?);
+                Some(out)
+            }
+            ExprKind::Match { arms, .. } => {
+                let mut out = Vec::new();
+                for arm in arenas.match_arms(arms.clone()) {
+                    out.extend(self.contents_of(arenas, arm.body)?);
+                }
+                Some(out)
+            }
+            ExprKind::Assign(_, rhs) => self.contents_of(arenas, *rhs),
+            _ => self.contents_from_origins(&self.origins(arenas, id)?),
+        })
+    }
+
+    /// That the value `rhs`, from `origins`, was written to the variable
+    /// `lhs`, or to an element or a property of it: the variable holds the
+    /// objects it holds.
+    fn note_stored(
+        &mut self,
+        arenas: &NodeArenas,
+        lhs: ExprId,
+        rhs: ExprId,
+        origins: Option<&[Origin]>,
+    ) {
+        let Some(Place {
+            root: Root::Variable(Some(name)),
+            steps,
+            ..
+        }) = Place::of(arenas, lhs)
+        else {
+            return;
+        };
+        if *name == *"this" {
+            return;
+        }
+        let stored = if steps.is_empty() {
+            self.contents_of(arenas, rhs)
+        } else {
+            origins.map(<[Origin]>::to_vec).and_then(|mut stored| {
+                stored.extend(self.contents_of(arenas, rhs)?);
+                Some(stored)
+            })
+        };
+        self.note_contents(&name, stored);
     }
 
     /// A write to a variable whose name is computed: any variable of the
@@ -1788,6 +1956,10 @@ impl Summarizer<'_> {
         if is_temporary(arenas, id) {
             self.implicit(arenas, id, Operation::Destroy);
         }
+        if holds_elements_made_here(arenas, id) {
+            let contents = self.contents_of(arenas, id);
+            self.implicit_on(contents, Operation::Destroy);
+        }
     }
 
     /// The variables the scope wrote die when it ends, but for the
@@ -1800,7 +1972,7 @@ impl Summarizer<'_> {
             .iter()
             .filter_map(|(name, _)| name.clone())
             .collect();
-        let mut locals: Vec<(Name, Option<Vec<Origin>>)> = self
+        let mut locals: Vec<(Name, MaybeOrigins, MaybeOrigins)> = self
             .scope
             .origins
             .iter()
@@ -1810,11 +1982,20 @@ impl Summarizer<'_> {
                     && !shared.contains(*name)
                     && !bound.contains(*name)
             })
-            .map(|(name, origins)| (name.clone(), origins.clone()))
+            .map(|(name, origins)| {
+                let contents = self
+                    .scope
+                    .contents
+                    .get(name)
+                    .cloned()
+                    .unwrap_or(Some(Vec::new()));
+                (name.clone(), origins.clone(), contents)
+            })
             .collect();
         locals.sort_by(|a, b| a.0.cmp(&b.0));
-        for (_, origins) in locals {
+        for (_, origins, contents) in locals {
             self.implicit_on(origins, Operation::Destroy);
+            self.implicit_on(contents, Operation::Destroy);
         }
     }
 
@@ -2697,6 +2878,7 @@ impl Visitor for Summarizer<'_> {
                         self.implicit(arenas, *lhs, Operation::Destroy);
                     }
                     self.write(arenas, *lhs, made, origins.clone());
+                    self.note_stored(arenas, *lhs, *rhs, origins.as_deref());
                     if let Some(ExprNode {
                         kind: ExprKind::Destructure(items, _),
                         ..
@@ -2717,6 +2899,11 @@ impl Visitor for Summarizer<'_> {
                         BinOp::Coalesce => self.origins(arenas, *rhs),
                         _ => Some(vec![Origin::Arithmetic]),
                     };
+                    match op {
+                        BinOp::Coalesce => self.note_stored(arenas, *lhs, *rhs, origins.as_deref()),
+                        BinOp::Add => self.note_stored(arenas, *lhs, *rhs, Some(&[])),
+                        _ => {}
+                    }
                     self.write(arenas, *lhs, None, origins);
                     self.reassign(arenas, *lhs);
                     self.mark(
@@ -3090,6 +3277,7 @@ syntax::canonical_enum!(Origin {
     Constant(name),
     ClassConstant(class, constant),
     Declared(ty),
+    Elements(inner),
 });
 
 syntax::canonical_enum!(ArgAt {

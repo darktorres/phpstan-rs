@@ -2844,6 +2844,7 @@ impl<'a> Checker<'a> {
                             self.expr_span(e.id),
                             locals,
                         );
+                        self.forget_what_a_temporary_destroys(base, &base_ty, locals);
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
                         // without this, `check_expr` (unlike `infer_expr`,

@@ -433,9 +433,15 @@ impl Checker<'_> {
         if !locals.has_state_to_forget() && self.shared_scope.binds_nothing() {
             return;
         }
-        if ty.is_object().no() || ty.is_void() {
+        let destroys = matches!(operation, Operation::Destroy);
+        if ty.is_void() || (ty.is_object().no() && !(destroys && !ty.is_array().no())) {
             return;
         }
+        let operand = if destroys {
+            elements_holder_of(ty)
+        } else {
+            holder_of(ty)
+        };
         let call = CallWrites {
             callee: Callee::Implicit {
                 on: None,
@@ -455,11 +461,35 @@ impl Checker<'_> {
                 arenas: self.syntax_arenas(),
                 args: &[],
                 written: Default::default(),
-                operand: Some((holder_of(ty), this)),
+                operand: Some((operand, this)),
             };
             self.registry.call_effect(&call, &ctx)
         };
         self.forget_effect(&effect, locals);
+    }
+
+    /// After the value of the expression `e`, of type `ty`, is dropped where
+    /// it was made, what destroying it may have written is stale; a value
+    /// that is held by something else is not dropped.
+    pub(crate) fn forget_what_a_temporary_destroys(
+        &self,
+        e: &ExprNode,
+        ty: &Type,
+        locals: &mut Locals,
+    ) {
+        if matches!(
+            e.kind,
+            ExprKind::New(..)
+                | ExprKind::Clone(..)
+                | ExprKind::ArrayLiteral(..)
+                | ExprKind::Call(..)
+                | ExprKind::MethodCall(..)
+                | ExprKind::DynamicMethodCall(..)
+                | ExprKind::StaticCall(..)
+                | ExprKind::DynamicStaticCall(..)
+        ) {
+            self.forget_what_an_operation_may_change(ty, false, Operation::Destroy, locals);
+        }
     }
 
     /// After the place `target` is overwritten, what destroying the value it

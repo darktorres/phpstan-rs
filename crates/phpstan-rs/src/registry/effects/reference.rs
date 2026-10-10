@@ -162,7 +162,7 @@ impl Reach<'_> {
                 }
                 let given = match registry.lookup_method_with_owner(candidate, "getIterator") {
                     Some((owner, sig)) => {
-                        declared_holder(registry, sig.return_type(), candidate, &owner)
+                        declared_holder(registry, sig.return_type(), candidate, &owner, holder_of)
                     }
                     None => Holder::Unknown,
                 };
