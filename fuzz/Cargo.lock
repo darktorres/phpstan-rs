@@ -909,6 +909,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "la-arena"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1247,12 +1253,14 @@ name = "phpstan-rs"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
+ "bumpalo",
  "clap",
  "crc32fast",
  "crossbeam-channel",
  "hashbrown 0.17.1",
  "hotpath",
  "imbl",
+ "la-arena",
  "libmimalloc-sys",
  "lsp-server",
  "lsp-types",
@@ -1261,7 +1269,9 @@ dependencies = [
  "phpstan-rs-composer",
  "phpstan-rs-config",
  "phpstan-rs-diagnostics",
+ "phpstan-rs-dumps",
  "phpstan-rs-phpdoc",
+ "phpstan-rs-semantics",
  "phpstan-rs-sql",
  "phpstan-rs-stub-sources",
  "phpstan-rs-syntax",
@@ -1284,6 +1294,7 @@ version = "0.1.0"
 dependencies = [
  "phpstan-rs-syntax",
  "rustc-hash",
+ "serde",
  "serde_json",
 ]
 
@@ -1300,6 +1311,15 @@ name = "phpstan-rs-diagnostics"
 version = "0.1.0"
 dependencies = [
  "phpstan-rs-syntax",
+]
+
+[[package]]
+name = "phpstan-rs-dumps"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "rustc-hash",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -1322,6 +1342,17 @@ dependencies = [
  "phpstan-rs-types",
  "rustc-hash",
  "serde",
+]
+
+[[package]]
+name = "phpstan-rs-semantics"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "postcard",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -1350,6 +1381,7 @@ dependencies = [
  "arbitrary",
  "hashbrown 0.17.1",
  "hotpath",
+ "la-arena",
  "memchr",
  "rustc-hash",
  "serde",
