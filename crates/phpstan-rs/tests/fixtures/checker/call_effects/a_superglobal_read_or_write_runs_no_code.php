@@ -16,7 +16,6 @@ function readsARequestValue(): string
 function writesASessionValue(): void
 {
     $_SESSION['seen'] = true;
-    $_SERVER['argv'][] = 'x';
     unset($_COOKIE['token']);
 }
 

@@ -5699,11 +5699,9 @@ impl<'r> Level<'r> {
             Root::This => self.this_holder(),
             Root::Variable(Some(name)) => self.narrowed_holder(name, narrowing),
             Root::Static(class, Some(prop)) => self.static_holder(class, prop),
-            // A superglobal is an array of strings, files or session values
-            // PHP itself fills.
-            Root::Global(Some(name)) if syntax::ast::is_superglobal(name) => {
-                return Holder::none();
-            }
+            // A superglobal is an array, no object; what its elements hold is
+            // not known, since any code may store an object in one.
+            Root::Global(Some(name)) if syntax::ast::is_superglobal(name) => Holder::none(),
             Root::Variable(None)
             | Root::Static(_, None)
             | Root::DynamicStatic(_)
