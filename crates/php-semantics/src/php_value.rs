@@ -618,6 +618,19 @@ impl SemanticHost for PhpFlowHost {
                 }
                 exits
             }
+            Event::Release { .. } => self.unmodeled_outcomes(
+                state,
+                &[
+                    Domain::Release,
+                    Domain::UserWrite,
+                    Domain::Output,
+                    Domain::PhpThrow,
+                    Domain::NativeUnwind,
+                    Domain::Fatal,
+                    Domain::Suspension,
+                ],
+                None,
+            ),
             Event::EmitDiagnostic { .. } => {
                 self.unmodeled_outcomes(state, &[Domain::Diagnostic], None)
             }

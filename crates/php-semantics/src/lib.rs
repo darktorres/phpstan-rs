@@ -26,8 +26,8 @@ pub use php_value::{
     ReferenceId, StateError,
 };
 pub use target::{
-    Applicability, ReleaseVersion, TargetError, TargetPredicate, TargetScenario, TargetSelection,
-    TargetSet, VersionRange,
+    Applicability, ReleaseVersion, TargetError, TargetPredicate, TargetProfile, TargetScenario,
+    TargetSelection, TargetSet, VersionRange,
 };
 
 pub const SCHEMA_MAJOR: u32 = 9;
@@ -198,6 +198,12 @@ pub enum Event {
         callable: Operand,
         arguments: Vec<Operand>,
         result: u32,
+    },
+    /// Release a value held by the native operation after conversion.
+    /// A host may attach destructor effects and abrupt outcomes to this
+    /// ordered point; the catalog currently leaves those consequences open.
+    Release {
+        value: Operand,
     },
     /// A diagnostic that is observable when this ordered event is reached.
     /// The argument index identifies the PHP call operand used for its span.
@@ -399,10 +405,15 @@ fn check_cleanup_replacement<V>(
 ) -> Result<(), GraphError> {
     if let Some(pending) = pending {
         let pending = pending_completion_kind(pending);
-        // The only replacement currently modeled and tested is a cleanup
-        // return overriding a pending PHP throw. All other matrix cells fail
-        // closed until their host semantics have evidence and coverage.
-        if pending == CompletionKind::PhpThrow && replacement == CompletionKind::Normal {
+        // Evidence-backed PHP cleanup cases: a destructor return preserves
+        // the pending PHP throw, while a PHP throw from that destructor
+        // replaces it. Other completion-kind combinations remain fail-closed.
+        if pending == CompletionKind::PhpThrow
+            && matches!(
+                replacement,
+                CompletionKind::Normal | CompletionKind::PhpThrow
+            )
+        {
             return Ok(());
         }
         return Err(GraphError::UnsupportedCleanupReplacement {
@@ -788,6 +799,7 @@ fn event_domains(event: &Event) -> Vec<Domain> {
         Event::Read { .. } => vec![Domain::UserRead],
         Event::Write { .. } => vec![Domain::UserWrite],
         Event::Invoke { .. } => vec![Domain::Invocation],
+        Event::Release { .. } => vec![Domain::Release],
         Event::EmitDiagnostic { .. } => vec![Domain::Diagnostic],
         Event::PhpFlow { instruction } => match instruction {
             PhpFlowInstruction::Assign { .. }
@@ -2477,6 +2489,8 @@ mod tests {
         throw_invoke: bool,
         both_invoke_outcomes: bool,
         native_unwind_invoke: bool,
+        fatal_invoke: bool,
+        suspended_invoke: bool,
         maybe_always: bool,
         growing_loop: bool,
         bad_join: bool,
@@ -2609,6 +2623,39 @@ mod tests {
                             coverage,
                         }];
                     }
+                    if self.fatal_invoke || self.suspended_invoke {
+                        let domain = if self.fatal_invoke {
+                            Domain::Fatal
+                        } else {
+                            Domain::Suspension
+                        };
+                        let coverage = coverage
+                            .into_iter()
+                            .map(|mut item| {
+                                if item.domain == domain {
+                                    item.coverage = Coverage::Open {
+                                        reasons: vec![Bytes(
+                                            b"observed abrupt invocation".to_vec(),
+                                        )],
+                                    };
+                                    item.assumptions = vec![Digest([3; 32])];
+                                }
+                                item
+                            })
+                            .collect();
+                        if self.fatal_invoke {
+                            return vec![EventExit::Fatal {
+                                value: "fatal callback".into(),
+                                state,
+                                coverage,
+                            }];
+                        }
+                        return vec![EventExit::Suspended {
+                            value: "suspended callback".into(),
+                            state,
+                            coverage,
+                        }];
+                    }
                     if self.throw_invoke {
                         return vec![EventExit::PhpThrow {
                             value: "exception".into(),
@@ -2638,6 +2685,7 @@ mod tests {
                         coverage,
                     }];
                 }
+                Event::Release { .. } => state.push("release".into()),
                 Event::PhpFlow { instruction } => {
                     state.push(format!("php-flow:{instruction:?}"));
                 }
@@ -2717,6 +2765,7 @@ mod tests {
                 Event::Read { .. } => vec![Domain::UserRead],
                 Event::Write { .. } => vec![Domain::UserWrite],
                 Event::Invoke { .. } => vec![Domain::Invocation],
+                Event::Release { .. } => vec![Domain::Release],
                 Event::EmitDiagnostic { .. } => vec![Domain::Diagnostic],
                 Event::PhpFlow {
                     instruction: PhpFlowInstruction::Assign { .. },
@@ -4741,7 +4790,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_replacement_matrix_fails_closed_except_modeled_php_throw_return() {
+    fn cleanup_replacement_matrix_allows_evidenced_php_throw_replacement_only() {
         let pending = [
             PendingOutcome::PhpThrow("throw".to_owned()),
             PendingOutcome::NativeUnwind("unwind".to_owned()),
@@ -4758,7 +4807,7 @@ mod tests {
         for (pending_index, pending) in pending.iter().enumerate() {
             for (replacement_index, replacement) in replacements.iter().enumerate() {
                 let result = check_cleanup_replacement(&Some(pending.clone()), *replacement);
-                let supported = pending_index == 0 && replacement_index == 0;
+                let supported = pending_index == 0 && matches!(replacement_index, 0 | 1);
                 assert_eq!(
                     result.is_ok(),
                     supported,
@@ -4866,7 +4915,10 @@ mod tests {
                 };
                 let result = evaluate(&graph, &arguments, &receiver(), vec![], &mut host);
                 let supported = pending_kind == CompletionKind::PhpThrow
-                    && replacement_kind == CompletionKind::Normal;
+                    && matches!(
+                        replacement_kind,
+                        CompletionKind::Normal | CompletionKind::PhpThrow
+                    );
                 assert_eq!(
                     result.is_ok(),
                     supported,
@@ -5079,6 +5131,49 @@ mod tests {
                 state: vec!["invoke".into()],
             }]
         );
+    }
+
+    #[test]
+    fn callback_fatal_and_suspension_remain_distinct_open_exits() {
+        for (fatal, expected, domain) in [
+            (true, "fatal callback", Domain::Fatal),
+            (false, "suspended callback", Domain::Suspension),
+        ] {
+            let graph = graph(
+                vec![Event::Invoke {
+                    callable: Operand::Argument(0),
+                    arguments: vec![],
+                    result: 1,
+                }],
+                Terminator::Return(None),
+            );
+            let mut host = Host {
+                fatal_invoke: fatal,
+                suspended_invoke: !fatal,
+                ..Host::default()
+            };
+            let evaluation = evaluate(&graph, &["callback".into()], &receiver(), vec![], &mut host)
+                .expect("abrupt callback outcome evaluates");
+            assert_eq!(evaluation.exits.len(), 1);
+            assert!(
+                matches!(
+                    (&evaluation.exits[0], domain),
+                    (Exit::Fatal { value, state }, Domain::Fatal)
+                        if value == expected && state == &["invoke".to_owned()]
+                ) || matches!(
+                    (&evaluation.exits[0], domain),
+                    (Exit::Suspended { value, state }, Domain::Suspension)
+                        if value == expected && state == &["invoke".to_owned()]
+                )
+            );
+            assert!(evaluation.coverage.iter().any(|coverage| {
+                coverage.domain == domain && matches!(coverage.coverage, Coverage::Open { .. })
+            }));
+            evaluation
+                .post_fixpoint
+                .validate(&graph, &host)
+                .expect("certificate preserves the distinct abrupt outcome");
+        }
     }
 
     #[test]

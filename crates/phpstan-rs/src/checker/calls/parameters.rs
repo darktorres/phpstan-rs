@@ -413,7 +413,6 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-
     }
 
     /// The arguments a constant array unpacked into a call stands for

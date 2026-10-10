@@ -160,6 +160,32 @@ impl Effect {
         self.0.as_deref()
     }
 
+    /// Excludes writes to named instance properties when the effect is a
+    /// finite, known set. Unknown/arbitrary effects cannot be narrowed this
+    /// way and are preserved unchanged.
+    pub(crate) fn without_properties(&self, excluded: &BTreeSet<Name>) -> Effect {
+        let Some(storages) = &self.0 else {
+            return self.clone();
+        };
+        if storages.contains(&Storage::Unknown) {
+            return self.clone();
+        }
+        Effect(Some(Arc::new(
+            storages
+                .iter()
+                .filter(|storage| match storage {
+                    Storage::Own(Some(property))
+                    | Storage::Property {
+                        prop: Some(property),
+                        ..
+                    } => !excluded.contains(property),
+                    _ => true,
+                })
+                .cloned()
+                .collect(),
+        )))
+    }
+
     /// This effect of a method, called on an object that may be of `class`
     /// (of any class, when `None`): its own object's properties are that
     /// object's.

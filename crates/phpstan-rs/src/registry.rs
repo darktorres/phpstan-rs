@@ -8,6 +8,9 @@ use syntax::name::{Name, OrderedNameMap};
 use syntax::ast::{NodeArenas, StmtId};
 use types::Type;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeTargetProfile(pub php_semantics::TargetProfile);
+
 pub mod access_attributes;
 mod anonymous_class;
 mod assertion_table;
@@ -393,6 +396,10 @@ pub struct Registry {
     /// exact releases for semantic catalog applicability.
     #[serde(skip)]
     pub php_releases: Option<types::PhpReleaseRange>,
+    /// Explicit target runtime facts for source/runtime evidence whose
+    /// applicability is narrower than the PHP release alone.
+    #[serde(skip)]
+    pub php_target_profile: Option<RuntimeTargetProfile>,
     // Class names with at least one *unconditional* declaration indexed
     // so far - lets `insert_built_decl` tell "this name's entry is
     // itself unconditional, so a second one should merge onto it"
@@ -1067,6 +1074,8 @@ impl Registry {
             scope: _,
             scoped_names: _,
             php_versions: _,
+            php_releases: _,
+            php_target_profile: _,
             unconditionally_declared_classes,
             built_in_stub_classes,
             unconditionally_declared_functions,
@@ -1300,7 +1309,10 @@ impl Registry {
 
     /// Full patch-aware target possibilities for semantic catalog selection.
     pub fn semantic_target_set(&self) -> php_semantics::TargetSet {
-        crate::semantics::target_set_from_php_releases(self.php_releases)
+        crate::semantics::target_set_from_php_releases_and_profile(
+            self.php_releases,
+            self.php_target_profile.as_ref().map(|profile| &profile.0),
+        )
     }
 
     /// `eval`'s answer on every PHP version the project runs on: the same
@@ -2771,6 +2783,7 @@ impl Registry {
     pub(crate) fn switch_base(&mut self, mut base: Registry) {
         base.php_versions = self.php_versions.take();
         base.php_releases = self.php_releases.take();
+        base.php_target_profile = self.php_target_profile.take();
         base.configured_assertions = std::mem::take(&mut self.configured_assertions);
         base.configured_class_argument_returns =
             std::mem::take(&mut self.configured_class_argument_returns);

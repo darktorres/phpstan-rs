@@ -17,6 +17,35 @@ pub struct VersionRange {
     pub max: ReleaseVersion,
 }
 
+/// Known runtime/build facts that accompany the configured PHP release.
+/// Unknown fields remain `None` and therefore cannot satisfy a profile-bound
+/// catalog variant.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetProfile {
+    pub os: Option<Bytes>,
+    pub arch: Option<Bytes>,
+    pub sapi: Option<Bytes>,
+    pub zts: Option<bool>,
+    pub debug: Option<bool>,
+    pub extensions: Option<Vec<(Bytes, bool)>>,
+    pub ini: Option<Vec<(Bytes, Bytes)>>,
+}
+
+impl TargetProfile {
+    pub fn apply_to(&self, release: VersionRange) -> TargetScenario {
+        TargetScenario {
+            release,
+            os: self.os.clone(),
+            arch: self.arch.clone(),
+            sapi: self.sapi.clone(),
+            zts: self.zts,
+            debug: self.debug,
+            extensions: self.extensions.clone(),
+            ini: self.ini.clone(),
+        }
+    }
+}
+
 impl VersionRange {
     pub fn exact(version: ReleaseVersion) -> Self {
         Self {

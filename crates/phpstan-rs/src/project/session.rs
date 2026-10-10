@@ -778,6 +778,15 @@ impl Session {
             policy,
             &mut warnings,
         )?;
+        let php_target_profile = recovered(
+            reflection
+                .php_target_profile
+                .as_ref()
+                .map(crate::registry::settings::PhpTargetProfileSetting::target_profile)
+                .transpose(),
+            policy,
+            &mut warnings,
+        )?;
         let restricted_symbols = recovered(disallowed_calls.entries(), policy, &mut warnings)?;
         let banned_constructs = recovered(
             banned_settings
@@ -944,6 +953,7 @@ impl Session {
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
             php_releases,
+            php_target_profile,
             phpstan_api_check_enabled,
             retain_source: false,
             keeps_as_built: false,

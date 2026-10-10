@@ -968,8 +968,15 @@ pub(crate) struct CatalogCallEvaluation {
     pub diagnostics: Vec<(php_semantics::DiagnosticKind, u32)>,
     pub diagnostics_closed: bool,
     /// Source graph events that require the ordinary checker operation
-    /// transfer (for example, `__toString` during weak internal coercion).
+    /// transfer on normal completion (for example, `__toString` during weak
+    /// internal coercion).
     pub invoked_string_arguments: Vec<u32>,
+    /// Whether a PHP-throw exit exists before any string callback was invoked.
+    pub php_throw_without_string_invocation: bool,
+    /// String callback arguments invoked on a PHP-throw exit. These effects
+    /// must be applied to that exit's caller state, not inferred from the
+    /// normal-completion summary above.
+    pub php_throw_invoked_string_arguments: Vec<u32>,
 }
 
 /// A syntax owner handle that can be held while the checker mutates its
@@ -2570,6 +2577,23 @@ impl<'a> Checker<'a> {
             arguments.extend(evaluation.invoked_string_arguments.iter().copied());
         }
         Some(arguments.into_iter().collect())
+    }
+
+    pub(crate) fn catalog_php_throw_invocation_at(&self, span: Span) -> Option<(bool, Vec<u32>)> {
+        let memo = self.catalog_return_type_memo.borrow();
+        let entries = memo.get(&span)?;
+        let mut without_invocation = false;
+        let mut arguments = std::collections::BTreeSet::new();
+        for (_, evaluation) in entries {
+            without_invocation |= evaluation.php_throw_without_string_invocation;
+            arguments.extend(
+                evaluation
+                    .php_throw_invoked_string_arguments
+                    .iter()
+                    .copied(),
+            );
+        }
+        Some((without_invocation, arguments.into_iter().collect()))
     }
 }
 

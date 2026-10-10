@@ -10,10 +10,12 @@
 //! it may hold.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use syntax::ast::*;
 use syntax::name::Name;
+use syntax::visit::arena::{self, Visitor};
 use types::Type;
 
 use crate::checker::keys::{KeyData, LocalKey};
@@ -455,19 +457,9 @@ impl Checker<'_> {
             })
             .cloned()
             .collect();
-        if let Some(string_arguments) = self.catalog_string_arguments_at(self.expr_span(e.id)) {
-            // The selected catalog graph is authoritative for which
-            // argument conversions run. Reuse the checker operation transfer
-            // for their PHP-body effects, but do not also apply the legacy
-            // builtin-run summary for this covered call.
-            for argument in string_arguments {
-                if let Some(value) = args
-                    .get(argument as usize)
-                    .and_then(|argument| arenas.expr(argument.value))
-                {
-                    self.forget_what_an_operation_on_may_change(value, Operation::String, locals);
-                }
-            }
+        if let Some(string_arguments) = self.catalog_string_arguments_at(self.expr_span(e.id))
+            && self.forget_catalog_string_arguments_may_change(e, &string_arguments, false, locals)
+        {
             return;
         }
         let effect = {
@@ -489,6 +481,321 @@ impl Checker<'_> {
         self.forget_effect(&effect, locals);
     }
 
+    /// Applies the ordinary checker transfer for the string-conversion
+    /// invocations selected by the catalog graph. Returning false leaves the
+    /// call on its generic effect path when the signature or syntax binding
+    /// is unavailable.
+    pub(crate) fn forget_catalog_string_arguments_may_change(
+        &self,
+        e: &ExprNode,
+        string_arguments: &[u32],
+        php_throw_path: bool,
+        locals: &mut Locals,
+    ) -> bool {
+        let Some(signature) = self.registry.lookup_function("strlen") else {
+            return false;
+        };
+        let Some(syntax_owner) = self.syntax_tree_owner() else {
+            return false;
+        };
+        let arenas = syntax_owner.arenas();
+        let args = match &e.kind {
+            ExprKind::Call(_, args) => arenas.args(args.clone()),
+            _ => return false,
+        };
+        let resolved = crate::checker::calls::resolve_call_args(arenas, &args, signature.params());
+        for argument in string_arguments {
+            if let Some(value) = resolved.get(*argument as usize).and_then(|value| *value) {
+                let ty = self.infer_expr(value, locals);
+                let is_temporary = self.syntax_arenas().is_some_and(|arenas| {
+                    arenas
+                        .peeled(value.id)
+                        .and_then(|id| arenas.expr(id))
+                        .is_some_and(|expression| matches!(expression.kind, ExprKind::New(..)))
+                });
+                let callback_summary = self.catalog_string_callback_outcomes(&ty, locals);
+                let callback_transfer = callback_summary.as_ref().and_then(|summary| {
+                    if php_throw_path {
+                        let throwing = merge_callback_transfers(
+                            summary.throwing.clone(),
+                            summary.invalid_return.clone(),
+                        );
+                        if is_temporary {
+                            // A PHP throw can also originate in the
+                            // destructor after a normally returning cast.
+                            // Keep that callback write state in the join.
+                            merge_callback_transfers(throwing, summary.normal.clone())
+                        } else {
+                            throwing
+                        }
+                    } else {
+                        summary.normal.clone()
+                    }
+                });
+                if let Some(transfer) = callback_transfer {
+                    self.forget_operation_may_change_except(
+                        &ty,
+                        Operation::String,
+                        &transfer,
+                        locals,
+                    );
+                } else {
+                    self.forget_what_an_operation_on_may_change(value, Operation::String, locals);
+                }
+                // A direct `new` argument is a temporary owned by this call.
+                // PHP releases it after conversion on both normal and PHP-
+                // throw paths; apply the existing conservative destructor
+                // write summary after the __toString effect.
+                if is_temporary {
+                    if let Some(summary) = self.catalog_string_destructor_outcomes(&ty, locals) {
+                        // On a callback-throw path, normal destructor
+                        // completion preserves the callback exception and a
+                        // destructor throw replaces it. Join both states;
+                        // the semantic evaluator carries the distinct exits.
+                        let transfer = if php_throw_path {
+                            merge_callback_transfers(summary.normal, summary.throwing)
+                        } else {
+                            summary.normal
+                        };
+                        if let Some(transfer) = transfer {
+                            self.forget_operation_may_change_except(
+                                &ty,
+                                Operation::Destroy,
+                                &transfer,
+                                locals,
+                            );
+                        }
+                    } else {
+                        self.forget_what_an_operation_may_change(
+                            &ty,
+                            false,
+                            Operation::Destroy,
+                            locals,
+                        );
+                    }
+                }
+            } else {
+                // `resolve_call_args` deliberately leaves unpacked values
+                // unresolved. Join their possible element types before
+                // applying the operation. For non-array or otherwise unknown
+                // iterables, mixed keeps the effect conservative.
+                let values = args
+                    .iter()
+                    .filter(|argument| argument.spread)
+                    .filter_map(|spread| arenas.expr(spread.value))
+                    .map(|value| {
+                        self.infer_expr(value, locals)
+                            .array_value_type()
+                            .unwrap_or_else(types::Type::mixed)
+                    })
+                    .collect::<Vec<_>>();
+                if !values.is_empty() {
+                    self.forget_what_an_operation_may_change(
+                        &Type::union_of(values),
+                        false,
+                        Operation::String,
+                        locals,
+                    );
+                }
+            }
+        }
+        true
+    }
+
+    /// Finds a deliberately narrow, source-backed case where a final
+    /// `__toString` body consists of simple property writes, pure branches,
+    /// literal string returns, and direct throws. Unsupported shapes retain
+    /// the ordinary whole-effect invalidation.
+    fn catalog_string_callback_outcomes(
+        &self,
+        ty: &Type,
+        locals: &Locals,
+    ) -> Option<CatalogCallbackSummary> {
+        let classes = ty.object_class_names();
+        if classes.len() != 1 {
+            return None;
+        }
+        let class = classes.first()?;
+        if !self.registry.class_by_name(class)?.is_final() {
+            return None;
+        }
+        let (owner, _) = self
+            .registry
+            .lookup_method_with_owner(class, "__toString")?;
+        let syntax_owner = self.syntax_tree_owner()?;
+        let arenas = syntax_owner.arenas();
+        let body = find_method_body(arenas, syntax_owner.statements(), &owner, "__toString")?;
+        let strict_types =
+            crate::checker::keywords::strict_types_mode(arenas, syntax_owner.statements())?;
+        let (throw_writes, normal_writes, invalid_writes, all_writes) =
+            callback_writes_by_outcome(arenas, &body, !owner.contains('\\'), strict_types)?;
+        let mut branch_reads = Vec::new();
+        collect_branch_reads(arenas, &body.0, &mut branch_reads, !owner.contains('\\'))?;
+        for path in branch_reads {
+            let mut current = owner.clone();
+            for (index, property) in path.iter().enumerate() {
+                let reflection = self.registry.lookup_property(&current, property.as_str())?;
+                if current != owner && reflection.visibility() != syntax::ast::Visibility::Public {
+                    return None;
+                }
+                if reflection.has_get_hook() {
+                    return None;
+                }
+                if !reflection.has_default() {
+                    return None;
+                }
+                if index + 1 < path.len() {
+                    let classes = reflection.ty().object_class_names();
+                    if classes.len() != 1 || !reflection.ty().is_object().yes() {
+                        return None;
+                    }
+                    current.clone_from(&classes[0]);
+                }
+            }
+        }
+        for (path, value) in &all_writes {
+            let mut current = owner.clone();
+            for (index, property) in path.iter().enumerate() {
+                let reflection = self.registry.lookup_property(&current, property.as_str())?;
+                if current != owner && reflection.visibility() != syntax::ast::Visibility::Public {
+                    return None;
+                }
+                if index + 1 == path.len() {
+                    let assigned = arenas.expr(*value)?;
+                    let assigned_ty = self.infer_expr(assigned, locals);
+                    if reflection.has_set_hook()
+                        || reflection.is_readonly()
+                        || reflection.is_virtual()
+                        || !self.accepts(reflection.ty_native(), &assigned_ty).yes()
+                        || !reflection.ty().is_object().no()
+                    {
+                        return None;
+                    }
+                } else {
+                    if reflection.has_get_hook()
+                        || !reflection.has_default()
+                        || !reflection.ty().is_object().yes()
+                    {
+                        return None;
+                    }
+                    let classes = reflection.ty().object_class_names();
+                    if classes.len() != 1 {
+                        return None;
+                    }
+                    current.clone_from(&classes[0]);
+                }
+            }
+        }
+        let transfer = |outcome_writes: &[(Vec<Name>, ExprId)]| -> Option<CatalogThrowTransfer> {
+            let reachable_properties: BTreeSet<_> = outcome_writes
+                .iter()
+                .filter_map(|(path, _)| path.last().cloned())
+                .collect();
+            let mut reachable_writes = Vec::new();
+            for (path, value) in outcome_writes {
+                let (class, property) = callback_target_property(&self.registry, &owner, path)?;
+                let value = arenas.expr(*value)?;
+                reachable_writes.push((class, property, self.infer_expr(value, locals)));
+            }
+            let mut unreachable_properties = BTreeSet::new();
+            for (path, _) in &all_writes {
+                let (_, property) = callback_target_property(&self.registry, &owner, path)?;
+                if !reachable_properties.contains(&property) {
+                    unreachable_properties.insert(property);
+                }
+            }
+            Some(CatalogThrowTransfer {
+                unreachable_properties,
+                reachable_writes,
+            })
+        };
+        Some(CatalogCallbackSummary {
+            throwing: throw_writes.as_deref().map(transfer).flatten(),
+            normal: normal_writes.as_deref().map(transfer).flatten(),
+            invalid_return: invalid_writes.as_deref().map(transfer).flatten(),
+        })
+    }
+
+    fn catalog_string_destructor_outcomes(
+        &self,
+        ty: &Type,
+        locals: &Locals,
+    ) -> Option<CatalogDestructorSummary> {
+        let classes = ty.object_class_names();
+        if classes.len() != 1 || !self.registry.class_by_name(&classes[0])?.is_final() {
+            return None;
+        }
+        let class = &classes[0];
+        let (owner, _) = self
+            .registry
+            .lookup_method_with_owner(class, "__destruct")?;
+        let syntax_owner = self.syntax_tree_owner()?;
+        let arenas = syntax_owner.arenas();
+        let body = find_method_body(arenas, syntax_owner.statements(), &owner, "__destruct")?;
+        let (throw_writes, normal_writes, all_writes) =
+            destructor_writes_by_outcome(arenas, &body, !owner.contains('\\'))?;
+
+        let mut branch_reads = Vec::new();
+        collect_branch_reads(arenas, &body.0, &mut branch_reads, !owner.contains('\\'))?;
+        for path in branch_reads {
+            validate_callback_property_path(&self.registry, &owner, &path)?;
+        }
+        for (path, value) in &all_writes {
+            let (class, property) = callback_target_property(&self.registry, &owner, path)?;
+            let reflection = self.registry.lookup_property(&class, property.as_str())?;
+            let assigned = arenas.expr(*value)?;
+            let assigned_ty = self.infer_expr(assigned, locals);
+            if reflection.has_set_hook()
+                || reflection.is_readonly()
+                || reflection.is_virtual()
+                || !self.accepts(reflection.ty_native(), &assigned_ty).yes()
+                || !reflection.ty().is_object().no()
+            {
+                return None;
+            }
+            validate_callback_property_path(&self.registry, &owner, &path[..path.len() - 1])?;
+        }
+
+        let transfer = |writes: &[(Vec<Name>, ExprId)]| -> Option<CatalogThrowTransfer> {
+            let reachable_properties = writes
+                .iter()
+                .filter_map(|(path, _)| path.last().cloned())
+                .collect::<BTreeSet<_>>();
+            let mut reachable_writes = Vec::new();
+            for (path, value) in writes {
+                let (class, property) = callback_target_property(&self.registry, &owner, path)?;
+                let value = arenas.expr(*value)?;
+                reachable_writes.push((class, property, self.infer_expr(value, locals)));
+            }
+            let unreachable_properties = all_writes
+                .iter()
+                .filter_map(|(path, _)| path.last().cloned())
+                .filter(|property| !reachable_properties.contains(property))
+                .collect();
+            Some(CatalogThrowTransfer {
+                unreachable_properties,
+                reachable_writes,
+            })
+        };
+        Some(CatalogDestructorSummary {
+            throwing: throw_writes.as_deref().map(transfer).flatten(),
+            normal: normal_writes.as_deref().map(transfer).flatten(),
+        })
+    }
+
+    /// Whether a source-backed, bounded `__toString` body can only end in an
+    /// invalid result (and therefore raises TypeError after its body runs).
+    pub(crate) fn catalog_string_callback_definitely_invalid(
+        &self,
+        ty: &Type,
+        locals: &Locals,
+    ) -> bool {
+        let Some(summary) = self.catalog_string_callback_outcomes(ty, locals) else {
+            return false;
+        };
+        summary.normal.is_none() && summary.invalid_return.is_some() && summary.throwing.is_none()
+    }
+
     /// After `operation` on a value of type `ty`, what the code PHP may run
     /// of the value for it may have written is stale; `this` when the value
     /// is the scope's own `$this`.
@@ -506,6 +813,18 @@ impl Checker<'_> {
         if ty.is_void() || (ty.is_object().no() && !(destroys && !ty.is_array().no())) {
             return;
         }
+        let effect = self.operation_effect(ty, this, operation, locals);
+        self.forget_effect(&effect, locals);
+    }
+
+    fn operation_effect(
+        &self,
+        ty: &Type,
+        this: bool,
+        operation: Operation,
+        locals: &Locals,
+    ) -> Effect {
+        let destroys = matches!(operation, Operation::Destroy);
         let operand = if destroys {
             elements_holder_of(ty)
         } else {
@@ -536,7 +855,7 @@ impl Checker<'_> {
             };
             self.registry.call_effect(&call, &ctx)
         };
-        let effect = if effect_memo_enabled() {
+        if effect_memo_enabled() {
             let key = (operation.clone(), operand, this);
             let known = {
                 let mut memo = self.operation_effects.borrow_mut();
@@ -565,8 +884,49 @@ impl Checker<'_> {
             }
         } else {
             compute(operand, locals)
-        };
+        }
+    }
+
+    fn forget_operation_may_change_except(
+        &self,
+        ty: &Type,
+        operation: Operation,
+        transfer: &CatalogThrowTransfer,
+        locals: &mut Locals,
+    ) {
+        if !locals.has_state_to_forget() && self.shared_scope.binds_nothing() {
+            return;
+        }
+        if ty.is_object().no() || ty.is_void() {
+            return;
+        }
+        let effect = self
+            .operation_effect(ty, false, operation, locals)
+            .without_properties(&transfer.unreachable_properties);
+        let before = locals.clone();
         self.forget_effect(&effect, locals);
+        let keys: Vec<_> = before.synthetic_keys().copied().collect();
+        for (class, property, assigned) in &transfer.reachable_writes {
+            for key in &keys {
+                let KeyData::Prop { base, prop } = before.data(*key) else {
+                    continue;
+                };
+                if prop != *property
+                    || !self.may_hold(&self.key_type(base, &before), Some(class.as_str()))
+                {
+                    continue;
+                }
+                let Some(previous) = before
+                    .get(*key)
+                    .cloned()
+                    .or_else(|| self.key_type(*key, &before))
+                else {
+                    continue;
+                };
+                let joined = self.relation().union_of(vec![previous, assigned.clone()]);
+                locals.insert(*key, joined);
+            }
+        }
     }
 
     /// After the value of the expression `e`, of type `ty`, is dropped where
@@ -1216,4 +1576,563 @@ fn root_variable(key: LocalKey, locals: &Locals) -> KeyData {
             data @ (KeyData::Var(_) | KeyData::StaticProp { .. }) => return data,
         }
     }
+}
+
+#[derive(Clone)]
+struct CatalogThrowTransfer {
+    unreachable_properties: BTreeSet<Name>,
+    reachable_writes: Vec<(Name, Name, Type)>,
+}
+
+struct CatalogCallbackSummary {
+    throwing: Option<CatalogThrowTransfer>,
+    normal: Option<CatalogThrowTransfer>,
+    invalid_return: Option<CatalogThrowTransfer>,
+}
+
+struct CatalogDestructorSummary {
+    throwing: Option<CatalogThrowTransfer>,
+    normal: Option<CatalogThrowTransfer>,
+}
+
+fn merge_callback_transfers(
+    left: Option<CatalogThrowTransfer>,
+    right: Option<CatalogThrowTransfer>,
+) -> Option<CatalogThrowTransfer> {
+    match (left, right) {
+        (None, None) => None,
+        (Some(transfer), None) | (None, Some(transfer)) => Some(transfer),
+        (Some(mut left), Some(right)) => {
+            left.unreachable_properties
+                .retain(|property| right.unreachable_properties.contains(property));
+            left.reachable_writes.extend(right.reachable_writes);
+            Some(left)
+        }
+    }
+}
+
+fn callback_target_property(
+    registry: &crate::registry::Registry,
+    owner: &Name,
+    path: &[Name],
+) -> Option<(Name, Name)> {
+    let mut current = owner.clone();
+    for property in &path[..path.len().checked_sub(1)?] {
+        let reflection = registry.lookup_property(&current, property.as_str())?;
+        let classes = reflection.ty().object_class_names();
+        if classes.len() != 1 {
+            return None;
+        }
+        current.clone_from(&classes[0]);
+    }
+    Some((current, path.last()?.clone()))
+}
+
+fn validate_callback_property_path(
+    registry: &crate::registry::Registry,
+    owner: &Name,
+    path: &[Name],
+) -> Option<()> {
+    let mut current = owner.clone();
+    for (index, property) in path.iter().enumerate() {
+        let reflection = registry.lookup_property(&current, property.as_str())?;
+        if current != *owner && reflection.visibility() != syntax::ast::Visibility::Public {
+            return None;
+        }
+        if reflection.has_get_hook() || !reflection.has_default() {
+            return None;
+        }
+        if index + 1 < path.len() {
+            let classes = reflection.ty().object_class_names();
+            if classes.len() != 1 || !reflection.ty().is_object().yes() {
+                return None;
+            }
+            current.clone_from(&classes[0]);
+        }
+    }
+    Some(())
+}
+
+fn find_method_body(
+    arenas: &NodeArenas,
+    statements: &[StmtId],
+    owner: &str,
+    method: &str,
+) -> Option<(Vec<StmtId>, bool)> {
+    struct Find<'a> {
+        owner: &'a str,
+        method: &'a str,
+        found: Option<(Vec<StmtId>, bool)>,
+    }
+
+    impl Visitor for Find<'_> {
+        fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {
+            let Some(stmt) = arenas.stmt(id) else {
+                return;
+            };
+            if let StmtKind::ClassDecl(decl_range) = &stmt.kind {
+                let decl = arenas.class_decl(decl_range.clone());
+                if decl.namespaced_name.eq_ignore_ascii_case(self.owner)
+                    && let Some(class) = arenas.class(decl.def)
+                {
+                    for method in arenas.methods(class.methods.clone()) {
+                        let function = &method.function;
+                        if function.name.name.eq_ignore_ascii_case(self.method)
+                            && let Some(body) = &function.body
+                        {
+                            self.found = Some((
+                                arenas.stmt_ids(&body.stmts).to_vec(),
+                                body.goto_labels.is_empty(),
+                            ));
+                            return;
+                        }
+                    }
+                }
+                return;
+            }
+            arena::walk_stmt(self, arenas, id);
+        }
+    }
+
+    let mut find = Find {
+        owner,
+        method,
+        found: None,
+    };
+    arena::walk_stmts(&mut find, arenas, statements);
+    find.found
+}
+
+/// Interpret a small source subset to collect writes on paths which end in a
+/// direct throw, valid literal string return, or invalid literal scalar return.
+/// Branches are forked, so a write in one outcome does not leak into the other.
+/// Unsupported live statements and implicit returns fail closed.
+fn callback_writes_by_outcome(
+    arenas: &NodeArenas,
+    (statements, has_no_goto_labels): &(Vec<StmtId>, bool),
+    allow_unqualified_runtime_exception: bool,
+    strict_types: bool,
+) -> Option<(
+    Option<Vec<(Vec<Name>, ExprId)>>,
+    Option<Vec<(Vec<Name>, ExprId)>>,
+    Option<Vec<(Vec<Name>, ExprId)>>,
+    Vec<(Vec<Name>, ExprId)>,
+)> {
+    if !has_no_goto_labels {
+        return None;
+    }
+    let mut all_writes = Vec::new();
+    collect_literal_assignments(
+        arenas,
+        statements,
+        &mut all_writes,
+        &mut Vec::new(),
+        allow_unqualified_runtime_exception,
+    )?;
+    let mut states = vec![CallbackPath {
+        writes: Vec::new(),
+        outcome: CallbackOutcome::Live,
+    }];
+    execute_callback_statements(arenas, statements, &mut states, strict_types, false)?;
+    if states.iter().any(|state| {
+        !matches!(
+            state.outcome,
+            CallbackOutcome::Throw | CallbackOutcome::NormalReturn | CallbackOutcome::InvalidReturn
+        )
+    }) {
+        return None;
+    }
+    let throw_paths = states
+        .iter()
+        .filter(|state| state.outcome == CallbackOutcome::Throw)
+        .collect::<Vec<_>>();
+    let normal_paths = states
+        .iter()
+        .filter(|state| state.outcome == CallbackOutcome::NormalReturn)
+        .collect::<Vec<_>>();
+    let invalid_paths = states
+        .iter()
+        .filter(|state| state.outcome == CallbackOutcome::InvalidReturn)
+        .collect::<Vec<_>>();
+    if throw_paths.is_empty() && normal_paths.is_empty() && invalid_paths.is_empty() {
+        return None;
+    }
+    let throw_writes = (!throw_paths.is_empty()).then(|| {
+        throw_paths
+            .iter()
+            .flat_map(|state| state.writes.iter().cloned())
+            .collect()
+    });
+    let normal_writes = (!normal_paths.is_empty()).then(|| {
+        normal_paths
+            .iter()
+            .flat_map(|state| state.writes.iter().cloned())
+            .collect()
+    });
+    let invalid_writes = (!invalid_paths.is_empty()).then(|| {
+        invalid_paths
+            .iter()
+            .flat_map(|state| state.writes.iter().cloned())
+            .collect()
+    });
+    Some((throw_writes, normal_writes, invalid_writes, all_writes))
+}
+
+fn destructor_writes_by_outcome(
+    arenas: &NodeArenas,
+    (statements, has_no_goto_labels): &(Vec<StmtId>, bool),
+    allow_unqualified_runtime_exception: bool,
+) -> Option<(
+    Option<Vec<(Vec<Name>, ExprId)>>,
+    Option<Vec<(Vec<Name>, ExprId)>>,
+    Vec<(Vec<Name>, ExprId)>,
+)> {
+    if !has_no_goto_labels {
+        return None;
+    }
+    let mut all_writes = Vec::new();
+    collect_literal_assignments(
+        arenas,
+        statements,
+        &mut all_writes,
+        &mut Vec::new(),
+        allow_unqualified_runtime_exception,
+    )?;
+    let mut states = vec![CallbackPath {
+        writes: Vec::new(),
+        outcome: CallbackOutcome::Live,
+    }];
+    execute_callback_statements(arenas, statements, &mut states, false, true)?;
+    for state in &mut states {
+        if state.outcome == CallbackOutcome::Live {
+            state.outcome = CallbackOutcome::NormalReturn;
+        }
+    }
+    if states.iter().any(|state| {
+        !matches!(
+            state.outcome,
+            CallbackOutcome::Throw | CallbackOutcome::NormalReturn
+        )
+    }) {
+        return None;
+    }
+    let throw_paths = states
+        .iter()
+        .filter(|state| state.outcome == CallbackOutcome::Throw)
+        .collect::<Vec<_>>();
+    let normal_paths = states
+        .iter()
+        .filter(|state| state.outcome == CallbackOutcome::NormalReturn)
+        .collect::<Vec<_>>();
+    let throw_writes = (!throw_paths.is_empty()).then(|| {
+        throw_paths
+            .iter()
+            .flat_map(|state| state.writes.iter().cloned())
+            .collect()
+    });
+    let normal_writes = (!normal_paths.is_empty()).then(|| {
+        normal_paths
+            .iter()
+            .flat_map(|state| state.writes.iter().cloned())
+            .collect()
+    });
+    Some((throw_writes, normal_writes, all_writes))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallbackOutcome {
+    Live,
+    Throw,
+    NormalReturn,
+    InvalidReturn,
+}
+
+#[derive(Clone)]
+struct CallbackPath {
+    writes: Vec<(Vec<Name>, ExprId)>,
+    outcome: CallbackOutcome,
+}
+
+fn collect_literal_assignments(
+    arenas: &NodeArenas,
+    statements: &[StmtId],
+    out: &mut Vec<(Vec<Name>, ExprId)>,
+    reads: &mut Vec<Vec<Name>>,
+    allow_unqualified_runtime_exception: bool,
+) -> Option<()> {
+    for id in statements {
+        let stmt = arenas.stmt(*id)?;
+        match &stmt.kind {
+            StmtKind::Expression(expression) => {
+                out.push(simple_literal_property_assignment(arenas, *expression)?);
+            }
+            StmtKind::Block(body) => {
+                collect_literal_assignments(
+                    arenas,
+                    arenas.stmt_ids(body),
+                    out,
+                    reads,
+                    allow_unqualified_runtime_exception,
+                )?;
+            }
+            StmtKind::If(branch) => {
+                simple_branch_condition(arenas, branch.cond, reads)?;
+                collect_literal_assignments(
+                    arenas,
+                    &[branch.then_branch],
+                    out,
+                    reads,
+                    allow_unqualified_runtime_exception,
+                )?;
+                for elseif in arenas.elseifs(branch.elseifs.clone()) {
+                    simple_branch_condition(arenas, elseif.cond, reads)?;
+                    collect_literal_assignments(
+                        arenas,
+                        &[elseif.body],
+                        out,
+                        reads,
+                        allow_unqualified_runtime_exception,
+                    )?;
+                }
+                if let Some(otherwise) = branch.else_branch {
+                    collect_literal_assignments(
+                        arenas,
+                        &[otherwise],
+                        out,
+                        reads,
+                        allow_unqualified_runtime_exception,
+                    )?;
+                }
+            }
+            StmtKind::Throw(value) => {
+                if !is_noarg_runtime_exception(arenas, *value, allow_unqualified_runtime_exception)
+                {
+                    return None;
+                }
+            }
+            StmtKind::Return(None) => {}
+            StmtKind::Return(Some(value)) => {
+                // Returning a value may invoke user code while evaluating it;
+                // accept only side-effect-free values we can classify.
+                if callback_return_is_definitely_invalid(arenas, *value, false).is_none() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(())
+}
+
+fn collect_branch_reads(
+    arenas: &NodeArenas,
+    statements: &[StmtId],
+    reads: &mut Vec<Vec<Name>>,
+    allow_unqualified_runtime_exception: bool,
+) -> Option<()> {
+    let mut ignored_writes = Vec::new();
+    collect_literal_assignments(
+        arenas,
+        statements,
+        &mut ignored_writes,
+        reads,
+        allow_unqualified_runtime_exception,
+    )
+}
+
+fn simple_branch_condition(
+    arenas: &NodeArenas,
+    id: ExprId,
+    reads: &mut Vec<Vec<Name>>,
+) -> Option<()> {
+    let expression = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    match &expression.kind {
+        ExprKind::Variable(_) | ExprKind::Literal(_) => Some(()),
+        ExprKind::PropertyAccess(..) => {
+            reads.push(simple_this_property_path(arenas, id)?);
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Weak scalar returns are converted to strings by PHP's magic-method
+/// boundary. Null and an empty array fail that boundary. Other expressions
+/// need ordinary conservative handling because evaluating them may run code.
+fn callback_return_is_definitely_invalid(
+    arenas: &NodeArenas,
+    id: ExprId,
+    strict_types: bool,
+) -> Option<bool> {
+    let expression = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    match &expression.kind {
+        ExprKind::Literal(Literal::Null) => Some(true),
+        ExprKind::Literal(Literal::String(_)) => Some(false),
+        ExprKind::Literal(_) => Some(strict_types),
+        ExprKind::ArrayLiteral(items) if arenas.array_items(items.clone()).is_empty() => Some(true),
+        _ => None,
+    }
+}
+
+fn simple_this_property_path(arenas: &NodeArenas, id: ExprId) -> Option<Vec<Name>> {
+    fn visit(arenas: &NodeArenas, id: ExprId, path: &mut Vec<Name>) -> Option<()> {
+        let expression = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+        match &expression.kind {
+            ExprKind::Variable(name) if **name == *"this" => Some(()),
+            ExprKind::PropertyAccess(base, property, _) => {
+                visit(arenas, *base, path)?;
+                path.push(property.name.clone());
+                Some(())
+            }
+            _ => None,
+        }
+    }
+    let mut path = Vec::new();
+    visit(arenas, id, &mut path)?;
+    (!path.is_empty()).then_some(path)
+}
+
+fn is_noarg_runtime_exception(arenas: &NodeArenas, id: ExprId, allow_unqualified: bool) -> bool {
+    let Some(expression) = arenas.peeled(id).and_then(|id| arenas.expr(id)) else {
+        return false;
+    };
+    let ExprKind::New(callee, args) = &expression.kind else {
+        return false;
+    };
+    if !arenas.args(args.clone()).is_empty() {
+        return false;
+    }
+    let Some(ExprKind::Name(name)) = arenas.expr(*callee).map(|callee| &callee.kind) else {
+        return false;
+    };
+    let Some(name) = arenas.qualified_name(name) else {
+        return false;
+    };
+    matches!(&name.resolved, ResolvedName::Exact(name) if name.eq_ignore_ascii_case("RuntimeException"))
+        || (allow_unqualified && name.written.eq_ignore_ascii_case("RuntimeException"))
+}
+
+fn execute_callback_statements(
+    arenas: &NodeArenas,
+    statements: &[StmtId],
+    states: &mut Vec<CallbackPath>,
+    strict_types: bool,
+    destructor: bool,
+) -> Option<()> {
+    for id in statements {
+        let stmt = arenas.stmt(*id)?;
+        let mut next = Vec::new();
+        for mut state in std::mem::take(states) {
+            if state.outcome != CallbackOutcome::Live {
+                next.push(state);
+                continue;
+            }
+            match &stmt.kind {
+                StmtKind::Expression(expression) => {
+                    state
+                        .writes
+                        .push(simple_literal_property_assignment(arenas, *expression)?);
+                    next.push(state);
+                }
+                StmtKind::Throw(_) => {
+                    state.outcome = CallbackOutcome::Throw;
+                    next.push(state);
+                }
+                StmtKind::Return(Some(value)) => {
+                    if destructor {
+                        return None;
+                    }
+                    state.outcome =
+                        if callback_return_is_definitely_invalid(arenas, *value, strict_types)? {
+                            CallbackOutcome::InvalidReturn
+                        } else {
+                            CallbackOutcome::NormalReturn
+                        };
+                    next.push(state);
+                }
+                StmtKind::Return(None) => {
+                    state.outcome = if destructor {
+                        CallbackOutcome::NormalReturn
+                    } else {
+                        CallbackOutcome::InvalidReturn
+                    };
+                    next.push(state);
+                }
+                StmtKind::Block(body) => {
+                    let mut nested = vec![state];
+                    execute_callback_statements(
+                        arenas,
+                        arenas.stmt_ids(body),
+                        &mut nested,
+                        strict_types,
+                        destructor,
+                    )?;
+                    next.extend(nested);
+                }
+                StmtKind::If(branch) => {
+                    simple_branch_condition(arenas, branch.cond, &mut Vec::new())?;
+                    let mut branch_ids = vec![branch.then_branch];
+                    branch_ids.extend(
+                        arenas
+                            .elseifs(branch.elseifs.clone())
+                            .iter()
+                            .map(|branch| branch.body),
+                    );
+                    if let Some(otherwise) = branch.else_branch {
+                        branch_ids.push(otherwise);
+                    } else {
+                        next.push(state.clone());
+                    }
+                    for branch_id in branch_ids {
+                        let mut branch_state = vec![state.clone()];
+                        execute_callback_statements(
+                            arenas,
+                            &[branch_id],
+                            &mut branch_state,
+                            strict_types,
+                            destructor,
+                        )?;
+                        next.extend(branch_state);
+                    }
+                }
+                _ => return None,
+            }
+        }
+        if next.len() > 64 {
+            return None;
+        }
+        *states = next;
+    }
+    Some(())
+}
+
+fn simple_literal_property_assignment(
+    arenas: &NodeArenas,
+    id: ExprId,
+) -> Option<(Vec<Name>, ExprId)> {
+    fn property_path(arenas: &NodeArenas, id: ExprId, out: &mut Vec<Name>) -> Option<()> {
+        let expression = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+        match &expression.kind {
+            ExprKind::Variable(name) if **name == *"this" => Some(()),
+            ExprKind::PropertyAccess(base, property, _) => {
+                property_path(arenas, *base, out)?;
+                out.push(property.name.clone());
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    let expression = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    let ExprKind::Assign(target, value) = &expression.kind else {
+        return None;
+    };
+    let value_id = arenas.peeled(*value)?;
+    let value = arenas.expr(value_id)?;
+    if !matches!(value.kind, ExprKind::Literal(_)) {
+        return None;
+    }
+    let mut path = Vec::new();
+    property_path(arenas, *target, &mut path)?;
+    (path.len() >= 2).then_some((path, value_id))
 }

@@ -29,6 +29,25 @@ use crate::registry::{
     Registry,
 };
 
+impl Canonical for crate::registry::RuntimeTargetProfile {
+    fn canonical(&self, p: &mut Printer) {
+        let encoded = serde_json::to_string(&self.0)
+            .expect("runtime target profile has a deterministic JSON representation");
+        p.node(
+            "RuntimeTargetProfile",
+            &[("profile", &CanonicalText(encoded))],
+        );
+    }
+}
+
+struct CanonicalText(String);
+
+impl Canonical for CanonicalText {
+    fn canonical(&self, p: &mut Printer) {
+        p.atom(&self.0);
+    }
+}
+
 canonical_struct!(ClassReflection {
     kind,
     is_abstract,
@@ -481,6 +500,7 @@ impl CanonicalOver for Registry {
             scoped_names: _,
             php_versions,
             php_releases,
+            php_target_profile,
             unconditionally_declared_classes,
             built_in_stub_classes,
             unconditionally_declared_functions,
@@ -563,6 +583,7 @@ impl CanonicalOver for Registry {
                 ("scope", scope),
                 ("php_versions", php_versions),
                 ("php_releases", php_releases),
+                ("php_target_profile", php_target_profile),
                 (
                     "unconditionally_declared_classes",
                     &Over(
@@ -701,6 +722,7 @@ canonical_struct!(Registry {
     scope,
     php_versions,
     php_releases,
+    php_target_profile,
     unconditionally_declared_classes,
     built_in_stub_classes,
     unconditionally_declared_functions,

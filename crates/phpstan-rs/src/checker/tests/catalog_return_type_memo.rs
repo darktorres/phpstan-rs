@@ -28,12 +28,16 @@ fn same_span_keeps_distinct_argument_states_and_file_change_clears_them() {
         )],
         diagnostics_closed: true,
         invoked_string_arguments: vec![],
+        php_throw_without_string_invocation: false,
+        php_throw_invoked_string_arguments: vec![],
     };
     let int_evaluation = CatalogCallEvaluation {
         return_type: int_result.clone(),
         diagnostics: vec![],
         diagnostics_closed: true,
         invoked_string_arguments: vec![0],
+        php_throw_without_string_invocation: true,
+        php_throw_invoked_string_arguments: vec![0],
     };
 
     checker.remember_catalog_return_type(span, null_argument.clone(), null_evaluation);
@@ -61,6 +65,10 @@ fn same_span_keeps_distinct_argument_states_and_file_change_clears_them() {
         Some((int_result, vec![]))
     );
     assert_eq!(checker.catalog_string_arguments_at(span), Some(vec![0]));
+    assert_eq!(
+        checker.catalog_php_throw_invocation_at(span),
+        Some((true, vec![0]))
+    );
 
     checker.set_current_file(std::path::Path::new("first.php"));
     assert!(
@@ -74,4 +82,5 @@ fn same_span_keeps_distinct_argument_states_and_file_change_clears_them() {
             .is_none()
     );
     assert!(checker.catalog_string_arguments_at(span).is_none());
+    assert!(checker.catalog_php_throw_invocation_at(span).is_none());
 }

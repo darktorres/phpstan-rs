@@ -707,6 +707,8 @@ pub struct ProjectSettings {
     pub php_versions: Option<types::PhpVersions>,
     /// Patch-aware PHP release interval for semantic catalog selection.
     pub php_releases: Option<types::PhpReleaseRange>,
+    /// Explicit runtime facts used to select profile-bound catalog evidence.
+    pub php_target_profile: Option<php_semantics::TargetProfile>,
     /// Whether the project consumes PHPStan as a library, which the
     /// PHPStan-API rules apply to.
     pub phpstan_api_check_enabled: bool,
@@ -953,6 +955,7 @@ impl Project {
             packages,
             php_versions,
             php_releases,
+            php_target_profile,
             phpstan_api_check_enabled,
             retain_source,
             keeps_as_built,
@@ -983,6 +986,8 @@ impl Project {
         self.registry.php_versions = php_versions;
         self.registry.php_releases = php_releases
             .or_else(|| php_versions.map(types::PhpReleaseRange::from_language_versions));
+        self.registry.php_target_profile =
+            php_target_profile.map(crate::registry::RuntimeTargetProfile);
         self.registry
             .set_assertion_tables(overlays.assertions, overlays.class_argument_returns);
 

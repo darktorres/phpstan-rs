@@ -13,6 +13,8 @@ struct CatalogTypeHost<'a> {
     weak_scalar_coercions: bool,
     registry: &'a Registry,
     invocation_coverage: Vec<php_semantics::DomainCoverage>,
+    definitely_invalid_string_arguments: std::collections::BTreeSet<u32>,
+    temporary_string_arguments: std::collections::BTreeSet<u32>,
 }
 
 #[cfg(test)]
@@ -27,6 +29,8 @@ mod catalog_type_host_tests {
             weak_scalar_coercions: true,
             registry: &registry,
             invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: Default::default(),
         };
         let exits = host.event(
             &php_semantics::Event::Invoke {
@@ -48,17 +52,287 @@ mod catalog_type_host_tests {
                 ..
             }
         )));
+        assert!(exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::EventExit::PhpThrow { state, .. }
+                if state.invoked_string_arguments.contains(&0)
+        )));
         assert!(
             exits
                 .iter()
-                .any(|exit| matches!(exit, php_semantics::EventExit::PhpThrow { .. }))
+                .any(|exit| matches!(exit, php_semantics::EventExit::Fatal { .. }))
         );
-        assert!(!exits.iter().any(|exit| matches!(
+        assert!(
+            exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::EventExit::Suspended { .. }))
+        );
+        assert!(
+            !exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::EventExit::NativeUnwind { .. }))
+        );
+    }
+
+    #[test]
+    fn temporary_release_has_a_distinct_destructor_php_throw_outcome() {
+        let registry = Registry::default();
+        let host = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: [0].into_iter().collect(),
+        };
+        let exits = host.event(
+            &php_semantics::Event::Release {
+                value: php_semantics::Operand::Argument(0),
+            },
+            &[Type::object("Stringable".into(), Vec::new())],
+            &Type::mixed(),
+            &[],
+            CatalogTypeState::default(),
+        );
+        assert!(exits.iter().any(|exit| matches!(
             exit,
-            php_semantics::EventExit::NativeUnwind { .. }
-                | php_semantics::EventExit::Fatal { .. }
-                | php_semantics::EventExit::Suspended { .. }
+            php_semantics::EventExit::Normal { state, .. }
+                if state.released_string_arguments.contains(&0)
         )));
+        assert!(exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::EventExit::PhpThrow { state, .. }
+                if state.released_string_arguments.contains(&0)
+        )));
+    }
+
+    #[test]
+    fn strlen_parser_predicate_separates_weak_and_strict_scalar_paths() {
+        let registry = Registry::default();
+        let weak = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: Default::default(),
+        };
+        let strict = CatalogTypeHost {
+            weak_scalar_coercions: false,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: Default::default(),
+        };
+        let parser = php_semantics::Predicate::Host(php_semantics::Bytes(
+            b"strlen-string-parser-accepts-under-call-strictness".to_vec(),
+        ));
+        let decide = |host: &CatalogTypeHost<'_>, ty: Type| {
+            host.test(
+                &parser,
+                &[ty],
+                &Type::mixed(),
+                &[],
+                &CatalogTypeState::default(),
+            )
+        };
+
+        for ty in [
+            Type::int(),
+            Type::float(),
+            Type::bool(),
+            Type::null(),
+            Type::string(),
+        ] {
+            let is_string = ty.is_string().yes();
+            assert_eq!(decide(&weak, ty.clone()), php_semantics::Truth::Yes);
+            assert_eq!(
+                decide(&strict, ty),
+                if is_string {
+                    php_semantics::Truth::Yes
+                } else {
+                    php_semantics::Truth::No
+                }
+            );
+        }
+        assert_eq!(
+            decide(&weak, Type::array(Type::int(), Type::mixed())),
+            php_semantics::Truth::No
+        );
+        assert_eq!(decide(&weak, Type::mixed()), php_semantics::Truth::Maybe);
+        assert_eq!(
+            decide(
+                &weak,
+                Type::union_of(vec![Type::int(), Type::array(Type::int(), Type::mixed())])
+            ),
+            php_semantics::Truth::Maybe
+        );
+    }
+
+    #[test]
+    fn strlen_graph_routes_parser_failure_and_throwing_diagnostic_to_php_throw() {
+        let catalog = crate::semantics::embedded_catalog();
+        let key = php_semantics::EntryKey::Function {
+            extension: php_semantics::Bytes(b"standard".to_vec()),
+            name: php_semantics::Bytes(b"strlen".to_vec()),
+        };
+        let targets = crate::semantics::target_set_from_php_versions(Some(
+            types::PhpVersions::exactly(types::PhpVersion::new(8, 5)),
+        ));
+        let selection = catalog.select_for_targets(&key, &targets);
+        assert_eq!(selection.variants.len(), 1);
+        let graph = selection.variants[0].graph;
+        for (block_index, expected_terminator) in [(6, false), (8, true)] {
+            let block = &graph.blocks[block_index];
+            assert!(matches!(
+                block.events.first(),
+                Some(php_semantics::Event::Release { .. })
+            ));
+            assert!(matches!(
+                block.events.get(1),
+                Some(php_semantics::Event::Unknown { domains, .. })
+                    if domains.contains(&php_semantics::Domain::Output)
+                        && domains.contains(&php_semantics::Domain::Invocation)
+                        && domains.contains(&php_semantics::Domain::UserWrite)
+            ));
+            assert_eq!(
+                matches!(block.terminator, php_semantics::Terminator::Resume),
+                expected_terminator
+            );
+        }
+        let registry = Registry::default();
+        let evaluate = |host: &mut CatalogTypeHost<'_>, ty| {
+            php_semantics::evaluate(
+                graph,
+                &[ty],
+                &Type::mixed(),
+                CatalogTypeState::default(),
+                host,
+            )
+            .expect("strlen graph evaluates and validates its post-fixpoint")
+        };
+
+        let mut weak = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: graph.coverage.clone(),
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: Default::default(),
+        };
+        let weak_int = evaluate(&mut weak, Type::int());
+        assert!(
+            weak_int
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::Exit::Normal { .. }))
+        );
+        assert!(
+            !weak_int
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::Exit::PhpThrow { .. }))
+        );
+
+        let weak_null = evaluate(&mut weak, Type::null());
+        assert!(weak_null.exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::Exit::PhpThrow { state, .. }
+                if state.diagnostics.contains(&(
+                    php_semantics::DiagnosticKind::NullToInternalScalarParameterDeprecated,
+                    0,
+                ))
+        )));
+
+        let stringable = evaluate(&mut weak, Type::object("Stringable".into(), Vec::new()));
+        assert!(stringable.exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::Exit::Normal { state, .. }
+                if state.released_string_arguments.contains(&0)
+        )));
+        assert!(
+            stringable.exits.iter().any(|exit| matches!(
+                exit,
+                php_semantics::Exit::PhpThrow { state, .. }
+                    if state.released_string_arguments.contains(&0)
+            )),
+            "the pending callback throw must pass through Release before resume"
+        );
+
+        let mut temporary_host = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: graph.coverage.clone(),
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: [0].into_iter().collect(),
+        };
+        let temporary = evaluate(
+            &mut temporary_host,
+            Type::object("Stringable".into(), Vec::new()),
+        );
+        assert!(temporary.exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::Exit::Normal { state, .. }
+                if state.released_string_arguments.contains(&0)
+        )));
+        assert!(
+            temporary.exits.iter().any(|exit| matches!(
+                exit,
+                php_semantics::Exit::PhpThrow { state, .. }
+                    if state.released_string_arguments.contains(&0)
+            )),
+            "a destructor throw on normal release must reach the caller"
+        );
+        assert!(weak_null.exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::Exit::Normal { state, .. }
+                if state.diagnostics.contains(&(
+                    php_semantics::DiagnosticKind::NullToInternalScalarParameterDeprecated,
+                    0,
+                ))
+        )));
+
+        let weak_array = evaluate(&mut weak, Type::array(Type::int(), Type::mixed()));
+        assert!(weak_array.exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::Exit::PhpThrow { value, .. } if value.is_mixed()
+        )));
+        assert!(
+            !weak_array
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::Exit::Normal { .. }))
+        );
+
+        let mut strict = CatalogTypeHost {
+            weak_scalar_coercions: false,
+            registry: &registry,
+            invocation_coverage: graph.coverage.clone(),
+            definitely_invalid_string_arguments: Default::default(),
+            temporary_string_arguments: Default::default(),
+        };
+        let strict_int = evaluate(&mut strict, Type::int());
+        assert!(
+            strict_int
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::Exit::PhpThrow { .. }))
+        );
+        assert!(
+            !strict_int
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::Exit::Normal { .. }))
+        );
+        let strict_null = evaluate(&mut strict, Type::null());
+        assert!(strict_null.exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::Exit::PhpThrow { state, .. }
+                if state.diagnostics.is_empty()
+        )));
+        assert!(
+            !strict_null
+                .exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::Exit::Normal { .. }))
+        );
     }
 }
 
@@ -66,6 +340,33 @@ mod catalog_type_host_tests {
 struct CatalogTypeState {
     diagnostics: std::collections::BTreeSet<(php_semantics::DiagnosticKind, u32)>,
     invoked_string_arguments: std::collections::BTreeSet<u32>,
+    released_string_arguments: std::collections::BTreeSet<u32>,
+}
+
+fn supports_catalog_strlen_binding(sig: &FunctionReflection, args: &[Arg]) -> bool {
+    let params = sig.params();
+    let Some(param) = (params.len() == 1).then(|| &params[0]) else {
+        return false;
+    };
+    let mut spread_seen = false;
+    let mut explicit_arguments = 0;
+    for argument in args {
+        if argument.spread {
+            spread_seen = true;
+            continue;
+        }
+        explicit_arguments += 1;
+        if explicit_arguments > 1 {
+            return false;
+        }
+        match &argument.name {
+            Some(name) if name.name.as_ref() == &*param.name() => {}
+            Some(_) => return false,
+            None if spread_seen => return false,
+            None => {}
+        }
+    }
+    explicit_arguments == 1 || args.iter().any(|argument| argument.spread)
 }
 
 impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
@@ -86,6 +387,10 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                 .iter()
                 .find(|(result, _)| result == index)
                 .map(|(_, value)| value.clone()),
+            // This graph uses Unknown only for parser-rejection exceptions,
+            // whose exact TypeError class/message stays outside the model.
+            // Mixed preserves the PHP-throw exit without inventing a value.
+            php_semantics::Operand::Unknown => Some(Type::mixed()),
             php_semantics::Operand::IntRange { min, max } => Some(Type::int_range(*min, *max)),
             php_semantics::Operand::StringByteLength(index) => {
                 let argument = arguments.get(*index as usize)?;
@@ -105,7 +410,7 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                     Some(Type::int_range(Some(0), None))
                 }
             }
-            php_semantics::Operand::Literal(_) | php_semantics::Operand::Unknown => None,
+            php_semantics::Operand::Literal(_) => None,
         }
     }
 
@@ -119,6 +424,14 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
     ) -> php_semantics::Truth {
         match predicate {
             php_semantics::Predicate::Always => php_semantics::Truth::Yes,
+            php_semantics::Predicate::Host(id)
+                if id.0 == b"strlen-string-parser-accepts-under-call-strictness" =>
+            {
+                let Some(argument) = arguments.first() else {
+                    return php_semantics::Truth::Maybe;
+                };
+                parser_acceptance_for_strlen(argument, self.weak_scalar_coercions, self.registry)
+            }
             php_semantics::Predicate::Host(id) if id.0 == b"strlen-weak-null-deprecation" => {
                 if !self.weak_scalar_coercions {
                     return php_semantics::Truth::No;
@@ -192,11 +505,20 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
         match event {
             php_semantics::Event::EmitDiagnostic { kind, argument } => {
                 state.diagnostics.insert((*kind, *argument));
-                vec![php_semantics::EventExit::Normal {
+                let mut outcomes = vec![php_semantics::EventExit::Normal {
                     result: None,
+                    state: state.clone(),
+                    coverage: self.invocation_coverage.clone(),
+                }];
+                // PHP error handlers can turn this deprecation into a PHP
+                // exception. Their effects and exact throw value remain open,
+                // so preserve both the normal and exceptional continuation.
+                outcomes.push(php_semantics::EventExit::PhpThrow {
+                    value: Type::mixed(),
                     state,
-                    coverage: vec![],
-                }]
+                    coverage: self.invocation_coverage.clone(),
+                });
+                outcomes
             }
             php_semantics::Event::Unknown { .. } => vec![php_semantics::EventExit::Normal {
                 result: None,
@@ -213,21 +535,65 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                     return Vec::new();
                 };
                 state.invoked_string_arguments.insert(*argument);
-                vec![
-                    php_semantics::EventExit::Normal {
+                let mut outcomes = Vec::new();
+                if !self.definitely_invalid_string_arguments.contains(argument) {
+                    outcomes.push(php_semantics::EventExit::Normal {
                         result: Some((*result, Type::string())),
                         state: state.clone(),
                         coverage: self.invocation_coverage.clone(),
-                    },
+                    });
+                }
+                outcomes.extend([
                     // The paired runtime witness observes a throwing
                     // __toString callback. Keep that path explicit while
                     // leaving its full callback semantics open in coverage.
                     php_semantics::EventExit::PhpThrow {
                         value: Type::mixed(),
+                        state: state.clone(),
+                        coverage: self.invocation_coverage.clone(),
+                    },
+                    // User callbacks can raise an uncatchable PHP fatal or
+                    // suspend from an active Fiber. Both outcomes are
+                    // evidence-backed, but their detailed state is open.
+                    php_semantics::EventExit::Fatal {
+                        value: Type::mixed(),
+                        state: state.clone(),
+                        coverage: self.invocation_coverage.clone(),
+                    },
+                    php_semantics::EventExit::Suspended {
+                        value: Type::mixed(),
                         state,
                         coverage: self.invocation_coverage.clone(),
                     },
-                ]
+                ]);
+                outcomes
+            }
+            php_semantics::Event::Release { value } => {
+                if let php_semantics::Operand::Argument(argument) = value {
+                    state.released_string_arguments.insert(*argument);
+                    if self.temporary_string_arguments.contains(argument) {
+                        // The temporary's destructor runs at this release
+                        // point. Its PHP throw replaces an already pending
+                        // PHP throw, or becomes the call's PHP-throw exit.
+                        return vec![
+                            php_semantics::EventExit::Normal {
+                                result: None,
+                                state: state.clone(),
+                                coverage: self.invocation_coverage.clone(),
+                            },
+                            php_semantics::EventExit::PhpThrow {
+                                value: Type::mixed(),
+                                state,
+                                coverage: self.invocation_coverage.clone(),
+                            },
+                        ];
+                    }
+                }
+                vec![php_semantics::EventExit::Normal {
+                    result: None,
+                    state,
+                    coverage: self.invocation_coverage.clone(),
+                }]
             }
             _ => Vec::new(),
         }
@@ -249,6 +615,8 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
         left.diagnostics.extend(right.diagnostics);
         left.invoked_string_arguments
             .extend(right.invoked_string_arguments);
+        left.released_string_arguments
+            .extend(right.released_string_arguments);
         left
     }
     fn widen_state(&self, old: Self::State, next: Self::State) -> Self::State {
@@ -259,6 +627,75 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
             && narrow
                 .invoked_string_arguments
                 .is_subset(&broad.invoked_string_arguments)
+            && narrow
+                .released_string_arguments
+                .is_subset(&broad.released_string_arguments)
+    }
+}
+
+fn parser_acceptance_for_strlen(
+    argument: &Type,
+    weak_scalar_coercions: bool,
+    registry: &Registry,
+) -> php_semantics::Truth {
+    use php_semantics::Truth;
+
+    let members = argument.union_members();
+    if members.is_empty() {
+        return Truth::Maybe;
+    }
+
+    let mut accepts = false;
+    let mut rejects = false;
+    for member in members {
+        if member.is_mixed() {
+            return Truth::Maybe;
+        }
+
+        let mut accepted_kind = member.is_string();
+        if weak_scalar_coercions {
+            accepted_kind = accepted_kind
+                .or(member.is_int())
+                .or(member.is_float())
+                .or(member.is_bool())
+                .or(member.is_null());
+        }
+        match accepted_kind {
+            types::TrinaryLogic::Yes => accepts = true,
+            types::TrinaryLogic::Maybe => return Truth::Maybe,
+            types::TrinaryLogic::No => {
+                if member.is_object().yes() {
+                    if !weak_scalar_coercions {
+                        rejects = true;
+                    } else if let Some((class, _)) = member.as_object() {
+                        if registry.is_subclass_of(class, "Stringable") {
+                            accepts = true;
+                        } else if registry
+                            .class_by_name(class)
+                            .is_some_and(|class| class.is_final())
+                        {
+                            rejects = true;
+                        } else {
+                            return Truth::Maybe;
+                        }
+                    } else {
+                        return Truth::Maybe;
+                    }
+                } else if member.is_object().maybe() {
+                    return Truth::Maybe;
+                } else {
+                    rejects = true;
+                }
+            }
+        }
+        if accepts && rejects {
+            return Truth::Maybe;
+        }
+    }
+    match (accepts, rejects) {
+        (true, false) => Truth::Yes,
+        (false, true) => Truth::No,
+        _ => Truth::Maybe,
     }
 }
 
@@ -2334,7 +2771,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         call_span: Span,
     ) -> Option<CatalogCallEvaluation> {
-        if name != "strlen" || !sig.is_stub() || args.len() != 1 {
+        if name != "strlen" || !sig.is_stub() || !supports_catalog_strlen_binding(sig, args) {
             return None;
         }
         let key = php_semantics::EntryKey::Function {
@@ -2355,11 +2792,22 @@ impl<'a> Checker<'a> {
         let syntax_owner = self.syntax_tree_owner()?;
         let arenas = syntax_owner.arenas();
         let resolved = resolve_call_args(arenas, args, sig.params());
+        let unpacked_values = args
+            .iter()
+            .filter(|argument| argument.spread)
+            .filter_map(|argument| arenas.expr(argument.value))
+            .filter_map(|value| self.infer_expr(value, locals).array_value_type())
+            .collect::<Vec<_>>();
         let arguments: Vec<Type> = resolved
             .iter()
-            .map(|argument| {
+            .enumerate()
+            .map(|(index, argument)| {
                 argument
                     .map(|expression| self.infer_expr(expression, locals))
+                    .or_else(|| {
+                        (index == 0 && !unpacked_values.is_empty())
+                            .then(|| Type::union_of(unpacked_values.clone()))
+                    })
                     .unwrap_or_else(Type::mixed)
             })
             .collect();
@@ -2373,11 +2821,37 @@ impl<'a> Checker<'a> {
             weak_scalar_coercions: strict_types == Some(false),
             registry: self.registry,
             invocation_coverage: Vec::new(),
+            definitely_invalid_string_arguments: resolved
+                .iter()
+                .enumerate()
+                .filter_map(|(index, expression)| {
+                    let expression = (*expression)?;
+                    let ty = self.infer_expr(expression, locals);
+                    self.catalog_string_callback_definitely_invalid(&ty, locals)
+                        .then_some(index as u32)
+                })
+                .collect(),
+            temporary_string_arguments: resolved
+                .iter()
+                .enumerate()
+                .filter_map(|(index, expression)| {
+                    let expression = (*expression)?;
+                    let is_new = self.syntax_arenas().is_some_and(|arenas| {
+                        arenas
+                            .peeled(expression.id)
+                            .and_then(|id| arenas.expr(id))
+                            .is_some_and(|expression| matches!(expression.kind, ExprKind::New(..)))
+                    });
+                    is_new.then_some(index as u32)
+                })
+                .collect(),
         };
         let receiver = Type::mixed();
         let mut returns = Vec::new();
         let mut diagnostics = std::collections::BTreeSet::new();
         let mut invoked_string_arguments = std::collections::BTreeSet::new();
+        let mut php_throw_without_string_invocation = false;
+        let mut php_throw_invoked_string_arguments = std::collections::BTreeSet::new();
         let mut diagnostics_closed = true;
         for variant in selected.variants {
             host.invocation_coverage = variant.graph.coverage.clone();
@@ -2393,8 +2867,8 @@ impl<'a> Checker<'a> {
                 &receiver,
                 CatalogTypeState::default(),
                 &mut host,
-            )
-            .ok()?;
+            );
+            let evaluation = evaluation.ok()?;
             evaluation
                 .post_fixpoint
                 .validate(variant.graph, &host)
@@ -2406,14 +2880,14 @@ impl<'a> Checker<'a> {
                 .is_some_and(|coverage| {
                     matches!(coverage.coverage, php_semantics::Coverage::Closed)
                 });
-            if !matches!(
-                evaluation
-                    .coverage
-                    .iter()
-                    .find(|coverage| coverage.domain == php_semantics::Domain::Return)?
-                    .coverage,
-                php_semantics::Coverage::Closed
-            ) {
+            if !evaluation
+                .coverage
+                .iter()
+                .find(|coverage| coverage.domain == php_semantics::Domain::Return)
+                .is_some_and(|coverage| {
+                    matches!(coverage.coverage, php_semantics::Coverage::Closed)
+                })
+            {
                 return None;
             }
             for exit in evaluation.exits {
@@ -2427,14 +2901,36 @@ impl<'a> Checker<'a> {
                         invoked_string_arguments.extend(state.invoked_string_arguments);
                     }
                     php_semantics::Exit::Normal { value: None, .. } => return None,
-                    php_semantics::Exit::PhpThrow { .. }
-                    | php_semantics::Exit::NativeUnwind { .. }
-                    | php_semantics::Exit::Fatal { .. }
-                    | php_semantics::Exit::Suspended { .. } => return None,
+                    // Return inference describes normal completions. Preserve
+                    // callback observations from abrupt paths for the
+                    // checker’s call-effect transfer, but do not let a
+                    // possible throw/fatal/suspension discard the valid
+                    // normal-result type. The graph keeps these exit domains
+                    // open, so this does not claim their state is modeled.
+                    php_semantics::Exit::PhpThrow { state, .. } => {
+                        diagnostics.extend(state.diagnostics);
+                        if state.invoked_string_arguments.is_empty() {
+                            php_throw_without_string_invocation = true;
+                        }
+                        php_throw_invoked_string_arguments.extend(state.invoked_string_arguments);
+                    }
+                    php_semantics::Exit::NativeUnwind { state, .. }
+                    | php_semantics::Exit::Fatal { state, .. }
+                    | php_semantics::Exit::Suspended { state, .. } => {
+                        diagnostics.extend(state.diagnostics);
+                    }
                 }
             }
         }
-        let return_type = (!returns.is_empty()).then(|| Type::union_of(returns))?;
+        // A closed graph may have no normal exit: e.g. every source-backed
+        // Stringable callback path returns an invalid value and raises
+        // TypeError. Preserve that as `never` instead of falling back to the
+        // generic native signature's `int` result.
+        let return_type = if returns.is_empty() {
+            Type::never()
+        } else {
+            Type::union_of(returns)
+        };
         let evaluation = CatalogCallEvaluation {
             return_type,
             diagnostics: if diagnostics_closed {
@@ -2444,6 +2940,10 @@ impl<'a> Checker<'a> {
             },
             diagnostics_closed,
             invoked_string_arguments: invoked_string_arguments.into_iter().collect(),
+            php_throw_without_string_invocation,
+            php_throw_invoked_string_arguments: php_throw_invoked_string_arguments
+                .into_iter()
+                .collect(),
         };
         self.remember_catalog_return_type(call_span, arguments, evaluation.clone());
         Some(evaluation)

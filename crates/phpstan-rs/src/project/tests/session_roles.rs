@@ -198,6 +198,46 @@ fn an_invalid_setting_fails_one_policy_and_is_taken_as_unset_by_the_other() {
 }
 
 #[test]
+fn configured_php_target_profile_reaches_the_loaded_registry() {
+    let dir = tree();
+    let schema = crate::app::config_schema();
+    let config = config::ConfigFile::parse(
+        "php_version = \"8.5.4\"\nphp_target_profile = { os = \"Linux\", arch = \"x86_64\", sapi = \"cli\", zts = false, debug = false }\n",
+        &schema,
+    )
+    .unwrap();
+    let resolved = Session::resolve(
+        &config,
+        None,
+        dir.0.clone(),
+        Overrides {
+            no_composer: true,
+            paths: paths(&["src"]),
+            ..Overrides::default()
+        },
+        Policy::Fail,
+        worker_pool(),
+    )
+    .unwrap();
+    let loaded = resolved.load().unwrap();
+    let target = loaded.project.registry().semantic_target_set();
+    assert_eq!(
+        target.scenarios[0].os,
+        Some(php_semantics::Bytes(b"linux".to_vec()))
+    );
+    assert_eq!(
+        target.scenarios[0].arch,
+        Some(php_semantics::Bytes(b"x86_64".to_vec()))
+    );
+    assert_eq!(
+        target.scenarios[0].sapi,
+        Some(php_semantics::Bytes(b"cli".to_vec()))
+    );
+    assert_eq!(target.scenarios[0].zts, Some(false));
+    assert_eq!(target.scenarios[0].debug, Some(false));
+}
+
+#[test]
 fn a_context_walk_does_not_go_into_an_analysed_root_below_it() {
     let dir = TempDir::new("session_roles_nested");
     dir.write("lib/C.php", "<?php class C {}");

@@ -243,11 +243,38 @@ impl<'a> Checker<'a> {
             if let Some(native) = native {
                 self.record_expr_type(self.expr_span(e.id), ty.clone(), native);
             }
+            let span = self.expr_span(e.id);
+            let catalog_throw_invocations = (!self.try_throw_states.is_empty())
+                .then(|| self.catalog_php_throw_invocation_at(span))
+                .flatten()
+                .filter(|(without_invocation, invoked)| *without_invocation || !invoked.is_empty());
+            let before_call_effect = catalog_throw_invocations.as_ref().map(|_| locals.clone());
             self.forget_what_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
                 && let Some(thrown) = self.thrown_by(e, locals)
             {
-                self.record_throw_state(thrown, locals);
+                if let Some((without_invocation, invoked)) = catalog_throw_invocations {
+                    if without_invocation
+                        && let Some(before_call_effect) = before_call_effect.as_ref()
+                    {
+                        self.record_throw_state(thrown.clone(), before_call_effect);
+                    }
+                    if !invoked.is_empty() {
+                        let mut throw_locals = before_call_effect
+                            .as_ref()
+                            .cloned()
+                            .unwrap_or_else(|| locals.clone());
+                        self.forget_catalog_string_arguments_may_change(
+                            e,
+                            &invoked,
+                            true,
+                            &mut throw_locals,
+                        );
+                        self.record_throw_state(thrown, &throw_locals);
+                    }
+                } else {
+                    self.record_throw_state(thrown, locals);
+                }
             }
             if !self.external_rules.is_empty() {
                 self.dispatch_expr_rules(e, locals, &ty);
@@ -1044,8 +1071,11 @@ impl<'a> Checker<'a> {
                     // reference, before the `if let` below consumes
                     // `callee_ty` by value) for every dynamic-callee
                     // shape this branch covers.
-                    if let Some(level) =
-                        self.failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
+                    let callable_names = callee_ty.constant_strings_text();
+                    let exact_strlen_callable = matches!(callable_names.as_slice(), [name] if name.eq_ignore_ascii_case("strlen"));
+                    if !exact_strlen_callable
+                        && let Some(level) = self
+                            .failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
                     {
                         let verdict = if self.relation().is_callable(&callee_ty).no() {
                             "it's not a callable"
@@ -1060,7 +1090,20 @@ impl<'a> Checker<'a> {
                             "callable.nonCallable",
                         );
                     }
-                    if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
+                    if exact_strlen_callable
+                        && let Some(signature) = self.registry.lookup_function("strlen")
+                    {
+                        self.check_args(CheckArgsCall {
+                            callee_label: CalleeLabel::Text("strlen"),
+                            callee: Callee::Function("strlen"),
+                            sig: signature,
+                            args,
+                            locals,
+                            defining_class: None,
+                            is_builtin: true,
+                            span: self.expr_span(e.id),
+                        });
+                    } else if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
                         self.check_dynamic_callable_args(
                             arenas,
                             &callable_sig,
@@ -5969,7 +6012,28 @@ impl<'a> Checker<'a> {
                             }),
                         None => Type::mixed(),
                     },
-                    _ => self.call_fallback_return_type(arenas, callee, args, locals),
+                    _ => {
+                        // A dynamically named builtin is catalogable when
+                        // the callable expression has exactly one constant
+                        // function name. Do not apply a catalog graph to
+                        // unions, arbitrary callables, or unresolved names.
+                        let callee_type = self.infer_expr(callee, locals);
+                        let names = callee_type.constant_strings_text();
+                        if let [name] = names.as_slice()
+                            && name.eq_ignore_ascii_case("strlen")
+                            && let Some(signature) = self.registry.lookup_function("strlen")
+                        {
+                            self.infer_builtin_call_return_type(
+                                "strlen",
+                                signature,
+                                args,
+                                locals,
+                                self.expr_span(e.id),
+                            )
+                        } else {
+                            self.call_fallback_return_type(arenas, callee, args, locals)
+                        }
+                    }
                 }
             }
             ExprKind::MethodCall(..)

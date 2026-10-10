@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "source_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
+  "sources": {
+    "parser": {
+      "path": "Zend/zend_API.c",
+      "sha256": "ba6d163b75905a3fc122186452a4cc08ab06b25e7fc51b22d830b38d5daca23b",
+      "facts": [
+        "zend_object *zobj = Z_OBJ_P(arg);",
+        "if (zobj->handlers->cast_object(zobj, &obj, IS_STRING) == SUCCESS) {",
+        "OBJ_RELEASE(zobj);",
+        "ZVAL_COPY_VALUE(arg, &obj);",
+        "return 0;"
+      ]
+    },
+    "object_cast": {
+      "path": "Zend/zend_object_handlers.c",
+      "sha256": "418536503bfde765c5dff821f689643e0f6ed1d38365f354cbb164633fce10b4",
+      "facts": [
+        "GC_ADDREF(readobj);",
+        "zend_call_known_instance_method_with_0_params(ce->__tostring, readobj, &retval);",
+        "zend_object_release(readobj);",
+        "if (EXPECTED(Z_TYPE(retval) == IS_STRING)) {",
+        "zval_ptr_dtor(&retval);",
+        "zend_throw_error(NULL, \"Method %s::__toString() must return a string value\", ZSTR_VAL(ce->name));"
+      ]
+    },
+    "vm_handler": {
+      "path": "Zend/zend_vm_def.h",
+      "sha256": "6403411fe62a39176fed58060e1c13a934951cd90f187b9d37b6b85532996423",
+      "facts": [
+        "ZVAL_COPY(&tmp, value);",
+        "zval_ptr_dtor(&tmp);",
+        "zval_ptr_dtor_str(value);",
+        "FREE_OP1();"
+      ]
+    },
+    "destructor": {
+      "path": "Zend/zend_objects.c",
+      "sha256": "d8ce93d530d740d0cc5063950cc9309057278df50accdbef429d8ec63e27f818",
+      "facts": [
+        "old_exception = EG(exception);",
+        "zend_call_known_instance_method_with_0_params(destructor, object, NULL);",
+        "if (EG(exception)) {",
+        "zend_exception_set_previous(EG(exception), old_exception);"
+      ]
+    }
+  },
+  "fixture": {
+    "path": "tools/php-catalog/experiments/comparison/runtime-strlen-release.php",
+    "sha256": "e5ed4e344961e590445217a930c6adf2662bc51f83bee67e41aa5f715eba1321"
+  },
+  "profiles": {
+    "normal": {
+      "vm_kind": "ZEND_VM_KIND_TAILCALL",
+      "binary_sha256": "abc41b0be90d2e9d1d744f2c53600c5f6a7e48af09bbd3ffc4eda382ce9236b5",
+      "output_path": "tools/php-catalog/experiments/comparison/results/runtime/php-tailcall-strlen-release.out",
+      "stdout_sha256": "b7f1276624a46cb2d7810c130bcefa2b0d4981b28a8f410a3da00ebf8d289a30"
+    },
+    "call": {
+      "vm_kind": "ZEND_VM_KIND_CALL",
+      "binary_sha256": "866ee99f4de2644b3d28e45dfc2071a5a3926a65b04ab3127baef312102684af",
+      "output_path": "tools/php-catalog/experiments/comparison/results/runtime/php-call-strlen-release.out",
+      "stdout_sha256": "b7f1276624a46cb2d7810c130bcefa2b0d4981b28a8f410a3da00ebf8d289a30"
+    }
+  },
+  "stdout_sha256": "b7f1276624a46cb2d7810c130bcefa2b0d4981b28a8f410a3da00ebf8d289a30",
+  "outputs_identical": true,
+  "output": {
+    "scalarLength": 3,
+    "scalarEvents": [],
+    "retainedLength": 3,
+    "retainedEvents": [
+      "retained:cast"
+    ],
+    "afterRetainedUnset": [
+      "retained:cast",
+      "retained:destruct"
+    ],
+    "temporaryLength": 3,
+    "afterTemporary": [
+      "retained:cast",
+      "retained:destruct",
+      "temporary:cast",
+      "temporary:destruct"
+    ],
+    "dynamicLength": 3,
+    "afterDynamic": [
+      "retained:cast",
+      "retained:destruct",
+      "temporary:cast",
+      "temporary:destruct",
+      "dynamic:cast",
+      "dynamic:destruct"
+    ],
+    "afterThrow": [
+      "retained:cast",
+      "retained:destruct",
+      "temporary:cast",
+      "temporary:destruct",
+      "dynamic:cast",
+      "dynamic:destruct",
+      "throwing:cast",
+      "throwing:destruct",
+      "throwing:caught"
+    ],
+    "reentrantLength": 3,
+    "afterReentrant": [
+      "retained:cast",
+      "retained:destruct",
+      "temporary:cast",
+      "temporary:destruct",
+      "dynamic:cast",
+      "dynamic:destruct",
+      "throwing:cast",
+      "throwing:destruct",
+      "throwing:caught",
+      "reentrant:cast",
+      "reentrant:destruct",
+      "outer:before-reentry",
+      "inner:cast",
+      "inner:length:1",
+      "inner:destruct",
+      "outer:after-reentry"
+    ],
+    "writes": [
+      "retained:write",
+      "temporary:write",
+      "dynamic:write",
+      "throwing:write",
+      "reentrant:write"
+    ],
+    "output": "temporary;"
+  },
+  "cases": {
+    "retained_argument": "cast occurs during strlen; no destructor until caller unsets retained object",
+    "temporary_argument": "cast then destructor occur before the next statement",
+    "dynamic_native_call": "same cast and temporary-destruction order through a dynamic callable",
+    "throwing_cast": "cast write is retained; destructor runs before catch; normal continuation is skipped",
+    "reentrant_destructor": "outer destructor re-enters strlen; inner temporary is destroyed before outer destructor resumes",
+    "observable_effects": "Stringable writes persist; selected destructor output is observable"
+  },
+  "opcode_capture": {
+    "command_template": "php -n -d opcache.enable_cli=1 -d opcache.opt_debug_level=0x20000 <fixture>",
+    "stage": "OPcache optimizer dump after optimization",
+    "opcode": "STRLEN",
+    "count": 5,
+    "outputs_identical": true,
+    "dump_sha256": "56b771fa9460bb846e039dfd62c6a71e2514a98cb6ad35ac7b1dd78bdcd87310",
+    "dump": "\n$_main:\n     ; (lines=92, args=0, vars=20, tmps=2)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:1-120\n0000 ASSIGN CV0($events) array(...)\n0001 ASSIGN CV1($writes) array(...)\n0002 ASSIGN CV2($output) string(\"\")\n0003 DECLARE_CLASS string(\"strlenreleaseprobe\")\n0004 INIT_FCALL 0 80 string(\"ob_start\")\n0005 DO_ICALL\n0006 ASSIGN CV3($scalarLength) int(3)\n0007 ASSIGN CV4($scalarEvents) CV0($events)\n0008 V20 = NEW 1 string(\"StrlenReleaseProbe\")\n0009 SEND_VAL_EX string(\"retained\") 1\n0010 DO_FCALL\n0011 ASSIGN CV5($retained) V20\n0012 T20 = STRLEN CV5($retained)\n0013 ASSIGN CV6($retainedLength) T20\n0014 ASSIGN CV7($retainedEvents) CV0($events)\n0015 UNSET_CV CV5($retained)\n0016 ASSIGN CV8($afterRetainedUnset) CV0($events)\n0017 V21 = NEW 1 string(\"StrlenReleaseProbe\")\n0018 SEND_VAL_EX string(\"temporary\") 1\n0019 SEND_VAL_EX bool(true) string(\"emit\")\n0020 CHECK_UNDEF_ARGS\n0021 DO_FCALL\n0022 T20 = STRLEN V21\n0023 ASSIGN CV9($temporaryLength) T20\n0024 ASSIGN CV10($afterTemporary) CV0($events)\n0025 ASSIGN CV11($callable) string(\"strlen\")\n0026 INIT_DYNAMIC_CALL 1 CV11($callable)\n0027 V20 = NEW 1 string(\"StrlenReleaseProbe\")\n0028 SEND_VAL_EX string(\"dynamic\") 1\n0029 DO_FCALL\n0030 SEND_VAR_NO_REF_EX V20 1\n0031 V20 = DO_FCALL\n0032 ASSIGN CV12($dynamicLength) V20\n0033 ASSIGN CV13($afterDynamic) CV0($events)\n0034 V20 = DECLARE_ANON_CLASS string(\"stringable@anonymous\\x00<repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:62$2\")\n0035 V21 = NEW 0 V20\n0036 DO_FCALL\n0037 T20 = STRLEN V21\n0038 FREE T20\n0039 ASSIGN_DIM CV0($events) NEXT\n0040 OP_DATA string(\"throwing:after\")\n0041 JMP 0045\n0042 CV14($e) = CATCH string(\"RuntimeException\")\n0043 ASSIGN_DIM CV0($events) NEXT\n0044 OP_DATA string(\"throwing:caught\")\n0045 ASSIGN CV15($afterThrow) CV0($events)\n0046 V21 = NEW 1 string(\"StrlenReleaseProbe\")\n0047 SEND_VAL_EX string(\"reentrant\") 1\n0048 SEND_VAL_EX bool(true) string(\"reenter\")\n0049 CHECK_UNDEF_ARGS\n0050 DO_FCALL\n0051 T20 = STRLEN V21\n0052 ASSIGN CV16($reentrantLength) T20\n0053 ASSIGN CV17($afterReentrant) CV0($events)\n0054 INIT_FCALL 0 80 string(\"ob_get_clean\")\n0055 V20 = DO_ICALL\n0056 ASSIGN CV2($output) V20\n0057 INIT_FCALL 14 304 string(\"compact\")\n0058 SEND_VAL string(\"scalarLength\") 1\n0059 SEND_VAL string(\"scalarEvents\") 2\n0060 SEND_VAL string(\"retainedLength\") 3\n0061 SEND_VAL string(\"retainedEvents\") 4\n0062 SEND_VAL string(\"afterRetainedUnset\") 5\n0063 SEND_VAL string(\"temporaryLength\") 6\n0064 SEND_VAL string(\"afterTemporary\") 7\n0065 SEND_VAL string(\"dynamicLength\") 8\n0066 SEND_VAL string(\"afterDynamic\") 9\n0067 SEND_VAL string(\"afterThrow\") 10\n0068 SEND_VAL string(\"reentrantLength\") 11\n0069 SEND_VAL string(\"afterReentrant\") 12\n0070 SEND_VAL string(\"writes\") 13\n0071 SEND_VAL string(\"output\") 14\n0072 V20 = DO_ICALL\n0073 ASSIGN CV18($observed) V20\n0074 ASSIGN CV19($expected) array(...)\n0075 T20 = IS_NOT_IDENTICAL CV18($observed) CV19($expected)\n0076 JMPZ T20 0085\n0077 V20 = NEW 1 string(\"RuntimeException\")\n0078 INIT_FCALL 2 112 string(\"json_encode\")\n0079 SEND_VAR CV18($observed) 1\n0080 SEND_VAL int(4194304) 2\n0081 V21 = DO_ICALL\n0082 SEND_VAR_NO_REF_EX V21 1\n0083 DO_FCALL\n0084 THROW V20\n0085 INIT_FCALL 2 112 string(\"json_encode\")\n0086 SEND_VAR CV18($observed) 1\n0087 SEND_VAL int(4194304) 2\n0088 V20 = DO_ICALL\n0089 ECHO V20\n0090 ECHO string(\"\\n\")\n0091 RETURN int(1)\nLIVE RANGES:\n     20: 0009 - 0011 (new)\n     21: 0018 - 0022 (new)\n     20: 0028 - 0030 (new)\n     21: 0036 - 0037 (new)\n     21: 0047 - 0051 (new)\n     20: 0078 - 0084 (new)\nEXCEPTION TABLE:\n     0034, 0042, -, -\n\nStringable@anonymous::__toString:\n     ; (lines=4, args=0, vars=0, tmps=1)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:30-34\n0000 V0 = FETCH_W (global) string(\"events\")\n0001 ASSIGN_DIM V0 NEXT\n0002 OP_DATA string(\"inner:cast\")\n0003 RETURN string(\"x\")\n\nStringable@anonymous::__destruct:\n     ; (lines=4, args=0, vars=0, tmps=1)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:36-39\n0000 V0 = FETCH_W (global) string(\"events\")\n0001 ASSIGN_DIM V0 NEXT\n0002 OP_DATA string(\"inner:destruct\")\n0003 RETURN null\n\nStrlenReleaseProbe::__construct:\n     ; (lines=10, args=3, vars=3, tmps=0)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:8-12\n0000 CV0($name) = RECV 1\n0001 CV1($reenter) = RECV_INIT 2 bool(false)\n0002 CV2($emit) = RECV_INIT 3 bool(false)\n0003 ASSIGN_OBJ THIS string(\"name\")\n0004 OP_DATA CV0($name)\n0005 ASSIGN_OBJ THIS string(\"reenter\")\n0006 OP_DATA CV1($reenter)\n0007 ASSIGN_OBJ THIS string(\"emit\")\n0008 OP_DATA CV2($emit)\n0009 RETURN null\n\nStrlenReleaseProbe::__toString:\n     ; (lines=11, args=0, vars=0, tmps=2)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:14-19\n0000 T1 = FETCH_OBJ_R THIS string(\"name\")\n0001 T0 = FAST_CONCAT T1 string(\":cast\")\n0002 V1 = FETCH_W (global) string(\"events\")\n0003 ASSIGN_DIM V1 NEXT\n0004 OP_DATA T0\n0005 T1 = FETCH_OBJ_R THIS string(\"name\")\n0006 T0 = FAST_CONCAT T1 string(\":write\")\n0007 V1 = FETCH_W (global) string(\"writes\")\n0008 ASSIGN_DIM V1 NEXT\n0009 OP_DATA T0\n0010 RETURN string(\"abc\")\nLIVE RANGES:\n     0: 0002 - 0003 (tmp/var)\n     0: 0007 - 0008 (tmp/var)\n\nStrlenReleaseProbe::__destruct:\n     ; (lines=29, args=0, vars=1, tmps=2)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:21-45\n0000 T2 = FETCH_OBJ_R THIS string(\"name\")\n0001 T1 = FAST_CONCAT T2 string(\":destruct\")\n0002 V2 = FETCH_W (global) string(\"events\")\n0003 ASSIGN_DIM V2 NEXT\n0004 OP_DATA T1\n0005 T1 = FETCH_OBJ_R THIS string(\"emit\")\n0006 JMPZ T1 0010\n0007 T2 = FETCH_OBJ_R THIS string(\"name\")\n0008 T1 = FAST_CONCAT T2 string(\";\")\n0009 ECHO T1\n0010 T1 = FETCH_OBJ_R THIS string(\"reenter\")\n0011 JMPZ T1 0028\n0012 V1 = FETCH_W (global) string(\"events\")\n0013 ASSIGN_DIM V1 NEXT\n0014 OP_DATA string(\"outer:before-reentry\")\n0015 V2 = DECLARE_ANON_CLASS string(\"stringable@anonymous\\x00<repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:29$0\")\n0016 V1 = NEW 0 V2\n0017 DO_FCALL\n0018 CV0($inner) = QM_ASSIGN V1\n0019 T2 = STRLEN CV0($inner)\n0020 T1 = FAST_CONCAT string(\"inner:length:\") T2\n0021 V2 = FETCH_W (global) string(\"events\")\n0022 ASSIGN_DIM V2 NEXT\n0023 OP_DATA T1\n0024 UNSET_CV CV0($inner)\n0025 V1 = FETCH_W (global) string(\"events\")\n0026 ASSIGN_DIM V1 NEXT\n0027 OP_DATA string(\"outer:after-reentry\")\n0028 RETURN null\nLIVE RANGES:\n     1: 0002 - 0003 (tmp/var)\n     1: 0017 - 0018 (new)\n     1: 0021 - 0022 (tmp/var)\n\nStringable@anonymous::__toString:\n     ; (lines=10, args=0, vars=0, tmps=1)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:63-68\n0000 V0 = FETCH_W (global) string(\"events\")\n0001 ASSIGN_DIM V0 NEXT\n0002 OP_DATA string(\"throwing:cast\")\n0003 V0 = FETCH_W (global) string(\"writes\")\n0004 ASSIGN_DIM V0 NEXT\n0005 OP_DATA string(\"throwing:write\")\n0006 V0 = NEW 1 string(\"RuntimeException\")\n0007 SEND_VAL_EX string(\"expected\") 1\n0008 DO_FCALL\n0009 THROW V0\nLIVE RANGES:\n     0: 0007 - 0009 (new)\n\nStringable@anonymous::__destruct:\n     ; (lines=4, args=0, vars=0, tmps=1)\n     ; (after optimizer)\n     ; <repo>/tools/php-catalog/experiments/comparison/runtime-strlen-release.php:70-73\n0000 V0 = FETCH_W (global) string(\"events\")\n0001 ASSIGN_DIM V0 NEXT\n0002 OP_DATA string(\"throwing:destruct\")\n0003 RETURN null\n"
+  }
+}

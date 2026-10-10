@@ -50,10 +50,13 @@ dependencies, validation rejects closed domains that depend on open domains or
 on uncertified closed cycles, and evaluation propagates open child domains
 through parent dependencies. These are foundation tests only: loop widening
 has a small interval-like fixture, not a calibrated production domain, and the
-replayer trusts the host's transfer semantics. The checker
-bridge currently uses a narrow type-only host for `strlen()` and does not model
-effect state, callback invocation, or exception integration. F00/F01 remain
-OPEN. Composed host event outcomes now carry
+replayer trusts the host's transfer semantics. The checker bridge uses a
+narrow type host for `strlen()` with an explicit Stringable invocation and
+separate normal, throw, fatal, and suspension exits. It retains the normal
+result and invocation marker across possible abrupt exits, then delegates
+coarse callback invalidation to the existing string-operation summary. Ordered
+heap effects, exact exceptional state, and cleanup/resumption are still not
+modeled by the graph. F00/F01 remain OPEN. Composed host event outcomes now carry
 per-domain coverage, precision, evidence, and assumptions; evaluation merges
 those records so an open child opens the corresponding closed parent domain.
 Schema major 4 added PHP value/reference flow instructions and regenerated the
@@ -70,13 +73,18 @@ A shared target-set primitive distinguishes exact releases from minor ranges,
 retains correlated scenarios, and keeps a Maybe-applicable graph alongside an
 uncovered remainder. Catalog variants use it to preserve exact and partially
 known target branches. The checker now has a thin adapter from its configured
-PHP major/minor range to those scenarios; it leaves platform facts unknown and
-preserves unknown release intervals before, between, or after known minors as
-uncovered scenarios. Five adapter tests cover exact, unset, future-minor, and
-patch-exact ranges. Exact patch releases are now parsed separately from the existing
-major/minor language-gate projection, retained in project/registry settings,
-included in canonical registry identity, and converted to exact catalog target
-ranges while platform facts remain unknown. Config, registry, adapter, and CLI
+PHP major/minor range to those scenarios; it leaves platform facts unknown by
+default and preserves unknown release intervals before, between, or after
+known minors as uncovered scenarios. Five adapter tests cover exact, unset,
+future-minor, and patch-exact ranges. Exact patch releases are parsed separately
+from the existing major/minor language-gate projection, retained in
+project/registry settings, included in canonical registry identity, and
+converted to exact catalog target ranges. An explicit `php_target_profile`
+setting now carries OS, architecture, SAPI, ZTS, and debug facts into catalog
+selection; unspecified facts remain unknown. The embedded `strlen` artifact
+requires PHP 8.5.4 on Linux x86-64 CLI, non-ZTS, non-debug. Tests cover an exact
+match, an unknown profile with a Maybe result and uncovered remainder, and an
+architecture mismatch that stays uncovered. Config, registry, adapter, and CLI
 fixtures exercise `8.5.4`; `cargo check -p phpstan-rs` passes. An unset version
 maps to every language version recognized by the checker (5.3–8.5). This
 verifies target propagation only; a separate exact-release `strlen()` slice is
@@ -179,14 +187,17 @@ unknown events keep each declared affected domain open, and declared dependent
 projections widen through those open domains.
 
 The matrix distinguishes source facts from what the graph and checker actually
-consume. The native `zif_strlen` chain has pinned source/layout/LLVM evidence;
-the usual direct opcode path does not. Weak scalar positives and selected
-diagnostics have runtime evidence, but callback effects, throw/release behavior,
-unknown behavior, and strict exceptional transfers remain open. In particular,
+consume. The native `zif_strlen` chain has pinned source/layout/LLVM evidence,
+and the direct opcode path now has locked compiler/VM source facts plus paired
+opcode/runtime observations for the enumerated cases. Weak scalar success,
+parser rejection, and null-handler outcomes have runtime evidence; exact throw
+values/state, callback effects, release behavior, unknown behavior, and broader
+strict exceptional transfers remain open. In particular,
 the checker’s separately applied `Operation::String` invalidation must not be
 counted as graph evidence for ordered callback mutation or exceptional-state
 retention. Follow-up implementation and calibration are tracked under R01.6,
-R02.2–R02.3, R04.1, and R05.2; RV-16 remains an artifact/source-linkage gap.
+R02.2–R02.3, R02.7, R04.1, and R05.2; RV-16's artifact/source-linkage gap is
+implemented with independent acceptance pending.
 
 R02.2 adds a reproducible bounded crosswalk for the PHP 8.5.4 `zif_strlen`
 normal demand. The builder checks the source hash and confirms that Clang's
@@ -209,12 +220,14 @@ does not establish. The source parser witness is checked against the locked
 release, and destination assignment. The current paired TAILCALL/CALL runtime
 record is checked against the fixture hash and byte-identical outputs for both
 the normal and throwing `__toString` sentinels. The type host retains both a
-normal result and a possible PHP throw for that invocation. Schema major 9
-separates `NativeUnwind` coverage from `PhpThrow`; graph unknown transfers keep
-callback effects, release consequences, parser failure, fatal, native unwind,
-and suspension explicitly open. These witnesses do not establish the detailed
-effects/order of arbitrary callbacks, destructor timing, fatal/bailout or native
-unwind behavior, suspension, or the direct compiler-emitted `ZEND_STRLEN` path.
+normal result and distinct PHP-throw, fatal, and suspended callback exits.
+Schema major 9 separates `NativeUnwind` coverage from `PhpThrow`; graph unknown
+transfers keep callback effects, release consequences, parser failure, cleanup,
+and resumption explicitly open. R02.7 pins fatal bailout and Fiber suspension
+for direct and dynamic calls, including the measured cleanup order. These
+witnesses do not establish arbitrary callback effects, generalized destructor
+timing, native unwind behavior, or the direct compiler-emitted `ZEND_STRLEN`
+transfer.
 
 The cleanup fixture supplies a counterexample to assuming CFG and LLVM
 exception behavior coincide: GCC GIMPLE records a `finally` destructor, and
