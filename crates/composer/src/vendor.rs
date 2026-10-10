@@ -210,6 +210,8 @@ struct Resolver<'p> {
     vendor_dir: &'p Path,
     base_dir: &'p Path,
     generated_dir: &'p Path,
+    // The vendor directory as the generated file spells it, normalised.
+    vendor_as_written: PathBuf,
     table: &'p DirTable,
     // Each directory's listing, made once: autoload entries share a few
     // thousand directories among tens of thousands of files, and a listing
@@ -232,6 +234,7 @@ impl<'p> Resolver<'p> {
             vendor_dir,
             base_dir,
             generated_dir,
+            vendor_as_written: lexically_normalized(&generated_dir.join("..")),
             table,
             listings: FxHashMap::default(),
         }
@@ -295,8 +298,7 @@ impl<'p> Resolver<'p> {
             return Some(resolved);
         }
         let lexical = lexically_normalized(raw);
-        let vendor_as_written = lexically_normalized(&self.generated_dir.join(".."));
-        (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&vendor_as_written))
+        (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&self.vendor_as_written))
             .then_some(lexical)
     }
 

@@ -1,7 +1,6 @@
 //! What a file references, recorded by the parser as it resolves names and
 //! reads doc comments, so no walk of the tree has to find them.
 
-use std::hash::Hasher;
 use std::sync::Arc;
 
 use rustc_hash::FxHashSet;
