@@ -613,7 +613,9 @@ revocation/cache invalidation, unknown program context, and transitive support.
 Executor loading and root configuration remain deployment trust boundaries; the
 deployment loader must verify implementation bytes. Graph validation still rejects
 closed coverage that cites assumptions because this contextual result is not threaded
-into graph evaluation. This is author evidence; independent acceptance is pending.
+into graph evaluation. That leaves the end-to-end consumption/replay part open as
+R01.7.a in the ledger; the R01.7 implementation is partial, not complete. This is
+author evidence; independent acceptance is pending.
 
 ### New findings
 
