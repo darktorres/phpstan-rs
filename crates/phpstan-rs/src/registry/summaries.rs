@@ -1315,6 +1315,8 @@ struct Scope {
     // The variables a `foreach` by reference bound to the elements of the
     // variable, in that order: what they hold, the elements hold.
     element_refs: Vec<ElementRef>,
+    // The variables declared `static`.
+    statics: FxHashSet<Name>,
     computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
@@ -2084,6 +2086,22 @@ impl Summarizer<'_> {
     /// binding is to the variable itself, and the objects in the arrays it
     /// holds.
     fn merge_references(&mut self) {
+        self.merge_element_refs();
+        // A static variable holds on to an object between calls, which then
+        // is not one the call made: it is known to hold what is no object
+        // only.
+        for name in self.scope.statics.clone() {
+            if let Some(origins) = self.scope.origins.get_mut(&name)
+                && origins
+                    .as_ref()
+                    .is_some_and(|all| all.iter().any(|origin| !origin.runs_nothing()))
+            {
+                *origins = None;
+            }
+        }
+    }
+
+    fn merge_element_refs(&mut self) {
         for index in 0..self.scope.element_refs.len() {
             let element_ref = &self.scope.element_refs[index];
             let (subject, item, whole) = (
@@ -3044,7 +3062,21 @@ impl Visitor for Summarizer<'_> {
                 }
                 StmtKind::StaticVar(vars) => {
                     for variable in arenas.static_vars(vars.clone()) {
-                        self.bind(Some(variable.name.name.clone()), Binding::Static);
+                        let name = variable.name.name.clone();
+                        let (origins, contents) = match variable.default {
+                            Some(default) => (
+                                self.origins(arenas, default),
+                                self.contents_of(arenas, default),
+                            ),
+                            None => (Some(vec![Origin::NoObject]), Some(Vec::new())),
+                        };
+                        self.destroy_held(&name);
+                        self.bind(Some(name.clone()), Binding::Static);
+                        // What it holds is what the body writes it, which the
+                        // calls before wrote the same.
+                        self.scope.origins.insert(name.clone(), origins);
+                        self.scope.contents.insert(name.clone(), contents);
+                        self.scope.statics.insert(name);
                     }
                 }
                 _ => {}
@@ -3132,7 +3164,15 @@ impl Visitor for Summarizer<'_> {
                         });
                         match item {
                             Some(element_ref) => element_ref.overwritten = true,
-                            None => self.implicit(arenas, *lhs, Operation::Destroy),
+                            None => {
+                                self.implicit(arenas, *lhs, Operation::Destroy);
+                                // The arrays it held die with it.
+                                if let Some(contents) = plain_variable(arenas, *lhs)
+                                    .and_then(|name| self.scope.contents.get(&name).cloned())
+                                {
+                                    self.implicit_on(contents, Operation::Destroy);
+                                }
+                            }
                         }
                     }
                     self.write(arenas, *lhs, made, origins.clone());
