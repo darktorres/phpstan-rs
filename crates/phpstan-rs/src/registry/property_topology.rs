@@ -5,7 +5,7 @@
 //! owning registry stores the ordered names in its cache and rebuilds this
 //! runtime lookup map from them.
 
-use syntax::name::{Name, NameMap};
+use syntax::name::{Name, NameKey, NameMap};
 
 /// The ordered property names and their exact-case class-local slots.
 #[derive(Debug, Clone, Default)]
@@ -32,7 +32,7 @@ impl PropertyTopology {
     }
 
     /// Returns the exact-case slot for `name`.
-    pub(crate) fn slot(&self, name: &str) -> Option<u32> {
+    pub(crate) fn slot<K: NameKey + ?Sized>(&self, name: &K) -> Option<u32> {
         self.slots.get(name).copied()
     }
 

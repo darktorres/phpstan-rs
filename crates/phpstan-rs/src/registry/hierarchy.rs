@@ -120,10 +120,10 @@ impl Registry {
         true
     }
 
-    pub(crate) fn property_ref_by_name(
+    pub(crate) fn property_ref_by_name<K: syntax::name::NameKey + ?Sized>(
         &self,
         class: super::ClassId,
-        property: &str,
+        property: &K,
     ) -> Option<super::PropertyRef> {
         self.debug_check_id_generation(class.generation());
         let slot = self.class_property_topology.get(&class)?.slot(property)?;

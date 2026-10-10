@@ -1485,7 +1485,7 @@ impl Registry {
                 let Some(class_id) = self.class_ids.get(class).copied() else {
                     return EffectId::Named(key.clone());
                 };
-                let Some(property) = self.property_ref_by_name(class_id, property.as_str()) else {
+                let Some(property) = self.property_ref_by_name(class_id, property) else {
                     return EffectId::Named(key.clone());
                 };
                 EffectId::PropertyHook { property, kind }
