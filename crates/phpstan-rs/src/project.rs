@@ -2987,7 +2987,7 @@ impl Project {
                 sources.push((path, std::mem::take(&mut check.property_assign_facts)));
             }
         }
-        sources.sort_by_key(|(path, _)| self.path_rank(path));
+        sources.sort_by_cached_key(|(path, _)| self.path_rank(path));
         let mut merged: PropertyAssignFacts = FxHashMap::default();
         for (_, facts) in sources {
             for (writer, props) in facts {
@@ -3594,14 +3594,14 @@ impl Project {
                 .iter()
                 .map(|(path, file)| (path, file.declared_classes.as_slice()))
                 .collect();
-            programs.sort_by_key(|(path, _)| self.path_rank(path));
+            programs.sort_by_cached_key(|(path, _)| self.path_rank(path));
             let overrides = whole_program::renamed_named_arguments::renamed_parameter_overrides(
                 &self.registry,
                 programs.into_iter().flat_map(|(_, classes)| classes),
             );
             let mut calls: Vec<(&PathBuf, &checker::NamedArgumentCallFacts)> =
                 self.named_argument_calls.iter().collect();
-            calls.sort_by_key(|(path, _)| self.path_rank(path));
+            calls.sort_by_cached_key(|(path, _)| self.path_rank(path));
             let calls = whole_program::renamed_named_arguments::merge_named_argument_calls(calls);
             let collisions =
                 whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
