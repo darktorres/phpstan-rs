@@ -96,12 +96,166 @@ pub enum Unit {
 
 /// The lines of a file, and the characters on them, found from its bytes
 /// once: a position is made from a byte offset when someone asks for it,
-/// so the lexer and parser carry offsets.
+/// so the lexer and parser carry offsets. A file that is lexed keeps its
+/// bytes until the first question, and most files get none; a file read
+/// from the cache keeps the bytes of its index and decodes them at the
+/// first question.
 ///
 /// A column counts characters from the start of the line, and a run of
 /// invalid bytes a lossy reading replaces counts as one.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LineIndex {
+    data: std::sync::OnceLock<Data>,
+    pending: std::sync::Mutex<Option<Pending>>,
+}
+
+/// What the index is made from, until it is asked.
+enum Pending {
+    /// The source text.
+    Source(Box<[u8]>),
+    /// The index as a cache wrote it.
+    Encoded(Vec<u8>),
+}
+
+impl Default for LineIndex {
+    /// The index of an empty source.
+    fn default() -> Self {
+        LineIndex::new(b"")
+    }
+}
+
+impl Clone for LineIndex {
+    fn clone(&self) -> Self {
+        LineIndex::from_data(self.data().clone())
+    }
+}
+
+impl std::fmt::Debug for LineIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.data().fmt(f)
+    }
+}
+
+impl PartialEq for LineIndex {
+    fn eq(&self, other: &LineIndex) -> bool {
+        self.data() == other.data()
+    }
+}
+
+impl Eq for LineIndex {}
+
+impl serde::Serialize for LineIndex {
+    /// As the bytes of the index, which `Deserialize` keeps undecoded.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let encoded = postcard::to_allocvec(self.data()).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_bytes(&encoded)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for LineIndex {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Bytes;
+        impl serde::de::Visitor<'_> for Bytes {
+            type Value = Vec<u8>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("the bytes of a line index")
+            }
+            fn visit_bytes<E: serde::de::Error>(self, bytes: &[u8]) -> Result<Vec<u8>, E> {
+                Ok(bytes.to_vec())
+            }
+            fn visit_byte_buf<E: serde::de::Error>(self, bytes: Vec<u8>) -> Result<Vec<u8>, E> {
+                Ok(bytes)
+            }
+        }
+        let encoded = deserializer.deserialize_byte_buf(Bytes)?;
+        Ok(LineIndex {
+            data: std::sync::OnceLock::new(),
+            pending: std::sync::Mutex::new(Some(Pending::Encoded(encoded))),
+        })
+    }
+}
+
+impl LineIndex {
+    /// The index of `src`, found now.
+    pub fn new(src: &[u8]) -> LineIndex {
+        LineIndex::from_data(Data::new(src))
+    }
+
+    /// The index of `src`, found when it is first asked.
+    pub fn lazy(src: &[u8]) -> LineIndex {
+        LineIndex {
+            data: std::sync::OnceLock::new(),
+            pending: std::sync::Mutex::new(Some(Pending::Source(src.into()))),
+        }
+    }
+
+    fn from_data(data: Data) -> LineIndex {
+        LineIndex {
+            data: std::sync::OnceLock::from(data),
+            pending: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn data(&self) -> &Data {
+        self.data.get_or_init(|| {
+            let pending = self
+                .pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            match pending {
+                Some(Pending::Source(src)) => Data::new(&src),
+                Some(Pending::Encoded(encoded)) => {
+                    postcard::from_bytes(&encoded).unwrap_or_else(|_| Data::new(b""))
+                }
+                None => Data::new(b""),
+            }
+        })
+    }
+
+    pub fn lines(&self) -> u32 {
+        self.data().lines()
+    }
+
+    pub fn line(&self, offset: u32) -> u32 {
+        self.data().line(offset)
+    }
+
+    pub fn line_start(&self, line: u32) -> Option<u32> {
+        self.data().line_start(line)
+    }
+
+    pub fn line_end(&self, line: u32) -> Option<u32> {
+        self.data().line_end(line)
+    }
+
+    pub fn range(&self, span: Span) -> Range {
+        self.data().range(span)
+    }
+
+    pub fn line_col(&self, offset: u32) -> LineCol {
+        self.data().line_col(offset)
+    }
+
+    pub fn column(&self, offset: u32, unit: Unit) -> u32 {
+        self.data().column(offset, unit)
+    }
+
+    pub fn offset_in(&self, line: u32, column: u32, unit: Unit) -> Option<u32> {
+        self.data().offset_in(line, column, unit)
+    }
+
+    pub fn offset_in_clamped(&self, line: u32, column: u32, unit: Unit) -> u32 {
+        self.data().offset_in_clamped(line, column, unit)
+    }
+
+    pub fn offset(&self, at: LineCol) -> Option<u32> {
+        self.data().offset(at)
+    }
+}
+
+/// The lines found.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Data {
     /// The offset each line begins at; the first is 0.
     line_starts: Box<[u32]>,
     /// The length of the source.
@@ -115,15 +269,8 @@ pub struct LineIndex {
     astral: Box<[u32]>,
 }
 
-impl Default for LineIndex {
-    /// The index of an empty source.
-    fn default() -> Self {
-        LineIndex::new(b"")
-    }
-}
-
-impl LineIndex {
-    pub fn new(src: &[u8]) -> LineIndex {
+impl Data {
+    fn new(src: &[u8]) -> Data {
         // A line of PHP is about thirty bytes.
         let mut line_starts: Vec<u32> = Vec::with_capacity(src.len() / 32 + 1);
         line_starts.push(0);
@@ -158,7 +305,7 @@ impl LineIndex {
                 base += valid.len() + invalid;
             }
         }
-        LineIndex {
+        Data {
             line_starts: line_starts.into_boxed_slice(),
             len: src.len() as u32,
             surplus: surplus.into_boxed_slice(),
@@ -167,7 +314,7 @@ impl LineIndex {
     }
 
     /// The number of lines: one more than the line feeds.
-    pub fn lines(&self) -> u32 {
+    fn lines(&self) -> u32 {
         self.line_starts.len() as u32
     }
 
@@ -187,18 +334,18 @@ impl LineIndex {
     }
 
     /// The 1-based line `offset` is on, without its column.
-    pub fn line(&self, offset: u32) -> u32 {
+    fn line(&self, offset: u32) -> u32 {
         self.line_index(offset.min(self.len)) as u32 + 1
     }
 
     /// The offset the 1-based `line` starts at.
-    pub fn line_start(&self, line: u32) -> Option<u32> {
+    fn line_start(&self, line: u32) -> Option<u32> {
         let index = (line as usize).checked_sub(1)?;
         self.line_starts.get(index).copied()
     }
 
     /// The offset the 1-based `line` ends at, before its line feed.
-    pub fn line_end(&self, line: u32) -> Option<u32> {
+    fn line_end(&self, line: u32) -> Option<u32> {
         let index = (line as usize).checked_sub(1)?;
         self.line_starts.get(index)?;
         Some(match self.line_starts.get(index + 1) {
@@ -208,7 +355,7 @@ impl LineIndex {
     }
 
     /// The lines and columns a span covers.
-    pub fn range(&self, span: Span) -> Range {
+    fn range(&self, span: Span) -> Range {
         Range {
             start: self.line_col(span.start),
             end: self.line_col(span.end),
@@ -217,7 +364,7 @@ impl LineIndex {
 
     /// The line and column of `offset`, which is the end of the source when
     /// it is past it.
-    pub fn line_col(&self, offset: u32) -> LineCol {
+    fn line_col(&self, offset: u32) -> LineCol {
         let offset = offset.min(self.len);
         let index = self.line_index(offset);
         let start = self.line_starts[index];
@@ -230,7 +377,7 @@ impl LineIndex {
     }
 
     /// The 0-based column of `offset` on its line, counted in `unit`.
-    pub fn column(&self, offset: u32, unit: Unit) -> u32 {
+    fn column(&self, offset: u32, unit: Unit) -> u32 {
         let offset = offset.min(self.len);
         let start = self.line_starts[self.line_index(offset)];
         match unit {
@@ -252,7 +399,7 @@ impl LineIndex {
     /// `unit`, or none when the line is not in the source or the column is
     /// past the end of the line. A UTF-16 column inside a character that
     /// takes two units is the character's start.
-    pub fn offset_in(&self, line: u32, column: u32, unit: Unit) -> Option<u32> {
+    fn offset_in(&self, line: u32, column: u32, unit: Unit) -> Option<u32> {
         let start = self.line_start(line.checked_add(1)?)?;
         let end = self.line_end(line + 1)?;
         match unit {
@@ -288,7 +435,7 @@ impl LineIndex {
 
     /// `offset_in`, for a position this source may not have: a line past the
     /// last is the last, and a column past the end of its line is the end.
-    pub fn offset_in_clamped(&self, line: u32, column: u32, unit: Unit) -> u32 {
+    fn offset_in_clamped(&self, line: u32, column: u32, unit: Unit) -> u32 {
         let line = line.min(self.lines() - 1);
         let end = self.line_end(line + 1).unwrap_or(self.len);
         self.offset_in(line, column, unit).unwrap_or(end)
@@ -296,7 +443,7 @@ impl LineIndex {
 
     /// The offset of `at`, or none when its line is not in the source or
     /// its column is past the end of the line.
-    pub fn offset(&self, at: LineCol) -> Option<u32> {
+    fn offset(&self, at: LineCol) -> Option<u32> {
         let start = self.line_start(at.line)?;
         let end = self.line_end(at.line)?;
         let want = at.col.checked_sub(1)?;

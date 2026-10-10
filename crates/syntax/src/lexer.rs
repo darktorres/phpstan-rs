@@ -420,7 +420,7 @@ impl<'a> Lexer<'a> {
             line_index: Arc::new(if in_php {
                 LineIndex::default()
             } else {
-                LineIndex::new(bytes)
+                LineIndex::lazy(bytes)
             }),
             last_token_start: 0,
             base: 0,
