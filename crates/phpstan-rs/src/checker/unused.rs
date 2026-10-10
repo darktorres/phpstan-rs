@@ -189,8 +189,9 @@ impl<'a> Checker<'a> {
             // it textually precedes the statement that established the
             // alias. HashSet inserts are idempotent, so the redundant work
             // in pass 1's own read/write/method accounting is harmless.
-            walk_stmt_body_for_members(arenas, m.function.body_stmts(arenas), fqn, &mut usage);
-            walk_stmt_body_for_members(arenas, m.function.body_stmts(arenas), fqn, &mut usage);
+            usage.scan_twice(|usage| {
+                walk_stmt_body_for_members(arenas, m.function.body_stmts(arenas), fqn, usage);
+            });
         }
         if let Some(ctor) = ctor {
             for p in arenas.params(ctor.function.params.clone()) {
@@ -204,8 +205,9 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(hooks) = &p.hooks {
                     usage.aliases.clear();
-                    walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
-                    walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
+                    usage.scan_twice(|usage| {
+                        walk_property_hooks_for_members(arenas, hooks, fqn, usage);
+                    });
                 }
             }
         }
@@ -216,8 +218,9 @@ impl<'a> Checker<'a> {
             }
             if let Some(hooks) = &p.hooks {
                 usage.aliases.clear();
-                walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
-                walk_property_hooks_for_members(arenas, hooks, fqn, &mut usage);
+                usage.scan_twice(|usage| {
+                    walk_property_hooks_for_members(arenas, hooks, fqn, usage);
+                });
             }
         }
         for c in consts {

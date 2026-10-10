@@ -18,7 +18,7 @@ use syntax::visit::arena::{self, Visitor};
 /// access might reach, so every private-member check for the *whole*
 /// class is skipped outright rather than risk a false "unused" report on
 /// a member that dynamic code actually does reach.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct MemberUsage {
     pub(crate) consts: NameSet,
     /// Lowercased (`method_key`).
@@ -38,6 +38,45 @@ pub(crate) struct MemberUsage {
     /// this before each function/hook body's own scan rather than letting
     /// it accumulate across bodies.
     pub(crate) aliases: NameSet,
+}
+
+impl MemberUsage {
+    /// Runs `scan` over a body twice: the second time every alias the first
+    /// found is known from the start. Aliases are only ever added, so a
+    /// first scan that found none ran with the alias set the second would
+    /// have, and the second would find what the first did.
+    pub(crate) fn scan_twice(&mut self, mut scan: impl FnMut(&mut MemberUsage)) {
+        let known = self.aliases.len();
+        scan(self);
+        if self.aliases.len() != known {
+            scan(self);
+            return;
+        }
+        #[cfg(debug_assertions)]
+        {
+            let mut again = self.clone();
+            scan(&mut again);
+            assert_eq!(
+                (
+                    again.consts.len(),
+                    again.methods.len(),
+                    again.reads.len(),
+                    again.writes.len(),
+                    again.aliases.len(),
+                    again.escaped
+                ),
+                (
+                    self.consts.len(),
+                    self.methods.len(),
+                    self.reads.len(),
+                    self.writes.len(),
+                    self.aliases.len(),
+                    self.escaped
+                ),
+                "a second scan of a body with no alias found something the first did not"
+            );
+        }
+    }
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/
