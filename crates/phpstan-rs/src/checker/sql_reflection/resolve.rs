@@ -127,20 +127,47 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
     ))
 }
 
+/// The statements parsed so far, by SQL text; a parse that failed is kept as
+/// `None`. The same query text is asked by several call sites, and several
+/// steps of one resolution.
+static PARSED: std::sync::LazyLock<
+    std::sync::Mutex<FxHashMap<String, Option<std::sync::Arc<Statement>>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Past this many texts the memo starts over.
+const PARSED_LIMIT: usize = 4096;
+
+/// The first statement of `sql`, parsed once per text.
+fn parse_sql_cached(sql: &str) -> Option<std::sync::Arc<Statement>> {
+    let lock = || PARSED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(known) = lock().get(sql) {
+        syntax::stats::count(syntax::stats::Counter::ParseSqlHit);
+        return known.clone();
+    }
+    syntax::stats::count(syntax::stats::Counter::ParseSqlMiss);
+    let parsed = Parser::parse_sql(&GenericDialect {}, sql)
+        .ok()
+        .and_then(|statements| statements.into_iter().next())
+        .map(std::sync::Arc::new);
+    let mut memo = lock();
+    if memo.len() >= PARSED_LIMIT {
+        memo.clear();
+    }
+    memo.insert(sql.to_owned(), parsed.clone());
+    parsed
+}
+
 /// The exact `single-table, no JOIN` scope `resolve_select_from_static_
 /// schema` already restricts itself to, extracted here as its own
 /// standalone parse since this needs the table name independent of
 /// *which* resolution step actually answered the query (pure-AST,
 /// static, or live all funnel through here identically).
 fn single_table_name(sql: &str) -> Option<String> {
-    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
-        .ok()?
-        .into_iter()
-        .next()?;
-    let Statement::Query(query) = stmt else {
+    let stmt = parse_sql_cached(sql)?;
+    let Statement::Query(query) = &*stmt else {
         return None;
     };
-    let SetExpr::Select(select) = *query.body else {
+    let SetExpr::Select(select) = &*query.body else {
         return None;
     };
     if select.from.len() != 1 || !select.from[0].joins.is_empty() {
@@ -173,14 +200,11 @@ fn single_table_name(sql: &str) -> Option<String> {
 /// nothing to connect to) is safer than guessing one engine's answer for
 /// an unknown target.
 fn resolve_pure_ast(sql: &str, driver: Option<SqlDriver>) -> Option<Type> {
-    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
-        .ok()?
-        .into_iter()
-        .next()?;
-    let Statement::Query(query) = stmt else {
+    let stmt = parse_sql_cached(sql)?;
+    let Statement::Query(query) = &*stmt else {
         return None;
     };
-    let SetExpr::Select(select) = *query.body else {
+    let SetExpr::Select(select) = &*query.body else {
         return None;
     };
     let mut fields = Vec::new();
@@ -345,14 +369,11 @@ fn refine_count_columns(sql: &str, row_type: Type) -> Type {
 }
 
 fn count_column_positions(sql: &str) -> Option<Vec<usize>> {
-    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
-        .ok()?
-        .into_iter()
-        .next()?;
-    let Statement::Query(query) = stmt else {
+    let stmt = parse_sql_cached(sql)?;
+    let Statement::Query(query) = &*stmt else {
         return None;
     };
-    let SetExpr::Select(select) = *query.body else {
+    let SetExpr::Select(select) = &*query.body else {
         return None;
     };
     Some(
@@ -383,18 +404,15 @@ fn is_count_call(expr: &Expr) -> bool {
 }
 
 fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type> {
-    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
-        .ok()?
-        .into_iter()
-        .next()?;
-    let Statement::Query(query) = stmt else {
+    let stmt = parse_sql_cached(sql)?;
+    let Statement::Query(query) = &*stmt else {
         return None;
     };
-    let ctes = resolve_ctes_from_static_schema(schema, &query)?;
-    let SetExpr::Select(select) = *query.body else {
+    let ctes = resolve_ctes_from_static_schema(schema, query)?;
+    let SetExpr::Select(select) = &*query.body else {
         return None;
     };
-    let fields = resolve_select_from_static_schema(schema, &select, &ctes)?;
+    let fields = resolve_select_from_static_schema(schema, select, &ctes)?;
     Some(Type::array_shape(Shape::from_named(fields)))
 }
 
