@@ -366,6 +366,9 @@ struct IncludeSite {
     suffix: Option<String>,
     /// The include expression, by its id in the file.
     at: u32,
+    /// The globals the body it is in binds with `global`, sorted: the
+    /// included file's top level writes them through those bindings.
+    binds: Vec<Name>,
 }
 
 /// What one file's walk found: its sites, and its include sites.
@@ -725,6 +728,25 @@ impl Registry {
             ..GlobalScopes::default()
         };
         scopes.include_writes = self.include_writes_of(&graph);
+        // A file a function includes writes, at its top level, the globals
+        // that function binds.
+        for (id, site) in &include_sites {
+            if site.top_level || site.binds.is_empty() {
+                continue;
+            }
+            let writes = match graph.targets.get(&(*id, site.at)) {
+                Some(Some(target)) => self.top_level_writes_from(*target, &graph),
+                _ => IncludeWrites::Any,
+            };
+            for name in site.binds.iter().filter(|name| writes.may_write(name)) {
+                for facts in [&mut scopes.function_facts, &mut scopes.plain_function_facts] {
+                    SiteContribution::WholeValue(Type::mixed())
+                        .apply(facts.entry(name.clone()).or_default());
+                }
+                SiteContribution::WholeValue(Type::mixed())
+                    .apply(accumulators.entry(name.clone()).or_default());
+            }
+        }
         for (id, ..) in files {
             scopes.function_dynamic |= self.global_sites[id].dynamic_function;
             if self.global_sites[id].dynamic_top_level
@@ -1421,10 +1443,17 @@ impl Visitor for Scope<'_> {
                 return;
             }
             ExprKind::Include(_, target) => {
+                let mut binds: Vec<Name> = if self.top_level {
+                    Vec::new()
+                } else {
+                    self.global_names.iter().cloned().collect()
+                };
+                binds.sort_unstable();
                 self.out.include_sites.push(IncludeSite {
                     top_level: self.top_level,
                     suffix: resolve_include_target_suffix(arenas, *target),
                     at: u32::from(id.into_raw()),
+                    binds,
                 });
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
@@ -2146,7 +2175,8 @@ syntax::canonical_struct!(SiteFact {
 syntax::canonical_struct!(IncludeSite {
     top_level,
     suffix,
-    at
+    at,
+    binds
 });
 
 syntax::canonical_enum!(ContributionFact {
