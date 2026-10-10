@@ -132,9 +132,9 @@ means the required evidence has not been produced or independently reviewed;
 
 **Reviewed evidence and current disposition:** Return and null diagnostic slices are represented; the 241-op inventory fails closed on unknown operations. Review: The graph closes only its narrow return and exact null-diagnostic observations. Scalar conversion, complete callback behavior, object release, effects, exceptions, fatal/unwind behavior, and other non-normal outcomes remain open. The opcode inventory intentionally fails closed instead of implying coverage. Model/validate scalar conversion, all callback behavior, object release, effects, and non-normal outcomes.
 
-- **R02.3 — Open** (depends on: R00.3, R02.2)
-  Extend strlen modeling to scalar conversion, callbacks, release, effects, exceptions, fatal/native unwind, and non-normal exits. Close only facts supported by source/compiler/runtime evidence and graph tests; contradictions fail closed.
-  Not yet evidenced as complete; see parent F task for the audited implementation state.
+- **R02.3 — Implementation complete; independent acceptance pending** (depends on: R00.3, R02.2)
+  The schema now represents `NativeUnwind` independently from `PhpThrow`. The strlen graph binds scalar parser/cast/release source facts, the current paired TAILCALL/CALL callback normal-and-throw witness, and the full LLVM operation inventory. Its executable graph has explicit unknown transfers for incomplete coercion, callback effects, release/destructor consequences, parser failures, fatal, native unwind, and suspension; these domains remain open. The type host represents the observed normal Stringable result and possible PHP throw while leaving other abrupt outcomes unsupported. No claim is made that the graph models full callback behavior, release timing, direct `ZEND_STRLEN`, fatal/bailout, native unwind, or suspension.
+  Validation: 109 semantics library tests and 5 builder tests pass; 1,203 checker library tests pass (1 ignored); all 16 focused `strlen_` fixtures pass; `cargo check --workspace` passes. Catalog regeneration validates against the locked PHP source and runtime witnesses and is byte-for-byte reproducible. Independent acceptance is still pending.
 
 ### F03.1 — Complete: Measure whole-profile SVF resource behavior
 

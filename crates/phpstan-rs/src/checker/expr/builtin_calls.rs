@@ -15,6 +15,53 @@ struct CatalogTypeHost<'a> {
     invocation_coverage: Vec<php_semantics::DomainCoverage>,
 }
 
+#[cfg(test)]
+mod catalog_type_host_tests {
+    use super::*;
+    use php_semantics::SemanticHost;
+
+    #[test]
+    fn stringable_invocation_keeps_observed_php_throw_path() {
+        let registry = Registry::default();
+        let host = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: vec![],
+        };
+        let exits = host.event(
+            &php_semantics::Event::Invoke {
+                callable: php_semantics::Operand::Literal(php_semantics::Bytes(
+                    b"__toString".to_vec(),
+                )),
+                arguments: vec![php_semantics::Operand::Argument(0)],
+                result: 1,
+            },
+            &[],
+            &Type::mixed(),
+            &[],
+            CatalogTypeState::default(),
+        );
+        assert!(exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::EventExit::Normal {
+                result: Some((1, _)),
+                ..
+            }
+        )));
+        assert!(
+            exits
+                .iter()
+                .any(|exit| matches!(exit, php_semantics::EventExit::PhpThrow { .. }))
+        );
+        assert!(!exits.iter().any(|exit| matches!(
+            exit,
+            php_semantics::EventExit::NativeUnwind { .. }
+                | php_semantics::EventExit::Fatal { .. }
+                | php_semantics::EventExit::Suspended { .. }
+        )));
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Eq)]
 struct CatalogTypeState {
     diagnostics: std::collections::BTreeSet<(php_semantics::DiagnosticKind, u32)>,
@@ -166,11 +213,21 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                     return Vec::new();
                 };
                 state.invoked_string_arguments.insert(*argument);
-                vec![php_semantics::EventExit::Normal {
-                    result: Some((*result, Type::string())),
-                    state,
-                    coverage: self.invocation_coverage.clone(),
-                }]
+                vec![
+                    php_semantics::EventExit::Normal {
+                        result: Some((*result, Type::string())),
+                        state: state.clone(),
+                        coverage: self.invocation_coverage.clone(),
+                    },
+                    // The paired runtime witness observes a throwing
+                    // __toString callback. Keep that path explicit while
+                    // leaving its full callback semantics open in coverage.
+                    php_semantics::EventExit::PhpThrow {
+                        value: Type::mixed(),
+                        state,
+                        coverage: self.invocation_coverage.clone(),
+                    },
+                ]
             }
             _ => Vec::new(),
         }

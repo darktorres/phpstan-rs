@@ -49,6 +49,11 @@ abstract values and states. Their concretizations, written `gammaV(v)` and
 Those functions are part of the host's semantic contract; they are not
 currently represented or checked by the Rust API.
 
+Coverage distinguishes `NativeUnwind` from `PhpThrow`, just as evaluator exits
+distinguish native unwinding from a PHP exception. A closed `NativeUnwind`
+projection requires evidence about the native boundary; PHP exception evidence
+cannot close it. Schema major 9 adds this coverage domain.
+
 For the state/value/exit projections the API exposes, an abstract frame denotes
 the product of its state's concretization, the concretizations of its defined
 result values, and its pending completion. The set of frames at a block denotes

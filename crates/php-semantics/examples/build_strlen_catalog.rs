@@ -252,6 +252,10 @@ fn main() {
         ])
     );
     for required_fact in [
+        "convert_to_string(arg);",
+        "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
+        "OBJ_RELEASE(zobj);",
+        "*dest = Z_STR_P(arg);",
         "if (UNEXPECTED(ZEND_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
         "if (UNEXPECTED(ZEND_FLF_ARG_USES_STRICT_TYPES())) {\n\t\treturn 0;\n\t}",
     ] {
@@ -279,6 +283,37 @@ fn main() {
         dependencies: vec![],
     };
     let parser_evidence_id = parser_evidence.id().expect("Zend parser evidence encodes");
+    let parser_source_path = source_path
+        .parent()
+        .expect("Zend source has a parent directory")
+        .join("zend_API.c");
+    let parser_source_bytes =
+        fs::read(&parser_source_path).expect("read pinned Zend argument-parser source");
+    let parser_source_digest: [u8; 32] = Sha256::digest(&parser_source_bytes).into();
+    assert_eq!(
+        parser_source_digest, parser_digest,
+        "parser source bytes differ from the source-linked LLVM witness"
+    );
+    let parser_source_text =
+        std::str::from_utf8(&parser_source_bytes).expect("Zend argument-parser source is UTF-8");
+    let parser_start = parser_source_text
+        .find("zend_parse_arg_str_weak(zval *arg")
+        .expect("locked weak string parser source exists");
+    let parser_end = parser_source_text[parser_start..]
+        .find("/* }}} */")
+        .map(|offset| parser_start + offset)
+        .expect("weak string parser has a section terminator");
+    for required_fact in [
+        "convert_to_string(arg);",
+        "zobj->handlers->cast_object(zobj, &obj, IS_STRING)",
+        "OBJ_RELEASE(zobj);",
+        "*dest = Z_STR_P(arg);",
+    ] {
+        assert!(
+            parser_source_text[parser_start..parser_end].contains(required_fact),
+            "weak string parser no longer contains {required_fact}"
+        );
+    }
     let object_handlers_path = source_path
         .parent()
         .expect("Zend source has a parent directory")
@@ -297,6 +332,18 @@ fn main() {
     assert!(object_handlers_text[cast_start..cast_end].contains(
         "zend_call_known_instance_method_with_0_params(ce->__tostring, readobj, &retval)"
     ));
+    for required_fact in [
+        "GC_ADDREF(readobj);",
+        "zend_object_release(readobj);",
+        "EXPECTED(Z_TYPE(retval) == IS_STRING)",
+        "zval_ptr_dtor(&retval);",
+        "zend_throw_error(NULL, \"Method %s::__toString() must return a string value\"",
+    ] {
+        assert!(
+            object_handlers_text[cast_start..cast_end].contains(required_fact),
+            "standard cast handler no longer contains {required_fact}"
+        );
+    }
     assert!(object_handlers_text.contains("zend_std_cast_object_tostring,\t\t\t/* cast_object */"));
     let object_handlers_digest: [u8; 32] = Sha256::digest(&object_handlers).into();
     let object_cast_evidence = EvidenceRecord {
@@ -311,9 +358,9 @@ fn main() {
     };
     let object_cast_evidence_id = object_cast_evidence.id().expect("cast evidence encodes");
     let callback_runtime_path = repository_root
-        .join("tools/php-catalog/experiments/comparison/results/runtime/hybrid-call-8.5.4.json");
+        .join("tools/php-catalog/experiments/comparison/results/runtime/tailcall-call-reference-8.5.4.json");
     let callback_runtime_bytes =
-        fs::read(&callback_runtime_path).expect("read Hybrid/CALL runtime witness");
+        fs::read(&callback_runtime_path).expect("read current TAILCALL/CALL runtime witness");
     let callback_runtime: serde_json::Value =
         serde_json::from_slice(&callback_runtime_bytes).expect("callback runtime witness is JSON");
     assert_eq!(
@@ -325,39 +372,61 @@ fn main() {
             .as_array()
             .is_some_and(|sentinels| sentinels
                 .iter()
-                .any(|sentinel| sentinel.as_str() == Some("string-coercion-callback")))
+                .any(|sentinel| sentinel.as_str() == Some("string-coercion-callback"))
+                && sentinels
+                    .iter()
+                    .any(|sentinel| sentinel.as_str() == Some("string-coercion-throw")))
     );
-    let callback_fixture = &callback_runtime["fixtures"][0];
+    assert_eq!(callback_runtime["result"]["exit_code"].as_u64(), Some(0));
+    assert_eq!(
+        callback_runtime["result"]["output_files_identical"].as_bool(),
+        Some(true)
+    );
+    let callback_fixture = &callback_runtime["fixture"];
     let callback_witness = read_witness_file(
         &repository_root,
         callback_fixture,
-        "hybrid_output",
+        "tailcall_output",
         "output_sha256",
     );
-    assert!(
-        callback_witness
-            .split(|byte| *byte == b'\n')
-            .any(|line| line == b"string-coercion-callback")
-    );
+    for sentinel in [
+        b"string-coercion-callback".as_slice(),
+        b"string-coercion-throw",
+    ] {
+        assert!(
+            callback_witness
+                .split(|byte| *byte == b'\n')
+                .any(|line| line == sentinel)
+        );
+    }
     let call_callback_witness_path = repository_root.join(
         callback_fixture["call_output"]
             .as_str()
             .expect("CALL callback output path"),
     );
+    let call_callback_witness = read_witness_file(
+        &repository_root,
+        callback_fixture,
+        "call_output",
+        "output_sha256",
+    );
     assert_eq!(
-        callback_witness,
-        fs::read(call_callback_witness_path).expect("read CALL callback witness"),
+        callback_witness, call_callback_witness,
         "PHP VM profiles disagree on the Stringable callback witness"
     );
+    assert!(call_callback_witness_path.exists());
+    let mut callback_dependencies = vec![parser_evidence_id, object_cast_evidence_id];
+    callback_dependencies.sort();
     let callback_observation = EvidenceRecord {
         kind: EvidenceKind::Observation,
         source_digest: Digest(Sha256::digest(&callback_runtime_bytes).into()),
         site: Some(Bytes(
-            b"PHP 8.5.4 Hybrid/CALL runtime:strlen(Stringable):string-coercion-callback".to_vec(),
+            b"PHP 8.5.4 TAILCALL/CALL runtime:strlen(Stringable):normal-and-throw-callback"
+                .to_vec(),
         )),
-        rule_version: Bytes(b"php-8.5.4-strlen-stringable-callback-observation-v1".to_vec()),
+        rule_version: Bytes(b"php-8.5.4-strlen-stringable-callback-observation-v2".to_vec()),
         assumptions: vec![],
-        dependencies: vec![parser_evidence_id, object_cast_evidence_id],
+        dependencies: callback_dependencies,
     };
     let callback_observation_id = callback_observation
         .id()
@@ -451,6 +520,13 @@ fn main() {
         dependencies: vec![],
     };
     let inventory_evidence_id = inventory_evidence.id().expect("inventory evidence encodes");
+    let mut native_demand_dependencies = vec![
+        source_evidence_id,
+        layout_evidence_id,
+        parser_evidence_id,
+        inventory_evidence_id,
+    ];
+    native_demand_dependencies.sort();
     let native_demand_evidence = EvidenceRecord {
         kind: EvidenceKind::SourceTransfer,
         source_digest: Digest(module_digest),
@@ -459,12 +535,7 @@ fn main() {
         )),
         rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-native-return-demand-v1".to_vec()),
         assumptions: vec![],
-        dependencies: vec![
-            source_evidence_id,
-            layout_evidence_id,
-            parser_evidence_id,
-            inventory_evidence_id,
-        ],
+        dependencies: native_demand_dependencies,
     };
     let native_demand_evidence_id = native_demand_evidence
         .id()
@@ -478,6 +549,14 @@ fn main() {
         ],
         "linked module differs from the measured PHP 8.5.4 Clang profile"
     );
+    let mut llvm_dependencies = vec![
+        source_evidence_id,
+        layout_evidence_id,
+        parser_evidence_id,
+        inventory_evidence_id,
+        native_demand_evidence_id,
+    ];
+    llvm_dependencies.sort();
     let llvm_evidence = EvidenceRecord {
         kind: EvidenceKind::SourceTransfer,
         source_digest: Digest(module_digest),
@@ -486,16 +565,10 @@ fn main() {
         )),
         rule_version: Bytes(b"php-8.5.4-clang-21.1.8-strlen-return-v2-inventoried".to_vec()),
         assumptions: vec![],
-        dependencies: vec![
-            source_evidence_id,
-            layout_evidence_id,
-            parser_evidence_id,
-            inventory_evidence_id,
-            native_demand_evidence_id,
-        ],
+        dependencies: llvm_dependencies,
     };
     let llvm_evidence_id = llvm_evidence.id().expect("LLVM evidence encodes");
-    let return_evidence = vec![
+    let mut return_evidence = vec![
         source_evidence_id,
         layout_evidence_id,
         parser_evidence_id,
@@ -503,19 +576,25 @@ fn main() {
         native_demand_evidence_id,
         llvm_evidence_id,
     ];
+    return_evidence.sort();
+    let mut diagnostic_coverage_evidence = vec![parser_evidence_id, diagnostic_evidence_id];
+    diagnostic_coverage_evidence.sort();
     let graph = BehaviorGraph {
         schema_major: SCHEMA_MAJOR,
         entry: 0,
         blocks: vec![
             Block::new(
                 vec![Event::Unknown {
-                    domains: Domain::ALL
-                        .iter()
-                        .copied()
-                        .filter(|domain| *domain != Domain::Return && *domain != Domain::Diagnostic)
-                        .collect(),
+                    domains: vec![
+                        Domain::Invocation,
+                        Domain::Release,
+                        Domain::PhpThrow,
+                        Domain::NativeUnwind,
+                        Domain::Fatal,
+                        Domain::Suspension,
+                    ],
                     reason: Bytes(
-                        b"effects and non-normal exits are not modeled in this slice".to_vec(),
+                        b"weak scalar parsing/coercion, object conversion, temporary release, and parser failure exits are only partially evidenced".to_vec(),
                     ),
                 }],
                 Terminator::Branch {
@@ -540,11 +619,33 @@ fn main() {
                 },
             ),
             Block::new(
-                vec![Event::Invoke {
-                    callable: Operand::Literal(Bytes(b"__toString".to_vec())),
-                    arguments: vec![Operand::Argument(0)],
-                    result: 0,
-                }],
+                vec![
+                    Event::Invoke {
+                        callable: Operand::Literal(Bytes(b"__toString".to_vec())),
+                        arguments: vec![Operand::Argument(0)],
+                        result: 0,
+                    },
+                    Event::Unknown {
+                        domains: vec![
+                            Domain::Invocation,
+                            Domain::UserRead,
+                            Domain::UserWrite,
+                            Domain::ExternalRead,
+                            Domain::ExternalWrite,
+                            Domain::Autoload,
+                            Domain::Output,
+                            Domain::Release,
+                            Domain::Retention,
+                            Domain::PhpThrow,
+                            Domain::NativeUnwind,
+                            Domain::Fatal,
+                            Domain::Suspension,
+                        ],
+                        reason: Bytes(
+                            b"Stringable callback body, ordered effects, destructor consequences, invalid return, and abrupt callback outcomes are not interpreted".to_vec(),
+                        ),
+                    },
+                ],
                 Terminator::Goto(4),
             ),
             Block::new(
@@ -563,16 +664,24 @@ fn main() {
             .copied()
             .map(|domain| DomainCoverage {
                 domain,
-                coverage: if domain == Domain::Return || domain == Domain::Diagnostic {
+                    coverage: if domain == Domain::Return || domain == Domain::Diagnostic {
                     php_semantics::Coverage::Closed
                 } else {
                     php_semantics::Coverage::Open {
-                        reasons: vec![Bytes(b"return-only first slice".to_vec())],
+                            reasons: vec![Bytes(match domain {
+                                Domain::Invocation => b"normal Stringable callback invocation is observed; callback body behavior remains open".to_vec(),
+                                Domain::Release => b"source releases temporary objects; release timing and destructor consequences are not modeled".to_vec(),
+                                Domain::PhpThrow => b"callback throw and parser failure are possible; only callback throw is observed".to_vec(),
+                                Domain::NativeUnwind => b"native unwind is distinct from PHP throw and is not modeled by this graph".to_vec(),
+                                Domain::Fatal => b"fatal and native bailout outcomes are not covered by the selected witness".to_vec(),
+                                Domain::Suspension => b"callback suspension is not covered by the selected witness".to_vec(),
+                                _ => b"callback effects and non-normal behavior are not modeled in this slice".to_vec(),
+                            })],
                     }
                 },
                 precision: Precision::Exact,
                 dependencies: vec![],
-                evidence: if domain == Domain::Invocation {
+                evidence: if matches!(domain, Domain::Invocation | Domain::Release | Domain::PhpThrow) {
                     let mut evidence = return_evidence.clone();
                     evidence.extend([object_cast_evidence_id, callback_observation_id]);
                     evidence.sort();
@@ -581,7 +690,7 @@ fn main() {
                 } else if domain == Domain::Return {
                     return_evidence.clone()
                 } else if domain == Domain::Diagnostic {
-                    vec![parser_evidence_id, diagnostic_evidence_id]
+                    diagnostic_coverage_evidence.clone()
                 } else {
                     return_evidence.clone()
                 },
@@ -598,6 +707,18 @@ fn main() {
         })),
         ..TargetPredicate::any()
     };
+    let mut evidence = vec![
+        (source_evidence_id, source_evidence),
+        (layout_evidence_id, layout_evidence),
+        (parser_evidence_id, parser_evidence),
+        (object_cast_evidence_id, object_cast_evidence),
+        (callback_observation_id, callback_observation),
+        (diagnostic_evidence_id, diagnostic_evidence),
+        (inventory_evidence_id, inventory_evidence),
+        (native_demand_evidence_id, native_demand_evidence),
+        (llvm_evidence_id, llvm_evidence),
+    ];
+    evidence.sort_by_key(|(id, _)| *id);
     let manifest = CatalogManifest {
         schema_major: SCHEMA_MAJOR,
         entries: vec![CatalogEntry {
@@ -612,17 +733,7 @@ fn main() {
             id: graph_id,
             graph,
         }],
-        evidence: vec![
-            (source_evidence_id, source_evidence),
-            (layout_evidence_id, layout_evidence),
-            (parser_evidence_id, parser_evidence),
-            (object_cast_evidence_id, object_cast_evidence),
-            (callback_observation_id, callback_observation),
-            (diagnostic_evidence_id, diagnostic_evidence),
-            (inventory_evidence_id, inventory_evidence),
-            (native_demand_evidence_id, native_demand_evidence),
-            (llvm_evidence_id, llvm_evidence),
-        ],
+        evidence,
         assumptions: vec![],
     };
     manifest.validate().expect("generated manifest validates");

@@ -30,7 +30,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 8;
+pub const SCHEMA_MAJOR: u32 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -118,12 +118,13 @@ pub enum Domain {
     Retention,
     Return,
     PhpThrow,
+    NativeUnwind,
     Fatal,
     Suspension,
 }
 
 impl Domain {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Invocation,
         Self::UserRead,
         Self::UserWrite,
@@ -136,6 +137,7 @@ impl Domain {
         Self::Retention,
         Self::Return,
         Self::PhpThrow,
+        Self::NativeUnwind,
         Self::Fatal,
         Self::Suspension,
     ];
@@ -940,7 +942,12 @@ fn validate_required_domain_dependencies(
                     }
                 }
                 Event::Invoke { .. } => {
-                    for projection in [Domain::PhpThrow, Domain::Fatal, Domain::Suspension] {
+                    for projection in [
+                        Domain::PhpThrow,
+                        Domain::NativeUnwind,
+                        Domain::Fatal,
+                        Domain::Suspension,
+                    ] {
                         required.push((projection, Domain::Invocation));
                     }
                 }
@@ -2849,7 +2856,12 @@ mod tests {
                 );
         }
         if applicable.contains(&Domain::Invocation) {
-            for projection in [Domain::PhpThrow, Domain::Fatal, Domain::Suspension] {
+            for projection in [
+                Domain::PhpThrow,
+                Domain::NativeUnwind,
+                Domain::Fatal,
+                Domain::Suspension,
+            ] {
                 if applicable.contains(&projection) {
                     coverage
                         .iter_mut()
@@ -3088,7 +3100,12 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::Invoke { .. }))
         }) {
-            for projection in [Domain::PhpThrow, Domain::Fatal, Domain::Suspension] {
+            for projection in [
+                Domain::PhpThrow,
+                Domain::NativeUnwind,
+                Domain::Fatal,
+                Domain::Suspension,
+            ] {
                 let item = graph
                     .coverage
                     .iter_mut()
@@ -3282,7 +3299,7 @@ mod tests {
 
     #[test]
     fn invocation_exception_projection_requires_invocation_dependency() {
-        let mut graph = graph(
+        let mut throw_graph = graph(
             vec![Event::Invoke {
                 callable: Operand::Argument(0),
                 arguments: vec![],
@@ -3290,7 +3307,7 @@ mod tests {
             }],
             Terminator::Throw(Operand::Literal(Bytes(b"throw".to_vec()))),
         );
-        let thrown = graph
+        let thrown = throw_graph
             .coverage
             .iter_mut()
             .find(|item| item.domain == Domain::PhpThrow)
@@ -3298,20 +3315,44 @@ mod tests {
         assert!(thrown.dependencies.contains(&Domain::Invocation));
         thrown.dependencies.clear();
         assert_eq!(
-            graph.validate(),
+            throw_graph.validate(),
             Err(GraphError::MissingRequiredDomainDependency {
                 domain: Domain::PhpThrow,
                 dependency: Domain::Invocation,
             })
         );
-        graph
+        throw_graph
             .coverage
             .iter_mut()
             .find(|item| item.domain == Domain::PhpThrow)
             .unwrap()
             .dependencies
             .push(Domain::Invocation);
-        assert_eq!(graph.validate(), Ok(()));
+        assert_eq!(throw_graph.validate(), Ok(()));
+
+        let mut unwind_graph = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 7,
+            }],
+            Terminator::Return(None),
+        );
+        unwind_graph.coverage = coverage_for(&Domain::ALL);
+        let unwind = unwind_graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::NativeUnwind)
+            .unwrap();
+        assert!(unwind.dependencies.contains(&Domain::Invocation));
+        unwind.dependencies.clear();
+        assert_eq!(
+            unwind_graph.validate(),
+            Err(GraphError::MissingRequiredDomainDependency {
+                domain: Domain::NativeUnwind,
+                dependency: Domain::Invocation,
+            })
+        );
     }
 
     #[test]
@@ -3324,21 +3365,28 @@ mod tests {
             }],
             Terminator::Return(None),
         );
-        let mut composed = graph.coverage.clone();
-        let mut complete_child = coverage_for(&Domain::ALL);
-        complete_child
-            .iter_mut()
-            .find(|item| item.domain == Domain::PhpThrow)
-            .unwrap()
-            .dependencies
-            .clear();
-        assert_eq!(
-            merge_graph_coverage(&graph, &mut composed, &complete_child),
-            Err(GraphError::MissingRequiredDomainDependency {
-                domain: Domain::PhpThrow,
-                dependency: Domain::Invocation,
-            })
-        );
+        for projection in [
+            Domain::PhpThrow,
+            Domain::NativeUnwind,
+            Domain::Fatal,
+            Domain::Suspension,
+        ] {
+            let mut composed = graph.coverage.clone();
+            let mut complete_child = coverage_for(&Domain::ALL);
+            complete_child
+                .iter_mut()
+                .find(|item| item.domain == projection)
+                .unwrap()
+                .dependencies
+                .clear();
+            assert_eq!(
+                merge_graph_coverage(&graph, &mut composed, &complete_child),
+                Err(GraphError::MissingRequiredDomainDependency {
+                    domain: projection,
+                    dependency: Domain::Invocation,
+                })
+            );
+        }
     }
     fn receiver() -> String {
         "receiver".into()
@@ -3386,7 +3434,7 @@ mod tests {
                 precision: Precision::Exact,
                 dependencies: if matches!(
                     domain,
-                    Domain::PhpThrow | Domain::Fatal | Domain::Suspension
+                    Domain::PhpThrow | Domain::NativeUnwind | Domain::Fatal | Domain::Suspension
                 ) {
                     vec![Domain::Invocation]
                 } else {

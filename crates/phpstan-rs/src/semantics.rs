@@ -230,7 +230,7 @@ mod embedded_catalog_tests {
             .iter()
             .map(|(_, record)| record)
             .find(|record| {
-                record.rule_version.0 == b"php-8.5.4-strlen-stringable-callback-observation-v1"
+                record.rule_version.0 == b"php-8.5.4-strlen-stringable-callback-observation-v2"
             })
             .expect("Stringable invocation has paired runtime observation evidence");
         assert_eq!(callback_record.kind, EvidenceKind::Observation);
@@ -371,6 +371,22 @@ mod embedded_catalog_tests {
                         && coverage.evidence.contains(&llvm_record.id().unwrap())
                 })
         );
+        let native_unwind = selection.variants[0]
+            .graph
+            .coverage
+            .iter()
+            .find(|coverage| coverage.domain == Domain::NativeUnwind)
+            .expect("schema records native unwind coverage independently");
+        assert!(matches!(native_unwind.coverage, Coverage::Open { .. }));
+        assert!(selection.variants[0].graph.blocks.iter().any(|block| {
+            block.events.iter().any(|event| {
+                matches!(event,
+                Event::Unknown { domains, reason }
+                    if domains.contains(&Domain::NativeUnwind)
+                        && reason.0.windows(b"parser failure exits".len())
+                            .any(|window| window == b"parser failure exits"))
+            })
+        }));
 
         let minor = target_set_from_php_releases(Some(PhpReleaseRange::new(
             PhpRelease::new(8, 5, 0),
