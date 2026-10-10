@@ -14,9 +14,11 @@ mod catalog;
 mod php_value;
 mod target;
 pub use catalog::{
-    AssumptionKind, AssumptionRecord, AssumptionScope, AssumptionValidator, Catalog, CatalogEntry,
-    CatalogError, CatalogManifest, CatalogTargetSelection, EntryKey, EvidenceKind, EvidenceRecord,
-    GraphRecord, Projection, Selection, SupportNode, VariantSelection,
+    AssumptionKind, AssumptionRecord, AssumptionScope, AssumptionValidation, AssumptionValidator,
+    AssumptionValidatorExecutor, Catalog, CatalogEntry, CatalogError, CatalogManifest,
+    CatalogTargetSelection, EntryKey, EvidenceKind, EvidenceRecord, GraphRecord, Projection,
+    Selection, SupportNode, ValidatorPin, ValidatorRevocation, ValidatorTrustDecision,
+    ValidatorTrustError, ValidatorTrustPolicy, ValidatorTrustRoot, VariantSelection,
 };
 pub use php_value::{
     ArrayId, ArrayKey, Binding, ObjectId, PhpCallbackOutcome, PhpFlowHost, PhpState, PhpValue,

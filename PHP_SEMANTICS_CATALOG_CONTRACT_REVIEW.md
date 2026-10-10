@@ -603,6 +603,18 @@ remove required edges and confirm rejection. The locked builder was rerun agains
 PHP source, LLVM inventory, and runtime witness and reproduced the checked-in catalog byte for
 byte. This is author evidence; fresh independent acceptance remains pending.
 
+**R01.7 remediation status (2026-10-10):** a deployment-owned `ValidatorTrustPolicy`
+now pins validator ID/version to an implementation digest under a configured root,
+rejects ambiguous or unrooted pins, applies revisioned revocations, and supplies a
+policy cache key. `Catalog::validate_assumption` checks context and support closure,
+recursively validates prerequisites, and calls exactly one executor only after the
+executor identity/digest matches the pin. Tests cover exact pins, stale executors,
+revocation/cache invalidation, unknown program context, and transitive support.
+Executor loading and root configuration remain deployment trust boundaries; the
+deployment loader must verify implementation bytes. Graph validation still rejects
+closed coverage that cites assumptions because this contextual result is not threaded
+into graph evaluation. This is author evidence; independent acceptance is pending.
+
 ### New findings
 
 **RV-14 — Active, High. Side-effecting `debug_assert!` calls drop registry members in release-profile builds.**

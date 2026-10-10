@@ -119,6 +119,193 @@ pub struct AssumptionValidator {
     pub version: crate::Bytes,
 }
 
+/// Deployment-owned trust configuration. It is intentionally kept outside
+/// the catalog manifest: a catalog cannot authorize its own validator.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidatorTrustPolicy {
+    /// Incremented whenever pins or revocations change. Consumers must include
+    /// the policy digest in any cached assumption decision.
+    pub revision: u64,
+    pub roots: Vec<ValidatorTrustRoot>,
+    pub pins: Vec<ValidatorPin>,
+    pub revocations: Vec<ValidatorRevocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidatorTrustRoot {
+    pub id: crate::Bytes,
+    /// Fingerprint of the root configuration managed by the deployment.
+    pub fingerprint: Digest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidatorPin {
+    pub validator: AssumptionValidator,
+    /// Digest reported by the loaded validator implementation at execution.
+    pub implementation: Digest,
+    pub root: crate::Bytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidatorRevocation {
+    pub validator_id: crate::Bytes,
+    pub version: crate::Bytes,
+    pub effective_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidatorTrustError {
+    EmptyRoot,
+    EmptyPin,
+    MissingRoot(crate::Bytes),
+    DuplicateRoot(crate::Bytes),
+    DuplicatePin(AssumptionValidator),
+    DuplicateRevocation(crate::Bytes, crate::Bytes),
+    FutureRevocation(crate::Bytes, crate::Bytes),
+    PolicyEncoding,
+    InvalidTarget(crate::TargetError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidatorTrustDecision {
+    Trusted { root: crate::Bytes },
+    Untrusted,
+    Revoked { effective_revision: u64 },
+}
+
+/// Deployment-loaded code that evaluates an assumption. Implementations must
+/// validate the claim against every supplied evidence record and the requested
+/// target/program context. Their declared digest is checked against the
+/// administrator-owned trust policy before this method is called.
+pub trait AssumptionValidatorExecutor {
+    fn validator(&self) -> AssumptionValidator;
+    fn implementation(&self) -> Digest;
+    fn validate(
+        &self,
+        assumption: &AssumptionRecord,
+        supporting_evidence: &[EvidenceRecord],
+        established_prerequisites: &[AssumptionRecord],
+        target: &TargetScenario,
+        loaded_program: Option<Digest>,
+    ) -> Applicability;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssumptionValidation {
+    Established {
+        assumption: Digest,
+        target: TargetScenario,
+        loaded_program: Option<Digest>,
+        policy_key: Digest,
+        root: crate::Bytes,
+    },
+    NotApplicable,
+    ContextUnknown,
+    UntrustedValidator,
+    RevokedValidator {
+        effective_revision: u64,
+    },
+    InvalidClaim,
+    PrerequisiteNotEstablished(Digest),
+    SupportCycle(Digest),
+    MissingAssumption(Digest),
+    MissingEvidence(Digest),
+}
+
+impl ValidatorTrustPolicy {
+    pub fn validate(&self) -> Result<(), ValidatorTrustError> {
+        for (index, root) in self.roots.iter().enumerate() {
+            if root.id.0.is_empty() {
+                return Err(ValidatorTrustError::EmptyRoot);
+            }
+            if self.roots[..index].iter().any(|old| old.id == root.id) {
+                return Err(ValidatorTrustError::DuplicateRoot(root.id.clone()));
+            }
+        }
+        for (index, pin) in self.pins.iter().enumerate() {
+            if pin.validator.id.0.is_empty()
+                || pin.validator.version.0.is_empty()
+                || pin.root.0.is_empty()
+            {
+                return Err(ValidatorTrustError::EmptyPin);
+            }
+            if !self.roots.iter().any(|root| root.id == pin.root) {
+                return Err(ValidatorTrustError::MissingRoot(pin.root.clone()));
+            }
+            if self.pins[..index].iter().any(|old| {
+                old.validator.id == pin.validator.id
+                    && old.validator.version == pin.validator.version
+            }) {
+                return Err(ValidatorTrustError::DuplicatePin(pin.validator.clone()));
+            }
+        }
+        for (index, revocation) in self.revocations.iter().enumerate() {
+            let identity = (revocation.validator_id.clone(), revocation.version.clone());
+            if self.revocations[..index]
+                .iter()
+                .any(|old| old.validator_id == identity.0 && old.version == identity.1)
+            {
+                return Err(ValidatorTrustError::DuplicateRevocation(
+                    identity.0, identity.1,
+                ));
+            }
+            if revocation.effective_revision > self.revision {
+                return Err(ValidatorTrustError::FutureRevocation(
+                    identity.0, identity.1,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn decide(
+        &self,
+        validator: &AssumptionValidator,
+        implementation: Digest,
+    ) -> Result<ValidatorTrustDecision, ValidatorTrustError> {
+        self.validate()?;
+        if let Some(revocation) = self.revocations.iter().find(|revocation| {
+            revocation.validator_id == validator.id && revocation.version == validator.version
+        }) {
+            return Ok(ValidatorTrustDecision::Revoked {
+                effective_revision: revocation.effective_revision,
+            });
+        }
+        Ok(self
+            .pins
+            .iter()
+            .find(|pin| pin.validator == *validator && pin.implementation == implementation)
+            .map_or(ValidatorTrustDecision::Untrusted, |pin| {
+                ValidatorTrustDecision::Trusted {
+                    root: pin.root.clone(),
+                }
+            }))
+    }
+
+    /// Stable invalidation key for downstream caches. A change to revision,
+    /// pinning, root fingerprints, or revocation changes this digest.
+    pub fn cache_key(&self) -> Result<Digest, postcard::Error> {
+        let mut canonical = self.clone();
+        canonical.roots.sort_by(|a, b| a.id.cmp(&b.id));
+        canonical.pins.sort_by(|a, b| {
+            a.validator
+                .id
+                .cmp(&b.validator.id)
+                .then_with(|| a.validator.version.cmp(&b.validator.version))
+                .then_with(|| a.implementation.cmp(&b.implementation))
+        });
+        canonical.revocations.sort_by(|a, b| {
+            a.validator_id
+                .cmp(&b.validator_id)
+                .then_with(|| a.version.cmp(&b.version))
+        });
+        let mut hasher = Sha256::new();
+        hasher.update(b"php-semantics-validator-trust-policy-v1\0");
+        hasher.update(postcard::to_allocvec(&canonical)?);
+        Ok(Digest(hasher.finalize().into()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssumptionRecord {
     pub kind: AssumptionKind,
@@ -683,6 +870,225 @@ impl Catalog {
     pub fn explain_assumption(&self, id: Digest) -> Option<&AssumptionRecord> {
         self.assumptions.get(&id)
     }
+
+    /// Execute one assumption validator through a deployment-pinned policy.
+    /// This result is contextual. Cache it only under the assumption ID,
+    /// target, loaded-program identity, and returned policy key.
+    /// It does not mutate graph coverage; callers still need to preserve the
+    /// result and its context when consuming a claim.
+    pub fn validate_assumption(
+        &self,
+        id: Digest,
+        target: &TargetScenario,
+        loaded_program: Option<Digest>,
+        policy: &ValidatorTrustPolicy,
+        executors: &[&dyn AssumptionValidatorExecutor],
+    ) -> Result<AssumptionValidation, ValidatorTrustError> {
+        policy.validate()?;
+        target
+            .validate()
+            .map_err(ValidatorTrustError::InvalidTarget)?;
+        let policy_key = policy
+            .cache_key()
+            .map_err(|_| ValidatorTrustError::PolicyEncoding)?;
+        fn visit(
+            catalog: &Catalog,
+            id: Digest,
+            target: &TargetScenario,
+            loaded_program: Option<Digest>,
+            policy: &ValidatorTrustPolicy,
+            policy_key: Digest,
+            executors: &[&dyn AssumptionValidatorExecutor],
+            active: &mut Vec<Digest>,
+            memo: &mut BTreeMap<Digest, AssumptionValidation>,
+        ) -> AssumptionValidation {
+            fn collect_evidence(
+                catalog: &Catalog,
+                evidence_id: Digest,
+                target: &TargetScenario,
+                loaded_program: Option<Digest>,
+                policy: &ValidatorTrustPolicy,
+                policy_key: Digest,
+                executors: &[&dyn AssumptionValidatorExecutor],
+                active_assumptions: &mut Vec<Digest>,
+                memo: &mut BTreeMap<Digest, AssumptionValidation>,
+                active_evidence: &mut Vec<Digest>,
+                seen_evidence: &mut Vec<Digest>,
+                collected: &mut Vec<EvidenceRecord>,
+            ) -> Result<(), AssumptionValidation> {
+                if seen_evidence.contains(&evidence_id) {
+                    return Ok(());
+                }
+                if active_evidence.contains(&evidence_id) {
+                    return Err(AssumptionValidation::SupportCycle(evidence_id));
+                }
+                let Some(record) = catalog.evidence.get(&evidence_id) else {
+                    return Err(AssumptionValidation::MissingEvidence(evidence_id));
+                };
+                active_evidence.push(evidence_id);
+                for assumption_id in &record.assumptions {
+                    match visit(
+                        catalog,
+                        *assumption_id,
+                        target,
+                        loaded_program,
+                        policy,
+                        policy_key,
+                        executors,
+                        active_assumptions,
+                        memo,
+                    ) {
+                        AssumptionValidation::Established { .. } => {}
+                        _ => {
+                            active_evidence.pop();
+                            return Err(AssumptionValidation::PrerequisiteNotEstablished(
+                                *assumption_id,
+                            ));
+                        }
+                    }
+                }
+                for dependency in &record.dependencies {
+                    if let Err(error) = collect_evidence(
+                        catalog,
+                        *dependency,
+                        target,
+                        loaded_program,
+                        policy,
+                        policy_key,
+                        executors,
+                        active_assumptions,
+                        memo,
+                        active_evidence,
+                        seen_evidence,
+                        collected,
+                    ) {
+                        active_evidence.pop();
+                        return Err(error);
+                    }
+                }
+                active_evidence.pop();
+                seen_evidence.push(evidence_id);
+                collected.push(record.clone());
+                Ok(())
+            }
+
+            if active.contains(&id) {
+                return AssumptionValidation::SupportCycle(id);
+            }
+            if let Some(cached) = memo.get(&id) {
+                return cached.clone();
+            }
+            let Some(record) = catalog.assumptions.get(&id) else {
+                return AssumptionValidation::MissingAssumption(id);
+            };
+            match record.applicability(target, loaded_program) {
+                Applicability::No => return AssumptionValidation::NotApplicable,
+                Applicability::Maybe => return AssumptionValidation::ContextUnknown,
+                Applicability::Yes => {}
+            }
+
+            let matching = executors
+                .iter()
+                .filter(|executor| executor.validator() == record.validator)
+                .collect::<Vec<_>>();
+            if matching.len() != 1 {
+                return AssumptionValidation::UntrustedValidator;
+            }
+            let executor = matching[0];
+            let trust = match policy.decide(&record.validator, executor.implementation()) {
+                Ok(trust) => trust,
+                Err(_) => return AssumptionValidation::UntrustedValidator,
+            };
+            let root = match trust {
+                ValidatorTrustDecision::Trusted { root } => root,
+                ValidatorTrustDecision::Untrusted => {
+                    return AssumptionValidation::UntrustedValidator;
+                }
+                ValidatorTrustDecision::Revoked { effective_revision } => {
+                    return AssumptionValidation::RevokedValidator { effective_revision };
+                }
+            };
+
+            active.push(id);
+            let mut prerequisites = Vec::with_capacity(record.prerequisites.len());
+            for prerequisite_id in &record.prerequisites {
+                match visit(
+                    catalog,
+                    *prerequisite_id,
+                    target,
+                    loaded_program,
+                    policy,
+                    policy_key,
+                    executors,
+                    active,
+                    memo,
+                ) {
+                    AssumptionValidation::Established { .. } => {
+                        let Some(prerequisite) = catalog.assumptions.get(prerequisite_id) else {
+                            active.pop();
+                            return AssumptionValidation::MissingAssumption(*prerequisite_id);
+                        };
+                        prerequisites.push(prerequisite.clone());
+                    }
+                    _ => {
+                        active.pop();
+                        return AssumptionValidation::PrerequisiteNotEstablished(*prerequisite_id);
+                    }
+                }
+            }
+            let mut evidence = Vec::with_capacity(record.supporting_evidence.len());
+            let mut seen_evidence = Vec::new();
+            let mut active_evidence = Vec::new();
+            for evidence_id in &record.supporting_evidence {
+                if let Err(error) = collect_evidence(
+                    catalog,
+                    *evidence_id,
+                    target,
+                    loaded_program,
+                    policy,
+                    policy_key,
+                    executors,
+                    active,
+                    memo,
+                    &mut active_evidence,
+                    &mut seen_evidence,
+                    &mut evidence,
+                ) {
+                    active.pop();
+                    return error;
+                }
+            }
+            let outcome =
+                executor.validate(record, &evidence, &prerequisites, target, loaded_program);
+            active.pop();
+            let result = match outcome {
+                Applicability::Yes => AssumptionValidation::Established {
+                    assumption: id,
+                    target: target.clone(),
+                    loaded_program,
+                    policy_key,
+                    root,
+                },
+                Applicability::No => AssumptionValidation::InvalidClaim,
+                Applicability::Maybe => AssumptionValidation::ContextUnknown,
+            };
+            memo.insert(id, result.clone());
+            result
+        }
+
+        Ok(visit(
+            self,
+            id,
+            target,
+            loaded_program,
+            policy,
+            policy_key,
+            executors,
+            &mut Vec::new(),
+            &mut BTreeMap::new(),
+        ))
+    }
+
     pub fn entry_count(&self) -> usize {
         self.entries.values().map(Vec::len).sum()
     }
@@ -961,6 +1367,161 @@ mod tests {
             extensions: Some(vec![(Bytes(b"session".to_vec()), true)]),
             ini: Some(vec![]),
         }
+    }
+
+    struct TestValidator {
+        identity: AssumptionValidator,
+        implementation: Digest,
+        result: Applicability,
+        calls: std::cell::Cell<usize>,
+    }
+
+    impl AssumptionValidatorExecutor for TestValidator {
+        fn validator(&self) -> AssumptionValidator {
+            self.identity.clone()
+        }
+
+        fn implementation(&self) -> Digest {
+            self.implementation
+        }
+
+        fn validate(
+            &self,
+            _: &AssumptionRecord,
+            supporting_evidence: &[EvidenceRecord],
+            _: &[AssumptionRecord],
+            _: &TargetScenario,
+            _: Option<Digest>,
+        ) -> Applicability {
+            assert!(!supporting_evidence.is_empty());
+            self.calls.set(self.calls.get() + 1);
+            self.result
+        }
+    }
+
+    fn trust_policy(
+        validator: AssumptionValidator,
+        implementation: Digest,
+    ) -> ValidatorTrustPolicy {
+        ValidatorTrustPolicy {
+            revision: 1,
+            roots: vec![ValidatorTrustRoot {
+                id: Bytes(b"root".to_vec()),
+                fingerprint: Digest([0xA1; 32]),
+            }],
+            pins: vec![ValidatorPin {
+                validator,
+                implementation,
+                root: Bytes(b"root".to_vec()),
+            }],
+            revocations: vec![],
+        }
+    }
+
+    #[test]
+    fn assumption_validation_executes_only_the_exact_trusted_implementation() {
+        let mut catalog = Catalog::default();
+        let evidence = catalog.add_evidence(evidence_record()).unwrap();
+        let assumption = assumption_record(evidence);
+        let id = catalog.add_assumption(assumption.clone()).unwrap();
+        let implementation = Digest([0x53; 32]);
+        let executor = TestValidator {
+            identity: assumption.validator.clone(),
+            implementation,
+            result: Applicability::Yes,
+            calls: std::cell::Cell::new(0),
+        };
+        let policy = trust_policy(assumption.validator.clone(), implementation);
+        assert!(matches!(
+            catalog.validate_assumption(id, &scenario(None), None, &policy, &[&executor]),
+            Ok(AssumptionValidation::Established { .. })
+        ));
+        assert_eq!(executor.calls.get(), 1);
+
+        let stale_executor = TestValidator {
+            identity: assumption.validator,
+            implementation: Digest([0x54; 32]),
+            result: Applicability::Yes,
+            calls: std::cell::Cell::new(0),
+        };
+        assert_eq!(
+            catalog.validate_assumption(id, &scenario(None), None, &policy, &[&stale_executor]),
+            Ok(AssumptionValidation::UntrustedValidator)
+        );
+        assert_eq!(stale_executor.calls.get(), 0);
+    }
+
+    #[test]
+    fn assumption_validation_is_revoked_and_context_scoped() {
+        let mut catalog = Catalog::default();
+        let evidence = catalog.add_evidence(evidence_record()).unwrap();
+        let mut assumption = assumption_record(evidence);
+        assumption.scope.loaded_program = Some(Digest([0x71; 32]));
+        let id = catalog.add_assumption(assumption.clone()).unwrap();
+        let implementation = Digest([0x72; 32]);
+        let executor = TestValidator {
+            identity: assumption.validator.clone(),
+            implementation,
+            result: Applicability::Yes,
+            calls: std::cell::Cell::new(0),
+        };
+        let policy = trust_policy(assumption.validator.clone(), implementation);
+        assert_eq!(
+            catalog.validate_assumption(id, &scenario(None), None, &policy, &[&executor]),
+            Ok(AssumptionValidation::ContextUnknown)
+        );
+        let mut revoked = policy;
+        revoked.revision = 2;
+        revoked.revocations.push(ValidatorRevocation {
+            validator_id: assumption.validator.id.clone(),
+            version: assumption.validator.version.clone(),
+            effective_revision: 2,
+        });
+        assert_eq!(
+            catalog.validate_assumption(
+                id,
+                &scenario(None),
+                Some(Digest([0x71; 32])),
+                &revoked,
+                &[&executor]
+            ),
+            Ok(AssumptionValidation::RevokedValidator {
+                effective_revision: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn assumption_validation_checks_prerequisite_and_transitive_evidence_closure() {
+        let mut catalog = Catalog::default();
+        let base_evidence = catalog.add_evidence(evidence_record()).unwrap();
+        let prerequisite = assumption_record(base_evidence);
+        let prerequisite_id = catalog.add_assumption(prerequisite.clone()).unwrap();
+        let derived_evidence = EvidenceRecord {
+            assumptions: vec![prerequisite_id],
+            dependencies: vec![base_evidence],
+            ..evidence_record()
+        };
+        let derived_evidence_id = catalog.add_evidence(derived_evidence).unwrap();
+        let mut assumption = assumption_record(derived_evidence_id);
+        assumption.claim = Bytes(b"derived claim conditioned on prerequisite".to_vec());
+        assumption.prerequisites = vec![prerequisite_id];
+        let id = catalog.add_assumption(assumption.clone()).unwrap();
+        let implementation = Digest([0x73; 32]);
+        let executor = TestValidator {
+            identity: assumption.validator.clone(),
+            implementation,
+            result: Applicability::Yes,
+            calls: std::cell::Cell::new(0),
+        };
+        let policy = trust_policy(assumption.validator, implementation);
+        assert!(matches!(
+            catalog.validate_assumption(id, &scenario(None), None, &policy, &[&executor]),
+            Ok(AssumptionValidation::Established { .. })
+        ));
+        // The shared prerequisite is executed once despite being reached both
+        // through the explicit prerequisite edge and evidence provenance.
+        assert_eq!(executor.calls.get(), 2);
     }
 
     #[test]
@@ -1324,6 +1885,123 @@ mod tests {
             tampered.validate(),
             Err(CatalogError::InvalidAssumption(assumption_id))
         );
+    }
+
+    #[test]
+    fn validator_trust_requires_exact_root_version_and_implementation_pin() {
+        let validator = AssumptionValidator {
+            id: Bytes(b"profile-checker".to_vec()),
+            version: Bytes(b"3.1.0".to_vec()),
+        };
+        let implementation = Digest([0x31; 32]);
+        let policy = ValidatorTrustPolicy {
+            revision: 4,
+            roots: vec![ValidatorTrustRoot {
+                id: Bytes(b"deployment-root-1".to_vec()),
+                fingerprint: Digest([0xA1; 32]),
+            }],
+            pins: vec![ValidatorPin {
+                validator: validator.clone(),
+                implementation,
+                root: Bytes(b"deployment-root-1".to_vec()),
+            }],
+            revocations: vec![],
+        };
+        assert_eq!(
+            policy.decide(&validator, implementation),
+            Ok(ValidatorTrustDecision::Trusted {
+                root: Bytes(b"deployment-root-1".to_vec()),
+            })
+        );
+        assert_eq!(
+            policy.decide(&validator, Digest([0x32; 32])),
+            Ok(ValidatorTrustDecision::Untrusted)
+        );
+        let stale = AssumptionValidator {
+            version: Bytes(b"3.0.9".to_vec()),
+            ..validator.clone()
+        };
+        assert_eq!(
+            policy.decide(&stale, implementation),
+            Ok(ValidatorTrustDecision::Untrusted)
+        );
+    }
+
+    #[test]
+    fn validator_revocation_changes_decision_and_invalidates_cache_key() {
+        let validator = AssumptionValidator {
+            id: Bytes(b"profile-checker".to_vec()),
+            version: Bytes(b"3.1.0".to_vec()),
+        };
+        let implementation = Digest([0x31; 32]);
+        let mut policy = ValidatorTrustPolicy {
+            revision: 4,
+            roots: vec![ValidatorTrustRoot {
+                id: Bytes(b"deployment-root-1".to_vec()),
+                fingerprint: Digest([0xA1; 32]),
+            }],
+            pins: vec![ValidatorPin {
+                validator: validator.clone(),
+                implementation,
+                root: Bytes(b"deployment-root-1".to_vec()),
+            }],
+            revocations: vec![],
+        };
+        let before = policy.cache_key().unwrap();
+        policy.revision = 5;
+        policy.revocations.push(ValidatorRevocation {
+            validator_id: validator.id.clone(),
+            version: validator.version.clone(),
+            effective_revision: 5,
+        });
+        assert_ne!(before, policy.cache_key().unwrap());
+        assert_eq!(
+            policy.decide(&validator, implementation),
+            Ok(ValidatorTrustDecision::Revoked {
+                effective_revision: 5,
+            })
+        );
+    }
+
+    #[test]
+    fn validator_trust_policy_rejects_unrooted_and_future_revocations() {
+        let validator = AssumptionValidator {
+            id: Bytes(b"profile-checker".to_vec()),
+            version: Bytes(b"3.1.0".to_vec()),
+        };
+        let policy = ValidatorTrustPolicy {
+            revision: 1,
+            roots: vec![],
+            pins: vec![ValidatorPin {
+                validator: validator.clone(),
+                implementation: Digest([0x31; 32]),
+                root: Bytes(b"missing-root".to_vec()),
+            }],
+            revocations: vec![],
+        };
+        assert_eq!(
+            policy.validate(),
+            Err(ValidatorTrustError::MissingRoot(Bytes(
+                b"missing-root".to_vec()
+            )))
+        );
+        let policy = ValidatorTrustPolicy {
+            revision: 1,
+            roots: vec![ValidatorTrustRoot {
+                id: Bytes(b"root".to_vec()),
+                fingerprint: Digest([0xA1; 32]),
+            }],
+            pins: vec![],
+            revocations: vec![ValidatorRevocation {
+                validator_id: validator.id,
+                version: validator.version,
+                effective_revision: 2,
+            }],
+        };
+        assert!(matches!(
+            policy.validate(),
+            Err(ValidatorTrustError::FutureRevocation(_, _))
+        ));
     }
 
     #[test]

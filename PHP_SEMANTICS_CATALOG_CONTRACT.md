@@ -151,8 +151,21 @@ implementation/version, its trust root and revocation policy must be explicit,
 and its supporting evidence must be validated for the selected target and
 loaded program. Evidence and assumption support form one dependency graph for
 trust analysis, even though their identifiers remain separate namespaces.
-Until the schema validates that graph and the trusted roots, a manifest can
-report provenance but cannot establish semantic trust.
+The runtime trust policy is deployment-owned and is not carried by a catalog,
+so a manifest cannot authorize its own validator. The policy pins validator ID,
+version, implementation digest, and root; it rejects ambiguous pins, requires
+known roots, and records revocations at a monotonically increasing revision.
+Assumption validation first checks target/program applicability, then validates
+prerequisites and the transitive supporting-evidence closure, and calls exactly
+one executor only after its declared identity and implementation digest match
+the policy. The deployment loader remains responsible for measuring the loaded
+implementation against that digest and protecting the policy roots. The
+resulting decision is scoped to the assumption, target, loaded program, and
+policy cache key; revocation or repinning changes that key and invalidates
+cached decisions. A caller must not treat an untrusted, revoked, inapplicable,
+or indeterminate result as established. Graph validation remains fail-closed
+for closed coverage that cites assumptions because graph evaluation does not
+carry this contextual validation result.
 
 Every invocation outcome carries complete per-domain coverage, precision,
 evidence, and assumptions for the composed call; other events carry the same
