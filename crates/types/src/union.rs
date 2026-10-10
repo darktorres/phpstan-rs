@@ -1,5 +1,8 @@
 use std::sync::Arc;
 
+use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
+
 use crate::{AccessoryKind, ClassHierarchy, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// How many members a union keeps: past it, its members are generalized
@@ -985,7 +988,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
     }
     // Each shape with whether it's known non-empty; a merge is non-empty
     // when both sides are. A shape that is a member's is shared with it.
-    let mut shapes: Vec<Option<(Arc<Shape>, bool)>> = Vec::new();
+    let mut shapes: Vec<ShapeSlot> = Vec::new();
     members.retain(|m| match shape_arc_parts(m) {
         Some((shape, non_empty)) => {
             shapes.push(Some((Arc::clone(shape), non_empty)));
@@ -993,6 +996,37 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         }
         None => true,
     });
+    #[cfg(debug_assertions)]
+    let reference = {
+        let mut reference = shapes.clone();
+        merge_shape_slots_reference(&mut reference);
+        reference
+    };
+    merge_shape_slots(&mut shapes);
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        shapes.len() == reference.len()
+            && shapes.iter().zip(&reference).all(|(found, expected)| match (found, expected) {
+                (None, None) => true,
+                (Some((a, a_non_empty)), Some((b, b_non_empty))) => {
+                    a_non_empty == b_non_empty && **a == **b
+                }
+                _ => false,
+            }),
+        "the indexed shape merge differs from the pairwise one"
+    );
+    members.extend(shapes.into_iter().flatten().map(|(shape, non_empty)| {
+        let shape = Arc::try_unwrap(shape).unwrap_or_else(|shared| Shape::clone(&shared));
+        shape_type(shape, non_empty)
+    }));
+}
+
+
+type ShapeSlot = Option<(Arc<Shape>, bool)>;
+
+/// The merges `reduceArrays` makes among `shapes`, over every pair.
+#[cfg(debug_assertions)]
+fn merge_shape_slots_reference(shapes: &mut [ShapeSlot]) {
     let relation = crate::Relation::structural();
     let keys_superset =
         |this: &Arc<Shape>, other: &Arc<Shape>| keys_superset_memo::answer(&relation, this, other);
@@ -1055,10 +1089,160 @@ fn reduce_array_members(members: &mut Vec<Type>) {
             }
         }
     }
-    members.extend(shapes.into_iter().flatten().map(|(shape, non_empty)| {
-        let shape = Arc::try_unwrap(shape).unwrap_or_else(|shared| Shape::clone(&shared));
-        shape_type(shape, non_empty)
-    }));
+}
+
+/// Whether a shape is one the second pass can merge into another or take
+/// one in: unsealed, empty, or with an optional field.
+fn is_merge_candidate(shape: &Shape) -> bool {
+    !shape.is_sealed() || shape.fields().is_empty() || shape.fields().iter().any(|f| f.optional)
+}
+
+/// The slots of `shapes` that hold a field of each key, in slot order.
+struct KeyPostings {
+    slots: FxHashMap<ShapeKey, SmallVec<[u32; 4]>>,
+}
+
+impl KeyPostings {
+    fn new(shapes: &[ShapeSlot]) -> KeyPostings {
+        let mut postings = KeyPostings {
+            slots: FxHashMap::default(),
+        };
+        for (at, slot) in shapes.iter().enumerate() {
+            if let Some((shape, _)) = slot {
+                postings.add(at as u32, shape);
+            }
+        }
+        postings
+    }
+
+    /// `shape` is now what slot `at` holds.
+    fn add(&mut self, at: u32, shape: &Shape) {
+        for field in shape.fields() {
+            let slots = self.slots.entry(field.key.clone()).or_default();
+            if let Err(place) = slots.binary_search(&at) {
+                slots.insert(place, at);
+            }
+        }
+    }
+
+    /// The first slot after `after` that holds a field of a key `shape` has.
+    fn next_sharing(&self, shape: &Shape, after: u32) -> Option<u32> {
+        shape
+            .fields()
+            .iter()
+            .filter_map(|field| {
+                let slots = self.slots.get(&field.key)?;
+                slots.get(slots.partition_point(|&slot| slot <= after)).copied()
+            })
+            .min()
+    }
+}
+
+/// The merges `reduceArrays` makes among `shapes`: a pass over the pairs
+/// that share a key, then one over the pairs where a side is a candidate.
+/// Both visit their pairs in the order of a loop over every pair; the
+/// pairs they leave out are the ones that loop skips.
+fn merge_shape_slots(shapes: &mut [ShapeSlot]) {
+    let relation = crate::Relation::structural();
+    let keys_superset =
+        |this: &Arc<Shape>, other: &Arc<Shape>| keys_superset_memo::answer(&relation, this, other);
+    let mut postings = KeyPostings::new(shapes);
+    for i in 0..shapes.len() {
+        let mut after = i as u32;
+        loop {
+            let Some((a, _)) = &shapes[i] else { break };
+            let Some(j) = postings.next_sharing(a, after) else {
+                break;
+            };
+            after = j;
+            let j = j as usize;
+            let (Some((a, a_non_empty)), Some((b, b_non_empty))) = (&shapes[i], &shapes[j]) else {
+                continue;
+            };
+            let non_empty = *a_non_empty && *b_non_empty;
+            let overlapping = a
+                .fields()
+                .iter()
+                .enumerate()
+                .filter(|(at, f)| b.field_near(&f.key, *at).is_some())
+                .count();
+            if overlapping == 0 {
+                continue;
+            }
+            let single_key_same_type = overlapping == 1
+                && a.fields().len() == 1
+                && b.fields().len() == 1
+                && !matches!(
+                    (Type::union(a.fields()[0].ty.clone(), b.fields()[0].ty.clone())).repr(),
+                    Repr::Union(_)
+                );
+            if single_key_same_type || (overlapping == a.fields().len() && keys_superset(b, a)) {
+                let merged = Arc::new(merge_shapes(b, a, true));
+                postings.add(j as u32, &merged);
+                shapes[j] = Some((merged, non_empty));
+                shapes[i] = None;
+                break;
+            }
+            if overlapping == b.fields().len() && keys_superset(a, b) {
+                let merged = Arc::new(merge_shapes(a, b, false));
+                postings.add(i as u32, &merged);
+                shapes[i] = Some((merged, non_empty));
+                shapes[j] = None;
+            }
+        }
+    }
+    let mut candidates: Vec<u32> = shapes
+        .iter()
+        .enumerate()
+        .filter_map(|(at, slot)| {
+            slot.as_ref()
+                .filter(|(shape, _)| is_merge_candidate(shape))
+                .map(|_| at as u32)
+        })
+        .collect();
+    let note_candidate = |candidates: &mut Vec<u32>, at: u32, shape: &Shape| {
+        if is_merge_candidate(shape)
+            && let Err(place) = candidates.binary_search(&at)
+        {
+            candidates.insert(place, at);
+        }
+    };
+    for i in 0..shapes.len() {
+        let mut after = i as u32;
+        loop {
+            let Some((a, _)) = &shapes[i] else { break };
+            let next = if is_merge_candidate(a) {
+                (after as usize + 1 < shapes.len()).then_some(after + 1)
+            } else {
+                candidates
+                    .get(candidates.partition_point(|&slot| slot <= after))
+                    .copied()
+            };
+            let Some(j) = next else { break };
+            after = j;
+            let j = j as usize;
+            let (Some((a, a_non_empty)), Some((b, b_non_empty))) = (&shapes[i], &shapes[j]) else {
+                continue;
+            };
+            if !is_merge_candidate(a) && !is_merge_candidate(b) {
+                continue;
+            }
+            let non_empty = *a_non_empty && *b_non_empty;
+            if keys_superset(b, a) {
+                let merged = Arc::new(merge_shapes(b, a, true));
+                note_candidate(&mut candidates, j as u32, &merged);
+                shapes[j] = Some((merged, non_empty));
+                shapes[i] = None;
+                break;
+            }
+            if keys_superset(a, b) {
+                let merged = Arc::new(merge_shapes(a, b, false));
+                note_candidate(&mut candidates, i as u32, &merged);
+                shapes[i] = Some((merged, non_empty));
+                shapes[j] = None;
+            }
+        }
+    }
 }
 
 /// `is_keys_superset` over the structural relation, kept for each pair of

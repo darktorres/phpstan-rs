@@ -171,3 +171,53 @@ fn the_union_of_a_list_is_a_union_of_it_and_the_fold_agrees_but_for_rare_merges(
         "{different} of {cases} lists differ"
     );
 }
+
+/// Many array shapes over a few keys, where the indexed merge of shapes and
+/// the pairwise one (its debug assertion) must agree.
+#[test]
+fn many_shapes_over_few_keys_merge_as_the_pairwise_loops_do() {
+    use proptest::strategy::{Strategy, ValueTree};
+    use proptest::test_runner::{Config, TestRng, TestRunner};
+    let keys = vec!["a", "b", "c", "d", "e"];
+    let shape = (
+        prop::collection::vec(
+            (prop::sample::select(keys), scalar(), any::<bool>()),
+            0..4,
+        ),
+        any::<bool>(),
+    )
+        .prop_map(|(fields, sealed)| {
+            let mut seen = Vec::new();
+            let fields: Vec<_> = fields
+                .into_iter()
+                .filter(|(k, ..)| {
+                    !seen.contains(k) && {
+                        seen.push(*k);
+                        true
+                    }
+                })
+                .collect();
+            let shape = Shape::from_named(fields);
+            if sealed {
+                Type::array_shape(shape)
+            } else {
+                Type::array_shape(Shape::unsealed(shape.fields().to_vec()))
+            }
+        });
+    let mut runner = TestRunner::new_with_rng(
+        Config::default(),
+        TestRng::deterministic_rng(proptest::test_runner::RngAlgorithm::ChaCha),
+    );
+    let strategy = prop::collection::vec(shape, 8..40);
+    let relation = Relation::structural();
+    for _ in 0..2_000 {
+        let members = strategy.new_tree(&mut runner).unwrap().current();
+        let many = Type::union_of(members.clone());
+        for operand in &members {
+            assert!(
+                relation.is_super_type_of(&many, operand).yes(),
+                "{many} does not cover {operand}"
+            );
+        }
+    }
+}
