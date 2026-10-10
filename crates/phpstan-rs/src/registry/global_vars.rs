@@ -1542,6 +1542,15 @@ impl Scope<'_> {
                         name: name.clone(),
                         contribution: ContributionFact::FieldMixed(key),
                     });
+                } else if let Some(name) = index_root_variable(arenas, expr.id)
+                    && self.is_site(name)
+                {
+                    self.out.sites.push(SiteFact {
+                        by_capture: false,
+                        top_level: self.top_level,
+                        name: name.clone(),
+                        contribution: ContributionFact::Mixed,
+                    });
                 }
             }
             ExprKind::Destructure(items, _) => {
@@ -1661,6 +1670,15 @@ impl Scope<'_> {
                         name: name.clone(),
                         contribution: ContributionFact::FieldMixed(key),
                     });
+                } else if let Some(name) = index_root_variable(arenas, expr.id)
+                    && self.is_site(name)
+                {
+                    self.out.sites.push(SiteFact {
+                        by_capture: false,
+                        top_level: self.top_level,
+                        name: name.clone(),
+                        contribution: ContributionFact::Mixed,
+                    });
                 } else if self.top_level && names_computed_variable(arenas, expr.id) {
                     self.computed_write();
                 } else if names_computed_global(arenas, expr.id) {
@@ -1701,7 +1719,10 @@ impl Scope<'_> {
                 ExprKind::Variable(name) => (name, None),
                 ExprKind::Index(..) => match root_variable_and_first_key(arenas, expr.id) {
                     Some((name, key)) => (name, Some(key)),
-                    None => continue,
+                    None => match index_root_variable(arenas, expr.id) {
+                        Some(name) => (name, None),
+                        None => continue,
+                    },
                 },
                 _ => continue,
             };
@@ -1817,6 +1838,18 @@ fn handle_assignment_target(
                     name: name.clone(),
                     contribution: ContributionFact::FieldMixed(key_str),
                 });
+            } else if let Some(name) = index_root_variable(arenas, lhs.id)
+                && is_site(name)
+            {
+                // `$name[$key] = <rhs>;`, or a chain whose innermost key is
+                // not a literal: which element of the variable is written
+                // is not known, so the whole may be anything.
+                out.sites.push(SiteFact {
+                    by_capture: false,
+                    top_level,
+                    name: name.clone(),
+                    contribution: ContributionFact::Mixed,
+                });
             }
         }
         _ => {}
@@ -1931,6 +1964,22 @@ fn root_variable_and_first_key(arenas: &NodeArenas, id: ExprId) -> Option<(&Name
             _ => None,
         }
     })
+}
+
+/// The variable an element chain `$name[..][..]` is rooted at, whatever its
+/// keys.
+fn index_root_variable(arenas: &NodeArenas, id: ExprId) -> Option<&Name> {
+    let mut current = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+    if !matches!(current.kind, ExprKind::Index(..)) {
+        return None;
+    }
+    while let ExprKind::Index(base, _) = &current.kind {
+        current = arenas.peeled(*base).and_then(|id| arenas.expr(id))?;
+    }
+    match &current.kind {
+        ExprKind::Variable(name) => Some(name),
+        _ => None,
+    }
 }
 
 /// `$name = array_merge($name, <rhs>);` - real PHP folds `<rhs>`'s own
