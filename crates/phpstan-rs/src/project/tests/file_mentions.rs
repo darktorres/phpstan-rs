@@ -43,3 +43,76 @@ fn a_file_naming_phpstan_has_its_bit_wherever_the_name_is_spelled() {
         0
     );
 }
+
+use crate::registry::bodies::MENTIONS_PROPERTY_WRITER;
+
+#[test]
+fn a_file_naming_a_property_writer_has_its_bit_as_a_name_or_as_a_string() {
+    for source in [
+        "<?php (new ReflectionProperty($o, 'p'))->setValue($o, 1);",
+        "<?php $x = unserialize($s);",
+        "<?php $rows = $statement->fetchAll(PDO::FETCH_CLASS, Row::class);",
+        "<?php $rows = array_map('unserialize', $rows);",
+        "<?php $rows = array_map(\"Unserialize\", $rows);",
+        "<?php $f = 'mysqli_fetch_object';",
+        "<?php $o = new ArrayObject($subject);",
+    ] {
+        assert_ne!(
+            facts_of(source).mentions & MENTIONS_PROPERTY_WRITER,
+            0,
+            "{source}"
+        );
+    }
+    for source in [
+        "<?php $x = serialize($s); $y = 'unserializer'; $z = \"set value\";",
+        "<?php class A { function getValue() { return 1; } }",
+    ] {
+        assert_eq!(
+            facts_of(source).mentions & MENTIONS_PROPERTY_WRITER,
+            0,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn every_property_writer_spelling_names_something_the_stubs_declare() {
+    let base = super::super::Project::plain_base();
+    for &(spelling, _) in crate::registry::bodies::PROPERTY_WRITER_WATCH {
+        let known = base.lookup_function(spelling).is_some()
+            || base.classes_by_id().any(|(_, class, reflection)| {
+                class.as_str().eq_ignore_ascii_case(spelling)
+                    || base.lookup_method(class.as_str(), spelling).is_some()
+                    || reflection
+                        .consts()
+                        .iter()
+                        .any(|(name, _)| name.as_str().eq_ignore_ascii_case(spelling))
+            });
+        assert!(known, "{spelling} is declared by no stub");
+    }
+}
+
+#[test]
+fn every_stub_function_that_fills_an_object_from_data_is_a_property_writer_spelling() {
+    let base = super::super::Project::plain_base();
+    let spelled: Vec<&str> = crate::registry::bodies::PROPERTY_WRITER_WATCH
+        .iter()
+        .map(|(spelling, _)| *spelling)
+        .collect();
+    let mut missing: Vec<String> = Vec::new();
+    for (_, name, _) in base.functions_by_id() {
+        let lower = name.as_str().to_ascii_lowercase();
+        let short = lower.rsplit('\\').next().unwrap_or(&lower);
+        if (short.contains("unserialize") || short.contains("fetch_object"))
+            && !spelled.contains(&short)
+        {
+            missing.push(short.to_owned());
+        }
+    }
+    missing.sort();
+    missing.dedup();
+    assert!(
+        missing.is_empty(),
+        "these fill an object and are not property writer spellings: {missing:?}"
+    );
+}

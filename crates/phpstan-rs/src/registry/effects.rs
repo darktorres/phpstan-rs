@@ -4599,10 +4599,34 @@ impl<'r> Resolve<'r> {
                 None if level.facts.anything => Classification::anything(),
                 None => Classification::unknown(),
             };
+            #[cfg(debug_assertions)]
+            Self::assert_writes_cover_effect(&classification.own, &property_writes, constructs);
             classification.property_writes = property_writes;
             out.push((scope_key, classification));
         }
         out
+    }
+
+    /// Every property the scope's own effect names is among the properties
+    /// its writes name, but for the constructor's own.
+    #[cfg(debug_assertions)]
+    fn assert_writes_cover_effect(own: &Effect, writes: &PropertyWrites, constructs: bool) {
+        if writes.all {
+            return;
+        }
+        for storage in own.storages().into_iter().flatten() {
+            let prop = match storage {
+                Storage::Own(Some(prop)) if !constructs => prop,
+                Storage::Property {
+                    prop: Some(prop), ..
+                } => prop,
+                _ => continue,
+            };
+            assert!(
+                writes.names.iter().any(|name| name == prop),
+                "a write to {prop} is in the effect but not among the property writes"
+            );
+        }
     }
 
     /// The variables lost at each scope when every level is built again in
@@ -5310,6 +5334,30 @@ impl<'r> Level<'r> {
                 continue;
             }
             out.note(prop.as_ref());
+        }
+        // A constructor run again on an object that exists writes what it
+        // wrote. Inside a constructor, `parent::__construct()` is the chain.
+        let initializer = |method: &Option<Name>| {
+            method.as_ref().is_some_and(|method| {
+                method.as_str().eq_ignore_ascii_case("__construct")
+                    || method.as_str().eq_ignore_ascii_case("__clone")
+            })
+        };
+        for call in facts.calls.iter() {
+            let again = match &call.callee {
+                Callee::Method { method, .. } => initializer(method),
+                Callee::Static { class, method } => {
+                    initializer(method)
+                        && !(constructs
+                            && class.as_ref().is_some_and(|class| {
+                                class.written.as_str().eq_ignore_ascii_case("parent")
+                            }))
+                }
+                _ => false,
+            };
+            if again {
+                out.all = true;
+            }
         }
         // A reference to a property, or to an element of an object being
         // iterated, is written wherever it goes.
