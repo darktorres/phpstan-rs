@@ -231,6 +231,10 @@ pub struct FileFacts {
     /// closure or an anonymous class, which a walk of its statements alone
     /// does not reach.
     pub has_nested_declaration: bool,
+    /// The file builds a function-like or a class-like inside the body of
+    /// a function, method, closure, arrow function or property hook, which
+    /// a walk of the declarations outside any body does not reach.
+    pub has_nested_function_like: bool,
     /// The file unsets a property (`unset($o->p)`, `unset($o->$name)`).
     pub unsets_property: bool,
     /// The bits of the `WatchList` the lexer was given for the spellings

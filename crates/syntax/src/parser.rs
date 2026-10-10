@@ -131,6 +131,7 @@ pub struct Parser<'a> {
     pub(crate) long_arrays: rustc_hash::FxHashSet<ExprId>,
     // Whether the parse has built an anonymous class (`new class`).
     pub(crate) saw_anonymous_class: bool,
+    pub(crate) saw_nested_function_like: bool,
     // Where the parse first met each syntax only some PHP versions accept.
     pub(crate) syntax_marks: crate::lexer::SyntaxMarks,
     // How many closure and anonymous class bodies the parse is inside, and
@@ -477,6 +478,7 @@ impl<'a> Parser<'a> {
             pattern_only: scratch.pattern_only,
             long_arrays: scratch.long_arrays,
             saw_anonymous_class: false,
+            saw_nested_function_like: false,
             syntax_marks: crate::lexer::SyntaxMarks::default(),
             nested_depth: std::cell::Cell::new(0),
             saw_nested_declaration: std::cell::Cell::new(false),
@@ -633,6 +635,7 @@ impl Parser<'_> {
     /// Opens the scope of a function-like body; give the result to
     /// `leave_goto_scope` when it ends.
     pub(crate) fn enter_goto_scope(&mut self) -> usize {
+        self.saw_nested_function_like |= self.goto_scopes.len() > 1;
         self.goto_scopes.push(GotoScope::default());
         self.goto_scopes.len()
     }
@@ -693,6 +696,10 @@ impl Parser<'_> {
     /// Whether the tree built so far has an anonymous class in it.
     pub fn saw_anonymous_class(&self) -> bool {
         self.saw_anonymous_class
+    }
+
+    pub fn saw_nested_function_like(&self) -> bool {
+        self.saw_nested_function_like
     }
 
     /// Whether the tree built so far has a class, function or constant

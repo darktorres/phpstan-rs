@@ -6,6 +6,7 @@ mod goto_labels;
 mod helpers;
 mod name_ids;
 mod namespaces_and_names;
+mod nested_function_like;
 mod node_ids;
 mod spans;
 mod statements_and_control_flow;

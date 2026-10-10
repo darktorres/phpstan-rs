@@ -149,7 +149,7 @@ impl Visitor for Promotions<'_, '_> {
                     params,
                     "anonymous function",
                 );
-                arena::walk_stmts(self, arenas, arenas.stmt_ids(body));
+                self.descend_stmts(arenas, arenas.stmt_ids(body));
             }
             ExprKind::ArrowFn(arrow) => {
                 let Some(ClosurePayload::ArrowFn(arrow)) = arenas.closure(*arrow) else {
@@ -180,7 +180,7 @@ impl Visitor for Promotions<'_, '_> {
                     params,
                     "arrow function",
                 );
-                self.visit_expr(arenas, *body);
+                self.descend_expr(arenas, *body);
             }
             ExprKind::NewAnonymousClass(class_id) => {
                 let Some(class) = arenas.anonymous_class(*class_id) else {
@@ -211,6 +211,36 @@ impl Visitor for Promotions<'_, '_> {
     }
 }
 
+impl Promotions<'_, '_> {
+    /// Walks a body for the function-likes nested in it; a file that builds
+    /// none inside a body has nothing there.
+    fn descend_stmts(&mut self, arenas: &NodeArenas, body: &[StmtId]) {
+        if self.checker.file_has_nested_function_like {
+            arena::walk_stmts(self, arenas, body);
+            return;
+        }
+        #[cfg(debug_assertions)]
+        {
+            let checked = self.checker.function_like_declarations_checked;
+            arena::walk_stmts(self, arenas, body);
+            debug_assert_eq!(checked, self.checker.function_like_declarations_checked);
+        }
+    }
+
+    fn descend_expr(&mut self, arenas: &NodeArenas, e: ExprId) {
+        if self.checker.file_has_nested_function_like {
+            self.visit_expr(arenas, e);
+            return;
+        }
+        #[cfg(debug_assertions)]
+        {
+            let checked = self.checker.function_like_declarations_checked;
+            self.visit_expr(arenas, e);
+            debug_assert_eq!(checked, self.checker.function_like_declarations_checked);
+        }
+    }
+}
+
 fn is_promoted(p: &Param) -> bool {
     p.promotion.is_some() || p.hooks.is_some()
 }
@@ -227,11 +257,11 @@ impl<'a> Checker<'a> {
     }
 
     fn walk_promoted_in_body(&mut self, arenas: &NodeArenas, body: &[StmtId]) {
-        arena::walk_stmts(&mut Promotions { checker: self }, arenas, body);
+        Promotions { checker: self }.descend_stmts(arenas, body);
     }
 
     fn walk_promoted_in_expr(&mut self, arenas: &NodeArenas, e: ExprId) {
-        Promotions { checker: self }.visit_expr(arenas, e);
+        Promotions { checker: self }.descend_expr(arenas, e);
     }
 
     fn check_promoted_in_methods(
@@ -332,6 +362,10 @@ impl<'a> Checker<'a> {
         returns: Option<ReturnSource>,
         promoted_into: Option<&str>,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            self.function_like_declarations_checked += 1;
+        }
         self.check_promoted_params(params, site);
         for p in params {
             if promoted_into.is_some() && is_promoted(p) {

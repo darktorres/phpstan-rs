@@ -817,6 +817,11 @@ pub struct Checker<'a> {
     /// The bits of `FileFacts::mentions` of the file being checked; every
     /// bit is set until said otherwise.
     pub(crate) file_mentions: u32,
+    // Whether the file builds a function-like or class-like inside a body;
+    // when it does not, no walk into a body can find one.
+    pub(crate) file_has_nested_function_like: bool,
+    #[cfg(debug_assertions)]
+    pub(crate) function_like_declarations_checked: u32,
     // Where the file first spells each syntax its tree does not keep
     // (`syntax_versions`).
     pub(crate) syntax_marks: syntax::SyntaxMarks,
@@ -1425,6 +1430,9 @@ impl<'a> Checker<'a> {
             closure_rebind_possible: true,
             include_guards_possible: true,
             file_mentions: u32::MAX,
+            file_has_nested_function_like: true,
+            #[cfg(debug_assertions)]
+            function_like_declarations_checked: 0,
             syntax_marks: syntax::SyntaxMarks::default(),
             rebind_escape_all: false,
             probe_span: Cell::new(None),
@@ -2053,6 +2061,12 @@ impl<'a> Checker<'a> {
     /// has them.
     pub fn set_file_mentions(&mut self, mentions: u32) {
         self.file_mentions = mentions;
+    }
+
+    /// Whether the file builds a function-like or class-like inside a body,
+    /// as `FileFacts::has_nested_function_like` has it.
+    pub fn set_file_has_nested_function_like(&mut self, nested: bool) {
+        self.file_has_nested_function_like = nested;
     }
 
     /// Where the file being checked first spells each syntax its tree

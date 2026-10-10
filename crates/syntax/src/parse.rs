@@ -425,6 +425,7 @@ fn parse_watching_in_arenas<'a>(
     let has_anonymous_class = parser.saw_anonymous_class();
     let stub_attributes_changed = parser.stub_attributes_changed();
     let has_nested_declaration = parser.saw_nested_declaration();
+    let has_nested_function_like = parser.saw_nested_function_like();
     let unsets_property = parser.saw_property_unset();
     let syntax_marks = parser.syntax_marks();
     let goto_labels = parser.file_goto_labels();
@@ -466,6 +467,7 @@ fn parse_watching_in_arenas<'a>(
     arenas.source = Arc::clone(&source_bytes);
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
+    facts.has_nested_function_like = has_nested_function_like;
     facts.unsets_property = unsets_property;
     facts.syntax.merge(&syntax_marks);
     Ok(ParsedFile {

@@ -3053,6 +3053,7 @@ impl Project {
         );
         checker.set_syntax_marks(file.facts.syntax);
         checker.set_file_mentions(file.facts.mentions);
+        checker.set_file_has_nested_function_like(file.facts.has_nested_function_like);
         Some((checker, ast))
     }
 

@@ -143,6 +143,7 @@ impl Parser<'_> {
         class_is_readonly: bool,
     ) -> Result<ClassBody, ParseError> {
         self.expect(&Token::LBrace)?;
+        self.saw_nested_function_like |= self.goto_scopes.len() > 1;
         let properties_start = self.property_scratch.len();
         let methods_start = self.method_scratch.len();
         let consts_start = self.class_const_scratch.len();
