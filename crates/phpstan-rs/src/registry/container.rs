@@ -12,6 +12,7 @@ use rustc_hash::FxHashMap;
 
 const MAGIC: [u8; 8] = *b"PRSSTUBS";
 pub(super) const NAMES: &str = "__names";
+const TYPES: &str = "__types";
 
 /// Magic, the body's length, the directory's length, the checksum. The
 /// cache key changes with the code that writes this layout, so a manual
@@ -134,6 +135,11 @@ impl Writer {
             .append(&names)
             .expect("a cache file's name table fits its address space");
         self.sections.push((NAMES.to_string(), names_span));
+        let types = types::cache::section(&self.names);
+        let types_span = self
+            .append(&types)
+            .expect("a cache file's type table fits its address space");
+        self.sections.push((TYPES.to_string(), types_span));
         let mut directory = Vec::new();
         directory.extend_from_slice(&(self.sections.len() as u32).to_le_bytes());
         for (name, span) in &self.sections {
@@ -444,6 +450,9 @@ impl Reader {
         if !spans.contains_key(NAMES) {
             return Err(Unreadable::Inconsistent("it has no name table".to_string()));
         }
+        if !spans.contains_key(TYPES) {
+            return Err(Unreadable::Inconsistent("it has no type table".to_string()));
+        }
         let mut ordered: Vec<_> = spans.iter().collect();
         ordered.sort_unstable_by_key(|(_, span)| span.offset);
         let eager_len = ordered.iter().try_fold(0usize, |total, (_, span)| {
@@ -471,7 +480,9 @@ impl Reader {
         }
         let names_range = sections[NAMES].clone();
         let buffer = Arc::new(eager_bytes);
-        let names = name_table_of(&buffer, names_range)?;
+        let mut names = name_table_of(&buffer, names_range)?;
+        types::cache::attach(&mut names, &buffer, sections[TYPES].clone())
+            .map_err(Unreadable::Inconsistent)?;
         Ok(Reader {
             buffer: Buffer(buffer),
             source,

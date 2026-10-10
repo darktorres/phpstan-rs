@@ -9,6 +9,7 @@ license.workspace = true
 name = "types"
 
 [dependencies]
+postcard.workspace = true
 rustc-hash.workspace = true
 smallvec.workspace = true
 serde.workspace = true

@@ -57,6 +57,8 @@ pub struct CacheNameEncoder(Rc<RefCell<CacheNameEncoderData>>);
 struct CacheNameEncoderData {
     indexes: FxHashMap<String, u32>,
     names: Vec<String>,
+    /// What another crate keeps beside the names for the same file.
+    extension: Option<Rc<dyn std::any::Any>>,
 }
 
 impl CacheNameEncoder {
@@ -77,6 +79,24 @@ impl CacheNameEncoder {
     pub fn names(&self) -> Vec<String> {
         self.0.borrow().names.clone()
     }
+
+    /// What a crate keeps beside the names of this file, made by `init` the
+    /// first time it is asked for. One kind of value is kept: asking for
+    /// another type replaces nothing and gets a fresh value each time.
+    pub fn extension<T: std::any::Any>(&self, init: impl FnOnce() -> T) -> Rc<T> {
+        if let Some(kept) = self.extension_if::<T>() {
+            return kept;
+        }
+        let made = Rc::new(init());
+        self.0.borrow_mut().extension = Some(Rc::clone(&made) as Rc<dyn std::any::Any>);
+        made
+    }
+
+    /// The extension, when one of type `T` was made.
+    pub fn extension_if<T: std::any::Any>(&self) -> Option<Rc<T>> {
+        let kept = self.0.borrow().extension.clone()?;
+        kept.downcast::<T>().ok()
+    }
 }
 
 /// A cache reader's names, each interned into the global `Name` table once.
@@ -90,6 +110,9 @@ pub struct CacheNameTable {
     // Optional opaque identity carried alongside nested lazy records. The
     // cache reader owns its meaning; syntax only preserves it in clones.
     context: Option<u64>,
+    /// What another crate decodes beside the names of the same file; every
+    /// clone of the table shares it.
+    extension: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl CacheNameTable {
@@ -114,7 +137,13 @@ impl CacheNameTable {
             ranges: Arc::new(ranges),
             names: Arc::new(names),
             context: None,
+            extension: None,
         }
+    }
+
+    /// Keeps `extension` beside the names, for `current_cache_extension`.
+    pub fn set_extension(&mut self, extension: Arc<dyn std::any::Any + Send + Sync>) {
+        self.extension = Some(extension);
     }
 
     pub fn text(&self, index: u32) -> Option<&str> {
@@ -175,6 +204,18 @@ pub fn with_cache_name_table<T>(table: &CacheNameTable, f: impl FnOnce() -> T) -
 pub fn current_cache_name_table() -> Option<CacheNameTable> {
     CACHE_NAME_CONTEXT.with(|context| match context.borrow().as_ref() {
         Some(CacheNameContext::Decode(table)) => Some(table.clone()),
+        _ => None,
+    })
+}
+
+/// The extension of type `T` kept beside the name table active while a
+/// cache value is decoded.
+#[doc(hidden)]
+pub fn current_cache_extension<T: std::any::Any + Send + Sync>() -> Option<Arc<T>> {
+    CACHE_NAME_CONTEXT.with(|context| match context.borrow().as_ref() {
+        Some(CacheNameContext::Decode(table)) => {
+            Arc::clone(table.extension.as_ref()?).downcast::<T>().ok()
+        }
         _ => None,
     })
 }

@@ -11,6 +11,7 @@ pub use syntax::name::Name;
 pub use syntax::php_string::PhpString;
 
 mod arithmetic;
+pub mod cache;
 mod canonical;
 mod coercion;
 mod comparator;
@@ -360,14 +361,37 @@ impl Drop for Node {
 
 /// A type serializes as its representation, and deserializes into an
 /// interned type again.
+/// Outside a cache codec a type serializes as its form. Within one it is a
+/// per-file `u32` index into the file's table of types (`cache`).
 impl serde::Serialize for Type {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        syntax::stack::guard(|| self.repr().serialize(serializer))
+        use serde::ser::Error;
+        match cache::index_of(self) {
+            Some(index) => serializer.serialize_u32(index.map_err(S::Error::custom)?),
+            None => syntax::stack::guard(|| self.repr().serialize(serializer)),
+        }
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Type {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Type, D::Error> {
+        struct Index;
+        impl serde::de::Visitor<'_> for Index {
+            type Value = Type;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an index into the cache's type table")
+            }
+
+            fn visit_u32<E: serde::de::Error>(self, index: u32) -> Result<Type, E> {
+                cache::type_at(index).unwrap_or_else(|| {
+                    Err(E::custom("a cache type index is read outside its file's types"))
+                })
+            }
+        }
+        if syntax::name::current_cache_extension::<cache::Table>().is_some() {
+            return deserializer.deserialize_u32(Index);
+        }
         syntax::stack::guard(|| Repr::deserialize(deserializer).map(Type::new))
     }
 }
