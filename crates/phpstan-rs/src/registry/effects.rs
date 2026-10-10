@@ -3825,6 +3825,23 @@ impl Reach<'_> {
                         out.push(registry.effect_run(&key, &transfer(Some(class))));
                     }
                 }
+                if matches!(operation, Operation::Destroy) {
+                    let held = self.destroy_held(candidate);
+                    if matches!(&held, Holder::Classes(classes) if classes.is_empty())
+                        || iterators.contains(&held)
+                    {
+                        continue;
+                    }
+                    iterators.push(held.clone());
+                    // Objects holding objects this deep drop as any object.
+                    let held = if iterators.len() > 16 {
+                        Holder::Unknown
+                    } else {
+                        held
+                    };
+                    self.implicit_targets(&held, false, operation, out, iterators)?;
+                    continue;
+                }
                 if !matches!(operation, Operation::Iterate { .. })
                     || registry.is_subclass_of(candidate, "Iterator")
                     || !registry.is_subclass_of(candidate, "IteratorAggregate")
@@ -3854,6 +3871,32 @@ impl Reach<'_> {
             }
         }
         Some(())
+    }
+
+    /// The objects an object of exactly `class` holds in its instance
+    /// properties, by their declared types, which die with it when nothing
+    /// else holds them.
+    fn destroy_held(&self, class: &Name) -> Holder {
+        let registry = self.registry;
+        let mut found = NameList::new();
+        let names: Vec<&Name> = match registry.property_owners(class) {
+            Some(owners) => owners.keys().collect(),
+            None => registry.property_names(class).collect(),
+        };
+        for property in names {
+            let Some((owner, declared)) = registry.lookup_property_with_owner(class, property)
+            else {
+                return Holder::Unknown;
+            };
+            if declared.is_static() {
+                continue;
+            }
+            match declared_holder(registry, declared.ty(), class, &owner, elements_holder_of) {
+                Holder::Classes(held) => found.extend(held.iter().cloned()),
+                _ => return Holder::Unknown,
+            }
+        }
+        Holder::listed(found)
     }
 
     /// The methods PHP calls for `operation` on an object of exactly
