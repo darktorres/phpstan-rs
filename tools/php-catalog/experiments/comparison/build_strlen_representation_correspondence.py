@@ -53,8 +53,11 @@ def main() -> None:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--clang-ast", type=Path, required=True)
     parser.add_argument("--clang-llvm", type=Path, required=True)
+    parser.add_argument("--clang-manifest", type=Path, required=True)
+    parser.add_argument("--clang-measurements", type=Path, required=True)
     parser.add_argument("--gcc-gimple", type=Path, required=True)
     parser.add_argument("--gcc-cfg", type=Path, required=True)
+    parser.add_argument("--gcc-measurements", type=Path, required=True)
     parser.add_argument("--cir-log", type=Path, required=True)
     parser.add_argument("--cleanup-ast", type=Path, required=True)
     parser.add_argument("--cleanup-gimple", type=Path, required=True)
@@ -77,6 +80,38 @@ def main() -> None:
         raise SystemExit("Clang AST/CFG or LLVM summary lacks zif_strlen")
     if ast_doc.get("representation") != "clang-ast-cfg" or llvm_doc.get("representation") != "llvm":
         raise SystemExit("unexpected Clang summary representation kinds")
+    clang_manifest = load(args.clang_manifest)
+    clang_units = [u for u in clang_manifest
+                   if u.get("unit") == "php-type" and u.get("backend") in {"ast", "llvm"}]
+    if {u.get("backend") for u in clang_units} != {"ast", "llvm"} or any(
+        u.get("source_sha256") != source_hash for u in clang_units):
+        raise SystemExit("Clang representation manifest does not bind both summaries to source bytes")
+    manifest_by_backend = {u["backend"]: u for u in clang_units}
+    for backend, doc in (("ast", ast_doc), ("llvm", llvm_doc)):
+        manifest_fn = next((f for f in manifest_by_backend[backend]["functions"]
+                            if f.get("name") == "zif_strlen"), None)
+        actual_fn = next((f for f in doc["functions"] if f.get("name") == "zif_strlen"), None)
+        if manifest_fn is None or actual_fn is None or any(
+            manifest_fn.get(key) != actual_fn.get(key)
+            for key in ("block_count", "edges", "elements", "direct_calls")
+            if key in manifest_fn):
+            raise SystemExit(f"{backend} raw summary does not match its source-bound manifest")
+    clang_measurements = load(args.clang_measurements)
+    ast_runs = [m for m in clang_measurements if m.get("name") == "php-type-ast-0"]
+    llvm_emit_runs = [m for m in clang_measurements if m.get("name") == "php-type-llvm-emit-0"]
+    llvm_read_runs = [m for m in clang_measurements if m.get("name") == "php-type-llvm-read-0"]
+    if len(ast_runs) != 1 or len(llvm_emit_runs) != 1 or len(llvm_read_runs) != 1 or any(
+        m.get("exit_code") != 0 for m in ast_runs + llvm_emit_runs + llvm_read_runs):
+        raise SystemExit("Clang AST/LLVM campaign command records are missing or failed")
+    ast_command = ast_runs[0].get("command", [])
+    llvm_emit_command = llvm_emit_runs[0].get("command", [])
+    source_path = str(args.source.resolve())
+    llvm_read_command = llvm_read_runs[0].get("command", [])
+    emitted_ir = next((str(llvm_emit_command[index + 1])
+                       for index, arg in enumerate(llvm_emit_command[:-1]) if arg == "-o"), None)
+    if (source_path not in ast_command or source_path not in llvm_emit_command
+            or emitted_ir is None or emitted_ir not in llvm_read_command):
+        raise SystemExit("Clang AST campaign command does not name the pinned PHP source")
     llvm_blocks = llvm_fn.get("blocks", [])
     llvm_text = "\n".join(s.get("text", "") for b in llvm_blocks
                             for s in b.get("statements", []))
@@ -125,6 +160,16 @@ def main() -> None:
     if not gimple_fn_match or not cfg_fn_match:
         raise SystemExit("GCC dump lacks zif_strlen function body")
     gimple_fn, cfg_fn = gimple_fn_match.group(), cfg_fn_match.group()
+    gcc_measurements = load(args.gcc_measurements)
+    gcc_runs = [m for m in gcc_measurements if m.get("name") == "php-type-gimple"]
+    if len(gcc_runs) != 1 or gcc_runs[0].get("exit_code") != 0:
+        raise SystemExit("GCC GIMPLE/CFG campaign command record is missing or failed")
+    gcc_command = gcc_runs[0].get("command", [])
+    if ("-fdump-tree-gimple" not in gcc_command or "-fdump-tree-cfg" not in gcc_command
+            or source_path not in gcc_command
+            or not args.gcc_gimple.name.endswith(".007t.gimple")
+            or not args.gcc_cfg.name.endswith(".016t.cfg")):
+        raise SystemExit("GCC dumps do not match the successful pinned-source dump command")
     gcc_parse = "zend_parse_arg_str (_arg, &s" in gimple_fn and "zend_parse_arg_str (_arg, &s" in cfg_fn
     gcc_len_return = "s.28_52->len" in gimple_fn and "__z->value.lval = _54" in gimple_fn
     gcc_blocks = gcc_cfg_blocks(cfg_fn)
@@ -145,6 +190,8 @@ def main() -> None:
                  if u.get("source", "").endswith("/Zend/zend_builtin_functions.c")]
     cir_status = "unsupported_or_failed"
     if cir_units:
+        if len(cir_units) != 1 or cir_units[0].get("source_sha256") != source_hash:
+            raise SystemExit("CIR campaign does not uniquely identify the pinned PHP source")
         emitted = [u for u in cir_units if u.get("emitted")]
         cir_status = "emitted" if emitted else "failed"
 
@@ -173,7 +220,7 @@ def main() -> None:
     report = {
         "schema": 1,
         "source_sha256": source_hash,
-        "provenance_note": "The source hash is checked against the PHP source digest pinned in the LLVM witness. The preserved AST/LLVM summary outputs do not embed source hashes, so their per-file digests are recorded here and their campaign commands remain the external provenance record.",
+        "provenance_note": "Clang AST/LLVM summaries are cross-checked against the source-bound representation manifest and successful source compilation records; GCC dump inputs are tied to the successful source-bound dump command. The raw dump digests are recorded below. CIR input is checked against the same source digest.",
         "scope": "PHP 8.5.4 zif_strlen parse-to-byte-length-return slice plus a separate C++ cleanup counterexample",
         "strlen_correspondence": {
             "source": {"function": "zif_strlen", "parser": "Z_PARAM_STR(s)",

@@ -12,6 +12,14 @@
       "bytes": 23222,
       "sha256": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f"
     },
+    "clang_manifest": {
+      "bytes": 59375,
+      "sha256": "86a9b25c1abc529b455992da2f1c6ec8883f11cb6b783fd29204ce203bfed875"
+    },
+    "clang_measurements": {
+      "bytes": 118409,
+      "sha256": "af5f9969bc3f5cd3b0ea6c3c5dc82a1f299a54ac776d3050fc30562126c4da69"
+    },
     "cleanup_ast": {
       "bytes": 2255,
       "sha256": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242"
@@ -32,6 +40,10 @@
       "bytes": 438573,
       "sha256": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2"
     },
+    "gcc_measurements": {
+      "bytes": 118409,
+      "sha256": "af5f9969bc3f5cd3b0ea6c3c5dc82a1f299a54ac776d3050fc30562126c4da69"
+    },
     "source": {
       "bytes": 64968,
       "sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
@@ -44,7 +56,7 @@
     "gcc_gimple_has_exceptional_finally_destructor": true,
     "llvm_has_unwind_cleanup_blocks": true
   },
-  "provenance_note": "The source hash is checked against the PHP source digest pinned in the LLVM witness. The preserved AST/LLVM summary outputs do not embed source hashes, so their per-file digests are recorded here and their campaign commands remain the external provenance record.",
+  "provenance_note": "Clang AST/LLVM summaries are cross-checked against the source-bound representation manifest and successful source compilation records; GCC dump inputs are tied to the successful source-bound dump command. The raw dump digests are recorded below. CIR input is checked against the same source digest.",
   "schema": 1,
   "scope": "PHP 8.5.4 zif_strlen parse-to-byte-length-return slice plus a separate C++ cleanup counterexample",
   "source_sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505",

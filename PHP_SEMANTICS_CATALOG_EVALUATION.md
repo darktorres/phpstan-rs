@@ -193,6 +193,9 @@ SSA value into the zval result, and GCC GIMPLE/CFG retain the parser gate and
 length-to-result assignment. The [generated correspondence record](tools/php-catalog/experiments/comparison/results/evaluation/strlen-representation-correspondence.json)
 records hashes for all input artifacts. These representations agree on that
 selected path; this does not establish equivalence for all branches or effects.
+The builder binds the Clang summaries to the source-hashed representation
+manifest and successful source compile records, and checks the GCC dump command
+record and source path before accepting the GIMPLE/CFG artifacts.
 
 The cleanup fixture supplies a counterexample to assuming CFG and LLVM
 exception behavior coincide: GCC GIMPLE records a `finally` destructor, and
