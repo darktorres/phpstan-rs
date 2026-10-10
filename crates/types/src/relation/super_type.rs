@@ -1,3 +1,4 @@
+use crate::relation::memo;
 use crate::relation::Relation;
 use crate::{AccessoryKind, Repr, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
@@ -69,11 +70,11 @@ impl Relation<'_> {
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         if let Some(generation) = self.hierarchy.generation() {
-            return relation_memo::answer(generation, sup, sub, || {
+            return memo::answer(generation, sup, sub, || {
                 self.is_super_type_of_uncached(sup, sub)
             });
         }
-        relation_memo::mark_provisional();
+        memo::mark_provisional();
         self.is_super_type_of_uncached(sup, sub)
     }
 
@@ -595,191 +596,9 @@ fn scalars_disjoint(a: &Type, b: &Type) -> bool {
     })
 }
 
-/// Relation answers for one immutable hierarchy generation. Each thread
-/// keeps two bounded segments; a generation change drops both.
-mod relation_memo {
-    use std::cell::RefCell;
-    use std::sync::OnceLock;
-
-    use rustc_hash::FxHashMap;
-
-    use crate::{TrinaryLogic, Type};
-
-    const SEGMENT_LIMIT: usize = 1 << 16;
-
-    /// The relation generation, then the node addresses of the two types.
-    /// An entry of another generation is never found for a query of this one,
-    /// and ages out with the segment that holds it.
-    type Key = (u64, usize, usize);
-    type Entries = FxHashMap<Key, (Type, Type, TrinaryLogic)>;
-
-    struct Memo {
-        previous: Entries,
-        current: Entries,
-        /// One flag per evaluation in progress: whether it read an answer
-        /// that is only provisional.
-        active: Vec<bool>,
-    }
-
-    impl Memo {
-        const fn new() -> Memo {
-            Memo {
-                previous: Entries::with_hasher(rustc_hash::FxBuildHasher),
-                current: Entries::with_hasher(rustc_hash::FxBuildHasher),
-                active: Vec::new(),
-            }
-        }
-    }
-
-    thread_local! {
-        static ANSWERS: RefCell<Memo> = const { RefCell::new(Memo::new()) };
-        #[cfg(test)]
-        static ENABLED_FOR_TESTS: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-    }
-
-    struct EvaluationGuard;
-
-    impl Drop for EvaluationGuard {
-        fn drop(&mut self) {
-            ANSWERS.with(|memo| {
-                memo.borrow_mut().active.pop();
-            });
-        }
-    }
-
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-
-    fn enabled() -> bool {
-        #[cfg(test)]
-        if let Some(enabled) = ENABLED_FOR_TESTS.with(std::cell::Cell::get) {
-            return enabled;
-        }
-        *ENABLED.get_or_init(|| std::env::var_os("PHPSTAN_RS_NO_RELATION_MEMO").is_none())
-    }
-
-    pub(super) fn mark_provisional() {
-        ANSWERS.with(|memo| {
-            for provisional in memo.borrow_mut().active.iter_mut() {
-                *provisional = true;
-            }
-        });
-    }
-
-    pub(super) fn answer(
-        generation: u64,
-        sup: &Type,
-        sub: &Type,
-        compute: impl FnOnce() -> TrinaryLogic,
-    ) -> TrinaryLogic {
-        if !enabled() {
-            return compute();
-        }
-        let key = (generation, sup.node_address(), sub.node_address());
-        let known = ANSWERS.with(|memo| {
-            let memo = memo.borrow();
-            memo.current
-                .get(&key)
-                .or_else(|| memo.previous.get(&key))
-                .map(|entry| entry.2)
-        });
-        if let Some(known) = known {
-            return known;
-        }
-        ANSWERS.with(|memo| memo.borrow_mut().active.push(false));
-        let evaluation = EvaluationGuard;
-        let answer = compute();
-        let provisional = ANSWERS.with(|memo| memo.borrow().active.last().copied().unwrap_or(true));
-        drop(evaluation);
-        if provisional {
-            return answer;
-        }
-        ANSWERS.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            if memo.current.len() >= SEGMENT_LIMIT {
-                memo.previous = std::mem::take(&mut memo.current);
-            }
-            memo.current.insert(key, (sup.clone(), sub.clone(), answer));
-        });
-        answer
-    }
-
-    #[cfg(test)]
-    #[test]
-    fn answers_are_generation_scoped_and_the_memo_can_be_disabled() {
-        use crate::TrinaryLogic::{No, Yes};
-        use std::cell::Cell;
-
-        let sup = Type::int();
-        let sub = Type::int();
-        let calls = Cell::new(0);
-        ENABLED_FOR_TESTS.with(|enabled| enabled.set(Some(true)));
-
-        assert_eq!(
-            answer(71, &sup, &sub, || {
-                calls.set(calls.get() + 1);
-                Yes
-            }),
-            Yes
-        );
-        assert_eq!(
-            answer(71, &sup, &sub, || {
-                calls.set(calls.get() + 1);
-                No
-            }),
-            Yes
-        );
-        assert_eq!(
-            answer(72, &sup, &sub, || {
-                calls.set(calls.get() + 1);
-                No
-            }),
-            No
-        );
-        assert_eq!(calls.get(), 2);
-
-        // Going back to an earlier generation finds its answer again.
-        assert_eq!(
-            answer(71, &sup, &sub, || {
-                calls.set(calls.get() + 1);
-                No
-            }),
-            Yes
-        );
-        assert_eq!(
-            answer(72, &sup, &sub, || {
-                calls.set(calls.get() + 1);
-                Yes
-            }),
-            No
-        );
-        assert_eq!(calls.get(), 2);
-
-        assert_eq!(
-            answer(73, &sup, &sub, || {
-                mark_provisional();
-                Yes
-            }),
-            Yes
-        );
-        assert_eq!(
-            answer(73, &sup, &sub, || {
-                calls.set(calls.get() + 1);
-                No
-            }),
-            No
-        );
-        assert_eq!(calls.get(), 3);
-
-        ENABLED_FOR_TESTS.with(|enabled| enabled.set(Some(false)));
-        assert_eq!(answer(74, &sup, &sub, || Yes), Yes);
-        assert_eq!(answer(74, &sup, &sub, || No), No);
-        ENABLED_FOR_TESTS.with(|enabled| enabled.set(None));
-    }
-}
-
 #[doc(hidden)]
 pub fn mark_relation_answers_provisional() {
-    relation_memo::mark_provisional();
+    memo::mark_provisional();
 }
 
 #[derive(PartialEq)]

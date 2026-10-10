@@ -3,6 +3,7 @@
 //! `ClassHierarchy`.
 
 mod accepts;
+pub(crate) mod memo;
 mod kinds;
 mod super_type;
 

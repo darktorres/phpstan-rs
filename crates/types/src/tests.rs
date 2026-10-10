@@ -24,6 +24,7 @@ mod shortcuts;
 mod subtyping;
 mod subtyping_properties;
 mod templates_and_substitution;
+mod relation_memo;
 mod union_many;
 mod unions;
 

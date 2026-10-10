@@ -1,3 +1,4 @@
+use crate::relation::memo;
 use crate::relation::{AcceptsResult, Relation};
 use crate::{CallableSig, ClassKind, Repr, Shape, ShapeKey, Type, Variance};
 
@@ -29,7 +30,18 @@ impl Relation<'_> {
     /// is declared: every level from it on rejects it, every level below
     /// it accepts it. `None` when every level accepts it.
     pub fn rejected_from(&self, accepting: &Type, accepted: &Type) -> Option<u8> {
-        let found = self.rejected_from_type(accepted, accepting);
+        let found = if accepting.node_address() == accepted.node_address() {
+            None
+        } else if let Some(generation) = self.hierarchy.generation() {
+            let settings =
+                u8::from(self.strict_mixed_arrays) | u8::from(self.check_benevolent_union_types) << 1;
+            memo::rejection(generation, accepting, accepted, settings, || {
+                self.rejected_from_type(accepted, accepting)
+            })
+        } else {
+            memo::mark_provisional();
+            self.rejected_from_type(accepted, accepting)
+        };
         #[cfg(debug_assertions)]
         for level in 0..=MAX_RULE_LEVEL {
             assert_eq!(

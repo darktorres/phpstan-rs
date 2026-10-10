@@ -119,6 +119,15 @@ impl Type {
     /// overload). A class the hierarchy doesn't know is left alone: stub
     /// coverage may simply not include it.
     pub fn to_string_type(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
+        match hierarchy.generation() {
+            Some(generation) => crate::relation::memo::string_type(generation, self, || {
+                self.to_string_type_uncached(hierarchy)
+            }),
+            None => self.to_string_type_uncached(hierarchy),
+        }
+    }
+
+    fn to_string_type_uncached(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
         syntax::stack::guard(|| {
             let decimal_int_string = || {
                 Type::new(Repr::Intersection(vec![
