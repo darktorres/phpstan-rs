@@ -1,1 +1,1 @@
-27:16-27:22 argument.type L5 | Parameter #1 $string of function strlen expects string, StrictStringLengthEffectStringable given.
+28:20-28:26 argument.type L5 | Parameter #1 $string of function strlen expects string, StrictStringLengthEffectStringable given.

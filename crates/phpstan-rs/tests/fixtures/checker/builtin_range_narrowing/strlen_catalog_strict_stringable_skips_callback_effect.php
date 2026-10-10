@@ -24,7 +24,10 @@ function strlenStrictStringableDoesNotInvokeConversion(
     StrictStringLengthEffectStringable $value,
 ): void {
     if ($box->value !== null) {
-        strlen($value);
+        try {
+            strlen($value);
+        } catch (TypeError) {
+        }
         assertType('string', $box->value);
     }
 }
