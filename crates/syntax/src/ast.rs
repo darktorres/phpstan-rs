@@ -2391,6 +2391,7 @@ pub struct Ident {
 impl std::ops::Deref for Ident {
     type Target = str;
 
+    #[inline]
     fn deref(&self) -> &str {
         &self.name
     }

@@ -428,6 +428,7 @@ impl PhpFeature {
     /// for how to interpret it - most variants mean "available from this
     /// version on"; `UnsetCastRemoved` means "no longer available from
     /// this version on".
+    #[inline]
     pub fn threshold(self) -> PhpVersion {
         use PhpFeature::*;
         match self {

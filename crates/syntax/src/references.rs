@@ -75,6 +75,7 @@ impl RefKey {
         }
     }
 
+    #[inline]
     fn tag(&self) -> u8 {
         match self {
             RefKey::Class(_) => 0,

@@ -16,6 +16,7 @@ impl TrinaryLogic {
         }
     }
 
+    #[inline]
     pub fn yes(self) -> bool {
         self == TrinaryLogic::Yes
     }
