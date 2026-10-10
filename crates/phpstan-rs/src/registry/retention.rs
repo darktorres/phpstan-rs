@@ -15,6 +15,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
+#[cfg(debug_assertions)]
 use syntax::visit::arena::{self, Visitor};
 
 use smallvec::SmallVec;
@@ -165,6 +166,7 @@ impl Uses {
     }
 
     /// A call of a method on `$this` or a relative class, with `args`.
+    #[cfg(debug_assertions)]
     fn this_call(&mut self, arenas: &NodeArenas, call: ThisCall, args: &ArgRange) {
         if self.in_callable {
             self.this.kept = true;
@@ -186,12 +188,14 @@ impl Uses {
 
     /// A use of `id` that keeps nothing of the value it evaluates to: the
     /// base of a property access, an identity or type test.
+    #[cfg(debug_assertions)]
     fn kept_by_none(&mut self, arenas: &NodeArenas, id: ExprId) {
         if Self::variable(arenas, id).is_none() {
             self.visit_expr(arenas, id);
         }
     }
 
+    #[cfg(debug_assertions)]
     fn call(&mut self, arenas: &NodeArenas, id: ExprId, callee: ExprId, args: &ArgRange) {
         let args = arenas.args(args.clone());
         match arenas.peeled(callee).and_then(|id| arenas.expr(id)) {

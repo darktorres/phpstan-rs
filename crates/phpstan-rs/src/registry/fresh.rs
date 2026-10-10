@@ -12,6 +12,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::name::Name;
+#[cfg(debug_assertions)]
 use syntax::visit::arena::{self, Visitor};
 
 use smallvec::{SmallVec, smallvec};
@@ -162,6 +163,7 @@ impl Returns {
     }
 
     /// A use of `id` that lets nothing leave the object it evaluates to.
+    #[cfg(debug_assertions)]
     fn kept(&mut self, arenas: &NodeArenas, id: ExprId) {
         if Self::variable(arenas, id).is_none() {
             self.visit_expr(arenas, id);
