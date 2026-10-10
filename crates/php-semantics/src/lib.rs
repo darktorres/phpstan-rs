@@ -16,7 +16,7 @@ mod target;
 pub use catalog::{
     AssumptionKind, AssumptionRecord, AssumptionScope, AssumptionValidator, Catalog, CatalogEntry,
     CatalogError, CatalogManifest, CatalogTargetSelection, EntryKey, EvidenceKind, EvidenceRecord,
-    GraphRecord, Projection, Selection, VariantSelection,
+    GraphRecord, Projection, Selection, SupportNode, VariantSelection,
 };
 pub use php_value::{
     ArrayId, ArrayKey, Binding, ObjectId, PhpCallbackOutcome, PhpFlowHost, PhpState, PhpValue,

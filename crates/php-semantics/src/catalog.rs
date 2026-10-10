@@ -186,8 +186,97 @@ pub enum CatalogError {
         evidence: Digest,
         assumption: Digest,
     },
+    CyclicSupport(Vec<SupportNode>),
     DigestMismatch(Digest),
     UnsupportedManifest(u32),
+}
+
+/// A node in the catalog's combined evidence/assumption support graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SupportNode {
+    Evidence(Digest),
+    Assumption(Digest),
+}
+
+impl SupportNode {
+    fn successors(
+        self,
+        evidence: &BTreeMap<Digest, EvidenceRecord>,
+        assumptions: &BTreeMap<Digest, AssumptionRecord>,
+    ) -> Vec<Self> {
+        match self {
+            Self::Evidence(id) => evidence.get(&id).map_or_else(Vec::new, |record| {
+                record
+                    .dependencies
+                    .iter()
+                    .copied()
+                    .map(Self::Evidence)
+                    .chain(record.assumptions.iter().copied().map(Self::Assumption))
+                    .collect()
+            }),
+            Self::Assumption(id) => assumptions.get(&id).map_or_else(Vec::new, |record| {
+                record
+                    .prerequisites
+                    .iter()
+                    .copied()
+                    .map(Self::Assumption)
+                    .chain(
+                        record
+                            .supporting_evidence
+                            .iter()
+                            .copied()
+                            .map(Self::Evidence),
+                    )
+                    .collect()
+            }),
+        }
+    }
+}
+
+fn find_support_cycle(
+    evidence: &BTreeMap<Digest, EvidenceRecord>,
+    assumptions: &BTreeMap<Digest, AssumptionRecord>,
+) -> Option<Vec<SupportNode>> {
+    let nodes = evidence
+        .keys()
+        .copied()
+        .map(SupportNode::Evidence)
+        .chain(assumptions.keys().copied().map(SupportNode::Assumption));
+    let mut active = Vec::new();
+    let mut active_positions = BTreeMap::new();
+    let mut complete = std::collections::BTreeSet::new();
+    for node in nodes {
+        if complete.contains(&node) {
+            continue;
+        }
+        active.push((node, node.successors(evidence, assumptions), 0));
+        active_positions.insert(node, 0);
+        while let Some((current, successors, next)) = active.last_mut() {
+            if *next == successors.len() {
+                let finished = *current;
+                active.pop();
+                active_positions.remove(&finished);
+                complete.insert(finished);
+                continue;
+            }
+            let successor = successors[*next];
+            *next += 1;
+            if let Some(start) = active_positions.get(&successor).copied() {
+                let mut cycle: Vec<_> = active[start..]
+                    .iter()
+                    .map(|(active_node, _, _)| *active_node)
+                    .collect();
+                cycle.push(successor);
+                return Some(cycle);
+            }
+            if !complete.contains(&successor) {
+                let position = active.len();
+                active_positions.insert(successor, position);
+                active.push((successor, successor.successors(evidence, assumptions), 0));
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,6 +408,11 @@ impl CatalogManifest {
                     return Err(CatalogError::MissingAssumption(*id));
                 }
             }
+        }
+        let evidence = self.evidence.iter().cloned().collect();
+        let assumptions = self.assumptions.iter().cloned().collect();
+        if let Some(cycle) = find_support_cycle(&evidence, &assumptions) {
+            return Err(CatalogError::CyclicSupport(cycle));
         }
         Ok(())
     }
@@ -473,6 +567,9 @@ impl Catalog {
                     return Err(CatalogError::MissingAssumption(*prerequisite));
                 }
             }
+        }
+        if let Some(cycle) = find_support_cycle(&self.evidence, &self.assumptions) {
+            return Err(CatalogError::CyclicSupport(cycle));
         }
         Ok(())
     }
@@ -694,6 +791,95 @@ mod tests {
                 version: Bytes(b"1".to_vec()),
             },
         }
+    }
+
+    fn support_graph_records(
+        evidence_edges: &[(u8, Vec<Digest>, Vec<Digest>)],
+        assumption_edges: &[(u8, Vec<Digest>, Vec<Digest>)],
+    ) -> (
+        BTreeMap<Digest, EvidenceRecord>,
+        BTreeMap<Digest, AssumptionRecord>,
+    ) {
+        let evidence = evidence_edges
+            .iter()
+            .map(|(id, assumptions, dependencies)| {
+                let mut record = evidence_record();
+                record.assumptions = assumptions.clone();
+                record.dependencies = dependencies.clone();
+                (Digest([*id; 32]), record)
+            })
+            .collect();
+        let assumptions = assumption_edges
+            .iter()
+            .map(|(id, prerequisites, supporting_evidence)| {
+                let mut record = assumption_record(Digest([0; 32]));
+                record.prerequisites = prerequisites.clone();
+                record.supporting_evidence = supporting_evidence.clone();
+                (Digest([*id; 32]), record)
+            })
+            .collect();
+        (evidence, assumptions)
+    }
+
+    #[test]
+    fn support_graph_reports_self_and_multi_node_assumption_cycles() {
+        let (evidence, assumptions) =
+            support_graph_records(&[], &[(1, vec![Digest([1; 32])], vec![])]);
+        assert_eq!(
+            find_support_cycle(&evidence, &assumptions),
+            Some(vec![
+                SupportNode::Assumption(Digest([1; 32])),
+                SupportNode::Assumption(Digest([1; 32]))
+            ])
+        );
+
+        let (evidence, assumptions) = support_graph_records(
+            &[],
+            &[
+                (1, vec![Digest([2; 32])], vec![]),
+                (2, vec![Digest([1; 32])], vec![]),
+            ],
+        );
+        let cycle = find_support_cycle(&evidence, &assumptions).unwrap();
+        assert_eq!(cycle.first(), cycle.last());
+        assert_eq!(cycle.len(), 3);
+        assert!(
+            cycle
+                .iter()
+                .all(|node| matches!(node, SupportNode::Assumption(_)))
+        );
+    }
+
+    #[test]
+    fn support_graph_reports_cross_namespace_cycles_and_accepts_dags() {
+        let (evidence, assumptions) = support_graph_records(
+            &[(1, vec![Digest([2; 32])], vec![])],
+            &[(2, vec![], vec![Digest([1; 32])])],
+        );
+        let cycle = find_support_cycle(&evidence, &assumptions).unwrap();
+        assert_eq!(cycle.first(), cycle.last());
+        assert!(
+            cycle
+                .iter()
+                .any(|node| matches!(node, SupportNode::Evidence(_)))
+        );
+        assert!(
+            cycle
+                .iter()
+                .any(|node| matches!(node, SupportNode::Assumption(_)))
+        );
+
+        let (evidence, assumptions) = support_graph_records(
+            &[
+                (1, vec![], vec![]),
+                (2, vec![Digest([3; 32])], vec![Digest([1; 32])]),
+            ],
+            &[
+                (3, vec![], vec![Digest([1; 32])]),
+                (4, vec![Digest([3; 32])], vec![Digest([2; 32])]),
+            ],
+        );
+        assert_eq!(find_support_cycle(&evidence, &assumptions), None);
     }
 
     fn graph(evidence: Digest) -> BehaviorGraph {

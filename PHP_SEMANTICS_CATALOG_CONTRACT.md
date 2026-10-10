@@ -228,14 +228,13 @@ Schema v8 stores typed assumption records separately from evidence. Each record
 has a schema-bound content ID, claim kind and text, target/program scope,
 prerequisite assumption IDs, supporting evidence IDs, and validator ID/version.
 Manifest validation resolves assumption references only in the assumption
-namespace, requires evidence assumptions to propagate into coverage, and
-rejects malformed scopes or records. Context matching alone does
-not establish an assumption: until trusted validator execution and
-cross-namespace cycle checks are implemented, graph validation rejects a
-closed fact that cites an assumption. This applies even when a graph bypasses
-the catalog loader. Open facts may retain assumptions as provenance without
-treating them as established. See R01.2 and R01.7 for the remaining graph and
-trust rules.
+namespace, requires evidence assumptions to propagate into coverage, rejects
+malformed scopes or records, and checks the combined evidence/assumption
+support graph for cycles. Context matching alone does not establish an
+assumption: until trusted validator execution is implemented, graph validation
+rejects a closed fact that cites an assumption. This applies even when a graph
+bypasses the catalog loader. Open facts may retain assumptions as provenance
+without treating them as established. See R01.7 for the remaining trust rules.
 
 ## Counterexamples that composition must reject
 
