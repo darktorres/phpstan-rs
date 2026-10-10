@@ -5337,8 +5337,9 @@ impl<'r> Level<'r> {
         }
         // A constructor run again on an object that exists writes what it
         // wrote. Inside a constructor, `parent::__construct()` is the chain.
+        // A computed method name may be either.
         let initializer = |method: &Option<Name>| {
-            method.as_ref().is_some_and(|method| {
+            method.as_ref().is_none_or(|method| {
                 method.as_str().eq_ignore_ascii_case("__construct")
                     || method.as_str().eq_ignore_ascii_case("__clone")
             })

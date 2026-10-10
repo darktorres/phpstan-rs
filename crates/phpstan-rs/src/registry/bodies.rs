@@ -190,6 +190,7 @@ pub(crate) const PROPERTY_WRITER_WATCH: &[(&str, u32)] = &[
     ("unserialize", MENTIONS_PROPERTY_WRITER),
     ("igbinary_unserialize", MENTIONS_PROPERTY_WRITER),
     ("msgpack_unserialize", MENTIONS_PROPERTY_WRITER),
+    ("_unserialize", MENTIONS_PROPERTY_WRITER),
     ("fetchobject", MENTIONS_PROPERTY_WRITER),
     ("fetch_object", MENTIONS_PROPERTY_WRITER),
     ("mysqli_fetch_object", MENTIONS_PROPERTY_WRITER),

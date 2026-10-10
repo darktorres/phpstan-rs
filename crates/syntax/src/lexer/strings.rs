@@ -207,8 +207,21 @@ impl<'a> Lexer<'a> {
                 self.decoded_payload(raw)
             }
         };
-        if !escaped {
-            self.note_string(start, end);
+        if self.watch.is_some() {
+            if escaped {
+                let mut decoded = Vec::with_capacity(raw.len());
+                let mut i = 0;
+                while i < raw.len() {
+                    if raw[i] == b'\\' && matches!(raw.get(i + 1), Some(b'\'' | b'\\')) {
+                        i += 1;
+                    }
+                    decoded.push(raw[i]);
+                    i += 1;
+                }
+                self.note_string(&decoded);
+            } else {
+                self.note_string(&self.src[start..end]);
+            }
         }
         self.pos = end + 1; // closing '
         Token::StringLit(string)
@@ -217,7 +230,16 @@ impl<'a> Lexer<'a> {
     pub(crate) fn lex_double_quoted(&mut self) -> Token {
         let start = self.pos + 1;
         let token = Token::InterpString(self.lex_interpolated_run(b'"'));
-        self.note_string(start, self.pos.saturating_sub(1));
+        if self.watch.is_some() {
+            let end = self.pos.saturating_sub(1).max(start).min(self.src.len());
+            let raw = &self.src[start.min(end)..end];
+            if raw.contains(&b'\\') {
+                let decoded = unescape_double_quoted(raw);
+                self.note_string(&decoded);
+            } else {
+                self.note_string(raw);
+            }
+        }
         token
     }
 
@@ -880,4 +902,70 @@ fn encode_codepoint(c: u32, output: &mut Vec<u8>) {
             output.push(0x80 | (c & 0x3F) as u8);
         }
     }
+}
+
+/// A double-quoted string's bytes with its escapes read.
+fn unescape_double_quoted(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] != b'\\' || i + 1 >= raw.len() {
+            out.push(raw[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        match raw[i] {
+            b'n' => out.push(b'\n'),
+            b'r' => out.push(b'\r'),
+            b't' => out.push(b'\t'),
+            b'v' => out.push(0x0b),
+            b'e' => out.push(0x1b),
+            b'f' => out.push(0x0c),
+            b'\\' | b'$' | b'"' => out.push(raw[i]),
+            b'x' if raw.get(i + 1).is_some_and(u8::is_ascii_hexdigit) => {
+                let mut value = 0u32;
+                let mut taken = 0;
+                while taken < 2 && raw.get(i + 1).is_some_and(u8::is_ascii_hexdigit) {
+                    value = value * 16 + (raw[i + 1] as char).to_digit(16).unwrap_or(0);
+                    i += 1;
+                    taken += 1;
+                }
+                out.push(value as u8);
+            }
+            b'0'..=b'7' => {
+                let mut value = u32::from(raw[i] - b'0');
+                let mut taken = 1;
+                while taken < 3 && matches!(raw.get(i + 1), Some(b'0'..=b'7')) {
+                    value = value * 8 + u32::from(raw[i + 1] - b'0');
+                    i += 1;
+                    taken += 1;
+                }
+                out.push(value as u8);
+            }
+            b'u' if raw.get(i + 1) == Some(&b'{') => {
+                let close = raw[i..].iter().position(|byte| *byte == b'}');
+                let code = close.and_then(|close| {
+                    std::str::from_utf8(&raw[i + 2..i + close])
+                        .ok()
+                        .and_then(|digits| u32::from_str_radix(digits, 16).ok())
+                        .and_then(char::from_u32)
+                });
+                match (code, close) {
+                    (Some(ch), Some(close)) => {
+                        let mut buffer = [0; 4];
+                        out.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
+                        i += close;
+                    }
+                    _ => out.extend_from_slice(b"\\u"),
+                }
+            }
+            other => {
+                out.push(b'\\');
+                out.push(other);
+            }
+        }
+        i += 1;
+    }
+    out
 }

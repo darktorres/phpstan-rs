@@ -116,3 +116,55 @@ fn every_stub_function_that_fills_an_object_from_data_is_a_property_writer_spell
         "these fill an object and are not property writer spellings: {missing:?}"
     );
 }
+
+#[test]
+fn every_stub_method_that_fills_an_object_from_data_is_a_property_writer_spelling() {
+    let base = super::super::Project::plain_base();
+    let spelled: Vec<&str> = crate::registry::bodies::PROPERTY_WRITER_WATCH
+        .iter()
+        .map(|(spelling, _)| *spelling)
+        .collect();
+    let mut missing: Vec<String> = Vec::new();
+    for (_, class, reflection) in base.classes_by_id() {
+        for name in reflection.methods().keys() {
+            let lower = name.as_str().to_ascii_lowercase();
+            let fills = lower.contains("unserialize")
+                || lower.contains("fetch_object")
+                || lower.contains("fetchobject")
+                || lower.contains("setfetchmode")
+                || lower.contains("exchangearray");
+            let hook = matches!(lower.as_str(), "__unserialize" | "bsonunserialize");
+            if fills
+                && !hook
+                && !spelled.contains(&lower.as_str())
+                && !spelled.contains(&class.as_str().to_ascii_lowercase().as_str())
+            {
+                missing.push(format!("{class}::{lower}"));
+            }
+        }
+    }
+    missing.sort();
+    assert!(
+        missing.is_empty(),
+        "these fill an object and are not property writer spellings: {missing:?}"
+    );
+}
+
+#[test]
+fn a_string_naming_a_writer_is_noted_through_escapes_and_a_class_prefix() {
+    for source in [
+        r#"<?php $f = 'Foo\\Bar::unserialize';"#,
+        r#"<?php $f = "Foo\\Bar::setValue";"#,
+        r#"<?php $f = "set\x56alue";"#,
+        r#"<?php $f = "\u{73}etValue";"#,
+        r#"<?php $f = 'Foo\Bar::setValue';"#,
+        r#"<?php $f = 'App\unserialize';"#,
+        r#"<?php $f = "\165nserialize";"#,
+    ] {
+        assert_ne!(
+            facts_of(source).mentions & MENTIONS_PROPERTY_WRITER,
+            0,
+            "{source}"
+        );
+    }
+}

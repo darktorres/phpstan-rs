@@ -323,10 +323,17 @@ impl WatchList {
 
     /// The bits of the spellings equal to `text` in any case.
     fn bits(&self, text: &str) -> u32 {
+        self.bits_of(text.as_bytes())
+    }
+
+    fn bits_of(&self, text: &[u8]) -> u32 {
         let mut bits = 0;
+        if text.len() > Self::LONGEST {
+            return bits;
+        }
         for list in self.0 {
             for &(spelling, bit) in *list {
-                if spelling.len() == text.len() && spelling.eq_ignore_ascii_case(text) {
+                if spelling.len() == text.len() && spelling.as_bytes().eq_ignore_ascii_case(text) {
                     bits |= bit;
                 }
             }
@@ -475,14 +482,22 @@ impl<'a> Lexer<'a> {
 
     /// Notes the watched spellings a string literal is, whose body is
     /// `src[start..end]`: a function named by a string is called by the name.
-    fn note_string(&mut self, start: usize, end: usize) {
+    /// Notes the spellings a string literal can name as a callable: the
+    /// whole string, and what follows its last `::` or `\`.
+    fn note_string(&mut self, bytes: &[u8]) {
         let Some(watch) = self.watch else { return };
-        if end <= start || end - start > WatchList::LONGEST {
+        if bytes.is_empty() || bytes.len() > WatchList::LONGEST * 4 {
             return;
         }
-        if let Some(text) = self.text.and_then(|text| text.get(start..end)) {
-            self.facts.mentions |= watch.bits(text);
+        let mut bits = watch.bits_of(bytes);
+        let tail = bytes
+            .iter()
+            .rposition(|byte| matches!(byte, b':' | b'\\'))
+            .map_or(bytes, |at| &bytes[at + 1..]);
+        if tail.len() != bytes.len() {
+            bits |= watch.bits_of(tail);
         }
+        self.facts.mentions |= bits;
     }
 
     fn name_and_bits(&mut self, text: &str) -> (Name, u32, Option<NameId>) {
