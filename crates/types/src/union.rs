@@ -1260,8 +1260,7 @@ fn merge_shape_slots(shapes: &mut [ShapeSlot]) {
     let mut postings = KeyPostings::new(shapes);
     for i in 0..shapes.len() {
         let mut after = i as u32;
-        loop {
-            let Some((a, _)) = &shapes[i] else { break };
+        while let Some((a, _)) = &shapes[i] {
             let Some(j) = postings.next_sharing(a, after) else {
                 break;
             };
@@ -1320,8 +1319,7 @@ fn merge_shape_slots(shapes: &mut [ShapeSlot]) {
     };
     for i in 0..shapes.len() {
         let mut after = i as u32;
-        loop {
-            let Some((a, _)) = &shapes[i] else { break };
+        while let Some((a, _)) = &shapes[i] {
             let next = if is_merge_candidate(a) {
                 (after as usize + 1 < shapes.len()).then_some(after + 1)
             } else {

@@ -295,7 +295,7 @@ impl Registry {
                                     is_final: entry.is_final,
                                     is_static: entry.is_static,
                                     is_final_by_phpdoc: entry.is_final_by_phpdoc,
-                                    is_constructor: syntax::ast::is_constructor_name(&name),
+                                    is_constructor: syntax::ast::is_constructor_name(name),
                                 },
                                 shared_sig,
                             ));
@@ -1604,7 +1604,7 @@ impl Registry {
                                 is_final: entry.is_final,
                                 is_static: entry.is_static,
                                 is_final_by_phpdoc: entry.is_final_by_phpdoc,
-                                is_constructor: syntax::ast::is_constructor_name(&name),
+                                is_constructor: syntax::ast::is_constructor_name(name),
                             },
                             shared_sig,
                         ));

@@ -3524,7 +3524,7 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .map(|n| {
                             if n == "class" {
-                                Type::class_string(Type::object(class.clone().into(), Vec::new()))
+                                Type::class_string(Type::object(class.clone(), Vec::new()))
                             } else {
                                 self.static_member_of_class(e, &class, None, &n, false)
                             }
@@ -3549,7 +3549,7 @@ impl<'a> Checker<'a> {
                 // `Foo::class` / `$obj::class` is a string naming the
                 // class, not a member.
                 match self.resolve_static_target_class(target, locals, label) {
-                    Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+                    Some(class) => Type::class_string(Type::object(class, Vec::new())),
                     None => Type::string(),
                 }
             }
@@ -6088,7 +6088,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::ClassNameFetch(target) => {
                 match self.infer_static_target_class(target, locals) {
-                    Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+                    Some(class) => Type::class_string(Type::object(class, Vec::new())),
                     None => Type::string(),
                 }
             }

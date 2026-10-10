@@ -4045,6 +4045,7 @@ pub(crate) fn parse_file_recording_with_file_id<'a>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::project) fn parse_file_with_names_and_file_id_and_worker_scratch<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,

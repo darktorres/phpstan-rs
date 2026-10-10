@@ -172,7 +172,8 @@ impl<'a> Checker<'a> {
     /// the registry does not change while a file is checked.
     pub(crate) fn class_template_params_for(&self, class: &str) -> Rc<TemplateParams> {
         let found = self.class_template_params.borrow().get(class).cloned();
-        let params = match found {
+
+        match found {
             Some(params) => {
                 syntax::stats::count(syntax::stats::Counter::ClassTemplateParamsHit);
                 #[cfg(debug_assertions)]
@@ -187,8 +188,7 @@ impl<'a> Checker<'a> {
                     .insert(class.to_string(), Rc::clone(&params));
                 params
             }
-        };
-        params
+        }
     }
 
     fn build_class_template_params(&self, class: &str) -> TemplateParams {
