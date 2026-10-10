@@ -107,6 +107,7 @@ impl Registry {
             .iter()
             .filter_map(|name| self.class_ids.get(name).copied())
             .collect();
+        self.reach_memo.template_paths = Default::default();
         self.class_reference_results
             .retain(|id, _| !scoped_ids.contains(id));
         for class_name in class_names.iter() {

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use syntax::name::Name;
 
+use super::ClassId;
 use super::effect_table::{EffectIx, EffectTable, TransferIx, TransferTable};
 use super::effects::{
     BuiltinBase, DeclKey, Effect, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Run,
@@ -183,6 +184,10 @@ pub(crate) struct ReachMemo {
     pub(crate) stub_runs: OnceMap<EffectIx, bool>,
     /// The handle a declaration's key stands for in the effects pass.
     pub(crate) effect_ixs: OnceMap<DeclKey, EffectIx>,
+    /// The levels `class_template_bindings` walks from a class to an
+    /// ancestor, by the two classes; none when the ancestor is not reached.
+    pub(crate) template_paths:
+        OnceMap<(ClassId, ClassId), Option<Arc<[super::generics::TemplateStep]>>>,
     pub(crate) effects: EffectTable,
     pub(crate) transfers: TransferTable,
     /// What a call of a declaration writes, written as a transfer says, by

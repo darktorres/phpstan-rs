@@ -1,7 +1,9 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::NameMap;
 
-use crate::registry::Registry;
+use syntax::name::Name;
+
+use crate::registry::{ClassId, Registry};
 use types::{self, Type, Variance};
 
 impl Registry {
@@ -64,9 +66,135 @@ impl Registry {
         type_args: &[Type],
         target: &str,
     ) -> FxHashMap<String, Type> {
-        let mut seen = FxHashSet::default();
-        self.class_template_bindings_rec(class, type_args, target, &mut seen)
-            .unwrap_or_default()
+        let (Some(&class_id), Some(&target_id)) =
+            (self.class_ids.get(class), self.class_ids.get(target))
+        else {
+            return FxHashMap::default();
+        };
+        let memo = &self.reach_memo.template_paths;
+        let mut stats = true;
+        let path = memo.get_or_compute((class_id, target_id), || {
+            stats = false;
+            self.template_path(class_id, target_id).map(Into::into)
+        });
+        syntax::stats::count(if stats {
+            syntax::stats::Counter::TemplatePathHit
+        } else {
+            syntax::stats::Counter::TemplatePathMiss
+        });
+        let bindings = path
+            .as_deref()
+            .map(|path| self.bindings_along(path, type_args))
+            .unwrap_or_default();
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            bindings,
+            self.class_template_bindings_rec(class, type_args, target, &mut FxHashSet::default())
+                .unwrap_or_default()
+        );
+        bindings
+    }
+
+    /// The levels from `from` up to `to` that `class_template_bindings`
+    /// walks, `to` included, found in the order that search takes: the
+    /// first parent, then each interface. The levels depend on the
+    /// declarations alone, not on the type arguments.
+    fn template_path(&self, from: ClassId, to: ClassId) -> Option<Vec<TemplateStep>> {
+        fn search(
+            registry: &Registry,
+            class: ClassId,
+            to: ClassId,
+            stack: &mut Vec<ClassId>,
+            path: &mut Vec<TemplateStep>,
+        ) -> bool {
+            syntax::stack::guard(|| {
+                if stack.contains(&class) {
+                    return false;
+                }
+                let Some(references) = registry.class_references(class) else {
+                    return false;
+                };
+                if class == to {
+                    path.push(TemplateStep {
+                        class,
+                        edge: TemplateEdge::Target,
+                    });
+                    return true;
+                }
+                stack.push(class);
+                let mut found = false;
+                if let Some(parent) = references.extends.first()
+                    && let Some(&parent_id) = registry.class_ids.get(parent)
+                {
+                    path.push(TemplateStep {
+                        class,
+                        edge: TemplateEdge::Extends,
+                    });
+                    found = search(registry, parent_id, to, stack, path);
+                    if !found {
+                        path.pop();
+                    }
+                }
+                if !found {
+                    for iface in references.implements {
+                        let Some(&iface_id) = registry.class_ids.get(iface) else {
+                            continue;
+                        };
+                        path.push(TemplateStep {
+                            class,
+                            edge: TemplateEdge::Implements(iface.clone()),
+                        });
+                        if search(registry, iface_id, to, stack, path) {
+                            found = true;
+                            break;
+                        }
+                        path.pop();
+                    }
+                }
+                stack.pop();
+                found
+            })
+        }
+        let mut path = Vec::new();
+        search(self, from, to, &mut Vec::new(), &mut path).then_some(path)
+    }
+
+    /// The bindings of the last level of `path`, with `type_args` as the
+    /// first level's arguments.
+    fn bindings_along(
+        &self,
+        path: &[TemplateStep],
+        type_args: &[Type],
+    ) -> FxHashMap<String, Type> {
+        let mut args: Vec<Type> = type_args.to_vec();
+        for step in path {
+            let Some(info) = self.class_by_id(step.class) else {
+                return FxHashMap::default();
+            };
+            let own_bindings: FxHashMap<String, Type> = info
+                .templates
+                .iter()
+                .map(|s| s.to_string())
+                .zip(args.iter().cloned())
+                .collect();
+            args = match &step.edge {
+                TemplateEdge::Target => return own_bindings,
+                TemplateEdge::Extends => self
+                    .effective_extends_args(step.class)
+                    .iter()
+                    .map(|t| t.substitute_templates(&own_bindings, &self.relation()))
+                    .collect(),
+                TemplateEdge::Implements(iface) => self
+                    .effective_implements_args_for(step.class, iface)
+                    .map(|args| {
+                        args.iter()
+                            .map(|t| t.substitute_templates(&own_bindings, &self.relation()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            };
+        }
+        FxHashMap::default()
     }
 
     /// `None` means `target` isn't reachable along this path at all (so
@@ -79,6 +207,7 @@ impl Registry {
     /// mutable reference, so two independent ancestors (e.g. two
     /// interfaces that both eventually reach a common shared parent, a
     /// real "diamond" shape) can each still be searched.
+    #[cfg(debug_assertions)]
     fn class_template_bindings_rec(
         &self,
         class: &str,
@@ -185,4 +314,20 @@ impl Registry {
                 .cloned()
         })
     }
+}
+
+/// One level of the walk from a class to an ancestor.
+#[derive(Debug, Clone)]
+pub(crate) struct TemplateStep {
+    class: ClassId,
+    edge: TemplateEdge,
+}
+
+/// How the walk goes on from a level.
+#[derive(Debug, Clone)]
+enum TemplateEdge {
+    Extends,
+    Implements(Name),
+    /// The level is the ancestor sought.
+    Target,
 }

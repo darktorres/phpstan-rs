@@ -871,6 +871,44 @@ impl Registry {
         args
     }
 
+    /// `effective_implements_args(id)` for the one interface `iface`.
+    pub(crate) fn effective_implements_args_for(
+        &self,
+        id: ClassId,
+        iface: &Name,
+    ) -> Option<Vec<Type>> {
+        if let Some(args) = self
+            .deferred_class_result(id)
+            .and_then(|results| {
+                results
+                    .types
+                    .implements_args
+                    .iter()
+                    .rev()
+                    .find(|(name, _)| name == iface)
+                    .map(|(_, args)| args.clone())
+            })
+        {
+            return Some(args);
+        }
+        if let Some(args) = self
+            .class_type_results
+            .get(&id)
+            .and_then(|results| {
+                results
+                    .implements_args
+                    .iter()
+                    .rev()
+                    .find(|(name, _)| name == iface)
+                    .map(|(_, args)| args.clone())
+            })
+        {
+            return Some(args);
+        }
+        self.class_by_id(id)
+            .and_then(|class| class.implements_args().get(iface).cloned())
+    }
+
     pub(crate) fn effective_implements_args_by_name(
         &self,
         name: &str,
@@ -1559,6 +1597,7 @@ impl Registry {
             self.imported_type_aliases.clear();
             self.class_type_results.clear();
             self.class_reference_results.clear();
+            self.reach_memo.template_paths = Default::default();
             return body_scope.map(|_| snapshot(self));
         }
         let changed_class_ids: FxHashSet<ClassId> = self
@@ -1890,6 +1929,7 @@ impl Registry {
             })
             .collect();
         self.class_type_results_cache = NameTable::default();
+        self.reach_memo.template_paths = Default::default();
         self.class_reference_results = class_reference_results
             .iter()
             .filter_map(|(name, refs)| {
