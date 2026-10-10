@@ -149,11 +149,12 @@ impl<'a> Checker<'a> {
                 && !locals.contains_var(name)
                 && !is_superglobal(name)
             {
-                let certainty = if self.might_be_assigned_before(name, self.expr_span(root.id)) {
-                    "might not exist"
-                } else {
-                    "does not exist"
-                };
+                let certainty =
+                    if self.might_be_assigned_before(arenas, name, self.expr_span(root.id)) {
+                        "might not exist"
+                    } else {
+                        "does not exist"
+                    };
                 self.report(
                     format!(
                         "Implicit array creation is not allowed - variable ${name} {certainty}."
@@ -611,11 +612,11 @@ impl<'a> Checker<'a> {
         &mut self,
         arenas: &NodeArenas,
         body: &[StmtId],
-    ) -> Vec<AssignedVariable> {
+    ) -> LazyAssigned {
         let entered = if self.settings.strict_rules.check_implicit_array_creation {
-            assigned_variables(arenas, body)
+            LazyAssigned::new(arenas, body)
         } else {
-            Vec::new()
+            LazyAssigned::default()
         };
         std::mem::replace(&mut self.current_function_assigned_variables, entered)
     }
@@ -623,8 +624,13 @@ impl<'a> Checker<'a> {
     /// Whether an assignment to `name` could have run before the one at
     /// `site`: it comes earlier, or shares an enclosing loop with it (as
     /// `site` itself does on a later iteration).
-    fn might_be_assigned_before(&self, name: &str, site: syntax::span::Span) -> bool {
-        let sites = &self.current_function_assigned_variables;
+    fn might_be_assigned_before(
+        &self,
+        arenas: &NodeArenas,
+        name: &str,
+        site: syntax::span::Span,
+    ) -> bool {
+        let sites = self.current_function_assigned_variables.get(arenas);
         let own_loops = sites
             .iter()
             .find(|a| a.span == site)
@@ -943,11 +949,40 @@ fn is_tuple(shape: &types::Shape) -> bool {
 }
 
 /// One variable assignment site, with the spans of the loops around it.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct AssignedVariable {
     name: Name,
     span: syntax::span::Span,
     loops: Vec<syntax::span::Span>,
+}
+
+/// The assignment sites of one function body, collected on the first query.
+#[derive(Default)]
+pub(crate) struct LazyAssigned {
+    body: Vec<StmtId>,
+    sites: std::cell::OnceCell<Vec<AssignedVariable>>,
+    #[cfg(debug_assertions)]
+    eager: Vec<AssignedVariable>,
+}
+
+impl LazyAssigned {
+    pub(crate) fn new(arenas: &NodeArenas, body: &[StmtId]) -> Self {
+        Self {
+            body: body.to_vec(),
+            sites: std::cell::OnceCell::new(),
+            #[cfg(debug_assertions)]
+            eager: assigned_variables(arenas, body),
+        }
+    }
+
+    fn get(&self, arenas: &NodeArenas) -> &[AssignedVariable] {
+        let sites = self
+            .sites
+            .get_or_init(|| assigned_variables(arenas, &self.body));
+        #[cfg(debug_assertions)]
+        debug_assert!(*sites == self.eager);
+        sites
+    }
 }
 
 /// Every site in `body` that binds a variable, outside nested functions,

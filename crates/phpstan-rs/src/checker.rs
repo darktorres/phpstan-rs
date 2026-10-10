@@ -576,8 +576,9 @@ pub struct Checker<'a> {
     // find the method again.
     pub(crate) statement_method_call: Option<StatementMethodCall>,
     // Every variable assignment site in the current function body, for
-    // `variable.implicitArray`; empty unless that check is enabled.
-    pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
+    // `variable.implicitArray`; empty unless that check is enabled, and
+    // collected when first asked.
+    pub(crate) current_function_assigned_variables: strict_rules::LazyAssigned,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -1382,7 +1383,7 @@ impl<'a> Checker<'a> {
             assigned_values: rustc_hash::FxHashMap::default(),
             loop_body_completion: Completion::FALLS_THROUGH,
             statement_method_call: None,
-            current_function_assigned_variables: Vec::new(),
+            current_function_assigned_variables: strict_rules::LazyAssigned::default(),
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
@@ -2079,9 +2080,9 @@ impl<'a> Checker<'a> {
         }
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
-                strict_rules::assigned_variables(arenas, stmts)
+                strict_rules::LazyAssigned::new(arenas, stmts)
             } else {
-                Vec::new()
+                strict_rules::LazyAssigned::default()
             };
         self.constant_facts = if self.file_mentions & global_constants::MENTIONS_MAGIC != 0 {
             global_constants::constant_facts(arenas, stmts)
