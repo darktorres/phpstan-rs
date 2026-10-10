@@ -1969,6 +1969,7 @@ impl Registry {
         id: ClassId,
         declaration: Option<&ClassReflection>,
     ) -> ClassResultOverlay {
+        syntax::stats::count(syntax::stats::Counter::ClassOverlays);
         let mut methods: Vec<_> = self
             .method_results_for_class(id)
             .filter_map(|(method, signature)| {

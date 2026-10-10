@@ -56,6 +56,7 @@ counters! {
     VendorWaitNanos => "vendor_autoload.wait_ns",
     DiagnosticsBuilt => "diagnostics.built",
     DiagnosticsBelowLevel => "diagnostics.below_level",
+    ClassOverlays => "class_result_overlay.built",
     ResolveRuns => "resolve_run.bodies",
     ResolveRounds => "resolve_run.rounds",
     ResolveLevelsBuilt => "resolve_run.levels_built",
