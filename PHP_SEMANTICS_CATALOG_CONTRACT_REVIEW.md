@@ -401,28 +401,19 @@ expected failures, so these steps can only record output. The layout steps do as
 and evaluation never mention it. *Required:* assert each step's expected status, and map
 `cbmc-low-budget` in R00.4. *Ledger:* R00.4.
 
-**RV-9 — Active, Medium. The Stringable predicate answers No for object types it does not
-recognise.** In `strlen-weak-stringable-cast` (builtin_calls.rs:111–126), a member is treated
-as "may cast" only if `as_object()` matches. `as_object` matches only `Repr::Object` and
-`EnumCase`. A bare `object` is `Repr::ObjectWithoutClass` (constructors.rs:141), so it falls
-into the `else` arm, `may_not_cast = true`, and the predicate returns No. The contract says
-a predicate answers `Maybe` unless the host proves the answer (lines 80–83). A plain `object`
-can be Stringable, so this answer is unproven. The consumer's effect is small today: a
-covered call only forgets the String operation on its argument expression
-(call_effects.rs:405–415). So the impact is latent, but the host violates its own rule. The
-ledger's F00-R4 wording ("keeps both branches for mixed or extensible unknown objects") is
-inaccurate for `object`. This was established by reading the code, not by a PHP run.
-*Required:* return `Maybe` for `ObjectWithoutClass`, `ObjectShape`, object-bearing
-intersections, and object-bounded templates, with a fixture for each. *Ledger:* R05.8 (new).
+**RV-9 — Active, Medium, reproduced. The Stringable predicate answers No for object types it does not recognise.** In `strlen-weak-stringable-cast` (builtin_calls.rs:111–126), a member is treated as "may cast" only if `as_object()` matches. `as_object` matches only `Repr::Object` and `EnumCase`. A bare `object` is `Repr::ObjectWithoutClass` (constructors.rs:141), so it falls into the `else` arm, `may_not_cast = true`, and the predicate returns No. The contract says a predicate answers `Maybe` unless the host proves the answer (lines 80–83). A plain `object` can be Stringable, so this answer is unproven.
 
-**RV-10 — Active, Medium. Spread arguments: the mechanism differs from the ledger text.**
-`resolve_call_args` skips spread arguments (calls.rs:956), so for `strlen(...$x)` the graph's
-argument 0 is `Type::mixed()` (builtin_calls.rs:2301). The invalidation step
-(call_effects.rs:405–412) indexes the raw call arguments, so index 0 invalidates the spread
-source expression, not the unpacked element. A Stringable element's callback side effects
-are therefore never attributed. The ledger's description is right about the outcome but
-wrong about the path. Not run in a PHP probe. *Ledger:* F05.4 text corrected; R05.2
-acceptance should include the spread case.
+The consequence is observable. A covered call re-computes the String operation's effect on the argument's type (`forget_what_an_operation_may_change`, call_effects.rs:530). For a bare `object` the predicate answers No, so the `__toString` branch is never taken and nothing is forgotten. PHP probe (`probe.php`, gate binary rebuilt at `09acd24e`), each function running `$c->p = 1; strlen($o); assertType('1', $c->p);`:
+
+```
+rv9_object_param(object $o, C $c)  -> no assertType mismatch: $c->p is still 1
+rv9_class_param(C $o, C $c)        -> mismatch, actual type "int"
+rv9_mixed_param(mixed $o, C $c)    -> mismatch, actual type "int"
+```
+
+The `mixed` control takes the Maybe branch, so the predicate's No is the cause. The `object` call also reports `argument.type` on the same line; that is a separate diagnostic. The ledger's F00-R4 wording ("keeps both branches for mixed or extensible unknown objects") is inaccurate for `object`. *Required:* return `Maybe` for `ObjectWithoutClass`, `ObjectShape`, object-bearing intersections, and object-bounded templates, with a fixture for each. *Ledger:* R05.8 (new).
+
+**RV-10 — Mechanism confirmed; consequence not reproduced. Spread arguments.** `resolve_call_args` skips spread arguments (calls.rs:956), so for `strlen(...$x)` the graph's argument 0 is `Type::mixed()` (builtin_calls.rs:2301). The invalidation step (call_effects.rs:405–412) indexes the raw call arguments, so index 0 names the spread source expression, not the unpacked element. A PHP probe did not reproduce a missed invalidation: `rv10_spread` (`strlen(...$list)` with `$list: list<C>`) invalidated `$c->p`, exactly as the direct call `rv10_direct` does. I did not trace which path performs that invalidation, so the ledger's claim that a Stringable element's side effects can be missed is unproven. *Required:* identify the path that invalidates in the spread case before claiming either outcome. *Ledger:* F05.4 text corrected; R05.2 acceptance should include the spread case.
 
 **RV-11 — Active, Medium. The runtime witness no longer describes the checked-in fixture.**
 `results/runtime/hybrid-call-8.5.4.json` records the `runtime.php` digest `9b38a3ea…`, from
@@ -468,7 +459,7 @@ the cgroup path disappears without an `exit_code`, which admits the next job. *L
 - **ACR-4:** confirmed, and worse than described. The evaluator performs the conversions the
   contract forbids (RV-1).
 - **ACR-5:** accepted as stated. The `cbmc-low-budget` mapping is added (RV-8).
-- **ACR-6:** accepted as stated. RV-9 and RV-10 are concrete examples of host-level gaps.
+- **ACR-6:** accepted as stated. RV-9 is a reproduced example of a host-level gap; RV-10 is a mechanism without a demonstrated consequence.
 
 ### Not verified by this review
 
@@ -477,8 +468,8 @@ the cgroup path disappears without an `exit_code`, which admits the next job. *L
 - F01.2, F01.3, F04.1: test names exist. I did not audit each assertion beyond the cleanup
   and fatal tests.
 - F02.1, F03.2, F03.3, F06.1, F06.3–F06.5: not checked.
-- `is_null()` on template parameters, which bears on the null predicate's treatment of them.
-- The observable PHP-level impact of RV-9 and RV-10: no PHP run was made.
+- `is_null()` on template parameters: not traced in code. A PHP probe shows the effect: `null_template` (`@template T of string|null`) gets no null deprecation, while `null_union` (`?string`) does. Both can be null, so the predicate treats the template as definitely non-null. The same probe reports `strlen($x)` for `T` as `expects string, T given` (`argument.type`). That is a separate diagnostic, and I did not investigate it.
+- The consequence of RV-10: not reproduced; see RV-10.
 
 ### Reviewer disposition
 
