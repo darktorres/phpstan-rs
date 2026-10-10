@@ -311,7 +311,10 @@ pub enum GraphError {
     UnsupportedSchema(u32),
     Empty,
     InvalidEntry(u32),
-    InvalidSuccessor { block: u32, successor: u32 },
+    InvalidSuccessor {
+        block: u32,
+        successor: u32,
+    },
     DuplicateCoverage(Domain),
     MissingCoverage(Domain),
     OpenDomainWithoutUnknown(Domain),
@@ -320,8 +323,14 @@ pub enum GraphError {
     UnknownTransferWithoutReason,
     UnknownTransferWithoutOpenCoverage(Domain),
     DuplicateDomainDependency(Domain),
-    ClosedDomainDependsOnOpen { domain: Domain, dependency: Domain },
-    ClosedDomainDependsOnNotApplicable { domain: Domain, dependency: Domain },
+    ClosedDomainDependsOnOpen {
+        domain: Domain,
+        dependency: Domain,
+    },
+    ClosedDomainDependsOnNotApplicable {
+        domain: Domain,
+        dependency: Domain,
+    },
     UnestablishedAssumption(Domain),
     CyclicDomainDependency(Domain),
     ApplicableDomainMarkedNotApplicable(Domain),
@@ -335,6 +344,48 @@ pub enum GraphError {
     CanonicalEncodingFailed,
     ResumeWithoutPendingOutcome,
     InvalidComposedCoverage,
+    UnsupportedCleanupReplacement {
+        pending: CompletionKind,
+        replacement: CompletionKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionKind {
+    PhpThrow,
+    NativeUnwind,
+    Fatal,
+    Suspended,
+    Normal,
+}
+
+fn pending_completion_kind<V>(pending: &PendingOutcome<V>) -> CompletionKind {
+    match pending {
+        PendingOutcome::PhpThrow(_) => CompletionKind::PhpThrow,
+        PendingOutcome::NativeUnwind(_) => CompletionKind::NativeUnwind,
+        PendingOutcome::Fatal(_) => CompletionKind::Fatal,
+        PendingOutcome::Suspended(_) => CompletionKind::Suspended,
+    }
+}
+
+fn check_cleanup_replacement<V>(
+    pending: &Option<PendingOutcome<V>>,
+    replacement: CompletionKind,
+) -> Result<(), GraphError> {
+    if let Some(pending) = pending {
+        let pending = pending_completion_kind(pending);
+        // The only replacement currently modeled and tested is a cleanup
+        // return overriding a pending PHP throw. All other matrix cells fail
+        // closed until their host semantics have evidence and coverage.
+        if pending == CompletionKind::PhpThrow && replacement == CompletionKind::Normal {
+            return Ok(());
+        }
+        return Err(GraphError::UnsupportedCleanupReplacement {
+            pending,
+            replacement,
+        });
+    }
+    Ok(())
 }
 
 impl BehaviorGraph {
@@ -1304,6 +1355,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                         next.push((state, next_values, pending.clone()));
                     }
                     EventExit::PhpThrow { value, state, .. } => {
+                        check_cleanup_replacement(&pending, CompletionKind::PhpThrow)?;
                         if let Some(to) = block.exceptional.php_throw {
                             successors.push(CertifiedFrame {
                                 block: to,
@@ -1316,6 +1368,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                         }
                     }
                     EventExit::NativeUnwind { value, state, .. } => {
+                        check_cleanup_replacement(&pending, CompletionKind::NativeUnwind)?;
                         if let Some(to) = block.exceptional.native_unwind {
                             successors.push(CertifiedFrame {
                                 block: to,
@@ -1328,6 +1381,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                         }
                     }
                     EventExit::Fatal { value, state, .. } => {
+                        check_cleanup_replacement(&pending, CompletionKind::Fatal)?;
                         if let Some(to) = block.exceptional.fatal {
                             successors.push(CertifiedFrame {
                                 block: to,
@@ -1340,6 +1394,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                         }
                     }
                     EventExit::Suspended { value, state, .. } => {
+                        check_cleanup_replacement(&pending, CompletionKind::Suspended)?;
                         if let Some(to) = block.exceptional.suspended {
                             successors.push(CertifiedFrame {
                                 block: to,
@@ -1380,6 +1435,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                 }
             }
             Terminator::Return(value) => {
+                check_cleanup_replacement(&pending, CompletionKind::Normal)?;
                 let value = value
                     .as_ref()
                     .map(|operand| {
@@ -1390,6 +1446,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                 exits.push(Exit::Normal { value, state });
             }
             Terminator::Throw(operand) => {
+                check_cleanup_replacement(&pending, CompletionKind::PhpThrow)?;
                 let value = host
                     .resolve(operand, arguments, receiver, &results)
                     .ok_or(GraphError::UnresolvedValue)?;
@@ -1405,6 +1462,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                 }
             }
             Terminator::Fatal(operand) => {
+                check_cleanup_replacement(&pending, CompletionKind::Fatal)?;
                 let value = host
                     .resolve(operand, arguments, receiver, &results)
                     .ok_or(GraphError::UnresolvedValue)?;
@@ -1420,6 +1478,7 @@ fn replay_certificate_frame<H: SemanticHost>(
                 }
             }
             Terminator::Suspend(operand) => {
+                check_cleanup_replacement(&pending, CompletionKind::Suspended)?;
                 let value = host
                     .resolve(operand, arguments, receiver, &results)
                     .ok_or(GraphError::UnresolvedValue)?;
@@ -1586,6 +1645,7 @@ pub fn evaluate<H: SemanticHost>(
                             state,
                             coverage,
                         } => {
+                            check_cleanup_replacement(&pending, CompletionKind::PhpThrow)?;
                             merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.php_throw {
                                 enqueue(
@@ -1612,6 +1672,7 @@ pub fn evaluate<H: SemanticHost>(
                             state,
                             coverage,
                         } => {
+                            check_cleanup_replacement(&pending, CompletionKind::NativeUnwind)?;
                             merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.native_unwind {
                                 enqueue(
@@ -1638,6 +1699,7 @@ pub fn evaluate<H: SemanticHost>(
                             state,
                             coverage,
                         } => {
+                            check_cleanup_replacement(&pending, CompletionKind::Fatal)?;
                             merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.fatal {
                                 enqueue(
@@ -1664,6 +1726,7 @@ pub fn evaluate<H: SemanticHost>(
                             state,
                             coverage,
                         } => {
+                            check_cleanup_replacement(&pending, CompletionKind::Suspended)?;
                             merge_coverage(&mut evaluation_coverage, &coverage)?;
                             if let Some(to) = block.exceptional.suspended {
                                 enqueue(
@@ -1774,6 +1837,7 @@ pub fn evaluate<H: SemanticHost>(
                     }
                 }
                 Terminator::Return(value) => {
+                    check_cleanup_replacement(&pending, CompletionKind::Normal)?;
                     let value = value
                         .as_ref()
                         .map(|v| {
@@ -1784,6 +1848,7 @@ pub fn evaluate<H: SemanticHost>(
                     push_exit(&mut exits, Exit::Normal { value, state });
                 }
                 Terminator::Throw(value) => {
+                    check_cleanup_replacement(&pending, CompletionKind::PhpThrow)?;
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
@@ -1808,6 +1873,7 @@ pub fn evaluate<H: SemanticHost>(
                     }
                 }
                 Terminator::Fatal(value) => {
+                    check_cleanup_replacement(&pending, CompletionKind::Fatal)?;
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
@@ -1832,6 +1898,7 @@ pub fn evaluate<H: SemanticHost>(
                     }
                 }
                 Terminator::Suspend(value) => {
+                    check_cleanup_replacement(&pending, CompletionKind::Suspended)?;
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
@@ -3576,6 +3643,333 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_replacement_matrix_fails_closed_except_modeled_php_throw_return() {
+        let pending = [
+            PendingOutcome::PhpThrow("throw".to_owned()),
+            PendingOutcome::NativeUnwind("unwind".to_owned()),
+            PendingOutcome::Fatal("fatal".to_owned()),
+            PendingOutcome::Suspended("suspended".to_owned()),
+        ];
+        let replacements = [
+            CompletionKind::Normal,
+            CompletionKind::PhpThrow,
+            CompletionKind::NativeUnwind,
+            CompletionKind::Fatal,
+            CompletionKind::Suspended,
+        ];
+        for (pending_index, pending) in pending.iter().enumerate() {
+            for (replacement_index, replacement) in replacements.iter().enumerate() {
+                let result = check_cleanup_replacement(&Some(pending.clone()), *replacement);
+                let supported = pending_index == 0 && replacement_index == 0;
+                assert_eq!(
+                    result.is_ok(),
+                    supported,
+                    "pending={pending:?}, replacement={replacement:?}: {result:?}"
+                );
+                if !supported {
+                    assert_eq!(
+                        result,
+                        Err(GraphError::UnsupportedCleanupReplacement {
+                            pending: pending_completion_kind(pending),
+                            replacement: *replacement,
+                        })
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            check_cleanup_replacement::<String>(&None, CompletionKind::Normal),
+            Ok(())
+        );
+        assert_eq!(
+            check_cleanup_replacement::<String>(&None, CompletionKind::PhpThrow),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn evaluator_enforces_every_pending_completion_replacement_cell() {
+        let pending_kinds = [
+            CompletionKind::PhpThrow,
+            CompletionKind::NativeUnwind,
+            CompletionKind::Fatal,
+            CompletionKind::Suspended,
+        ];
+        let replacement_kinds = [
+            CompletionKind::Normal,
+            CompletionKind::PhpThrow,
+            CompletionKind::Fatal,
+            CompletionKind::Suspended,
+        ];
+        for pending_kind in pending_kinds {
+            for replacement_kind in replacement_kinds {
+                let mut graph = if matches!(
+                    pending_kind,
+                    CompletionKind::PhpThrow | CompletionKind::NativeUnwind
+                ) {
+                    graph(
+                        vec![Event::Invoke {
+                            callable: Operand::Argument(0),
+                            arguments: vec![],
+                            result: 1,
+                        }],
+                        Terminator::Return(None),
+                    )
+                } else {
+                    let terminator = match pending_kind {
+                        CompletionKind::Fatal => {
+                            Terminator::Fatal(Operand::Literal(Bytes(b"fatal".to_vec())))
+                        }
+                        CompletionKind::Suspended => {
+                            Terminator::Suspend(Operand::Literal(Bytes(b"suspended".to_vec())))
+                        }
+                        _ => unreachable!(),
+                    };
+                    graph(vec![], terminator)
+                };
+                match pending_kind {
+                    CompletionKind::PhpThrow => graph.blocks[0].exceptional.php_throw = Some(1),
+                    CompletionKind::NativeUnwind => {
+                        graph.blocks[0].exceptional.native_unwind = Some(1)
+                    }
+                    CompletionKind::Fatal => graph.blocks[0].exceptional.fatal = Some(1),
+                    CompletionKind::Suspended => graph.blocks[0].exceptional.suspended = Some(1),
+                    CompletionKind::Normal => unreachable!(),
+                }
+                let replacement = match replacement_kind {
+                    CompletionKind::Normal => {
+                        Terminator::Return(Some(Operand::Literal(Bytes(b"return".to_vec()))))
+                    }
+                    CompletionKind::PhpThrow => {
+                        Terminator::Throw(Operand::Literal(Bytes(b"throw".to_vec())))
+                    }
+                    CompletionKind::Fatal => {
+                        Terminator::Fatal(Operand::Literal(Bytes(b"fatal".to_vec())))
+                    }
+                    CompletionKind::Suspended => {
+                        Terminator::Suspend(Operand::Literal(Bytes(b"suspended".to_vec())))
+                    }
+                    CompletionKind::NativeUnwind => unreachable!(),
+                };
+                graph.blocks.push(Block::new(vec![], replacement));
+                for item in &mut graph.coverage {
+                    if matches!(item.coverage, Coverage::NotApplicable) {
+                        item.coverage = Coverage::Closed;
+                    }
+                }
+                let mut host = Host {
+                    throw_invoke: pending_kind == CompletionKind::PhpThrow,
+                    native_unwind_invoke: pending_kind == CompletionKind::NativeUnwind,
+                    ..Host::default()
+                };
+                let arguments = if matches!(
+                    pending_kind,
+                    CompletionKind::PhpThrow | CompletionKind::NativeUnwind
+                ) {
+                    vec!["callback".into()]
+                } else {
+                    vec![]
+                };
+                let result = evaluate(&graph, &arguments, &receiver(), vec![], &mut host);
+                let supported = pending_kind == CompletionKind::PhpThrow
+                    && replacement_kind == CompletionKind::Normal;
+                assert_eq!(
+                    result.is_ok(),
+                    supported,
+                    "pending={pending_kind:?}, replacement={replacement_kind:?}: {result:?}"
+                );
+                if !supported {
+                    assert_eq!(
+                        result.unwrap_err(),
+                        GraphError::UnsupportedCleanupReplacement {
+                            pending: pending_kind,
+                            replacement: replacement_kind,
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn certificate_replay_rejects_unsupported_cleanup_replacement() {
+        let mut graph = graph(
+            vec![],
+            Terminator::Fatal(Operand::Literal(Bytes(b"fatal".to_vec()))),
+        );
+        graph.blocks[0].exceptional.fatal = Some(1);
+        graph.blocks.push(Block::new(
+            vec![],
+            Terminator::Return(Some(Operand::Literal(Bytes(b"cleanup".to_vec())))),
+        ));
+        for item in &mut graph.coverage {
+            if matches!(item.coverage, Coverage::NotApplicable) {
+                item.coverage = Coverage::Closed;
+            }
+        }
+        let host = Host::default();
+        let initial = Frame {
+            block: 0,
+            state: vec![],
+            results: vec![],
+            pending: None,
+            growing_updates: 0,
+        };
+        let cleanup = Frame {
+            block: 1,
+            state: vec![],
+            results: vec![],
+            pending: Some(PendingOutcome::Fatal("fatal".into())),
+            growing_updates: 0,
+        };
+        let certificate = test_certificate(&graph, vec![initial, cleanup], vec![]);
+        assert_eq!(
+            certificate.validate(&graph, &host),
+            Err(GraphError::UnsupportedCleanupReplacement {
+                pending: CompletionKind::Fatal,
+                replacement: CompletionKind::Normal,
+            })
+        );
+    }
+
+    #[test]
+    fn cleanup_resume_preserves_every_pending_completion_kind() {
+        for pending_kind in [
+            CompletionKind::PhpThrow,
+            CompletionKind::NativeUnwind,
+            CompletionKind::Fatal,
+            CompletionKind::Suspended,
+        ] {
+            let mut graph = match pending_kind {
+                CompletionKind::PhpThrow | CompletionKind::NativeUnwind => graph(
+                    vec![Event::Invoke {
+                        callable: Operand::Argument(0),
+                        arguments: vec![],
+                        result: 1,
+                    }],
+                    Terminator::Return(None),
+                ),
+                CompletionKind::Fatal => graph(
+                    vec![],
+                    Terminator::Fatal(Operand::Literal(Bytes(b"fatal".to_vec()))),
+                ),
+                CompletionKind::Suspended => graph(
+                    vec![],
+                    Terminator::Suspend(Operand::Literal(Bytes(b"suspended".to_vec()))),
+                ),
+                CompletionKind::Normal => unreachable!(),
+            };
+            match pending_kind {
+                CompletionKind::PhpThrow => graph.blocks[0].exceptional.php_throw = Some(1),
+                CompletionKind::NativeUnwind => graph.blocks[0].exceptional.native_unwind = Some(1),
+                CompletionKind::Fatal => graph.blocks[0].exceptional.fatal = Some(1),
+                CompletionKind::Suspended => graph.blocks[0].exceptional.suspended = Some(1),
+                CompletionKind::Normal => unreachable!(),
+            }
+            graph.blocks.push(Block::new(vec![], Terminator::Resume));
+            for item in &mut graph.coverage {
+                if matches!(item.coverage, Coverage::NotApplicable) {
+                    item.coverage = Coverage::Closed;
+                }
+            }
+            let mut host = Host {
+                throw_invoke: pending_kind == CompletionKind::PhpThrow,
+                native_unwind_invoke: pending_kind == CompletionKind::NativeUnwind,
+                ..Host::default()
+            };
+            let arguments = if matches!(
+                pending_kind,
+                CompletionKind::PhpThrow | CompletionKind::NativeUnwind
+            ) {
+                vec!["callback".into()]
+            } else {
+                vec![]
+            };
+            let exits = evaluate(&graph, &arguments, &receiver(), vec![], &mut host)
+                .unwrap()
+                .exits;
+            assert_eq!(exits.len(), 1, "pending={pending_kind:?}: {exits:?}");
+            assert!(
+                matches!(
+                    (&exits[0], pending_kind),
+                    (Exit::PhpThrow { .. }, CompletionKind::PhpThrow)
+                        | (Exit::NativeUnwind { .. }, CompletionKind::NativeUnwind)
+                        | (Exit::Fatal { .. }, CompletionKind::Fatal)
+                        | (Exit::Suspended { .. }, CompletionKind::Suspended)
+                ),
+                "resume changed pending={pending_kind:?}: {exits:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pending_throw_survives_cleanup_branch_join_and_resume() {
+        let mut g = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 1,
+            }],
+            Terminator::Return(None),
+        );
+        g.blocks[0].exceptional.php_throw = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Branch {
+                predicate: Predicate::Always,
+                yes: 2,
+                no: 3,
+            },
+        ));
+        g.blocks.push(Block::new(
+            vec![Event::Write {
+                storage: Operand::Argument(1),
+                value: Operand::Literal(Bytes(b"left".to_vec())),
+            }],
+            Terminator::Goto(4),
+        ));
+        g.blocks.push(Block::new(
+            vec![Event::Read {
+                storage: Operand::Argument(1),
+            }],
+            Terminator::Goto(4),
+        ));
+        g.blocks.push(Block::new(vec![], Terminator::Resume));
+        for item in &mut g.coverage {
+            if matches!(item.coverage, Coverage::NotApplicable) {
+                item.coverage = Coverage::Closed;
+            }
+        }
+        let mut host = Host {
+            throw_invoke: true,
+            maybe_always: true,
+            ..Host::default()
+        };
+        let exits = evaluate(
+            &g,
+            &["callback".into(), "slot".into()],
+            &receiver(),
+            vec![],
+            &mut host,
+        )
+        .unwrap()
+        .exits;
+        assert!(
+            exits.iter().all(|exit| matches!(
+                exit,
+                Exit::PhpThrow { value, .. } if value == "exception"
+            )),
+            "branch/join must preserve the pending throw: {exits:?}"
+        );
+        assert!(
+            exits
+                .iter()
+                .any(|exit| matches!(exit, Exit::PhpThrow { state, .. } if state == &["<joined>".to_owned()])),
+            "both branch states must reach the join: {exits:?}"
+        );
+    }
+
+    #[test]
     fn native_unwind_remains_distinct_from_php_throw() {
         let g = graph(
             vec![Event::Invoke {
@@ -4222,17 +4616,30 @@ mod tests {
             }
         }
         assert_eq!(graph.validate(), Ok(()), "the test graph must be valid");
-        if let Ok(evaluation) = evaluate(graph, arguments, &receiver(), vec![], &mut host) {
-            assert!(
-                evaluation.exits.iter().any(kept),
-                "pending exit replaced: {:?}",
-                evaluation.exits
-            );
+        match evaluate(graph, arguments, &receiver(), vec![], &mut host) {
+            Ok(evaluation) => {
+                assert!(
+                    evaluation
+                        .exits
+                        .iter()
+                        .all(|exit| !matches!(exit, Exit::Normal { .. } | Exit::PhpThrow { .. })),
+                    "cleanup replacement leaked a normal/PHP-throw exit: {:?}",
+                    evaluation.exits
+                );
+                assert!(
+                    evaluation.exits.iter().any(kept),
+                    "pending exit replaced: {:?}",
+                    evaluation.exits
+                );
+            }
+            Err(error) => assert!(
+                matches!(error, GraphError::UnsupportedCleanupReplacement { .. }),
+                "cleanup must fail closed for the unsupported replacement cell, got {error:?}"
+            ),
         }
     }
 
     #[test]
-    #[ignore = "RV-1: a cleanup return replaces a pending fatal; remove when fixed"]
     fn cleanup_return_does_not_replace_a_pending_fatal() {
         let mut g = graph(
             vec![],
@@ -4249,7 +4656,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV-1: a cleanup throw replaces a pending fatal; remove when fixed"]
     fn cleanup_throw_does_not_replace_a_pending_fatal() {
         let mut g = graph(
             vec![],
@@ -4266,7 +4672,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV-1: a cleanup return replaces a pending native unwind; remove when fixed"]
     fn cleanup_return_does_not_replace_a_pending_native_unwind() {
         let mut g = graph(
             vec![Event::Invoke {
@@ -4287,6 +4692,62 @@ mod tests {
         };
         assert_pending_exit_kept(&mut g, &["native".into()], host, |exit| {
             matches!(exit, Exit::NativeUnwind { .. })
+        });
+    }
+
+    #[test]
+    fn cleanup_throw_does_not_replace_a_pending_native_unwind() {
+        let mut g = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 1,
+            }],
+            Terminator::Return(None),
+        );
+        g.blocks[0].exceptional.native_unwind = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Throw(Operand::Literal(Bytes(b"cleanup-throw".to_vec()))),
+        ));
+        let host = Host {
+            native_unwind_invoke: true,
+            ..Host::default()
+        };
+        assert_pending_exit_kept(&mut g, &["native".into()], host, |exit| {
+            matches!(exit, Exit::NativeUnwind { .. })
+        });
+    }
+
+    #[test]
+    fn cleanup_return_does_not_replace_a_pending_suspension() {
+        let mut g = graph(
+            vec![],
+            Terminator::Suspend(Operand::Literal(Bytes(b"suspended".to_vec()))),
+        );
+        g.blocks[0].exceptional.suspended = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Return(Some(Operand::Literal(Bytes(b"cleanup-return".to_vec())))),
+        ));
+        assert_pending_exit_kept(&mut g, &[], Host::default(), |exit| {
+            matches!(exit, Exit::Suspended { .. })
+        });
+    }
+
+    #[test]
+    fn cleanup_throw_does_not_replace_a_pending_suspension() {
+        let mut g = graph(
+            vec![],
+            Terminator::Suspend(Operand::Literal(Bytes(b"suspended".to_vec()))),
+        );
+        g.blocks[0].exceptional.suspended = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Throw(Operand::Literal(Bytes(b"cleanup-throw".to_vec()))),
+        ));
+        assert_pending_exit_kept(&mut g, &[], Host::default(), |exit| {
+            matches!(exit, Exit::Suspended { .. })
         });
     }
 }

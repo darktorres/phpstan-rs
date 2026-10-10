@@ -118,19 +118,20 @@ future schema.
 
 Cleanup is part of the same simulation obligation, not an exception to it. A
 normal cleanup continuation that resumes a pending completion preserves that
-completion and its accumulated state. A cleanup return or throw may replace a
-pending PHP throw only where that PHP behavior is modeled and tested. The
-replacement rules for pending fatal, suspension, and native-unwind completions
-are currently unspecified: such combinations must be rejected or left open
-until a rule and regression evidence exist. In particular, they may not be
+completion and its accumulated state. A cleanup return may replace a pending
+PHP throw; that is the sole replacement cell modeled and tested today. Cleanup
+throws and all cleanup fatal, suspension, or native-unwind completions while
+any completion is pending are rejected with `UnsupportedCleanupReplacement`.
+They remain unsupported until a rule and regression evidence exist. In
+particular, no pending fatal, suspension, or native-unwind completion may be
 silently converted to a normal return or PHP throw.
 
-This cleanup requirement is normative, but the evaluator currently violates
-it for cleanup `Return`/`Throw` with pending fatal, suspension, and
-native-unwind outcomes;
-those executions are accepted and converted. The rule is defined here, while
-conformance remains open under RV-1/R01.5. R00.2 closes only the definition,
-not the evaluator's implementation.
+The evaluator and certificate replay enforce this rule. The current supported
+matrix is intentionally narrow: no pending completion permits a cleanup
+replacement, except pending PHP throw plus cleanup `Return`. Normal cleanup
+events, branches, joins, and `Resume` preserve the pending completion. Other
+replacement cells fail closed under R01.5 and remain outside the modeled
+behavior claim.
 
 The evaluator and post-fixpoint certificate validator check a narrower,
 host-relative invariant: under the supplied host's operations and
@@ -178,12 +179,10 @@ Sequential composition passes each normal state and result into the next
 operation. A PHP throw, fatal exit, or suspension bypasses normal-only
 operations. Effects that happened before the exit remain visible. A cleanup
 continuation may run for a pending exit. Resuming cleanup preserves the pending
-completion. The only replacement rule currently modeled and tested is a
-cleanup return or throw replacing a pending PHP throw. The replacement rules
-for pending fatal, suspension, and native-unwind outcomes remain unspecified;
-the evaluator must reject those combinations or keep the affected result open.
-Native unwind must not be silently converted into a PHP throw or a normal
-return.
+completion. The only replacement rule currently modeled and tested is cleanup
+`Return` replacing a pending PHP throw. Every other abrupt cleanup replacement
+is rejected until modeled and tested. The evaluator must not silently convert
+pending fatal, suspension, or native-unwind completions into another kind.
 
 Alternative paths retain their guard and outcome correlation until a sound
 join is required. Joining can add possible values or events, but cannot remove
@@ -253,7 +252,7 @@ without treating them as established. See R01.7 for the remaining trust rules.
 | A result is defined on only one predecessor path, then used after the paths join as if it were available on both. | A value from one path cannot replace an undefined result on another; the evaluator must retain the path distinction or return an incomplete result. | `joining_paths_with_a_partially_defined_result_is_incomplete` |
 | A pending throw enters cleanup, then cleanup returns, while the evaluator still reports the original throw. | The cleanup return overrides the pending completion. | `pending_callback_throw_runs_cleanup_then_resumes`; `cleanup_return_overrides_pending_throw` |
 | A native unwind is reported as a PHP throw. | It crosses a different language/ABI boundary and does not establish PHP exception state. | `native_unwind_remains_distinct_from_php_throw` |
-| A fatal exit or suspension is collapsed into a PHP throw or normal return, including through cleanup. | These are distinct observable completion modes and carry different continuation rules. The no-cleanup cases pass; pending-fatal cleanup cases are currently accepted incorrectly and covered by ignored regressions. | `fatal_and_suspension_remain_distinct_exits`; ignored `cleanup_return_does_not_replace_a_pending_fatal`, `cleanup_throw_does_not_replace_a_pending_fatal`, and `cleanup_return_does_not_replace_a_pending_native_unwind` |
+| A fatal exit, suspension, or native unwind is collapsed into a different completion through cleanup. | These are distinct observable completion modes. `Resume` preserves each pending kind; only pending PHP throw plus cleanup return is a modeled replacement. All other abrupt replacement cells fail closed. | `fatal_and_suspension_remain_distinct_exits`; `cleanup_resume_preserves_every_pending_completion_kind`; `evaluator_enforces_every_pending_completion_replacement_cell`; focused fatal/native-unwind/suspension regressions |
 | An unresolved return is treated as no return or as a closed empty result. | Incomplete evaluation cannot justify excluding a return behavior. | `unresolved_return_is_an_incomplete_evaluation_not_no_return` |
 | A graph labels a domain closed while containing an unknown transfer that affects it, or supplies no coverage/evidence. | Its negative claims are unsupported by the actual transfer graph. | `unknown_transfer_cannot_be_marked_closed_or_reasonless`; `every_domain_requires_a_coverage_decision_and_evidence` |
 | A return refinement drops a possible write or throw effect by declaring a dependency open. | A projected fact is closed only when every required semantic domain is justified, including effects and exceptional outcomes that can change its preconditions. | `graph_rejects_closed_return_coverage_with_open_domain_dependency`; `closed_return_refinement_cannot_drop_an_open_throw_path`; `projection_includes_transitive_domain_dependencies` |

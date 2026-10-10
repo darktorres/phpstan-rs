@@ -73,7 +73,7 @@ means the required evidence has not been produced or independently reviewed;
 
 ### F01.2 — Partial: Implement evaluator control flow and exceptional continuations
 
-**Status note (independent review, 2026-10-09):** downgraded from Complete. A cleanup `Return` or `Throw` replaces a pending fatal, suspension, or native unwind, which the contract forbids in part (RV-1, tracked in R01.5).
+**Status note (independent review, 2026-10-09; remediation recorded below):** downgraded from Complete because cleanup `Return` or `Throw` replaced pending fatal, suspension, or native unwind (RV-1). R01.5 now rejects unsupported abrupt replacement cells and tests the completion matrix. F01.2 remains Partial until the independent acceptance gate in F00.5 is resolved.
 
 **Reviewed evidence and current disposition:** Worklist, joins/widening, PHP/native exceptional exits, cleanup/resumption, and masked unknown transfers are tested. Review: Worklist evaluation, joins/widening, normal and exceptional continuations, PHP throw versus native unwind, fatal/suspended exits, cleanup/resumption, and masked unknown transfers have targeted fixtures. Tests reject join/widening losses and check loop convergence. Production-domain calibration and semantic-host soundness are separate open obligations. Calibrate domains for production behavior.
 
@@ -87,9 +87,9 @@ means the required evidence has not been produced or independently reviewed;
 
 **Reviewed evidence and current disposition:** Callback result/write/throw order, state-sensitive predicates, joins, cleanup, and second-callback branch selection are covered. Review: Callback result/write order, result-selected second callback, state-sensitive predicates, branch joins, callback throws, cleanup, and normal/throw state separation have fixtures. These are substantial reference-contract examples, but not an independently reviewed or exhaustive composition matrix; F00.5 remains open. Independent contract review remains F00-dependent; broaden combinations after review.
 
-- **R01.5 — Open** (depends on: R00.2)
-  Implement the reviewed pending-completion × cleanup-completion matrix and broaden branch/callback/join compositions. Test every supported cell; unsupported cells remain open or fail closed. Current behavior is wrong, not merely missing: a cleanup `Return` turns a pending fatal or native unwind into a normal exit, and a cleanup `Throw` turns a pending fatal into a PHP throw (RV-1). Add a failing test for each cell before fixing it.
-  Not yet evidenced as complete; see parent F task for the audited implementation state.
+- **R01.5 — Implementation complete; independent acceptance pending** (depends on: R00.2)
+  `GraphError::UnsupportedCleanupReplacement` now makes unsupported cleanup replacement fail closed in both evaluation and certificate replay. The only modeled replacement remains cleanup `Return` over pending PHP throw. A full evaluator matrix covers all four pending kinds against cleanup Return, PHP throw, fatal, and suspension; it asserts the sole supported cell succeeds and every other cell returns the typed error. A certificate replay regression verifies the validator independently rejects a pending-fatal cleanup return. A separate matrix proves `Resume` preserves all four pending kinds. A callback throw also passes through a `Maybe` branch, distinct state writes, a join, and `Resume` without losing the pending throw. Existing six fatal/native-unwind/suspension Return/Throw counterexamples now fail closed. RV-1's implementation defect is addressed; obtain an independent review before treating the finding or parent F01.2 as accepted.
+  Validation: `cargo test -p phpstan-rs-semantics` passes (90 passed, 1 pre-existing ignored); `cargo check --workspace`, `cargo fmt --check -p phpstan-rs-semantics`, and `git diff --check` pass. Workspace-wide `cargo fmt --all -- --check` reports pre-existing formatting differences in unrelated crates, so no unrelated formatting was retained.
 
 ### F01.5 — Open: Calibrate a production semantic host
 

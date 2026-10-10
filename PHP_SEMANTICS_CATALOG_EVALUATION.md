@@ -1,7 +1,15 @@
 # PHP catalog evaluation results
 
-Updated October 9, 2026. The extended comparative campaign has completed. The
+Updated October 10, 2026. The extended comparative campaign has completed. The
 production semantic/checker evaluation and Phase F remain incomplete.
+
+R01.5 cleanup-completion remediation is implemented in the current worktree:
+evaluation and certificate replay reject unsupported abrupt replacements with
+`UnsupportedCleanupReplacement`. Cleanup `Return` over a pending PHP throw is
+the only replacement currently modeled. Tests cover every pending kind against
+abrupt cleanup terminators, preservation of all pending kinds through `Resume`,
+and a callback-throw branch/join/resume composition. This implementation still
+awaits independent acceptance under F00.5.
 
 The initial comparison is committed as `043f2c78`; the extended compiler and
 framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up

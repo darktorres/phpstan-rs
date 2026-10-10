@@ -334,6 +334,15 @@ return over a fatal error. Suspension is unspecified in the contract. Native unw
 become a normal return or PHP throw. Fail closed on every cell that is not modeled, and add
 a test per cell, before any cell is claimed. *Ledger:* R01.5; F01.2 and F00.2 downgraded.
 
+**Remediation status (R01.5, 2026-10-10):** the current implementation rejects every
+unsupported abrupt cleanup replacement in both evaluation and certificate replay. It models
+only pending PHP throw followed by cleanup `Return`. An evaluator-level matrix checks all
+four pending kinds against cleanup Return, PHP throw, fatal, and suspension; `Resume` is
+tested separately for all four kinds. Callback throw through a maybe-branch, distinct-state
+join, and resume is also covered. The original counterexamples now fail closed. This records
+the author's remediation evidence, not independent acceptance; RV-1 remains pending a fresh
+review of R01.5 and the updated contract.
+
 **RV-2 — Latent, High. The closed-dependency closure is bypassed through a `NotApplicable`
 intermediate.** `validate_domain_dependencies` (lib.rs:532–592) and
 `propagate_open_dependencies` (lib.rs:837) follow only edges from a closed domain to another
