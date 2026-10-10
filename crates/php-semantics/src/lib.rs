@@ -3955,4 +3955,89 @@ mod tests {
         );
         assert_eq!(g.validate(), Ok(()));
     }
+
+    /// Passes when evaluation fails closed, or keeps a pending exit matching
+    /// `kept` and reports no normal or PHP-throw exit in its place.
+    fn assert_pending_exit_kept(
+        graph: &mut BehaviorGraph,
+        arguments: &[String],
+        mut host: Host,
+        kept: impl Fn(&Exit<String, Vec<String>>) -> bool,
+    ) {
+        // The helper only derives applicability from the entry block, so a
+        // cleanup block's own domains start as not applicable. Close them so the
+        // graph is valid and an error cannot make the check pass vacuously.
+        for item in &mut graph.coverage {
+            if matches!(item.coverage, Coverage::NotApplicable) {
+                item.coverage = Coverage::Closed;
+            }
+        }
+        assert_eq!(graph.validate(), Ok(()), "the test graph must be valid");
+        if let Ok(evaluation) = evaluate(graph, arguments, &receiver(), vec![], &mut host) {
+            assert!(
+                evaluation.exits.iter().any(kept),
+                "pending exit replaced: {:?}",
+                evaluation.exits
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "RV-1: a cleanup return replaces a pending fatal; remove when fixed"]
+    fn cleanup_return_does_not_replace_a_pending_fatal() {
+        let mut g = graph(
+            vec![],
+            Terminator::Fatal(Operand::Literal(Bytes(b"boom".to_vec()))),
+        );
+        g.blocks[0].exceptional.fatal = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Return(Some(Operand::Literal(Bytes(b"cleanup-return".to_vec())))),
+        ));
+        assert_pending_exit_kept(&mut g, &[], Host::default(), |exit| {
+            matches!(exit, Exit::Fatal { .. })
+        });
+    }
+
+    #[test]
+    #[ignore = "RV-1: a cleanup throw replaces a pending fatal; remove when fixed"]
+    fn cleanup_throw_does_not_replace_a_pending_fatal() {
+        let mut g = graph(
+            vec![],
+            Terminator::Fatal(Operand::Literal(Bytes(b"boom".to_vec()))),
+        );
+        g.blocks[0].exceptional.fatal = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Throw(Operand::Literal(Bytes(b"cleanup-throw".to_vec()))),
+        ));
+        assert_pending_exit_kept(&mut g, &[], Host::default(), |exit| {
+            matches!(exit, Exit::Fatal { .. })
+        });
+    }
+
+    #[test]
+    #[ignore = "RV-1: a cleanup return replaces a pending native unwind; remove when fixed"]
+    fn cleanup_return_does_not_replace_a_pending_native_unwind() {
+        let mut g = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(0),
+                arguments: vec![],
+                result: 1,
+            }],
+            Terminator::Return(None),
+        );
+        g.blocks[0].exceptional.native_unwind = Some(1);
+        g.blocks.push(Block::new(
+            vec![],
+            Terminator::Return(Some(Operand::Literal(Bytes(b"cleanup-return".to_vec())))),
+        ));
+        let host = Host {
+            native_unwind_invoke: true,
+            ..Host::default()
+        };
+        assert_pending_exit_kept(&mut g, &["native".into()], host, |exit| {
+            matches!(exit, Exit::NativeUnwind { .. })
+        });
+    }
 }

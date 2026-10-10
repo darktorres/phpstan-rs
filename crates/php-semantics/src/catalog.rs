@@ -767,4 +767,122 @@ mod tests {
         );
         assert_eq!(selection.uncovered.len(), 1);
     }
+
+    #[test]
+    #[ignore = "RV-2: a closed return reaches an open domain through a N/A dependency; remove when fixed"]
+    fn closed_return_cannot_reach_an_open_domain_through_not_applicable() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(id);
+        graph.blocks[0].events.push(Event::Unknown {
+            domains: vec![Domain::UserWrite],
+            reason: Bytes(b"unmodeled write".to_vec()),
+        });
+        for item in &mut graph.coverage {
+            match item.domain {
+                Domain::Return => item.dependencies.push(Domain::Diagnostic),
+                Domain::Diagnostic => {
+                    item.coverage = Coverage::NotApplicable;
+                    item.dependencies.push(Domain::UserWrite);
+                }
+                Domain::UserWrite => {
+                    item.coverage = Coverage::Open {
+                        reasons: vec![Bytes(b"unmodeled write".to_vec())],
+                    }
+                }
+                _ => {}
+            }
+        }
+        let key = function(b"core", b"strlen");
+        if catalog.add_entry(key.clone(), graph).is_ok() {
+            let selection = catalog.select(&key).unwrap();
+            let returned = selection
+                .graph
+                .coverage
+                .iter()
+                .find(|item| item.domain == Domain::Return)
+                .unwrap();
+            assert!(
+                !matches!(returned.coverage, Coverage::Closed),
+                "closed return depends on an open write"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "RV-4: a coverage assumption must resolve to an assumption record, not evidence; remove when fixed"]
+    fn coverage_assumptions_are_rejected_until_typed_records_exist() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(id);
+        graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap()
+            .assumptions = vec![id];
+        assert!(
+            catalog
+                .add_entry(function(b"core", b"strlen"), graph)
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "RV-4: evidence assumptions are not resolved on manifest load; remove when fixed"]
+    fn manifest_rejects_unresolved_evidence_assumptions() {
+        let mut record = evidence_record();
+        record.assumptions = vec![Digest([0xCD; 32])];
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(record).unwrap();
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph(id))
+            .unwrap();
+        assert!(Catalog::from_manifest(catalog.manifest()).is_err());
+    }
+
+    #[test]
+    #[ignore = "RV-5: permuted unordered assumption vectors get distinct identities; remove when canonicalized or rejected"]
+    fn permuted_evidence_assumptions_share_one_identity_or_are_rejected() {
+        let first = Digest([7; 32]);
+        let second = Digest([8; 32]);
+        let mut ascending = evidence_record();
+        ascending.assumptions = vec![first, second];
+        let mut descending = evidence_record();
+        descending.assumptions = vec![second, first];
+        let mut catalog = Catalog::default();
+        if let (Ok(a), Ok(b)) = (
+            catalog.add_evidence(ascending),
+            catalog.add_evidence(descending),
+        ) {
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    #[ignore = "RV-7: an inverted release predicate is accepted on catalog add; remove when validated"]
+    fn inverted_release_predicate_is_rejected_on_add() {
+        let mut catalog = Catalog::default();
+        let id = catalog.add_evidence(evidence_record()).unwrap();
+        let inverted = TargetPredicate {
+            release: Some(VersionRange {
+                min: crate::ReleaseVersion {
+                    major: 8,
+                    minor: 5,
+                    patch: 4,
+                },
+                max: crate::ReleaseVersion {
+                    major: 8,
+                    minor: 5,
+                    patch: 0,
+                },
+            }),
+            ..TargetPredicate::any()
+        };
+        assert!(
+            catalog
+                .add_variant(function(b"core", b"strlen"), inverted, graph(id))
+                .is_err()
+        );
+    }
 }
