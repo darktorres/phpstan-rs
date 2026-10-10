@@ -56,6 +56,10 @@ counters! {
     VendorWaitNanos => "vendor_autoload.wait_ns",
     DiagnosticsBuilt => "diagnostics.built",
     DiagnosticsBelowLevel => "diagnostics.below_level",
+    ResolveRuns => "resolve_run.bodies",
+    ResolveRounds => "resolve_run.rounds",
+    ResolveLevelsBuilt => "resolve_run.levels_built",
+    ResolveLevelsReused => "resolve_run.levels_reused",
 }
 
 #[cfg(feature = "memo-stats")]

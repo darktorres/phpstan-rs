@@ -4359,14 +4359,49 @@ impl<'r> Resolve<'r> {
             }
             _ => Vec::new(),
         };
+        let aliased = Rc::new(self.aliased(sig.map_or(&[][..], |sig| &sig.params[..])));
+        // A level depends on its scope's lost variables and on its parent's
+        // level, so a round builds again only the scopes whose lost variables
+        // grew in the one before, and the closures inside them.
+        let mut levels: Vec<Level<'r>> = Vec::with_capacity(scopes);
+        let mut reached: Vec<Reached<'r>> = Vec::with_capacity(scopes);
+        let mut dirty = vec![true; scopes];
         let (levels, reached) = loop {
-            let levels = self.levels(sig, &lost, &param_holders);
-            let reached: Vec<Reached<'r>> = levels.iter().map(Level::reach).collect();
+            for at in 0..scopes {
+                if at > 0 {
+                    let parent = self.summary.closures[at - 1]
+                        .within
+                        .map_or(0, |within| within as usize + 1);
+                    dirty[at] |= dirty[parent];
+                }
+                if !dirty[at] {
+                    continue;
+                }
+                let level = self.level_at(at, sig, &lost, &param_holders, &aliased, &levels);
+                let found = level.reach();
+                if at < levels.len() {
+                    levels[at] = level;
+                    reached[at] = found;
+                } else {
+                    levels.push(level);
+                    reached.push(found);
+                }
+            }
+            stats::count(Counter::ResolveRounds);
+            stats::add(
+                Counter::ResolveLevelsBuilt,
+                dirty.iter().filter(|dirty| **dirty).count() as u64,
+            );
+            stats::add(
+                Counter::ResolveLevelsReused,
+                dirty.iter().filter(|dirty| !**dirty).count() as u64,
+            );
+            dirty.fill(false);
             let mut grew = false;
             for (at, found) in reached.iter().enumerate() {
                 for place in found.iter().flat_map(|(_, written_args)| written_args) {
                     if let Some(name) = place_variable(place) {
-                        grew |= self.lose(&levels, &mut lost, at, name.as_str());
+                        grew |= self.lose(&levels, &mut lost, &mut dirty, at, name.as_str());
                     }
                 }
             }
@@ -4374,6 +4409,9 @@ impl<'r> Resolve<'r> {
                 break (levels, reached);
             }
         };
+        stats::count(Counter::ResolveRuns);
+        #[cfg(debug_assertions)]
+        self.assert_rounds_agree(sig, &param_holders, &lost);
         let mut out = Vec::with_capacity(scopes);
         for (at, (level, found)) in levels.iter().zip(reached).enumerate() {
             let scope_key = match at {
@@ -4390,6 +4428,45 @@ impl<'r> Resolve<'r> {
         out
     }
 
+    /// The variables lost at each scope when every level is built again in
+    /// every round, which the rounds that build only the changed ones must
+    /// agree with.
+    #[cfg(debug_assertions)]
+    fn assert_rounds_agree(
+        &self,
+        sig: Option<&'r FunctionReflection>,
+        param_holders: &[Holder],
+        found: &[Rc<FxHashSet<&'r str>>],
+    ) {
+        let scopes = 1 + self.summary.closures.len();
+        let aliased = Rc::new(self.aliased(sig.map_or(&[][..], |sig| &sig.params[..])));
+        let mut lost: Vec<Rc<FxHashSet<&'r str>>> = vec![Rc::default(); scopes];
+        loop {
+            let mut levels: Vec<Level<'r>> = Vec::with_capacity(scopes);
+            for at in 0..scopes {
+                let level = self.level_at(at, sig, &lost, param_holders, &aliased, &levels);
+                levels.push(level);
+            }
+            let reached: Vec<Reached<'r>> = levels.iter().map(Level::reach).collect();
+            let mut dirty = vec![false; scopes];
+            let mut grew = false;
+            for (at, found) in reached.iter().enumerate() {
+                for place in found.iter().flat_map(|(_, written_args)| written_args) {
+                    if let Some(name) = place_variable(place) {
+                        grew |= self.lose(&levels, &mut lost, &mut dirty, at, name.as_str());
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        assert!(
+            lost.iter().zip(found).all(|(a, b)| **a == **b),
+            "building only the changed levels lost the variables that building all of them does"
+        );
+    }
+
     /// Takes the variable `name` of the scope at `at` as written anything
     /// there, and in each scope around it that shares it by reference;
     /// whether that loses a parameter's declared type or what a body made.
@@ -4397,6 +4474,7 @@ impl<'r> Resolve<'r> {
         &self,
         levels: &[Level<'r>],
         lost: &mut [Rc<FxHashSet<&'r str>>],
+        dirty: &mut [bool],
         mut at: usize,
         name: &'r str,
     ) -> bool {
@@ -4404,6 +4482,7 @@ impl<'r> Resolve<'r> {
         loop {
             if !lost[at].contains(name) {
                 Rc::make_mut(&mut lost[at]).insert(name);
+                dirty[at] = true;
                 let level = &levels[at];
                 grew |= level.params.contains_key(name)
                     || level.made.contains_key(name)
@@ -4447,19 +4526,31 @@ impl<'r> Resolve<'r> {
         names
     }
 
-    /// Each scope's level: the body's, then each closure's in the order the
-    /// summary lists them; the variables `lost` names at a scope are written
-    /// anything there.
-    fn levels(
+    /// The level of the scope at `at`: the body's, or a closure's in the
+    /// order the summary lists them; the variables `lost` names at a scope
+    /// are written anything there. `levels` holds the levels of the scopes
+    /// before it.
+    fn level_at(
         &self,
+        at: usize,
         sig: Option<&'r FunctionReflection>,
         lost: &[Rc<FxHashSet<&'r str>>],
         param_holders: &[Holder],
-    ) -> Vec<Level<'r>> {
+        aliased: &Rc<FxHashSet<&'r str>>,
+        levels: &[Level<'r>],
+    ) -> Level<'r> {
+        if let Some(index) = at.checked_sub(1) {
+            let closure = &self.summary.closures[index];
+            let parent = closure.within.map_or(0, |within| within as usize + 1);
+            let mut level = self.closure_level(closure, &levels[parent], &lost[at], aliased);
+            if index == 0 && closure.captures.is_none() {
+                level.outer = self.captured;
+            }
+            return level;
+        }
         let facts = &self.summary.writes;
         let sig_params = sig.map_or(&[][..], |sig| &sig.params[..]);
-        let aliased = Rc::new(self.aliased(sig_params));
-        let mut level = self.level(facts, &lost[0], &aliased, facts.bindings.iter().collect());
+        let mut level = self.level(facts, &lost[0], aliased, facts.bindings.iter().collect());
         level.overwrites = sig_params
             .iter()
             .enumerate()
@@ -4525,18 +4616,7 @@ impl<'r> Resolve<'r> {
                 }
             }
         }
-        let mut levels = Vec::with_capacity(1 + self.summary.closures.len());
-        levels.push(level);
-        for (index, closure) in self.summary.closures.iter().enumerate() {
-            let parent = closure.within.map_or(0, |within| within as usize + 1);
-            let mut level =
-                self.closure_level(closure, &levels[parent], &lost[index + 1], &aliased);
-            if index == 0 && closure.captures.is_none() {
-                level.outer = self.captured;
-            }
-            levels.push(level);
-        }
-        levels
+        level
     }
 
     /// The level of `closure`, written in the scope whose level is `parent`.
