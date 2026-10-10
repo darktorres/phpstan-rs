@@ -75,11 +75,13 @@ pub(crate) struct ParamUses {
 
 impl ParamUses {
     /// What the body `body` of a function with the parameters `params` does
-    /// with them; `None` when it has none.
+    /// with them; `None` when it has none. `yields` is whether `body` has a
+    /// `yield`.
     pub(crate) fn of(
         arenas: &NodeArenas,
         params: &[Param],
         body: &[StmtId],
+        yields: bool,
     ) -> Option<Box<ParamUses>> {
         let mut uses = Uses {
             this: ThisUse::default(),
@@ -92,7 +94,7 @@ impl ParamUses {
                     passed: Vec::new(),
                 })
                 .collect(),
-            reads_all: arena::body_contains_yield(arenas, body),
+            reads_all: yields,
         };
         for (at, param) in params.iter().enumerate() {
             uses.index.insert(param.name.name.clone(), at);

@@ -1232,6 +1232,18 @@ fn walk_function_body(arenas: &NodeArenas, stmts: &[StmtId], out: &mut GlobalFac
 /// Every name a `global` statement in this body imports. A nested
 /// function, class or closure needs its own `global`, so none is entered.
 fn collect_global_names(arenas: &NodeArenas, stmts: &[StmtId]) -> NameSet {
+    if !arenas.has_global_statement() {
+        #[cfg(debug_assertions)]
+        assert!(
+            collect_global_names_walk(arenas, stmts).is_empty(),
+            "an arena with no `global` statement imports a name in a body"
+        );
+        return NameSet::default();
+    }
+    collect_global_names_walk(arenas, stmts)
+}
+
+fn collect_global_names_walk(arenas: &NodeArenas, stmts: &[StmtId]) -> NameSet {
     struct Globals(NameSet);
     impl Visitor for Globals {
         fn visit_stmt(&mut self, arenas: &NodeArenas, id: StmtId) {

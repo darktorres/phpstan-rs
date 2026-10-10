@@ -37,13 +37,15 @@ pub(crate) struct FreshReturns {
 
 impl FreshReturns {
     /// What a function with the parameters `params` and the body `body`
-    /// returns, when it returns only objects it made.
+    /// returns, when it returns only objects it made. `yields` is whether
+    /// `body` has a `yield`.
     pub(crate) fn of(
         arenas: &NodeArenas,
         params: &[Param],
         body: &[StmtId],
+        yields: bool,
     ) -> Option<Box<FreshReturns>> {
-        if arena::body_contains_yield(arenas, body) {
+        if yields {
             return None;
         }
         let mut walk = Returns::default();

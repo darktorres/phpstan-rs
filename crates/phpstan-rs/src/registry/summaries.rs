@@ -1184,8 +1184,9 @@ impl BodySummary {
         }
         let mut summary = walk.finish();
         summary.empty = body.is_empty();
-        summary.parameters = ParamUses::of(arenas, params, body);
-        summary.fresh = FreshReturns::of(arenas, params, body);
+        let yields = arena::body_contains_yield(arenas, body);
+        summary.parameters = ParamUses::of(arenas, params, body, yields);
+        summary.fresh = FreshReturns::of(arenas, params, body, yields);
         summary
     }
 

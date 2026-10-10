@@ -701,9 +701,16 @@ pub fn any_expr_in_scope(
 /// Whether a statement body contains a yield in the current scope, without
 /// entering nested closures, arrow functions, or anonymous classes.
 pub fn body_contains_yield(arenas: &NodeArenas, stmts: &[StmtId]) -> bool {
-    any_expr_in_body(arenas, stmts, |expr| {
-        matches!(expr.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
-    })
+    let walk = || {
+        any_expr_in_body(arenas, stmts, |expr| {
+            matches!(expr.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
+        })
+    };
+    if !arenas.has_yield() {
+        debug_assert!(!walk(), "an arena with no yield holds one in a body");
+        return false;
+    }
+    walk()
 }
 
 /// Whether `pred` holds for an expression in the current function-like

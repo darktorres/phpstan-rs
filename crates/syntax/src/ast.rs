@@ -285,6 +285,23 @@ pub struct NodeArenas {
     pub anonymous_classes_base: u32,
     /// File-local offset for decoded-byte ranges in parser fragments.
     pub decoded_bytes_base: u32,
+    /// Whether a node of a kind some walks look for was ever committed.
+    kinds_seen: KindsSeen,
+}
+
+/// The kinds of node a committed arena holds at least one of, for the walks
+/// that can find something only where one is.
+#[derive(Debug, Default, Clone, Copy)]
+struct KindsSeen {
+    yield_: bool,
+    global: bool,
+}
+
+impl KindsSeen {
+    fn merge(&mut self, other: KindsSeen) {
+        self.yield_ |= other.yield_;
+        self.global |= other.global;
+    }
 }
 
 /// A doc comment recorded for lookup by its owning node's start offset.
@@ -977,6 +994,9 @@ impl NodeArenas {
                 )
                 .expect("expression arena exhausted")
         );
+        if matches!(node.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_)) {
+            self.kinds_seen.yield_ = true;
+        }
         let local_id = self.exprs.alloc(node);
         assert_eq!(u32::from(local_id.into_raw()), self.expr_spans.len() as u32);
         self.expr_spans.push(span);
@@ -994,6 +1014,9 @@ impl NodeArenas {
                 )
                 .expect("statement arena exhausted")
         );
+        if matches!(node.kind, StmtKind::Global(_)) {
+            self.kinds_seen.global = true;
+        }
         let local_id = self.stmts.alloc(node);
         assert_eq!(u32::from(local_id.into_raw()), self.stmt_spans.len() as u32);
         self.stmt_spans.push(span);
@@ -1128,6 +1151,19 @@ impl NodeArenas {
         self.doc_sites.extend(fragment.doc_sites);
         self.doc_sites.sort_by_key(|site| site.pos);
         self.decoded_bytes.extend(fragment.decoded_bytes);
+        self.kinds_seen.merge(fragment.kinds_seen);
+    }
+
+    /// Whether the arena holds a `yield` or `yield from`, in any body.
+    #[inline]
+    pub fn has_yield(&self) -> bool {
+        self.kinds_seen.yield_
+    }
+
+    /// Whether the arena holds a `global` statement.
+    #[inline]
+    pub fn has_global_statement(&self) -> bool {
+        self.kinds_seen.global
     }
 
     /// Looks up an expression in this file's expression arena.
@@ -1238,6 +1274,7 @@ impl NodeArenas {
         self.stmt_spans.clear();
         self.doc_sites.clear();
         self.decoded_bytes.clear();
+        self.kinds_seen = KindsSeen::default();
         self.expr_base = 0;
         self.stmt_base = 0;
         self.args_base = 0;
@@ -3537,6 +3574,24 @@ mod arena_tests {
                 .anonymous_class_name(appended_anonymous_class)
                 .map(|name| name.as_str()),
             Some("class@anonymous/fragment:1")
+        );
+    }
+
+    #[test]
+    fn arenas_note_the_yields_and_globals_they_hold() {
+        let kinds = |source: &str| {
+            let file = crate::parse_watching(source, None, None).expect("the file parses");
+            (file.arenas.has_yield(), file.arenas.has_global_statement())
+        };
+        assert_eq!(kinds("<?php function f() { return 1; }"), (false, false));
+        assert_eq!(kinds("<?php function f() { yield 1; }"), (true, false));
+        assert_eq!(
+            kinds("<?php $f = function () { yield from g(); };"),
+            (true, false)
+        );
+        assert_eq!(
+            kinds("<?php function f() { global $x; return \"{$x}\"; }"),
+            (false, true)
         );
     }
 
