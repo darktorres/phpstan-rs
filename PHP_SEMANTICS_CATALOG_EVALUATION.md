@@ -507,6 +507,7 @@ semantic invariant.
 | `through_copy.precondition_instance.*` | 3, all successful | CBMC's `memcpy` overlap/readable/writable precondition instances. Harness-safety evidence only. |
 | `main.unwind.0`–`.1` | 2, both successful at `--unwind 4` | Unwinding assertions for the bounded loop (`length <= 3`). These show that this run's chosen bound covers this loop; they are not unbounded proofs. |
 | Invalid-run `main.assertion.11` | 1 expected failure, at `contracts.c:55` | Deliberately asserts that callback mutation and pending-throw state were erased. The counterexample rejects that invalid composition in the reduced C model. The same contract clause has an analogous Rust regression; this CBMC counterexample itself remains C-only and is not a PHP semantic proof. |
+| Low-budget `main.assertion.1` | 1 success, at `loop_contract.c:8` | Asserts `count == length` on paths represented with `--unwind 2`. It is C-only and has no PHP contract clause. Since `main.unwind.0` fails in the same run, this local success does not establish the assertion for all allowed lengths. |
 | Low-budget `main.unwind.0` | 1 expected failure, at `loop_contract.c:7` | With `length < 100` and `--unwind 2`, CBMC finds a possible path beyond the unwind bound. The failure correctly prevents treating the incomplete bounded run as proof. |
 
 For an exact name-to-disposition crosswalk, the valid run's 93 successful IDs
@@ -523,6 +524,12 @@ the table above.
 | `memcpy` object/pointer checks (16) | `memcpy.pointer.1`–`.2`; `memcpy.pointer_arithmetic.1`–`.14` | Generated C-model safety checks for the aggregate-copy example; no PHP contract clause. |
 | `memcpy` preconditions (3) | `through_copy.precondition_instance.1`–`.3` | Generated C-model library precondition checks; no PHP contract clause. |
 | Unwinding assertions (2) | `main.unwind.0`–`.1` | Bounded-loop completeness checks only; no PHP semantic clause. Both succeed in the `--unwind 4`, `length <= 3` run. |
+
+The invalid-composition run adds exactly one property to that valid-run
+inventory: `main.assertion.11=FAILURE`, mapped above. The low-budget run's
+complete two-property inventory is `main.assertion.1=SUCCESS` and
+`main.unwind.0=FAILURE`; both are C-only, and the failed unwind means the
+successful assertion result is not a complete proof of the loop property.
 
 All 93 valid-run properties are therefore accounted for: 10 explicit
 assertions, 81 generated bounds/overflow/pointer/precondition checks, and 2
