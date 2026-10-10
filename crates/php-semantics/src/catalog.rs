@@ -92,6 +92,80 @@ impl EvidenceRecord {
     }
 }
 
+/// The kind of condition on which a catalog fact relies. This is deliberately
+/// distinct from `EvidenceKind`: assumptions describe applicability, while
+/// evidence describes support for a claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssumptionKind {
+    SourceBuildIdentity,
+    LoadedProgram,
+    TargetProfile,
+    NativeBehavior,
+    EngineInvariant,
+    ModelContract,
+    DispatchCondition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssumptionScope {
+    pub target: TargetPredicate,
+    /// Required loaded-program identity, when the assumption is program-local.
+    pub loaded_program: Option<Digest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssumptionValidator {
+    pub id: crate::Bytes,
+    pub version: crate::Bytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssumptionRecord {
+    pub kind: AssumptionKind,
+    pub claim: crate::Bytes,
+    pub scope: AssumptionScope,
+    pub prerequisites: Vec<Digest>,
+    pub supporting_evidence: Vec<Digest>,
+    pub validator: AssumptionValidator,
+}
+
+impl AssumptionRecord {
+    pub fn id(&self) -> Result<Digest, postcard::Error> {
+        let encoded = postcard::to_allocvec(self)?;
+        let mut hasher = Sha256::new();
+        hasher.update(b"php-semantics-assumption-v1\0");
+        hasher.update(crate::SCHEMA_MAJOR.to_le_bytes());
+        hasher.update(encoded);
+        Ok(Digest(hasher.finalize().into()))
+    }
+
+    /// Applicability is only a context match. It does not mean the named
+    /// validator is trusted or that supporting evidence has been checked.
+    pub fn applicability(
+        &self,
+        target: &TargetScenario,
+        loaded_program: Option<Digest>,
+    ) -> Applicability {
+        let target_match = self.scope.target.test(target);
+        if target_match == Applicability::No {
+            return Applicability::No;
+        }
+        match (self.scope.loaded_program, loaded_program) {
+            (Some(required), Some(actual)) if required != actual => Applicability::No,
+            (Some(_), None) => Applicability::Maybe,
+            _ => target_match,
+        }
+    }
+
+    fn is_well_formed(&self) -> bool {
+        !self.claim.0.is_empty()
+            && !self.validator.id.0.is_empty()
+            && !self.validator.version.0.is_empty()
+            && !self.supporting_evidence.is_empty()
+            && self.scope.target.validate().is_ok()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogEntry {
     pub key: EntryKey,
@@ -106,6 +180,12 @@ pub enum CatalogError {
     DuplicateEntry(EntryKey),
     ConflictingEvidence(Digest),
     MissingEvidence(Digest),
+    MissingAssumption(Digest),
+    InvalidAssumption(Digest),
+    UnpropagatedEvidenceAssumption {
+        evidence: Digest,
+        assumption: Digest,
+    },
     DigestMismatch(Digest),
     UnsupportedManifest(u32),
 }
@@ -122,6 +202,7 @@ pub struct CatalogManifest {
     pub entries: Vec<CatalogEntry>,
     pub graphs: Vec<GraphRecord>,
     pub evidence: Vec<(Digest, EvidenceRecord)>,
+    pub assumptions: Vec<(Digest, AssumptionRecord)>,
 }
 
 impl CatalogManifest {
@@ -174,19 +255,68 @@ impl CatalogManifest {
             }
             evidence_ids.push(*id);
         }
+        let mut assumption_ids = Vec::new();
+        for (id, record) in &self.assumptions {
+            if record.id().map_err(|_| CatalogError::GraphEncoding)? != *id
+                || assumption_ids.contains(id)
+                || !record.is_well_formed()
+            {
+                return Err(CatalogError::InvalidAssumption(*id));
+            }
+            assumption_ids.push(*id);
+        }
         for record in &self.graphs {
             for item in &record.graph.coverage {
-                for id in item.evidence.iter().chain(item.assumptions.iter()) {
+                for id in &item.evidence {
                     if !evidence_ids.contains(id) {
                         return Err(CatalogError::MissingEvidence(*id));
+                    }
+                    let evidence = self
+                        .evidence
+                        .iter()
+                        .find(|(evidence_id, _)| evidence_id == id)
+                        .map(|(_, evidence)| evidence)
+                        .expect("validated evidence ID is present");
+                    for assumption in &evidence.assumptions {
+                        if !assumption_ids.contains(assumption) {
+                            return Err(CatalogError::MissingAssumption(*assumption));
+                        }
+                        if !item.assumptions.contains(assumption) {
+                            return Err(CatalogError::UnpropagatedEvidenceAssumption {
+                                evidence: *id,
+                                assumption: *assumption,
+                            });
+                        }
+                    }
+                }
+                for id in &item.assumptions {
+                    if !assumption_ids.contains(id) {
+                        return Err(CatalogError::MissingAssumption(*id));
                     }
                 }
             }
         }
         for (_, record) in &self.evidence {
+            for id in &record.assumptions {
+                if !assumption_ids.contains(id) {
+                    return Err(CatalogError::MissingAssumption(*id));
+                }
+            }
             for dependency in &record.dependencies {
                 if !evidence_ids.contains(dependency) {
                     return Err(CatalogError::MissingEvidence(*dependency));
+                }
+            }
+        }
+        for (_, record) in &self.assumptions {
+            for id in &record.supporting_evidence {
+                if !evidence_ids.contains(id) {
+                    return Err(CatalogError::MissingEvidence(*id));
+                }
+            }
+            for id in &record.prerequisites {
+                if !assumption_ids.contains(id) {
+                    return Err(CatalogError::MissingAssumption(*id));
                 }
             }
         }
@@ -199,6 +329,7 @@ pub struct Catalog {
     graphs: BTreeMap<Digest, BehaviorGraph>,
     entries: BTreeMap<EntryKey, Vec<CatalogEntry>>,
     evidence: BTreeMap<Digest, EvidenceRecord>,
+    assumptions: BTreeMap<Digest, AssumptionRecord>,
 }
 
 impl Catalog {
@@ -209,6 +340,7 @@ impl Catalog {
         manifest.validate()?;
         let mut catalog = Self::default();
         catalog.evidence = manifest.evidence.into_iter().collect();
+        catalog.assumptions = manifest.assumptions.into_iter().collect();
         catalog.graphs = manifest
             .graphs
             .into_iter()
@@ -240,6 +372,18 @@ impl Catalog {
         Ok(id)
     }
 
+    pub fn add_assumption(&mut self, record: AssumptionRecord) -> Result<Digest, CatalogError> {
+        let id = record.id().map_err(|_| CatalogError::GraphEncoding)?;
+        if !record.is_well_formed() {
+            return Err(CatalogError::InvalidAssumption(id));
+        }
+        if self.assumptions.get(&id).is_some_and(|old| old != &record) {
+            return Err(CatalogError::InvalidAssumption(id));
+        }
+        self.assumptions.insert(id, record);
+        Ok(id)
+    }
+
     pub fn add_entry(
         &mut self,
         key: EntryKey,
@@ -254,7 +398,6 @@ impl Catalog {
         applicability: TargetPredicate,
         graph: BehaviorGraph,
     ) -> Result<CatalogEntry, CatalogError> {
-        graph.validate().map_err(CatalogError::Graph)?;
         let key = key.normalized();
         if self.entries.get(&key).is_some_and(|entries| {
             entries
@@ -264,12 +407,31 @@ impl Catalog {
             return Err(CatalogError::DuplicateEntry(key));
         }
         for domain in &graph.coverage {
-            for evidence in domain.evidence.iter().chain(domain.assumptions.iter()) {
-                if !self.evidence.contains_key(evidence) {
-                    return Err(CatalogError::MissingEvidence(*evidence));
+            for evidence in &domain.evidence {
+                let record = self
+                    .evidence
+                    .get(evidence)
+                    .ok_or(CatalogError::MissingEvidence(*evidence))?;
+                for assumption in &record.assumptions {
+                    if !self.assumptions.contains_key(assumption) {
+                        return Err(CatalogError::MissingAssumption(*assumption));
+                    }
+                    if !domain.assumptions.contains(assumption) {
+                        return Err(CatalogError::UnpropagatedEvidenceAssumption {
+                            evidence: *evidence,
+                            assumption: *assumption,
+                        });
+                    }
+                }
+            }
+            for assumption in &domain.assumptions {
+                if !self.assumptions.contains_key(assumption) {
+                    return Err(CatalogError::MissingAssumption(*assumption));
                 }
             }
         }
+        self.validate_assumption_references()?;
+        graph.validate().map_err(CatalogError::Graph)?;
         let id = graph
             .canonical_digest()
             .map_err(|_| CatalogError::GraphEncoding)?;
@@ -281,6 +443,38 @@ impl Catalog {
         };
         self.entries.entry(key).or_default().push(entry.clone());
         Ok(entry)
+    }
+
+    fn validate_assumption_references(&self) -> Result<(), CatalogError> {
+        for record in self.evidence.values() {
+            for assumption in &record.assumptions {
+                if !self.assumptions.contains_key(assumption) {
+                    return Err(CatalogError::MissingAssumption(*assumption));
+                }
+            }
+            for dependency in &record.dependencies {
+                if !self.evidence.contains_key(dependency) {
+                    return Err(CatalogError::MissingEvidence(*dependency));
+                }
+            }
+        }
+        for record in self.assumptions.values() {
+            let id = record.id().map_err(|_| CatalogError::GraphEncoding)?;
+            if !record.is_well_formed() {
+                return Err(CatalogError::InvalidAssumption(id));
+            }
+            for evidence in &record.supporting_evidence {
+                if !self.evidence.contains_key(evidence) {
+                    return Err(CatalogError::MissingEvidence(*evidence));
+                }
+            }
+            for prerequisite in &record.prerequisites {
+                if !self.assumptions.contains_key(prerequisite) {
+                    return Err(CatalogError::MissingAssumption(*prerequisite));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn select(&self, key: &EntryKey) -> Option<Selection<'_>> {
@@ -376,6 +570,9 @@ impl Catalog {
     pub fn explain(&self, id: Digest) -> Option<&EvidenceRecord> {
         self.evidence.get(&id)
     }
+    pub fn explain_assumption(&self, id: Digest) -> Option<&AssumptionRecord> {
+        self.assumptions.get(&id)
+    }
     pub fn entry_count(&self) -> usize {
         self.entries.values().map(Vec::len).sum()
     }
@@ -405,6 +602,11 @@ impl Catalog {
                 .collect(),
             evidence: self
                 .evidence
+                .iter()
+                .map(|(id, record)| (*id, record.clone()))
+                .collect(),
+            assumptions: self
+                .assumptions
                 .iter()
                 .map(|(id, record)| (*id, record.clone()))
                 .collect(),
@@ -474,6 +676,23 @@ mod tests {
             rule_version: Bytes(b"test-v1".to_vec()),
             assumptions: vec![],
             dependencies: vec![],
+        }
+    }
+
+    fn assumption_record(evidence: Digest) -> AssumptionRecord {
+        AssumptionRecord {
+            kind: AssumptionKind::TargetProfile,
+            claim: Bytes(b"the selected target matches this tested profile".to_vec()),
+            scope: AssumptionScope {
+                target: TargetPredicate::any(),
+                loaded_program: None,
+            },
+            prerequisites: vec![],
+            supporting_evidence: vec![evidence],
+            validator: AssumptionValidator {
+                id: Bytes(b"php-semantics-test-validator".to_vec()),
+                version: Bytes(b"1".to_vec()),
+            },
         }
     }
 
@@ -810,38 +1029,252 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV-4: a coverage assumption must resolve to an assumption record, not evidence; remove when fixed"]
-    fn coverage_assumptions_are_rejected_until_typed_records_exist() {
+    fn typed_assumptions_are_separate_and_round_trip_with_coverage() {
+        let mut catalog = Catalog::default();
+        let evidence_id = catalog.add_evidence(evidence_record()).unwrap();
+        let prerequisite = assumption_record(evidence_id);
+        let prerequisite_id = catalog.add_assumption(prerequisite.clone()).unwrap();
+        let mut assumption = assumption_record(evidence_id);
+        assumption.scope.loaded_program = Some(Digest([0x55; 32]));
+        assumption.prerequisites = vec![prerequisite_id];
+        let assumption_id = catalog.add_assumption(assumption.clone()).unwrap();
+        let mut graph = graph(evidence_id);
+        graph.blocks[0].events.push(Event::Unknown {
+            domains: vec![Domain::Return],
+            reason: Bytes(b"assumption validation is not implemented".to_vec()),
+        });
+        let returned = graph
+            .coverage
+            .iter_mut()
+            .find(|item| item.domain == Domain::Return)
+            .unwrap();
+        returned.coverage = crate::Coverage::Open {
+            reasons: vec![Bytes(
+                b"assumption validation awaits a trusted validator".to_vec(),
+            )],
+        };
+        returned.assumptions = vec![assumption_id];
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph)
+            .unwrap();
+        let manifest = catalog.manifest();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.assumptions.len(), 2);
+        let loaded = Catalog::from_json(&manifest.to_json().unwrap()).unwrap();
+        assert_eq!(loaded.explain_assumption(assumption_id), Some(&assumption));
+        assert_eq!(
+            loaded.explain_assumption(prerequisite_id),
+            Some(&prerequisite)
+        );
+        let mut tampered = manifest;
+        let tampered_index = tampered
+            .assumptions
+            .iter()
+            .position(|(id, _)| *id == assumption_id)
+            .unwrap();
+        tampered.assumptions[tampered_index].1.claim.0.push(b'!');
+        assert_eq!(
+            tampered.validate(),
+            Err(CatalogError::InvalidAssumption(assumption_id))
+        );
+    }
+
+    #[test]
+    fn manifest_rejects_unresolved_evidence_assumptions() {
+        let unresolved = Digest([0xCD; 32]);
         let mut catalog = Catalog::default();
         let id = catalog.add_evidence(evidence_record()).unwrap();
-        let mut graph = graph(id);
+        catalog
+            .add_entry(function(b"core", b"strlen"), graph(id))
+            .unwrap();
+        let mut manifest = catalog.manifest();
+        manifest.evidence[0].1.assumptions = vec![unresolved];
+        let updated_evidence_id = manifest.evidence[0].1.id().unwrap();
+        manifest.evidence[0].0 = updated_evidence_id;
+        for item in &mut manifest.graphs[0].graph.coverage {
+            item.evidence = vec![updated_evidence_id];
+        }
+        let updated_graph_id = manifest.graphs[0].graph.canonical_digest().unwrap();
+        manifest.graphs[0].id = updated_graph_id;
+        manifest.entries[0].graph = updated_graph_id;
+        assert!(matches!(
+            Catalog::from_manifest(manifest),
+            Err(CatalogError::MissingAssumption(id)) if id == unresolved
+        ));
+    }
+
+    #[test]
+    fn coverage_assumption_cannot_resolve_in_the_evidence_namespace() {
+        let mut catalog = Catalog::default();
+        let evidence_id = catalog.add_evidence(evidence_record()).unwrap();
+        let mut graph = graph(evidence_id);
+        graph.coverage[0].assumptions = vec![evidence_id];
+        assert_eq!(
+            catalog.add_entry(function(b"core", b"strlen"), graph),
+            Err(CatalogError::MissingAssumption(evidence_id))
+        );
+    }
+
+    #[test]
+    fn closed_coverage_cannot_rely_on_an_unestablished_assumption() {
+        let mut catalog = Catalog::default();
+        let evidence_id = catalog.add_evidence(evidence_record()).unwrap();
+        let assumption_id = catalog
+            .add_assumption(assumption_record(evidence_id))
+            .unwrap();
+        let mut graph = graph(evidence_id);
         graph
             .coverage
             .iter_mut()
             .find(|item| item.domain == Domain::Return)
             .unwrap()
-            .assumptions = vec![id];
-        assert!(
-            catalog
-                .add_entry(function(b"core", b"strlen"), graph)
-                .is_err()
+            .assumptions = vec![assumption_id];
+        assert_eq!(
+            graph.validate(),
+            Err(GraphError::UnestablishedAssumption(Domain::Return))
+        );
+        assert_eq!(
+            catalog.add_entry(function(b"core", b"strlen"), graph),
+            Err(CatalogError::Graph(GraphError::UnestablishedAssumption(
+                Domain::Return
+            )))
         );
     }
 
     #[test]
-    #[ignore = "RV-4: evidence assumptions are not resolved on manifest load; remove when fixed"]
-    fn manifest_rejects_unresolved_evidence_assumptions() {
-        let mut record = evidence_record();
-        record.assumptions = vec![Digest([0xCD; 32])];
+    fn evidence_assumptions_must_be_propagated_to_coverage() {
+        let support = evidence_record();
+        let support_id = support.id().unwrap();
+        let assumption = assumption_record(support_id);
+        let assumption_id = assumption.id().unwrap();
+        let mut conditioned_evidence = evidence_record();
+        conditioned_evidence.assumptions = vec![assumption_id];
+        let conditioned_id = conditioned_evidence.id().unwrap();
+        let graph = graph(conditioned_id);
+        let graph_id = graph.canonical_digest().unwrap();
+        let manifest = CatalogManifest {
+            schema_major: SCHEMA_MAJOR,
+            entries: vec![CatalogEntry {
+                key: function(b"core", b"strlen"),
+                graph: graph_id,
+                applicability: TargetPredicate::any(),
+            }],
+            graphs: vec![GraphRecord {
+                id: graph_id,
+                graph: graph.clone(),
+            }],
+            evidence: vec![
+                (support_id, support),
+                (conditioned_id, conditioned_evidence),
+            ],
+            assumptions: vec![(assumption_id, assumption)],
+        };
+
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::UnpropagatedEvidenceAssumption {
+                evidence: conditioned_id,
+                assumption: assumption_id
+            })
+        );
+
         let mut catalog = Catalog::default();
-        let id = catalog.add_evidence(record).unwrap();
+        catalog.add_evidence(evidence_record()).unwrap();
         catalog
-            .add_entry(function(b"core", b"strlen"), graph(id))
+            .add_assumption(assumption_record(support_id))
             .unwrap();
+        let mut evidence_without_condition = evidence_record();
+        evidence_without_condition.assumptions = vec![assumption_id];
+        catalog.add_evidence(evidence_without_condition).unwrap();
         assert!(matches!(
-            Catalog::from_manifest(catalog.manifest()),
-            Err(CatalogError::MissingEvidence(_))
+            catalog.add_entry(function(b"core", b"strlen"), graph),
+            Err(CatalogError::UnpropagatedEvidenceAssumption { .. })
         ));
+    }
+
+    #[test]
+    fn assumption_records_require_valid_claim_validator_scope_and_resolved_edges() {
+        let evidence_id = evidence_record().id().unwrap();
+        let mut catalog = Catalog::default();
+        let mut assumption = assumption_record(evidence_id);
+        assumption.claim = Bytes(vec![]);
+        assert!(matches!(
+            catalog.add_assumption(assumption),
+            Err(CatalogError::InvalidAssumption(_))
+        ));
+        let mut assumption = assumption_record(evidence_id);
+        assumption.validator.version = Bytes(vec![]);
+        assert!(matches!(
+            catalog.add_assumption(assumption),
+            Err(CatalogError::InvalidAssumption(_))
+        ));
+        let mut assumption = assumption_record(evidence_id);
+        assumption.scope.target.release = Some(VersionRange {
+            min: crate::ReleaseVersion {
+                major: 8,
+                minor: 6,
+                patch: 0,
+            },
+            max: crate::ReleaseVersion {
+                major: 8,
+                minor: 5,
+                patch: u16::MAX,
+            },
+        });
+        assert!(matches!(
+            catalog.add_assumption(assumption),
+            Err(CatalogError::InvalidAssumption(_))
+        ));
+        let mut assumption = assumption_record(evidence_id);
+        assumption.supporting_evidence.clear();
+        assert!(matches!(
+            catalog.add_assumption(assumption),
+            Err(CatalogError::InvalidAssumption(_))
+        ));
+
+        let assumption = assumption_record(evidence_id);
+        let assumption_id = catalog.add_assumption(assumption).unwrap();
+        let manifest = catalog.manifest();
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::MissingEvidence(evidence_id))
+        );
+        let mut manifest = manifest;
+        manifest.evidence.push((evidence_id, evidence_record()));
+        manifest.assumptions[0].1.prerequisites = vec![Digest([0xAA; 32])];
+        let stale_id = manifest.assumptions[0].0;
+        manifest.assumptions[0].0 = manifest.assumptions[0].1.id().unwrap();
+        assert_ne!(stale_id, manifest.assumptions[0].0);
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::MissingAssumption(Digest([0xAA; 32])))
+        );
+        assert_ne!(assumption_id, Digest([0; 32]));
+    }
+
+    #[test]
+    fn assumption_applicability_requires_matching_target_and_program_context() {
+        let evidence_id = Digest([9; 32]);
+        let program_id = Digest([0x33; 32]);
+        let mut assumption = assumption_record(evidence_id);
+        assumption.scope.loaded_program = Some(program_id);
+        assert_eq!(
+            assumption.applicability(&scenario(Some(b"linux")), Some(program_id)),
+            Applicability::Yes
+        );
+        assert_eq!(
+            assumption.applicability(&scenario(Some(b"linux")), None),
+            Applicability::Maybe
+        );
+        assert_eq!(
+            assumption.applicability(&scenario(Some(b"linux")), Some(Digest([0x44; 32]))),
+            Applicability::No
+        );
+        assumption.scope.target.os = Some(Bytes(b"windows".to_vec()));
+        assert_eq!(
+            assumption.applicability(&scenario(Some(b"linux")), Some(program_id)),
+            Applicability::No
+        );
     }
 
     #[test]

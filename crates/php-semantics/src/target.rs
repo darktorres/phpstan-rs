@@ -108,6 +108,19 @@ impl TargetPredicate {
         }
     }
 
+    pub fn validate(&self) -> Result<(), TargetError> {
+        if self.release.is_some_and(|release| !release.valid()) {
+            return Err(TargetError::InvalidVersionRange);
+        }
+        if has_duplicate_names(self.extensions.iter().map(|(name, _)| name)) {
+            return Err(TargetError::DuplicateExtension);
+        }
+        if has_duplicate_names(self.ini.iter().map(|(name, _)| name)) {
+            return Err(TargetError::DuplicateSetting);
+        }
+        Ok(())
+    }
+
     pub fn test(&self, scenario: &TargetScenario) -> Applicability {
         let mut maybe = false;
         if let Some(required) = self.release {

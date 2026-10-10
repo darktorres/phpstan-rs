@@ -14,8 +14,9 @@ mod catalog;
 mod php_value;
 mod target;
 pub use catalog::{
-    Catalog, CatalogEntry, CatalogError, CatalogManifest, CatalogTargetSelection, EntryKey,
-    EvidenceKind, EvidenceRecord, GraphRecord, Projection, Selection, VariantSelection,
+    AssumptionKind, AssumptionRecord, AssumptionScope, AssumptionValidator, Catalog, CatalogEntry,
+    CatalogError, CatalogManifest, CatalogTargetSelection, EntryKey, EvidenceKind, EvidenceRecord,
+    GraphRecord, Projection, Selection, VariantSelection,
 };
 pub use php_value::{
     ArrayId, ArrayKey, Binding, ObjectId, PhpCallbackOutcome, PhpFlowHost, PhpState, PhpValue,
@@ -26,7 +27,7 @@ pub use target::{
     TargetSet, VersionRange,
 };
 
-pub const SCHEMA_MAJOR: u32 = 7;
+pub const SCHEMA_MAJOR: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Digest(pub [u8; 32]);
@@ -320,6 +321,7 @@ pub enum GraphError {
     UnknownTransferWithoutOpenCoverage(Domain),
     DuplicateDomainDependency(Domain),
     ClosedDomainDependsOnOpen { domain: Domain, dependency: Domain },
+    UnestablishedAssumption(Domain),
     CyclicDomainDependency(Domain),
     ApplicableDomainMarkedNotApplicable(Domain),
     UnresolvedValue,
@@ -530,7 +532,12 @@ impl BehaviorGraph {
 }
 
 fn validate_domain_dependencies(coverage: &[DomainCoverage]) -> Result<(), GraphError> {
+    // Assumption IDs have no established meaning outside a validated catalog
+    // manifest. A graph alone cannot use one to support closed coverage.
     for item in coverage {
+        if matches!(item.coverage, Coverage::Closed) && !item.assumptions.is_empty() {
+            return Err(GraphError::UnestablishedAssumption(item.domain));
+        }
         let mut dependencies = Vec::new();
         for dependency in &item.dependencies {
             if dependencies.contains(dependency) {
@@ -2222,7 +2229,11 @@ mod tests {
                 precision: Precision::Exact,
                 dependencies: vec![],
                 evidence: vec![Digest([2; 32])],
-                assumptions: vec![Digest([3; 32])],
+                assumptions: if Some(domain) == open_domain {
+                    vec![Digest([3; 32])]
+                } else {
+                    vec![]
+                },
             })
             .collect()
     }

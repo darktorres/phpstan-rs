@@ -721,3 +721,23 @@ hashes and exit codes. The follow-up evidence, runner and test hashes, and
 tool digest are recorded under `followup_cbmc_validation` in the evaluation
 lock. This resolves only the campaign-accounting defect; it does not extend
 the reduced C model's claims to PHP semantics.
+
+## Author follow-up for R01.1 (2026-10-10)
+
+Schema v8 now stores typed assumptions separately from evidence. Assumption
+IDs are domain-separated and schema-bound; records carry a typed kind, claim,
+target and optional loaded-program scope, prerequisite and supporting-evidence
+IDs, and validator ID/version. Catalog and manifest validation keep the two
+reference namespaces separate, propagate evidence assumptions to coverage,
+reject unresolved references and malformed scope/record data, and round-trip
+the new manifest field. Context matching is
+explicitly not validator acceptance: graph validation rejects closed coverage
+citing an assumption until trusted validation is implemented. R01.2, R01.7, and R01.8
+remain open for cycles, validator trust, and unordered-vector canonicalization,
+so IDs currently preserve input order for list-valued fields.
+The semantics crate has 67 passing tests and six previously ignored findings;
+`cargo check -p phpstan-rs` passes, and the generated PHP 8.5.4 catalog
+reproduces byte-for-byte. A full `cargo test --workspace` run was started but
+not completed: its cold build remained compiling the large checker test target
+for more than ten minutes, so validation was narrowed to the changed crate and
+its direct consumer.

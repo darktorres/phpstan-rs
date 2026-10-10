@@ -617,6 +617,7 @@ fn main() {
             (native_demand_evidence_id, native_demand_evidence),
             (llvm_evidence_id, llvm_evidence),
         ],
+        assumptions: vec![],
     };
     manifest.validate().expect("generated manifest validates");
     println!("{}", manifest.to_json().expect("manifest is JSON"));
