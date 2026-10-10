@@ -78,6 +78,9 @@ impl<'a> Checker<'a> {
         sig: &FunctionReflection,
         span: Span,
     ) {
+        if !self.collect_semantic_tokens {
+            return;
+        }
         let deprecated = !self.current_scope_deprecated && sig.deprecated().is_some();
         let internal = sig.is_internal() && self.should_report_internal_usage(fqn);
         self.record_usage_semantic_token(UsageTokenKind::Function, span, deprecated, internal);
@@ -105,6 +108,9 @@ impl<'a> Checker<'a> {
         own_internal: bool,
         span: Span,
     ) {
+        if !self.collect_semantic_tokens {
+            return;
+        }
         let class = self.registry.class_by_name(owner);
         let deprecated = !self.current_scope_deprecated
             && (own_deprecated || class.is_some_and(|c| c.deprecated().is_some()));
@@ -119,6 +125,9 @@ impl<'a> Checker<'a> {
     /// lookup itself to succeed; internal additionally requires
     /// `should_report_internal_usage(class)`.
     pub(crate) fn record_instantiation_usage_token(&mut self, class: &str, span: Span) {
+        if !self.collect_semantic_tokens {
+            return;
+        }
         let info = self.registry.class_by_name(class);
         let deprecated =
             !self.current_scope_deprecated && info.is_some_and(|i| i.deprecated().is_some());

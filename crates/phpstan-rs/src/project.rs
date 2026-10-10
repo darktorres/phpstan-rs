@@ -3074,6 +3074,7 @@ impl Project {
         let Some((mut checker, ast)) = self.checker_for(path) else {
             return Vec::new();
         };
+        checker.collect_semantic_tokens = true;
         checker.check_program(ast.statements());
         checker.take_semantic_tokens()
     }

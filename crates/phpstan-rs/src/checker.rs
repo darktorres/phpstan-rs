@@ -344,6 +344,9 @@ pub struct Checker<'a> {
     // rather than firing off the raw `is_internal`/`deprecated.is_some()`
     // booleans alone.
     pub(crate) semantic_tokens: Vec<semantic_tokens::UsageSemanticToken>,
+    /// Whether the usage recorders build tokens: only the language
+    /// server's token request reads them.
+    pub(crate) collect_semantic_tokens: bool,
     // Namespace + `use`-import map, built once per file. Needed because
     // almost all real code refers to an imported class/function by its
     // short name, not a fully-qualified path - without resolving it here
@@ -1495,6 +1498,7 @@ impl<'a> Checker<'a> {
             escaped_enums: RefCell::new(FxHashSet::default()),
             escaped_member_classes: RefCell::new(FxHashSet::default()),
             semantic_tokens: Vec::new(),
+            collect_semantic_tokens: false,
             pending_or_disjunctions: Vec::new(),
             type_dump: None,
             expr_types: None,
