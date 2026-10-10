@@ -129,7 +129,9 @@ impl<'a> Checker<'a> {
                             && !self.accepts(&bound, checked_arg).yes()
                         {
                             let kind = class_kind_identifier(&info.kind());
-                            report!(self, format!(
+                            report!(
+                                self,
+                                format!(
                                     "Type {arg} in generic type {ty} in {location} is not subtype of template type {name} of {kind} {class}."
                                 ),
                                 span,
@@ -382,7 +384,8 @@ impl<'a> Checker<'a> {
         };
         let kind = class_kind_identifier(&info.kind());
         if info.templates().is_empty() {
-            report!(self, 
+            report!(
+                self,
                 format!("{location} contains generic type {ty} but {kind} {class} is not generic."),
                 span,
                 6,
@@ -431,7 +434,9 @@ impl<'a> Checker<'a> {
             } else {
                 format!("{list} ({required}-{total} required).")
             };
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Generic type {ty} in {location} does not specify all template types of {kind} {class}: {list}"
                 ),
                 span,
@@ -444,7 +449,9 @@ impl<'a> Checker<'a> {
             } else {
                 format!("{list} ({required}-{total} required)")
             };
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Generic type {ty} in {location} specifies {} template types, but {kind} {class} supports only {total}: {list}",
                     args.len()
                 ),
@@ -498,7 +505,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if declared == call_site {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Call-site variance of {arg} in generic type {ty} in {location} is redundant, template type {template_name} of {kind} {class} has the same variance."
                     ),
                     span,
@@ -513,7 +522,9 @@ impl<'a> Checker<'a> {
                 } else {
                     "contravariant"
                 };
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Call-site variance of {arg} in generic type {ty} in {location} is in conflict with {declared_word} template type {template_name} of {kind} {class}."
                     ),
                     span,
@@ -561,7 +572,8 @@ impl<'a> Checker<'a> {
         let mut template_with_default: Option<&Name> = None;
         for name in templates {
             if self.class_name_exists(name) {
-                report!(self, 
+                report!(
+                    self,
                     subject.existing_class(name),
                     span,
                     6,
@@ -569,7 +581,8 @@ impl<'a> Checker<'a> {
                 );
             }
             if type_aliases.contains_key(name) {
-                report!(self, 
+                report!(
+                    self,
                     subject.existing_type_alias(name),
                     span,
                     6,
@@ -579,7 +592,8 @@ impl<'a> Checker<'a> {
             if let Some(bound) = bounds.get(name)
                 && !bound.can_bound_a_template()
             {
-                report!(self, 
+                report!(
+                    self,
                     subject.unsupported_bound(name, bound),
                     span,
                     6,
@@ -589,7 +603,8 @@ impl<'a> Checker<'a> {
             match defaults.get(name) {
                 None => {
                     if let Some(prev) = template_with_default {
-                        report!(self, 
+                        report!(
+                            self,
                             subject.required_after_optional(name, prev),
                             span,
                             6,
@@ -604,7 +619,8 @@ impl<'a> Checker<'a> {
                         && self.is_type_fully_known(bound)
                         && !self.accepts(bound, default).yes()
                     {
-                        report!(self, 
+                        report!(
+                            self,
                             subject.default_out_of_bounds(name, default, bound),
                             span,
                             6,

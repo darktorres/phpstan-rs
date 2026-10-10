@@ -12,8 +12,8 @@ use syntax::name::Name;
 use super::ClassId;
 use super::effect_table::{EffectIx, EffectTable, TransferIx, TransferTable};
 use super::effects::{
-    BuiltinBase, DeclKey, Effect, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey, Run,
-    Transfer,
+    BuiltinBase, DeclKey, Effect, Holder, HookDeclaration, IdTargets, ImplicitKey, OperationKey,
+    Run, Transfer,
 };
 
 const SHARDS: usize = 16;

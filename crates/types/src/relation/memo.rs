@@ -146,7 +146,11 @@ pub(crate) fn rejection(
     compute: impl FnOnce() -> Option<u8>,
 ) -> Option<u8> {
     let key = (
-        (generation, accepting.node_address(), accepted.node_address()),
+        (
+            generation,
+            accepting.node_address(),
+            accepted.node_address(),
+        ),
         settings,
     );
     evaluate(

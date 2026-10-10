@@ -336,7 +336,11 @@ impl<'a> Checker<'a> {
             .collect();
         missing.sort();
         for name in missing {
-            report!(self, format!("Template type {name} of {kind_word} {label}() is not referenced in a parameter."),
+            report!(
+                self,
+                format!(
+                    "Template type {name} of {kind_word} {label}() is not referenced in a parameter."
+                ),
                 span,
                 0,
                 "method.templateTypeNotInParameter",
@@ -665,7 +669,8 @@ impl<'a> Checker<'a> {
         let mut traits = Vec::new();
         self.collect_trait_class_names(ty, &mut traits);
         for name in traits {
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} has invalid type {name}"),
                 span,
                 0,
@@ -686,7 +691,8 @@ impl<'a> Checker<'a> {
         identifier: &'static str,
     ) {
         if ty.has_parent_ref() {
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} has invalid type parent"),
                 span,
                 0,
@@ -714,7 +720,8 @@ impl<'a> Checker<'a> {
         let mut seen = rustc_hash::FxHashSet::default();
         unknown.retain(|n| seen.insert(n.clone()));
         for name in unknown {
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} has invalid type {name}"),
                 span,
                 0,
@@ -737,7 +744,8 @@ impl<'a> Checker<'a> {
         let mut seen = rustc_hash::FxHashSet::default();
         prefixed.retain(|(n, _)| seen.insert(*n));
         for (name, project) in prefixed {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     format!("Referencing prefixed {project} class: {name}."),
                     span,

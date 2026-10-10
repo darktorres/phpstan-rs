@@ -21,7 +21,10 @@ fn a_magic_constant_in_a_closure_is_not_out_of_function() {
         "<?php\n$f = function () { return __FUNCTION__; };\n",
         "magicConstant.outOfFunction"
     ));
-    assert!(has("<?php\necho __FUNCTION__;\n", "magicConstant.outOfFunction"));
+    assert!(has(
+        "<?php\necho __FUNCTION__;\n",
+        "magicConstant.outOfFunction"
+    ));
     assert!(has("<?php\necho __CLASS__;\n", "magicConstant.outOfClass"));
 }
 
@@ -46,7 +49,10 @@ fn a_function_like_is_checked_where_it_is_nested_and_where_it_is_not() {
         "<?php\nfunction f() { return new class { function m($a, $a) {} }; }\n",
         duplicate
     ));
-    assert!(!has("<?php\nfunction f($a, $b) {}\nclass A { function m($a) {} }\n", duplicate));
+    assert!(!has(
+        "<?php\nfunction f($a, $b) {}\nclass A { function m($a) {} }\n",
+        duplicate
+    ));
 }
 
 #[test]
@@ -79,17 +85,16 @@ fn an_implicit_array_creation_is_reported_whether_or_not_the_body_is_scanned_ear
         "<?php\nfunction f(bool $c): void { if ($c) { $a = []; } $a[] = 1; }\n"
     ));
     assert!(reports("<?php\n$a[] = 1;\n"));
-    assert!(!reports("<?php\nfunction f(): void { $a = []; $a[] = 1; }\n"));
+    assert!(!reports(
+        "<?php\nfunction f(): void { $a = []; $a[] = 1; }\n"
+    ));
     assert!(!reports("<?php\nfunction f(): void { $a = 1; }\n"));
 }
 
 #[test]
 fn a_generator_is_checked_against_its_return_type() {
     let ids = identifiers("<?php\nfunction g(): int { yield 1; }\n", |_| {});
-    assert!(
-        ids.iter().any(|i| i.starts_with("generator")),
-        "{ids:?}"
-    );
+    assert!(ids.iter().any(|i| i.starts_with("generator")), "{ids:?}");
     assert!(
         identifiers("<?php\nfunction h(): int { return 1; }\n", |_| {})
             .iter()
@@ -124,7 +129,8 @@ fn api_identifiers(files: &[(&str, &str)], checked: &str) -> Vec<String> {
 
 #[test]
 fn a_static_call_is_checked_against_the_api_in_a_file_that_never_spells_phpstan() {
-    let base = "<?php\nnamespace PHPStan\\Rules;\nclass Base { public static function run(): void {} }\n";
+    let base =
+        "<?php\nnamespace PHPStan\\Rules;\nclass Base { public static function run(): void {} }\n";
     let mid = "<?php\nnamespace App;\nclass Mid extends \\PHPStan\\Rules\\Base {}\n";
     let user = "<?php\nnamespace App;\nfunction f(): void { Mid::run(); }\n";
     let reported = api_identifiers(
@@ -137,5 +143,8 @@ fn a_static_call_is_checked_against_the_api_in_a_file_that_never_spells_phpstan(
         reported.iter().any(|i| i.starts_with("phpstanApi")),
         "{reported:?}"
     );
-    assert!(quiet.iter().all(|i| !i.starts_with("phpstanApi")), "{quiet:?}");
+    assert!(
+        quiet.iter().all(|i| !i.starts_with("phpstanApi")),
+        "{quiet:?}"
+    );
 }

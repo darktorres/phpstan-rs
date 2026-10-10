@@ -252,7 +252,8 @@ impl<'a> Checker<'a> {
                 })
                 .next();
             if let Some(class) = by_value {
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "Indirect modification of overloaded element of {class} has no effect."
                     ),
@@ -364,7 +365,8 @@ impl<'a> Checker<'a> {
         } else {
             7
         };
-        report!(self, 
+        report!(
+            self,
             format!("Cannot access offset {dim} on {base_ty}."),
             span,
             level,

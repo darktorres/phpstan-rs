@@ -131,7 +131,8 @@ impl<'a> Checker<'a> {
             if usage.contains(&u.name) {
                 continue;
             }
-            report!(self, 
+            report!(
+                self,
                 format!("closure has an unused use (${})", u.name),
                 span,
                 1,
@@ -240,16 +241,16 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if self.shows_level(4) {
-            let mut builder = DiagnosticBuilder::new(
-                format!("private constant {fqn}::{} is unused", c.name),
-                c.span,
-                4,
-                "classConstant.unused",
-            );
-            if let Some(removal) = c.removal_span {
-                builder = builder.fix(removal, "", format!("Remove constant {}", c.name));
-            }
-            self.report_builder(builder);
+                let mut builder = DiagnosticBuilder::new(
+                    format!("private constant {fqn}::{} is unused", c.name),
+                    c.span,
+                    4,
+                    "classConstant.unused",
+                );
+                if let Some(removal) = c.removal_span {
+                    builder = builder.fix(removal, "", format!("Remove constant {}", c.name));
+                }
+                self.report_builder(builder);
             } else {
                 self.note_below_level();
             }
@@ -271,16 +272,17 @@ impl<'a> Checker<'a> {
                 "private method"
             };
             if self.shows_level(4) {
-            let mut builder = DiagnosticBuilder::new(
-                format!("{kind_word} {fqn}::{}() is unused", m.function.name),
-                m.function.span,
-                4,
-                "method.unused",
-            );
-            if let Some(removal) = m.removal_span {
-                builder = builder.fix(removal, "", format!("Remove method {}()", m.function.name));
-            }
-            self.report_builder(builder);
+                let mut builder = DiagnosticBuilder::new(
+                    format!("{kind_word} {fqn}::{}() is unused", m.function.name),
+                    m.function.span,
+                    4,
+                    "method.unused",
+                );
+                if let Some(removal) = m.removal_span {
+                    builder =
+                        builder.fix(removal, "", format!("Remove method {}()", m.function.name));
+                }
+                self.report_builder(builder);
             } else {
                 self.note_below_level();
             }
@@ -311,7 +313,9 @@ impl<'a> Checker<'a> {
             } else {
                 "property"
             };
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{kind_word} {fqn}::${} has private(set) visibility but is never written from within the declaring class",
                     p.name
                 ),

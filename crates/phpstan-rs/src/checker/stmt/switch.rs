@@ -20,7 +20,8 @@ impl<'a> Checker<'a> {
         if self.settings.extras.check_switch_missing_default
             && !cases.iter().any(|c| c.test.is_none())
         {
-            report!(self, 
+            report!(
+                self,
                 "Switch has no default branch.".to_string(),
                 span,
                 5,

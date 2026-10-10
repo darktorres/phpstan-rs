@@ -46,7 +46,8 @@ impl<'a> Checker<'a> {
         let mut seen: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         for case in cases {
             if !seen.insert(case.name.as_ref()) {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare enum case {fqn}::{}.", case.name),
                         case.span,
@@ -59,7 +60,8 @@ impl<'a> Checker<'a> {
         }
         for c in consts {
             if !seen.insert(c.name.as_ref()) {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare constant {fqn}::{}.", c.name),
                         c.span,
@@ -82,7 +84,8 @@ impl<'a> Checker<'a> {
         let mut seen: rustc_hash::FxHashMap<&str, &PropertyDecl> = rustc_hash::FxHashMap::default();
         for p in properties {
             if seen.insert(p.name.as_ref(), p).is_some() {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare property {fqn}::${}.", p.name),
                         p.span,
@@ -111,7 +114,8 @@ impl<'a> Checker<'a> {
             .unwrap_or_default();
         for (name, span) in promotions {
             if seen.contains_key(name.as_str()) || !seen_promoted.insert(name.clone()) {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare property {fqn}::${name}."),
                         span,
@@ -130,7 +134,8 @@ impl<'a> Checker<'a> {
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         for m in methods {
             if !seen.insert(m.function.name.to_ascii_lowercase()) {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare method {fqn}::{}().", m.function.name),
                         m.span,

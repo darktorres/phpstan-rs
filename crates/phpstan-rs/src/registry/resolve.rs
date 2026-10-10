@@ -270,7 +270,9 @@ impl Registry {
                                             is_final: entry.is_final,
                                             is_static: entry.is_static,
                                             is_final_by_phpdoc: entry.is_final_by_phpdoc,
-                                            is_constructor: syntax::ast::is_constructor_name(&alias.alias),
+                                            is_constructor: syntax::ast::is_constructor_name(
+                                                &alias.alias,
+                                            ),
                                         },
                                         Arc::clone(&shared_sig),
                                     ));
@@ -1879,9 +1881,7 @@ impl Registry {
                     // real vendored userland base class (Symfony's
                     // `Command`, Doctrine's console commands, ...), which
                     // must still participate in this pass normally.
-                    if entry.is_constructor
-                        && registry.built_in_stub_classes.contains_key(owner)
-                    {
+                    if entry.is_constructor && registry.built_in_stub_classes.contains_key(owner) {
                         continue;
                     }
                     let mut param_fills = Vec::new();

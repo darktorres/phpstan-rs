@@ -123,7 +123,8 @@ impl<'a> Checker<'a> {
         if !contains_nullsafe(syntax_owner.arenas(), target) {
             return;
         }
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(
                 "Nullsafe operator cannot be on left side of assignment.".to_string(),
                 self.expr_span(target.id),
@@ -148,7 +149,8 @@ impl<'a> Checker<'a> {
         if !contains_nullsafe(syntax_owner.arenas(), target) {
             return;
         }
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(
                 "Nullsafe operator cannot be on right side of assignment by reference.".to_string(),
                 self.expr_span(target.id),
@@ -173,7 +175,8 @@ impl<'a> Checker<'a> {
         if !is_non_assignable_target(syntax_owner.arenas(), target) {
             return;
         }
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(
                 "Expression on left side of assignment is not assignable.".to_string(),
                 self.expr_span(target.id),
@@ -923,7 +926,8 @@ impl<'a> Checker<'a> {
         span: syntax::span::Span,
     ) -> bool {
         if container.has_offset_value_type(dim).no() {
-            report!(self, 
+            report!(
+                self,
                 format!("Offset {dim} does not exist on {container}."),
                 span,
                 3,
@@ -950,7 +954,8 @@ impl<'a> Checker<'a> {
                 .1
         });
         if string_presence == Some(types::OffsetPresence::Absent) && arrays.is_empty() {
-            report!(self, 
+            report!(
+                self,
                 format!("Offset {dim} does not exist on {container}."),
                 span,
                 3,
@@ -980,7 +985,8 @@ impl<'a> Checker<'a> {
         if !might_not_exist {
             return false;
         }
-        report!(self, 
+        report!(
+            self,
             format!("Offset {dim} might not exist on {container}."),
             span,
             7,
@@ -1002,14 +1008,16 @@ impl<'a> Checker<'a> {
         if let Some(level) = self.failing_level(base_ty, 3, |m| {
             m.is_null().yes() || self.relation().is_offset_accessible(m).no()
         }) {
-            report!(self, 
+            report!(
+                self,
                 format!("Cannot access offset on {base_ty}."),
                 self.expr_span(idx.id),
                 level,
                 "offsetAccess.nonOffsetAccessible",
             );
         } else if let Some(from) = types::strict_mixed_receiver_from(base_ty) {
-            report_found_from!(self, 
+            report_found_from!(
+                self,
                 "Cannot access offset on mixed.".to_string(),
                 self.expr_span(idx.id),
                 3,

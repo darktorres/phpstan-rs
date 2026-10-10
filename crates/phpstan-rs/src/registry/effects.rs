@@ -1162,7 +1162,8 @@ impl PropertyWrites {
     }
 
     fn settle(&mut self) {
-        self.names.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+        self.names
+            .sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
         self.names.dedup();
     }
 
@@ -4590,10 +4591,8 @@ impl<'r> Resolve<'r> {
                 && ["__construct", "__clone"]
                     .iter()
                     .any(|name| self.member.as_str().eq_ignore_ascii_case(name));
-            let property_writes = level.property_writes(
-                found.as_ref().map(|(_, written)| &written[..]),
-                constructs,
-            );
+            let property_writes =
+                level.property_writes(found.as_ref().map(|(_, written)| &written[..]), constructs);
             let mut classification = match found {
                 Some((targets, written_args)) => level.classify(key, targets, written_args),
                 None if level.facts.anything => Classification::anything(),

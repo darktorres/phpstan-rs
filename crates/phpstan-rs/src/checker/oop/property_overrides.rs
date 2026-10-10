@@ -168,7 +168,8 @@ impl<'a> Checker<'a> {
             if is_by_phpdoc {
                 report!(self, message, span, 0, identifier);
             } else {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable(),
                 );
             }
@@ -185,7 +186,9 @@ impl<'a> Checker<'a> {
             return;
         }
         if ancestor_sig.is_static() && !own_sig.is_static() {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Non-static property {fqn}::${name} overrides static property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -193,7 +196,9 @@ impl<'a> Checker<'a> {
                 "property.nonStatic",
             );
         } else if !ancestor_sig.is_static() && own_sig.is_static() {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Static property {fqn}::${name} overrides non-static property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -202,7 +207,9 @@ impl<'a> Checker<'a> {
             );
         }
         if ancestor_sig.is_readonly() && !own_sig.is_readonly() {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Readwrite property {fqn}::${name} overrides readonly property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -210,7 +217,9 @@ impl<'a> Checker<'a> {
                 "property.readWrite",
             );
         } else if !ancestor_sig.is_readonly() && own_sig.is_readonly() {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Readonly property {fqn}::${name} overrides readwrite property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -226,7 +235,9 @@ impl<'a> Checker<'a> {
             Visibility::Private => false,
         };
         if narrows_visibility {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{fqn}::${name} overriding {} property {ancestor_owner}::${name} must not reduce visibility",
                     visibility_word(&ancestor_sig.visibility())
                 ),
@@ -341,7 +352,9 @@ impl<'a> Checker<'a> {
         let ancestor_readable = !ancestor_sig.is_virtual() || ancestor_sig.has_get_hook();
         let own_readable = !own_sig.is_virtual() || own_sig.has_get_hook();
         if ancestor_readable && !own_readable {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Property {fqn}::${name} does not have `get` hook and is not readable, but is required to be readable by property {ancestor_owner}::${name}."
                 ),
                 span,
@@ -352,7 +365,9 @@ impl<'a> Checker<'a> {
         let ancestor_writable = !ancestor_sig.is_virtual() || ancestor_sig.has_set_hook();
         let own_writable = !own_sig.is_virtual() || own_sig.has_set_hook();
         if ancestor_writable && !own_writable {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Property {fqn}::${name} does not have `set` hook and is not writable, but is required to be writable by property {ancestor_owner}::${name}."
                 ),
                 span,
@@ -365,7 +380,9 @@ impl<'a> Checker<'a> {
         // real PHP's own rule only fires on that exact overlap.
         if own_sig.is_abstract() && !ancestor_sig.is_abstract() {
             if own_sig.has_get_hook() && ancestor_sig.has_get_hook() {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Cannot make non abstract method {ancestor_owner}::${name}::get() abstract in class {fqn}"
                     ),
                     span,
@@ -374,7 +391,9 @@ impl<'a> Checker<'a> {
                 );
             }
             if own_sig.has_set_hook() && ancestor_sig.has_set_hook() {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Cannot make non abstract method {ancestor_owner}::${name}::set() abstract in class {fqn}"
                     ),
                     span,

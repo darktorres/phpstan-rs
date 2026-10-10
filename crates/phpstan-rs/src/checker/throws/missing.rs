@@ -52,7 +52,8 @@ impl<'a> Checker<'a> {
             if covered {
                 continue;
             }
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} throws {class} but it's not covered by any @throws tag."),
                 span,
                 2,

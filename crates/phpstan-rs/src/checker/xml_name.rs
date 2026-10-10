@@ -50,7 +50,11 @@ impl<'a> Checker<'a> {
         if is_valid_xml_name(name) {
             return;
         }
-        report!(self, format!("DOMDocument::createElement() name '{name}' is not a valid XML element name and will throw at runtime"),
+        report!(
+            self,
+            format!(
+                "DOMDocument::createElement() name '{name}' is not a valid XML element name and will throw at runtime"
+            ),
             span,
             0,
             "argument.type",

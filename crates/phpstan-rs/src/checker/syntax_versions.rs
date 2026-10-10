@@ -105,7 +105,8 @@ impl<'a> Checker<'a> {
         if self.registry.php_supports_everywhere(feature) != Some(false) {
             return;
         }
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(
                 format!(
                     "{what} supported only on PHP {} and later.",

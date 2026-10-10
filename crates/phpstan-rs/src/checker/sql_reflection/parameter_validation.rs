@@ -254,7 +254,9 @@ impl<'a> Checker<'a> {
 
         for key in &placeholder_keys {
             if !bindings.iter().any(|b| b.key == *key) {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "{class}::{method}() call's own SQL references parameter {} with no bound value",
                         describe_key(key)
                     ),
@@ -269,7 +271,9 @@ impl<'a> Checker<'a> {
                 && placeholder_keys.contains(&binding.key)
                 && value_is_definitely_array(&binding.value_ty)
             {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "{class}::{method}() binds an array to parameter {} without ArrayParameterType::*, which every plain SQL placeholder rejects at runtime",
                         describe_key(&binding.key)
                     ),
@@ -282,7 +286,9 @@ impl<'a> Checker<'a> {
                 && placeholder_keys.contains(&binding.key)
                 && value_is_confidently_not_an_integer(&binding.value_ty)
             {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "{class}::{method}() binds a non-numeric string to parameter {} declared as an integer type",
                         describe_key(&binding.key)
                     ),

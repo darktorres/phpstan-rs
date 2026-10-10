@@ -62,7 +62,8 @@ impl<'a> Checker<'a> {
     }
 
     fn report_magic_number(&mut self, span: Span, id: &str, place: &str) {
-        report!(self, 
+        report!(
+            self,
             format!("Do not use magic number {place}. Move to constant with a suitable name."),
             span,
             0,
@@ -252,7 +253,8 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner.arenas();
         match &stmt.kind {
             StmtKind::Return(Some(value)) if self.magic_number(arenas, *value).is_some() => {
-                report!(self, 
+                report!(
+                    self,
                     "Do not return magic number. Move to constant with a suitable name."
                         .to_string(),
                     self.stmt_span(stmt.id),

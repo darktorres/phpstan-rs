@@ -104,7 +104,8 @@ impl<'a> Checker<'a> {
             .find(|a| registry::is_no_discard_attribute_name(&a.name))
         {
             let fqn = self.resolve_class_name(&nodiscard.name);
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     format!("Attribute class {fqn} cannot be used on property hooks."),
                     nodiscard.span,
@@ -205,7 +206,8 @@ impl<'a> Checker<'a> {
             && !registry::hook_body_references_property(arenas, body, name)
             && !registry::hook_body_calls_parent_hook(arenas, body, name)
         {
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "Get hook for non-virtual property {fqn}::${name} does not read its value."
                 ),
@@ -294,7 +296,8 @@ impl<'a> Checker<'a> {
                     .expect("property-hook arrow body belongs to its retained file owner");
                 let body_ty = self.check_expr(e, &mut locals, &label);
                 if !body_ty.is_mixed() && !self.accepts(prop_sig.ty(), &body_ty).yes() {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "return type mismatch: expected {}, got {body_ty}",
                             prop_sig.ty()
@@ -328,19 +331,19 @@ impl<'a> Checker<'a> {
                     )
                 {
                     if self.shows_level(level) {
-                    let mut builder = DiagnosticBuilder::new(
-                        format!(
-                            "should return {} but return statement is missing",
-                            prop_sig.ty()
-                        ),
-                        span,
-                        level,
-                        "return.missing",
-                    );
-                    if prop_sig.has_native_type() {
-                        builder = builder.non_ignorable();
-                    }
-                    self.report_builder(builder);
+                        let mut builder = DiagnosticBuilder::new(
+                            format!(
+                                "should return {} but return statement is missing",
+                                prop_sig.ty()
+                            ),
+                            span,
+                            level,
+                            "return.missing",
+                        );
+                        if prop_sig.has_native_type() {
+                            builder = builder.non_ignorable();
+                        }
+                        self.report_builder(builder);
                     } else {
                         self.note_below_level();
                     }
@@ -369,7 +372,9 @@ impl<'a> Checker<'a> {
         if throws.as_ref().is_some_and(|throws| throws.is_void())
             && let Some(throw_span) = self.first_explicit_throw()
         {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Get hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
                 ),
                 throw_span,
@@ -433,7 +438,8 @@ impl<'a> Checker<'a> {
             && !registry::hook_body_references_property(arenas, body, name)
             && !registry::hook_body_calls_parent_hook(arenas, body, name)
         {
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "Set hook for non-virtual property {fqn}::${name} does not assign value to it."
                 ),
@@ -677,7 +683,9 @@ impl<'a> Checker<'a> {
             if throws.as_ref().is_some_and(|throws| throws.is_void())
                 && let Some(throw_span) = self.first_explicit_throw()
             {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Set hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
                     ),
                     throw_span,

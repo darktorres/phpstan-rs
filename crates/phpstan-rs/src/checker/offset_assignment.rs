@@ -112,7 +112,13 @@ impl<'a> Checker<'a> {
             None
         };
         if let Some(message) = message {
-            report!(self, message, self.expr_span(lhs.id), 3, "offsetAssign.valueType");
+            report!(
+                self,
+                message,
+                self.expr_span(lhs.id),
+                3,
+                "offsetAssign.valueType"
+            );
         }
     }
 

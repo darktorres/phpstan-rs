@@ -47,7 +47,8 @@ impl<'a> Checker<'a> {
     /// or anonymous class body - PHP parses it, then refuses to compile it.
     pub(crate) fn check_enum_cases_outside_enum(&mut self, cases: &[EnumCase]) {
         for case in cases {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     "Enum case can only be used in enums.".to_string(),
                     case.span,
@@ -90,10 +91,16 @@ impl<'a> Checker<'a> {
                 _ => continue,
             };
             if let Some(first_case) = seen.get(&key) {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "duplicate value in enum {fqn} for case {} (already used by case {first_case})",
                         case.name.as_ref()
-                    ), case.span, 0, "enum.duplicateValue");
+                    ),
+                    case.span,
+                    0,
+                    "enum.duplicateValue"
+                );
             } else {
                 seen.insert(key, case.name.as_ref());
             }
@@ -118,7 +125,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let plural = if block.templates.len() == 1 { "" } else { "s" };
-        report!(self, 
+        report!(
+            self,
             format!("Enum {fqn} has PHPDoc @template tag{plural} but enums cannot be generic."),
             e.span,
             2,
@@ -149,7 +157,8 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some(property) = def.properties(arenas).first() {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     format!("Enum {fqn} cannot include properties."),
                     property.span,
@@ -163,7 +172,8 @@ impl<'a> Checker<'a> {
             let lower = m.function.name.as_ref().to_ascii_lowercase();
             if is_magic_method_name(&lower) {
                 if lower == "__construct" {
-                    report_builder!(self, 
+                    report_builder!(
+                        self,
                         DiagnosticBuilder::new(
                             format!("Enum {fqn} contains constructor."),
                             m.span,
@@ -173,7 +183,8 @@ impl<'a> Checker<'a> {
                         .non_ignorable(),
                     );
                 } else if lower == "__destruct" {
-                    report_builder!(self, 
+                    report_builder!(
+                        self,
                         DiagnosticBuilder::new(
                             format!("Enum {fqn} contains destructor."),
                             m.span,
@@ -183,7 +194,8 @@ impl<'a> Checker<'a> {
                         .non_ignorable(),
                     );
                 } else if !matches!(lower.as_str(), "__call" | "__callstatic" | "__invoke") {
-                    report_builder!(self, 
+                    report_builder!(
+                        self,
                         DiagnosticBuilder::new(
                             format!("Enum {fqn} contains magic method {}().", m.function.name),
                             m.span,
@@ -195,7 +207,8 @@ impl<'a> Checker<'a> {
                 }
             }
             if is_native_enum_method(def, m.function.name.as_ref()) {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!(
                             "Enum {fqn} cannot redeclare native method {}().",
@@ -215,7 +228,8 @@ impl<'a> Checker<'a> {
             let expects_string =
                 matches!(backing.kind, TypeHintKind::Keyword(NativeType::String, _));
             if !expects_int && !expects_string {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!("Backed enum {fqn} can have only \"int\" or \"string\" type."),
                         def.span,
@@ -228,7 +242,8 @@ impl<'a> Checker<'a> {
         }
 
         if self.registry.is_subclass_of(fqn, "Serializable") {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     format!("Enum {fqn} cannot implement the Serializable interface."),
                     def.span,
@@ -250,7 +265,8 @@ impl<'a> Checker<'a> {
             match (&def.backing_type, &case.value) {
                 (None, Some(value)) => {
                     let ty = registry::infer_const_type(arenas, *value);
-                    report_builder!(self, 
+                    report_builder!(
+                        self,
                         DiagnosticBuilder::new(
                             format!(
                                 "Enum {fqn} is not backed, but case {} has value {ty}.",

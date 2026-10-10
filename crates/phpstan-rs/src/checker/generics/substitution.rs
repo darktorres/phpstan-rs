@@ -71,7 +71,8 @@ impl<'a> Checker<'a> {
 
         if self
             .registry
-            .class(owner).map(|(_, _, c)| c)
+            .class(owner)
+            .map(|(_, _, c)| c)
             .is_some_and(|c| !c.templates().is_empty())
         {
             let mut bindings = self.class_template_bindings(class, type_args, owner);

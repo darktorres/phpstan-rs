@@ -183,7 +183,9 @@ impl<'a> Checker<'a> {
         if type_allows_generator_return(&resolved, self.registry) {
             return;
         }
-        report!(self, format!(
+        report!(
+            self,
+            format!(
                 "yields, but its declared return type {resolved} is not a supertype of Generator, Iterator, Traversable, or iterable"
             ),
             span,
@@ -451,14 +453,16 @@ impl<'a> Checker<'a> {
                     .collect();
                 shadowed.sort();
                 for name in shadowed {
-                    report!(self, format!(
-                        "PHPDoc tag @template {name} for method {c}::{}() shadows @template {name} for class {c}.",
-                        f.name
-                    ),
-                    f.span,
-                    6,
-                    "method.shadowTemplate",
-                );
+                    report!(
+                        self,
+                        format!(
+                            "PHPDoc tag @template {name} for method {c}::{}() shadows @template {name} for class {c}.",
+                            f.name
+                        ),
+                        f.span,
+                        6,
+                        "method.shadowTemplate",
+                    );
                 }
             }
         }
@@ -1121,7 +1125,8 @@ impl<'a> Checker<'a> {
             // statement - real PHPStan's `return.never` covers both
             // shapes identically.
             if expected.is_never() {
-                report!(self, 
+                report!(
+                    self,
                     "should never return, but a return statement was reached".to_string(),
                     f.span,
                     3,
@@ -1131,16 +1136,16 @@ impl<'a> Checker<'a> {
                 missing_return_level(&expected, f.return_type.is_some(), is_generator_treturn)
             {
                 if self.shows_level(level) {
-                let mut builder = DiagnosticBuilder::new(
-                    format!("should return {expected} but return statement is missing"),
-                    f.span,
-                    level,
-                    "return.missing",
-                );
-                if f.return_type.is_some() {
-                    builder = builder.non_ignorable();
-                }
-                self.report_builder(builder);
+                    let mut builder = DiagnosticBuilder::new(
+                        format!("should return {expected} but return statement is missing"),
+                        f.span,
+                        level,
+                        "return.missing",
+                    );
+                    if f.return_type.is_some() {
+                        builder = builder.non_ignorable();
+                    }
+                    self.report_builder(builder);
                 } else {
                     self.note_below_level();
                 }
@@ -1165,7 +1170,8 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(|t| t.is_void() || t.is_mixed())
         {
-            report!(self, 
+            report!(
+                self,
                 "could be declared to return never - it never returns normally".to_string(),
                 f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
                 5,
@@ -1238,7 +1244,9 @@ impl<'a> Checker<'a> {
                 } else {
                     "Function"
                 };
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "{kind_word} {label}() throws exception but the PHPDoc contains @throws void."
                     ),
                     throw_span,
@@ -1378,7 +1386,8 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner.arenas();
         for hint in param_hints {
             if is_bare_native_union(hint, arenas) {
-                report!(self, 
+                report!(
+                    self,
                     message.to_string(),
                     span,
                     0,
@@ -1388,7 +1397,13 @@ impl<'a> Checker<'a> {
             }
         }
         if is_bare_native_union(return_hint, arenas) {
-            report!(self, message.to_string(), span, 0, "return.unionTypeNotSupported");
+            report!(
+                self,
+                message.to_string(),
+                span,
+                0,
+                "return.unionTypeNotSupported"
+            );
         }
     }
 
@@ -1464,7 +1479,8 @@ impl<'a> Checker<'a> {
         if self.registry.is_intersection_possible(&names) {
             return;
         }
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(message.to_string(), span, 0, identifier).non_ignorable(),
         );
     }
@@ -1514,7 +1530,9 @@ impl<'a> Checker<'a> {
             if !is_default_null {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Deprecated in PHP 8.4: Parameter #{} ${} ({}) is implicitly nullable via default value null.",
                     i + 1,
                     p.name,
@@ -1550,7 +1568,9 @@ impl<'a> Checker<'a> {
                 && p.default.is_none()
                 && !p.variadic
             {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Deprecated in PHP 8.0: Required parameter ${} follows optional parameter ${optional}.",
                         p.name,
                     ),
@@ -1622,7 +1642,9 @@ impl<'a> Checker<'a> {
                 Some(c) => format!("method {c}::{}()", f.name),
                 None => format!("function {}()", f.name),
             };
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Default value of the parameter #{} ${} ({default_ty}) of {target} is incompatible with type {param_ty}.",
                     i + 1,
                     p.name,
@@ -1661,7 +1683,8 @@ impl<'a> Checker<'a> {
             None => expected.clone(),
         };
         if expected.is_never() {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     "should never return, but a return statement was reached".to_string(),
                     span,
@@ -1675,7 +1698,8 @@ impl<'a> Checker<'a> {
         let Some(level) = missing_return_level(&expected, true, false) else {
             return;
         };
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(
                 format!("should return {expected} but return statement is missing"),
                 span,

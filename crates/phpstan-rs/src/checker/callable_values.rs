@@ -118,7 +118,8 @@ impl<'a> Checker<'a> {
             } else {
                 "protected"
             };
-            report!(self, 
+            report!(
+                self,
                 format!("Call to {word} method {method}() of class {owner}."),
                 span,
                 2,

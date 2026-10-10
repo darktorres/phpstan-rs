@@ -117,7 +117,8 @@ impl<'a> Checker<'a> {
         let Some(detail) = validate_pattern(pattern_literal) else {
             return;
         };
-        report!(self, 
+        report!(
+            self,
             format!("Regex pattern is invalid: {detail}"),
             span,
             0,

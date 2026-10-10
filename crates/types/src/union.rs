@@ -1113,13 +1113,16 @@ fn reduce_array_members(members: &mut Vec<Type>) {
     #[cfg(debug_assertions)]
     debug_assert!(
         shapes.len() == reference.len()
-            && shapes.iter().zip(&reference).all(|(found, expected)| match (found, expected) {
-                (None, None) => true,
-                (Some((a, a_non_empty)), Some((b, b_non_empty))) => {
-                    a_non_empty == b_non_empty && **a == **b
-                }
-                _ => false,
-            }),
+            && shapes
+                .iter()
+                .zip(&reference)
+                .all(|(found, expected)| match (found, expected) {
+                    (None, None) => true,
+                    (Some((a, a_non_empty)), Some((b, b_non_empty))) => {
+                        a_non_empty == b_non_empty && **a == **b
+                    }
+                    _ => false,
+                }),
         "the indexed shape merge differs from the pairwise one"
     );
     members.extend(shapes.into_iter().flatten().map(|(shape, non_empty)| {
@@ -1127,7 +1130,6 @@ fn reduce_array_members(members: &mut Vec<Type>) {
         shape_type(shape, non_empty)
     }));
 }
-
 
 type ShapeSlot = Option<(Arc<Shape>, bool)>;
 
@@ -1239,7 +1241,9 @@ impl KeyPostings {
             .iter()
             .filter_map(|field| {
                 let slots = self.slots.get(&field.key)?;
-                slots.get(slots.partition_point(|&slot| slot <= after)).copied()
+                slots
+                    .get(slots.partition_point(|&slot| slot <= after))
+                    .copied()
             })
             .min()
     }

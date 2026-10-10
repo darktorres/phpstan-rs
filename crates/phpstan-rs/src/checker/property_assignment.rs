@@ -43,7 +43,8 @@ impl<'a> Checker<'a> {
         );
         let not_writable = can_write && !prop_sig.is_writable();
         if not_writable {
-            report!(self, 
+            report!(
+                self,
                 format!("Property {owner}::${prop} is not writable."),
                 self.expr_span(lhs.id),
                 0,
@@ -90,7 +91,8 @@ impl<'a> Checker<'a> {
                 Visibility::Private => ("private(set)", "assign.propertyPrivateSet"),
                 _ => ("protected(set)", "assign.propertyProtectedSet"),
             };
-            report!(self, 
+            report!(
+                self,
                 format!("Assign to {word} property {class}::${prop}."),
                 self.expr_span(lhs.id),
                 0,
@@ -146,7 +148,8 @@ impl<'a> Checker<'a> {
         let Some(from) = self.rejected_from(&expected, &actual) else {
             return;
         };
-        report_found_from!(self, 
+        report_found_from!(
+            self,
             format!("{class}::${prop} expects {expected}, {actual} given"),
             self.expr_span(rhs.id),
             3,
@@ -331,7 +334,9 @@ impl<'a> Checker<'a> {
                 } else {
                     "protected"
                 };
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Property {owner}::${prop} with {description} visibility is assigned by reference."
                     ),
                     self.expr_span(rhs.id),
@@ -346,14 +351,16 @@ impl<'a> Checker<'a> {
             && !sig.tag_read_only()
             && !is_static_fetch
         {
-            report!(self, 
+            report!(
+                self,
                 format!("Readonly property {owner}::${prop} is assigned by reference."),
                 self.expr_span(rhs.id),
                 3,
                 "property.readOnlyAssignByRef",
             );
         } else if sig.readonly_by_phpdoc() {
-            report!(self, 
+            report!(
+                self,
                 format!("@readonly property {owner}::${prop} is assigned by reference."),
                 self.expr_span(rhs.id),
                 3,

@@ -62,7 +62,8 @@ impl<'a> Checker<'a> {
             // avoids a message naming the very case `check_class_name_case`
             // is simultaneously flagging as wrong.
             let Some((canonical, info)) = self.registry.lookup_class(&fqn) else {
-                report!(self, 
+                report!(
+                    self,
                     format!("attribute class {fqn} does not exist"),
                     attr.span,
                     0,
@@ -77,7 +78,8 @@ impl<'a> Checker<'a> {
             // immediately after confirming the name resolves.
             self.check_class_name_case(&attr.name);
             if info.is_abstract() {
-                report!(self, 
+                report!(
+                    self,
                     format!("Attribute class {canonical} is abstract."),
                     attr.span,
                     0,
@@ -93,7 +95,9 @@ impl<'a> Checker<'a> {
             let ctor_sig = self.registry.lookup_method(&canonical, "__construct");
             let Some(ctor_sig) = ctor_sig else {
                 if !arenas.args(attr.args.clone()).is_empty() {
-                    report!(self, format!(
+                    report!(
+                        self,
+                        format!(
                             "Attribute class {canonical} does not have a constructor and must be instantiated without any parameters."
                         ),
                         attr.span,
@@ -104,7 +108,8 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if ctor_sig.visibility() != Visibility::Public {
-                report!(self, 
+                report!(
+                    self,
                     format!("Constructor of attribute class {canonical} is not public."),
                     attr.span,
                     0,
@@ -166,7 +171,8 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let Some(flags) = info.attribute_targets() else {
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "{} {fqn} is not an Attribute class.",
                         class_type_word(info.kind())
@@ -178,7 +184,8 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if flags & required_target == 0 {
-                report!(self, 
+                report!(
+                    self,
                     format!("Attribute class {fqn} does not have the {target_name} target."),
                     attr.span,
                     0,
@@ -188,7 +195,9 @@ impl<'a> Checker<'a> {
             if flags & ATTRIBUTE_IS_REPEATABLE == 0
                 && !seen_non_repeatable.insert(fqn.to_lowercase())
             {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Attribute class {fqn} is not repeatable but is already present above the {target_name}."
                     ),
                     attr.span,
@@ -247,7 +256,8 @@ impl<'a> Checker<'a> {
             .php_supports_everywhere(types::php_version::PhpFeature::AttributesOnGlobalConstants)
             == Some(false)
         {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     "Attributes on global constants are supported only on PHP 8.5 and later."
                         .to_string(),
@@ -291,7 +301,8 @@ impl<'a> Checker<'a> {
         };
         match kind {
             ClassKind::Trait => {
-                report!(self, 
+                report!(
+                    self,
                     "Trait cannot be an Attribute class.".to_string(),
                     attr.span,
                     0,
@@ -300,7 +311,8 @@ impl<'a> Checker<'a> {
                 return;
             }
             ClassKind::Interface => {
-                report!(self, 
+                report!(
+                    self,
                     "Interface cannot be an Attribute class.".to_string(),
                     attr.span,
                     0,
@@ -309,7 +321,8 @@ impl<'a> Checker<'a> {
                 return;
             }
             ClassKind::Enum => {
-                report!(self, 
+                report!(
+                    self,
                     "Enum cannot be an Attribute class.".to_string(),
                     attr.span,
                     0,
@@ -320,7 +333,8 @@ impl<'a> Checker<'a> {
             ClassKind::Class => {}
         }
         if is_abstract {
-            report!(self, 
+            report!(
+                self,
                 format!("Abstract class {fqn} cannot be an Attribute class."),
                 attr.span,
                 0,
@@ -331,7 +345,8 @@ impl<'a> Checker<'a> {
         if let Some(ctor) = self.registry.lookup_method(fqn, "__construct")
             && ctor.visibility() != Visibility::Public
         {
-            report!(self, 
+            report!(
+                self,
                 format!("Attribute class {fqn} constructor must be public."),
                 attr.span,
                 0,
@@ -411,7 +426,8 @@ impl<'a> Checker<'a> {
                         type_word.clone(),
                     )
                 };
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(
                         format!(
                             "Attribute class AllowDynamicProperties cannot be used with {subject}."

@@ -68,7 +68,9 @@ impl<'a> Checker<'a> {
             if property_assigned_anywhere_in_hierarchy(self, c, fqn, &p.name) {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{fqn} has an uninitialized property ${}. Give it a default value or assign it in the constructor.",
                     p.name
                 ),

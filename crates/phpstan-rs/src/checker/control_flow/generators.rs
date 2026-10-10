@@ -84,7 +84,11 @@ impl<'a> Checker<'a> {
         if let Some(level) =
             self.failing_level(inner_ty, 0, |m| self.relation().is_iterable(m).no())
         {
-            report!(self, format!("Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."),
+            report!(
+                self,
+                format!(
+                    "Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."
+                ),
                 span,
                 level,
                 "generator.nonIterable",
@@ -136,7 +140,9 @@ impl<'a> Checker<'a> {
             && !inner_key.is_mixed()
             && let Some(from) = self.rejected_from(&enclosing_key, &inner_key)
         {
-            report_found_from!(self, format!(
+            report_found_from!(
+                self,
+                format!(
                     "Key type {inner_key} of yielded generator is not assignable to key type {enclosing_key} of enclosing generator."
                 ),
                 span,
@@ -149,7 +155,9 @@ impl<'a> Checker<'a> {
             && !inner_value.is_mixed()
             && let Some(from) = self.rejected_from(&enclosing_value, &inner_value)
         {
-            report_found_from!(self, format!(
+            report_found_from!(
+                self,
+                format!(
                     "Value type {inner_value} of yielded generator is not assignable to value type {enclosing_value} of enclosing generator."
                 ),
                 span,
@@ -166,7 +174,9 @@ impl<'a> Checker<'a> {
             && !inner_send.is_mixed()
             && !self.accepts(&inner_send, &enclosing_send).yes()
         {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Send type {enclosing_send} of enclosing generator is not assignable to send type {inner_send} of yielded generator."
                 ),
                 span,

@@ -180,7 +180,8 @@ impl<'a> Checker<'a> {
                     if !body_ty.is_mixed()
                         && let Some(from) = self.rejected_from(&expected, &body_ty)
                     {
-                        report_found_from!(self, 
+                        report_found_from!(
+                            self,
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             self.expr_span(body.id),
                             3,
@@ -218,7 +219,8 @@ impl<'a> Checker<'a> {
                     // See the identical fix's own comment at
                     // `checker::expr`'s `ExprKind::Closure` arm.
                     if u.name == "this" {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 "Cannot use $this as lexical variable.".to_string(),
                                 u.name.span,
@@ -228,7 +230,8 @@ impl<'a> Checker<'a> {
                             .non_ignorable(),
                         );
                     } else if is_superglobal(&u.name) {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 format!(
                                     "Cannot use superglobal variable ${} as lexical variable.",
@@ -253,7 +256,8 @@ impl<'a> Checker<'a> {
                             .non_ignorable(),
                         );
                     } else if !u.by_ref && !locals.contains_var(&u.name) {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("undefined variable ${}", u.name),
                             u.name.span,
                             0,

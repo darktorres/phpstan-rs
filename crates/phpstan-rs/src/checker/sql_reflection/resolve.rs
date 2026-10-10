@@ -139,7 +139,11 @@ const PARSED_LIMIT: usize = 4096;
 
 /// The first statement of `sql`, parsed once per text.
 fn parse_sql_cached(sql: &str) -> Option<std::sync::Arc<Statement>> {
-    let lock = || PARSED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let lock = || {
+        PARSED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
     if let Some(known) = lock().get(sql) {
         syntax::stats::count(syntax::stats::Counter::ParseSqlHit);
         return known.clone();

@@ -161,11 +161,7 @@ impl Registry {
 
     /// The bindings of the last level of `path`, with `type_args` as the
     /// first level's arguments.
-    fn bindings_along(
-        &self,
-        path: &[TemplateStep],
-        type_args: &[Type],
-    ) -> FxHashMap<String, Type> {
+    fn bindings_along(&self, path: &[TemplateStep], type_args: &[Type]) -> FxHashMap<String, Type> {
         let mut args: Vec<Type> = type_args.to_vec();
         for step in path {
             let Some(info) = self.class_by_id(step.class) else {

@@ -2041,7 +2041,10 @@ impl<'a> Checker<'a> {
         level: u8,
         identifier: impl Into<diagnostics::Identifier>,
     ) {
-        report_builder!(self, DiagnosticBuilder::new(message, span, level, identifier));
+        report_builder!(
+            self,
+            DiagnosticBuilder::new(message, span, level, identifier)
+        );
     }
 
     /// `report`, for a finding made only from configured level
@@ -2054,7 +2057,8 @@ impl<'a> Checker<'a> {
         found_from: u8,
         identifier: impl Into<diagnostics::Identifier>,
     ) {
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(message, span, level, identifier).found_from(found_from),
         );
     }

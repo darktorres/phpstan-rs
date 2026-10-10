@@ -240,7 +240,8 @@ impl<'a> Checker<'a> {
         let mut iterable = Vec::new();
         iterable.extend(ty.iterable_types_missing_value_type(explicit_mixed));
         for desc in iterable {
-            report_builder!(self, 
+            report_builder!(
+                self,
                 DiagnosticBuilder::new(
                     iterable_message(&desc),
                     span,
@@ -253,7 +254,8 @@ impl<'a> Checker<'a> {
         let mut generics = Vec::new();
         self.collect_non_generic_generic_class(ty, &mut generics);
         for (class_desc, list) in generics {
-            report!(self, 
+            report!(
+                self,
                 generics_message(&class_desc, &list),
                 span,
                 6,
@@ -319,7 +321,8 @@ impl<'a> Checker<'a> {
                 )
             };
             if implicit_mixed {
-                report!(self, 
+                report!(
+                    self,
                     format!("Property {fqn}::${} has no type specified.", p.name),
                     p.span,
                     6,
@@ -455,7 +458,8 @@ impl<'a> Checker<'a> {
             }
             let explicit_mixed = resolved_type_mentions_explicit_mixed(ty);
             if ty.is_mixed() && !explicit_mixed {
-                report!(self, 
+                report!(
+                    self,
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
                     *span,
                     6,
@@ -535,7 +539,8 @@ impl<'a> Checker<'a> {
         let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
         let return_explicit_mixed = resolved_type_mentions_explicit_mixed(&return_ty);
         if return_ty.is_mixed() && !return_explicit_mixed {
-            report!(self, 
+            report!(
+                self,
                 format!("{kind_word} {label}() has no return type specified."),
                 f.span,
                 6,

@@ -186,7 +186,10 @@ pub(crate) const MENTIONS_PROPERTY_WRITER: u32 = 1 << 7;
 /// The spellings that set `MENTIONS_PROPERTY_WRITER`.
 pub(crate) const PROPERTY_WRITER_WATCH: &[(&str, u32)] = &[
     ("setvalue", MENTIONS_PROPERTY_WRITER),
-    ("setrawvaluewithoutlazyinitialization", MENTIONS_PROPERTY_WRITER),
+    (
+        "setrawvaluewithoutlazyinitialization",
+        MENTIONS_PROPERTY_WRITER,
+    ),
     ("unserialize", MENTIONS_PROPERTY_WRITER),
     ("igbinary_unserialize", MENTIONS_PROPERTY_WRITER),
     ("msgpack_unserialize", MENTIONS_PROPERTY_WRITER),

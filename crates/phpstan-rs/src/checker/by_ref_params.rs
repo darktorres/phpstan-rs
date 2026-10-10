@@ -90,7 +90,8 @@ impl<'a> Checker<'a> {
         let Some(from) = self.rejected_from(&declared, actual) else {
             return;
         };
-        report_found_from!(self, 
+        report_found_from!(
+            self,
             format!("by-ref parameter ${name} expects {declared}, {actual} given"),
             span,
             3,
@@ -158,7 +159,9 @@ impl<'a> Checker<'a> {
             let Some(from) = self.rejected_from(&declared, &actual) else {
                 continue;
             };
-            report_found_from!(self, format!(
+            report_found_from!(
+                self,
+                format!(
                     "by-ref parameter ${name} expects {declared} at the end of execution, {actual} given"
                 ),
                 span,
@@ -210,7 +213,9 @@ impl<'a> Checker<'a> {
             if too_wide.is_empty() {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "by-ref parameter ${name}'s declared type {declared} is never narrower than {actual} at the end of execution - consider narrowing it"
                 ),
                 span,

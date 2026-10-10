@@ -77,7 +77,8 @@ impl<'a> Checker<'a> {
                 ),
                 reason,
             );
-            report!(self, 
+            report!(
+                self,
                 message,
                 span,
                 0,
@@ -138,7 +139,8 @@ impl<'a> Checker<'a> {
                 ),
                 reason,
             );
-            report!(self, 
+            report!(
+                self,
                 message,
                 span,
                 0,
@@ -183,7 +185,8 @@ impl<'a> Checker<'a> {
                 ),
                 reason,
             );
-            report!(self, 
+            report!(
+                self,
                 message,
                 span,
                 0,

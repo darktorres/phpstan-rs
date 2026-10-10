@@ -83,7 +83,9 @@ impl<'a> Checker<'a> {
             let Some(template_name) = info.templates().get(idx) else {
                 continue;
             };
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{kind_word} {fqn} specifies template type {template_name} of interface {iface} as {new_ty} but it's already specified as {old_ty}."
                 ),
                 span,

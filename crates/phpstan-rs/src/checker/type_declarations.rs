@@ -113,7 +113,10 @@ fn is_only_standalone(atom: Atom) -> bool {
 
 impl<'a> Checker<'a> {
     fn report_type_declaration(&mut self, message: String, span: Span, id: String) {
-        report_builder!(self, DiagnosticBuilder::new(message, span, 0, id).non_ignorable());
+        report_builder!(
+            self,
+            DiagnosticBuilder::new(message, span, 0, id).non_ignorable()
+        );
     }
 
     pub(crate) fn check_type_declaration(

@@ -501,7 +501,8 @@ impl<'a> Checker<'a> {
             .count();
         let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
         if args.len() < required {
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "Closure() expects at least {required} argument(s), {} given",
                     args.len()
@@ -516,7 +517,8 @@ impl<'a> Checker<'a> {
             } else {
                 "at most"
             };
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "Closure() expects {quantifier} {} argument(s), {} given",
                     sig.params.len(),
@@ -543,7 +545,8 @@ impl<'a> Checker<'a> {
             // ordinary-call argument check for why no separate `Mixed`
             // bail-out is needed here.
             if let Some(from) = self.rejected_from(&param.ty, &arg_ty) {
-                report_found_from!(self, 
+                report_found_from!(
+                    self,
                     format!(
                         "Closure() argument #{} expects {}, {} given",
                         i + 1,
@@ -599,7 +602,9 @@ impl<'a> Checker<'a> {
             if param_ty != Type::bool() {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{callee_label}() argument #{} (${}) is a bare `{literal}` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead",
                     index + 1,
                     param.name()
@@ -687,7 +692,9 @@ impl<'a> Checker<'a> {
             if ty_a.is_mixed() || ty_a != ty_b {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{callee_label}() arguments #{} (${a_name}) and #{} (${b_name}) may be swapped - their variable names match the reversed parameter order (${}, ${})",
                     i + 1,
                     j + 1,
@@ -771,7 +778,8 @@ impl<'a> Checker<'a> {
                 let Some(only_arg) = arenas.expr(call_args[0].value) else {
                     continue;
                 };
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "Call to preg_quote() is missing delimiter {delimiter} to be effective."
                     ),
@@ -792,7 +800,9 @@ impl<'a> Checker<'a> {
                 let Some(delimiter_arg) = arenas.expr(call_args[1].value) else {
                     continue;
                 };
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Call to preg_quote() uses invalid delimiter {given} while pattern uses {delimiter}."
                     ),
                     self.expr_span(delimiter_arg.id),

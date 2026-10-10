@@ -28,7 +28,8 @@ impl<'a> Checker<'a> {
                 .expect("instanceof target belongs to its retained file owner");
             let target_ty = self.infer_expr(target_expr, locals);
             if self.relation().can_name_a_class(&target_ty).no() {
-                report!(self, 
+                report!(
+                    self,
                     format!("Instanceof between {expr_ty} and {target_ty} results in an error."),
                     span,
                     0,
@@ -44,7 +45,8 @@ impl<'a> Checker<'a> {
         if always && is_exempt_last_condition {
             return;
         }
-        report!(self, 
+        report!(
+            self,
             format!("Instanceof between {expr_ty} and {class} will always evaluate to {always}."),
             span,
             4,

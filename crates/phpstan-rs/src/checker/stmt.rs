@@ -171,7 +171,8 @@ impl<'a> Checker<'a> {
                 // does - see `Checker::current_function_goto_targets`'s.
                 && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.is_target(&name.name))
             {
-                report!(self, 
+                report!(
+                    self,
                     "Unreachable statement - code above always terminates.".to_string(),
                     arenas
                         .stmt_span(next.id)
@@ -602,10 +603,8 @@ impl<'a> Checker<'a> {
                     match tag {
                         None => unnamed += 1,
                         Some(name) if defined(name) => {}
-                        Some(name) => found.push((
-                            var_tag_variable_not_found(name),
-                            "varTag.variableNotFound",
-                        )),
+                        Some(name) => found
+                            .push((var_tag_variable_not_found(name), "varTag.variableNotFound")),
                     }
                 }
                 if unnamed > 0 && (unnamed != 1 || !has_expr) {
@@ -662,7 +661,8 @@ impl<'a> Checker<'a> {
                     Some(v) => format!("PHPDoc tag @var for variable ${v}"),
                     None => "PHPDoc tag @var".to_string(),
                 };
-                report!(self, 
+                report!(
+                    self,
                     format!("{subject} contains unresolvable type."),
                     span,
                     2,
@@ -901,7 +901,8 @@ impl<'a> Checker<'a> {
                     // generic path below, which would otherwise report
                     // this identically to any other type mismatch.
                     if expected.is_never() {
-                        report!(self, 
+                        report!(
+                            self,
                             "should never return, but a return statement was reached".to_string(),
                             self.expr_span(e.id),
                             3,
@@ -922,7 +923,8 @@ impl<'a> Checker<'a> {
                         // itself, isn't "returning a value" at all) -
                         // without it, every such delegation would report
                         // the nonsensical "expected void, got void".
-                        report!(self, 
+                        report!(
+                            self,
                             format!("return type mismatch: expected void, got {actual}"),
                             self.expr_span(e.id),
                             3,
@@ -958,7 +960,8 @@ impl<'a> Checker<'a> {
                                 .map(|passes_below| from.max(passes_below))
                         };
                         if let Some(from) = found_from {
-                            report_found_from!(self, 
+                            report_found_from!(
+                                self,
                                 format!("return type mismatch: expected {expected}, got {actual}"),
                                 self.expr_span(e.id),
                                 3,
@@ -1021,7 +1024,8 @@ impl<'a> Checker<'a> {
                     // reaches this exact "never returns" claim just as
                     // surely as one with a value does.
                     if expected.is_never() {
-                        report!(self, 
+                        report!(
+                            self,
                             "should never return, but a return statement was reached".to_string(),
                             self.stmt_span(stmt.id),
                             3,
@@ -1051,7 +1055,8 @@ impl<'a> Checker<'a> {
                     // isVoid`, no explicit/implicit distinction there
                     // either) are exempt.
                     } else if !(expected.is_mixed() || expected.is_void()) {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("should return {expected} but empty return statement found"),
                             self.stmt_span(stmt.id),
                             3,
@@ -1280,7 +1285,8 @@ impl<'a> Checker<'a> {
                     // as global variable." is a real, unconditional
                     // fatal error.
                     if &**name == "this" {
-                        report!(self, 
+                        report!(
+                            self,
                             "cannot use $this as global variable".to_string(),
                             self.stmt_span(stmt.id),
                             0,
@@ -1314,7 +1320,8 @@ impl<'a> Checker<'a> {
                     // Same idea as `global $this;` just above - "Cannot
                     // use $this as static variable."
                     if **name == *"this" {
-                        report!(self, 
+                        report!(
+                            self,
                             "cannot use $this as static variable".to_string(),
                             self.stmt_span(stmt.id),
                             0,
@@ -1610,7 +1617,8 @@ impl<'a> Checker<'a> {
             if let Some(value) = known_condition {
                 if is_elseif {
                     if !(value && is_last_without_else) {
-                        report!(self, 
+                        report!(
+                            self,
                             format!(
                                 "Elseif condition is always {}.",
                                 if value { "true" } else { "false" }
@@ -1625,7 +1633,8 @@ impl<'a> Checker<'a> {
                         );
                     }
                 } else {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "If condition is always {}.",
                             if value { "true" } else { "false" }

@@ -442,9 +442,15 @@ impl<'a> Checker<'a> {
                     if let Some(expected) = arenas.string_bytes(expected) {
                         let expected = String::from_utf8_lossy(expected);
                         if actual != expected {
-                            report!(self, format!(
-                                "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
-                            ), self.expr_span(actual_expr.id), 0, "phpstanRs.assertType");
+                            report!(
+                                self,
+                                format!(
+                                    "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
+                                ),
+                                self.expr_span(actual_expr.id),
+                                0,
+                                "phpstanRs.assertType"
+                            );
                         }
                     }
                     self.check_expr(actual_expr, locals, label);
@@ -680,7 +686,8 @@ impl<'a> Checker<'a> {
                         if let Some(level) = self
                             .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
                         {
-                            report!(self, 
+                            report!(
+                                self,
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 self.expr_span(argument.id),
                                 level,
@@ -938,12 +945,10 @@ impl<'a> Checker<'a> {
                         // like any other function call - matched against
                         // just the last namespace segment, the same as
                         // every other by-name builtin special-case here.
-                        if bare.eq_ignore_ascii_case("define")
-                        {
+                        if bare.eq_ignore_ascii_case("define") {
                             self.check_define_third_argument(args, self.expr_span(e.id));
                         }
-                        if bare.eq_ignore_ascii_case("random_int")
-                        {
+                        if bare.eq_ignore_ascii_case("random_int") {
                             self.check_random_int_call(arenas, args, locals);
                         }
                         if matches!(
@@ -952,13 +957,10 @@ impl<'a> Checker<'a> {
                         ) {
                             self.check_value_to_key_call(arenas, &bare_lower, args, locals);
                         }
-                        if bare.eq_ignore_ascii_case("filter_var")
-                            && args.len() >= 3
-                        {
+                        if bare.eq_ignore_ascii_case("filter_var") && args.len() >= 3 {
                             self.check_filter_var_flag_conflict(arenas, args, self.expr_span(e.id));
                         }
-                        if bare.eq_ignore_ascii_case("simplexml_load_string")
-                        {
+                        if bare.eq_ignore_ascii_case("simplexml_load_string") {
                             self.check_simplexml_load_string_call(
                                 arenas,
                                 args,
@@ -1020,7 +1022,8 @@ impl<'a> Checker<'a> {
                         // against a "found" signature still correctly
                         // never happens for a guarded, still-genuinely-
                         // unresolvable call.
-                        report!(self, 
+                        report!(
+                            self,
                             format!("call to undefined function {name}()"),
                             self.expr_span(e.id),
                             0,
@@ -1049,7 +1052,8 @@ impl<'a> Checker<'a> {
                         } else {
                             "it might not be a callable"
                         };
-                        report!(self, 
+                        report!(
+                            self,
                             format!("Trying to invoke {callee_ty} but {verdict}."),
                             self.expr_span(callee.id),
                             level,
@@ -1225,7 +1229,9 @@ impl<'a> Checker<'a> {
                     && !matches!(&recv.kind, ExprKind::Variable(n) if self.is_static_var(n))
                     && type_definitely_excludes_null(&recv_ty)
                 {
-                    report!(self, format!(
+                    report!(
+                        self,
+                        format!(
                             "Using nullsafe method call on non-nullable type {recv_ty}. Use -> instead."
                         ),
                         self.expr_span(e.id),
@@ -1264,7 +1270,8 @@ impl<'a> Checker<'a> {
                 if let Some(level) = self.failing_level(&nonobject_ty, 0, |m| {
                     self.relation().can_call_methods(m).no()
                 }) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "call to method {method}() on {} {recv_ty}",
                             non_object_kind(level)
@@ -1286,7 +1293,8 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(from) = types::strict_mixed_receiver_from(&nonobject_ty) {
-                    report_found_from!(self, 
+                    report_found_from!(
+                        self,
                         format!("Cannot call method {method}() on mixed."),
                         self.expr_span(e.id),
                         0,
@@ -1371,7 +1379,8 @@ impl<'a> Checker<'a> {
                         if let Some(level) = self
                             .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
                         {
-                            report!(self, 
+                            report!(
+                                self,
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 self.expr_span(argument.id),
                                 level,
@@ -1820,7 +1829,8 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Variable(name) => {
                 if !locals.contains_var(name) && !is_superglobal(name) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!("undefined variable ${name}"),
                         self.expr_span(e.id),
                         0,
@@ -1922,7 +1932,8 @@ impl<'a> Checker<'a> {
                 if let Some(inner_value) = self.inferred_constant_condition(inner, locals) {
                     let result_value = !inner_value;
                     if !(result_value && is_exempt_last_condition) {
-                        report!(self, 
+                        report!(
+                            self,
                             format!(
                                 "Negated boolean expression is always {}.",
                                 if result_value { "true" } else { "false" }
@@ -2198,7 +2209,8 @@ impl<'a> Checker<'a> {
                 // otherwise).
                 let inner_ty = self.check_expr(inner, locals, label);
                 if let Some(class) = self.thrown_value_not_throwable(&inner_ty) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!("cannot throw {class}: it does not implement Throwable"),
                         self.expr_span(inner.id),
                         0,
@@ -2263,7 +2275,8 @@ impl<'a> Checker<'a> {
                 if let Some(level) = self.failing_level(&inner_ty, 3, |m| {
                     self.relation().can_access_properties(m).no()
                 }) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!("Cannot clone non-object variable of type {inner_ty}."),
                         self.expr_span(inner.id),
                         level,
@@ -2339,7 +2352,8 @@ impl<'a> Checker<'a> {
                         {
                             if !self.class_name_exists(class) && !Self::class_guarded(class, locals)
                             {
-                                report!(self, 
+                                report!(
+                                    self,
                                     format!("instanceof check target class {class} not found"),
                                     self.expr_span(e.id),
                                     0,
@@ -2419,7 +2433,8 @@ impl<'a> Checker<'a> {
                     && let Some(level) = self
                         .failing_level(&rhs_ty, 3, |m| self.relation().is_destructurable(m).no())
                 {
-                    report!(self, 
+                    report!(
+                        self,
                         format!("Cannot use array destructuring on {rhs_ty}."),
                         self.expr_span(rhs.id),
                         level,
@@ -2430,7 +2445,8 @@ impl<'a> Checker<'a> {
                 // reference to the current object - reassigning it is an
                 // unconditional fatal error ("Cannot re-assign $this.").
                 if matches!(&lhs.kind, ExprKind::Variable(v) if **v == *"this") {
-                    report!(self, 
+                    report!(
+                        self,
                         "cannot re-assign $this".to_string(),
                         self.expr_span(lhs.id),
                         0,
@@ -2559,7 +2575,8 @@ impl<'a> Checker<'a> {
                 // exemption as plain `??` applies to its own left side.
                 let lhs_ty = if *op == BinOp::Coalesce {
                     if matches!(lhs.kind, ExprKind::Index(_, None)) {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 "Cannot use [] for reading.".to_string(),
                                 self.expr_span(lhs.id),
@@ -2667,7 +2684,8 @@ impl<'a> Checker<'a> {
                 // ones; this rule has none of `BooleanAnd`/`BooleanOr`'s
                 // `isLast`/first-level-statement complexity.
                 if let Some(value) = self.inferred_constant_condition(cond, locals) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "Ternary operator condition is always {}.",
                             if value { "true" } else { "false" }
@@ -2756,7 +2774,8 @@ impl<'a> Checker<'a> {
                         && let Some(level) = self
                             .failing_level(&value_ty, 3, |m| self.relation().is_iterable(m).no())
                     {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("Only iterables can be unpacked, {value_ty} given."),
                             self.expr_span(value.id),
                             level,
@@ -2854,7 +2873,8 @@ impl<'a> Checker<'a> {
                         {
                             return Type::mixed();
                         }
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 "Cannot use [] for reading.".to_string(),
                                 self.expr_span(e.id),
@@ -2927,7 +2947,8 @@ impl<'a> Checker<'a> {
                         if let Some(level) = self
                             .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
                         {
-                            report!(self, 
+                            report!(
+                                self,
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 self.expr_span(argument.id),
                                 level,
@@ -3050,7 +3071,8 @@ impl<'a> Checker<'a> {
                             self.apply_param_out_types(sig, args, locals);
                         }
                     } else if !Self::class_guarded(class, locals) {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("instantiated class {class} not found"),
                             self.expr_span(e.id),
                             0,
@@ -3229,7 +3251,8 @@ impl<'a> Checker<'a> {
                             if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
                                 self.relation().is_iterable(m).no()
                             }) {
-                                report!(self, 
+                                report!(
+                                    self,
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     self.expr_span(value.id),
                                     level,
@@ -3250,7 +3273,8 @@ impl<'a> Checker<'a> {
                             if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
                                 self.relation().is_iterable(m).no()
                             }) {
-                                report!(self, 
+                                report!(
+                                    self,
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     self.expr_span(value.id),
                                     level,
@@ -3395,14 +3419,14 @@ impl<'a> Checker<'a> {
                         // is confirmed known, and __callStatic (the
                         // static equivalent of __call) suppresses it
                         // entirely, matching real PHPStan.
-                        report!(self, 
+                        report!(
+                            self,
                             format!("call to undefined static method {class}::{method}()"),
                             self.expr_span(e.id),
                             0,
                             "staticMethod.notFound",
                         );
-                    } else if !self.registry.has_class(class)
-                        && !Self::class_guarded(class, locals)
+                    } else if !self.registry.has_class(class) && !Self::class_guarded(class, locals)
                     {
                         // Mirrors real PHPStan's `StaticMethodCallCheck`'s
                         // "class doesn't exist at all" half - neither
@@ -3410,7 +3434,8 @@ impl<'a> Checker<'a> {
                         // class (no `sig` to check args against, and the
                         // `contains_key` guard on the undefined-method
                         // branch correctly excludes it too).
-                        report!(self, 
+                        report!(
+                            self,
                             format!("static method call target class {class} not found"),
                             self.expr_span(e.id),
                             0,
@@ -3621,7 +3646,9 @@ impl<'a> Checker<'a> {
                     && !matches!(&base.kind, ExprKind::Variable(n) if self.is_static_var(n))
                     && type_definitely_excludes_null(&base_ty)
                 {
-                    report!(self, format!(
+                    report!(
+                        self,
+                        format!(
                             "Using nullsafe property access on non-nullable type {base_ty}. Use -> instead."
                         ),
                         self.expr_span(e.id),
@@ -3672,7 +3699,8 @@ impl<'a> Checker<'a> {
                     self.relation().can_access_properties(m).no()
                 });
                 if let Some(level) = non_object_level {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "access to property ${prop} on {} {base_ty}",
                             non_object_kind(level)
@@ -3684,7 +3712,8 @@ impl<'a> Checker<'a> {
                 }
                 if non_object_level != Some(0) {
                     if let Some(from) = types::strict_mixed_receiver_from(&nonobject_ty) {
-                        report_found_from!(self, 
+                        report_found_from!(
+                            self,
                             format!("Cannot access property ${prop} on mixed."),
                             self.expr_span(e.id),
                             0,
@@ -3699,7 +3728,8 @@ impl<'a> Checker<'a> {
                                 || (is_pest_this && self.pest_hook_properties.contains(&*prop.name))
                         })
                     {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("access to undefined property {base_ty}::${prop}"),
                             self.expr_span(e.id),
                             2,
@@ -3734,7 +3764,8 @@ impl<'a> Checker<'a> {
                     if !p.is_readable()
                         && self.is_member_access_visible(&owner, &p.visibility(), prop, "property")
                     {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("Property {owner}::${prop} is not readable."),
                             self.expr_span(e.id),
                             0,
@@ -3993,7 +4024,8 @@ impl<'a> Checker<'a> {
                         locals,
                     );
                     if part_ty.to_string_type(self.registry).is_none() {
-                        report!(self, 
+                        report!(
+                            self,
                             format!(
                                 "Part of encapsed string ({part_ty}) cannot be cast to string."
                             ),
@@ -4130,7 +4162,9 @@ impl<'a> Checker<'a> {
                                 continue;
                             };
                             if !outcome {
-                                report!(self, format!(
+                                report!(
+                                    self,
+                                    format!(
                                         "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always false."
                                     ),
                                     self.expr_span(c.id),
@@ -4152,7 +4186,9 @@ impl<'a> Checker<'a> {
                             // followed only by an unreachable `default`
                             // would wrongly go unreported.
                             if i != arms_count - 1 || default.is_some() {
-                                report!(self, format!(
+                                report!(
+                                    self,
+                                    format!(
                                         "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always true."
                                     ),
                                     self.expr_span(c.id),
@@ -4255,7 +4291,8 @@ impl<'a> Checker<'a> {
                             // literal), so its message is this same
                             // degenerate-but-accurate "true" regardless
                             // of which arm(s) are actually unhandled.
-                            report!(self, 
+                            report!(
+                                self,
                                 "Match expression does not handle remaining value: true"
                                     .to_string(),
                                 self.expr_span(e.id),
@@ -4306,7 +4343,8 @@ impl<'a> Checker<'a> {
                             self.record_throw_state(unhandled_match_error(), before);
                         }
                         if !remaining.is_never() && !exempted {
-                            report!(self, 
+                            report!(
+                                self,
                                 format!(
                                     "Match expression does not handle remaining value: {remaining}"
                                 ),
@@ -4394,7 +4432,8 @@ impl<'a> Checker<'a> {
                     // checked before - the plain "undefined variable"
                     // case below.
                     if u.name == "this" {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 "Cannot use $this as lexical variable.".to_string(),
                                 u.name.span,
@@ -4404,7 +4443,8 @@ impl<'a> Checker<'a> {
                             .non_ignorable(),
                         );
                     } else if is_superglobal(&u.name) {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 format!(
                                     "Cannot use superglobal variable ${} as lexical variable.",
@@ -4429,7 +4469,8 @@ impl<'a> Checker<'a> {
                             .non_ignorable(),
                         );
                     } else if !u.by_ref && !locals.contains_var(&u.name) {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("undefined variable ${}", u.name),
                             u.name.span,
                             0,
@@ -4966,7 +5007,8 @@ impl<'a> Checker<'a> {
                     // `rejected_from` already accepts a `Mixed` body type
                     // below real PHPStan's own level 9/10.
                     if let Some(from) = self.rejected_from(&expected, &body_ty) {
-                        report_found_from!(self, 
+                        report_found_from!(
+                            self,
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             self.expr_span(body.id),
                             3,
@@ -5030,7 +5072,8 @@ impl<'a> Checker<'a> {
                         types::php_version::PhpFeature::FirstClassCallables,
                     ) == Some(false)
                 {
-                    report_builder!(self, 
+                    report_builder!(
+                        self,
                         DiagnosticBuilder::new(
                             "First-class callables are supported only on PHP 8.1 and later."
                                 .to_string(),
@@ -5095,7 +5138,8 @@ impl<'a> Checker<'a> {
                                                 .as_str(),
                                         );
                                     if !guarded {
-                                        report!(self, 
+                                        report!(
+                                            self,
                                             format!("call to undefined function {primary}()"),
                                             self.expr_span(e.id),
                                             0,
@@ -5206,7 +5250,8 @@ impl<'a> Checker<'a> {
                                     .lookup_method(&class, "__callStatic")
                                     .is_none()
                             {
-                                report!(self, 
+                                report!(
+                                    self,
                                     format!("call to undefined static method {class}::{method}()"),
                                     self.expr_span(e.id),
                                     0,
@@ -5283,7 +5328,8 @@ impl<'a> Checker<'a> {
                         self.check_expr(name_expr, locals, label);
                     }
                     ExprKind::New(..) => {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 "Cannot create callable from the new operator.".to_string(),
                                 self.expr_span(e.id),
@@ -7496,7 +7542,8 @@ impl<'a> Checker<'a> {
             } else {
                 "class constant access"
             };
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} target class {class} not found"),
                 self.expr_span(e.id),
                 0,
@@ -7524,7 +7571,8 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(|(_, sig)| sig.is_static());
             if !is_valid_static {
-                report!(self, 
+                report!(
+                    self,
                     format!("access to undefined static property {class}::${prop_name}"),
                     self.expr_span(e.id),
                     0,
@@ -7583,7 +7631,8 @@ impl<'a> Checker<'a> {
                         .class_constant_type(owner, member, constant_type)
                 });
             if const_ty.is_none() {
-                report!(self, 
+                report!(
+                    self,
                     format!("access to undefined constant {class}::{member}"),
                     self.expr_span(e.id),
                     0,

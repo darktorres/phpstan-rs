@@ -151,7 +151,8 @@ impl<'a> Checker<'a> {
                 let constant = this.inferred_constant_condition(cond, pass_locals);
                 condition_always_true = constant == Some(true);
                 if constant == Some(false) {
-                    report!(this, 
+                    report!(
+                        this,
                         "While loop condition is always false.".to_string(),
                         this.expr_span(cond.id),
                         4,
@@ -169,7 +170,8 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(ExitPoint::lets_a_loop_end)
         {
-            report!(self, 
+            report!(
+                self,
                 "While loop condition is always true.".to_string(),
                 self.expr_span(cond.id),
                 4,
@@ -315,7 +317,8 @@ impl<'a> Checker<'a> {
             .any(|point| matches!(point.kind, ExitKind::Break(_)));
         if self.inferred_constant_condition(cond, locals) == Some(false) {
             if !breaks {
-                report!(self, 
+                report!(
+                    self,
                     "Do-while loop condition is always false.".to_string(),
                     self.expr_span(cond.id),
                     4,
@@ -330,7 +333,8 @@ impl<'a> Checker<'a> {
                 syntax::visit::arena::body_contains_yield(arenas, std::slice::from_ref(&body.id))
             })
         {
-            report!(self, 
+            report!(
+                self,
                 "Do-while loop condition is always true.".to_string(),
                 self.expr_span(cond.id),
                 4,
@@ -609,7 +613,8 @@ impl<'a> Checker<'a> {
         // `DeadForeachRule` - skipped inside an enclosing loop, whose
         // earlier convergence passes can still see a not-yet-grown array.
         if self.loop_depth == 0 && subject_ty.is_empty_array().yes() {
-            report!(self, 
+            report!(
+                self,
                 "Empty array passed to foreach.".to_string(),
                 self.expr_span(subject.id),
                 4,
@@ -662,7 +667,9 @@ impl<'a> Checker<'a> {
                     };
                     if let Some(level) = self.failing_level(&subject_ty, 3, |m| foreachable(m).no())
                     {
-                        report!(self, format!(
+                        report!(
+                            self,
+                            format!(
                                 "Argument of an invalid type {subject_ty} supplied for foreach, only arrays and objects are supported."
                             ),
                             self.expr_span(subject.id),

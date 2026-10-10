@@ -1398,7 +1398,10 @@ impl<'a> Lexer<'a> {
             Some(found) => self.pos + found + 2,
             None => self.src.len(),
         };
-        crate::stats::add(crate::stats::Counter::DocBytesLexed, (self.pos - start) as u64);
+        crate::stats::add(
+            crate::stats::Counter::DocBytesLexed,
+            (self.pos - start) as u64,
+        );
         crate::stats::count(crate::stats::Counter::DocCommentsLexed);
         Token::DocComment(self.interner.str(&self.slice(start..self.pos)))
     }

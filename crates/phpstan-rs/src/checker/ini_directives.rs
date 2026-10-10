@@ -178,7 +178,9 @@ impl<'a> Checker<'a> {
                 } else {
                     "it always returns false"
                 };
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Call to {function}() with ini directive {directive}, removed in PHP {removed}; {outcome}."
                     ),
                     self.expr_span(value.id),
@@ -200,7 +202,8 @@ impl<'a> Checker<'a> {
                 } else {
                     "Ini directive"
                 };
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "Call to {function}(): {what} {directive} is deprecated since PHP {since}."
                     ),

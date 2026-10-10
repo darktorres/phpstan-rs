@@ -385,7 +385,9 @@ impl<'de> serde::Deserialize<'de> for Type {
 
             fn visit_u32<E: serde::de::Error>(self, index: u32) -> Result<Type, E> {
                 cache::type_at(index).unwrap_or_else(|| {
-                    Err(E::custom("a cache type index is read outside its file's types"))
+                    Err(E::custom(
+                        "a cache type index is read outside its file's types",
+                    ))
                 })
             }
         }

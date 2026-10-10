@@ -2220,7 +2220,8 @@ impl<'a> Checker<'a> {
         };
         let given = args.len() - 2;
         if specs.len() != given {
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "Call to {name}() contains {} placeholder(s), {given} value(s) given.",
                     specs.len()
@@ -2258,7 +2259,8 @@ impl<'a> Checker<'a> {
         if contains_flag_name_with_options(arenas, flags_arg.value, "FILTER_NULL_ON_FAILURE")
             && contains_flag_name_with_options(arenas, flags_arg.value, "FILTER_THROW_ON_FAILURE")
         {
-            report!(self, 
+            report!(
+                self,
                 "Cannot use both FILTER_NULL_ON_FAILURE and FILTER_THROW_ON_FAILURE.".to_string(),
                 span,
                 0,

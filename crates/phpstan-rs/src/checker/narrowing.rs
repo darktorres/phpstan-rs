@@ -1702,7 +1702,8 @@ impl<'a> Checker<'a> {
             AssertTarget::ThisSelf => "$this".to_string(),
             AssertTarget::ThisProp(prop) => format!("$this->{prop}"),
             AssertTarget::NotFound(name) => {
-                report!(self, 
+                report!(
+                    self,
                     format!("Assert references unknown parameter ${name}."),
                     span,
                     0,
@@ -1711,7 +1712,8 @@ impl<'a> Checker<'a> {
                 return;
             }
             AssertTarget::Unknown(raw) => {
-                report!(self, 
+                report!(
+                    self,
                     format!("Assert references unknown {raw}."),
                     span,
                     0,
@@ -1723,7 +1725,8 @@ impl<'a> Checker<'a> {
         let subject = format!("PHPDoc tag {tag_name} for {target_desc}");
         let class = self.current_class.clone();
         if self.type_node_unresolvable(&info.written_ty, class.as_deref()) {
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} contains unresolvable type."),
                 span,
                 2,
@@ -1765,18 +1768,24 @@ impl<'a> Checker<'a> {
             (is_disjoint, is_super)
         };
         if impossible {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} can never happen.",
-                    info.ty, param.ty()
+                    info.ty,
+                    param.ty()
                 ),
                 span,
                 0,
                 "assert.impossibleType",
             );
         } else if already_narrowed {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} does not narrow down the type.",
-                    info.ty, param.ty()
+                    info.ty,
+                    param.ty()
                 ),
                 span,
                 0,

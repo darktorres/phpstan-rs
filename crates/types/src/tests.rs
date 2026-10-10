@@ -18,6 +18,7 @@ mod mentions;
 mod narrowing;
 mod node_flags;
 mod parsing;
+mod relation_memo;
 mod reserved_type_words;
 mod shape_index;
 mod shape_relation;
@@ -25,7 +26,6 @@ mod shortcuts;
 mod subtyping;
 mod subtyping_properties;
 mod templates_and_substitution;
-mod relation_memo;
 mod union_many;
 mod unions;
 

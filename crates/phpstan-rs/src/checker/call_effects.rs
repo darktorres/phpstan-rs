@@ -45,9 +45,10 @@ pub(crate) struct OperationEffects {
 impl OperationEffects {
     /// The answers, emptied when they were made in another scope.
     fn in_scope(&mut self, class: Option<&str>, file: Option<FileId>, rebindable: bool) {
-        let same = self.scope.as_ref().is_some_and(|(c, f, r)| {
-            c.as_deref() == class && *f == file && *r == rebindable
-        });
+        let same = self
+            .scope
+            .as_ref()
+            .is_some_and(|(c, f, r)| c.as_deref() == class && *f == file && *r == rebindable);
         if !same {
             self.answers.clear();
             self.scope = Some((class.map(str::to_owned), file, rebindable));

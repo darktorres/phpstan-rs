@@ -140,7 +140,9 @@ impl<'a> Checker<'a> {
             .collect();
         names.sort();
         for name in names {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Variance annotation is only allowed for type parameters of classes and interfaces, but occurs in template type {name} in {kind_word} {label}()."
                 ),
                 span,

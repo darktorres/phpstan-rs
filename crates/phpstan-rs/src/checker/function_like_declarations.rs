@@ -451,7 +451,9 @@ impl<'a> Checker<'a> {
             if default_ty.is_mixed() || self.accepts(&param_ty, &default_ty).yes() {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Default value of the parameter #{} ${} ({default_ty}) of {kind} is incompatible with type {param_ty}.",
                     i + 1,
                     p.name,
@@ -535,7 +537,8 @@ impl<'a> Checker<'a> {
     }
 
     fn report_declaration(&mut self, message: &str, span: Span, identifier: &'static str) {
-        report_builder!(self, 
+        report_builder!(
+            self,
             DiagnosticBuilder::new(message.to_string(), span, 0, identifier).non_ignorable(),
         );
     }

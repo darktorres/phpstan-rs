@@ -882,32 +882,25 @@ impl Registry {
         id: ClassId,
         iface: &Name,
     ) -> Option<Vec<Type>> {
-        if let Some(args) = self
-            .deferred_class_result(id)
-            .and_then(|results| {
-                results
-                    .types
-                    .implements_args
-                    .iter()
-                    .rev()
-                    .find(|(name, _)| name == iface)
-                    .map(|(_, args)| args.clone())
-            })
-        {
+        if let Some(args) = self.deferred_class_result(id).and_then(|results| {
+            results
+                .types
+                .implements_args
+                .iter()
+                .rev()
+                .find(|(name, _)| name == iface)
+                .map(|(_, args)| args.clone())
+        }) {
             return Some(args);
         }
-        if let Some(args) = self
-            .class_type_results
-            .get(&id)
-            .and_then(|results| {
-                results
-                    .implements_args
-                    .iter()
-                    .rev()
-                    .find(|(name, _)| name == iface)
-                    .map(|(_, args)| args.clone())
-            })
-        {
+        if let Some(args) = self.class_type_results.get(&id).and_then(|results| {
+            results
+                .implements_args
+                .iter()
+                .rev()
+                .find(|(name, _)| name == iface)
+                .map(|(_, args)| args.clone())
+        }) {
             return Some(args);
         }
         self.class_by_id(id)

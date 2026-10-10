@@ -54,7 +54,8 @@ impl<'a> Checker<'a> {
         ] {
             for name in &names {
                 let Some(i) = params.iter().position(|p| *p.name == **name) else {
-                    report!(self, 
+                    report!(
+                        self,
                         format!("PHPDoc tag {tag} references unknown parameter: ${name}"),
                         f.name.span,
                         2,
@@ -71,7 +72,8 @@ impl<'a> Checker<'a> {
                     nodes.params.get(name.as_str())
                 };
                 if node.is_some_and(|n| self.type_node_unresolvable(n, class_name)) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "PHPDoc tag {tag} for parameter ${name} contains unresolvable type."
                         ),
@@ -83,7 +85,8 @@ impl<'a> Checker<'a> {
                 }
                 let doc_ty = if tag == "@param-out" {
                     if !param.by_ref {
-                        report!(self, 
+                        report!(
+                            self,
                             format!(
                                 "Parameter ${name} for PHPDoc tag {tag} is not passed by reference."
                             ),
@@ -136,7 +139,8 @@ impl<'a> Checker<'a> {
             .as_ref()
             .is_some_and(|n| self.type_node_unresolvable(n, class_name))
         {
-            report!(self, 
+            report!(
+                self,
                 "PHPDoc tag @return contains unresolvable type.".to_string(),
                 f.name.span,
                 2,
@@ -415,7 +419,8 @@ impl<'a> Checker<'a> {
         for (name, span, description, node) in entries {
             let subject = format!("{description} for property {fqn}::${name}");
             if node.is_some_and(|n| self.type_node_unresolvable(&n, Some(fqn))) {
-                report!(self, 
+                report!(
+                    self,
                     format!("{subject} contains unresolvable type."),
                     span,
                     2,
@@ -498,13 +503,15 @@ impl<'a> Checker<'a> {
                             &phpdoc::grammar::TypeNode::Identifier(subject.to_string()),
                             "conditional return subject",
                         );
-                        report!(self, format!(
-                            "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
-                        ),
-                        f.name.span,
-                        2,
-                        "conditionalType.subjectNotFound",
-                    );
+                        report!(
+                            self,
+                            format!(
+                                "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
+                            ),
+                            f.name.span,
+                            2,
+                            "conditionalType.subjectNotFound",
+                        );
                         continue;
                     }
                     match inherited {
@@ -516,14 +523,15 @@ impl<'a> Checker<'a> {
                     match sig.params().iter().find(|p| p.name() == subject) {
                         Some(p) => p.ty().clone(),
                         None => {
-                            report!(self, 
-                            format!(
-                                "Conditional return type references unknown parameter ${subject}."
-                            ),
-                            f.name.span,
-                            2,
-                            "parameter.notFound",
-                        );
+                            report!(
+                                self,
+                                format!(
+                                    "Conditional return type references unknown parameter ${subject}."
+                                ),
+                                f.name.span,
+                                2,
+                                "parameter.notFound",
+                            );
                             continue;
                         }
                     }
@@ -540,7 +548,9 @@ impl<'a> Checker<'a> {
             };
             let always = holds != negated;
             let word = if negated { "is not" } else { "is" };
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "Condition \"{subject_ty} {word} {target}\" in conditional return type is always {always}."
                 ),
                 f.name.span,
@@ -582,7 +592,8 @@ impl<'a> Checker<'a> {
         if !unresolvable
             && self.registry.is_super_type_of(&class_ty, &resolved) != TrinaryLogic::Yes
         {
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "Self-out type {resolved} of method {class}::{} is not subtype of {class}.",
                     f.name
@@ -593,7 +604,9 @@ impl<'a> Checker<'a> {
             );
         }
         if is_static {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "PHPDoc tag @phpstan-self-out is not supported above static method {class}::{}().",
                     f.name
                 ),
@@ -603,7 +616,9 @@ impl<'a> Checker<'a> {
             );
         }
         if unresolvable {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "PHPDoc tag @phpstan-self-out for method {class}::{}() contains unresolvable type.",
                     f.name
                 ),
@@ -634,7 +649,8 @@ impl<'a> Checker<'a> {
         if !doc.contains("var") || super::phpdoc_unresolvable::var_tag_nodes(doc).is_empty() {
             return;
         }
-        report!(self, 
+        report!(
+            self,
             format!("PHPDoc tag @var above {description} has no effect."),
             span,
             2,
@@ -673,7 +689,8 @@ impl<'a> Checker<'a> {
             TrinaryLogic::No => "is incompatible with",
             TrinaryLogic::Maybe => "is not subtype of",
         };
-        report!(self, 
+        report!(
+            self,
             format!("{subject} with type {doc_ty} {verdict} native type {native}."),
             span,
             2,

@@ -18,7 +18,8 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        report!(self, 
+        report!(
+            self,
             format!("cannot instantiate class using {ty}"),
             span,
             level,
@@ -34,7 +35,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let Some(class) = self.current_class.clone() else {
-            report!(self, 
+            report!(
+                self,
                 format!("using {name} outside of class scope"),
                 span,
                 0,
@@ -53,7 +55,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let method = self.current_method.clone().unwrap_or_default();
-        report!(self, 
+        report!(
+            self,
             format!("{class}::{method}() calls new parent but {class} does not extend any class"),
             span,
             0,
@@ -91,7 +94,8 @@ impl<'a> Checker<'a> {
         let is_abstract = info.is_abstract();
         match kind {
             ClassKind::Trait => {
-                report!(self, 
+                report!(
+                    self,
                     format!("cannot instantiate trait {class}"),
                     span,
                     0,
@@ -100,7 +104,8 @@ impl<'a> Checker<'a> {
                 return false;
             }
             ClassKind::Enum => {
-                report!(self, 
+                report!(
+                    self,
                     format!("cannot instantiate enum {class}"),
                     span,
                     0,
@@ -109,7 +114,8 @@ impl<'a> Checker<'a> {
                 return false;
             }
             ClassKind::Interface if !is_static => {
-                report!(self, 
+                report!(
+                    self,
                     format!("cannot instantiate interface {class}"),
                     span,
                     0,
@@ -138,7 +144,9 @@ impl<'a> Checker<'a> {
             .map(|(owner, sig)| (owner, sig.visibility()))
         else {
             if has_args && !self.registry.has_unresolvable_ancestor(class) {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "class {class} does not have a constructor and must be instantiated without any parameters"
                     ),
                     span,
@@ -154,7 +162,8 @@ impl<'a> Checker<'a> {
             Visibility::Protected => "protected",
         };
         if !self.is_member_access_visible(&owner, &visibility, "__construct", "method") {
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "cannot instantiate class {class} via {word} constructor {owner}::__construct()"
                 ),
@@ -184,13 +193,17 @@ impl<'a> Checker<'a> {
         };
         let is_abstract = info.is_abstract();
         if !info.is_final() && !info.is_final_by_phpdoc() && self.new_static_is_unsafe(&class) {
-            report_builder!(self, 
-                DiagnosticBuilder::new("unsafe usage of new static()".to_string(),
+            report_builder!(
+                self,
+                DiagnosticBuilder::new(
+                    "unsafe usage of new static()".to_string(),
                     span,
                     0,
                     "new.static",
                 )
-                .tip("See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static"),
+                .tip(
+                    "See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static"
+                ),
             );
         }
         let Some(method) = self.current_method.clone() else {

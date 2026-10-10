@@ -1,5 +1,5 @@
-use crate::relation::memo;
 use crate::relation::Relation;
+use crate::relation::memo;
 use crate::{AccessoryKind, Repr, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 

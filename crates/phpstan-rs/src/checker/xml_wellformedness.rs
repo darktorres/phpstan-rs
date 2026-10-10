@@ -43,7 +43,11 @@ impl<'a> Checker<'a> {
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
             && let Some(detail) = is_well_formed_xml(xml)
         {
-            report!(self, format!("SimpleXMLElement constructor argument is not well-formed XML ({detail}) and will throw at runtime"),
+            report!(
+                self,
+                format!(
+                    "SimpleXMLElement constructor argument is not well-formed XML ({detail}) and will throw at runtime"
+                ),
                 span,
                 0,
                 "argument.type",
@@ -80,7 +84,11 @@ impl<'a> Checker<'a> {
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
             && let Some(detail) = is_well_formed_xml(xml)
         {
-            report!(self, format!("simplexml_load_string() argument is not well-formed XML ({detail}) and will return false at runtime"),
+            report!(
+                self,
+                format!(
+                    "simplexml_load_string() argument is not well-formed XML ({detail}) and will return false at runtime"
+                ),
                 span,
                 0,
                 "argument.type",

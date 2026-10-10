@@ -3,8 +3,8 @@
 //! `ClassHierarchy`.
 
 mod accepts;
-pub(crate) mod memo;
 mod kinds;
+pub(crate) mod memo;
 mod super_type;
 
 pub use accepts::{MAX_RULE_LEVEL, UNCONFIGURED_RULE_LEVEL, strict_mixed_receiver_from};

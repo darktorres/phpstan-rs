@@ -164,7 +164,8 @@ impl<'a> Checker<'a> {
         if guarded(bare) || guarded(primary) || fallback.is_some_and(guarded) {
             return;
         }
-        report!(self, 
+        report!(
+            self,
             format!("Constant {bare} not found."),
             span,
             1,
@@ -201,7 +202,8 @@ impl<'a> Checker<'a> {
             ),
             _ => return,
         };
-        report!(self, 
+        report!(
+            self,
             format!("Magic constant {upper} {message}."),
             span,
             0,
@@ -236,7 +238,9 @@ impl<'a> Checker<'a> {
             Some(class) => format!("{class}::{name}"),
             None => name.trim_start_matches('\\').to_string(),
         };
-        report!(self, format!(
+        report!(
+            self,
+            format!(
                 "Configuration defined type for constant {display} ({configured}) does not accept value {value}."
             ),
             span,
@@ -302,7 +306,8 @@ impl<'a> Checker<'a> {
         let Some(level) = self.failing_level(name_ty, 0, |m| !m.is_string().yes()) else {
             return;
         };
-        report!(self, 
+        report!(
+            self,
             format!("Class constant name in dynamic fetch can only be a string, {name_ty} given."),
             span,
             level,

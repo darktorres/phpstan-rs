@@ -75,7 +75,8 @@ impl<'a> Checker<'a> {
                     self.static_method_through_instance(receiver, method, locals)
                 })
             {
-                report!(self, 
+                report!(
+                    self,
                     format!("Dynamic call to static method {owner}::{name}()."),
                     self.expr_span(e.id),
                     0,
@@ -155,7 +156,8 @@ impl<'a> Checker<'a> {
                     } else {
                         "does not exist"
                     };
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "Implicit array creation is not allowed - variable ${name} {certainty}."
                     ),
@@ -170,7 +172,8 @@ impl<'a> Checker<'a> {
                 ExprKind::MethodCall(_, method, _, _)
                     if syntax::ast::is_constructor_name(method) =>
                 {
-                    report!(self, 
+                    report!(
+                        self,
                         "Call to __construct() on an existing object is not allowed.".to_string(),
                         self.expr_span(e.id),
                         0,
@@ -210,7 +213,8 @@ impl<'a> Checker<'a> {
                 };
                 let ty = self.infer_expr(operand, locals);
                 if !self.valid_operand(&ty, valid) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!(
                             "Only numeric types are allowed in {name}, {} given.",
                             ty.describe_type_only()
@@ -243,7 +247,8 @@ impl<'a> Checker<'a> {
         }
         for (ty, side) in [(&left_ty, "left"), (&right_ty, "right")] {
             if !self.valid_operand(ty, Operand::Arithmetic) {
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "Only numeric types are allowed in {sigil}, {} given on the {side} side.",
                         ty.describe_type_only()
@@ -354,7 +359,8 @@ impl<'a> Checker<'a> {
             }
             self.report_builder(builder);
         } else if !self.is_comparable_together(&left, &right) {
-            report!(self, 
+            report!(
+                self,
                 format!("Cannot compare different types in {l_text} {sigil} {r_text}."),
                 span,
                 0,
@@ -481,7 +487,8 @@ impl<'a> Checker<'a> {
             } else {
                 ("nonArrayOperand", "non-array")
             };
-            report!(self, 
+            report!(
+                self,
                 format!(
                     "{kind} ({one}) in combination with {capitalized} ({other}) is not allowed."
                 ),
@@ -556,7 +563,9 @@ impl<'a> Checker<'a> {
         } else {
             return;
         };
-        report!(self, format!(
+        report!(
+            self,
+            format!(
                 "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics ({} given).",
                 callback_ty.describe_type_only()
             ),
@@ -594,7 +603,8 @@ impl<'a> Checker<'a> {
         if expr.is_never() || self.registry.is_super_type_of(cast, expr) != TrinaryLogic::Yes {
             return;
         }
-        report!(self, 
+        report!(
+            self,
             format!(
                 "Casting to {} something that's already {}.",
                 cast.describe_type_only(),
@@ -752,7 +762,9 @@ impl<'a> Checker<'a> {
                 if self.registry.is_super_type_of(&subject_ty, &case_ty) != TrinaryLogic::No {
                     continue;
                 }
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Switch condition type ({subject_ty}) does not match case condition {} ({}).",
                         syntax::printer::print_expr(arenas, test),
                         case_ty.describe_type_only()

@@ -367,7 +367,8 @@ impl<'a> Checker<'a> {
             "{verb_phrase} internal {} {class}.",
             type_word.to_lowercase()
         );
-        report!(self, 
+        report!(
+            self,
             message,
             span,
             0,
@@ -448,7 +449,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let type_word = class_type_word(info.kind());
-        report!(self, 
+        report!(
+            self,
             format!(
                 "{subject} {fqn} {verb} internal {} {target}.",
                 type_word.to_lowercase()
@@ -467,7 +469,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let type_word = class_type_word(info.kind());
-        report!(self, 
+        report!(
+            self,
             format!(
                 "Usage of internal {} {target} in class {fqn}.",
                 type_word.to_lowercase()
@@ -562,7 +565,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let type_word = class_type_word(info.kind());
-        report!(self, 
+        report!(
+            self,
             format!(
                 "{subject} of {context} has typehint with internal {} {class}.",
                 type_word.to_lowercase()

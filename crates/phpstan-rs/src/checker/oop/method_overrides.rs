@@ -161,7 +161,9 @@ impl<'a> Checker<'a> {
 
         for (owner, parent_throws) in ancestors {
             if parent_throws.is_void() {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Method {fqn}::{method_name}() should not throw {own_throws} because parent method {owner}::{method_name}() has PHPDoc tag @throws void."
                     ),
                     span,
@@ -173,7 +175,9 @@ impl<'a> Checker<'a> {
             if self.accepts(&parent_throws, &own_throws).yes() {
                 continue;
             }
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "PHPDoc tag @throws type {own_throws} of method {fqn}::{method_name}() should be covariant with PHPDoc @throws type {parent_throws} of method {owner}::{method_name}()."
                 ),
                 span,
@@ -226,7 +230,8 @@ impl<'a> Checker<'a> {
             if is_by_phpdoc {
                 report!(self, message, span, 0, identifier);
             } else {
-                report_builder!(self, 
+                report_builder!(
+                    self,
                     DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable(),
                 );
             }
@@ -242,21 +247,21 @@ impl<'a> Checker<'a> {
             .find_case_mismatched_ancestor_method(fqn, method_name)
         {
             if self.shows_level(4) {
-            let mut builder = DiagnosticBuilder::new(
-                format!(
-                    "Method {fqn}::{method_name}() overrides {ancestor_owner}::{ancestor_name}() with different letter casing"
-                ),
-                span,
-                4,
-                "method.nameCase",
-            );
-            if let Some(decl) = decl
-                && let Some((span, replacement, description)) =
-                    Self::name_case_fix(method_name, &ancestor_name, decl.name)
-            {
-                builder = builder.fix(span, replacement, description);
-            }
-            self.report_builder(builder);
+                let mut builder = DiagnosticBuilder::new(
+                    format!(
+                        "Method {fqn}::{method_name}() overrides {ancestor_owner}::{ancestor_name}() with different letter casing"
+                    ),
+                    span,
+                    4,
+                    "method.nameCase",
+                );
+                if let Some(decl) = decl
+                    && let Some((span, replacement, description)) =
+                        Self::name_case_fix(method_name, &ancestor_name, decl.name)
+                {
+                    builder = builder.fix(span, replacement, description);
+                }
+                self.report_builder(builder);
             } else {
                 self.note_below_level();
             }
@@ -445,7 +450,9 @@ impl<'a> Checker<'a> {
                 Visibility::Private => false,
             };
         if narrows_visibility {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{fqn}::{method_name}() overriding {} method {ancestor_owner}::{method_name}() must not reduce visibility",
                     visibility_word(&ancestor_sig.visibility()),
                 ),
@@ -464,7 +471,9 @@ impl<'a> Checker<'a> {
                 // parameter the variadic swallows) than this project
                 // attempts here.
                 if !ancestor_param.variadic() {
-                    report!(self, format!(
+                    report!(
+                        self,
+                        format!(
                             "{fqn}::{method_name}() overrides {ancestor_owner}::{method_name}() but misses parameter #{} (${})",
                             i + 1,
                             ancestor_param.name()
@@ -483,7 +492,9 @@ impl<'a> Checker<'a> {
             // type being `Mixed` the way the narrowing check below is -
             // this is about arity/callability, not type compatibility.
             if ancestor_param.has_default() && !own_param.has_default() && !own_param.variadic() {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Parameter #{} (${}) of {fqn}::{method_name}() is required but parameter #{} (${}) of {ancestor_owner}::{method_name}() is optional",
                         i + 1,
                         own_param.name(),
@@ -534,10 +545,14 @@ impl<'a> Checker<'a> {
             // widened to variadic on override) is real, legal PHP, so
             // only this direction is checked.
             if ancestor_param.variadic() && !own_param.variadic() {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Parameter #{} (${}) of {fqn}::{method_name}() is not variadic but parameter #{} (${}) of {ancestor_owner}::{method_name}() is variadic",
-                        i + 1, own_param.name(),
-                        i + 1, ancestor_param.name()
+                        i + 1,
+                        own_param.name(),
+                        i + 1,
+                        ancestor_param.name()
                     ),
                     span,
                     0,
@@ -603,13 +618,19 @@ impl<'a> Checker<'a> {
             let ancestor_ty =
                 self.resolve_pseudo(ancestor_param.ty_native(), ancestor_pseudo_owner);
             if !self.accepts(&own_ty, &ancestor_ty).yes() {
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
                         i + 1,
                         own_param.name(),
                         own_ty,
                         ancestor_ty
-                    ), span, 0, "method.childParameterType");
+                    ),
+                    span,
+                    0,
+                    "method.childParameterType"
+                );
             }
         }
         // An ancestor's `static`-typed return (`self.registry` has no
@@ -691,10 +712,17 @@ impl<'a> Checker<'a> {
                 )
                 .yes()
         {
-            report!(self, format!(
+            report!(
+                self,
+                format!(
                     "{fqn}::{method_name}() return type {} is not compatible with the inherited return type {}",
-                    own_sig.return_type(), ancestor_sig.return_type()
-                ), span, 0, "method.childReturnType");
+                    own_sig.return_type(),
+                    ancestor_sig.return_type()
+                ),
+                span,
+                0,
+                "method.childReturnType"
+            );
         }
     }
 }

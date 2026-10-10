@@ -104,7 +104,8 @@ impl<'a> Checker<'a> {
             if is_used {
                 continue;
             }
-            report!(self, 
+            report!(
+                self,
                 format!("{subject} has {declared} in PHPDoc @throws tag but it's not thrown."),
                 span,
                 2,

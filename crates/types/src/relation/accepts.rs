@@ -33,8 +33,8 @@ impl Relation<'_> {
         let found = if accepting.node_address() == accepted.node_address() {
             None
         } else if let Some(generation) = self.hierarchy.generation() {
-            let settings =
-                u8::from(self.strict_mixed_arrays) | u8::from(self.check_benevolent_union_types) << 1;
+            let settings = u8::from(self.strict_mixed_arrays)
+                | u8::from(self.check_benevolent_union_types) << 1;
             memo::rejection(generation, accepting, accepted, settings, || {
                 self.rejected_from_type(accepted, accepting)
             })

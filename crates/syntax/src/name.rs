@@ -150,8 +150,7 @@ impl CacheNameTable {
     /// Keeps `extension` beside the names, for `current_cache_extension`. A
     /// value of the same type that was kept before is replaced.
     pub fn set_extension<T: std::any::Any + Send + Sync>(&mut self, extension: Arc<T>) {
-        self.extensions
-            .retain(|kept| !(**kept).is::<T>());
+        self.extensions.retain(|kept| !(**kept).is::<T>());
         self.extensions.push(extension);
     }
 

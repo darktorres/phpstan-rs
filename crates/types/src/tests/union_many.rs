@@ -180,10 +180,7 @@ fn many_shapes_over_few_keys_merge_as_the_pairwise_loops_do() {
     use proptest::test_runner::{Config, TestRng, TestRunner};
     let keys = vec!["a", "b", "c", "d", "e"];
     let shape = (
-        prop::collection::vec(
-            (prop::sample::select(keys), scalar(), any::<bool>()),
-            0..4,
-        ),
+        prop::collection::vec((prop::sample::select(keys), scalar(), any::<bool>()), 0..4),
         any::<bool>(),
     )
         .prop_map(|(fields, sealed)| {
@@ -245,7 +242,17 @@ fn a_long_union_keeps_each_member_once_in_the_order_it_met_them() {
 
 #[test]
 fn a_shape_key_from_a_type_and_by_name_is_the_key_of_its_text() {
-    for text in ["0", "7", "-3", "01", "-0", "a", "", "9223372036854775808", "é"] {
+    for text in [
+        "0",
+        "7",
+        "-3",
+        "01",
+        "-0",
+        "a",
+        "",
+        "9223372036854775808",
+        "é",
+    ] {
         let from_type = ShapeKey::from_type(&Type::string_literal(text.into()));
         assert_eq!(from_type, Some(ShapeKey::from_name(text)), "{text:?}");
         for other in ["0", "7", "-3", "a", ""] {

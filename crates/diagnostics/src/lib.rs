@@ -207,7 +207,11 @@ impl LevelCutoff {
 
     /// Whether a report at this cutoff shows `diagnostic`.
     pub fn reports(&self, diagnostic: &Diagnostic) -> bool {
-        self.admits(diagnostic.level, diagnostic.found_from, diagnostic.found_below)
+        self.admits(
+            diagnostic.level,
+            diagnostic.found_from,
+            diagnostic.found_below,
+        )
     }
 
     /// Whether a report at this cutoff shows a finding with these levels.

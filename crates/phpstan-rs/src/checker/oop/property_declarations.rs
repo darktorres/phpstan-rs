@@ -368,12 +368,15 @@ impl<'a> Checker<'a> {
             return;
         };
         if doc.readonly && !doc.allow_private_mutation && view.has_default {
-            report_builder!(self, DiagnosticBuilder::new(
-                "@readonly property cannot have a default value.".to_string(),
-                view.span,
-                0,
-                "property.readOnlyByPhpDocDefaultValue",
-            ));
+            report_builder!(
+                self,
+                DiagnosticBuilder::new(
+                    "@readonly property cannot have a default value.".to_string(),
+                    view.span,
+                    0,
+                    "property.readOnlyByPhpDocDefaultValue",
+                )
+            );
         }
     }
 
@@ -383,6 +386,9 @@ impl<'a> Checker<'a> {
         span: Span,
         identifier: &'static str,
     ) {
-        report_builder!(self, DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
+        report_builder!(
+            self,
+            DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable()
+        );
     }
 }

@@ -59,7 +59,8 @@ impl<'a> Checker<'a> {
                 let fqn = import.path.trim_start_matches('\\');
                 match self.registry.lookup_function_with_name(fqn) {
                     None => {
-                        report!(self, 
+                        report!(
+                            self,
                             format!("used function {fqn} not found"),
                             self.stmt_span(stmt.id),
                             0,
@@ -130,7 +131,8 @@ impl<'a> Checker<'a> {
                 }
                 let fqn = import.path.trim_start_matches('\\');
                 if !self.registry.global_constants().contains_key(fqn) {
-                    report!(self, 
+                    report!(
+                        self,
                         format!("used constant {fqn} not found"),
                         self.stmt_span(stmt.id),
                         0,
@@ -181,7 +183,8 @@ impl<'a> Checker<'a> {
                 let path = import.path.trim_start_matches('\\');
                 for (project, prefix) in INTERNAL_CLASS_PREFIXES {
                     if path.starts_with(prefix) {
-                        report_builder!(self, 
+                        report_builder!(
+                            self,
                             DiagnosticBuilder::new(
                                 format!("Referencing prefixed {project} class: {path}."),
                                 self.stmt_span(stmt.id),

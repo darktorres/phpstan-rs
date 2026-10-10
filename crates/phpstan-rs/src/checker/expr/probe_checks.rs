@@ -92,7 +92,8 @@ impl<'a> Checker<'a> {
                                 || self.registry.lookup_property(c, prop).is_some()
                                 || self.registry.lookup_method(c, "__get").is_some()
                         }) {
-                            report!(self, 
+                            report!(
+                                self,
                                 format!("access to undefined property {base_ty}::${prop}"),
                                 self.expr_span(e.id),
                                 2,
@@ -168,7 +169,8 @@ impl<'a> Checker<'a> {
         let Some(verdict) = verdict_fn(ty) else {
             return;
         };
-        report!(self, 
+        report!(
+            self,
             format!("Variable ${name} {operator_description} always exists and {verdict}."),
             self.expr_span(e.id),
             0,
@@ -230,7 +232,8 @@ impl<'a> Checker<'a> {
                     // through a `Union`, recursively), this just asks it
                     // twice rather than duplicating its own logic.
                     if base_ty.with_key_presence(&shape_key, true).is_never() {
-                        report!(self, 
+                        report!(
+                            self,
                             format!(
                                 "Offset '{key}' on {base_ty} {operator_description} does not exist."
                             ),
@@ -321,7 +324,9 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 let base_ty = self.infer_expr(base, locals);
-                report!(self, format!(
+                report!(
+                    self,
+                    format!(
                         "Offset '{key}' on {base_ty} {operator_description} always exists and {verdict}."
                     ),
                     self.expr_span(e.id),
@@ -345,7 +350,8 @@ impl<'a> Checker<'a> {
                     .find_property_owner(&base_ty, prop)
                     .map(|(owner, _)| owner)
                     .unwrap_or_else(|| base_ty.to_string().into());
-                report!(self, 
+                report!(
+                    self,
                     format!(
                         "Property {owner}::${prop} ({leaf_ty}) {operator_description} {verdict}."
                     ),
@@ -410,13 +416,18 @@ impl<'a> Checker<'a> {
         } else {
             "notEqual"
         };
-        report!(self, format!(
+        report!(
+            self,
+            format!(
                 "Loose comparison using {sigil} between {l_ty} and {r_ty} will always evaluate to {}.",
                 if outcome { "true" } else { "false" }
             ),
             span,
             4,
-            format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
+            format!(
+                "{rule_name}.always{}",
+                if outcome { "True" } else { "False" }
+            ),
         );
     }
 
@@ -493,13 +504,18 @@ impl<'a> Checker<'a> {
         } else {
             "notIdentical"
         };
-        report!(self, format!(
+        report!(
+            self,
+            format!(
                 "Strict comparison using {sigil} between {l_ty} and {r_ty} will always evaluate to {}.",
                 if outcome { "true" } else { "false" }
             ),
             span,
             4,
-            format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
+            format!(
+                "{rule_name}.always{}",
+                if outcome { "True" } else { "False" }
+            ),
         );
     }
 
@@ -565,7 +581,8 @@ impl<'a> Checker<'a> {
             OrderingOp::LtEq => "<=",
             OrderingOp::GtEq => ">=",
         };
-        report!(self, 
+        report!(
+            self,
             format!(
                 "Comparison operation \"{sigil}\" between {l_ty} and {r_ty} is always {}.",
                 if outcome { "true" } else { "false" }
@@ -639,14 +656,16 @@ impl<'a> Checker<'a> {
             locals,
         );
         if !outcome {
-            report!(self, 
+            report!(
+                self,
                 format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
                 span,
                 4,
                 "function.impossibleType",
             );
         } else if !is_exempt_last_condition {
-            report!(self, 
+            report!(
+                self,
                 format!("Call to function {name}() with {arg_ty} will always evaluate to true."),
                 span,
                 4,
