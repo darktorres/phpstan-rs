@@ -101,7 +101,7 @@ impl<'a> Checker<'a> {
     ) {
         let ty = self.infer_expr(operand, locals);
         if is_nullable(&ty) {
-            self.report(
+            report!(self, 
                 format!("A possibly-null value ({ty}) is silently coerced {context}."),
                 self.expr_span(operand.id),
                 0,
@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "instanceof"
                 };
-                self.report(
+                report!(self, 
                     format!("{which}() on an object ({ty}) says less than {instead}."),
                     self.expr_span(operand.id),
                     0,
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
                 } else {
                     ("!==", "!")
                 };
-                self.report(format!(
+                report!(self, format!(
                         "{operator} between {class} objects compares identity; {class} defines equals() to compare values, use {negation}{}->equals({}).",
                         syntax::printer::print_expr(
                             arenas,
@@ -268,7 +268,7 @@ impl<'a> Checker<'a> {
                     .expect("match default body belongs to its retained file owner")
             }) && let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals))
             {
-                self.report(format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),
+                report!(self, format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),
                     self.expr_span(default.id),
                     0,
                     "match.enumDefault",
@@ -292,7 +292,7 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 if let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals)) {
-                    self.report(format!("switch over enum {enum_name}; a match would be checked for exhaustiveness."),
+                    report!(self, format!("switch over enum {enum_name}; a match would be checked for exhaustiveness."),
                         self.stmt_span(stmt.id),
                         0,
                         "enum.switch",
@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
                 if compared.len() >= 2 && compared.windows(2).all(|w| w[0] == w[1]) {
                     self.enum_chain_tails.extend(chain_ifs);
                     let enum_name = &compared[0].1;
-                    self.report(format!("if/elseif chain over cases of enum {enum_name}; a match would be checked for exhaustiveness."),
+                    report!(self, format!("if/elseif chain over cases of enum {enum_name}; a match would be checked for exhaustiveness."),
                         self.stmt_span(stmt.id),
                         0,
                         "enum.ifChain",

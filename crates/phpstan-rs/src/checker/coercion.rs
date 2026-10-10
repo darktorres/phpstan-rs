@@ -26,7 +26,7 @@ impl<'a> Checker<'a> {
         if result.is_some() {
             return;
         }
-        self.report(
+        report!(self, 
             format!("Cannot cast {inner_ty} to {target_name}."),
             span,
             2,
@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(
                 "The (unset) cast is no longer supported in PHP 8.0 and later.".to_string(),
                 span,
@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(
                 "The (real) cast has been removed, use (float) instead.".to_string(),
                 span,
@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
             .php_supports_everywhere(types::php_version::PhpFeature::VoidCast)
             == Some(false)
         {
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new(
                     "The (void) cast is supported only on PHP 8.5 and later.".to_string(),
                     span,
@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
         if is_bare_statement {
             return;
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(
                 "The (void) cast cannot be used within an expression.".to_string(),
                 span,
@@ -134,7 +134,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let (spelling, canonical) = (cast.keyword(), cast.kind().keyword());
-        self.report(format!(
+        report!(self, format!(
                 "Non-standard ({spelling}) cast is deprecated in PHP 8.5. Use ({canonical}) instead."
             ),
             span,
@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report(
+        report!(self, 
             "Backtick operator is deprecated in PHP 8.5. Use shell_exec() function call instead."
                 .to_string(),
             span,
@@ -169,7 +169,7 @@ impl<'a> Checker<'a> {
         if expr_ty.to_string_type(self.registry).is_some() {
             return;
         }
-        self.report(
+        report!(self, 
             format!(
                 "Parameter #{} ({expr_ty}) of echo cannot be converted to string.",
                 position + 1
@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
         if expr_ty.to_string_type(self.registry).is_some() {
             return;
         }
-        self.report(
+        report!(self, 
             format!("Parameter {expr_ty} of print cannot be converted to string."),
             span,
             2,

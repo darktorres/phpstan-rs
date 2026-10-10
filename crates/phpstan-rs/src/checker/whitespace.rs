@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
                 })
                 .unwrap_or((false, false));
             if has_bom {
-                self.report("File begins with UTF-8 BOM character. This may cause problems when running the code in the web browser."
+                report!(self, "File begins with UTF-8 BOM character. This may cause problems when running the code in the web browser."
                         .to_string(),
                     arenas.stmt_span(first.id).expect("first statement has a parallel span"),
                     0,
@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if starts_with_whitespace {
-                self.report("File begins with whitespace before the opening <?php tag. This may cause problems when running the code in the web browser."
+                report!(self, "File begins with whitespace before the opening <?php tag. This may cause problems when running the code in the web browser."
                         .to_string(),
                     arenas.stmt_span(first.id).expect("first statement has a parallel span"),
                     0,
@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             reported.push(end_id);
-            self.report("File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace."
+            report!(self, "File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace."
                     .to_string(),
                 arenas.stmt_span(end.id).expect("HTML statement has a parallel span"),
                 0,

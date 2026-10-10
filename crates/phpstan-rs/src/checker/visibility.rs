@@ -117,7 +117,7 @@ impl<'a> Checker<'a> {
         if self.is_member_access_visible(owner, visibility, member_name, kind) {
             return;
         }
-        self.report(
+        report!(self, 
             format!("access to {word} {member}"),
             span,
             0,
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
         if is_final {
             return;
         }
-        self.report(
+        report!(self, 
             format!("unsafe {verb} to private {noun} {owner}::{member_display} through static::"),
             span,
             0,

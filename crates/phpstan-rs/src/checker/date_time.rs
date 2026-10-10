@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
             if validate_date_time_string(&spec) != Some(false) {
                 continue;
             }
-            self.report(format!(
+            report!(self, format!(
                     "{class}::__construct() date string '{spec}' is malformed and will throw at runtime"
                 ),
                 span,

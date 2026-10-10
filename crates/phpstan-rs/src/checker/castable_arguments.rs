@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
         let Some(level) = self.failing_level(&element_ty, 5, |m| !castable(m)) else {
             return;
         };
-        self.report(
+        report!(self, 
             format!(
                 "Parameter {param_name} of function {function} expects {}, {array_ty} given.",
                 cast.expectation()
@@ -273,7 +273,7 @@ impl<'a> Checker<'a> {
         let Some(level) = self.failing_level(&key_ty, 3, |m| m.is_string().yes()) else {
             return;
         };
-        self.report(
+        report!(self, 
             format!(
                 "Array unpacking cannot be used on an array with {}string keys: {value_ty}",
                 if level == 3 { "" } else { "potential " }

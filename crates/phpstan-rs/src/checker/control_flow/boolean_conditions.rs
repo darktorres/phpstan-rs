@@ -92,7 +92,7 @@ impl<'a> Checker<'a> {
         };
         let symbol = crate::checker::binop_sigil(op);
         if let Some(value) = self.inferred_constant_condition(l, locals) {
-            self.report(
+            report!(self, 
                 format!(
                     "Left side of {symbol} is always {}.",
                     if value { "true" } else { "false" }
@@ -108,7 +108,7 @@ impl<'a> Checker<'a> {
         let mut narrowed = locals.clone();
         self.apply_narrowing(l, &mut narrowed, is_and);
         if let Some(value) = self.inferred_constant_condition(r, &narrowed) {
-            self.report(
+            report!(self, 
                 format!(
                     "Right side of {symbol} is always {}.",
                     if value { "true" } else { "false" }
@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
         // return `None`.
         let whole_value = self.infer_expr(whole, locals).bool_literal_value();
         if let Some(value) = whole_value {
-            self.report(
+            report!(self, 
                 format!(
                     "Result of {symbol} is always {}.",
                     if value { "true" } else { "false" }
@@ -148,7 +148,7 @@ impl<'a> Checker<'a> {
     /// and no real rule for it exists to model that overlap regardless.
     pub(crate) fn check_logical_xor(&mut self, l: &ExprNode, r: &ExprNode, locals: &Locals) {
         if let Some(value) = self.inferred_constant_condition(l, locals) {
-            self.report(
+            report!(self, 
                 format!(
                     "Left side of xor is always {}.",
                     if value { "true" } else { "false" }
@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
             );
         }
         if let Some(value) = self.inferred_constant_condition(r, locals) {
-            self.report(
+            report!(self, 
                 format!(
                     "Right side of xor is always {}.",
                     if value { "true" } else { "false" }

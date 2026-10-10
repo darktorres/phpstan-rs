@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
         if let Some(level) =
             self.failing_level(inner_ty, 0, |m| self.relation().is_iterable(m).no())
         {
-            self.report(format!("Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."),
+            report!(self, format!("Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."),
                 span,
                 level,
                 "generator.nonIterable",
@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
         // expression's own result (the delegated generator's TReturn) is
         // `void` but consumed in a non-statement position.
         if result_ty.is_void() && !is_bare_statement {
-            self.report("Result of yield from is used but the delegated generator never returns anything, it's return type is void.".to_string(),
+            report!(self, "Result of yield from is used but the delegated generator never returns anything, it's return type is void.".to_string(),
                 span,
                 0,
                 "generator.void",
@@ -136,7 +136,7 @@ impl<'a> Checker<'a> {
             && !inner_key.is_mixed()
             && let Some(from) = self.rejected_from(&enclosing_key, &inner_key)
         {
-            self.report_found_from(format!(
+            report_found_from!(self, format!(
                     "Key type {inner_key} of yielded generator is not assignable to key type {enclosing_key} of enclosing generator."
                 ),
                 span,
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
             && !inner_value.is_mixed()
             && let Some(from) = self.rejected_from(&enclosing_value, &inner_value)
         {
-            self.report_found_from(format!(
+            report_found_from!(self, format!(
                     "Value type {inner_value} of yielded generator is not assignable to value type {enclosing_value} of enclosing generator."
                 ),
                 span,
@@ -166,7 +166,7 @@ impl<'a> Checker<'a> {
             && !inner_send.is_mixed()
             && !self.accepts(&inner_send, &enclosing_send).yes()
         {
-            self.report(format!(
+            report!(self, format!(
                     "Send type {enclosing_send} of enclosing generator is not assignable to send type {inner_send} of yielded generator."
                 ),
                 span,

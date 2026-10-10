@@ -1702,7 +1702,7 @@ impl<'a> Checker<'a> {
             AssertTarget::ThisSelf => "$this".to_string(),
             AssertTarget::ThisProp(prop) => format!("$this->{prop}"),
             AssertTarget::NotFound(name) => {
-                self.report(
+                report!(self, 
                     format!("Assert references unknown parameter ${name}."),
                     span,
                     0,
@@ -1711,7 +1711,7 @@ impl<'a> Checker<'a> {
                 return;
             }
             AssertTarget::Unknown(raw) => {
-                self.report(
+                report!(self, 
                     format!("Assert references unknown {raw}."),
                     span,
                     0,
@@ -1723,7 +1723,7 @@ impl<'a> Checker<'a> {
         let subject = format!("PHPDoc tag {tag_name} for {target_desc}");
         let class = self.current_class.clone();
         if self.type_node_unresolvable(&info.written_ty, class.as_deref()) {
-            self.report(
+            report!(self, 
                 format!("{subject} contains unresolvable type."),
                 span,
                 2,
@@ -1765,7 +1765,7 @@ impl<'a> Checker<'a> {
             (is_disjoint, is_super)
         };
         if impossible {
-            self.report(format!(
+            report!(self, format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} can never happen.",
                     info.ty, param.ty()
                 ),
@@ -1774,7 +1774,7 @@ impl<'a> Checker<'a> {
                 "assert.impossibleType",
             );
         } else if already_narrowed {
-            self.report(format!(
+            report!(self, format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} does not narrow down the type.",
                     info.ty, param.ty()
                 ),

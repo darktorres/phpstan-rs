@@ -403,7 +403,7 @@ impl<'a> Checker<'a> {
             {
                 continue;
             }
-            self.report(
+            report!(self, 
                 format!("Path in {construct}() \"{path}\" is not a file or it does not exist."),
                 span,
                 0,

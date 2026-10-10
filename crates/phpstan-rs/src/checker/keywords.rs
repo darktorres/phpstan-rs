@@ -166,12 +166,16 @@ impl<'a> Checker<'a> {
                 "break"
             };
             let level = if kind == "switch" { 2 } else { 0 };
+            if self.shows_level(level) {
             let mut builder =
                 DiagnosticBuilder::new(message, span, level, format!("{keyword}.{kind}"));
             if kind != "switch" {
                 builder = builder.non_ignorable();
             }
             self.report_builder(builder);
+            } else {
+                self.note_below_level();
+            }
         }
         for (name, span) in &scope.duplicate_labels {
             self.report_keyword(
@@ -215,7 +219,7 @@ impl<'a> Checker<'a> {
         labels.sort_by_key(|(_, p)| p.span.start);
         for (name, placement) in labels {
             if !used.contains(name) {
-                self.report(
+                report!(self, 
                     format!("Label '{name}' is unused."),
                     placement.span,
                     4,
@@ -311,7 +315,7 @@ impl<'a> Checker<'a> {
     }
 
     fn report_keyword(&mut self, message: String, span: Span, identifier: &'static str) {
-        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
+        report_builder!(self, DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }
 

@@ -171,7 +171,7 @@ impl<'a> Checker<'a> {
                     // - the `else` here reports at most one diagnostic
                     // per catch type instead of both.
                     if !self.class_name_exists(class) {
-                        self.report(
+                        report!(self, 
                             format!("caught class {class} not found"),
                             t.span,
                             0,
@@ -185,7 +185,7 @@ impl<'a> Checker<'a> {
                         );
                     } else {
                         if !self.registry.is_subclass_of(class, "Throwable") {
-                            self.report(
+                            report!(self, 
                                 format!("cannot catch {class}: it does not implement Throwable"),
                                 t.span,
                                 0,
@@ -226,7 +226,7 @@ impl<'a> Checker<'a> {
                     .map(Type::to_string)
                     .collect::<Vec<_>>()
                     .join("|");
-                self.report(
+                report!(self, 
                     format!("Dead catch - {desc} is already caught above."),
                     c.span,
                     4,
@@ -339,7 +339,7 @@ impl<'a> Checker<'a> {
                 && finally_block.completion.terminates
             {
                 for exit in &try_catch_exit_points {
-                    self.report(
+                    report!(self, 
                         format!(
                             "This {} is overwritten by a different one in the finally block below.",
                             exit.describe()
@@ -350,7 +350,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 for exit in &finally_exit_points {
-                    self.report(
+                    report!(self, 
                         format!("The overwriting {} is on this line.", exit.describe()),
                         exit.span,
                         4,
@@ -381,7 +381,7 @@ impl<'a> Checker<'a> {
             && let ExprKind::New(_, args) = &e.kind
             && args.is_empty()
         {
-            self.report(
+            report!(self, 
                 "Exception thrown with no message argument.".to_string(),
                 self.expr_span(e.id),
                 5,
@@ -393,14 +393,14 @@ impl<'a> Checker<'a> {
             && let Some((class, _)) = thrown_ty.as_object()
             && (class.eq_ignore_ascii_case("Exception") || class.eq_ignore_ascii_case("Error"))
         {
-            self.report(format!("Throwing the base {class} class is not recommended, use a specific subclass instead."),
+            report!(self, format!("Throwing the base {class} class is not recommended, use a specific subclass instead."),
                 self.expr_span(e.id),
                 5,
                 "throw.baseClass",
             );
         }
         if let Some(class) = self.thrown_value_not_throwable(&thrown_ty) {
-            self.report(
+            report!(self, 
                 format!("cannot throw {class}: it does not implement Throwable"),
                 self.expr_span(e.id),
                 0,
@@ -547,7 +547,7 @@ impl<'a> Checker<'a> {
                         })
                     });
                 if accepts_previous {
-                    self.report(format!(
+                    report!(self, format!(
                             "{class} is thrown from the catch of ${var} without ${var} as its previous exception; the original cause and trace are lost."
                         ),
                         *span,
@@ -568,7 +568,7 @@ impl<'a> Checker<'a> {
         if let Some(base) = base
             && !throws.iter().any(|(_, _, top)| *top)
         {
-            self.report(format!("Catching {base} swallows every such exception unless the catch rethrows; add an unconditional throw."),
+            report!(self, format!("Catching {base} swallows every such exception unless the catch rethrows; add an unconditional throw."),
                 c.span,
                 4,
                 "catch.baseWithoutRethrow",

@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
                     .map(|(name, _)| name)
                     .min()
             {
-                self.report(format!("Parameter $context of logger method {method}() has no 'exception' key while ${name} holds a Throwable."),
+                report!(self, format!("Parameter $context of logger method {method}() has no 'exception' key while ${name} holds a Throwable."),
                     self.expr_span(e.id),
                     0,
                     "psr3.contextMissingException",
@@ -202,7 +202,7 @@ impl<'a> Checker<'a> {
         let levels = level.constant_strings_text();
         let valid = !levels.is_empty() && levels.iter().all(|l| LEVELS.contains(&l.as_ref()));
         if !valid {
-            self.report(format!("Parameter #1 $level of method Psr\\Log\\LoggerInterface::log() expects a PSR-3 log level, {level} given."),
+            report!(self, format!("Parameter #1 $level of method Psr\\Log\\LoggerInterface::log() expects a PSR-3 log level, {level} given."),
                 span,
                 0,
                 "psr3.invalidLevel",
@@ -219,7 +219,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) {
         if self.is_risky_log_expr(message, locals) {
-            self.report("Using interpolated strings in log messages is potentially a security risk. Use PSR-3 placeholders instead.".to_string(),
+            report!(self, "Using interpolated strings in log messages is potentially a security risk. Use PSR-3 placeholders instead.".to_string(),
                 self.expr_span(message.id),
                 0,
                 "psr3.interpolated",
@@ -229,7 +229,7 @@ impl<'a> Checker<'a> {
         let texts = message_ty.constant_strings_text();
         if texts.is_empty() {
             if may_be_non_literal_string(&message_ty) {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(
                         format!(
                             "Parameter $message of logger method {method}() is not a static string."
@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
         for text in &texts {
             let (double, invalid) = invalid_braces(text);
             if double {
-                self.report(format!("Parameter $message of logger method {method}() should not include double braces."),
+                report!(self, format!("Parameter $message of logger method {method}() should not include double braces."),
                     self.expr_span(message.id),
                     0,
                     "psr3.placeholderDoubleBraces",
@@ -255,7 +255,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !invalid.is_empty() {
-                self.report(format!(
+                report!(self, format!(
                         "Parameter $message of logger method {method}() has braces with invalid placeholder characters - {}.",
                         invalid.join(", ")
                     ),
@@ -269,7 +269,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let Some((context, context_ty)) = context.zip(context_ty) else {
-                self.report(format!(
+                report!(self, format!(
                         "Parameter $context of logger method {method}() is required when the message has placeholders - {}.",
                         names.iter().map(|n| format!("{{{n}}}")).collect::<Vec<_>>().join(", ")
                     ),
@@ -288,7 +288,7 @@ impl<'a> Checker<'a> {
                 .map(|n| format!("{{{n}}}"))
                 .collect();
             if !missing.is_empty() && shape.is_sealed() {
-                self.report(format!(
+                report!(self, format!(
                         "Parameter $message of logger method {method}() has placeholders with no context key - {}.",
                         missing.join(", ")
                     ),
@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
             for field in shape.fields() {
                 let (key, value) = (field.key.to_string(), &field.ty);
                 if names.contains(&key.as_str()) && !self.converts_to_string(value) {
-                    self.report(format!("Context value for placeholder {{{key}}} of logger method {method}() is {value}, which has no string form."),
+                    report!(self, format!("Context value for placeholder {{{key}}} of logger method {method}() is {value}, which has no string form."),
                         self.expr_span(context.id),
                         0,
                         "psr3.placeholderNotStringable",
@@ -317,7 +317,7 @@ impl<'a> Checker<'a> {
         for field in shape.fields() {
             let (key, value) = (field.key.to_string(), &field.ty);
             if key.is_empty() || key.parse::<i64>().is_ok() {
-                self.report(
+                report!(self, 
                     format!("Context key {key:?} of a logger call should be a non-empty string."),
                     span,
                     0,
@@ -327,7 +327,7 @@ impl<'a> Checker<'a> {
             if let Some(pattern) = &self.settings.psr3_context_key_pattern
                 && !pattern.is_match(&key)
             {
-                self.report(
+                report!(self, 
                     format!(
                         "Context key {key:?} of a logger call should match {}.",
                         pattern.as_str()
@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
                 if !value.is_mixed()
                     && self.registry.is_super_type_of(&throwable, value) != types::TrinaryLogic::Yes
                 {
-                    self.report(format!("Context key 'exception' of a logger call expects Throwable, {value} given."),
+                    report!(self, format!("Context key 'exception' of a logger call expects Throwable, {value} given."),
                         span,
                         0,
                         "psr3.contextType",

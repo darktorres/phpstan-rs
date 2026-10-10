@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
         if owner_info.is_api() && !syntax::ast::is_constructor_name(method) {
             return;
         }
-        self.report(format!(
+        report!(self, format!(
                 "calling {owner}::{method}() is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
             ),
             span,
@@ -441,7 +441,7 @@ impl<'a> Checker<'a> {
         if !matches!(name.as_ref(), "parent" | "previous" | "next") {
             return;
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(
                 format!("Node attribute '{name}' is no longer available."),
                 span,

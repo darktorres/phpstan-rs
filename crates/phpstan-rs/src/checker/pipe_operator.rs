@@ -20,7 +20,7 @@ impl<'a> Checker<'a> {
         let Some(true) = self.pipe_target_first_param_is_by_ref(rhs, locals) else {
             return;
         };
-        self.report_builder(DiagnosticBuilder::new(
+        report_builder!(self, DiagnosticBuilder::new(
             "Parameter #1 of callable on the right side of pipe operator is passed by reference."
                 .to_string(),
             self.expr_span(rhs.id),

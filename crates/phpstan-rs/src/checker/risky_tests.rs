@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
             if body_has_assertion(arenas, f.body_stmts(arenas)) {
                 continue;
             }
-            self.report(format!(
+            report!(self, format!(
                     "Test {fqn}::{}() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.",
                     f.name
                 ),
@@ -91,7 +91,7 @@ impl<'a> Checker<'a> {
         if has_assertion {
             return;
         }
-        self.report("Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.".to_string(),
+        report!(self, "Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.".to_string(),
             span,
             4,
             "test.risky",

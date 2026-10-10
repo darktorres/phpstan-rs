@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
                 Some(d) => format!("Cannot assign offset {d} to {container}."),
             }
         };
-        self.report(message, self.expr_span(lhs.id), level, identifier);
+        report!(self, message, self.expr_span(lhs.id), level, identifier);
     }
 
     /// A write to a string offset PHP rejects or cuts short
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
             None
         };
         if let Some(message) = message {
-            self.report(message, self.expr_span(lhs.id), 3, "offsetAssign.valueType");
+            report!(self, message, self.expr_span(lhs.id), 3, "offsetAssign.valueType");
         }
     }
 

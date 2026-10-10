@@ -88,7 +88,7 @@ impl<'a> Checker<'a> {
         if throws_is_valid(throws, self.registry) {
             return;
         }
-        self.report(
+        report!(self, 
             format!("PHPDoc tag @throws with type {throws} is not subtype of Throwable"),
             span,
             2,

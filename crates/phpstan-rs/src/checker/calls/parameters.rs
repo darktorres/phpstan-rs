@@ -279,7 +279,7 @@ impl<'a> Checker<'a> {
                 if let Some(required) = required {
                     // Too many arguments is `checkExtraArguments`, from
                     // level 1; too few is level 0.
-                    self.report(
+                    report!(self, 
                         format!(
                             "{} invoked with {invoked} {parameters}, {required}.",
                             callee.invoked()
@@ -314,7 +314,7 @@ impl<'a> Checker<'a> {
                     Some(name) => Position::Name(name),
                     None => Position::Index(i + 1),
                 };
-                self.report_found_from(
+                report_found_from!(self, 
                     format!(
                         "{} of {} expects {param_ty}, {arg_ty} given.",
                         describe_parameter(param, position),
@@ -336,7 +336,7 @@ impl<'a> Checker<'a> {
             if contains_nullsafe_access(arenas, argument.value)
                 || (!argument.unpack && !is_valid_byref_argument_expr(arenas, argument.value))
             {
-                self.report(
+                report!(self, 
                     callee.by_ref_message(&describe_parameter(param, position)),
                     argument.span,
                     5,
@@ -455,7 +455,7 @@ impl<'a> Checker<'a> {
                         Some(p) => p,
                         None => {
                             if !natively_variadic || is_builtin {
-                                self.report(
+                                report!(self, 
                                     format!(
                                         "Unknown parameter ${name} in call to {}.",
                                         callee.target()
@@ -468,7 +468,7 @@ impl<'a> Checker<'a> {
                                 continue;
                             }
                             if !variadic_names.insert(name.as_str()) {
-                                self.report(
+                                report!(self, 
                                     format!(
                                         "Named parameter ${name} overwrites previous argument."
                                     ),
@@ -498,7 +498,7 @@ impl<'a> Checker<'a> {
                         unused.remove(at);
                     }
                     None if has_named => {
-                        self.report(
+                        report!(self, 
                             format!(
                                 "Argument for parameter ${} has already been passed.",
                                 param.name()
@@ -517,7 +517,7 @@ impl<'a> Checker<'a> {
                 if param.has_default() {
                     continue;
                 }
-                self.report(
+                report!(self, 
                     format!(
                         "Missing parameter ${} ({}) in call to {}.",
                         param.name(),
@@ -534,6 +534,6 @@ impl<'a> Checker<'a> {
     }
 
     fn report_non_ignorable(&mut self, message: String, span: Span, identifier: &'static str) {
-        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
+        report_builder!(self, DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }

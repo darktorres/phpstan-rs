@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
     }
 
     fn report_current_time(&mut self, message: String, span: Span, id: &'static str) {
-        self.report(message, span, 0, id);
+        report!(self, message, span, 0, id);
     }
 
     /// `function` is the resolved, lowercase function name.

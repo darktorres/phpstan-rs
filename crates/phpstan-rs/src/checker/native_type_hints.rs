@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
             }
-            self.report(
+            report!(self, 
                 format!(
                     "{kind_word} {label}() parameter ${} can be declared natively as {suggested}.",
                     param.name
@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report(
+        report!(self, 
             format!("{kind_word} {label}() return type can be declared natively as {suggested}."),
             f.name.span,
             0,
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            self.report(
+            report!(self, 
                 format!(
                     "Parameter ${} of the closure can be declared natively as {suggested}.",
                     param.name
@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
             if redeclared_incompatibly {
                 continue;
             }
-            self.report(
+            report!(self, 
                 format!(
                     "Constant {fqn}::{} can be declared natively as {suggested}.",
                     constant.name

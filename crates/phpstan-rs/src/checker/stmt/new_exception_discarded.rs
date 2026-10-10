@@ -28,7 +28,7 @@ impl<'a> Checker<'a> {
             && self.class_name_exists(class)
             && self.registry.is_subclass_of(class, "Throwable")
         {
-            self.report(
+            report!(self, 
                 format!("Construction of {class} is discarded - did you forget the throw keyword?"),
                 self.expr_span(e.id),
                 5,

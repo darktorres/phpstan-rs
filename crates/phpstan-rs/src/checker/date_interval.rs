@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
             if is_valid_date_interval_spec(&spec) {
                 continue;
             }
-            self.report(format!(
+            report!(self, format!(
                     "Instantiating DateInterval with {spec} produces an error: Unknown or bad format ({spec})"
                 ),
                 span,

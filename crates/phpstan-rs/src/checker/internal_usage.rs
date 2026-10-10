@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
                 format!("Call to internal function {fqn}() from outside its root namespace {ns}.")
             }
         };
-        self.report(message, span, 0, "function.internal");
+        report!(self, message, span, 0, "function.internal");
     }
 
     /// `RestrictedInternalMethodUsageExtension` -
@@ -166,7 +166,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word}.internal"),
             ),
         };
-        self.report(message, span, 0, identifier);
+        report!(self, message, span, 0, identifier);
     }
 
     /// `RestrictedInternalPropertyUsageExtension` - same four-branch
@@ -226,7 +226,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word}.internal"),
             ),
         };
-        self.report(message, span, 0, identifier);
+        report!(self, message, span, 0, identifier);
     }
 
     /// `RestrictedInternalClassConstantUsageExtension`: a constant's
@@ -281,7 +281,7 @@ impl<'a> Checker<'a> {
                 "classConstant.internal".to_string(),
             ),
         };
-        self.report(message, span, 0, identifier);
+        report!(self, message, span, 0, identifier);
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to
@@ -367,7 +367,7 @@ impl<'a> Checker<'a> {
             "{verb_phrase} internal {} {class}.",
             type_word.to_lowercase()
         );
-        self.report(
+        report!(self, 
             message,
             span,
             0,
@@ -448,7 +448,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let type_word = class_type_word(info.kind());
-        self.report(
+        report!(self, 
             format!(
                 "{subject} {fqn} {verb} internal {} {target}.",
                 type_word.to_lowercase()
@@ -467,7 +467,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let type_word = class_type_word(info.kind());
-        self.report(
+        report!(self, 
             format!(
                 "Usage of internal {} {target} in class {fqn}.",
                 type_word.to_lowercase()
@@ -562,7 +562,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let type_word = class_type_word(info.kind());
-        self.report(
+        report!(self, 
             format!(
                 "{subject} of {context} has typehint with internal {} {class}.",
                 type_word.to_lowercase()

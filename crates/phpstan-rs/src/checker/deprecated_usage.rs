@@ -39,7 +39,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let message = with_reason(&format!("Call to deprecated function {fqn}()."), reason);
-        self.report(message, span, 0, "function.deprecated");
+        report!(self, message, span, 0, "function.deprecated");
     }
 
     /// `method.deprecated`/`staticMethod.deprecated` - an instance or
@@ -77,7 +77,7 @@ impl<'a> Checker<'a> {
                 ),
                 reason,
             );
-            self.report(
+            report!(self, 
                 message,
                 span,
                 0,
@@ -95,7 +95,7 @@ impl<'a> Checker<'a> {
             } else {
                 format!("Casting class {owner} to string is deprecated.:\n{reason}")
             };
-            self.report(message, span, 0, "class.toStringDeprecated");
+            report!(self, message, span, 0, "class.toStringDeprecated");
             return;
         }
         let message = with_reason(
@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(message, span, 0, format!("{kind_word}.deprecated"));
+        report!(self, message, span, 0, format!("{kind_word}.deprecated"));
     }
 
     /// `property.deprecated`/`staticProperty.deprecated` - an instance or
@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
                 ),
                 reason,
             );
-            self.report(
+            report!(self, 
                 message,
                 span,
                 0,
@@ -157,7 +157,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(message, span, 0, format!("{kind_word}.deprecated"));
+        report!(self, message, span, 0, format!("{kind_word}.deprecated"));
     }
 
     /// `classConstant.deprecated` - a class-constant access. Same
@@ -183,7 +183,7 @@ impl<'a> Checker<'a> {
                 ),
                 reason,
             );
-            self.report(
+            report!(self, 
                 message,
                 span,
                 0,
@@ -201,7 +201,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(message, span, 0, "classConstant.deprecated");
+        report!(self, message, span, 0, "classConstant.deprecated");
     }
 
     /// `new.deprecatedClass` - instantiation (`new Foo()`) of a class whose
@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
             &format!("Instantiation of deprecated class {class}."),
             reason,
         );
-        self.report(message, span, 0, "new.deprecatedClass");
+        report!(self, message, span, 0, "new.deprecatedClass");
     }
 }
 

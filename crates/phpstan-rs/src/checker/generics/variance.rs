@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
         violations.sort();
         violations.dedup();
         for message in violations {
-            self.report(message, span, 6, "generics.variance");
+            report!(self, message, span, 6, "generics.variance");
         }
     }
 
@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
             .collect();
         names.sort();
         for name in names {
-            self.report(format!(
+            report!(self, format!(
                     "Variance annotation is only allowed for type parameters of classes and interfaces, but occurs in template type {name} in {kind_word} {label}()."
                 ),
                 span,
@@ -212,7 +212,7 @@ impl<'a> Checker<'a> {
             violations.sort();
             violations.dedup();
             for message in violations {
-                self.report(message, p.span, 6, "generics.variance");
+                report!(self, message, p.span, 6, "generics.variance");
             }
         }
         // A promoted constructor property (readonly or
@@ -253,7 +253,7 @@ impl<'a> Checker<'a> {
             violations.sort();
             violations.dedup();
             for message in violations {
-                self.report(message, span, 6, "generics.variance");
+                report!(self, message, span, 6, "generics.variance");
             }
         }
     }

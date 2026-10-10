@@ -426,7 +426,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier));
+        report_builder!(self, DiagnosticBuilder::new(message, span, 0, identifier));
     }
 
     /// The checked file's path as path-scoped config spells it: relative

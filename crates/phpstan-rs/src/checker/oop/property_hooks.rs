@@ -104,7 +104,7 @@ impl<'a> Checker<'a> {
             .find(|a| registry::is_no_discard_attribute_name(&a.name))
         {
             let fqn = self.resolve_class_name(&nodiscard.name);
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new(
                     format!("Attribute class {fqn} cannot be used on property hooks."),
                     nodiscard.span,
@@ -205,7 +205,7 @@ impl<'a> Checker<'a> {
             && !registry::hook_body_references_property(arenas, body, name)
             && !registry::hook_body_calls_parent_hook(arenas, body, name)
         {
-            self.report(
+            report!(self, 
                 format!(
                     "Get hook for non-virtual property {fqn}::${name} does not read its value."
                 ),
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
                     .expect("property-hook arrow body belongs to its retained file owner");
                 let body_ty = self.check_expr(e, &mut locals, &label);
                 if !body_ty.is_mixed() && !self.accepts(prop_sig.ty(), &body_ty).yes() {
-                    self.report(
+                    report!(self, 
                         format!(
                             "return type mismatch: expected {}, got {body_ty}",
                             prop_sig.ty()
@@ -327,6 +327,7 @@ impl<'a> Checker<'a> {
                         false,
                     )
                 {
+                    if self.shows_level(level) {
                     let mut builder = DiagnosticBuilder::new(
                         format!(
                             "should return {} but return statement is missing",
@@ -340,6 +341,9 @@ impl<'a> Checker<'a> {
                         builder = builder.non_ignorable();
                     }
                     self.report_builder(builder);
+                    } else {
+                        self.note_below_level();
+                    }
                 }
             }
             // No real statement/expression to type-check at all.
@@ -365,7 +369,7 @@ impl<'a> Checker<'a> {
         if throws.as_ref().is_some_and(|throws| throws.is_void())
             && let Some(throw_span) = self.first_explicit_throw()
         {
-            self.report(format!(
+            report!(self, format!(
                     "Get hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
                 ),
                 throw_span,
@@ -429,7 +433,7 @@ impl<'a> Checker<'a> {
             && !registry::hook_body_references_property(arenas, body, name)
             && !registry::hook_body_calls_parent_hook(arenas, body, name)
         {
-            self.report(
+            report!(self, 
                 format!(
                     "Set hook for non-virtual property {fqn}::${name} does not assign value to it."
                 ),
@@ -449,7 +453,7 @@ impl<'a> Checker<'a> {
         match (prop_has_native, param_has_native) {
             _ if param.is_none() => {}
             (false, true) => {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(format!(
                             "Parameter ${} of set hook has a native type but the property {fqn}::${name} does not.",
                             param.map(|p| p.name.as_ref()).unwrap_or("value"),
@@ -462,7 +466,7 @@ impl<'a> Checker<'a> {
                 );
             }
             (true, false) => {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(format!(
                             "Parameter ${} of set hook does not have a native type but the property {fqn}::${name} does.",
                             param.map(|p| p.name.as_ref()).unwrap_or("value"),
@@ -478,7 +482,7 @@ impl<'a> Checker<'a> {
                 let param_ty = self.resolve_type_hint(param.and_then(|p| p.type_hint.as_ref()));
                 let prop_native_ty = self.resolve_type_hint(type_hint);
                 if !self.accepts(&param_ty, &prop_native_ty).yes() {
-                    self.report_builder(
+                    report_builder!(self, 
                         DiagnosticBuilder::new(format!(
                                 "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${name}.",
                                 param.map(|p| p.name.as_ref()).unwrap_or("value"),
@@ -673,7 +677,7 @@ impl<'a> Checker<'a> {
             if throws.as_ref().is_some_and(|throws| throws.is_void())
                 && let Some(throw_span) = self.first_explicit_throw()
             {
-                self.report(format!(
+                report!(self, format!(
                         "Set hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
                     ),
                     throw_span,

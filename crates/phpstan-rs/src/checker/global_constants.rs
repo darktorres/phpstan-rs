@@ -164,7 +164,7 @@ impl<'a> Checker<'a> {
         if guarded(bare) || guarded(primary) || fallback.is_some_and(guarded) {
             return;
         }
-        self.report(
+        report!(self, 
             format!("Constant {bare} not found."),
             span,
             1,
@@ -201,7 +201,7 @@ impl<'a> Checker<'a> {
             ),
             _ => return,
         };
-        self.report(
+        report!(self, 
             format!("Magic constant {upper} {message}."),
             span,
             0,
@@ -236,7 +236,7 @@ impl<'a> Checker<'a> {
             Some(class) => format!("{class}::{name}"),
             None => name.trim_start_matches('\\').to_string(),
         };
-        self.report(format!(
+        report!(self, format!(
                 "Configuration defined type for constant {display} ({configured}) does not accept value {value}."
             ),
             span,
@@ -284,7 +284,7 @@ impl<'a> Checker<'a> {
             .php_supports_everywhere(types::php_version::PhpFeature::DynamicClassConstantFetch)
             == Some(false)
         {
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new("Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
                         .to_string(),
                     span,
@@ -302,7 +302,7 @@ impl<'a> Checker<'a> {
         let Some(level) = self.failing_level(name_ty, 0, |m| !m.is_string().yes()) else {
             return;
         };
-        self.report(
+        report!(self, 
             format!("Class constant name in dynamic fetch can only be a string, {name_ty} given."),
             span,
             level,

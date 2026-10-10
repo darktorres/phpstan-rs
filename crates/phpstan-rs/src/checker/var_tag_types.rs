@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
             let mut seen = rustc_hash::FxHashSet::default();
             for class in traits {
                 if seen.insert(class.clone()) {
-                    self.report(
+                    report!(self, 
                         format!("{subject} has invalid type {class}."),
                         self.stmt_span(stmt.id),
                         2,
@@ -400,7 +400,7 @@ impl<'a> Checker<'a> {
             self.check_type_prefixed_class_names(ty, self.stmt_span(stmt.id));
             for class in unknown {
                 if seen.insert(class.clone()) {
-                    self.report(
+                    report!(self, 
                         format!("{subject} contains unknown class {class}."),
                         self.stmt_span(stmt.id),
                         0,
@@ -711,7 +711,7 @@ impl<'a> Checker<'a> {
             return;
         }
         if !value.native.is_mixed() && !self.var_tag_fits_value(&value.native, tag, value.shape) {
-            self.report(
+            report!(self, 
                 format!(
                     "PHPDoc tag @var with type {tag} is not subtype of native type {}.",
                     value.native
@@ -727,7 +727,7 @@ impl<'a> Checker<'a> {
         }
         if self.contains_phpstan_type(tag) {
             if !self.var_tag_fits_value(&value.doc, tag, value.shape) {
-                self.report(
+                report!(self, 
                     format!(
                         "PHPDoc tag @var with type {tag} is not subtype of type {}.",
                         value.doc
@@ -737,7 +737,7 @@ impl<'a> Checker<'a> {
                     "varTag.type",
                 );
             } else if value.doc != *tag {
-                self.report(format!(
+                report!(self, format!(
                         "PHPDoc tag @var assumes the expression with type {} is always {tag} but it's error-prone and dangerous.",
                         value.doc
                     ),
@@ -753,7 +753,7 @@ impl<'a> Checker<'a> {
         if self.registry.is_super_type_of(&value.doc, tag) == TrinaryLogic::No
             && self.registry.is_super_type_of(tag, &value.doc) == TrinaryLogic::No
         {
-            self.report(
+            report!(self, 
                 format!(
                     "PHPDoc tag @var with type {tag} is incompatible with type {}.",
                     value.doc

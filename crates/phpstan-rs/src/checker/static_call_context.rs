@@ -28,7 +28,7 @@ impl<'a> Checker<'a> {
                     return;
                 }
                 let Some(class) = self.current_class.clone() else {
-                    self.report(
+                    report!(self, 
                         format!("calling {name}::{method}() outside of class scope"),
                         span,
                         0,
@@ -42,7 +42,7 @@ impl<'a> Checker<'a> {
                     .is_none_or(|references| !references.extends.is_empty());
                 if keyword == "parent" && !has_parent {
                     let current = self.current_method.clone().unwrap_or_default();
-                    self.report(format!(
+                    report!(self, format!(
                             "{class}::{current}() calls parent::{method}() but {class} does not extend any class"
                         ),
                         span,
@@ -65,7 +65,7 @@ impl<'a> Checker<'a> {
                 else {
                     return;
                 };
-                self.report(
+                report!(self, 
                     format!("cannot call static method {method}() on {ty}"),
                     span,
                     level,
@@ -103,7 +103,7 @@ impl<'a> Checker<'a> {
             let dom_load_html = canonical.eq_ignore_ascii_case("loadHTML")
                 && owner.eq_ignore_ascii_case("DOMDocument");
             if !dom_load_html {
-                self.report(
+                report!(self, 
                     format!("static call to instance method {owner}::{canonical}()"),
                     span,
                     0,
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
             } else {
                 ("", "method.callToAbstract")
             };
-            self.report(
+            report!(self, 
                 format!("cannot call abstract{word} method {owner}::{canonical}()"),
                 span,
                 0,

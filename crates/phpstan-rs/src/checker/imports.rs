@@ -59,7 +59,7 @@ impl<'a> Checker<'a> {
                 let fqn = import.path.trim_start_matches('\\');
                 match self.registry.lookup_function_with_name(fqn) {
                     None => {
-                        self.report(
+                        report!(self, 
                             format!("used function {fqn} not found"),
                             self.stmt_span(stmt.id),
                             0,
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
                 }
                 let fqn = import.path.trim_start_matches('\\');
                 if !self.registry.global_constants().contains_key(fqn) {
-                    self.report(
+                    report!(self, 
                         format!("used constant {fqn} not found"),
                         self.stmt_span(stmt.id),
                         0,
@@ -181,7 +181,7 @@ impl<'a> Checker<'a> {
                 let path = import.path.trim_start_matches('\\');
                 for (project, prefix) in INTERNAL_CLASS_PREFIXES {
                     if path.starts_with(prefix) {
-                        self.report_builder(
+                        report_builder!(self, 
                             DiagnosticBuilder::new(
                                 format!("Referencing prefixed {project} class: {path}."),
                                 self.stmt_span(stmt.id),
@@ -246,7 +246,7 @@ impl<'a> Checker<'a> {
                             .entry(current_namespace_lower.clone())
                             .or_default();
                         if !scope.insert(alias.to_ascii_lowercase()) {
-                            self.report_builder(
+                            report_builder!(self, 
                                 DiagnosticBuilder::new(format!(
                                         "Cannot use {path} as {alias} because the name is already in use."
                                     ),
@@ -274,7 +274,7 @@ impl<'a> Checker<'a> {
                         } else {
                             format!("{current_namespace}\\{}", c.name)
                         };
-                        self.report_builder(
+                        report_builder!(self, 
                             DiagnosticBuilder::new(format!(
                                     "Cannot declare {kind} {qualified} because the name is already in use."
                                 ),

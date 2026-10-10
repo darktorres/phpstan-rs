@@ -987,6 +987,49 @@ pub(crate) enum InferQuestion {
     ChainLink,
 }
 
+/// `Checker::report`, building the message and the span only when the run's
+/// level shows a finding at `level`.
+macro_rules! report {
+    ($checker:expr, $message:expr, $span:expr, $level:expr, $identifier:expr $(,)?) => {{
+        let level: u8 = $level;
+        if $checker.shows_level(level) {
+            $checker.report($message, $span, level, $identifier)
+        } else {
+            $checker.note_below_level()
+        }
+    }};
+}
+
+/// `Checker::report_found_from`, with the same laziness as `report!`.
+macro_rules! report_found_from {
+    ($checker:expr, $message:expr, $span:expr, $level:expr, $found_from:expr, $identifier:expr $(,)?) => {{
+        let level: u8 = $level;
+        if $checker.shows_level(level) {
+            $checker.report_found_from($message, $span, level, $found_from, $identifier)
+        } else {
+            $checker.note_below_level()
+        }
+    }};
+}
+
+/// `Checker::report_builder` of a builder made by `DiagnosticBuilder::new`
+/// and the calls chained onto it, which are made only when the run's level
+/// shows a finding at the builder's level.
+macro_rules! report_builder {
+    (
+        $checker:expr,
+        $($path:ident)::+ ($message:expr, $span:expr, $level:expr, $identifier:expr $(,)?)
+        $($chain:tt)*
+    ) => {{
+        let level: u8 = $level;
+        if $checker.shows_level(level) {
+            $checker.report_builder($($path)::+($message, $span, level, $identifier) $($chain)*)
+        } else {
+            $checker.note_below_level()
+        }
+    }};
+}
+
 mod access_attributes;
 mod synthetic;
 /// A method call statement's callee as the check of the call resolved it.
@@ -1988,7 +2031,7 @@ impl<'a> Checker<'a> {
         level: u8,
         identifier: impl Into<diagnostics::Identifier>,
     ) {
-        self.report_builder(DiagnosticBuilder::new(message, span, level, identifier));
+        report_builder!(self, DiagnosticBuilder::new(message, span, level, identifier));
     }
 
     /// `report`, for a finding made only from configured level
@@ -2001,7 +2044,7 @@ impl<'a> Checker<'a> {
         found_from: u8,
         identifier: impl Into<diagnostics::Identifier>,
     ) {
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(message, span, level, identifier).found_from(found_from),
         );
     }
@@ -2010,12 +2053,27 @@ impl<'a> Checker<'a> {
     /// `fix`, or `non_ignorable`, none of which `report`'s own
     /// positional signature has room for without every plain call site
     /// paying for arguments it never uses.
+    /// Whether the run reports a finding at rule level `level`. A finding
+    /// above the cutoff's rule level is never shown, whatever else the
+    /// finding says.
+    pub(crate) fn shows_level(&self, level: u8) -> bool {
+        self.settings
+            .report_cutoff
+            .as_ref()
+            .is_none_or(|cutoff| level <= cutoff.rule)
+    }
+
+    /// A finding the run's level does not show, left unmade.
+    pub(crate) fn note_below_level(&self) {
+        syntax::stats::add(syntax::stats::Counter::DiagnosticsBuilt, 1);
+        syntax::stats::add(syntax::stats::Counter::DiagnosticsBelowLevel, 1);
+    }
+
     pub(crate) fn report_builder(&mut self, builder: DiagnosticBuilder) {
         if let Some(cutoff) = &self.settings.report_cutoff
             && !builder.reported_at(cutoff)
         {
-            syntax::stats::add(syntax::stats::Counter::DiagnosticsBuilt, 1);
-            syntax::stats::add(syntax::stats::Counter::DiagnosticsBelowLevel, 1);
+            self.note_below_level();
             return;
         }
         self.diagnostics.push(builder.build(&self.line_index));

@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         if let Some((sigil, identifier)) = word_operator {
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new(
                     format!("Unused result of \"{sigil}\" operator."),
                     self.expr_span(e.id),
@@ -264,7 +264,7 @@ impl<'a> Checker<'a> {
                 "expr.resultUnused",
             ),
         };
-        self.report(message, self.expr_span(e.id), 4, identifier);
+        report!(self, message, self.expr_span(e.id), 4, identifier);
     }
 
     /// The transitive-purity payoff: a bare, statement-level
@@ -413,7 +413,7 @@ impl<'a> Checker<'a> {
             }
             _ => return,
         };
-        self.report(message, self.expr_span(e.id), 4, identifier);
+        report!(self, message, self.expr_span(e.id), 4, identifier);
     }
 
     /// `@phpstan-pure`/`@phpstan-impure` tag validation - real PHPStan's
@@ -478,7 +478,7 @@ impl<'a> Checker<'a> {
         } else {
             ("Function", "impureFunction.pure")
         };
-        self.report(
+        report!(self, 
             format!(
                 "{description} {label}() is marked as impure but does not have any side effects."
             ),
@@ -568,7 +568,7 @@ impl<'a> Checker<'a> {
             })
             .unwrap_or_default();
         for (name, span) in by_ref_params {
-            self.report(
+            report!(self, 
                 format!(
                     "Parameter ${} of pure {} {label}() is passed by reference.",
                     name,
@@ -586,7 +586,7 @@ impl<'a> Checker<'a> {
             && sig.assert_if_true().is_empty()
             && sig.assert_if_false().is_empty()
         {
-            self.report(
+            report!(self, 
                 format!("{kind_word} {label}() is pure but has no return value."),
                 f.name.span,
                 0,
@@ -617,7 +617,7 @@ impl<'a> Checker<'a> {
                     format!("possiblyImpure.{}", occ.identifier),
                 )
             };
-            self.report(
+            report!(self, 
                 format!(
                     "{verb} {} in pure {} {label}().",
                     occ.description,
@@ -678,7 +678,7 @@ impl<'a> Checker<'a> {
         for (name, immediately) in &block.param_immediately_invoked_callable {
             let tag = if *immediately { "immediately" } else { "later" };
             let Some(native_ty) = native_types.get(name.as_str()) else {
-                self.report(format!(
+                report!(self, format!(
                         "PHPDoc tag @param-{tag}-invoked-callable references unknown parameter: ${name}"
                     ),
                     f.name.span,
@@ -694,7 +694,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "paramLaterInvokedCallable.nonCallable"
                 };
-                self.report(format!(
+                report!(self, format!(
                         "PHPDoc tag @param-{tag}-invoked-callable is for parameter ${name} with non-callable type {native_ty}."
                     ),
                     f.name.span,
@@ -705,7 +705,7 @@ impl<'a> Checker<'a> {
         }
         for name in block.param_closure_this.keys() {
             let Some(native_ty) = native_types.get(name.as_str()) else {
-                self.report(
+                report!(self, 
                     format!("PHPDoc tag @param-closure-this references unknown parameter: ${name}"),
                     f.name.span,
                     2,
@@ -716,7 +716,7 @@ impl<'a> Checker<'a> {
             let native_ty = native_ty.clone();
             let closure_ty = Type::object("Closure".into(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
-                self.report(format!(
+                report!(self, format!(
                         "PHPDoc tag @param-closure-this is for parameter ${name} with non-Closure type {native_ty}."
                     ),
                     f.name.span,

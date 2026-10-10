@@ -176,7 +176,7 @@ impl<'a> Checker<'a> {
         }
 
         for (message, identifier) in reports {
-            self.report(message, span, 0, identifier);
+            report!(self, message, span, 0, identifier);
         }
     }
 
@@ -205,12 +205,12 @@ impl<'a> Checker<'a> {
                 } else {
                     "extends unknown class"
                 };
-                self.report(format!("{fqn} {verb} {parent}"), span, 0, "class.notFound");
+                report!(self, format!("{fqn} {verb} {parent}"), span, 0, "class.notFound");
             }
         }
         for iface in references.implements {
             if !self.class_name_exists(iface) {
-                self.report(
+                report!(self, 
                     format!("{fqn} implements unknown interface {iface}"),
                     span,
                     0,
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
         }
         for used_trait in references.uses {
             if !self.class_name_exists(used_trait) {
-                self.report(
+                report!(self, 
                     format!("{fqn} uses unknown trait {used_trait}"),
                     span,
                     0,
@@ -370,7 +370,7 @@ impl<'a> Checker<'a> {
             );
             for name in tag.templates.iter().map(|t| &t.name) {
                 if class_templates.contains_key(name) {
-                    self.report(format!(
+                    report!(self, format!(
                             "PHPDoc tag @method template {name} for method {fqn}::{}() shadows @template {name} for class {fqn}.",
                             tag.name
                         ),
@@ -400,7 +400,7 @@ impl<'a> Checker<'a> {
         };
         for mixin in references.mixins {
             if !self.class_name_exists(mixin) {
-                self.report(
+                report!(self, 
                     format!("PHPDoc tag @mixin references unknown class {mixin}."),
                     span,
                     0,
@@ -442,7 +442,7 @@ impl<'a> Checker<'a> {
             return;
         };
         if doc.require_extends.len() > 1 {
-            self.report(
+            report!(self, 
                 "PHPDoc tag @phpstan-require-extends can only be used once.".to_string(),
                 c.span,
                 0,
@@ -462,7 +462,7 @@ impl<'a> Checker<'a> {
                 .map(|n| n.to_string())
                 .collect();
             if names.is_empty() {
-                self.report(
+                report!(self, 
                     format!("PHPDoc tag @phpstan-require-extends contains non-object type {ty}."),
                     c.span,
                     0,
@@ -472,7 +472,7 @@ impl<'a> Checker<'a> {
             }
             for name in names {
                 if !self.class_name_exists(&name) {
-                    self.report(
+                    report!(self, 
                         format!(
                             "PHPDoc tag @phpstan-require-extends contains unknown class {name}."
                         ),
@@ -487,7 +487,7 @@ impl<'a> Checker<'a> {
                 };
                 match info.kind() {
                     ClassKind::Interface => {
-                        self.report_builder(
+                        report_builder!(self, 
                             DiagnosticBuilder::new(format!(
                                     "PHPDoc tag @phpstan-require-extends cannot contain an interface {name}, expected a class."
                                 ),
@@ -499,7 +499,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                     ClassKind::Trait | ClassKind::Enum => {
-                        self.report(format!(
+                        report!(self, format!(
                                 "PHPDoc tag @phpstan-require-extends cannot contain non-class type {name}."
                             ),
                             c.span,
@@ -508,7 +508,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                     ClassKind::Class if info.is_final() => {
-                        self.report(format!(
+                        report!(self, format!(
                                 "PHPDoc tag @phpstan-require-extends cannot contain final class {name}."
                             ),
                             c.span,
@@ -533,7 +533,7 @@ impl<'a> Checker<'a> {
                 .map(|n| n.to_string())
                 .collect();
             if names.is_empty() {
-                self.report(
+                report!(self, 
                     format!(
                         "PHPDoc tag @phpstan-require-implements contains non-object type {ty}."
                     ),
@@ -545,7 +545,7 @@ impl<'a> Checker<'a> {
             }
             for name in names {
                 if !self.class_name_exists(&name) {
-                    self.report(
+                    report!(self, 
                         format!(
                             "PHPDoc tag @phpstan-require-implements contains unknown class {name}."
                         ),
@@ -559,7 +559,7 @@ impl<'a> Checker<'a> {
                     continue;
                 };
                 if info.kind() != ClassKind::Interface {
-                    self.report(format!(
+                    report!(self, format!(
                             "PHPDoc tag @phpstan-require-implements cannot contain non-interface type {name}."
                         ),
                         c.span,
@@ -591,7 +591,7 @@ impl<'a> Checker<'a> {
         }
         let span = c.span;
         if c.kind == ClassKind::Enum {
-            self.report(
+            report!(self, 
                 "PHPDoc tag @phpstan-sealed is only valid on class or interface.".to_string(),
                 span,
                 0,
@@ -612,7 +612,7 @@ impl<'a> Checker<'a> {
                 .map(|n| n.to_string())
                 .collect();
             if names.is_empty() {
-                self.report(
+                report!(self, 
                     format!("PHPDoc tag @phpstan-sealed contains non-object type {ty}."),
                     span,
                     0,
@@ -622,7 +622,7 @@ impl<'a> Checker<'a> {
             }
             for name in names {
                 if !self.class_name_exists(&name) {
-                    self.report(
+                    report!(self, 
                         format!("PHPDoc tag @phpstan-sealed contains unknown class {name}."),
                         span,
                         0,
@@ -693,7 +693,7 @@ impl<'a> Checker<'a> {
                 }
                 match seen_props.get(prop_name.as_ref()) {
                     Some((first_trait, first_sig)) if *first_sig.ty() != *sig.ty() => {
-                        self.report(format!(
+                        report!(self, format!(
                                 "{first_trait} and {trait_name} define the same property (${prop_name}) with incompatible types in the composition of {fqn}"
                             ), span, 0, "trait.propertyConflict");
                     }
@@ -712,7 +712,7 @@ impl<'a> Checker<'a> {
                 }
                 match seen_methods.get(method_name.as_ref()) {
                     Some((first_trait, first_sig)) if !signatures_compatible(first_sig, sig) => {
-                        self.report(format!(
+                        report!(self, format!(
                                 "{first_trait} and {trait_name} define the same method ({method_name}) with an incompatible signature in the composition of {fqn}"
                             ), span, 0, "trait.methodConflict");
                     }
@@ -734,7 +734,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_reserved_class_constant_name(&mut self, consts: &[ClassConst]) {
         for c in consts {
             if c.name.eq_ignore_ascii_case("class") {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new("a class constant must not be called 'class'; it is reserved for class name fetching".to_string(),
                         c.span,
                         0,
@@ -809,7 +809,7 @@ impl<'a> Checker<'a> {
         }
         if doc.contains("@phpstan-") {
             for tag in docblock::unknown_phpstan_tags(doc) {
-                self.report(
+                report!(self, 
                     format!("Unknown PHPDoc tag: @phpstan-{tag}"),
                     span,
                     2,
@@ -845,7 +845,7 @@ impl<'a> Checker<'a> {
                     invalid.tag, invalid.value, invalid.message
                 )
             };
-            self.report(message, span, 2, "phpDoc.parseError");
+            report!(self, message, span, 2, "phpDoc.parseError");
         }
     }
 
@@ -865,7 +865,7 @@ impl<'a> Checker<'a> {
             // qualified instead of qualifying it with the namespace again.
             let resolved = self.name_ctx.resolve(reference.class);
             if self.registry.lookup_class(&resolved).is_none() {
-                self.report(
+                report!(self, 
                     format!("PHPDoc tag @see contains unknown class {trimmed}"),
                     span,
                     2,
@@ -889,7 +889,7 @@ impl<'a> Checker<'a> {
                 ),
             };
             if !found {
-                self.report(
+                report!(self, 
                     format!("PHPDoc tag @see contains unknown reference {trimmed}::{member}"),
                     span,
                     2,
@@ -996,7 +996,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !self.accepts(&declared_ty, &value_ty).yes() {
-                self.report(
+                report!(self, 
                     format!(
                         "constant {fqn}::{} ({declared_ty}) does not accept value {value_ty}",
                         c.name
@@ -1023,7 +1023,7 @@ impl<'a> Checker<'a> {
         }
         let name = &c.name;
         if has_native_type {
-            self.report(
+            report!(self, 
                 format!("constant {fqn}::{name} ({phpdoc_ty}) does not accept value {value_ty}"),
                 c.span,
                 2,
@@ -1039,7 +1039,7 @@ impl<'a> Checker<'a> {
         } else {
             "is not subtype of"
         };
-        self.report(format!(
+        report!(self, format!(
                 "PHPDoc tag @var for constant {fqn}::{name} with type {phpdoc_ty} {relation} value {value_ty}."
             ),
             c.span,
@@ -1141,7 +1141,7 @@ impl<'a> Checker<'a> {
             let proto = proto.clone();
             let span = cc.name.span;
             if proto.is_final() {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(
                         format!(
                             "Constant {fqn}::{name} overrides final constant {proto_owner}::{name}."
@@ -1169,7 +1169,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(message) = narrowed {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(message, span, 0, "classConstant.visibility")
                         .non_ignorable(),
                 );
@@ -1177,7 +1177,7 @@ impl<'a> Checker<'a> {
             if let Some(proto_native) = &proto.native_ty() {
                 match &own.native_ty() {
                     Some(own_native) if !self.accepts(proto_native, own_native).yes() => {
-                        self.report_builder(
+                        report_builder!(self, 
                             DiagnosticBuilder::new(format!(
                                     "Native type {own_native} of constant {fqn}::{name} is not covariant with native type {proto_native} of constant {proto_owner}::{name}."
                                 ),
@@ -1190,7 +1190,7 @@ impl<'a> Checker<'a> {
                     }
                     Some(_) => {}
                     None => {
-                        self.report_builder(
+                        report_builder!(self, 
                             DiagnosticBuilder::new(format!(
                                     "Constant {fqn}::{name} overriding constant {proto_owner}::{name} ({proto_native}) should also have native type {proto_native}."
                                 ),
@@ -1215,7 +1215,7 @@ impl<'a> Checker<'a> {
                 && own.has_phpdoc_type()
                 && !self.accepts(proto_ty, own_ty).yes()
             {
-                self.report(format!(
+                report!(self, format!(
                         "Type {} of constant {fqn}::{name} is not covariant with type {} of constant {proto_owner}::{name}.",
                         own_ty, proto_ty
                     ),
@@ -1285,7 +1285,7 @@ impl<'a> Checker<'a> {
                         .map(|value| self.infer_expr(value, &self.new_locals()))
                         .expect("trait-constant value belongs to its parsed file owner");
                     if !own_value.is_mixed() && own_value != *trait_const.value_ty() {
-                        self.report_builder(
+                        report_builder!(self, 
                             DiagnosticBuilder::new(format!(
                                     "Constant {fqn}::{name} with value {own_value} overriding constant {trait_fqn}::{name} with different value {} should have the same value.",
                                     trait_const.value_ty()
@@ -1367,7 +1367,7 @@ impl<'a> Checker<'a> {
             _ => {}
         }
         for (message, identifier) in errors {
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new(message, cc.name.span, 0, identifier).non_ignorable(),
             );
         }
@@ -1406,7 +1406,7 @@ impl<'a> Checker<'a> {
             if declared {
                 continue;
             }
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new(format!(
                         "non-abstract class {display} implements the Serializable interface, but does not implement {method}()"
                     ),
@@ -1445,7 +1445,7 @@ impl<'a> Checker<'a> {
         if self.registry.php_supports_everywhere(feature) != Some(false) {
             return;
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(
                 message.to_string(),
                 span,
@@ -1489,7 +1489,7 @@ impl<'a> Checker<'a> {
                     .php_supports_everywhere(types::php_version::PhpFeature::ConstantsInTraits)
                     == Some(false)
             {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new("Constant is declared inside a trait but is only supported on PHP 8.2 and later.".to_string(),
                         c.span,
                         0,
@@ -1504,7 +1504,7 @@ impl<'a> Checker<'a> {
                     .php_supports_everywhere(types::php_version::PhpFeature::FinalClassConstants)
                     == Some(false)
             {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(
                         "Final class constants are supported only on PHP 8.1 and later."
                             .to_string(),
@@ -1516,7 +1516,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if c.is_final && c.visibility == Visibility::Private {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(format!(
                             "Private constant {fqn}::{} cannot be final as it is never overridden by other classes.",
                             c.name
@@ -1533,7 +1533,7 @@ impl<'a> Checker<'a> {
                     types::php_version::PhpFeature::NativeTypedClassConstants,
                 ) == Some(false)
             {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new("Class constants with native types are supported only on PHP 8.3 and later.".to_string(),
                         c.span,
                         0,
@@ -1587,7 +1587,7 @@ impl<'a> Checker<'a> {
                     } else {
                         "Non-abstract class"
                     };
-                    self.report_builder(
+                    report_builder!(self, 
                         DiagnosticBuilder::new(
                             format!(
                                 "{description} {fqn} contains abstract method {}()",
@@ -1605,7 +1605,7 @@ impl<'a> Checker<'a> {
             // outside an interface - real PHP: "Non-abstract method
             // Foo::bar() must contain body."
             if !m.is_abstract && kind != ClassKind::Interface && m.function.body.is_none() {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(
                         format!(
                             "Non-abstract method {fqn}::{}() must contain a body",
@@ -1636,7 +1636,7 @@ impl<'a> Checker<'a> {
                 && kind != ClassKind::Trait
                 && (is_class_abstract || kind == ClassKind::Interface)
             {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(
                         format!(
                             "private method {fqn}::{}() cannot be abstract",
@@ -1659,7 +1659,7 @@ impl<'a> Checker<'a> {
             // pattern idiom, not the "forgot final does nothing here"
             // mistake this check otherwise exists to catch.
             if m.is_final && m.visibility == Visibility::Private && !m.function.is_constructor() {
-                self.report(format!(
+                report!(self, format!(
                         "private method {fqn}::{}() cannot be final as it is never overridden by other classes",
                         m.function.name
                     ),
@@ -1675,7 +1675,7 @@ impl<'a> Checker<'a> {
             // matching real PHPStan's deliberate choice to share it
             // between both shapes.
             if kind == ClassKind::Interface && m.visibility != Visibility::Public {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(
                         format!(
                             "method {fqn}::{}() cannot use non-public visibility in interface",
@@ -1694,7 +1694,7 @@ impl<'a> Checker<'a> {
             // always yields the new instance), so a native return type
             // is always a mistake, never legitimate.
             if m.function.is_constructor() && m.function.return_type.is_some() {
-                self.report(
+                report!(self, 
                     format!("constructor of class {fqn} has a return type"),
                     m.span,
                     0,
@@ -1739,7 +1739,7 @@ impl<'a> Checker<'a> {
         if missing.len() > shown.len() {
             message.push_str(&format!(", and {} more", missing.len() - shown.len()));
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(message, span, 0, "class.abstractMethodNotImplemented").tip(
                 "either implement every method listed above, or declare this class itself abstract",
             ),
@@ -1786,6 +1786,7 @@ impl<'a> Checker<'a> {
         if body_calls_parent_construct(arenas, ctor.function.body_stmts(arenas)) {
             return;
         }
+        if self.shows_level(4) {
         let mut builder = DiagnosticBuilder::new(
             format!("{fqn}::__construct() does not call parent constructor from {ancestor}."),
             ctor.function.span,
@@ -1802,6 +1803,9 @@ impl<'a> Checker<'a> {
             builder = builder.fix(span, text, "Call parent::__construct()");
         }
         self.report_builder(builder);
+        } else {
+            self.note_below_level();
+        }
     }
 
     /// Suggests constructor property promotion for a trivially-
@@ -1884,7 +1888,7 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(format!(
                     "{fqn}::__construct() only forwards its parameters into matching properties - consider constructor property promotion instead"
                 ),
@@ -1942,7 +1946,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ("Interface", "implementing")
                     };
-                    self.report(format!(
+                    report!(self, format!(
                             "{kind_word} {ancestor_fqn} requires {relation_word} class to extend {required}, but {fqn} does not."
                         ),
                         span,
@@ -1955,7 +1959,7 @@ impl<'a> Checker<'a> {
                 if self.registry.is_subclass_of(fqn, &required) {
                     continue;
                 }
-                self.report(format!(
+                report!(self, format!(
                         "Trait {ancestor_fqn} requires using class to implement {required}, but {fqn} does not."
                     ),
                     span,
@@ -2017,7 +2021,7 @@ impl<'a> Checker<'a> {
             if (parent_info.sealed().is_empty() && attribute_sealed.is_empty()) || permitted() {
                 continue;
             }
-            self.report(
+            report!(self, 
                 format!("Type {fqn} is not allowed to be a subtype of {parent_fqn}."),
                 span,
                 0,

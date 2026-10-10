@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
                     name
                 )
             };
-            self.report(message, span, 1, "constructor.unusedParameter");
+            report!(self, message, span, 1, "constructor.unusedParameter");
         }
     }
 
@@ -131,7 +131,7 @@ impl<'a> Checker<'a> {
             if usage.contains(&u.name) {
                 continue;
             }
-            self.report(
+            report!(self, 
                 format!("closure has an unused use (${})", u.name),
                 span,
                 1,
@@ -239,6 +239,7 @@ impl<'a> Checker<'a> {
             if c.visibility != Visibility::Private || usage.consts.contains(c.name.as_ref()) {
                 continue;
             }
+            if self.shows_level(4) {
             let mut builder = DiagnosticBuilder::new(
                 format!("private constant {fqn}::{} is unused", c.name),
                 c.span,
@@ -249,6 +250,9 @@ impl<'a> Checker<'a> {
                 builder = builder.fix(removal, "", format!("Remove constant {}", c.name));
             }
             self.report_builder(builder);
+            } else {
+                self.note_below_level();
+            }
         }
 
         for m in methods {
@@ -266,6 +270,7 @@ impl<'a> Checker<'a> {
             } else {
                 "private method"
             };
+            if self.shows_level(4) {
             let mut builder = DiagnosticBuilder::new(
                 format!("{kind_word} {fqn}::{}() is unused", m.function.name),
                 m.function.span,
@@ -276,6 +281,9 @@ impl<'a> Checker<'a> {
                 builder = builder.fix(removal, "", format!("Remove method {}()", m.function.name));
             }
             self.report_builder(builder);
+            } else {
+                self.note_below_level();
+            }
         }
 
         // PHP 8.4 asymmetric visibility (`public private(set)`): a
@@ -303,7 +311,7 @@ impl<'a> Checker<'a> {
             } else {
                 "property"
             };
-            self.report(format!(
+            report!(self, format!(
                     "{kind_word} {fqn}::${} has private(set) visibility but is never written from within the declaring class",
                     p.name
                 ),
@@ -398,6 +406,10 @@ impl<'a> Checker<'a> {
         } else {
             "property"
         };
+        if !self.shows_level(4) {
+            self.note_below_level();
+            return;
+        }
         let (message, identifier) = if !read {
             if !written {
                 (

@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
         span: syntax::span::Span,
         identifier: &'static str,
     ) {
-        self.report_builder(
+        report_builder!(self, 
             DiagnosticBuilder::new(
                 format!("Call to {callee} on a separate line discards its return value."),
                 span,
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
         if let (Some(min), Some(max)) = (min_ty.int_literal_value(), max_ty.int_literal_value())
             && min > max
         {
-            self.report(format!(
+            report!(self, format!(
                     "random_int(): parameter #1 ($min = {min}) must be less than or equal to parameter #2 ($max = {max})"
                 ),
                 self.expr_span(min_expr.id),
@@ -189,7 +189,7 @@ impl<'a> Checker<'a> {
                     (keys_ty.count_range(), values_ty.count_range())
                     && (kh.is_some_and(|h| h < vl) || vh.is_some_and(|h| h < kl))
                 {
-                    self.report(
+                    report!(self, 
                         format!(
                             "array_combine() expects arrays of the same size, {keys_ty} and {values_ty} given."
                         ),
@@ -215,7 +215,7 @@ impl<'a> Checker<'a> {
                     } else {
                         "count"
                     };
-                    self.report(
+                    report!(self, 
                         format!(
                             "{name}() can only {verb} int and string values, {values} given; others are skipped."
                         ),
@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
         if args.len() < 3 {
             return;
         }
-        self.report("Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported.".to_string(),
+        report!(self, "Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported.".to_string(),
             span,
             0,
             "argument.unused",

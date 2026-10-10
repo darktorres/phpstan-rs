@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
             );
         }
         for (prop, span) in premature_reads {
-            self.report(
+            report!(self, 
                 format!("Access to an uninitialized property {fqn}::${prop}."),
                 span,
                 2,

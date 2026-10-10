@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
             if is_used {
                 continue;
             }
-            self.report(
+            report!(self, 
                 format!(
                     "{subject} never returns {member} so it can be removed from the return type."
                 ),

@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
     }
 
     fn report_magic_number(&mut self, span: Span, id: &str, place: &str) {
-        self.report(
+        report!(self, 
             format!("Do not use magic number {place}. Move to constant with a suitable name."),
             span,
             0,
@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                 let span = arenas
                     .expr_span(default)
                     .expect("property default belongs to its retained file owner");
-                self.report("Do not assign magic number to property. Move to constant with a suitable name.".to_string(),
+                report!(self, "Do not assign magic number to property. Move to constant with a suitable name.".to_string(),
                     span,
                     0,
                     "magicNumber.property",
@@ -197,7 +197,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Assign(_, value) | ExprKind::AssignRef(_, value) => {
                 if self.magic_number(arenas, *value).is_some() {
-                    self.report("Do not assign magic number to variable. Move to constant with a suitable name.".to_string(),
+                    report!(self, "Do not assign magic number to variable. Move to constant with a suitable name.".to_string(),
                         self.expr_span(e.id),
                         0,
                         "magicNumber.assignment",
@@ -252,7 +252,7 @@ impl<'a> Checker<'a> {
         let arenas = syntax_owner.arenas();
         match &stmt.kind {
             StmtKind::Return(Some(value)) if self.magic_number(arenas, *value).is_some() => {
-                self.report(
+                report!(self, 
                     "Do not return magic number. Move to constant with a suitable name."
                         .to_string(),
                     self.stmt_span(stmt.id),

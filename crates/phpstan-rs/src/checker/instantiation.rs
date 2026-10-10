@@ -18,7 +18,7 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        self.report(
+        report!(self, 
             format!("cannot instantiate class using {ty}"),
             span,
             level,
@@ -34,7 +34,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let Some(class) = self.current_class.clone() else {
-            self.report(
+            report!(self, 
                 format!("using {name} outside of class scope"),
                 span,
                 0,
@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let method = self.current_method.clone().unwrap_or_default();
-        self.report(
+        report!(self, 
             format!("{class}::{method}() calls new parent but {class} does not extend any class"),
             span,
             0,
@@ -91,7 +91,7 @@ impl<'a> Checker<'a> {
         let is_abstract = info.is_abstract();
         match kind {
             ClassKind::Trait => {
-                self.report(
+                report!(self, 
                     format!("cannot instantiate trait {class}"),
                     span,
                     0,
@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
                 return false;
             }
             ClassKind::Enum => {
-                self.report(
+                report!(self, 
                     format!("cannot instantiate enum {class}"),
                     span,
                     0,
@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                 return false;
             }
             ClassKind::Interface if !is_static => {
-                self.report(
+                report!(self, 
                     format!("cannot instantiate interface {class}"),
                     span,
                     0,
@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
                 return false;
             }
             ClassKind::Class if is_abstract && !is_static => {
-                self.report_builder(
+                report_builder!(self, 
                     DiagnosticBuilder::new(format!("cannot instantiate abstract class {class}"),
                         span,
                         0,
@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
             .map(|(owner, sig)| (owner, sig.visibility()))
         else {
             if has_args && !self.registry.has_unresolvable_ancestor(class) {
-                self.report(format!(
+                report!(self, format!(
                         "class {class} does not have a constructor and must be instantiated without any parameters"
                     ),
                     span,
@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
             Visibility::Protected => "protected",
         };
         if !self.is_member_access_visible(&owner, &visibility, "__construct", "method") {
-            self.report(
+            report!(self, 
                 format!(
                     "cannot instantiate class {class} via {word} constructor {owner}::__construct()"
                 ),
@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
         };
         let is_abstract = info.is_abstract();
         if !info.is_final() && !info.is_final_by_phpdoc() && self.new_static_is_unsafe(&class) {
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new("unsafe usage of new static()".to_string(),
                     span,
                     0,
@@ -201,7 +201,7 @@ impl<'a> Checker<'a> {
             .lookup_method_with_owner(&class, &method)
             .is_some_and(|(owner, _)| self.registry.method_is_static(&owner, &method));
         if is_abstract && in_static_method {
-            self.report_builder(
+            report_builder!(self, 
                 DiagnosticBuilder::new(format!(
                         "unsafe usage of new static() in abstract class {class} in static method {method}()"
                     ),

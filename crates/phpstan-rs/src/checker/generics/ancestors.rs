@@ -380,7 +380,7 @@ impl<'a> Checker<'a> {
         let mut unused: Vec<&String> = names.iter().collect();
         for (node, ty) in &tag_types {
             let Some((class, args)) = ty.as_object() else {
-                self.report(
+                report!(self, 
                     format!("{} {ty}.", messages.incompatible()),
                     span,
                     2,
@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if args.is_empty() {
-                self.report(
+                report!(self, 
                     format!("{} {ty}.", messages.incompatible()),
                     span,
                     2,
@@ -406,9 +406,9 @@ impl<'a> Checker<'a> {
                         } else {
                             format!("{prefix} {class} {rest} {listed}.")
                         };
-                        self.report(message, span, 2, "generics.wrongParent");
+                        report!(self, message, span, 2, "generics.wrongParent");
                     }
-                    _ => self.report(messages.no_names(), span, 2, "generics.noParent"),
+                    _ => report!(self, messages.no_names(), span, 2, "generics.noParent"),
                 }
                 continue;
             };
@@ -417,7 +417,7 @@ impl<'a> Checker<'a> {
             // half (never allowed here, see below).
             self.check_ancestor_generic_object(ty, &location, &label, span);
             if self.type_node_unresolvable(node, Some(fqn)) {
-                self.report(messages.unresolvable(), span, 2, "generics.unresolvable");
+                report!(self, messages.unresolvable(), span, 2, "generics.unresolvable");
             }
             let referenced: Vec<String> = ty
                 .referenced_class_names()
@@ -430,7 +430,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 match self.registry.lookup_class(&name) {
-                    None => self.report(
+                    None => report!(self, 
                         format!("{location} has invalid type {name}."),
                         span,
                         0,
@@ -462,7 +462,7 @@ impl<'a> Checker<'a> {
                     .map(|(tp, position)| (tp.name.clone(), tp.variance, position))
                     .collect();
                 for (name, declared, position) in violations {
-                    self.report(format!(
+                    report!(self, format!(
                             "Template type {name} is declared as {}, but occurs in {} position {context}.",
                             PositionVariance::from(declared).describe(),
                             position.describe()
@@ -475,7 +475,7 @@ impl<'a> Checker<'a> {
             }
             for arg in args {
                 if let Some(projection) = call_site_projection(arg) {
-                    self.report(format!(
+                    report!(self, format!(
                             "Call-site variance annotation of {projection} in generic type {ty} in {location} is not allowed."
                         ),
                         span,
@@ -504,7 +504,7 @@ impl<'a> Checker<'a> {
                     list.push_str(&format!(" ({required}-{total} required)"));
                 }
                 let missing = messages.missing_generics().unwrap_or_default();
-                self.report(
+                report!(self, 
                     format!("{missing} {canonical} but does not specify its types: {list}"),
                     span,
                     6,

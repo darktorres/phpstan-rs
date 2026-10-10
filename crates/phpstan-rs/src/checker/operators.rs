@@ -237,7 +237,7 @@ impl<'a> Checker<'a> {
         } else {
             (sigil.to_string(), "binaryOp.invalid")
         };
-        self.report(
+        report!(self, 
             format!("Binary operation \"{op_str}\" between {l_ty} and {r_ty} results in an error."),
             span,
             2,
@@ -265,7 +265,7 @@ impl<'a> Checker<'a> {
         if ty.is_mixed() || ty.is_bool().yes() {
             return;
         }
-        self.report(
+        report!(self, 
             format!("Only booleans are allowed in {context}, {ty} given."),
             self.expr_span(e.id),
             5,
@@ -292,7 +292,7 @@ impl<'a> Checker<'a> {
         if ty.is_mixed() || ty.is_bool().yes() {
             return;
         }
-        self.report(
+        report!(self, 
             format!("Only booleans are allowed in {sigil}, {ty} given on the {side} side."),
             self.expr_span(e.id),
             5,
@@ -327,7 +327,7 @@ impl<'a> Checker<'a> {
         if !is_duplicate_side_effect_free_operand(owner.arenas(), l, r) {
             return;
         }
-        self.report(
+        report!(self, 
             "Both sides of this expression are the same.".to_string(),
             self.expr_span(l.id),
             5,
@@ -346,7 +346,7 @@ impl<'a> Checker<'a> {
         if !is_duplicate_side_effect_free_operand(owner.arenas(), lhs, rhs) {
             return;
         }
-        self.report(
+        report!(self, 
             "This assignment has no effect, both sides are the same.".to_string(),
             self.expr_span(lhs.id),
             5,
@@ -382,7 +382,7 @@ impl<'a> Checker<'a> {
         if !is_zero {
             return;
         }
-        self.report(format!("{op_word} by zero."), span, 0, identifier);
+        report!(self, format!("{op_word} by zero."), span, 0, identifier);
     }
 
     /// `None` = this operator's operand legality isn't modeled here:
@@ -474,7 +474,7 @@ impl<'a> Checker<'a> {
         if !invalid {
             return;
         }
-        self.report(
+        report!(self, 
             format!(
                 "Comparison operation \"{}\" between {l_ty} and {r_ty} results in an error.",
                 binop_sigil(op)
@@ -518,7 +518,7 @@ impl<'a> Checker<'a> {
             UnaryOp::Plus => "+",
             _ => "~",
         };
-        self.report(
+        report!(self, 
             format!("Unary operation \"{sigil}\" on {inner_ty} results in an error."),
             span,
             2,
@@ -564,7 +564,7 @@ impl<'a> Checker<'a> {
                 | ExprKind::StaticPropertyFetch(..)
                 | ExprKind::DynamicStaticPropertyFetch(..)
         ) {
-            self.report(
+            report!(self, 
                 format!("Cannot use {symbol} on a non-variable."),
                 span,
                 0,
@@ -581,7 +581,7 @@ impl<'a> Checker<'a> {
             self.check_incdec_version_warnings(increment, inner_ty, span, name);
             return;
         }
-        self.report(
+        report!(self, 
             format!("Cannot use {symbol} on {inner_ty}."),
             span,
             0,
@@ -657,7 +657,7 @@ impl<'a> Checker<'a> {
         } else {
             7
         };
-        self.report(
+        report!(self, 
             format!("{message} ({inner_ty} given)."),
             span,
             level,

@@ -75,7 +75,7 @@ impl<'a> Checker<'a> {
                     self.static_method_through_instance(receiver, method, locals)
                 })
             {
-                self.report(
+                report!(self, 
                     format!("Dynamic call to static method {owner}::{name}()."),
                     self.expr_span(e.id),
                     0,
@@ -155,7 +155,7 @@ impl<'a> Checker<'a> {
                     } else {
                         "does not exist"
                     };
-                self.report(
+                report!(self, 
                     format!(
                         "Implicit array creation is not allowed - variable ${name} {certainty}."
                     ),
@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
                 ExprKind::MethodCall(_, method, _, _)
                     if syntax::ast::is_constructor_name(method) =>
                 {
-                    self.report(
+                    report!(self, 
                         "Call to __construct() on an existing object is not allowed.".to_string(),
                         self.expr_span(e.id),
                         0,
@@ -181,7 +181,7 @@ impl<'a> Checker<'a> {
                     if syntax::ast::is_constructor_name(method)
                         && !self.is_parent_constructor_call(target) =>
                 {
-                    self.report("Static call to __construct() is only allowed on a parent class in the constructor.".to_string(),
+                    report!(self, "Static call to __construct() is only allowed on a parent class in the constructor.".to_string(),
                         self.expr_span(e.id),
                         0,
                         "constructor.call",
@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
                 };
                 let ty = self.infer_expr(operand, locals);
                 if !self.valid_operand(&ty, valid) {
-                    self.report(
+                    report!(self, 
                         format!(
                             "Only numeric types are allowed in {name}, {} given.",
                             ty.describe_type_only()
@@ -243,7 +243,7 @@ impl<'a> Checker<'a> {
         }
         for (ty, side) in [(&left_ty, "left"), (&right_ty, "right")] {
             if !self.valid_operand(ty, Operand::Arithmetic) {
-                self.report(
+                report!(self, 
                     format!(
                         "Only numeric types are allowed in {sigil}, {} given on the {side} side.",
                         ty.describe_type_only()
@@ -354,7 +354,7 @@ impl<'a> Checker<'a> {
             }
             self.report_builder(builder);
         } else if !self.is_comparable_together(&left, &right) {
-            self.report(
+            report!(self, 
                 format!("Cannot compare different types in {l_text} {sigil} {r_text}."),
                 span,
                 0,
@@ -481,7 +481,7 @@ impl<'a> Checker<'a> {
             } else {
                 ("nonArrayOperand", "non-array")
             };
-            self.report(
+            report!(self, 
                 format!(
                     "{kind} ({one}) in combination with {capitalized} ({other}) is not allowed."
                 ),
@@ -529,7 +529,7 @@ impl<'a> Checker<'a> {
                 };
                 let array_ty = self.infer_expr(array, locals);
                 if !self.filters_unambiguously(&array_ty) {
-                    self.report("Call to function array_filter() requires parameter #2 to be passed to avoid loose comparison semantics.".to_string(),
+                    report!(self, "Call to function array_filter() requires parameter #2 to be passed to avoid loose comparison semantics.".to_string(),
                         span,
                         0,
                         "arrayFilter.strict",
@@ -537,7 +537,7 @@ impl<'a> Checker<'a> {
                 }
                 return;
             }
-            self.report("Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics (null given).".to_string(),
+            report!(self, "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics (null given).".to_string(),
                 span,
                 0,
                 "arrayFilter.strict",
@@ -556,7 +556,7 @@ impl<'a> Checker<'a> {
         } else {
             return;
         };
-        self.report(format!(
+        report!(self, format!(
                 "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics ({} given).",
                 callback_ty.describe_type_only()
             ),
@@ -594,7 +594,7 @@ impl<'a> Checker<'a> {
         if expr.is_never() || self.registry.is_super_type_of(cast, expr) != TrinaryLogic::Yes {
             return;
         }
-        self.report(
+        report!(self, 
             format!(
                 "Casting to {} something that's already {}.",
                 cast.describe_type_only(),
@@ -683,7 +683,7 @@ impl<'a> Checker<'a> {
             }
             Some(_) => return,
         };
-        self.report(message, span, 0, "function.strict");
+        report!(self, message, span, 0, "function.strict");
     }
 
     /// The statement-level ports, before `stmt` itself is checked.
@@ -730,7 +730,7 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
             for (span, id, message) in overwritten {
-                self.report(message, span, 0, id);
+                report!(self, message, span, 0, id);
             }
         }
         if self.settings.strict_rules.check_switch_case_types
@@ -752,7 +752,7 @@ impl<'a> Checker<'a> {
                 if self.registry.is_super_type_of(&subject_ty, &case_ty) != TrinaryLogic::No {
                     continue;
                 }
-                self.report(format!(
+                report!(self, format!(
                         "Switch condition type ({subject_ty}) does not match case condition {} ({}).",
                         syntax::printer::print_expr(arenas, test),
                         case_ty.describe_type_only()

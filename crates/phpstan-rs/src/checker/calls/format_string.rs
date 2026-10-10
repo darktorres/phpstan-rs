@@ -420,7 +420,7 @@ impl<'a> Checker<'a> {
                 registry.php_version_consensus(|v| printf_placeholder_count(&format, v))
             };
             let Some(count) = count else {
-                self.report(
+                report!(self, 
                     format!("Call to {name} contains an invalid placeholder."),
                     span,
                     0,
@@ -455,7 +455,7 @@ impl<'a> Checker<'a> {
         if values == placeholders {
             return;
         }
-        self.report(
+        report!(self, 
             count_message(name, Count::exact(placeholders), Count::exact(values)),
             span,
             0,
@@ -503,7 +503,7 @@ impl<'a> Checker<'a> {
         if placeholders_match_values(placeholders, values) {
             return;
         }
-        self.report(
+        report!(self, 
             count_message(name, placeholders, values),
             span,
             0,
@@ -540,7 +540,7 @@ impl<'a> Checker<'a> {
         let Some(from) = self.rejected_from(&expected, &values_ty) else {
             return;
         };
-        self.report_found_from(format!(
+        report_found_from!(self, format!(
                 "Parameter #{} $values of function {name} expects array<bool|float|int|string|null>, {values_ty} given.",
                 position + 1
             ),
@@ -592,7 +592,7 @@ impl<'a> Checker<'a> {
             let arg_ty = self.infer_expr(arg_expr, locals);
             let rejected_from = self.rejected_from(&allowed, &arg_ty);
             if let Some(from) = rejected_from {
-                self.report_found_from(format!(
+                report_found_from!(self, format!(
                         "Parameter #{} ...$values of function {name} expects bool|float|int|string|null, {arg_ty} given.",
                         i + 1
                     ),
@@ -623,6 +623,7 @@ impl<'a> Checker<'a> {
                     (Accepting::Float, false) => "castable to float",
                     (Accepting::String | Accepting::Mixed, false) => "castable to string",
                 };
+                if self.shows_level(level) {
                 let finding = DiagnosticBuilder::new(
                     format!(
                         "Parameter #{} of function {name} is expected to be {expected} by placeholder #{} ({}), {} given.",
@@ -639,6 +640,9 @@ impl<'a> Checker<'a> {
                     Some(below) => finding.found_below(below),
                     None => finding,
                 });
+                } else {
+                    self.note_below_level();
+                }
             }
         }
     }

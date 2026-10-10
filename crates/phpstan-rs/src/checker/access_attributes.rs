@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
                 .current_class
                 .clone()
                 .unwrap_or_else(|| "code outside a class".to_string());
-            self.report(
+            report!(self, 
                 format!(
                     "{target} can only be called by its friends ({}), not by {caller}.",
                     friends.join(", ")
@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
                 } else {
                     format!("namespace {} and below", visibility.namespace)
                 };
-                self.report(
+                report!(self, 
                     format!("{target} is only visible from {scope}."),
                     span,
                     2,
@@ -135,7 +135,7 @@ impl<'a> Checker<'a> {
         let test_only =
             own.is_some_and(|a| a.test_only) || class_level.is_some_and(|a| a.test_only);
         if test_only && !self.in_test_code() {
-            self.report(
+            report!(self, 
                 format!("{target} is marked #[TestTag] and can only be used from test code."),
                 span,
                 2,
@@ -187,7 +187,7 @@ impl<'a> Checker<'a> {
                             .is_some_and(|resolved| resolved.eq_ignore_ascii_case(&trait_name))
                     })
                     .map_or(c.name.span, |u| u.span);
-                self.report(format!(
+                report!(self, format!(
                         "Trait {trait_name} can only be used by {} and their subclasses, not {fqn}.",
                         allowed.iter().map(|a| a.as_ref()).collect::<Vec<_>>().join(", ")
                     ),
@@ -230,7 +230,7 @@ impl<'a> Checker<'a> {
                 })
                 .collect();
             for (span, param, used, injectable) in findings {
-                self.report(format!(
+                report!(self, format!(
                         "Parameter ${param} of {fqn}::{}() is type-hinted with {used}; inject its #[InjectableVersion] {injectable} instead.",
                         m.function.name
                     ),
