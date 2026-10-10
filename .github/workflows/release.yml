@@ -19,21 +19,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Two Linux legs on an EXPLICITLY PINNED older Ubuntu LTS image
-          # (not `ubuntu-latest`) - this is what actually addresses glibc
-          # symbol-versioning skew against an end user's own, possibly
-          # older distro. `ubuntu-24.04` was the current actively-
-          # supported LTS at the time this workflow was authored;
-          # `ubuntu-22.04` had just entered its own deprecation window
-          # (GitHub deprecates runner images on a rolling schedule) - if
-          # this image is itself later deprecated, re-pin to whatever
-          # GitHub's current oldest-supported LTS is at that time, and
-          # update the minimum-glibc claim in README.md's own
-          # "Installing a pre-built binary" section to match.
-          - os: ubuntu-24.04
+          # Two Linux legs on an EXPLICITLY PINNED Ubuntu LTS image
+          # (not `ubuntu-latest`), so the glibc these binaries link
+          # against is the one the runner image ships. The binaries need
+          # that glibc (2.43 on ubuntu-26.04) or newer at run time, so they
+          # will not run on older distros. The pin is the newest LTS, as
+          # of this change. Earlier, `ubuntu-24.04` was pinned for the
+          # opposite reason: a lower glibc floor for older end-user distros.
+          # GitHub deprecates runner images on a rolling schedule; when this
+          # image is deprecated, re-pin to the current LTS and update the
+          # minimum-glibc claim in README.md's "Linux glibc compatibility"
+          # section to match.
+          - os: ubuntu-26.04
             target: x86_64-unknown-linux-gnu
             native: true
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             target: aarch64-unknown-linux-gnu
             native: false
           # macOS and Windows need native/first-party runners regardless
