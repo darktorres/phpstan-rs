@@ -185,6 +185,24 @@ counted as graph evidence for ordered callback mutation or exceptional-state
 retention. Follow-up implementation and calibration are tracked under R01.6,
 R02.2–R02.3, R04.1, and R05.2; RV-16 remains an artifact/source-linkage gap.
 
+R02.2 adds a reproducible bounded crosswalk for the PHP 8.5.4 `zif_strlen`
+normal demand. The builder checks the source hash and confirms that Clang's
+AST/CFG represents the `zend_string.len` read and zval result assignment,
+Clang's emitted translation-unit LLVM loads field index 2 and stores that same
+SSA value into the zval result, and GCC GIMPLE/CFG retain the parser gate and
+length-to-result assignment. The [generated correspondence record](tools/php-catalog/experiments/comparison/results/evaluation/strlen-representation-correspondence.json)
+records hashes for all input artifacts. These representations agree on that
+selected path; this does not establish equivalence for all branches or effects.
+
+The cleanup fixture supplies a counterexample to assuming CFG and LLVM
+exception behavior coincide: GCC GIMPLE records a `finally` destructor, and
+Clang LLVM has unwind cleanup blocks, while the Clang AST CFG output contains
+no explicit `Guard` destructor edge. The PHP `zend_builtin_functions.c` CIR
+campaign failed to emit this unit, so CIR agreement is unsupported. Clang
+analyzer campaigns here concern C fixtures rather than PHP's `zif_strlen`.
+The [correspondence builder](tools/php-catalog/experiments/comparison/build_strlen_representation_correspondence.py)
+fails when the pinned source, required IR anchors, or cleanup evidence drift.
+
 An October 9, 2026 comparison runs the same 13 positive PHP sentinels on
 PHP 8.5.4 Hybrid and CALL runtimes. GCC 15.2.0 and `-O0 -g` match. The CALL
 configuration disables GCC global-register variables because they select a

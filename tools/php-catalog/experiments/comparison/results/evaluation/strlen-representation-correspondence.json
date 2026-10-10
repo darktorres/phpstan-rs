@@ -1,0 +1,92 @@
+{
+  "artifacts": {
+    "cir_log": {
+      "bytes": 1078652,
+      "sha256": "43fb1371160e9346f669dfad71350b2d0dd228517784e78700c5cdd81ea4167a"
+    },
+    "clang_ast": {
+      "bytes": 42735,
+      "sha256": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067"
+    },
+    "clang_llvm": {
+      "bytes": 23222,
+      "sha256": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f"
+    },
+    "cleanup_ast": {
+      "bytes": 2255,
+      "sha256": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242"
+    },
+    "cleanup_gimple": {
+      "bytes": 889,
+      "sha256": "13382af7b554b6311ec0c5b19607898badc21692f60f1c3ea91faf982e81b254"
+    },
+    "cleanup_llvm": {
+      "bytes": 4665,
+      "sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672"
+    },
+    "gcc_cfg": {
+      "bytes": 412240,
+      "sha256": "16fd020bcfd952490217b6d24ddb2b76c420aa59df10fd37d77de68a83deaab9"
+    },
+    "gcc_gimple": {
+      "bytes": 438573,
+      "sha256": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2"
+    },
+    "source": {
+      "bytes": 64968,
+      "sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+    }
+  },
+  "cleanup_counterexample": {
+    "ast_has_explicit_destructor_edge": false,
+    "clang_ast_cfg_blocks": 8,
+    "finding": "GCC GIMPLE and Clang LLVM retain exceptional cleanup; the Clang AST CFG artifact has no explicit Guard destructor edge. Do not use that CFG alone to claim cleanup preservation.",
+    "gcc_gimple_has_exceptional_finally_destructor": true,
+    "llvm_has_unwind_cleanup_blocks": true
+  },
+  "provenance_note": "The source hash is checked against the PHP source digest pinned in the LLVM witness. The preserved AST/LLVM summary outputs do not embed source hashes, so their per-file digests are recorded here and their campaign commands remain the external provenance record.",
+  "schema": 1,
+  "scope": "PHP 8.5.4 zif_strlen parse-to-byte-length-return slice plus a separate C++ cleanup counterexample",
+  "source_sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505",
+  "strlen_correspondence": {
+    "agreement": "Clang AST/CFG, Clang LLVM summary, and GCC GIMPLE/CFG retain the selected parse-to-length result path. This is a structural correspondence for the selected demand, not a general semantic equivalence proof.",
+    "cir": {
+      "interpretation": "No CIR semantic correspondence can be claimed when this translation unit does not emit CIR.",
+      "status": "failed"
+    },
+    "clang_ast_cfg": {
+      "blocks": 53,
+      "edges": 75,
+      "length_field_reads": 1,
+      "length_to_zval_lval": true,
+      "parser_call_present": true,
+      "parser_to_result_to_exit_path": true,
+      "status": "matched"
+    },
+    "clang_llvm": {
+      "blocks": 33,
+      "instructions": 241,
+      "length_field_load": true,
+      "length_to_result_store": true,
+      "result_store_reaches_return": true,
+      "status": "matched in Clang translation-unit LLVM"
+    },
+    "gcc_gimple_cfg": {
+      "cfg_parser_to_result_to_exit_path": true,
+      "gimple_length_to_result": true,
+      "gimple_parser_call": true,
+      "status": "matched"
+    },
+    "source": {
+      "function": "zif_strlen",
+      "parser": "Z_PARAM_STR(s)",
+      "return": "RETVAL_LONG(ZSTR_LEN(s))"
+    }
+  },
+  "unsupported_coverage": [
+    "CIR could not emit the selected PHP translation unit; no CIR-to-LLVM or CIR semantic comparison is supported.",
+    "Clang analyzer results are fixture-level probes, not a PHP zif_strlen analysis.",
+    "The structural crosswalk does not compare all transfers, path conditions, ABI effects, or exceptional semantics.",
+    "This does not close ZEND_STRLEN VM-opcode correspondence or any open PHP effect/exception domain."
+  ]
+}
