@@ -3369,3 +3369,51 @@ syntax::canonical_struct!(AssignedProperties {
     on_variables,
     new_instances,
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn place(name: &str) -> Origin {
+        Origin::Place(Place::root(Root::Variable(Some(Name::from(name)))))
+    }
+
+    #[test]
+    fn the_elements_of_an_origin_are_not_the_origin() {
+        let inner = place("list");
+        let elements = Origin::Elements(Box::new(inner.clone()));
+        assert_ne!(inner, elements);
+        assert_ne!(hash_of(&inner), hash_of(&elements));
+        assert_eq!(elements, Origin::Elements(Box::new(inner.clone())));
+        assert_ne!(
+            syntax::canonical::print(&inner),
+            syntax::canonical::print(&elements)
+        );
+        assert_ne!(elements, Origin::Elements(Box::new(place("other"))));
+    }
+
+    #[test]
+    fn elements_of_an_origin_that_holds_no_array_are_none() {
+        for origin in [Origin::NoObject, Origin::Arithmetic, Origin::Closure] {
+            assert!(origin.elements().is_none());
+        }
+        assert!(Origin::New(None).elements().is_none());
+        assert_eq!(
+            place("list").elements(),
+            Some(Origin::Elements(Box::new(place("list"))))
+        );
+    }
+
+    #[test]
+    fn the_elements_of_a_place_depend_on_the_scope_as_the_place_does() {
+        assert!(!Origin::Elements(Box::new(place("list"))).context_free());
+        assert!(
+            Origin::Elements(Box::new(Origin::Constant(QualifiedName {
+                written: Name::from("LIST"),
+                resolved: ResolvedName::Exact(Name::from("LIST")),
+                span: syntax::span::Span::default(),
+            })))
+            .context_free()
+        );
+    }
+}

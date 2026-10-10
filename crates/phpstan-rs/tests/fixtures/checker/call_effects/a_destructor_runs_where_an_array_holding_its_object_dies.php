@@ -127,3 +127,128 @@ function anArrayOfNumbersRunsNothing(): void
     [makeCount()];
     assertType('null', Flag::$value);
 }
+
+function aSpreadArrayDiesWithTheFunction(): void
+{
+    $list = [new Resets()];
+    $spread = [...$list];
+    $list = [];
+}
+
+function theCallerSeesTheSpreadDie(): void
+{
+    Flag::$value = null;
+    aSpreadArrayDiesWithTheFunction();
+    assertType('int|null', Flag::$value);
+}
+
+function aBranchMakesTheArray(bool $flag): void
+{
+    $list = $flag ? [new Resets()] : [];
+}
+
+function theCallerSeesTheBranchArrayDie(): void
+{
+    Flag::$value = null;
+    aBranchMakesTheArray(true);
+    assertType('int|null', Flag::$value);
+}
+
+function aUnionAddsElements(): void
+{
+    $list = [1];
+    $list += [new Resets()];
+}
+
+function theCallerSeesTheUnionDie(): void
+{
+    Flag::$value = null;
+    aUnionAddsElements();
+    assertType('int|null', Flag::$value);
+}
+
+function aCoalesceStoresAnElement(string $key): void
+{
+    $list = [];
+    $list[$key] ??= new Resets();
+}
+
+function theCallerSeesTheCoalescedElementDie(): void
+{
+    Flag::$value = null;
+    aCoalesceStoresAnElement('k');
+    assertType('int|null', Flag::$value);
+}
+
+function aPropertyHoldsTheObject(): void
+{
+    $holder = new \stdClass();
+    $holder->items = [new Resets()];
+}
+
+function theCallerSeesThePropertyObjectDie(): void
+{
+    Flag::$value = null;
+    aPropertyHoldsTheObject();
+    assertType('int|null', Flag::$value);
+}
+
+/** @param list<Resets> $given */
+function aTypedParameterArrayIsCopied(array $given): void
+{
+    $copy = $given;
+}
+
+/** @param list<Resets> $given */
+function theCallerSeesTheTypedCopyDie(array $given): void
+{
+    Flag::$value = null;
+    aTypedParameterArrayIsCopied($given);
+    assertType('int|null', Flag::$value);
+}
+
+/** @param list<Quiet> $given */
+function aTypedQuietParameterArrayIsCopied(array $given): void
+{
+    Flag::$value = null;
+    $copy = $given;
+    assertType('null', Flag::$value);
+}
+
+/** @param list<list<Resets>> $given */
+function aNestedTypedParameterArrayIsCopied(array $given): void
+{
+    $copy = $given;
+}
+
+/** @param list<list<Resets>> $given */
+function theCallerSeesTheNestedTypedCopyDie(array $given): void
+{
+    Flag::$value = null;
+    aNestedTypedParameterArrayIsCopied($given);
+    assertType('int|null', Flag::$value);
+}
+
+function anArrayOverwrittenInTheChecker(): void
+{
+    $list = [new Resets()];
+    Flag::$value = null;
+    $list = [];
+    assertType('int|null', Flag::$value);
+}
+
+function aClosureStoresIntoASharedArray(): void
+{
+    $list = [];
+    $add = function () use (&$list): void {
+        $list[] = new Resets();
+    };
+    $add();
+}
+
+function theCallerSeesTheClosureArrayDie(): void
+{
+    Flag::$value = null;
+    aClosureStoresIntoASharedArray();
+    assertType('int|null', Flag::$value);
+}
