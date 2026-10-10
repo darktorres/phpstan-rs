@@ -118,7 +118,20 @@ impl TargetPredicate {
         if has_duplicate_names(self.ini.iter().map(|(name, _)| name)) {
             return Err(TargetError::DuplicateSetting);
         }
+        if self.extensions.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(TargetError::NonCanonicalOrder("target extensions"));
+        }
+        if self.ini.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(TargetError::NonCanonicalOrder("target ini settings"));
+        }
         Ok(())
+    }
+
+    pub(crate) fn canonicalized_order(&self) -> Self {
+        let mut canonical = self.clone();
+        canonical.extensions.sort();
+        canonical.ini.sort();
+        canonical
     }
 
     pub fn test(&self, scenario: &TargetScenario) -> Applicability {
@@ -272,6 +285,7 @@ pub enum TargetError {
     InvalidVersionRange,
     DuplicateExtension,
     DuplicateSetting,
+    NonCanonicalOrder(&'static str),
 }
 
 #[cfg(test)]
@@ -302,6 +316,32 @@ mod tests {
         assert!(minor.contains_range(exact));
         assert!(!exact.contains_range(minor));
         assert!(!minor.overlaps(VersionRange::minor(8, 6)));
+    }
+
+    #[test]
+    fn target_predicate_set_vectors_require_canonical_order() {
+        let mut predicate = TargetPredicate {
+            extensions: vec![
+                (Bytes(b"zlib".to_vec()), true),
+                (Bytes(b"curl".to_vec()), false),
+            ],
+            ini: vec![
+                (Bytes(b"z.setting".to_vec()), Bytes(b"2".to_vec())),
+                (Bytes(b"a.setting".to_vec()), Bytes(b"1".to_vec())),
+            ],
+            ..TargetPredicate::any()
+        };
+        assert_eq!(
+            predicate.validate(),
+            Err(TargetError::NonCanonicalOrder("target extensions"))
+        );
+        predicate = predicate.canonicalized_order();
+        assert!(predicate.validate().is_ok());
+        predicate.extensions.reverse();
+        assert_eq!(
+            predicate.validate(),
+            Err(TargetError::NonCanonicalOrder("target extensions"))
+        );
     }
 
     #[test]

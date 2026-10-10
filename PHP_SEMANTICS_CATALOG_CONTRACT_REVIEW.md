@@ -775,3 +775,17 @@ reproduces byte-for-byte. A full `cargo test --workspace` run was started but
 not completed: its cold build remained compiling the large checker test target
 for more than ten minutes, so validation was narrowed to the changed crate and
 its direct consumer.
+
+## Author follow-up for R01.8 (2026-10-10)
+
+The unordered-vector identity gap is addressed at both identity and validation
+boundaries. Record IDs and graph/manifest digests normalize set-like vector
+order, while graph, catalog, target-predicate, and manifest validation reject
+noncanonical serialized order and duplicate members. Covered lists include
+evidence and assumption references, domain coverage and its set-like fields,
+open reasons, unknown-event domains, target-predicate extension/INI
+constraints, and manifest record arrays. Existing identities for canonical
+inputs remain unchanged, while ordered blocks and events remain
+order-sensitive. Regression coverage exercises each collection family and
+confirms reordered events still produce distinct graph digests. This is author
+evidence; independent acceptance is pending.

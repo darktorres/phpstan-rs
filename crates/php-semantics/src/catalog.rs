@@ -88,8 +88,25 @@ pub struct EvidenceRecord {
 
 impl EvidenceRecord {
     pub fn id(&self) -> Result<Digest, postcard::Error> {
-        Ok(Digest(Sha256::digest(postcard::to_allocvec(self)?).into()))
+        let mut canonical = self.clone();
+        canonical.assumptions.sort();
+        canonical.dependencies.sort();
+        Ok(Digest(
+            Sha256::digest(postcard::to_allocvec(&canonical)?).into(),
+        ))
     }
+
+    fn validate_canonical_order(&self) -> Result<(), CatalogError> {
+        require_strictly_sorted(&self.assumptions, "evidence assumptions")?;
+        require_strictly_sorted(&self.dependencies, "evidence dependencies")
+    }
+}
+
+fn require_strictly_sorted<T: Ord>(values: &[T], field: &'static str) -> Result<(), CatalogError> {
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(CatalogError::NonCanonicalOrder(field));
+    }
+    Ok(())
 }
 
 /// The kind of condition on which a catalog fact relies. This is deliberately
@@ -329,12 +346,20 @@ pub struct AssumptionRecord {
 
 impl AssumptionRecord {
     pub fn id(&self) -> Result<Digest, postcard::Error> {
-        let encoded = postcard::to_allocvec(self)?;
+        let mut canonical = self.clone();
+        canonical.prerequisites.sort();
+        canonical.supporting_evidence.sort();
+        let encoded = postcard::to_allocvec(&canonical)?;
         let mut hasher = Sha256::new();
         hasher.update(b"php-semantics-assumption-v1\0");
         hasher.update(crate::SCHEMA_MAJOR.to_le_bytes());
         hasher.update(encoded);
         Ok(Digest(hasher.finalize().into()))
+    }
+
+    fn validate_canonical_order(&self) -> Result<(), CatalogError> {
+        require_strictly_sorted(&self.prerequisites, "assumption prerequisites")?;
+        require_strictly_sorted(&self.supporting_evidence, "assumption supporting evidence")
     }
 
     /// Applicability is only a context match. It does not mean the named
@@ -388,6 +413,7 @@ pub enum CatalogError {
     CyclicSupport(Vec<SupportNode>),
     DigestMismatch(Digest),
     UnsupportedManifest(u32),
+    NonCanonicalOrder(&'static str),
 }
 
 /// A node in the catalog's combined evidence/assumption support graph.
@@ -495,7 +521,37 @@ pub struct CatalogManifest {
 
 impl CatalogManifest {
     pub fn canonical_digest(&self) -> Result<Digest, postcard::Error> {
-        Ok(Digest(Sha256::digest(postcard::to_allocvec(self)?).into()))
+        let mut canonical = self.clone();
+        for entry in &mut canonical.entries {
+            entry.applicability = entry.applicability.canonicalized_order();
+        }
+        canonical.entries.sort_by(|a, b| {
+            a.key
+                .cmp(&b.key)
+                .then_with(|| a.graph.cmp(&b.graph))
+                .then_with(|| {
+                    postcard::to_allocvec(&a.applicability)
+                        .unwrap_or_default()
+                        .cmp(&postcard::to_allocvec(&b.applicability).unwrap_or_default())
+                })
+        });
+        for record in &mut canonical.graphs {
+            record.graph = record.graph.canonicalized_order();
+        }
+        canonical.graphs.sort_by_key(|record| record.id);
+        for (_, record) in &mut canonical.evidence {
+            record.assumptions.sort();
+            record.dependencies.sort();
+        }
+        canonical.evidence.sort_by_key(|(id, _)| *id);
+        for (_, record) in &mut canonical.assumptions {
+            record.prerequisites.sort();
+            record.supporting_evidence.sort();
+        }
+        canonical.assumptions.sort_by_key(|(id, _)| *id);
+        Ok(Digest(
+            Sha256::digest(postcard::to_allocvec(&canonical)?).into(),
+        ))
     }
 
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
@@ -506,6 +562,7 @@ impl CatalogManifest {
         if self.schema_major != crate::SCHEMA_MAJOR {
             return Err(CatalogError::UnsupportedManifest(self.schema_major));
         }
+        validate_manifest_order(self)?;
         // Check graph structure before content IDs so malformed cyclic input
         // receives the actionable cycle diagnostic instead of only a digest
         // mismatch. Well-formed content-addressed cycles are not constructible
@@ -553,6 +610,7 @@ impl CatalogManifest {
         }
         let mut evidence_ids = Vec::new();
         for (id, record) in &self.evidence {
+            record.validate_canonical_order()?;
             if record.id().map_err(|_| CatalogError::GraphEncoding)? != *id
                 || evidence_ids.contains(id)
             {
@@ -562,6 +620,7 @@ impl CatalogManifest {
         }
         let mut assumption_ids = Vec::new();
         for (id, record) in &self.assumptions {
+            record.validate_canonical_order()?;
             if record.id().map_err(|_| CatalogError::GraphEncoding)? != *id
                 || assumption_ids.contains(id)
                 || !record.is_well_formed()
@@ -629,6 +688,35 @@ impl CatalogManifest {
     }
 }
 
+fn validate_manifest_order(manifest: &CatalogManifest) -> Result<(), CatalogError> {
+    if manifest.entries.windows(2).any(|pair| {
+        let left = &pair[0];
+        let right = &pair[1];
+        left.key > right.key
+            || (left.key == right.key
+                && (left.graph > right.graph
+                    || (left.graph == right.graph
+                        && postcard::to_allocvec(&left.applicability).unwrap_or_default()
+                            > postcard::to_allocvec(&right.applicability).unwrap_or_default())))
+    }) {
+        return Err(CatalogError::NonCanonicalOrder("manifest entries"));
+    }
+    require_strictly_sorted_by(&manifest.graphs, |record| record.id, "manifest graphs")?;
+    require_strictly_sorted_by(&manifest.evidence, |(id, _)| *id, "manifest evidence")?;
+    require_strictly_sorted_by(&manifest.assumptions, |(id, _)| *id, "manifest assumptions")
+}
+
+fn require_strictly_sorted_by<T, K: Ord>(
+    values: &[T],
+    key: impl Fn(&T) -> K,
+    field: &'static str,
+) -> Result<(), CatalogError> {
+    if values.windows(2).any(|pair| key(&pair[0]) >= key(&pair[1])) {
+        return Err(CatalogError::NonCanonicalOrder(field));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default)]
 pub struct Catalog {
     graphs: BTreeMap<Digest, BehaviorGraph>,
@@ -669,6 +757,7 @@ impl Catalog {
     }
 
     pub fn add_evidence(&mut self, record: EvidenceRecord) -> Result<Digest, CatalogError> {
+        record.validate_canonical_order()?;
         let id = record.id().map_err(|_| CatalogError::GraphEncoding)?;
         if self.evidence.get(&id).is_some_and(|old| old != &record) {
             return Err(CatalogError::ConflictingEvidence(id));
@@ -678,6 +767,7 @@ impl Catalog {
     }
 
     pub fn add_assumption(&mut self, record: AssumptionRecord) -> Result<Digest, CatalogError> {
+        record.validate_canonical_order()?;
         let id = record.id().map_err(|_| CatalogError::GraphEncoding)?;
         if !record.is_well_formed() {
             return Err(CatalogError::InvalidAssumption(id));
@@ -2406,21 +2496,191 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "RV-5: permuted unordered assumption vectors get distinct identities; remove when canonicalized or rejected"]
-    fn permuted_evidence_assumptions_share_one_identity_or_are_rejected() {
+    fn evidence_assumption_order_is_rejected_at_catalog_admission() {
         let first = Digest([7; 32]);
         let second = Digest([8; 32]);
-        let mut ascending = evidence_record();
-        ascending.assumptions = vec![first, second];
         let mut descending = evidence_record();
         descending.assumptions = vec![second, first];
+        let mut ascending = descending.clone();
+        ascending.assumptions.reverse();
+        assert_eq!(ascending.id().unwrap(), descending.id().unwrap());
         let mut catalog = Catalog::default();
-        if let (Ok(a), Ok(b)) = (
-            catalog.add_evidence(ascending),
+        assert_eq!(
             catalog.add_evidence(descending),
-        ) {
-            assert_eq!(a, b);
-        }
+            Err(CatalogError::NonCanonicalOrder("evidence assumptions"))
+        );
+    }
+
+    #[test]
+    fn assumption_and_evidence_reference_lists_reject_permutations_and_duplicates() {
+        let first = Digest([7; 32]);
+        let second = Digest([8; 32]);
+        let mut catalog = Catalog::default();
+        let mut evidence = evidence_record();
+        evidence.dependencies = vec![second, first];
+        assert_eq!(
+            catalog.add_evidence(evidence),
+            Err(CatalogError::NonCanonicalOrder("evidence dependencies"))
+        );
+        let mut assumption = assumption_record(first);
+        assumption.prerequisites = vec![second, first];
+        let mut permuted_assumption = assumption.clone();
+        permuted_assumption.prerequisites.reverse();
+        assert_eq!(assumption.id().unwrap(), permuted_assumption.id().unwrap());
+        assert_eq!(
+            catalog.add_assumption(assumption),
+            Err(CatalogError::NonCanonicalOrder("assumption prerequisites"))
+        );
+        let mut assumption = assumption_record(first);
+        assumption.supporting_evidence = vec![second, first];
+        assert_eq!(
+            catalog.add_assumption(assumption),
+            Err(CatalogError::NonCanonicalOrder(
+                "assumption supporting evidence"
+            ))
+        );
+        let mut evidence = evidence_record();
+        evidence.assumptions = vec![first, first];
+        assert_eq!(
+            catalog.add_evidence(evidence),
+            Err(CatalogError::NonCanonicalOrder("evidence assumptions"))
+        );
+    }
+
+    #[test]
+    fn manifest_record_vectors_must_be_sorted_by_content_id() {
+        let mut catalog = Catalog::default();
+        let mut first = evidence_record();
+        first.source_digest = Digest([1; 32]);
+        let mut second = evidence_record();
+        second.source_digest = Digest([2; 32]);
+        catalog.add_evidence(first).unwrap();
+        catalog.add_evidence(second).unwrap();
+        let manifest = catalog.manifest();
+        let mut permuted = manifest.clone();
+        permuted.evidence.reverse();
+        assert_eq!(
+            manifest.canonical_digest().unwrap(),
+            permuted.canonical_digest().unwrap()
+        );
+        assert_eq!(
+            permuted.validate(),
+            Err(CatalogError::NonCanonicalOrder("manifest evidence"))
+        );
+
+        let mut unsorted = evidence_record();
+        unsorted.assumptions = vec![Digest([8; 32]), Digest([7; 32])];
+        let id = unsorted.id().unwrap();
+        let noncanonical_record = CatalogManifest {
+            schema_major: crate::SCHEMA_MAJOR,
+            entries: vec![],
+            graphs: vec![],
+            evidence: vec![(id, unsorted)],
+            assumptions: vec![],
+        };
+        assert_eq!(
+            noncanonical_record.validate(),
+            Err(CatalogError::NonCanonicalOrder("evidence assumptions"))
+        );
+    }
+
+    #[test]
+    fn manifest_entries_graphs_and_assumptions_reject_permutations() {
+        let mut manifest = CatalogManifest {
+            schema_major: crate::SCHEMA_MAJOR,
+            entries: vec![],
+            graphs: vec![],
+            evidence: vec![],
+            assumptions: vec![],
+        };
+        manifest.entries = vec![
+            CatalogEntry {
+                key: EntryKey::Function {
+                    extension: Bytes(b"core".to_vec()),
+                    name: Bytes(b"a".to_vec()),
+                },
+                graph: Digest([1; 32]),
+                applicability: TargetPredicate::any(),
+            },
+            CatalogEntry {
+                key: EntryKey::Function {
+                    extension: Bytes(b"core".to_vec()),
+                    name: Bytes(b"b".to_vec()),
+                },
+                graph: Digest([2; 32]),
+                applicability: TargetPredicate::any(),
+            },
+        ];
+        let entry_digest = manifest.canonical_digest().unwrap();
+        manifest.entries.reverse();
+        assert_eq!(entry_digest, manifest.canonical_digest().unwrap());
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::NonCanonicalOrder("manifest entries"))
+        );
+        manifest.entries.clear();
+        manifest.graphs = vec![
+            GraphRecord {
+                id: Digest([1; 32]),
+                graph: graph(Digest([3; 32])),
+            },
+            GraphRecord {
+                id: Digest([2; 32]),
+                graph: graph(Digest([4; 32])),
+            },
+        ];
+        let graph_digest = manifest.canonical_digest().unwrap();
+        manifest.graphs.reverse();
+        assert_eq!(graph_digest, manifest.canonical_digest().unwrap());
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::NonCanonicalOrder("manifest graphs"))
+        );
+        manifest.graphs.clear();
+        manifest.assumptions = vec![
+            (Digest([1; 32]), assumption_record(Digest([3; 32]))),
+            (Digest([2; 32]), assumption_record(Digest([4; 32]))),
+        ];
+        let assumption_digest = manifest.canonical_digest().unwrap();
+        manifest.assumptions.reverse();
+        assert_eq!(assumption_digest, manifest.canonical_digest().unwrap());
+        assert_eq!(
+            manifest.validate(),
+            Err(CatalogError::NonCanonicalOrder("manifest assumptions"))
+        );
+
+        let mut with_target_set = CatalogManifest {
+            schema_major: crate::SCHEMA_MAJOR,
+            entries: vec![CatalogEntry {
+                key: EntryKey::Function {
+                    extension: Bytes(b"core".to_vec()),
+                    name: Bytes(b"targeted".to_vec()),
+                },
+                graph: Digest([3; 32]),
+                applicability: TargetPredicate {
+                    extensions: vec![
+                        (Bytes(b"curl".to_vec()), true),
+                        (Bytes(b"zlib".to_vec()), true),
+                    ],
+                    ..TargetPredicate::any()
+                },
+            }],
+            graphs: vec![],
+            evidence: vec![],
+            assumptions: vec![],
+        };
+        let original_digest = with_target_set.canonical_digest().unwrap();
+        with_target_set.entries[0]
+            .applicability
+            .extensions
+            .reverse();
+        assert_eq!(original_digest, with_target_set.canonical_digest().unwrap());
+        assert_eq!(
+            with_target_set.validate(),
+            Err(CatalogError::InvalidTargetPredicate(
+                TargetError::NonCanonicalOrder("target extensions")
+            ))
+        );
     }
 
     #[test]

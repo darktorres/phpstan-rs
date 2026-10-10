@@ -277,10 +277,25 @@ Manifest validation resolves assumption references only in the assumption
 namespace, requires evidence assumptions to propagate into coverage, rejects
 malformed scopes or records, and checks the combined evidence/assumption
 support graph for cycles. Context matching alone does not establish an
-assumption: until trusted validator execution is implemented, graph validation
-rejects a closed fact that cites an assumption. This applies even when a graph
-bypasses the catalog loader. Open facts may retain assumptions as provenance
-without treating them as established. See R01.7 for the remaining trust rules.
+assumption: trusted catalog-backed projection and evaluation validate the
+assumption under a deployment-owned policy, and certificate replay repeats that
+validation. Context-free graph validation and evaluation reject closed facts
+that cite assumptions. Open facts may retain assumptions as provenance without
+treating them as established. See R01.7 for the trust boundary.
+
+Vectors whose meaning is set-like must be strictly sorted and contain no
+duplicates before they are admitted or validated. This covers evidence
+assumptions/dependencies, assumption prerequisites/supporting evidence, graph
+coverage by `Domain::ALL`, coverage dependencies by `Domain::ALL`, coverage
+evidence/assumptions by digest, open reasons by byte value, and unknown-event
+domains by `Domain::ALL`, and target-predicate extension/INI constraints by
+their tuple order. Manifest entries are sorted by key, graph ID, then
+applicability encoding; manifest graphs, evidence, and assumptions are sorted
+by ID. Noncanonical order is rejected with a field-specific error, so each
+valid record has one serialized identity. Identity methods normalize these
+set-like vectors before hashing, while admission still rejects noncanonical
+serialized input. Basic blocks and events remain ordered because their
+sequence is semantic.
 
 ## Counterexamples that composition must reject
 

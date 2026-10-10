@@ -355,6 +355,7 @@ pub enum GraphError {
         pending: CompletionKind,
         replacement: CompletionKind,
     },
+    NonCanonicalOrder(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,11 +413,48 @@ fn check_cleanup_replacement<V>(
 
 impl BehaviorGraph {
     /// Encode in the schema's canonical field/vector order and identify the
-    /// result with SHA-256. Producers must sort semantically unordered lists
-    /// before calling this method.
+    /// result with SHA-256. Semantically unordered vectors are normalized for
+    /// identity; validation still rejects noncanonical serialized input.
     pub fn canonical_digest(&self) -> Result<Digest, postcard::Error> {
-        let bytes = postcard::to_allocvec(self)?;
+        let canonical = self.canonicalized_order();
+        let bytes = postcard::to_allocvec(&canonical)?;
         Ok(Digest(Sha256::digest(bytes).into()))
+    }
+
+    pub(crate) fn canonicalized_order(&self) -> Self {
+        let mut canonical = self.clone();
+        canonical.coverage.sort_by_key(|item| {
+            Domain::ALL
+                .iter()
+                .position(|domain| *domain == item.domain)
+                .unwrap_or(usize::MAX)
+        });
+        for item in &mut canonical.coverage {
+            item.dependencies.sort_by_key(|dependency| {
+                Domain::ALL
+                    .iter()
+                    .position(|domain| domain == dependency)
+                    .unwrap_or(usize::MAX)
+            });
+            item.evidence.sort();
+            item.assumptions.sort();
+            if let Coverage::Open { reasons } = &mut item.coverage {
+                reasons.sort();
+            }
+        }
+        for block in &mut canonical.blocks {
+            for event in &mut block.events {
+                if let Event::Unknown { domains, .. } = event {
+                    domains.sort_by_key(|domain| {
+                        Domain::ALL
+                            .iter()
+                            .position(|candidate| candidate == domain)
+                            .unwrap_or(usize::MAX)
+                    });
+                }
+            }
+        }
+        canonical
     }
 
     pub fn validate(&self) -> Result<(), GraphError> {
@@ -512,6 +550,28 @@ impl BehaviorGraph {
                 return Err(GraphError::MissingCoverage(domain));
             }
         }
+        if self.coverage.iter().map(|item| item.domain).ne(Domain::ALL) {
+            return Err(GraphError::NonCanonicalOrder("graph coverage"));
+        }
+        for item in &self.coverage {
+            if item.dependencies.windows(2).any(|pair| {
+                Domain::ALL.iter().position(|domain| *domain == pair[0])
+                    >= Domain::ALL.iter().position(|domain| *domain == pair[1])
+            }) {
+                return Err(GraphError::NonCanonicalOrder("domain dependencies"));
+            }
+            if item.evidence.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(GraphError::NonCanonicalOrder("coverage evidence"));
+            }
+            if item.assumptions.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(GraphError::NonCanonicalOrder("coverage assumptions"));
+            }
+            if let Coverage::Open { reasons } = &item.coverage
+                && reasons.windows(2).any(|pair| pair[0] >= pair[1])
+            {
+                return Err(GraphError::NonCanonicalOrder("open coverage reasons"));
+            }
+        }
         let unknown_events: Vec<&Event> = self
             .blocks
             .iter()
@@ -535,6 +595,16 @@ impl BehaviorGraph {
             .collect();
         if unknown_events.iter().any(|event| matches!(event, Event::Unknown { domains, reason } if domains.is_empty() || reason.0.is_empty())) {
             return Err(GraphError::UnknownTransferWithoutReason);
+        }
+        for event in &unknown_events {
+            if let Event::Unknown { domains, .. } = event
+                && domains.windows(2).any(|pair| {
+                    Domain::ALL.iter().position(|domain| *domain == pair[0])
+                        >= Domain::ALL.iter().position(|domain| *domain == pair[1])
+                })
+            {
+                return Err(GraphError::NonCanonicalOrder("unknown event domains"));
+            }
         }
         let mut required_domains = Vec::new();
         for (index, block) in self.blocks.iter().enumerate() {
@@ -5443,6 +5513,106 @@ mod tests {
             first.canonical_digest().unwrap(),
             first.canonical_digest().unwrap()
         );
+        assert_ne!(
+            first.canonical_digest().unwrap(),
+            second.canonical_digest().unwrap()
+        );
+    }
+
+    #[test]
+    fn graph_rejects_noncanonical_unordered_vectors_but_keeps_event_order() {
+        let mut permuted = graph(vec![], Terminator::Return(None));
+        permuted.coverage.swap(0, 1);
+        let canonical = graph(vec![], Terminator::Return(None));
+        assert_eq!(
+            permuted.canonical_digest().unwrap(),
+            canonical.canonical_digest().unwrap()
+        );
+        assert_eq!(
+            permuted.validate(),
+            Err(GraphError::NonCanonicalOrder("graph coverage"))
+        );
+
+        let mut permuted = graph(vec![], Terminator::Return(None));
+        permuted.coverage[0].evidence = vec![Digest([8; 32]), Digest([7; 32])];
+        let mut canonical_evidence = permuted.clone();
+        canonical_evidence.coverage[0].evidence.reverse();
+        assert_eq!(
+            permuted.canonical_digest().unwrap(),
+            canonical_evidence.canonical_digest().unwrap()
+        );
+        assert_eq!(
+            permuted.validate(),
+            Err(GraphError::NonCanonicalOrder("coverage evidence"))
+        );
+
+        let mut permuted = graph(vec![], Terminator::Return(None));
+        permuted.coverage[0].assumptions = vec![Digest([8; 32]), Digest([7; 32])];
+        let mut canonical_assumptions = permuted.clone();
+        canonical_assumptions.coverage[0].assumptions.reverse();
+        assert_eq!(
+            permuted.canonical_digest().unwrap(),
+            canonical_assumptions.canonical_digest().unwrap()
+        );
+        assert_eq!(
+            permuted.validate(),
+            Err(GraphError::NonCanonicalOrder("coverage assumptions"))
+        );
+
+        let mut permuted = graph(vec![], Terminator::Return(None));
+        permuted.coverage[0].dependencies = vec![Domain::UserWrite, Domain::Invocation];
+        assert_eq!(
+            permuted.validate(),
+            Err(GraphError::NonCanonicalOrder("domain dependencies"))
+        );
+
+        let mut permuted = graph(vec![], Terminator::Return(None));
+        permuted.coverage[0].coverage = Coverage::Open {
+            reasons: vec![Bytes(b"zeta".to_vec()), Bytes(b"alpha".to_vec())],
+        };
+        assert_eq!(
+            permuted.validate(),
+            Err(GraphError::NonCanonicalOrder("open coverage reasons"))
+        );
+
+        let permuted = graph(
+            vec![Event::Unknown {
+                domains: vec![Domain::UserWrite, Domain::Invocation],
+                reason: Bytes(b"unknown".to_vec()),
+            }],
+            Terminator::Return(None),
+        );
+        assert_eq!(
+            permuted.validate(),
+            Err(GraphError::NonCanonicalOrder("unknown event domains"))
+        );
+
+        let first = graph(
+            vec![
+                Event::Read {
+                    storage: Operand::Argument(0),
+                },
+                Event::Write {
+                    storage: Operand::Argument(1),
+                    value: Operand::Unknown,
+                },
+            ],
+            Terminator::Return(None),
+        );
+        let second = graph(
+            vec![
+                Event::Write {
+                    storage: Operand::Argument(1),
+                    value: Operand::Unknown,
+                },
+                Event::Read {
+                    storage: Operand::Argument(0),
+                },
+            ],
+            Terminator::Return(None),
+        );
+        assert!(first.validate().is_ok());
+        assert!(second.validate().is_ok());
         assert_ne!(
             first.canonical_digest().unwrap(),
             second.canonical_digest().unwrap()
