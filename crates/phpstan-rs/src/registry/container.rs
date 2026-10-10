@@ -222,6 +222,7 @@ impl std::ops::Deref for Slice {
 
 #[derive(Clone)]
 pub(super) enum Source {
+    #[cfg(any(test, debug_assertions))]
     Memory(Arc<Vec<u8>>),
     File {
         file: Arc<File>,
@@ -236,6 +237,7 @@ impl Source {
         match self {
             Source::File { file, .. } => read_vec_at(file, offset, len)
                 .map_err(|error| format!("reading cache record at {offset}: {error}")),
+            #[cfg(any(test, debug_assertions))]
             Source::Memory(_) => {
                 let mut bytes = vec![0; len];
                 self.read_into(offset, &mut bytes)?;
@@ -247,6 +249,7 @@ impl Source {
     /// Fills `into` from the bytes at `offset`.
     pub(super) fn read_into(&self, offset: u64, into: &mut [u8]) -> Result<(), String> {
         match self {
+            #[cfg(any(test, debug_assertions))]
             Source::Memory(file) => {
                 let start = usize::try_from(offset)
                     .map_err(|_| "a cache offset is too large".to_string())?;
@@ -399,6 +402,7 @@ pub(crate) enum Unreadable {
 }
 
 impl Reader {
+    #[cfg(any(test, debug_assertions))]
     pub(crate) fn new(file: Vec<u8>) -> Result<Reader, Unreadable> {
         let file = Arc::new(file);
         let file_len = file.len() as u64;

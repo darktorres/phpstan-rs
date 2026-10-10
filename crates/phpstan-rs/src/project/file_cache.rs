@@ -105,6 +105,7 @@ pub(super) struct CachedFile {
     line_index: Arc<LineIndex>,
     class_fn_refs: Option<Vec<(Span, RefTarget)>>,
     /// Runtime-only identity for the cache's single project-file origin.
+    #[cfg(debug_assertions)]
     #[serde(skip, default)]
     origin_file_id: Option<crate::file_id::FileId>,
 }
@@ -215,6 +216,7 @@ impl CachedFile {
             facts: parsed.facts,
             line_index: Arc::clone(&parsed.line_index),
             class_fn_refs: parsed.class_fn_refs.clone(),
+            #[cfg(debug_assertions)]
             origin_file_id: parsed.built_decls.iter().find_map(|decl| match decl {
                 BuiltDecl::Class { info, .. } => info.provenance().file_id(),
                 BuiltDecl::Function { sig, .. } => sig.provenance().file_id(),
