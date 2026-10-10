@@ -808,13 +808,14 @@ impl<'a> Checker<'a> {
                     if let Some(sig) = sig {
                         // This function's own throw contribution - tried
                         // before `sig.throws` itself.
-                        let bare = name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .to_ascii_lowercase();
+                        let bare = name.rsplit('\\').next().unwrap_or(name);
+                        let bare_lower = if bare.bytes().any(|b| b.is_ascii_uppercase()) {
+                            std::borrow::Cow::Owned(bare.to_ascii_lowercase())
+                        } else {
+                            std::borrow::Cow::Borrowed(bare)
+                        };
                         let dynamic_throw =
-                            self.dynamic_function_throw_type(arenas, &bare, args, locals);
+                            self.dynamic_function_throw_type(arenas, &bare_lower, args, locals);
                         self.record_call_throw_point(
                             dynamic_throw,
                             Some(sig),
@@ -937,47 +938,26 @@ impl<'a> Checker<'a> {
                         // like any other function call - matched against
                         // just the last namespace segment, the same as
                         // every other by-name builtin special-case here.
-                        if name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .eq_ignore_ascii_case("define")
+                        if bare.eq_ignore_ascii_case("define")
                         {
                             self.check_define_third_argument(args, self.expr_span(e.id));
                         }
-                        if name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .eq_ignore_ascii_case("random_int")
+                        if bare.eq_ignore_ascii_case("random_int")
                         {
                             self.check_random_int_call(arenas, args, locals);
                         }
-                        let bare = name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .to_ascii_lowercase();
                         if matches!(
-                            bare.as_str(),
+                            &*bare_lower,
                             "array_combine" | "array_flip" | "array_count_values"
                         ) {
-                            self.check_value_to_key_call(arenas, &bare, args, locals);
+                            self.check_value_to_key_call(arenas, &bare_lower, args, locals);
                         }
-                        if name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .eq_ignore_ascii_case("filter_var")
+                        if bare.eq_ignore_ascii_case("filter_var")
                             && args.len() >= 3
                         {
                             self.check_filter_var_flag_conflict(arenas, args, self.expr_span(e.id));
                         }
-                        if name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .eq_ignore_ascii_case("simplexml_load_string")
+                        if bare.eq_ignore_ascii_case("simplexml_load_string")
                         {
                             self.check_simplexml_load_string_call(
                                 arenas,
@@ -987,7 +967,6 @@ impl<'a> Checker<'a> {
                         }
                         self.check_preg_pattern_validity(arenas, name, args);
                         {
-                            let bare = name.rsplit('\\').next().unwrap_or(name);
                             if bare.eq_ignore_ascii_case("sscanf")
                                 || bare.eq_ignore_ascii_case("fscanf")
                             {
