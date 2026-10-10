@@ -696,10 +696,21 @@ impl<'a> Checker<'a> {
         // Whether an expression statement's value was `never`, as it was
         // checked.
         let mut value_is_never = false;
-        self.check_statement_doc_tag_values(stmt);
-        self.check_statement_var_tags_resolvable(stmt);
-        let names_ok = self.check_statement_var_tag_names(stmt, locals, label);
-        let var_tags = self.statement_var_tags_of(stmt);
+        // Each of the four checks returns first for a statement with no
+        // docblock, which is nearly every statement.
+        let has_doc = {
+            let start = self.stmt_span(stmt.id).start;
+            self.syntax_arenas()
+                .is_some_and(|arenas| arenas.doc_site(start).is_some())
+        };
+        let (names_ok, var_tags) = if has_doc {
+            self.check_statement_doc_tag_values(stmt);
+            self.check_statement_var_tags_resolvable(stmt);
+            let names_ok = self.check_statement_var_tag_names(stmt, locals, label);
+            (names_ok, self.statement_var_tags_of(stmt))
+        } else {
+            (true, Vec::new())
+        };
         if !var_tags.is_empty() {
             self.check_statement_var_tag_classes(stmt, &var_tags);
             self.check_statement_var_tag_types(stmt, &var_tags, names_ok, locals);
