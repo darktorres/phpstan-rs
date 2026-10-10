@@ -711,9 +711,10 @@ property valid run, 94-property invalid-composition run, and two-property
 low-budget run, including the C-only scope and analogous Rust/PHP evidence.
 `campaign.py` now pins each reviewed property-ID/status inventory by digest,
 checks the expected CBMC summary and process exit, and rejects changed,
-missing, duplicate, or unreviewed properties. Six regression tests pass. A
-replay with CBMC 6.6.0 produced the same output bytes as the three reviewed
-transcripts, with exit codes 0, 10, and 10. The follow-up evidence, runner and
-test hashes, and tool digest are recorded under `followup_cbmc_validation` in
-the evaluation lock. This resolves only the campaign-accounting defect; it
-does not extend the reduced C model's claims to PHP semantics.
+missing, duplicate, or unreviewed properties. Seven regression tests pass,
+including a campaign-runner dispatch check. All three commands also passed
+through the actual `EnforcedRunner` with resource enforcement, producing the
+expected output hashes and exit codes. The follow-up evidence, runner and test
+hashes, and tool digest are recorded under `followup_cbmc_validation` in the
+evaluation lock. This resolves only the campaign-accounting defect; it does
+not extend the reduced C model's claims to PHP semantics.

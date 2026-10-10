@@ -97,8 +97,8 @@
     "date": "2026-10-10",
     "cbmc_version": "6.6.0",
     "cbmc_binary_sha256": "bf215bba2dbf514c69bb32f353a5f94aea150ab87735a9e1b4d5b3bcd745058a",
-    "campaign_py_sha256": "0802d6ab0ea8ed3126713c824521017e6dceb6ed96855d6e9af3136900338da4",
-    "test_py_sha256": "e3e5c1fd365c70d7c98d25096d19e6a1715380c4cf5dc31b6ad0ed23e5e448b6",
+    "campaign_py_sha256": "dd5d74618b235333582339a6e3a5d3f31e8bb51e0de65ebb96ecaa1890626aed",
+    "test_py_sha256": "363e01b4b847e8eb213cb075a1d0a71c8dd35f740eaba28413edc941e4ccd74c",
     "runs": {
       "cbmc-contracts": {
         "command": [
@@ -156,8 +156,35 @@
     "cbmc_binary_path": "/home/torres/.cache/php-catalog-evaluation/deps/usr/bin/cbmc",
     "python_validation": {
       "command": "python3 -m unittest tools/php-catalog/experiments/comparison/test_campaign_cbmc_validation.py",
-      "tests": 6,
+      "tests": 7,
       "result": "passed"
+    },
+    "enforced_runner_replay": {
+      "output_directory": "/tmp/php-catalog-r004-enforced-run",
+      "resource_enforcement": "aggregate_hard_limit_enforced for all three runs",
+      "runs": {
+        "cbmc-contracts": {
+          "exit_code": 0,
+          "aggregate_hard_limit_enforced": true,
+          "elapsed_seconds": 0.3364,
+          "stdout_sha256": "c201f70eb6499d955c244335ea72915fb4ce44c650f5aa06144e9c12e65eb3ed",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "cbmc-invalid-composition": {
+          "exit_code": 10,
+          "aggregate_hard_limit_enforced": true,
+          "elapsed_seconds": 0.3364,
+          "stdout_sha256": "2c8ef8d2e1f917e498965c13fcccbb81d6abc244baedff34278ef5c947f7e722",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "cbmc-low-budget": {
+          "exit_code": 10,
+          "aggregate_hard_limit_enforced": true,
+          "elapsed_seconds": 0.164,
+          "stdout_sha256": "ba01c9ced4f644958dcc72bf22498ca3640c3c19e62c4dea75982a80ba9c7efd",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
     }
   }
 }

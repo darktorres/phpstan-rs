@@ -141,7 +141,7 @@ def compact_build(cache, original, runner):
     return binary
 
 
-def complementary(cache, runner):
+def run_cbmc_campaign(cache, runner):
     environment = dict(os.environ, LD_LIBRARY_PATH=str(cache/'deps/usr/lib'))
     cbmc = cache / 'deps/usr/bin/cbmc'
     cbmc_runs = [
@@ -161,6 +161,10 @@ def complementary(cache, runner):
         actual = json.loads((runner.output / (name + '.out')).read_text())
         exit_code = runner.measurements[-1]['exit_code']
         validate_cbmc_run(name, actual, references[name], exit_code)
+
+
+def complementary(cache, runner):
+    run_cbmc_campaign(cache, runner)
     runner.run('smt', [cache/'smt-python/bin/python', HERE/'smt_cases.py', runner.output/'smt-results.json'])
     for compiler in ['clang-21', 'gcc']:
         binary = runner.output / ('layout-'+compiler)

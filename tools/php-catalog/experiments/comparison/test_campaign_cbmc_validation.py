@@ -1,7 +1,9 @@
 import copy
 import importlib.util
 import json
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -76,6 +78,47 @@ class CbmcValidationTests(unittest.TestCase):
     def test_unknown_run_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'No reviewed CBMC expectation'):
             CAMPAIGN.validate_cbmc_run('cbmc-new-mode', [], [], True)
+
+    def test_campaign_runner_checks_each_command_exit_and_transcript(self):
+        class TranscriptRunner:
+            def __init__(self, output, exit_codes=None):
+                self.output = output
+                self.measurements = []
+                self.calls = []
+                self.exit_codes = exit_codes or {}
+
+            def run(inner, name, command, **kwargs):
+                inner.calls.append((name, command, kwargs))
+                source = SCRIPT.parent / 'results/evaluation' / (name + '.out')
+                shutil.copyfile(source, inner.output / (name + '.out'))
+                inner.measurements.append({
+                    'exit_code': inner.exit_codes.get(
+                        name, CAMPAIGN.CBMC_EXPECTATIONS[name]['command_exit_code']
+                    )
+                })
+                return inner.measurements[-1]['exit_code'] == 0
+
+        with tempfile.TemporaryDirectory() as temporary:
+            runner = TranscriptRunner(Path(temporary))
+            CAMPAIGN.run_cbmc_campaign(Path('/locked/cache'), runner)
+            self.assertEqual(
+                [name for name, _, _ in runner.calls],
+                list(CAMPAIGN.CBMC_EXPECTATIONS),
+            )
+            self.assertEqual(
+                [entry['exit_code'] for entry in runner.measurements],
+                [0, 10, 10],
+            )
+            for (name, command, kwargs) in runner.calls:
+                with self.subTest(name=name):
+                    self.assertIn('--json-ui', command)
+                    self.assertEqual(kwargs['timeout'], 300)
+                    self.assertEqual(kwargs['env']['LD_LIBRARY_PATH'], '/locked/cache/deps/usr/lib')
+
+        with tempfile.TemporaryDirectory() as temporary:
+            runner = TranscriptRunner(Path(temporary), {'cbmc-invalid-composition': 1})
+            with self.assertRaisesRegex(ValueError, 'command exit'):
+                CAMPAIGN.run_cbmc_campaign(Path('/locked/cache'), runner)
 
 
 if __name__ == '__main__':

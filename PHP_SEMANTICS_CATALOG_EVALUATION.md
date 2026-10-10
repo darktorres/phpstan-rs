@@ -528,9 +528,13 @@ run; only `main.assertion.11` failing/exit-nonzero for the invalid run; and only
 the reference transcript's expected summary, rejects duplicate IDs, and loads
 references before writing run outputs. Six Python regressions exercise the
 recorded cases and reject missing properties, changed outcomes, incorrect exit
-status, reference-inventory drift, and unreviewed run modes. Replaying all three
-commands with locked CBMC 6.6.0 produced the expected 93/94/2 property counts and exit codes
-0/10/10. The harness source and its `--unwind` settings remain C-model
+status, reference-inventory drift, and unreviewed run modes; a seventh test
+exercises the campaign runner's command dispatch and exit-code handling. All
+three runs were also invoked through the actual `EnforcedRunner`, including its
+systemd/cgroup resource proof, and were validated with the expected 93/94/2
+property counts and exit codes 0/10/10. Their output hashes, measured exits,
+resource-enforcement results, and updated source hashes are in the evaluation
+lock. The harness source and its `--unwind` settings remain C-model
 evidence; this enforcement closes only the campaign's CBMC result-accounting
 gap.
 
