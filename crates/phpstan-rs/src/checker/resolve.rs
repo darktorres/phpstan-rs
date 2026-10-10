@@ -6,6 +6,10 @@ use syntax::span::Span;
 use types::Name;
 use types::{self, Type};
 
+use std::rc::Rc;
+
+pub(crate) type TemplateParams = rustc_hash::FxHashMap<String, types::TemplateParam>;
+
 impl<'a> Checker<'a> {
     /// The class type a class name written in code (`new Foo()`, `$x
     /// instanceof Foo`, ...) refers to: `self`, `parent` and `static`
@@ -130,8 +134,10 @@ impl<'a> Checker<'a> {
     /// marked, its class names resolved, with the case refs of those names.
     #[allow(clippy::type_complexity)]
     fn resolve_written_type(&self, ty: Type) -> (Type, Vec<(Name, Name)>) {
-        let mut params = self.current_class_template_params();
-        params.extend(self.current_function_template_params());
+        let class_params = self.current_class_template_params();
+        let function_params = self.current_function_template_params();
+        let mut params = rustc_hash::FxHashMap::clone(&class_params);
+        params.extend(function_params);
         let ty = if params.is_empty() {
             ty
         } else {
@@ -150,20 +156,37 @@ impl<'a> Checker<'a> {
     /// recognize a class-level template by name before ever resolving
     /// names in a type string built independently of the registry's own
     /// pipeline. Empty outside any class, or for a non-generic one.
-    pub(crate) fn current_class_template_params(
-        &self,
-    ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
+    pub(crate) fn current_class_template_params(&self) -> Rc<TemplateParams> {
         match &self.current_class {
             Some(class) => self.class_template_params_for(class),
-            None => rustc_hash::FxHashMap::default(),
+            None => Rc::default(),
         }
     }
 
-    /// `current_class_template_params` for any class.
-    pub(crate) fn class_template_params_for(
-        &self,
-        class: &str,
-    ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
+    /// `current_class_template_params` for any class, built once per class:
+    /// the registry does not change while a file is checked.
+    pub(crate) fn class_template_params_for(&self, class: &str) -> Rc<TemplateParams> {
+        let found = self.class_template_params.borrow().get(class).cloned();
+        let params = match found {
+            Some(params) => {
+                syntax::stats::count(syntax::stats::Counter::ClassTemplateParamsHit);
+                #[cfg(debug_assertions)]
+                assert_eq!(*params, self.build_class_template_params(class));
+                params
+            }
+            None => {
+                syntax::stats::count(syntax::stats::Counter::ClassTemplateParamsMiss);
+                let params = Rc::new(self.build_class_template_params(class));
+                self.class_template_params
+                    .borrow_mut()
+                    .insert(class.to_string(), Rc::clone(&params));
+                params
+            }
+        };
+        params
+    }
+
+    fn build_class_template_params(&self, class: &str) -> TemplateParams {
         let class = &class.to_string();
         let Some(info) = self.registry.class_by_name(class) else {
             return rustc_hash::FxHashMap::default();

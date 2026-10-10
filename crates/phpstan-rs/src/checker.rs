@@ -782,6 +782,9 @@ pub struct Checker<'a> {
     // variables around it, by value, where it was written: the object each
     // held (`note_captures`).
     pub(crate) operation_effects: RefCell<call_effects::OperationEffects>,
+    /// The template parameters of a class, by its name.
+    pub(crate) class_template_params:
+        RefCell<rustc_hash::FxHashMap<String, std::rc::Rc<resolve::TemplateParams>>>,
     pub(crate) closure_captures: rustc_hash::FxHashMap<
         syntax::ast::ExprId,
         rustc_hash::FxHashMap<syntax::name::Name, crate::registry::Holder>,
@@ -1466,6 +1469,7 @@ impl<'a> Checker<'a> {
             shared_scope: Default::default(),
             stmt_at: Default::default(),
             operation_effects: Default::default(),
+            class_template_params: Default::default(),
             closure_captures: Default::default(),
             captured_types: Default::default(),
             capture_entries: Default::default(),

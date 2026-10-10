@@ -328,7 +328,7 @@ impl<'a> Checker<'a> {
             if tag.templates.is_empty() {
                 continue;
             }
-            let mut scope = class_templates.clone();
+            let mut scope = (*class_templates).clone();
             for t in &tag.templates {
                 scope.insert(
                     t.name.clone(),
