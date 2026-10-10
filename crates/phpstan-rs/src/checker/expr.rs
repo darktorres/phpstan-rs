@@ -7029,10 +7029,10 @@ impl<'a> Checker<'a> {
             }
             ExprKind::StaticCall(target, method, _) => {
                 let class = self.infer_static_target_class(target, locals)?;
-                let sig = self.registry.lookup_method(&class, method)?;
+                let sig = self.registry.lookup_method(class.as_str(), method)?;
                 Some(FirstClassTarget {
                     sig,
-                    class: Some(class),
+                    class: Some(class.to_string()),
                     name: method.to_string(),
                 })
             }

@@ -718,9 +718,13 @@ impl<'a> Checker<'a> {
         // A tag naming a variable this statement assigns describes the
         // assigned value, so it applies after the assignment (below) -
         // the right-hand side still reads the variable's prior type.
-        let assigned = statement_assigned_variable_names(arenas, &stmt.kind);
+        let assigned = if inline_var.is_empty() {
+            Vec::new()
+        } else {
+            statement_assigned_variable_names(arenas, &stmt.kind)
+        };
         for (name, ty) in &inline_var {
-            if assigned.contains(name) {
+            if assigned.iter().any(|assigned| assigned.as_str() == name) {
                 continue;
             }
             purge_stale_narrowing_for_var(locals, name);
@@ -1418,9 +1422,13 @@ impl<'a> Checker<'a> {
             .syntax_tree_owner()
             .expect("statement variable names retain their parsed file owner");
         let arenas = owner.arenas();
-        let defined = statement_defined_variable_names(arenas, &stmt.kind);
+        let defined = if inline_var.is_empty() {
+            Vec::new()
+        } else {
+            statement_defined_variable_names(arenas, &stmt.kind)
+        };
         for (name, ty) in inline_var {
-            if defined.contains(&name) {
+            if defined.iter().any(|defined| defined.as_str() == name) {
                 purge_stale_narrowing_for_var(locals, &name);
                 locals.insert_var(&name, ty);
             }
@@ -1897,7 +1905,7 @@ fn inline_var_annotations(
     tags: Vec<(Option<String>, Type)>,
 ) -> Vec<(String, Type)> {
     let unnamed_target = match statement_defined_variable_names(arenas, &stmt.kind).as_slice() {
-        [single] => Some(single.clone()),
+        [single] => Some(single.to_string()),
         _ => None,
     };
     let unnamed = tags.iter().filter(|(n, _)| n.is_none()).count();
@@ -1963,7 +1971,7 @@ fn bare_assert_condition(arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
     }
 }
 
-fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec<String> {
+fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec<Name> {
     match kind {
         StmtKind::Expression(_) => statement_assigned_variable_names(arenas, kind),
         // `StmtKind::StaticVar`'s own arm above infers purely from the
@@ -1977,7 +1985,7 @@ fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec
         StmtKind::StaticVar(vars) => arenas
             .static_vars(vars.clone())
             .iter()
-            .map(|variable| variable.name.to_string())
+            .map(|variable| Name::from(&*variable.name))
             .collect(),
         // A bare `@var Type` header on a `foreach` targets the loop's
         // own value variable, mirroring every other statement kind
@@ -1991,7 +1999,7 @@ fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec
         StmtKind::Foreach { key, value, .. } if key.is_none() => arenas
             .expr(*value)
             .and_then(|value| match &value.kind {
-                ExprKind::Variable(name) => Some(vec![name.to_string()]),
+                ExprKind::Variable(name) => Some(vec![name.clone()]),
                 _ => None,
             })
             .unwrap_or_default(),
@@ -2001,13 +2009,13 @@ fn statement_defined_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec
 
 /// Every variable an assignment statement (`$x = ...`, `[$a, [$b]] =
 /// ...`, `$x = &...`) binds.
-fn statement_assigned_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec<String> {
-    fn collect(arenas: &NodeArenas, id: ExprId, out: &mut Vec<String>) {
+fn statement_assigned_variable_names(arenas: &NodeArenas, kind: &StmtKind) -> Vec<Name> {
+    fn collect(arenas: &NodeArenas, id: ExprId, out: &mut Vec<Name>) {
         let Some(target) = arenas.expr(id) else {
             return;
         };
         match &target.kind {
-            ExprKind::Variable(name) => out.push(name.to_string()),
+            ExprKind::Variable(name) => out.push(name.clone()),
             ExprKind::Destructure(items, _) => {
                 for target in arenas
                     .destructure_items(items)

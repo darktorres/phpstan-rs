@@ -246,7 +246,8 @@ impl<'a> Checker<'a> {
         match &e.kind {
             ExprKind::ClassNameFetch(target) => target
                 .as_name()
-                .and_then(|n| self.resolve_static_class_name(n)),
+                .and_then(|n| self.resolve_static_class_name(n))
+                .map(|class| class.to_string()),
             ExprKind::Literal(Literal::String(s)) => {
                 let s = self.syntax_string_text(s)?.trim_start_matches('\\');
                 self.registry.has_class(s).then(|| s.to_string())

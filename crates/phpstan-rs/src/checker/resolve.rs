@@ -319,10 +319,10 @@ impl<'a> Checker<'a> {
     /// The class a `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall`
     /// target's name (`self`/`parent`/`static`, or a class name) names;
     /// `None` for `self`/`parent`/`static` outside any class.
-    pub(crate) fn resolve_static_class_name(&self, class_name: &QualifiedName) -> Option<String> {
+    pub(crate) fn resolve_static_class_name(&self, class_name: &QualifiedName) -> Option<Name> {
         self.resolve_name_expr(class_name)
             .as_object()
-            .map(|(class, _)| class.to_string())
+            .map(|(class, _)| class.clone())
     }
 
     /// `StaticCall`'s own full `StaticTarget` resolution, for a
@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
         target: &StaticTarget,
         locals: &mut Locals,
         label: &str,
-    ) -> Option<String> {
+    ) -> Option<Name> {
         match target {
             StaticTarget::Name(name) => self.resolve_static_class_name(name),
             StaticTarget::Expr(receiver) => {
@@ -366,7 +366,7 @@ impl<'a> Checker<'a> {
         &self,
         target: &StaticTarget,
         locals: &Locals,
-    ) -> Option<String> {
+    ) -> Option<Name> {
         match target {
             StaticTarget::Name(name) => self.resolve_static_class_name(name),
             StaticTarget::Expr(receiver) => {
@@ -756,6 +756,6 @@ fn collect_scoped_template_params(
 
 /// The class a receiver's value is an instance of, when its type names
 /// one.
-pub(crate) fn receiver_class(ty: Type) -> Option<String> {
-    ty.as_object().map(|(class, _)| class.to_string())
+pub(crate) fn receiver_class(ty: Type) -> Option<Name> {
+    ty.as_object().map(|(class, _)| class.clone())
 }

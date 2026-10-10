@@ -259,10 +259,10 @@ impl<'a> Checker<'a> {
                     StaticTarget::Name(name) => self.resolve_static_class_name(name),
                     StaticTarget::Expr(receiver) => child(*receiver)
                         .as_object()
-                        .map(|(class, _)| class.to_string()),
+                        .map(|(class, _)| class.clone()),
                 };
                 match class {
-                    Some(class) => self.native_method_return(&class, method),
+                    Some(class) => self.native_method_return(class.as_str(), method),
                     None => Type::mixed(),
                 }
             }
@@ -282,7 +282,7 @@ impl<'a> Checker<'a> {
                 .as_name()
                 .and_then(|n| self.resolve_static_class_name(n))
             {
-                Some(class) => self.native_property_type(&class, prop, true),
+                Some(class) => self.native_property_type(class.as_str(), prop, true),
                 None => Type::mixed(),
             },
             _ => Type::mixed(),
