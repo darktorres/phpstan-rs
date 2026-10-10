@@ -61,6 +61,10 @@ counters! {
     ResolveRounds => "resolve_run.rounds",
     ResolveLevelsBuilt => "resolve_run.levels_built",
     ResolveLevelsReused => "resolve_run.levels_reused",
+    DocBytesLexed => "doc_comment.bytes_lexed",
+    DocBytesAsked => "doc_comment.bytes_asked",
+    DocCommentsLexed => "doc_comment.lexed",
+    DocCommentsAsked => "doc_comment.asked",
 }
 
 #[cfg(feature = "memo-stats")]

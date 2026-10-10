@@ -302,6 +302,8 @@ fn shared() -> &'static syntax::memo::Memo<DocBlock> {
 /// the same one, shared. Whoever needs a part of it for their own copies
 /// that part.
 pub fn parse_shared(raw: &str) -> std::sync::Arc<DocBlock> {
+    syntax::stats::add(syntax::stats::Counter::DocBytesAsked, raw.len() as u64);
+    syntax::stats::count(syntax::stats::Counter::DocCommentsAsked);
     shared().get(raw, parse)
 }
 
