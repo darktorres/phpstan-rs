@@ -338,7 +338,7 @@ impl ComposerManifest {
             .map(|r| {
                 let fixed = r.url.split('*').next().unwrap_or(&r.url);
                 let joined = self.absolute_root.join(fixed.trim_end_matches('/'));
-                std::fs::canonicalize(&joined).unwrap_or(joined)
+                dunce::canonicalize(&joined).unwrap_or(joined)
             })
             .collect();
         self.installed
@@ -378,7 +378,7 @@ fn read_installed(root: &Path) -> Vec<InstalledPackage> {
             let install_dir = read::<String>(member(&p, "install-path"))
                 .map(|rel| composer_dir.join(rel))
                 .unwrap_or_else(|| vendor_dir.clone());
-            let install_dir = std::fs::canonicalize(&install_dir).unwrap_or(install_dir);
+            let install_dir = dunce::canonicalize(&install_dir).unwrap_or(install_dir);
             Some(InstalledPackage {
                 kind: read(member(&p, "type")).unwrap_or_else(|| "library".to_string()),
                 auto_discovered: read::<BTreeMap<Key, IgnoredAny>>(member(&p, "extra"))

@@ -576,7 +576,7 @@ pub(crate) fn declared_php_versions(
 fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for dir in dirs {
-        let start = std::fs::canonicalize(root.join(dir)).unwrap_or_else(|_| root.join(dir));
+        let start = dunce::canonicalize(root.join(dir)).unwrap_or_else(|_| root.join(dir));
         let start = if start.is_file() {
             start.parent().map(Path::to_path_buf).unwrap_or(start)
         } else {
@@ -867,7 +867,7 @@ impl Session {
         let mut promoted: Vec<PathBuf> = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
-        let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        let absolute_root = dunce::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let mut composer_php_versions = None;
         let mut root_manifest = None;
         let listings = Arc::new(composer::dir_table::DirTable::default());

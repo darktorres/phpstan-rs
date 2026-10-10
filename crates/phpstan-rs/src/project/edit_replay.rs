@@ -590,8 +590,8 @@ where
     /// then vanishing: two steps. A PHP file there must be one a fresh load
     /// analyses, as the server would load it.
     fn include_target(&mut self, label: &'static str) -> Result<(), String> {
-        let tree = std::fs::canonicalize(self.root)
-            .map_err(|e| format!("{}: {e}", self.root.display()))?;
+        let tree =
+            dunce::canonicalize(self.root).map_err(|e| format!("{}: {e}", self.root.display()))?;
         let mut probes: Vec<PathBuf> = self
             .project
             .include_probes

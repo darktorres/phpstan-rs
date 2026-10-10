@@ -11,6 +11,7 @@ smallvec.workspace = true
 bumpalo.workspace = true
 composer.workspace = true
 config.workspace = true
+dunce.workspace = true
 diagnostics.workspace = true
 dumps.workspace = true
 phpdoc.workspace = true

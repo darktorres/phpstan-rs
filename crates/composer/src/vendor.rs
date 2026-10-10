@@ -63,7 +63,7 @@ pub fn discover_vendor_context_in(
     if !composer_dir.is_dir() {
         return VendorContext::default();
     }
-    let Ok(vendor_dir) = std::fs::canonicalize(composer_dir.join("..")) else {
+    let Ok(vendor_dir) = dunce::canonicalize(composer_dir.join("..")) else {
         return VendorContext::default();
     };
     let Some(base_dir) = vendor_dir.parent().map(Path::to_path_buf) else {
@@ -328,24 +328,24 @@ impl<'p> Resolver<'p> {
             .then_some(lexical)
     }
 
-    /// `std::fs::canonicalize(path)`, through its directory's canonical
+    /// `dunce::canonicalize(path)`, through its directory's canonical
     /// form when the entry itself isn't a link, and none for an entry its
     /// directory does not list.
     fn canonical(&mut self, path: &Path) -> Option<PathBuf> {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
-            return std::fs::canonicalize(path).ok();
+            return dunce::canonicalize(path).ok();
         };
         if dir.as_os_str().is_empty() {
-            return std::fs::canonicalize(path).ok();
+            return dunce::canonicalize(path).ok();
         }
         let Some(listed) = self.listed(dir) else {
             // A directory that can't be listed (no permission to read it
             // but to pass through it) is still resolved as the system does.
-            return std::fs::canonicalize(path).ok();
+            return dunce::canonicalize(path).ok();
         };
         match listed.listing.kind_of(name) {
             None => None,
-            Some(EntryKind::Link) => std::fs::canonicalize(path).ok(),
+            Some(EntryKind::Link) => dunce::canonicalize(path).ok(),
             Some(EntryKind::Dir | EntryKind::File) => Some(listed.canonical.join(name)),
         }
     }
@@ -375,22 +375,22 @@ impl<'p> Resolver<'p> {
     fn canonical_dir(&mut self, dir: &Path) -> Option<PathBuf> {
         let Some(parent) = dir.parent() else {
             // The root.
-            return std::fs::canonicalize(dir).ok();
+            return dunce::canonicalize(dir).ok();
         };
         if parent.as_os_str().is_empty() {
-            return std::fs::canonicalize(dir).ok();
+            return dunce::canonicalize(dir).ok();
         }
         let Some(name) = dir.file_name() else {
             // Ends in `..`: the parent of what precedes it, as the system
             // reads it.
-            return std::fs::canonicalize(dir).ok();
+            return dunce::canonicalize(dir).ok();
         };
         let Some(parent_listed) = self.listed(parent) else {
-            return std::fs::canonicalize(dir).ok();
+            return dunce::canonicalize(dir).ok();
         };
         match parent_listed.listing.kind_of(name) {
             None => None,
-            Some(EntryKind::Link) => std::fs::canonicalize(dir).ok(),
+            Some(EntryKind::Link) => dunce::canonicalize(dir).ok(),
             Some(EntryKind::Dir | EntryKind::File) => Some(parent_listed.canonical.join(name)),
         }
     }

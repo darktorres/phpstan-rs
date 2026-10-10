@@ -1257,6 +1257,7 @@ dependencies = [
  "clap",
  "crc32fast",
  "crossbeam-channel",
+ "dunce",
  "hashbrown 0.17.1",
  "hotpath",
  "imbl",
@@ -1292,6 +1293,7 @@ dependencies = [
 name = "phpstan-rs-composer"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "phpstan-rs-syntax",
  "rustc-hash",
  "serde",

@@ -109,7 +109,7 @@ fn main() {
             positions,
             reference,
         } => {
-            let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+            let dir = dunce::canonicalize(&dir).unwrap_or(dir);
             let record = lsp::session_record::record_session(&dir, seed, files, positions);
             if let Err(e) = phpstan_rs::project::session::write_dump(
                 &out,
