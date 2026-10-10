@@ -451,6 +451,7 @@ impl Checker<'_> {
             places: Box::new([]),
             objectless: Box::new([]),
             callables: Box::new([]),
+            fills: None,
         };
         let effect = {
             let ctx = TypedCall {
@@ -564,6 +565,7 @@ impl Checker<'_> {
             places: Box::new([]),
             objectless: Box::new([]),
             callables: Box::new([]),
+            fills: None,
         };
         let effect = {
             let ctx = TypedCall {

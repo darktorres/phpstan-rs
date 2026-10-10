@@ -442,3 +442,43 @@ function theCallerSeesTheReboundObjectDie(): void
     aVariableBoundToAReferenceLosesItsValue();
     assertType('int|null', Flag::$value);
 }
+
+function aBuiltinFillsAnArrayOfQuietObjects(): void
+{
+    $list = [];
+    array_push($list, new Quiet());
+}
+
+function theCallerSeesNothingRunForTheBuiltinFill(): void
+{
+    Flag::$value = null;
+    aBuiltinFillsAnArrayOfQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aBuiltinPrependsAnObject(): void
+{
+    $list = [];
+    array_unshift($list, new Resets());
+}
+
+function theCallerSeesThePrependedObjectDie(): void
+{
+    Flag::$value = null;
+    aBuiltinPrependsAnObject();
+    assertType('int|null', Flag::$value);
+}
+
+function aBuiltinFillsAnArrayWithAnArrayOfObjects(): void
+{
+    $list = [];
+    $more = [new Resets()];
+    array_push($list, $more);
+}
+
+function theCallerSeesTheNestedObjectDie(): void
+{
+    Flag::$value = null;
+    aBuiltinFillsAnArrayWithAnArrayOfObjects();
+    assertType('int|null', Flag::$value);
+}

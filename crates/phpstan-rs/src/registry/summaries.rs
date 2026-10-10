@@ -839,6 +839,10 @@ pub(crate) struct CallWrites {
     /// literal, a constant, a `::class` name.
     pub(crate) objectless: Box<[ArgAt]>,
     pub(crate) callables: Box<[(ArgAt, Callable)]>,
+    /// The argument the call fills with the others if it is the builtin it
+    /// is written as (`array_push`, `array_unshift`): the variable then holds
+    /// what they hold, nothing else.
+    pub(crate) fills: Option<ArgAt>,
 }
 
 /// What a body or a closure in it writes, before any declaration is looked
@@ -2185,6 +2189,7 @@ impl Summarizer<'_> {
             places: Box::new([]),
             objectless: Box::new([]),
             callables: Box::new([]),
+            fills: None,
         });
     }
 
@@ -2275,13 +2280,42 @@ impl Summarizer<'_> {
                 objectless.push(at);
             }
         }
+        let fills = self.fills(arenas, &callee, args);
         self.scope.calls.push(CallWrites {
             callee,
             arguments: arguments.into_boxed_slice(),
             places: places.into_iter().collect(),
             objectless: objectless.into_iter().collect(),
             callables: callables.into_iter().collect(),
+            fills,
         });
+    }
+
+    /// The first argument of a call written as `array_push` or
+    /// `array_unshift` of a variable the walk tracks the contents of, which
+    /// then holds the objects in the other arguments too.
+    fn fills(&mut self, arenas: &NodeArenas, callee: &Callee, args: &[Arg]) -> Option<ArgAt> {
+        let Callee::Function(name) = callee else {
+            return None;
+        };
+        let written = name.written.as_str();
+        let written = written.strip_prefix('\\').unwrap_or(written);
+        if !(written.eq_ignore_ascii_case("array_push")
+            || written.eq_ignore_ascii_case("array_unshift"))
+            || args.iter().any(|arg| arg.spread || arg.name.is_some())
+        {
+            return None;
+        }
+        let (first, rest) = args.split_first()?;
+        let variable = plain_variable(arenas, first.value)
+            .filter(|variable| self.scope.contents.contains_key(variable))?;
+        let stored = rest.iter().try_fold(Vec::new(), |mut all, arg| {
+            all.extend(self.origins(arenas, arg.value)?);
+            all.extend(self.contents_of(arenas, arg.value)?);
+            Some(all)
+        });
+        self.note_contents(&variable, stored);
+        Some(ArgAt::Position(0))
     }
 
     /// What the body made that `e` evaluates to, when it is that.
@@ -2319,6 +2353,7 @@ impl Summarizer<'_> {
             places: Box::new([]),
             objectless: Box::new([]),
             callables: Box::new([]),
+            fills: None,
         });
     }
 
@@ -3492,6 +3527,7 @@ syntax::canonical_struct!(CallWrites {
     places,
     objectless,
     callables,
+    fills,
 });
 
 syntax::canonical_struct!(WriteFacts {
