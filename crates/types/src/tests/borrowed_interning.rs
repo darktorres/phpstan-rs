@@ -38,6 +38,17 @@ proptest! {
             &Type::string_literal(literal.clone()).0
         ));
         prop_assert!(Arc::ptr_eq(
+            &Type::string_literal_bytes(literal.as_bytes()).0,
+            &Type::string_literal(literal.clone()).0
+        ));
+        // Bytes that are not text are one literal as well, whichever form
+        // is asked first.
+        let raw = [0xffu8, 0x00, text.len() as u8];
+        prop_assert!(Arc::ptr_eq(
+            &Type::string_literal_bytes(&raw).0,
+            &Type::string_literal(PhpString::from_bytes(raw.to_vec())).0
+        ));
+        prop_assert!(Arc::ptr_eq(
             &Type::enum_case_ref(&class, &class).0,
             &Type::enum_case(class.clone(), class.clone()).0
         ));

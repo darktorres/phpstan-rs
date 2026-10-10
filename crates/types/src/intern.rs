@@ -91,6 +91,9 @@ impl Form<'_> {
 #[derive(Clone, Copy)]
 pub(crate) enum ReprRef<'a> {
     StringLiteral(&'a crate::PhpString),
+    /// A string literal's bytes, for a caller that holds no `PhpString`: the
+    /// same form as `StringLiteral` of those bytes.
+    StringBytes(&'a [u8]),
     Object(&'a crate::Name, &'a [Type]),
     EnumCase(&'a crate::Name, &'a crate::Name),
     ClassString(&'a Type),
@@ -131,6 +134,9 @@ impl<'a> ReprRef<'a> {
     pub(crate) fn to_owned(self) -> Repr {
         match self {
             ReprRef::StringLiteral(s) => Repr::StringLiteral(s.clone()),
+            ReprRef::StringBytes(bytes) => {
+                Repr::StringLiteral(crate::PhpString::from_bytes(Arc::<[u8]>::from(bytes)))
+            }
             ReprRef::Object(name, args) => Repr::Object(name.clone(), args.to_vec()),
             ReprRef::EnumCase(class, case) => Repr::EnumCase(class.clone(), case.clone()),
             ReprRef::ClassString(inner) => Repr::ClassString(inner.clone()),
@@ -466,6 +472,9 @@ fn exact_eq_owned(a: &Repr, b: &Repr) -> bool {
 fn exact_eq(stored: &Repr, form: &ReprRef<'_>) -> bool {
     match form.canonical() {
         ReprRef::StringLiteral(b) => matches!(stored, Repr::StringLiteral(a) if a == b),
+        ReprRef::StringBytes(b) => {
+            matches!(stored, Repr::StringLiteral(a) if a.as_bytes() == b)
+        }
         ReprRef::Object(bn, ba) => {
             matches!(stored, Repr::Object(an, aa) if an == bn && same_all(aa, ba))
         }
@@ -627,6 +636,10 @@ fn exact_hash(form: &ReprRef<'_>) -> u64 {
         ReprRef::StringLiteral(s) => {
             0xa0u8.hash(state);
             s.hash(state);
+        }
+        ReprRef::StringBytes(bytes) => {
+            0xa0u8.hash(state);
+            bytes.hash(state);
         }
         ReprRef::Object(name, args) => {
             0xa1u8.hash(state);

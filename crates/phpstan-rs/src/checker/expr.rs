@@ -5325,8 +5325,8 @@ impl<'a> Checker<'a> {
                 Literal::Float(f) => Type::float_literal(*f),
                 Literal::String(s) => self
                     .syntax_arenas()
-                    .and_then(|arenas| arenas.owned_php_string(s))
-                    .map(Type::string_literal)
+                    .and_then(|arenas| arenas.string_bytes(s))
+                    .map(Type::string_literal_bytes)
                     .unwrap_or_else(Type::string),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),
@@ -5534,8 +5534,8 @@ impl<'a> Checker<'a> {
                 Literal::Float(f) => Type::float_literal(*f),
                 Literal::String(s) => self
                     .syntax_arenas()
-                    .and_then(|arenas| arenas.owned_php_string(s))
-                    .map(Type::string_literal)
+                    .and_then(|arenas| arenas.string_bytes(s))
+                    .map(Type::string_literal_bytes)
                     .unwrap_or_else(Type::string),
                 Literal::Bool(true) => Type::bool_literal(true),
                 Literal::Bool(false) => Type::bool_literal(false),

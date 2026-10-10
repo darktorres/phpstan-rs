@@ -19,7 +19,7 @@ impl<'a> Checker<'a> {
         } else if keyword("static") {
             Type::static_ref(Vec::new())
         } else {
-            return Type::object(self.resolve_class_name(name).into(), Vec::new());
+            return Type::object_ref(&self.resolve_class_name_value(name), &[]);
         };
         match &self.current_class {
             Some(c) => self.resolve_pseudo(&raw, c),
@@ -31,6 +31,22 @@ impl<'a> Checker<'a> {
     /// a name as fully qualified, whatever the file's namespace.
     pub(crate) fn class_type_named(&self, name: &str) -> Type {
         Type::object(self.canonical_class_name(name).into(), Vec::new())
+    }
+
+    /// `resolve_class_name`, as the `Name` it is held under: the declared
+    /// one, or the resolved one, with no text built when it is a `Name`.
+    pub(crate) fn resolve_class_name_value(&self, name: &QualifiedName) -> Name {
+        let value = match name.resolved_class_name() {
+            Some(resolved) if !resolved.as_str().starts_with('\\') => {
+                match self.registry.class(resolved) {
+                    Some((_, declared, _)) => declared.clone(),
+                    None => resolved.clone(),
+                }
+            }
+            _ => Name::from(self.resolve_class_name(name)),
+        };
+        debug_assert_eq!(value, Name::from(self.resolve_class_name(name)));
+        value
     }
 
     /// The fully-qualified class a class name written in code names, in

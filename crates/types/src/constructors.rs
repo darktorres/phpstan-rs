@@ -96,6 +96,12 @@ impl Type {
         Type::from_ref(crate::intern::ReprRef::StringLiteral(value))
     }
 
+    /// `string_literal` for bytes held by the caller: nothing is copied when
+    /// the type exists.
+    pub fn string_literal_bytes(bytes: &[u8]) -> Type {
+        Type::from_ref(crate::intern::ReprRef::StringBytes(bytes))
+    }
+
     /// `class-string<inner>`.
     pub fn class_string(inner: Type) -> Type {
         Type::new(Repr::ClassString(inner))
