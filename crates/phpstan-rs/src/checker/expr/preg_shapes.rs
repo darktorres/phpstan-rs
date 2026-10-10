@@ -572,7 +572,7 @@ impl crate::checker::Checker<'_> {
         locals: &crate::checker::Locals,
     ) -> Option<Type> {
         let pattern = self.constant_string_value(call.pattern, locals)?;
-        let parsed = regex_groups::parse_capture_groups(&pattern)?;
+        let parsed = regex_groups::shared_capture_groups(&pattern)?;
         let flags = match call.flags {
             Some(e) => {
                 let arenas = self.syntax_arenas()?;

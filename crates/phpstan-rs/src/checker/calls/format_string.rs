@@ -39,6 +39,37 @@ pub(crate) struct Placeholder {
     pub accepting: Accepting,
 }
 
+/// The placeholder pattern and the index of each of its named groups, so a
+/// match is read by position.
+struct PlaceholderPattern {
+    regex: Regex,
+    before: usize,
+    position: usize,
+    width: usize,
+    precision: usize,
+    specifier: usize,
+}
+
+impl PlaceholderPattern {
+    fn new(hh: bool) -> Self {
+        let regex = placeholder_pattern(hh);
+        let index = |wanted: &str| {
+            regex
+                .capture_names()
+                .position(|name| name == Some(wanted))
+                .expect("the placeholder pattern names this group")
+        };
+        PlaceholderPattern {
+            before: index("before"),
+            position: index("position"),
+            width: index("width"),
+            precision: index("precision"),
+            specifier: index("specifier"),
+            regex,
+        }
+    }
+}
+
 /// PHPStan's placeholder pattern, with `h`/`H` (PHP 8.0+) and without.
 fn placeholder_pattern(hh: bool) -> Regex {
     let specifiers = if hh { "bshH" } else { "bs" };
@@ -48,8 +79,10 @@ fn placeholder_pattern(hh: bool) -> Regex {
     .expect("the placeholder pattern is valid")
 }
 
-static PLACEHOLDER_WITH_HH: LazyLock<Regex> = LazyLock::new(|| placeholder_pattern(true));
-static PLACEHOLDER_WITHOUT_HH: LazyLock<Regex> = LazyLock::new(|| placeholder_pattern(false));
+static PLACEHOLDER_WITH_HH: LazyLock<PlaceholderPattern> =
+    LazyLock::new(|| PlaceholderPattern::new(true));
+static PLACEHOLDER_WITHOUT_HH: LazyLock<PlaceholderPattern> =
+    LazyLock::new(|| PlaceholderPattern::new(false));
 
 /// `PrintfHelper::getPrintfPlaceholders`: the placeholders of a printf
 /// format by the value they consume, or `None` when one is invalid.
@@ -66,15 +99,15 @@ pub(crate) fn printf_placeholders(
     let mut parsed = Vec::new();
     let mut next_index = 0i64;
     let mut number = 0usize;
-    for m in pattern.captures_iter(format) {
+    for m in pattern.regex.captures_iter(format) {
         // An odd run of `%` before this one escapes it (`%%d`).
-        if m["before"].len() % 2 != 0 {
+        if m.get(pattern.before).map_or(0, |before| before.len()) % 2 != 0 {
             continue;
         }
         number += 1;
         let whole = &m[0];
         let mut show_value_suffix = false;
-        if m.name("width").is_some() {
+        if m.get(pattern.width).is_some() {
             parsed.push(Placeholder {
                 label: format!("\"{whole}\" (width)"),
                 parameter_index: next_index,
@@ -84,7 +117,7 @@ pub(crate) fn printf_placeholders(
             next_index += 1;
             show_value_suffix = true;
         }
-        if m.name("precision").is_some() {
+        if m.get(pattern.precision).is_some() {
             parsed.push(Placeholder {
                 label: format!("\"{whole}\" (precision)"),
                 parameter_index: next_index,
@@ -94,8 +127,8 @@ pub(crate) fn printf_placeholders(
             next_index += 1;
             show_value_suffix = true;
         }
-        let specifier = m.name("specifier")?.as_str();
-        let parameter_index = match m.name("position") {
+        let specifier = m.get(pattern.specifier)?.as_str();
+        let parameter_index = match m.get(pattern.position) {
             Some(position) => position.as_str().parse::<i64>().ok()? - 1,
             None => {
                 next_index += 1;

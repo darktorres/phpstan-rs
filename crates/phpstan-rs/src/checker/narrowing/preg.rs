@@ -130,7 +130,7 @@ impl Checker<'_> {
         };
         let Some(parsed) = self
             .constant_string_value(call.pattern, locals)
-            .and_then(|p| regex_groups::parse_capture_groups(&p))
+            .and_then(|p| regex_groups::shared_capture_groups(&p))
         else {
             return;
         };

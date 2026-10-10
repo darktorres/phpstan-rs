@@ -150,6 +150,29 @@ pub(crate) struct ParsedPattern {
     pub final_newline: bool,
 }
 
+/// A pattern's `ParsedPattern`, shared by every check that reads the same
+/// pattern text.
+pub(crate) struct SharedPattern(std::sync::Arc<Option<ParsedPattern>>);
+
+impl std::ops::Deref for SharedPattern {
+    type Target = ParsedPattern;
+
+    fn deref(&self) -> &ParsedPattern {
+        self.0
+            .as_ref()
+            .as_ref()
+            .expect("a shared pattern holds a parsed one")
+    }
+}
+
+/// `parse_capture_groups`, kept by the pattern text.
+pub(crate) fn shared_capture_groups(pattern_literal: &str) -> Option<SharedPattern> {
+    static MEMO: std::sync::LazyLock<syntax::memo::Memo<Option<ParsedPattern>>> =
+        std::sync::LazyLock::new(|| syntax::memo::Memo::with_limits(1024, 256 * 1024));
+    let parsed = MEMO.get(pattern_literal, parse_capture_groups);
+    parsed.is_some().then_some(SharedPattern(parsed))
+}
+
 /// Parses a PHP PCRE pattern literal's own delimiters/modifiers and
 /// structure to enumerate its capturing groups, in left-to-right
 /// numbering order. Returns `None` for anything outside this function's
