@@ -880,7 +880,7 @@ impl Canonical for crate::references::RefKey {
         let (kind, name) = match self {
             RefKey::Class(name) => ("Class", name),
             RefKey::Function(name) => ("Function", name),
-            RefKey::Constant(name) => ("Constant", name),
+            RefKey::Constant(name, _) => ("Constant", name),
             RefKey::GlobalVar(name) => ("GlobalVar", name),
         };
         p.tuple(kind, &[name]);

@@ -17,11 +17,52 @@ use crate::parser::NameKind;
 /// constant's namespace does and its own name does not, a variable's name
 /// is exact. A name holds the hashes it was made with.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(from = "RefKeyWire", into = "RefKeyWire")]
 pub enum RefKey {
+    Class(Name),
+    Function(Name),
+    /// The name and the hash of its namespace and own name, which `Hash`
+    /// writes.
+    Constant(Name, u64),
+    GlobalVar(Name),
+}
+
+/// What `RefKey` is written as: the names alone.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum RefKeyWire {
     Class(Name),
     Function(Name),
     Constant(Name),
     GlobalVar(Name),
+}
+
+impl From<RefKeyWire> for RefKey {
+    fn from(wire: RefKeyWire) -> RefKey {
+        match wire {
+            RefKeyWire::Class(name) => RefKey::Class(name),
+            RefKeyWire::Function(name) => RefKey::Function(name),
+            RefKeyWire::Constant(name) => RefKey::constant_of(name),
+            RefKeyWire::GlobalVar(name) => RefKey::GlobalVar(name),
+        }
+    }
+}
+
+impl From<RefKey> for RefKeyWire {
+    fn from(key: RefKey) -> RefKeyWire {
+        match key {
+            RefKey::Class(name) => RefKeyWire::Class(name),
+            RefKey::Function(name) => RefKeyWire::Function(name),
+            RefKey::Constant(name, _) => RefKeyWire::Constant(name),
+            RefKey::GlobalVar(name) => RefKeyWire::GlobalVar(name),
+        }
+    }
+}
+
+/// The hash of a constant's namespace (ignoring case) and own name.
+fn constant_hash(name: &str) -> u64 {
+    let (namespace, own) = constant_parts(name);
+    crate::name::folded_hash(namespace.as_bytes())
+        ^ crate::name::text_hash(own).wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
 impl RefKey {
@@ -35,7 +76,12 @@ impl RefKey {
     }
 
     pub fn constant(name: &Name) -> RefKey {
-        RefKey::Constant(without_backslash(name))
+        RefKey::constant_of(without_backslash(name))
+    }
+
+    fn constant_of(name: Name) -> RefKey {
+        let hash = constant_hash(&name);
+        RefKey::Constant(name, hash)
     }
 
     /// `class` for a text, which the key holds without sharing it.
@@ -48,7 +94,7 @@ impl RefKey {
     }
 
     pub fn constant_text(text: &str) -> RefKey {
-        RefKey::Constant(Name::from(text.trim_start_matches('\\')))
+        RefKey::constant_of(Name::from(text.trim_start_matches('\\')))
     }
 
     pub fn global_variable(name: &str) -> RefKey {
@@ -60,7 +106,7 @@ impl RefKey {
         match self {
             RefKey::Class(name)
             | RefKey::Function(name)
-            | RefKey::Constant(name)
+            | RefKey::Constant(name, _)
             | RefKey::GlobalVar(name) => name,
         }
     }
@@ -79,7 +125,7 @@ impl RefKey {
         match self {
             RefKey::Class(_) => 0,
             RefKey::Function(_) => 1,
-            RefKey::Constant(_) => 2,
+            RefKey::Constant(..) => 2,
             RefKey::GlobalVar(_) => 3,
         }
     }
@@ -143,7 +189,7 @@ fn ref_key_folded_cmp(a: &RefKey, b: &RefKey) -> std::cmp::Ordering {
         (RefKey::Class(a), RefKey::Class(b)) | (RefKey::Function(a), RefKey::Function(b)) => {
             a.lower().as_bytes().cmp(b.lower().as_bytes())
         }
-        (RefKey::Constant(a), RefKey::Constant(b)) => {
+        (RefKey::Constant(a, _), RefKey::Constant(b, _)) => {
             let (a_namespace, a_name) = constant_parts(a);
             let (b_namespace, b_name) = constant_parts(b);
             cmp_ascii_folded(a_namespace, b_namespace).then_with(|| a_name.cmp(b_name))
@@ -182,10 +228,12 @@ impl PartialEq for RefKey {
             (RefKey::Class(a), RefKey::Class(b)) | (RefKey::Function(a), RefKey::Function(b)) => {
                 a.eq_ignore_case(b)
             }
-            (RefKey::Constant(a), RefKey::Constant(b)) => {
-                let ((a_namespace, a_name), (b_namespace, b_name)) =
-                    (constant_parts(a), constant_parts(b));
-                a_name == b_name && a_namespace.eq_ignore_ascii_case(b_namespace)
+            (RefKey::Constant(a, ah), RefKey::Constant(b, bh)) => {
+                ah == bh && {
+                    let ((a_namespace, a_name), (b_namespace, b_name)) =
+                        (constant_parts(a), constant_parts(b));
+                    a_name == b_name && a_namespace.eq_ignore_ascii_case(b_namespace)
+                }
             }
             (RefKey::GlobalVar(a), RefKey::GlobalVar(b)) => a == b,
             _ => false,
@@ -200,11 +248,7 @@ impl std::hash::Hash for RefKey {
         state.write_u8(self.tag());
         match self {
             RefKey::Class(name) | RefKey::Function(name) => state.write_u64(name.folded_hash()),
-            RefKey::Constant(name) => {
-                let (namespace, own) = constant_parts(name);
-                state.write_u64(crate::name::folded_hash(namespace.as_bytes()));
-                state.write_u64(crate::name::text_hash(own));
-            }
+            RefKey::Constant(_, hash) => state.write_u64(*hash),
             RefKey::GlobalVar(name) => state.write_u64(name.text_hash()),
         }
     }
@@ -379,6 +423,24 @@ impl Recorder {
 #[cfg(test)]
 mod sort_tests {
     use super::*;
+
+    #[test]
+    fn a_constant_key_hashes_and_serialises_by_its_names() {
+        use std::hash::{Hash, Hasher};
+        let hash = |key: &RefKey| {
+            let mut hasher = rustc_hash::FxHasher::default();
+            key.hash(&mut hasher);
+            hasher.finish()
+        };
+        let a = RefKey::constant_text("App\\Lib\\LIMIT");
+        let b = RefKey::constant_text("app\\lib\\LIMIT");
+        let c = RefKey::constant_text("App\\Lib\\limit");
+        assert!(a == b && hash(&a) == hash(&b));
+        assert!(a != c);
+        let bytes = serde_json::to_string(&a).unwrap();
+        let wire = serde_json::to_string(&RefKeyWire::Constant(a.name().clone())).unwrap();
+        assert_eq!(bytes, wire);
+    }
 
     fn by_comparator(keys: &mut [RefKey]) {
         use std::hash::{Hash, Hasher};
