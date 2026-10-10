@@ -364,17 +364,27 @@ impl Reader {
     }
 
     pub(crate) fn open(path: &Path) -> Result<Reader, Unreadable> {
+        Self::open_modified(path).map(|(reader, _)| reader)
+    }
+
+    /// `open`, with the time the file was last modified, read from the
+    /// opened file.
+    pub(crate) fn open_modified(
+        path: &Path,
+    ) -> Result<(Reader, Option<std::time::SystemTime>), Unreadable> {
         let file = Arc::new(File::open(path).map_err(|_| Unreadable::Damaged)?);
         let metadata = file.metadata().map_err(|_| Unreadable::Damaged)?;
         let file_len = metadata.len();
-        Self::read(
+        let modified = metadata.modified().ok();
+        let reader = Self::read(
             Source::File {
                 identity: file_identity(&metadata),
                 file,
                 path: Some(Arc::new(path.to_path_buf())),
             },
             file_len,
-        )
+        )?;
+        Ok((reader, modified))
     }
 
     fn read(source: Source, file_len: u64) -> Result<Reader, Unreadable> {

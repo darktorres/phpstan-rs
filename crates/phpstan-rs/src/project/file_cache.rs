@@ -333,9 +333,8 @@ pub(super) fn key(
 
 /// The entry under `key`, when there is one that is whole.
 pub(super) fn load(key: &Key, file_id: crate::file_id::FileId) -> Option<CachedFile> {
-    let modified = fs::metadata(&key.file).ok().and_then(|m| m.modified().ok());
-    let mut reader = match CacheReader::open(&key.file) {
-        Ok(reader) => reader,
+    let (mut reader, modified) = match CacheReader::open_modified(&key.file) {
+        Ok(opened) => opened,
         Err(CacheUnreadable::Damaged) => return None,
         Err(CacheUnreadable::Inconsistent(reason)) => {
             eprintln!("phpstan-rs: the stored file cache is inconsistent ({reason}); reparsing");
