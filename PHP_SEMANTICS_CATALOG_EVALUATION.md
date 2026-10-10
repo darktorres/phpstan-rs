@@ -509,6 +509,21 @@ semantic invariant.
 | Invalid-run `main.assertion.11` | 1 expected failure, at `contracts.c:55` | Deliberately asserts that callback mutation and pending-throw state were erased. The counterexample rejects that invalid composition in the reduced C model. The same contract clause has an analogous Rust regression; this CBMC counterexample itself remains C-only and is not a PHP semantic proof. |
 | Low-budget `main.unwind.0` | 1 expected failure, at `loop_contract.c:7` | With `length < 100` and `--unwind 2`, CBMC finds a possible path beyond the unwind bound. The failure correctly prevents treating the incomplete bounded run as proof. |
 
+For an exact name-to-disposition crosswalk, the valid run's 93 successful IDs
+are grouped below. These generated checks all map to C harness safety rather
+than a PHP semantic clause; the explicit assertions' semantic mappings are in
+the table above.
+
+| Property family | Exact IDs in the valid run | Clause/evidence disposition |
+| --- | --- | --- |
+| Main assertions (10) | `main.assertion.1`–`.10` | `main.assertion.1`–`.3` and `.8`–`.10` are C-only harness invariants with no matching contract clause; `.4`–`.5` illustrate the callback-write/throw clause; `.6`–`.7` illustrate ordinary event order. Related Rust/PHP checks are described above and do not prove these C properties. |
+| Array bounds (10) | `main.array_bounds.1`–`.2`; `increment.array_bounds.1`–`.2`; `throwing.array_bounds.1`–`.2`; `release_value.array_bounds.1`–`.2`; `invoke.array_bounds.1`–`.2` | Generated C-model safety checks; no PHP contract clause. |
+| Overflow (7) | `main.overflow.1`; `increment.overflow.1`–`.2`; `throwing.overflow.1`–`.2`; `release_value.overflow.1`; `invoke.overflow.1` | Generated C-model safety checks; no PHP contract clause. |
+| Pointer dereference (45) | `main.pointer_dereference.1`–`.7`; `increment.pointer_dereference.1`–`.6`; `throwing.pointer_dereference.1`–`.6`; `invoke.pointer_dereference.1`–`.7`; `alias_write.pointer_dereference.1`–`.12`; `through_copy.pointer_dereference.1`–`.7` | Generated C-model safety checks; no PHP contract clause. The harness restricts callback targets to `increment` and `throwing`. |
+| `memcpy` object/pointer checks (16) | `memcpy.pointer.1`–`.2`; `memcpy.pointer_arithmetic.1`–`.14` | Generated C-model safety checks for the aggregate-copy example; no PHP contract clause. |
+| `memcpy` preconditions (3) | `through_copy.precondition_instance.1`–`.3` | Generated C-model library precondition checks; no PHP contract clause. |
+| Unwinding assertions (2) | `main.unwind.0`–`.1` | Bounded-loop completeness checks only; no PHP semantic clause. Both succeed in the `--unwind 4`, `length <= 3` run. |
+
 All 93 valid-run properties are therefore accounted for: 10 explicit
 assertions, 81 generated bounds/overflow/pointer/precondition checks, and 2
 unwinding assertions. The invalid run has the same 93 plus the intentional
