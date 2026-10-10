@@ -1219,6 +1219,19 @@ fn record_property_assigned(
 /// Origins, not known when `None`.
 type MaybeOrigins = Option<Vec<Origin>>;
 
+/// A variable a `foreach` by reference bound to the elements of another.
+#[derive(Debug)]
+struct ElementRef {
+    subject: Name,
+    item: Name,
+    // Where what the loop writes to the variable comes from, or `None` once
+    // that is not known.
+    written: MaybeOrigins,
+    // Whether the body assigns the variable, which destroys the element it
+    // is the reference to.
+    overwritten: bool,
+}
+
 /// What one scope writes, as the walk finds it: the body's own, or a
 /// closure's.
 #[derive(Default)]
@@ -1235,6 +1248,9 @@ struct Scope {
     // Where the objects held in the arrays each variable written holds come
     // from, or `None` once they are not known.
     contents: FxHashMap<Name, Option<Vec<Origin>>>,
+    // The variables a `foreach` by reference bound to the elements of the
+    // variable, in that order: what they hold, the elements hold.
+    element_refs: Vec<ElementRef>,
     computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
@@ -1547,6 +1563,15 @@ impl Summarizer<'_> {
                 (Some(known), Some(origins)) => known.extend(origins.iter().cloned()),
                 _ => *known = None,
             }
+            for element_ref in scope.element_refs.iter_mut().filter(|r| r.item == name) {
+                element_ref.written = match (element_ref.written.take(), origins) {
+                    (Some(mut all), Some(origins)) => {
+                        all.extend(origins.iter().cloned());
+                        Some(all)
+                    }
+                    _ => None,
+                };
+            }
         }
         self.note_contents(&name, contents);
     }
@@ -1689,6 +1714,14 @@ impl Summarizer<'_> {
             Some(name) => {
                 self.scope.made.insert(name.clone(), None);
                 self.scope.origins.insert(name.clone(), None);
+                for element_ref in self
+                    .scope
+                    .element_refs
+                    .iter_mut()
+                    .filter(|r| r.item == *name)
+                {
+                    element_ref.written = None;
+                }
             }
             None => self.write_computed(),
         }
@@ -1993,6 +2026,52 @@ impl Summarizer<'_> {
             })
             .collect();
         locals.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, _, contents) in &mut locals {
+            for element_ref in self
+                .scope
+                .element_refs
+                .iter()
+                .filter(|r| r.subject == *name)
+            {
+                let held = element_ref.written.clone();
+                let held_contents = self
+                    .scope
+                    .contents
+                    .get(&element_ref.item)
+                    .cloned()
+                    .unwrap_or(Some(Vec::new()));
+                *contents = match (contents.take(), held, held_contents) {
+                    (Some(mut all), Some(held), Some(held_contents)) => {
+                        all.extend(held);
+                        all.extend(held_contents);
+                        Some(all)
+                    }
+                    _ => None,
+                };
+            }
+        }
+        let overwritten: Vec<MaybeOrigins> = self
+            .scope
+            .element_refs
+            .iter()
+            .filter(|r| r.overwritten)
+            .map(|r| {
+                let mut all = r.written.clone()?;
+                for name in [&r.subject, &r.item] {
+                    all.extend(
+                        self.scope
+                            .contents
+                            .get(name)
+                            .cloned()
+                            .unwrap_or(Some(Vec::new()))?,
+                    );
+                }
+                Some(all)
+            })
+            .collect();
+        for held in overwritten {
+            self.implicit_on(held, Operation::Destroy);
+        }
         for (_, origins, contents) in locals {
             self.implicit_on(origins, Operation::Destroy);
             self.implicit_on(contents, Operation::Destroy);
@@ -2747,7 +2826,15 @@ impl Visitor for Summarizer<'_> {
                         self.write(arenas, *key, None, None);
                         self.mark(arenas, *key, WRITE);
                     }
-                    let element = source.and_then(element_origins);
+                    // An array the body made, or a variable whose contents it
+                    // knows, yields the objects it holds.
+                    let tracked = plain_variable(arenas, *subject)
+                        .is_some_and(|name| self.scope.contents.contains_key(&name));
+                    let element = if tracked || holds_elements_made_here(arenas, *subject) {
+                        self.contents_of(arenas, *subject)
+                    } else {
+                        source.and_then(element_origins)
+                    };
                     if !*by_ref {
                         self.implicit(arenas, *value, Operation::Destroy);
                     }
@@ -2774,7 +2861,23 @@ impl Visitor for Summarizer<'_> {
                         }
                     }
                     if *by_ref {
-                        self.write(arenas, *subject, None, None);
+                        match (
+                            plain_variable(arenas, *subject).filter(|_| tracked),
+                            plain_variable(arenas, *value),
+                        ) {
+                            // The loop writes the elements through the
+                            // reference, which holds what they will.
+                            (Some(name), Some(item)) => {
+                                self.write(arenas, *subject, None, Some(Vec::new()));
+                                self.scope.element_refs.push(ElementRef {
+                                    subject: name,
+                                    item,
+                                    written: Some(Vec::new()),
+                                    overwritten: false,
+                                });
+                            }
+                            _ => self.write(arenas, *subject, None, None),
+                        }
                     }
                     for target in key.iter().copied().chain([*value]) {
                         self.reassign(arenas, target);
@@ -2875,7 +2978,17 @@ impl Visitor for Summarizer<'_> {
                                 | ExprKind::Index(..)
                         )
                     ) {
-                        self.implicit(arenas, *lhs, Operation::Destroy);
+                        let item = plain_variable(arenas, *lhs).and_then(|name| {
+                            self.scope
+                                .element_refs
+                                .iter_mut()
+                                .rev()
+                                .find(|r| r.item == name)
+                        });
+                        match item {
+                            Some(element_ref) => element_ref.overwritten = true,
+                            None => self.implicit(arenas, *lhs, Operation::Destroy),
+                        }
                     }
                     self.write(arenas, *lhs, made, origins.clone());
                     self.note_stored(arenas, *lhs, *rhs, origins.as_deref());

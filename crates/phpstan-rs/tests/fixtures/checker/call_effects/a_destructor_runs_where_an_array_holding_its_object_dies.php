@@ -292,3 +292,64 @@ function theCallerSeesTheForeachArrayDie(): void
     aForeachBindsAnElementByReference();
     assertType('int|null', Flag::$value);
 }
+
+function aForeachByReferenceOverQuietObjects(): void
+{
+    $list = [new Quiet()];
+    foreach ($list as &$item) {
+    }
+}
+
+function theCallerSeesNothingRunForQuietObjects(): void
+{
+    Flag::$value = null;
+    aForeachByReferenceOverQuietObjects();
+    assertType('null', Flag::$value);
+}
+
+function aForeachByReferenceStoresAnObject(): void
+{
+    $list = [1];
+    foreach ($list as &$item) {
+        $item = new Resets();
+    }
+}
+
+function theCallerSeesTheStoredObjectDie(): void
+{
+    Flag::$value = null;
+    aForeachByReferenceStoresAnObject();
+    assertType('int|null', Flag::$value);
+}
+
+function aForeachByReferenceOverNumbers(): void
+{
+    $copy = [1, 2];
+    foreach ($copy as &$number) {
+        $number = 3;
+    }
+}
+
+function theCallerSeesNothingRunForNumbers(): void
+{
+    Flag::$value = null;
+    aForeachByReferenceOverNumbers();
+    assertType('null', Flag::$value);
+}
+
+/**
+ * @param array<int, Resets> $list
+ */
+function aForeachByReferenceOverAParameter(array $list): void
+{
+    foreach ($list as &$item) {
+        $item = 1;
+    }
+}
+
+function theCallerSeesTheElementsOfAParameterDie(): void
+{
+    Flag::$value = null;
+    aForeachByReferenceOverAParameter([new Resets()]);
+    assertType('int|null', Flag::$value);
+}
