@@ -4891,19 +4891,19 @@ impl<'r> Level<'r> {
             registry: self.registry,
             ctx: self,
         };
-        let mut calls: Vec<(EffectIx, TransferIx, Option<u32>)> = Vec::with_capacity(
-            reached
-                .iter()
-                .map(|targets| match targets {
-                    Targets::List(list) => list.len(),
-                    Targets::Shared(_) => 0,
-                })
-                .sum(),
-        );
+        let listed: usize = reached
+            .iter()
+            .map(|targets| match targets {
+                Targets::List(list) => list.len(),
+                Targets::Shared(_) => 0,
+            })
+            .sum();
+        let mut calls: Vec<(EffectIx, TransferIx, Option<u32>)> = Vec::with_capacity(listed);
         let mut sets: Vec<IdTargets> = Vec::new();
         let mut sites: Vec<Site<'r>> = Vec::new();
         // The declarations run with no call's arguments, each once.
-        let mut siteless: FxHashSet<(EffectIx, TransferIx)> = FxHashSet::default();
+        let mut siteless: FxHashSet<(EffectIx, TransferIx)> =
+            FxHashSet::with_capacity_and_hasher(listed, Default::default());
         let facts: &'r WriteFacts = self.facts;
         // The shared sets of declarations already taken.
         let mut taken: FxHashSet<usize> = FxHashSet::default();
@@ -5554,11 +5554,11 @@ impl<'r> Level<'r> {
         &self,
         class: &QualifiedName,
         prop: Option<&Name>,
-    ) -> Vec<(Option<Name>, Option<Name>)> {
+    ) -> SmallVec<[(Option<Name>, Option<Name>); 2]> {
         let Some(classes) = named_classes(self.registry, self.class_name(), class) else {
-            return vec![(None, prop.cloned())];
+            return smallvec![(None, prop.cloned())];
         };
-        let mut out: Vec<(Option<Name>, Option<Name>)> = Vec::new();
+        let mut out: SmallVec<[(Option<Name>, Option<Name>); 2]> = SmallVec::new();
         for candidate in classes {
             let storage = match prop {
                 Some(prop) => match self.registry.lookup_property_with_owner(&candidate, prop) {
