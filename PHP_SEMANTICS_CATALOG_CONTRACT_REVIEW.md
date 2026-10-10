@@ -801,3 +801,136 @@ currently newer than the 13-sentinel witness (`94dc6509…` versus
 `9b38a3ea…`), so replay fails before making a claim about the stale witness.
 This closes the fail-open mechanism; it does not reconcile or replace the
 historical witness. This is author evidence; independent acceptance is pending.
+
+---
+
+## Third review pass: commits 60c668a0..HEAD (2026-10-10)
+
+Scope: the 24 commits after `60c668a0`, reviewed by reading their diffs and checking the
+claims against the code, the tests and the stored artifacts. The uncommitted working tree
+(about 50 modified files and several untracked witnesses) is not part of this pass. Where
+the committed docs and the working tree differ, the committed text was judged.
+
+### What was checked
+
+- **Identity and canonical order** (`77ee2d87`, `4e0ef0db`, `a01299a0`, `dbb2182a`). Unordered
+  vectors are normalized for identity, and validation rejects unsorted or duplicate input.
+  Release ranges and predicate vectors are validated on add and on load. RV-5, RV-7 and RV-8
+  are closed. Support-graph cycle detection covers self, multi-node and cross-namespace
+  cycles, and accepts DAGs.
+- **Typed assumptions and deployment-pinned trust** (`cb50f132`, `bdf3665a`, `c7efd837`).
+  Applicability is separated from trust. Trust needs an exact validator version, a pinned
+  implementation digest and an unrevoked root, and the policy has a cache key. Evaluation
+  requires `Applicability::Yes`, and cycles through prerequisites and evidence are caught.
+- **Not-applicable closure and transitive dependencies** (`b8cbd36e`). A closed domain
+  reached through a not-applicable intermediate is rejected, and open propagation follows
+  transitive edges. RV-2 is closed.
+- **Cleanup replacement** (`69d936fb`). Only a return over a pending PHP throw is allowed.
+  The other 19 cells fail closed. The unit matrix covers all 4 pending by 5 replacement
+  cells. RV-1 is closed, and the three committed regression tests now pass with strict
+  assertions: they accept only `UnsupportedCleanupReplacement`, and a normal or PHP-throw
+  exit is never allowed through.
+- **Required-domain dependencies** (`eca079b4`). Edges for `Return` are derived from events on
+  normal-return paths, and missing edges fail with `MissingRequiredDomainDependency`. Seven
+  mutation tests cover this. The strlen `Return` has no such edge, which matches the
+  reasoning recorded for RV-3.
+- **Composed coverage and certificates** (`eca079b4`, `bdf3665a`). Composed child coverage
+  goes through the same required-edge check. Certificates can carry an assumption context
+  that is re-validated against the catalog, the target, the loaded program and the policy.
+- **CBMC accounting** (`39ccc5ad`, `04cd907a`, `dfa1c39b`, `119f0a27`, `d3375c16`). Each run
+  checks the exit code, the property count, the inventory digest and the property-record
+  digest against constants, and the reference transcript is read before the run. Failures
+  must match the expected set exactly. I re-checked the lock, the CBMC binary hash and the
+  three sources against the cache, and each transcript passes the validator against itself.
+  This does not rerun CBMC, which is not installed here. The property mapping in the
+  evaluation report matches the transcripts: the valid-run properties by exact ID, with
+  `main.assertion.11` at `contracts.c:55` as the single expected failure, and the low-budget
+  run's failure at `main.unwind.0` (`loop_contract.c:7`).
+- **SVF replay pin** (`f16d46ee`). RV-11 is enforced: the replay checks the fixture digest,
+  the recorded output digests and the sentinel before it runs anything.
+- **Compiler correspondence** (`f307c252`, `7617797e`, `94bce99a`). All 15 recorded input
+  artifacts match their hashes. The report states its own limits, including that it does not
+  close `ZEND_STRLEN` opcode correspondence. The Clang cleanup finding (no destructor edge on
+  the exceptional path of the AST CFG) matches what I re-derived from the recorded CFG.
+- **Strlen artifact at HEAD** (`9f895cff`). The committed artifact is internally consistent
+  with the committed checker: it refers only to the `strlen-weak-null-deprecation` and
+  `strlen-weak-stringable-cast` predicates, which `HEAD` implements. Parser failure is
+  an `Unknown` event in block 0, and the host's `Invoke` transfer exits both normally and
+  as a PHP throw. Regeneration of this artifact from the `HEAD` builder has not been verified (see
+  below).
+
+### Findings
+
+**RV-20 — Medium, status. R02.3 is overstated.** The committed ledger marks R02.3
+"Implementation complete; independent acceptance pending". Its acceptance requires modeling
+release, effects, exceptions, fatal and native unwind, and non-normal exits. The same ledger
+lists R02.5 (release) and R02.7 (non-normal native and callback outcomes) as Open, and the
+committed matrix says native unwind "has no evidence and stays Open". Recommendation:
+downgrade R02.3 to Partial, and state which acceptance items it has met.
+
+**RV-21 — Medium, test integrity. The required-edge tests are partly circular.** The `graph()`
+helper in the `lib.rs` test module derives `Return` dependencies from the production
+`event_domains` table. Tests built through it cannot detect an error in that table, and they
+agree with the validator by construction. Recommendation: give at least the required-edge
+mutation tests hand-written expected edges, and keep one test that checks `event_domains`
+against a literal table.
+
+**RV-22 — Low, coverage. The evaluator cleanup matrix omits native-unwind replacement.**
+`evaluator_enforces_every_pending_completion_replacement_cell` tests four replacement kinds
+and leaves out `NativeUnwind`. The unit matrix covers that cell at the decision-function
+level only. Recommendation: add the evaluator-level case.
+
+**RV-23 — Medium, process. Committed docs and working tree diverge.** About 50 files are
+modified in the working tree and not committed. They include the parser-acceptance predicate
+and its `Throw` branch, a larger artifact with 18 evidence records, and matrix and ledger text
+claiming R02.4 and R02.6 are complete. None of that is in a commit. The committed ledger
+correctly keeps R02.4 and R02.6 Open. Recommendation: commit or set aside the working-tree
+changes before any status is claimed for them, and review them as commits.
+
+**RV-24 — Medium, documentation. Stringable outcomes disable the catalog bridge for some
+arguments.** `CatalogTypeHost` now returns a `PhpThrow` exit alongside the normal exit for
+`__toString`. The strlen bridge returns `None` on any non-normal exit, so calls whose
+Stringable branch is reachable (`mixed`, objects) fall back to the legacy path. That is
+conservative. Probes at `HEAD` and in the working tree gave identical output for `int`,
+`string`, `object`, `mixed`, `?string`, literal and spread `null` cases, so the fallback is
+not visible on those inputs. The ledger does not state the fallback. Recommendation: record
+it in the R05 and F05.4 rows.
+
+**RV-25 — Low, design statement. Loading does not establish assumptions.** `add_entry`,
+`from_manifest` and `evaluate` now use `validate_structure` or `validate_with_assumptions`.
+The unestablished-assumption check runs only when an established list is supplied. Projection
+without context refuses closed-with-assumption claims, and evaluation-time validation covers
+the rest. This is consistent with the contract's rule that unestablished assumptions do not
+establish anything, but the contract does not say that loading a manifest is not establishment.
+Recommendation: add one sentence to the contract.
+
+**RV-26 — Medium, evidence state. The SVF replay refuses to run.** RV-11 is enforced, but the
+checked-in runtime witness still records the old `runtime.php` digest. The replay now stops
+before doing any work, which is the intended behaviour. R02.1 is "implementation complete",
+and the matrix's runtime evidence depends on that replay. Recommendation: regenerate the
+witness against the current fixture, or pin the old fixture, and say which in the ledger.
+
+### Corrections to earlier review records
+
+- In an earlier pass I said the committed artifact and checker disagreed about the parser
+  predicate. That was wrong: I had compared the working-tree artifact with the `HEAD` checker.
+  The committed pair is consistent (see the strlen artifact entry above).
+- The earlier claim that the regenerated artifact is byte-for-byte reproducible was checked
+  against the working-tree builder and artifact only. It has not been checked at `HEAD`.
+
+### Not verified in this pass
+
+- The full library and fixture suites at `HEAD`. A gate-profile test build in a worktree was
+  still running when this record was written, and was competing with another session for CPU.
+  The working-tree semantics suite passes (110 tests, none ignored), but that is not the
+  committed state.
+- Regeneration of `php-8.5.4-strlen.json` from the `HEAD` builder and inputs.
+- The working-tree changes listed under RV-23.
+- The remaining checker tests outside the catalog area, and the full optimized fixture run.
+
+### Reviewer disposition
+
+The committed commits close RV-1, RV-2, RV-4, RV-5, RV-6, RV-7 and RV-8 in their implemented
+form, and RV-11 is enforced but its evidence is still stale (RV-26). They add the typed assumption, trust, cycle, cleanup-matrix and CBMC fail-closed machinery
+the earlier records asked for. The open items for the next author pass are RV-20, RV-21,
+RV-23, RV-24 and RV-26 (Medium or higher), and the verification gaps listed above.
