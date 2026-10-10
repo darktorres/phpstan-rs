@@ -353,3 +353,19 @@ function theCallerSeesTheElementsOfAParameterDie(): void
     aForeachByReferenceOverAParameter([new Resets()]);
     assertType('int|null', Flag::$value);
 }
+
+/**
+ * @param array<int, int> $list
+ */
+function anAppendToAParameterArrayDestroysNothing(array &$list): void
+{
+    $list[] = 1;
+}
+
+function theCallerSeesNothingRunForAnAppend(): void
+{
+    $numbers = [1];
+    Flag::$value = null;
+    anAppendToAParameterArrayDestroysNothing($numbers);
+    assertType('null', Flag::$value);
+}

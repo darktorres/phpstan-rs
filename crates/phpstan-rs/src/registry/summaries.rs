@@ -2975,7 +2975,7 @@ impl Visitor for Summarizer<'_> {
                             ExprKind::Variable(_)
                                 | ExprKind::PropertyAccess(..)
                                 | ExprKind::StaticPropertyFetch(..)
-                                | ExprKind::Index(..)
+                                | ExprKind::Index(_, Some(_))
                         )
                     ) {
                         let item = plain_variable(arenas, *lhs).and_then(|name| {
