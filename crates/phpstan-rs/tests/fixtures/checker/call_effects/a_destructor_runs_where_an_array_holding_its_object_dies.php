@@ -369,3 +369,21 @@ function theCallerSeesNothingRunForAnAppend(): void
     anAppendToAParameterArrayDestroysNothing($numbers);
     assertType('null', Flag::$value);
 }
+
+function aLoopOverwritesWhatItAppended(): void
+{
+    $list = [1];
+    foreach ($list as &$item) {
+        if (count($list) < 3) {
+            $list[] = new Resets();
+        }
+        $item = 2;
+    }
+}
+
+function theCallerSeesTheAppendedObjectDie(): void
+{
+    Flag::$value = null;
+    aLoopOverwritesWhatItAppended();
+    assertType('int|null', Flag::$value);
+}
