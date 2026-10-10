@@ -1078,6 +1078,17 @@ pub struct AssumptionCertificateContext {
     pub assumptions: Vec<Digest>,
 }
 
+/// The catalog, target and trust inputs an assumption-bound claim is judged under.
+#[derive(Clone, Copy)]
+pub struct AssumptionContext<'a> {
+    pub catalog: &'a Catalog,
+    pub entry_key: &'a EntryKey,
+    pub target: &'a TargetScenario,
+    pub loaded_program: Option<Digest>,
+    pub policy: &'a ValidatorTrustPolicy,
+    pub executors: &'a [&'a dyn AssumptionValidatorExecutor],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PostFixpointCertificate<V, S> {
     pub graph_digest: Digest,
@@ -1103,16 +1114,19 @@ impl<V: Clone + PartialEq, S: Clone + PartialEq> PostFixpointCertificate<V, S> {
         &self,
         graph: &BehaviorGraph,
         host: &H,
-        catalog: &Catalog,
-        entry_key: &EntryKey,
-        target: &TargetScenario,
-        loaded_program: Option<Digest>,
-        policy: &ValidatorTrustPolicy,
-        executors: &[&dyn AssumptionValidatorExecutor],
+        assumptions: &AssumptionContext<'_>,
     ) -> Result<(), AssumptionCertificateError>
     where
         H: SemanticHost<Value = V, State = S>,
     {
+        let AssumptionContext {
+            catalog,
+            entry_key,
+            target,
+            loaded_program,
+            policy,
+            executors,
+        } = *assumptions;
         let Some(context) = &self.assumption_context else {
             return Err(AssumptionCertificateError::MissingContext);
         };
@@ -1759,6 +1773,8 @@ fn coverage_subsumes(broad: &DomainCoverage, narrow: &DomainCoverage) -> bool {
             .all(|item| broad.dependencies.contains(item))
 }
 
+type ReplayedFrames<V, S> = (Vec<CertifiedFrame<V, S>>, Vec<Exit<V, S>>);
+
 /// Independently replays one invariant frame through the graph's events and
 /// terminator. Every produced successor and observable exit must be covered
 /// by the persisted certificate.
@@ -1769,13 +1785,7 @@ fn replay_certificate_frame<H: SemanticHost>(
     receiver: &H::Value,
     frame: &CertifiedFrame<H::Value, H::State>,
     replayed_coverage: &mut Vec<DomainCoverage>,
-) -> Result<
-    (
-        Vec<CertifiedFrame<H::Value, H::State>>,
-        Vec<Exit<H::Value, H::State>>,
-    ),
-    GraphError,
-> {
+) -> Result<ReplayedFrames<H::Value, H::State>, GraphError> {
     let block = &graph.blocks[frame.block as usize];
     let mut paths = vec![(
         frame.state.clone(),
@@ -2049,17 +2059,20 @@ pub fn evaluate<H: SemanticHost>(
 
 pub fn evaluate_with_assumption_context<H: SemanticHost>(
     graph: &BehaviorGraph,
-    catalog: &Catalog,
-    entry_key: &EntryKey,
-    target: &TargetScenario,
-    loaded_program: Option<Digest>,
-    policy: &ValidatorTrustPolicy,
-    executors: &[&dyn AssumptionValidatorExecutor],
+    assumptions: &AssumptionContext<'_>,
     arguments: &[H::Value],
     receiver: &H::Value,
     initial: H::State,
     host: &mut H,
 ) -> Result<Evaluation<H::Value, H::State>, AssumptionEvaluationError> {
+    let AssumptionContext {
+        catalog,
+        entry_key,
+        target,
+        loaded_program,
+        policy,
+        executors,
+    } = *assumptions;
     let assumptions = catalog
         .validate_graph_assumptions(graph, entry_key, target, loaded_program, policy, executors)
         .map_err(AssumptionEvaluationError::Validation)?;
@@ -2452,10 +2465,10 @@ fn evaluate_inner<H: SemanticHost>(
     }
     if evaluation_precision != Precision::Exact {
         for item in &mut evaluation_coverage {
-            if !matches!(item.coverage, Coverage::NotApplicable) {
-                if precision_rank(evaluation_precision) > precision_rank(item.precision) {
-                    item.precision = evaluation_precision;
-                }
+            if !matches!(item.coverage, Coverage::NotApplicable)
+                && precision_rank(evaluation_precision) > precision_rank(item.precision)
+            {
+                item.precision = evaluation_precision;
             }
         }
     }
@@ -3157,14 +3170,17 @@ mod tests {
             evaluate(&graph, &[], &receiver(), vec![], &mut Host::default()),
             Err(GraphError::UnestablishedAssumption(Domain::Return))
         );
+        let assumptions = AssumptionContext {
+            catalog: &catalog,
+            entry_key: &key,
+            target: &target,
+            loaded_program: None,
+            policy: &policy,
+            executors: &executors,
+        };
         let evaluation = evaluate_with_assumption_context(
             &graph,
-            &catalog,
-            &key,
-            &target,
-            None,
-            &policy,
-            &executors,
+            &assumptions,
             &[],
             &receiver(),
             vec![],
@@ -3173,31 +3189,13 @@ mod tests {
         .unwrap();
         evaluation
             .post_fixpoint
-            .validate_with_assumption_context(
-                &graph,
-                &Host::default(),
-                &catalog,
-                &key,
-                &target,
-                None,
-                &policy,
-                &executors,
-            )
+            .validate_with_assumption_context(&graph, &Host::default(), &assumptions)
             .unwrap();
         let persisted: PostFixpointCertificate<String, Vec<String>> =
             serde_json::from_str(&serde_json::to_string(&evaluation.post_fixpoint).unwrap())
                 .unwrap();
         persisted
-            .validate_with_assumption_context(
-                &graph,
-                &Host::default(),
-                &catalog,
-                &key,
-                &target,
-                None,
-                &policy,
-                &executors,
-            )
+            .validate_with_assumption_context(&graph, &Host::default(), &assumptions)
             .unwrap();
 
         let mut revoked = policy.clone();
@@ -3211,12 +3209,10 @@ mod tests {
             persisted.validate_with_assumption_context(
                 &graph,
                 &Host::default(),
-                &catalog,
-                &key,
-                &target,
-                None,
-                &revoked,
-                &executors,
+                &AssumptionContext {
+                    policy: &revoked,
+                    ..assumptions
+                },
             ),
             Err(AssumptionCertificateError::ContextChanged)
         );
@@ -3226,12 +3222,10 @@ mod tests {
             persisted.validate_with_assumption_context(
                 &graph,
                 &Host::default(),
-                &catalog,
-                &key,
-                &other_target,
-                None,
-                &policy,
-                &executors,
+                &AssumptionContext {
+                    target: &other_target,
+                    ..assumptions
+                },
             ),
             Err(AssumptionCertificateError::ContextChanged)
         );
@@ -3243,12 +3237,10 @@ mod tests {
             persisted.validate_with_assumption_context(
                 &graph,
                 &Host::default(),
-                &catalog,
-                &other_key,
-                &target,
-                None,
-                &policy,
-                &executors,
+                &AssumptionContext {
+                    entry_key: &other_key,
+                    ..assumptions
+                },
             ),
             Err(AssumptionCertificateError::ContextChanged)
         );

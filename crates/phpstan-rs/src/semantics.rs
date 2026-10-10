@@ -48,14 +48,14 @@ pub fn target_set_from_php_versions_and_profile(
         .filter(|version| min <= *version && *version <= max)
     {
         let supported = VersionRange::minor(version.major as u16, version.minor as u16);
-        if let Some(start) = cursor.filter(|start| *start < supported.min) {
-            if let Some(end) = previous_release(supported.min) {
-                let scenario = unknown_scenario(VersionRange {
-                    min: start,
-                    max: end,
-                });
-                scenarios.push(apply_profile(scenario, profile));
-            }
+        if let Some(start) = cursor.filter(|start| *start < supported.min)
+            && let Some(end) = previous_release(supported.min)
+        {
+            let scenario = unknown_scenario(VersionRange {
+                min: start,
+                max: end,
+            });
+            scenarios.push(apply_profile(scenario, profile));
         }
         let scenario = TargetScenario {
             release: supported,

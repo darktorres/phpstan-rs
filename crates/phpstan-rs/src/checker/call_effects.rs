@@ -503,7 +503,7 @@ impl Checker<'_> {
             ExprKind::Call(_, args) => arenas.args(args.clone()),
             _ => return false,
         };
-        let resolved = crate::checker::calls::resolve_call_args(arenas, &args, signature.params());
+        let resolved = crate::checker::calls::resolve_call_args(arenas, args, signature.params());
         for argument in string_arguments {
             if let Some(value) = resolved.get(*argument as usize).and_then(|value| *value) {
                 let ty = self.infer_expr(value, locals);
@@ -591,7 +591,7 @@ impl Checker<'_> {
                     .collect::<Vec<_>>();
                 if !values.is_empty() {
                     self.forget_what_an_operation_may_change(
-                        &Type::union_of(values),
+                        &self.relation().union_of(values),
                         false,
                         Operation::String,
                         locals,
@@ -649,7 +649,7 @@ impl Checker<'_> {
                     if classes.len() != 1 || !reflection.ty().is_object().yes() {
                         return None;
                     }
-                    current.clone_from(&classes[0]);
+                    current.clone_from(classes[0]);
                 }
             }
         }
@@ -682,7 +682,7 @@ impl Checker<'_> {
                     if classes.len() != 1 {
                         return None;
                     }
-                    current.clone_from(&classes[0]);
+                    current.clone_from(classes[0]);
                 }
             }
         }
@@ -693,13 +693,13 @@ impl Checker<'_> {
                 .collect();
             let mut reachable_writes = Vec::new();
             for (path, value) in outcome_writes {
-                let (class, property) = callback_target_property(&self.registry, &owner, path)?;
+                let (class, property) = callback_target_property(self.registry, &owner, path)?;
                 let value = arenas.expr(*value)?;
                 reachable_writes.push((class, property, self.infer_expr(value, locals)));
             }
             let mut unreachable_properties = BTreeSet::new();
             for (path, _) in &all_writes {
-                let (_, property) = callback_target_property(&self.registry, &owner, path)?;
+                let (_, property) = callback_target_property(self.registry, &owner, path)?;
                 if !reachable_properties.contains(&property) {
                     unreachable_properties.insert(property);
                 }
@@ -710,9 +710,9 @@ impl Checker<'_> {
             })
         };
         Some(CatalogCallbackSummary {
-            throwing: throw_writes.as_deref().map(transfer).flatten(),
-            normal: normal_writes.as_deref().map(transfer).flatten(),
-            invalid_return: invalid_writes.as_deref().map(transfer).flatten(),
+            throwing: throw_writes.as_deref().and_then(transfer),
+            normal: normal_writes.as_deref().and_then(transfer),
+            invalid_return: invalid_writes.as_deref().and_then(transfer),
         })
     }
 
@@ -722,7 +722,7 @@ impl Checker<'_> {
         locals: &Locals,
     ) -> Option<CatalogDestructorSummary> {
         let classes = ty.object_class_names();
-        if classes.len() != 1 || !self.registry.class_by_name(&classes[0])?.is_final() {
+        if classes.len() != 1 || !self.registry.class_by_name(classes[0])?.is_final() {
             return None;
         }
         let class = &classes[0];
@@ -738,10 +738,10 @@ impl Checker<'_> {
         let mut branch_reads = Vec::new();
         collect_branch_reads(arenas, &body.0, &mut branch_reads, !owner.contains('\\'))?;
         for path in branch_reads {
-            validate_callback_property_path(&self.registry, &owner, &path)?;
+            validate_callback_property_path(self.registry, &owner, &path)?;
         }
         for (path, value) in &all_writes {
-            let (class, property) = callback_target_property(&self.registry, &owner, path)?;
+            let (class, property) = callback_target_property(self.registry, &owner, path)?;
             let reflection = self.registry.lookup_property(&class, property.as_str())?;
             let assigned = arenas.expr(*value)?;
             let assigned_ty = self.infer_expr(assigned, locals);
@@ -753,7 +753,7 @@ impl Checker<'_> {
             {
                 return None;
             }
-            validate_callback_property_path(&self.registry, &owner, &path[..path.len() - 1])?;
+            validate_callback_property_path(self.registry, &owner, &path[..path.len() - 1])?;
         }
 
         let transfer = |writes: &[(Vec<Name>, ExprId)]| -> Option<CatalogThrowTransfer> {
@@ -763,7 +763,7 @@ impl Checker<'_> {
                 .collect::<BTreeSet<_>>();
             let mut reachable_writes = Vec::new();
             for (path, value) in writes {
-                let (class, property) = callback_target_property(&self.registry, &owner, path)?;
+                let (class, property) = callback_target_property(self.registry, &owner, path)?;
                 let value = arenas.expr(*value)?;
                 reachable_writes.push((class, property, self.infer_expr(value, locals)));
             }
@@ -778,8 +778,8 @@ impl Checker<'_> {
             })
         };
         Some(CatalogDestructorSummary {
-            throwing: throw_writes.as_deref().map(transfer).flatten(),
-            normal: normal_writes.as_deref().map(transfer).flatten(),
+            throwing: throw_writes.as_deref().and_then(transfer),
+            normal: normal_writes.as_deref().and_then(transfer),
         })
     }
 
@@ -1623,7 +1623,7 @@ fn callback_target_property(
         if classes.len() != 1 {
             return None;
         }
-        current.clone_from(&classes[0]);
+        current.clone_from(classes[0]);
     }
     Some((current, path.last()?.clone()))
 }
@@ -1647,7 +1647,7 @@ fn validate_callback_property_path(
             if classes.len() != 1 || !reflection.ty().is_object().yes() {
                 return None;
             }
-            current.clone_from(&classes[0]);
+            current.clone_from(classes[0]);
         }
     }
     Some(())
@@ -1707,17 +1707,19 @@ fn find_method_body(
 /// direct throw, valid literal string return, or invalid literal scalar return.
 /// Branches are forked, so a write in one outcome does not leak into the other.
 /// Unsupported live statements and implicit returns fail closed.
+/// The property writes of one callback path, each as its target path and
+/// the expression that writes it.
+type WriteList = Vec<(Vec<Name>, ExprId)>;
+/// The writes of one completion outcome, or `None` when that outcome is
+/// not reachable.
+type OutcomeWrites = Option<WriteList>;
+
 fn callback_writes_by_outcome(
     arenas: &NodeArenas,
     (statements, has_no_goto_labels): &(Vec<StmtId>, bool),
     allow_unqualified_runtime_exception: bool,
     strict_types: bool,
-) -> Option<(
-    Option<Vec<(Vec<Name>, ExprId)>>,
-    Option<Vec<(Vec<Name>, ExprId)>>,
-    Option<Vec<(Vec<Name>, ExprId)>>,
-    Vec<(Vec<Name>, ExprId)>,
-)> {
+) -> Option<(OutcomeWrites, OutcomeWrites, OutcomeWrites, WriteList)> {
     if !has_no_goto_labels {
         return None;
     }
@@ -1782,11 +1784,7 @@ fn destructor_writes_by_outcome(
     arenas: &NodeArenas,
     (statements, has_no_goto_labels): &(Vec<StmtId>, bool),
     allow_unqualified_runtime_exception: bool,
-) -> Option<(
-    Option<Vec<(Vec<Name>, ExprId)>>,
-    Option<Vec<(Vec<Name>, ExprId)>>,
-    Vec<(Vec<Name>, ExprId)>,
-)> {
+) -> Option<(OutcomeWrites, OutcomeWrites, WriteList)> {
     if !has_no_goto_labels {
         return None;
     }
@@ -1914,9 +1912,7 @@ fn collect_literal_assignments(
             StmtKind::Return(Some(value)) => {
                 // Returning a value may invoke user code while evaluating it;
                 // accept only side-effect-free values we can classify.
-                if callback_return_is_definitely_invalid(arenas, *value, false).is_none() {
-                    return None;
-                }
+                callback_return_is_definitely_invalid(arenas, *value, false)?;
             }
             _ => return None,
         }

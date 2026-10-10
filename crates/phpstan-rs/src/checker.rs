@@ -296,6 +296,10 @@ type MethodMemo<'a> = FxHashMap<
     FxHashMap<String, Option<(syntax::name::Name, &'a crate::registry::FunctionReflection)>>,
 >;
 
+/// Builtin-call return evaluations memoized per call site, keyed by the
+/// argument types they were computed for.
+type CatalogReturnMemo = FxHashMap<Span, Vec<(Vec<Type>, CatalogCallEvaluation)>>;
+
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) semantic_catalog: &'a php_semantics::Catalog,
@@ -328,7 +332,7 @@ pub struct Checker<'a> {
     // reused by later expression inference at the same source site. The
     // argument types are part of the key because a call can be revisited on
     // different narrowed control-flow paths.
-    catalog_return_type_memo: RefCell<FxHashMap<Span, Vec<(Vec<Type>, CatalogCallEvaluation)>>>,
+    catalog_return_type_memo: RefCell<CatalogReturnMemo>,
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,

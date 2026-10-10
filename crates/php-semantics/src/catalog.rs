@@ -208,20 +208,21 @@ pub trait AssumptionValidatorExecutor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EstablishedAssumption {
+    pub assumption: Digest,
+    pub target: TargetScenario,
+    pub loaded_program: Option<Digest>,
+    pub policy_key: Digest,
+    pub root: crate::Bytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssumptionValidation {
-    Established {
-        assumption: Digest,
-        target: TargetScenario,
-        loaded_program: Option<Digest>,
-        policy_key: Digest,
-        root: crate::Bytes,
-    },
+    Established(Box<EstablishedAssumption>),
     NotApplicable,
     ContextUnknown,
     UntrustedValidator,
-    RevokedValidator {
-        effective_revision: u64,
-    },
+    RevokedValidator { effective_revision: u64 },
     InvalidClaim,
     PrerequisiteNotEstablished(Digest),
     SupportCycle(Digest),
@@ -731,9 +732,13 @@ impl Catalog {
     /// callers must not execute a manifest by deserializing its fields alone.
     pub fn from_manifest(manifest: CatalogManifest) -> Result<Self, CatalogError> {
         manifest.validate()?;
-        let mut catalog = Self::default();
-        catalog.evidence = manifest.evidence.into_iter().collect();
-        catalog.assumptions = manifest.assumptions.into_iter().collect();
+        let evidence = manifest.evidence.into_iter().collect();
+        let assumptions = manifest.assumptions.into_iter().collect();
+        let mut catalog = Self {
+            evidence,
+            assumptions,
+            ..Self::default()
+        };
         catalog.graphs = manifest
             .graphs
             .into_iter()
@@ -1079,31 +1084,38 @@ impl Catalog {
         let policy_key = policy
             .cache_key()
             .map_err(|_| ValidatorTrustError::PolicyEncoding)?;
-        fn visit(
-            catalog: &Catalog,
-            id: Digest,
-            target: &TargetScenario,
+        struct Scope<'a> {
+            catalog: &'a Catalog,
+            target: &'a TargetScenario,
             loaded_program: Option<Digest>,
-            policy: &ValidatorTrustPolicy,
+            policy: &'a ValidatorTrustPolicy,
             policy_key: Digest,
-            executors: &[&dyn AssumptionValidatorExecutor],
+            executors: &'a [&'a dyn AssumptionValidatorExecutor],
+        }
+        fn visit(
+            scope: &Scope<'_>,
+            id: Digest,
             active: &mut Vec<Digest>,
             memo: &mut BTreeMap<Digest, AssumptionValidation>,
         ) -> AssumptionValidation {
+            let Scope {
+                catalog,
+                target,
+                loaded_program,
+                policy,
+                policy_key,
+                executors,
+            } = *scope;
             fn collect_evidence(
-                catalog: &Catalog,
+                scope: &Scope<'_>,
                 evidence_id: Digest,
-                target: &TargetScenario,
-                loaded_program: Option<Digest>,
-                policy: &ValidatorTrustPolicy,
-                policy_key: Digest,
-                executors: &[&dyn AssumptionValidatorExecutor],
                 active_assumptions: &mut Vec<Digest>,
                 memo: &mut BTreeMap<Digest, AssumptionValidation>,
                 active_evidence: &mut Vec<Digest>,
                 seen_evidence: &mut Vec<Digest>,
                 collected: &mut Vec<EvidenceRecord>,
             ) -> Result<(), AssumptionValidation> {
+                let Scope { catalog, .. } = *scope;
                 if seen_evidence.contains(&evidence_id) {
                     return Ok(());
                 }
@@ -1115,18 +1127,8 @@ impl Catalog {
                 };
                 active_evidence.push(evidence_id);
                 for assumption_id in &record.assumptions {
-                    match visit(
-                        catalog,
-                        *assumption_id,
-                        target,
-                        loaded_program,
-                        policy,
-                        policy_key,
-                        executors,
-                        active_assumptions,
-                        memo,
-                    ) {
-                        AssumptionValidation::Established { .. } => {}
+                    match visit(scope, *assumption_id, active_assumptions, memo) {
+                        AssumptionValidation::Established(_) => {}
                         _ => {
                             active_evidence.pop();
                             return Err(AssumptionValidation::PrerequisiteNotEstablished(
@@ -1137,13 +1139,8 @@ impl Catalog {
                 }
                 for dependency in &record.dependencies {
                     if let Err(error) = collect_evidence(
-                        catalog,
+                        scope,
                         *dependency,
-                        target,
-                        loaded_program,
-                        policy,
-                        policy_key,
-                        executors,
                         active_assumptions,
                         memo,
                         active_evidence,
@@ -1200,18 +1197,8 @@ impl Catalog {
             active.push(id);
             let mut prerequisites = Vec::with_capacity(record.prerequisites.len());
             for prerequisite_id in &record.prerequisites {
-                match visit(
-                    catalog,
-                    *prerequisite_id,
-                    target,
-                    loaded_program,
-                    policy,
-                    policy_key,
-                    executors,
-                    active,
-                    memo,
-                ) {
-                    AssumptionValidation::Established { .. } => {
+                match visit(scope, *prerequisite_id, active, memo) {
+                    AssumptionValidation::Established(_) => {
                         let Some(prerequisite) = catalog.assumptions.get(prerequisite_id) else {
                             active.pop();
                             return AssumptionValidation::MissingAssumption(*prerequisite_id);
@@ -1229,13 +1216,8 @@ impl Catalog {
             let mut active_evidence = Vec::new();
             for evidence_id in &record.supporting_evidence {
                 if let Err(error) = collect_evidence(
-                    catalog,
+                    scope,
                     *evidence_id,
-                    target,
-                    loaded_program,
-                    policy,
-                    policy_key,
-                    executors,
                     active,
                     memo,
                     &mut active_evidence,
@@ -1250,13 +1232,15 @@ impl Catalog {
                 executor.validate(record, &evidence, &prerequisites, target, loaded_program);
             active.pop();
             let result = match outcome {
-                Applicability::Yes => AssumptionValidation::Established {
-                    assumption: id,
-                    target: target.clone(),
-                    loaded_program,
-                    policy_key,
-                    root,
-                },
+                Applicability::Yes => {
+                    AssumptionValidation::Established(Box::new(EstablishedAssumption {
+                        assumption: id,
+                        target: target.clone(),
+                        loaded_program,
+                        policy_key,
+                        root,
+                    }))
+                }
                 Applicability::No => AssumptionValidation::InvalidClaim,
                 Applicability::Maybe => AssumptionValidation::ContextUnknown,
             };
@@ -1264,17 +1248,15 @@ impl Catalog {
             result
         }
 
-        Ok(visit(
-            self,
-            id,
+        let scope = Scope {
+            catalog: self,
             target,
             loaded_program,
             policy,
             policy_key,
             executors,
-            &mut Vec::new(),
-            &mut BTreeMap::new(),
-        ))
+        };
+        Ok(visit(&scope, id, &mut Vec::new(), &mut BTreeMap::new()))
     }
 
     pub fn validate_graph_assumptions(
@@ -1317,7 +1299,7 @@ impl Catalog {
             let decision = self
                 .validate_assumption(*id, target, loaded_program, policy, executors)
                 .map_err(AssumptionGraphValidationError::Trust)?;
-            if !matches!(decision, AssumptionValidation::Established { .. }) {
+            if !matches!(decision, AssumptionValidation::Established(_)) {
                 return Err(AssumptionGraphValidationError::NotEstablished {
                     assumption: *id,
                     decision,
@@ -1679,7 +1661,7 @@ mod tests {
         let policy = trust_policy(assumption.validator.clone(), implementation);
         assert!(matches!(
             catalog.validate_assumption(id, &scenario(None), None, &policy, &[&executor]),
-            Ok(AssumptionValidation::Established { .. })
+            Ok(AssumptionValidation::Established(_))
         ));
         assert_eq!(executor.calls.get(), 1);
 
@@ -1783,7 +1765,7 @@ mod tests {
         let policy = trust_policy(assumption.validator, implementation);
         assert!(matches!(
             catalog.validate_assumption(id, &scenario(None), None, &policy, &[&executor]),
-            Ok(AssumptionValidation::Established { .. })
+            Ok(AssumptionValidation::Established(_))
         ));
         // The shared prerequisite is executed once despite being reached both
         // through the explicit prerequisite edge and evidence provenance.

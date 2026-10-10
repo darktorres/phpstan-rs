@@ -27,24 +27,13 @@ pub struct ReflectionSettings {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct PhpTargetProfileSetting {
     pub os: Option<String>,
     pub arch: Option<String>,
     pub sapi: Option<String>,
     pub zts: Option<bool>,
     pub debug: Option<bool>,
-}
-
-impl Default for PhpTargetProfileSetting {
-    fn default() -> Self {
-        Self {
-            os: None,
-            arch: None,
-            sapi: None,
-            zts: None,
-            debug: None,
-        }
-    }
 }
 
 impl PhpTargetProfileSetting {

@@ -97,15 +97,15 @@ impl TargetScenario {
         if !self.release.valid() {
             return Err(TargetError::InvalidVersionRange);
         }
-        if let Some(extensions) = &self.extensions {
-            if has_duplicate_names(extensions.iter().map(|(name, _)| name)) {
-                return Err(TargetError::DuplicateExtension);
-            }
+        if let Some(extensions) = &self.extensions
+            && has_duplicate_names(extensions.iter().map(|(name, _)| name))
+        {
+            return Err(TargetError::DuplicateExtension);
         }
-        if let Some(ini) = &self.ini {
-            if has_duplicate_names(ini.iter().map(|(name, _)| name)) {
-                return Err(TargetError::DuplicateSetting);
-            }
+        if let Some(ini) = &self.ini
+            && has_duplicate_names(ini.iter().map(|(name, _)| name))
+        {
+            return Err(TargetError::DuplicateSetting);
         }
         Ok(())
     }

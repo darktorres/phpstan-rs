@@ -161,7 +161,9 @@ mod catalog_type_host_tests {
         assert_eq!(
             decide(
                 &weak,
-                Type::union_of(vec![Type::int(), Type::array(Type::int(), Type::mixed())])
+                registry
+                    .relation()
+                    .union_of(vec![Type::int(), Type::array(Type::int(), Type::mixed())])
             ),
             php_semantics::Truth::Maybe
         );
@@ -360,7 +362,7 @@ fn supports_catalog_strlen_binding(sig: &FunctionReflection, args: &[Arg]) -> bo
             return false;
         }
         match &argument.name {
-            Some(name) if name.name.as_ref() == &*param.name() => {}
+            Some(name) if name.name.as_ref() == param.name() => {}
             Some(_) => return false,
             None if spread_seen => return false,
             None => {}
@@ -403,7 +405,9 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                     Some(lengths.map_or_else(
                         || Type::int_range(Some(0), None),
                         |lengths| {
-                            Type::union_of(lengths.into_iter().map(Type::int_literal).collect())
+                            self.registry
+                                .relation()
+                                .union_of(lengths.into_iter().map(Type::int_literal).collect())
                         },
                     ))
                 } else {
@@ -614,7 +618,7 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
         Type::mixed()
     }
     fn join_value(&self, left: Type, right: Type) -> Type {
-        Type::union_of(vec![left, right])
+        self.registry.relation().union_of(vec![left, right])
     }
     fn widen_value(&self, old: Type, next: Type) -> Type {
         self.join_value(old, next)
@@ -2819,7 +2823,7 @@ impl<'a> Checker<'a> {
                     .map(|expression| self.infer_expr(expression, locals))
                     .or_else(|| {
                         (index == 0 && !unpacked_values.is_empty())
-                            .then(|| Type::union_of(unpacked_values.clone()))
+                            .then(|| self.relation().union_of(unpacked_values.clone()))
                     })
                     .unwrap_or_else(Type::mixed)
             })
@@ -2942,7 +2946,7 @@ impl<'a> Checker<'a> {
         let return_type = if returns.is_empty() {
             Type::never()
         } else {
-            Type::union_of(returns)
+            self.relation().union_of(returns)
         };
         let evaluation = CatalogCallEvaluation {
             return_type,
