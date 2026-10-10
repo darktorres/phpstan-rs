@@ -2513,7 +2513,22 @@ impl<'a> Checker<'a> {
                     self.expr_span(e.id),
                     (rhs_ty.clone(), native.as_ref().map(|(_, n)| n.clone())),
                 );
+                let by_ref = matches!(&e.kind, ExprKind::AssignRef(..));
+                if by_ref && let ExprKind::Variable(target) = &lhs.kind {
+                    let target = locals.var_key(target);
+                    locals.unlink_reference(target);
+                }
                 self.bind_assignment_target(arenas, lhs, rhs_ty.clone(), locals);
+                if by_ref
+                    && let ExprKind::Variable(target) = &lhs.kind
+                    && let Some(source) = arenas.peeled(rhs.id).and_then(|id| arenas.expr(id))
+                    && let ExprKind::Variable(source) = &source.kind
+                    && **target != *"this"
+                    && **source != *"this"
+                {
+                    let (target, source) = (locals.var_key(target), locals.var_key(source));
+                    locals.link_references(target, source);
+                }
                 if let Some((name, native)) = native {
                     locals.set_native_var(&name, native);
                 }

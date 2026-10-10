@@ -56,6 +56,7 @@ pub(crate) struct Locals {
     guarded_properties: GuardedMemberSet,
     clone_reinitialized: ReinitializedPropertySet,
     exposed: ExposedVariableSet,
+    reference_links: ReferenceLinkMap,
     condition_aliases: ConditionAliasMap,
     branch_implied_facts: BranchImpliedFactsMap,
     query_builder_aliases: QueryBuilderAliasMap,
@@ -126,6 +127,7 @@ impl Locals {
             guarded_properties: GuardedMemberSet::default(),
             clone_reinitialized: ReinitializedPropertySet::default(),
             exposed: ExposedVariableSet::default(),
+            reference_links: ReferenceLinkMap::default(),
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
@@ -320,6 +322,15 @@ impl Locals {
     /// `key`'s provenance with a fresh singleton `{span}`, since a rebind
     /// makes anything tracked before it a dead candidate.
     pub(crate) fn declare(&mut self, key: LocalKey, ty: Type, span: Span) -> Option<Type> {
+        if let Some(linked) = self.reference_links.get(&key).cloned() {
+            for other in linked.iter() {
+                self.declare_one(*other, ty.clone(), span);
+            }
+        }
+        self.declare_one(key, ty, span)
+    }
+
+    fn declare_one(&mut self, key: LocalKey, ty: Type, span: Span) -> Option<Type> {
         self.touch();
         self.native.remove(&key);
         if self.track {
@@ -473,6 +484,7 @@ impl Locals {
     }
 
     pub(crate) fn remove(&mut self, key: LocalKey) -> Option<Type> {
+        self.unlink_reference(key);
         self.touch();
         self.provenance.remove(&key);
         self.native.remove(&key);
@@ -560,6 +572,7 @@ impl Locals {
             guarded_properties: GuardedMemberSet::default(),
             clone_reinitialized: ReinitializedPropertySet::default(),
             exposed: ExposedVariableSet::default(),
+            reference_links: ReferenceLinkMap::default(),
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
@@ -687,6 +700,65 @@ impl Locals {
         if !self.exposed.contains(name) {
             self.touch();
             self.exposed.insert(name.clone());
+        }
+    }
+
+    /// From here on, a write to `a` is a write to `b` and the other way
+    /// round, and to every variable either is bound to (`$a = &$b`).
+    pub(crate) fn link_references(&mut self, a: LocalKey, b: LocalKey) {
+        if a == b {
+            return;
+        }
+        let mut group = vec![a, b];
+        for key in [a, b] {
+            if let Some(linked) = self.reference_links.get(&key) {
+                group.extend(linked.iter().copied());
+            }
+        }
+        group.sort_unstable();
+        group.dedup();
+        self.set_group(&group);
+    }
+
+    /// `key` no longer shares a value with any variable: it was rebound by
+    /// reference, or unset.
+    pub(crate) fn unlink_reference(&mut self, key: LocalKey) {
+        if self.reference_links.is_empty() {
+            return;
+        }
+        let Some(linked) = self.reference_links.get(&key).cloned() else {
+            return;
+        };
+        self.touch();
+        self.reference_links.remove(&key);
+        let rest: Vec<LocalKey> = linked.to_vec();
+        self.set_group(&rest);
+    }
+
+    /// Every variable of `group` is linked to the others, and to nothing
+    /// else; a group of one is no link.
+    fn set_group(&mut self, group: &[LocalKey]) {
+        self.touch();
+        for key in group {
+            if group.len() < 2 {
+                self.reference_links.remove(key);
+                continue;
+            }
+            let others: Vec<LocalKey> = group.iter().copied().filter(|o| o != key).collect();
+            self.reference_links.insert(*key, std::rc::Rc::new(others));
+        }
+    }
+
+    /// The links of `other` as well: a link that holds on either of two
+    /// joined paths may hold after them.
+    pub(crate) fn join_reference_links(&mut self, other: &Locals) {
+        if other.reference_links.is_empty() {
+            return;
+        }
+        for (key, linked) in other.reference_links.iter() {
+            for member in linked.iter() {
+                self.link_references(*key, *member);
+            }
         }
     }
 

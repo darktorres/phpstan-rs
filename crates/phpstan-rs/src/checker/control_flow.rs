@@ -422,6 +422,8 @@ pub(crate) fn merge_scopes(
         .clone_reinitialized()
         .clone()
         .union(else_locals.clone_reinitialized().clone());
+    merged.join_reference_links(else_locals);
+    merged.join_reference_links(then_locals);
     // Exposed on either path is possibly exposed.
     *merged.exposed_mut() = then_locals
         .exposed()

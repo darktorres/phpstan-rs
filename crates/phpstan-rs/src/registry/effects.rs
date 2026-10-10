@@ -5124,10 +5124,12 @@ impl<'r> Level<'r> {
             && !self.lost.contains(name)
             && !self.aliased.contains(name)
             && !self.shared_with_file.contains(&name)
-            && !self
-                .bindings
-                .iter()
-                .any(|(bound, _)| bound.as_ref().is_none_or(|bound| bound.as_str() == name))
+            && !self.bindings.iter().any(|(bound, binding)| {
+                bound.as_ref().is_none_or(|bound| bound.as_str() == name)
+                    || matches!(binding, Binding::Reference(place)
+                        if matches!(&place.root, Root::Variable(shared)
+                            if shared.as_ref().is_none_or(|shared| shared.as_str() == name)))
+            })
     }
 
     /// Whether a value of the type `ty`, as an inline `@var` gives it, holds

@@ -72,6 +72,16 @@ type ExposedVariableSet = imbl::GenericHashSet<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// Variables bound to one another by reference (`$r = &$x`), each key with the
+// others of its group: a write to one is a write to all. Branches merge by
+// union, since a link on either path may hold.
+type ReferenceLinkMap = imbl::GenericHashMap<
+    LocalKey,
+    std::rc::Rc<Vec<LocalKey>>,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 // `name -> (target_key, ExprId)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
 // `condition_alias_shape`/`condition_alias_targets` in `checker/
