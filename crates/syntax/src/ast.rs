@@ -2397,6 +2397,17 @@ impl std::ops::Deref for Ident {
     }
 }
 
+impl crate::name::NameKey for Ident {
+    #[inline]
+    fn key_hash(&self) -> u64 {
+        self.name.key_hash()
+    }
+    #[inline]
+    fn is_key_of(&self, stored: &Name) -> bool {
+        self.name.is_key_of(stored)
+    }
+}
+
 impl PartialEq<str> for Ident {
     fn eq(&self, other: &str) -> bool {
         self.name == *other

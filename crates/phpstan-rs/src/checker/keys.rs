@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use rustc_hash::FxHasher;
 use syntax::ast::{BinOp, ExprId, ExprKind, ExprNode, Literal, NodeArenas, StaticTarget};
-use syntax::name::{Name, text_hash};
+use syntax::name::{Name, NameKey};
 
 /// What a scope's facts are filed under; see the module documentation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -134,11 +134,11 @@ fn hash_of(data: &KeyData) -> u64 {
     hasher.finish()
 }
 
-/// `hash_of(&KeyData::Var(name))` for the name's text, without a `Name`.
-fn hash_var(text: &str) -> u64 {
+/// `hash_of(&KeyData::Var(name))` for a name's text hash, without a `Name`.
+fn hash_var(text_hash: u64) -> u64 {
     let mut hasher = FxHasher::default();
     hasher.write_u8(0);
-    hasher.write_u64(text_hash(text));
+    hasher.write_u64(text_hash);
     hasher.finish()
 }
 
@@ -168,10 +168,10 @@ impl KeyTable {
     }
 
     /// The key of the variable `name` when it has been made.
-    pub(crate) fn find_var(&self, name: &str) -> Option<LocalKey> {
+    pub(crate) fn find_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<LocalKey> {
         self.index
-            .find(hash_var(name), |&k| {
-                matches!(&self.data[k.0 as usize], KeyData::Var(held) if held.as_str() == name)
+            .find(hash_var(name.key_hash()), |&k| {
+                matches!(&self.data[k.0 as usize], KeyData::Var(held) if name.is_key_of(held))
             })
             .copied()
     }

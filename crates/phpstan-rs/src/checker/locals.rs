@@ -1,6 +1,7 @@
 //! A checked scope's variables and the facts recorded about them.
 
 use super::keys::KeyTableRef;
+use syntax::name::NameKey;
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -151,7 +152,7 @@ impl Locals {
     }
 
     /// The key of the variable `name` when it has been made.
-    pub(crate) fn find_var(&self, name: &str) -> Option<LocalKey> {
+    pub(crate) fn find_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<LocalKey> {
         self.keys.borrow().find_var(name)
     }
 
@@ -211,7 +212,7 @@ impl Locals {
     }
 
     /// The type of the variable `name`.
-    pub(crate) fn get_var(&self, name: &str) -> Option<&Type> {
+    pub(crate) fn get_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<&Type> {
         self.types.get(&self.find_var(name)?)
     }
 
@@ -220,7 +221,7 @@ impl Locals {
     }
 
     /// Whether the variable `name` has a type.
-    pub(crate) fn contains_var(&self, name: &str) -> bool {
+    pub(crate) fn contains_var<N: NameKey + ?Sized>(&self, name: &N) -> bool {
         self.find_var(name)
             .is_some_and(|key| self.types.contains_key(&key))
     }
@@ -294,7 +295,7 @@ impl Locals {
     }
 
     /// `native` of the variable `name`.
-    pub(crate) fn native_var(&self, name: &str) -> Option<&Type> {
+    pub(crate) fn native_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<&Type> {
         self.native.get(&self.find_var(name)?)
     }
 
@@ -305,14 +306,14 @@ impl Locals {
     }
 
     /// `clear_native` for the variable `name`.
-    pub(crate) fn clear_native_var(&mut self, name: &str) {
+    pub(crate) fn clear_native_var<N: NameKey + ?Sized>(&mut self, name: &N) {
         if let Some(key) = self.find_var(name) {
             self.clear_native(key);
         }
     }
 
     /// `get_provenance` of the variable `name`.
-    pub(crate) fn get_provenance_var(&self, name: &str) -> Option<&ProvenanceSet> {
+    pub(crate) fn get_provenance_var<N: NameKey + ?Sized>(&self, name: &N) -> Option<&ProvenanceSet> {
         self.provenance.get(&self.find_var(name)?)
     }
 
