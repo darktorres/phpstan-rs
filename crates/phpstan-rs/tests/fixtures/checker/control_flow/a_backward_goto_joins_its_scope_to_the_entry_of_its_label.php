@@ -3,10 +3,12 @@ use function PHPStan\Testing\assertType;
 
 function f(bool $c): void {
     $x = 1;
+    $again = $c;
     top:
     assertType('1|2', $x);
     $x = 2;
-    if ($c) {
+    if ($again) {
+        $again = false;
         goto top;
     }
     assertType('2', $x);
