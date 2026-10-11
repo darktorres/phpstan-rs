@@ -111,3 +111,80 @@ function units(callable $wanted): array
     usort($costed, static fn (array $a, array $b): int => [$b[0], $a[1]] <=> [$a[0], $b[1]]);
     return array_map(static fn (array $entry): array => $entry[2], $costed);
 }
+
+/**
+ * The children a unit makes: counted from the reflection of what it calls,
+ * as the probes of `probe_function`, `probe_method` and `probe_held` are.
+ *
+ * @param array{string, string, string, int, int} $unit
+ */
+function unit_forks(array $unit, callable $wanted): int
+{
+    [$kind, $name, $method, $paramAt, $probeAt] = $unit;
+    if ($kind === 'function') {
+        $forks = 1;
+        foreach ((new ReflectionFunction($name))->getParameters() as $param) {
+            $forks += count(probes_for($param));
+        }
+        return $forks;
+    }
+    $reflection = new ReflectionClass($name);
+    if ($kind === 'method') {
+        $target = $reflection->getMethod($method);
+        $forks = 1;
+        foreach ($target->getParameters() as $param) {
+            $forks += count(probes_for($param));
+        }
+        return $target->isStatic() ? $forks : $forks + count(makers($reflection)) - 1;
+    }
+    $forks = 0;
+    foreach (own_methods($reflection) as $then) {
+        if (!$then->isStatic() && $then->getName() !== '__construct' && $wanted(strtolower($name . '::' . $then->getName()))) {
+            $forks++;
+        }
+    }
+    return $forks;
+}
+
+/**
+ * The children each unit makes.
+ *
+ * @param list<array{string, string, string, int, int}> $units
+ * @return list<int>
+ */
+function unit_weights(array $units, callable $wanted): array
+{
+    return array_map(static fn (array $unit): int => unit_forks($unit, $wanted), $units);
+}
+
+/**
+ * What a run would do: the units and the children of each kind, and the
+ * classes with the most children.
+ *
+ * @param list<array{string, string, string, int, int}> $units
+ * @param list<int> $weights
+ */
+function plan_summary(array $units, array $weights): string
+{
+    $count = $forks = $byClass = [];
+    foreach ($units as $i => [$kind, $name]) {
+        $count[$kind] = ($count[$kind] ?? 0) + 1;
+        $forks[$kind] = ($forks[$kind] ?? 0) + $weights[$i];
+        $class = $kind === 'function' ? '(functions)' : $name;
+        $byClass[$class] = ($byClass[$class] ?? 0) + $weights[$i];
+    }
+    arsort($byClass);
+    $kinds = static fn (array $by): string => implode(', ', array_map(
+        static fn (string $kind): string => $kind . ' ' . ($by[$kind] ?? 0),
+        ['function', 'method', 'held'],
+    ));
+    $lines = [
+        'units ' . count($units) . ' (' . $kinds($count) . ')',
+        'forks ' . array_sum($weights) . ' (' . $kinds($forks) . ')',
+        'classes with the most forks:',
+    ];
+    foreach (array_slice($byClass, 0, 10, true) as $class => $n) {
+        $lines[] = sprintf('  %-40s %d', $class, $n);
+    }
+    return implode("\n", $lines) . "\n";
+}

@@ -36,6 +36,14 @@
 // (one for each processor by default): each takes the next function or
 // method from a queue as it finishes its last, so the machine stays busy
 // to the end.
+//
+// `--list` prints the units and the children a run would make, by kind and
+// for the classes with the most, and stops. `--stats=FILE` writes a JSON
+// line for every child (the unit's kind, the builtin, where, its wall time
+// in milliseconds and `ok`, `timeout` or `died`) and a last line with the
+// totals, the histogram of wall times, the slowest children, the timeouts by
+// class and each worker's peak memory. A line on standard error every five
+// seconds gives the share of the children done, the time and the failures.
 
 declare(strict_types=0);
 
@@ -70,12 +78,25 @@ require_once __DIR__ . '/lib/child.php';
 require_once __DIR__ . '/lib/plan.php';
 require_once __DIR__ . '/lib/unit.php';
 require_once __DIR__ . '/lib/pool.php';
+require_once __DIR__ . '/lib/stats.php';
 
 $arguments = array_values(array_filter(array_slice($argv, 1), static fn (string $argument): bool => !str_starts_with($argument, '--')));
 $only = $arguments[0] ?? null;
 $wanted = static fn (string $builtin): bool => $only === null || preg_match($only, $builtin) === 1;
 
-$out = run_units(units($wanted), jobs($argv), $wanted);
+$units = units($wanted);
+$weights = unit_weights($units, $wanted);
+if (in_array('--list', $argv, true)) {
+    echo plan_summary($units, $weights);
+    exit(0);
+}
+$statsFile = option($argv, 'stats');
+if ($statsFile !== null) {
+    Stats::open($statsFile);
+}
+
+$out = run_units($units, jobs($argv), $wanted, $weights);
+Stats::close((int) array_sum($weights));
 
 foreach (RUNS_NOTHING as $function) {
     if (function_exists($function) && $wanted($function)) {

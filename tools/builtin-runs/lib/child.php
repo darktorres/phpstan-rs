@@ -9,6 +9,7 @@
  */
 function in_child(Closure $call): ?array
 {
+    $started = hrtime(true);
     $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
     $pid = pcntl_fork();
     if ($pid === -1) {
@@ -32,9 +33,13 @@ function in_child(Closure $call): ?array
     $data = stream_get_contents($pair[0]);
     fclose($pair[0]);
     pcntl_waitpid($pid, $status);
+    $ms = (hrtime(true) - $started) / 1e6;
     if ($data === '' || $data === false) {
+        $alarmed = pcntl_wifsignaled($status) && pcntl_wtermsig($status) === SIGALRM;
+        Stats::note($ms, $alarmed ? 'timeout' : 'died');
         return null;
     }
     $seen = @unserialize($data, ['allowed_classes' => false]);
+    Stats::note($ms, is_array($seen) ? 'ok' : 'died');
     return is_array($seen) ? $seen : null;
 }

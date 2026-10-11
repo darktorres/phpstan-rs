@@ -172,6 +172,7 @@ function run_unit(array $unit, callable $wanted): array
 {
     $out = [];
     [$kind, $name, $method, $paramAt, $probeAt] = $unit;
+    Stats::$unit = $kind;
     match ($kind) {
         'function' => probe_function($name, $out),
         'method' => probe_method($name, $method, $out),

@@ -9,7 +9,9 @@
 # network, a fresh capped `/tmp` and a fixed environment; NEW-ARGS go to the
 # second script only. The outputs are kept in $COMPARE_DIR (default
 # ${TMPDIR:-/tmp}/builtin-runs-compare) as old.tsv and new.tsv, sorted with
-# LC_ALL=C. Exit status: 0 equal, 1 different, 2 a recorder failed.
+# LC_ALL=C. $COMPARE_BIND (space-separated directories) are bound writable
+# in both runs, for a file a recorder is asked to write (`--stats=`).
+# Exit status: 0 equal, 1 different, 2 a recorder failed.
 set -u
 
 if [ $# -lt 3 ]; then
@@ -40,6 +42,9 @@ run() { # script output error [extra args...]
     case "$(dirname "$script")" in
         /tmp/*) binds=(--bind "$(dirname "$script")" "$(dirname "$script")") ;;
     esac
+    for extra in ${COMPARE_BIND:-}; do
+        binds+=(--bind "$extra" "$extra")
+    done
     nice -n 19 bwrap \
         --unshare-net --unshare-pid --unshare-uts --unshare-ipc \
         --die-with-parent --new-session \

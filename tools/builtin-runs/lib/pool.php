@@ -45,7 +45,7 @@ function work(mixed $socket, callable $wanted): never
     chdir($dir);
     send($socket, ['ready', []]);
     while (is_array($unit = receive($socket))) {
-        send($socket, ['done', run_unit($unit, $wanted)]);
+        send($socket, ['done', run_unit($unit, $wanted), Stats::payload()]);
     }
     remove_directory($dir);
     exit(0);
@@ -56,9 +56,10 @@ function work(mixed $socket, callable $wanted): never
  * of the queue when it has finished its last.
  *
  * @param list<array{string, string, string, int, int}> $units
+ * @param list<int> $weights the forks each unit makes, for the progress line
  * @return array<string, true>
  */
-function run_units(array $units, int $jobs, callable $wanted): array
+function run_units(array $units, int $jobs, callable $wanted, array $weights): array
 {
     $out = [];
     $sockets = [];
@@ -81,10 +82,15 @@ function run_units(array $units, int $jobs, callable $wanted): array
     }
     $next = 0;
     $total = count($units);
+    $planned = (int) array_sum($weights);
+    $done = 0;
+    $running = [];
+    $started = microtime(true);
+    $shown = $started;
     while ($sockets !== []) {
         $read = array_values($sockets);
         $write = $except = null;
-        if (stream_select($read, $write, $except, null) === false) {
+        if (stream_select($read, $write, $except, 5) === false) {
             fwrite(STDERR, "select failed\n");
             exit(1);
         }
@@ -95,29 +101,51 @@ function run_units(array $units, int $jobs, callable $wanted): array
                 foreach (array_keys($message[1]) as $line) {
                     $out[$line] = true;
                 }
+                Stats::absorb((int) $pid, $message[2] ?? null);
+                $done += $running[$pid] ?? 0;
             }
             if ($message !== null && $next < $total) {
+                $running[$pid] = $weights[$next];
                 send($socket, $units[$next++]);
-                if ($next % 500 === 0) {
-                    fwrite(STDERR, "$next / $total\n");
-                }
                 continue;
             }
             fclose($socket);
             unset($sockets[$pid]);
             pcntl_waitpid($pid, $status);
         }
+        if (microtime(true) - $shown >= 5) {
+            fwrite(STDERR, progress_line($done, $planned, $started) . "\n");
+            $shown = microtime(true);
+        }
     }
     return $out;
 }
 
-/** The number of workers asked for, or one for each processor. */
-function jobs(array $argv): int
+/**
+ * The value of the option `--$name=value`, or `null` when it was not given.
+ *
+ * @param array<int|string, mixed> $argv
+ */
+function option(array $argv, string $name): ?string
 {
     foreach ($argv as $argument) {
-        if (str_starts_with($argument, '--jobs=')) {
-            return max(1, (int) substr($argument, 7));
+        if (is_string($argument) && str_starts_with($argument, "--$name=")) {
+            return substr($argument, strlen($name) + 3);
         }
+    }
+    return null;
+}
+
+/**
+ * The number of workers asked for, or one for each processor.
+ *
+ * @param array<int|string, mixed> $argv
+ */
+function jobs(array $argv): int
+{
+    $asked = option($argv, 'jobs');
+    if ($asked !== null) {
+        return max(1, (int) $asked);
     }
     return max(1, (int) shell_exec('nproc 2>/dev/null') ?: 1);
 }
