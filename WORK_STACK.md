@@ -14,6 +14,15 @@ State as of 2026-10-07, worktree based on `39f0b029`.
 
 ## Where to resume
 
+0. **CI repair and speed-up** (the top of the stack; it blocks the
+   `lint` and `fixtures` gates on this branch). The plan is
+   `/home/torres/.claude/plans/pure-jumping-wolf.md`. Part 1 fixes the
+   modgraph gate (27 problems), the strlen callable regression and the Windows
+   smoke test (already fixed on another host, `4750f023`..`27471478`). Part 2
+   cuts CI time: the test-name manifest, the oracle profile, the benches
+   check, a parallel fixtures job. Commits go in the plan's order, one per
+   sub-item. Recorded CI runs: `38110770211` (Rust) and `38110770179`
+   (Extension, green on all three OS).
 1. **Level 9**, the recorder of the builtin-runs table
    (`tools/builtin-runs/record.php`, plan `BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12): a fix started on 2026-10-11 because a full run of the
