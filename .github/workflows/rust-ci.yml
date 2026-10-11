@@ -60,29 +60,38 @@ jobs:
           cargo metadata --locked --format-version 1 > /dev/null
           cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - name: Format
+        if: ${{ !cancelled() }}
         run: cargo fmt --all --check
       - name: Clippy
+        if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Module graph
+        if: ${{ !cancelled() }}
         run: cargo xtask modgraph
       - name: Architecture rules
+        if: ${{ !cancelled() }}
         run: cargo xtask arch
       - name: Docs
+        if: ${{ !cancelled() }}
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
       - name: Fuzz targets compile
+        if: ${{ !cancelled() }}
         run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
       # --each-feature also builds --all-features unless excluded, and the
       # allocator features refuse to build together. Resolver 3 keeps
       # dev-dependency features out of a check without test targets.
       - name: Each feature on its own
+        if: ${{ !cancelled() }}
         run: >
           cargo hack check --workspace --each-feature --exclude-all-features
       # Our crates only: vendor/ holds other projects' checkouts.
       - name: Unused dependencies
+        if: ${{ !cancelled() }}
         run: cargo machete crates tools xtask fuzz
       - name: Licenses, advisories, duplicate versions
+        if: ${{ !cancelled() }}
         run: cargo deny check
 
   test:
