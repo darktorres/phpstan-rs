@@ -10,6 +10,17 @@ import { buildInitializationOptions } from "./config";
 import { resolveServerBinary } from "./serverBinary";
 
 let client: LanguageClient | undefined;
+// Every failure to start the server, also written to `output`: a pop-up
+// is not recorded anywhere, so a failed start was otherwise invisible to
+// anything that did not see the notification.
+let output: vscode.LogOutputChannel | undefined;
+let startError: string | undefined;
+
+function recordStartError(message: string): void {
+  startError = message;
+  output?.error(message);
+  void vscode.window.showErrorMessage(message);
+}
 
 function firstFolderPath(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -28,6 +39,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     await client.stop();
     client = undefined;
   }
+  startError = undefined;
 
   const settings = getSettings();
   if (!settings.enable) {
@@ -38,9 +50,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   try {
     command = await resolveServerBinary(settings, context.globalStorageUri.fsPath);
   } catch (err: unknown) {
-    void vscode.window.showErrorMessage(
-      `phpstan-rs: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    recordStartError(`phpstan-rs: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
 
@@ -100,7 +110,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   // needs `.catch()`, not a `try`/`catch` around the call itself (which
   // would never observe an async rejection).
   client.start().catch((err: unknown) => {
-    void vscode.window.showErrorMessage(
+    recordStartError(
       `phpstan-rs: failed to start the language server (${command}): ${String(err)}`,
     );
   });
@@ -114,9 +124,14 @@ export interface ExtensionExports {
    * simultaneous events, since `activate()` never awaits `client.start()`
    * itself. */
   getClientState: () => State | undefined;
+  /** The message of the last failure to start the server, `undefined` if the
+   * last start succeeded or none has run. */
+  getStartError: () => string | undefined;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<ExtensionExports> {
+  output = vscode.window.createOutputChannel("phpstan-rs", { log: true });
+  context.subscriptions.push(output);
   context.subscriptions.push(
     vscode.commands.registerCommand("phpstan-rs.restartServer", () => startClient(context)),
   );
@@ -150,7 +165,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
 
   await startClient(context);
 
-  return { getClientState: () => client?.state };
+  return {
+    getClientState: () => client?.state,
+    getStartError: () => startError,
+  };
 }
 
 export function deactivate(): Thenable<void> | undefined {

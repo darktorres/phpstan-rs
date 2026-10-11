@@ -123,8 +123,18 @@ describe("phpstan-rs activation", function () {
     // means a real spawn failure surfaces here with a precise message
     // instead of only ever showing up as "no diagnostics arrived" once
     // the longer timeout below expires.
-    const exports = ext!.exports as { getClientState: () => State | undefined };
-    await waitUntil(() => exports.getClientState() === State.Running, 10_000);
+    const exports = ext!.exports as {
+      getClientState: () => State | undefined;
+      getStartError: () => string | undefined;
+    };
+    await waitUntil(() => exports.getClientState() === State.Running, 10_000).catch(
+      (err: unknown) => {
+        throw new Error(
+          `the language client did not reach Running (${String(err)}); ` +
+            `last start error: ${exports.getStartError() ?? "none recorded"}`,
+        );
+      },
+    );
 
     await waitUntil(
       () => vscode.languages.getDiagnostics(doc.uri).length > 0,
