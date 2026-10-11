@@ -31,12 +31,14 @@ Protocol::open();
 Workdir::create();
 
 $wanted = static fn (string $builtin): bool => true;
+$skip = 'off';
 try {
     while (($message = receive(Protocol::$in)) !== null && is_array($message)) {
         switch ($message[0]) {
             case 'init':
                 $only = $message[1];
                 Stats::$enabled = $message[2];
+                $skip = $message[3];
                 $wanted = static fn (string $builtin): bool => $only === null || preg_match($only, $builtin) === 1;
                 send(Protocol::$out, ['ready', manifest()]);
                 break;
@@ -51,7 +53,7 @@ try {
                 send(Protocol::$out, ['plan', $units, unit_weights($units, $wanted), $nothing]);
                 break;
             case 'unit':
-                $lines = run_unit($message[1], $wanted);
+                $lines = run_unit($message[1], $wanted, $skip);
                 send(Protocol::$out, ['done', $lines, Stats::payload()]);
                 break;
         }

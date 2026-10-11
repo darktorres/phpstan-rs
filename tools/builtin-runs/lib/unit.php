@@ -113,11 +113,36 @@ function probe_method(string $class, string $name, array &$out): void
 }
 
 /**
+ * The object a held unit's children call their methods on: made by `$maker`,
+ * then given the probe `$make` makes at `$at` by calling `$firstName`. The
+ * object is `null` when `$maker` gives none. The probe comes back with the
+ * object, so that it lives as long as the object does in the child.
+ *
+ * @param list<ReflectionParameter> $firstParams
+ * @return array{?object, mixed}
+ */
+function held_first(callable $maker, string $firstName, array $firstParams, int $at, callable $make): array
+{
+    $object = $maker();
+    if (!is_object($object)) {
+        return [null, null];
+    }
+    $value = $make();
+    try {
+        $object->$firstName(...arguments($firstParams, $at, $value));
+    } catch (Throwable) {
+    }
+    return [$object, $value];
+}
+
+/**
  * The lines for the methods of a class called after `$firstName` was given
  * the probe `$probeAt` of its parameter `$paramAt`: what each runs of what
- * the first kept.
+ * the first kept. With `$skip` `dead`, a survey child first makes the object
+ * and calls the first method: when that yields no object, the methods are
+ * not run (each would stop at the same point and record nothing).
  */
-function probe_held(string $class, string $firstName, int $paramAt, int $probeAt, callable $wanted, array &$out): void
+function probe_held(string $class, string $firstName, int $paramAt, int $probeAt, callable $wanted, string $skip, array &$out): void
 {
     $reflection = new ReflectionClass($class);
     if (!$reflection->isInstantiable()) {
@@ -137,23 +162,36 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
             if ($index !== $probeAt) {
                 continue;
             }
-            foreach ($instance as $then) {
-                $builtin = strtolower($class . '::' . $then->getName());
-                if (!$wanted($builtin)) {
-                    continue;
+            $targets = array_values(array_filter(
+                $instance,
+                static fn (ReflectionMethod $then): bool => $wanted(strtolower($class . '::' . $then->getName())),
+            ));
+            if ($targets === []) {
+                return;
+            }
+            $where = 'by:' . strtolower($firstName) . ':' . where('', $at, $probe);
+            $maker = $makers[0][1];
+            if ($skip === 'dead') {
+                $survey = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make): void {
+                    [$object, $value] = held_first($maker, $firstName, $firstParams, $at, $make);
+                    if ($object !== null) {
+                        Seen::$entries["\tsurvey\t"] = true;
+                    }
+                });
+                Stats::child(strtolower($class . '::' . $firstName), 'survey:' . $where);
+                if ($survey === null || !isset($survey["\tsurvey\t"])) {
+                    Stats::skipped('dead', count($targets));
+                    return;
                 }
-                $where = 'by:' . strtolower($firstName) . ':' . where('', $at, $probe);
+            }
+            foreach ($targets as $then) {
+                $builtin = strtolower($class . '::' . $then->getName());
                 $thenName = $then->getName();
                 $thenParams = $then->getParameters();
-                $seen = in_child(static function () use ($makers, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
-                    $object = ($makers[0][1])();
+                $seen = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
+                    [$object, $value] = held_first($maker, $firstName, $firstParams, $at, $make);
                     if ($object === null) {
                         return;
-                    }
-                    $value = $make();
-                    try {
-                        $object->$firstName(...arguments($firstParams, $at, $value));
-                    } catch (Throwable) {
                     }
                     Seen::$entries = [];
                     Seen::$where = $where;
@@ -168,7 +206,7 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
 }
 
 /** Runs one unit, giving back the lines it found. */
-function run_unit(array $unit, callable $wanted): array
+function run_unit(array $unit, callable $wanted, string $skip): array
 {
     $out = [];
     [$kind, $name, $method, $paramAt, $probeAt] = $unit;
@@ -176,7 +214,7 @@ function run_unit(array $unit, callable $wanted): array
     match ($kind) {
         'function' => probe_function($name, $out),
         'method' => probe_method($name, $method, $out),
-        'held' => probe_held($name, $method, $paramAt, $probeAt, $wanted, $out),
+        'held' => probe_held($name, $method, $paramAt, $probeAt, $wanted, $skip, $out),
     };
     return $out;
 }

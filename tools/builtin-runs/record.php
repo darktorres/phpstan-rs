@@ -40,7 +40,9 @@
 // to the end. `--php=BIN` records the PHP BIN instead of this one, and the
 // workers are its processes. `--zend-mm` leaves the workers on PHP's own
 // allocator; by default they run with `USE_ZEND_ALLOC=0`, which gives the same
-// output about twice as fast.
+// output about twice as fast. `--skip=dead` first runs one child per held unit
+// that makes the object and calls the method it is given the probe for; when
+// that yields no object, none of the unit's children runs.
 //
 // A worker that dies has its unit run once more on another worker. A unit
 // that dies twice is reported on standard error, its rows are missing from
@@ -79,6 +81,11 @@ $arguments = array_values(array_filter(array_slice($argv, 1), static fn (string 
 $only = $arguments[0] ?? null;
 $php = option($argv, 'php') ?? PHP_BINARY;
 $zendMm = in_array('--zend-mm', $argv, true);
+$skip = option($argv, 'skip') ?? 'off';
+if (!in_array($skip, ['off', 'dead'], true)) {
+    fwrite(STDERR, "--skip is off or dead\n");
+    exit(2);
+}
 
 sweep_stale_directories();
 pcntl_async_signals(true);
@@ -99,7 +106,7 @@ if ($statsFile !== null) {
     Stats::open($statsFile);
 }
 
-[$out, $failed] = run_units($plan['units'], $plan['weights'], jobs($argv), $php, $only, $zendMm, $plan['manifest']);
+[$out, $failed] = run_units($plan['units'], $plan['weights'], jobs($argv), $php, $only, $zendMm, $plan['manifest'], $skip);
 Stats::close((int) array_sum($plan['weights']));
 
 foreach ($plan['nothing'] as $function) {

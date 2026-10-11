@@ -16,6 +16,8 @@ final class Stats
     public static float $ms = 0.0;
     public static int $timeouts = 0;
     public static int $died = 0;
+    /** @var array<string, int> children not run, by the reason */
+    public static array $skipped = [];
 
     /** Upper bounds, in milliseconds, of the buckets of the wall-time histogram. */
     private const BUCKETS = [1, 2, 5, 10, 20, 50, 100, 500, 1000, 3000];
@@ -23,7 +25,7 @@ final class Stats
     /** @var resource|null */
     private static $file = null;
     private static string $path = '';
-    /** @var array<int, array{peak: int, rss: int, children: int, ms: float, timeouts: int, died: int}> */
+    /** @var array<int, array{peak: int, rss: int, children: int, ms: float, timeouts: int, died: int, skipped: array<string, int>}> */
     private static array $workers = [];
     /** @var array<string, int> */
     private static array $histogram = [];
@@ -47,6 +49,12 @@ final class Stats
         }
     }
 
+    /** Notes children that were not run, and the reason. */
+    public static function skipped(string $reason, int $children): void
+    {
+        self::$skipped[$reason] = (self::$skipped[$reason] ?? 0) + $children;
+    }
+
     /** The line for the child just noted, kept when `--stats` asked for it. */
     public static function child(string $builtin, string $where): void
     {
@@ -59,7 +67,7 @@ final class Stats
      * What a worker tells the parent after a unit: the children since the
      * last time, and its totals so far.
      *
-     * @return array{lines: list<array{string, string, string, float, string}>, peak: int, rss: int, children: int, ms: float, timeouts: int, died: int}
+     * @return array{lines: list<array{string, string, string, float, string}>, peak: int, rss: int, children: int, ms: float, timeouts: int, died: int, skipped: array<string, int>}
      */
     public static function payload(): array
     {
@@ -71,6 +79,7 @@ final class Stats
             'ms' => self::$ms,
             'timeouts' => self::$timeouts,
             'died' => self::$died,
+            'skipped' => self::$skipped,
         ];
         self::$lines = [];
         return $payload;
@@ -100,6 +109,7 @@ final class Stats
             'ms' => $payload['ms'],
             'timeouts' => $payload['timeouts'],
             'died' => $payload['died'],
+            'skipped' => $payload['skipped'],
         ];
         if (self::$file === null) {
             return;
@@ -197,9 +207,16 @@ final class Stats
             }
         }
         [$timeouts, $died] = self::failures();
+        $skipped = [];
+        foreach (self::$workers as $worker) {
+            foreach ($worker['skipped'] as $reason => $children) {
+                $skipped[$reason] = ($skipped[$reason] ?? 0) + $children;
+            }
+        }
         self::put([
             't' => 'summary',
             'forks' => $forks,
+            'skipped' => $skipped,
             'wall_s' => round(microtime(true) - self::$started, 1),
             'timeouts' => $timeouts,
             'died' => $died,

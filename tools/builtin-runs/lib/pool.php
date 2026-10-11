@@ -91,7 +91,7 @@ function plan_run(string $php, ?string $only, bool $zendMm): array
 {
     $worker = start_worker($php, $zendMm);
     try {
-        send($worker->in, ['init', $only, false]);
+        send($worker->in, ['init', $only, false, 'off']);
         $ready = receive($worker->out);
         if (!is_array($ready) || $ready[0] !== 'ready') {
             fail("$php did not start a worker");
@@ -119,9 +119,10 @@ function plan_run(string $php, ?string $only, bool $zendMm): array
  * @param list<array{string, string, string, int, int}> $units
  * @param list<int> $weights the forks each unit makes, for the progress line
  * @param array{php: string, extensions: list<string>, ffi: bool} $manifest what the workers must be
+ * @param string $skip which children are not run (`off` or `dead`)
  * @return array{array<string, true>, list<array{string, string, string, int, int}>}
  */
-function run_units(array $units, array $weights, int $jobs, string $php, ?string $only, bool $zendMm, array $manifest): array
+function run_units(array $units, array $weights, int $jobs, string $php, ?string $only, bool $zendMm, array $manifest, string $skip): array
 {
     $out = [];
     $failed = [];
@@ -134,10 +135,10 @@ function run_units(array $units, array $weights, int $jobs, string $php, ?string
     $respawns = 0;
     $started = microtime(true);
     $shown = $started;
-    $spawn = static function () use ($php, $only, $zendMm): void {
+    $spawn = static function () use ($php, $only, $zendMm, $skip): void {
         $worker = start_worker($php, $zendMm);
         try {
-            send($worker->in, ['init', $only, Stats::$enabled]);
+            send($worker->in, ['init', $only, Stats::$enabled, $skip]);
         } catch (RuntimeException) {
         }
     };
