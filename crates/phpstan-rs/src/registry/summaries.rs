@@ -2137,7 +2137,7 @@ impl Summarizer<'_> {
         if !site.text.contains("var") {
             return Vec::new();
         }
-        let tags = crate::checker::var_tag_nodes(&site.text);
+        let tags = phpdoc::var_tags::var_tag_nodes(&site.text);
         if tags.is_empty() {
             return Vec::new();
         }

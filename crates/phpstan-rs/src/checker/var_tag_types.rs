@@ -345,7 +345,7 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_statement_var_tags(&self, doc: &str) -> Vec<(Option<String>, Type)> {
-        super::phpdoc_unresolvable::var_tag_nodes(doc)
+        phpdoc::var_tags::var_tag_nodes(doc)
             .iter()
             .map(|(name, node)| {
                 let name = name.clone();

@@ -646,7 +646,7 @@ impl<'a> Checker<'a> {
         let Some(doc) = doc else {
             return;
         };
-        if !doc.contains("var") || super::phpdoc_unresolvable::var_tag_nodes(doc).is_empty() {
+        if !doc.contains("var") || phpdoc::var_tags::var_tag_nodes(doc).is_empty() {
             return;
         }
         report!(

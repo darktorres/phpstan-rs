@@ -5,7 +5,7 @@ use types::{self, Relation, Type};
 mod boolean_conditions;
 mod generators;
 
-pub(crate) use boolean_conditions::{is_constant_condition_family_identifier, is_truthy_literal};
+pub(crate) use boolean_conditions::is_constant_condition_family_identifier;
 pub(crate) use generators::{
     generator_missing_return_type, generator_template_param, type_allows_generator_return,
 };

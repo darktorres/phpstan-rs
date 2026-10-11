@@ -10,7 +10,7 @@
 //! A part of a body with no event in it is left out: it changes nothing the
 //! dataflow tracks.
 
-use crate::checker::{Completion, Reach, is_truthy_literal};
+use super::completion::{Completion, Reach, is_truthy_literal};
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::span::Span;

@@ -8,6 +8,7 @@ mod canonical;
 pub mod doc_type;
 pub mod docblock;
 pub mod grammar;
+pub mod var_tags;
 
 pub use doc_type::{DocType, WrittenType};
 

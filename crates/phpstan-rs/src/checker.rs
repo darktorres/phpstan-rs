@@ -1077,9 +1077,10 @@ pub(crate) struct StatementMethodCall {
 
 mod completion;
 mod labels;
-pub(crate) use completion::{
-    BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, ExitKind, ExitPoint, GotoState, Reach,
+pub(crate) use crate::registry::completion::{
+    BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, Reach,
 };
+pub(crate) use completion::{ExitKind, ExitPoint, GotoState};
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod infer_cache;
@@ -1133,7 +1134,6 @@ mod oop;
 mod operators;
 mod phpdoc_type_compat;
 mod phpdoc_unresolvable;
-pub(crate) use phpdoc_unresolvable::var_tag_nodes;
 pub(crate) mod phpstan_api;
 mod pipe_operator;
 mod predefined_constants;
@@ -1164,12 +1164,12 @@ mod whitespace;
 mod xml_name;
 mod xml_wellformedness;
 
+pub(crate) use crate::registry::completion::is_truthy_literal;
 pub(crate) use assignment::{literal_shape_key, literal_string_key, unassigned_variable_type};
 pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
     LoopZeroIterations, generator_missing_return_type, generator_template_param,
-    is_constant_condition_family_identifier, is_truthy_literal, merge_scopes,
-    type_allows_generator_return,
+    is_constant_condition_family_identifier, merge_scopes, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{PregCall, preg_call, preg_result_outcome, preg_result_type};

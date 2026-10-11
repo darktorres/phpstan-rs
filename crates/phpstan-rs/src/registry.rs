@@ -19,6 +19,7 @@ mod body_passes;
 mod callee_table;
 pub(crate) mod canonical;
 mod class_info;
+pub(crate) mod completion;
 use class_info::{ResolvedTypeImport, TraitAlias};
 mod class_table;
 mod container;

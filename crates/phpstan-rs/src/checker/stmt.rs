@@ -411,7 +411,7 @@ impl<'a> Checker<'a> {
         {
             return true;
         }
-        let tags: Vec<Option<String>> = super::phpdoc_unresolvable::var_tag_nodes(doc)
+        let tags: Vec<Option<String>> = phpdoc::var_tags::var_tag_nodes(doc)
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
@@ -655,7 +655,7 @@ impl<'a> Checker<'a> {
             .line_start(line)
             .unwrap_or(self.stmt_span(stmt.id).start);
         let span = syntax::span::Span { start: at, end: at };
-        for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc).iter() {
+        for (variable, node) in phpdoc::var_tags::var_tag_nodes(doc).iter() {
             if self.type_node_unresolvable(node, class.as_deref()) {
                 let subject = match variable {
                     Some(v) => format!("PHPDoc tag @var for variable ${v}"),
