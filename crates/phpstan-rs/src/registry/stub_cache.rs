@@ -8,6 +8,7 @@
 //! decode is a bug, and says so. `PHPSTAN_RS_NO_STUB_CACHE`
 //! turns the cache off.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -50,18 +51,39 @@ pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
 }
 
 /// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` under
-/// `XDG_CACHE_HOME` or `~/.cache`; `None` when the cache is off.
+/// `XDG_CACHE_HOME`, `~/.cache`, or the platform's local app-data
+/// directory; `None` when the cache is off or no such directory is known.
 pub(crate) fn cache_dir() -> Option<PathBuf> {
-    if std::env::var_os("PHPSTAN_RS_NO_STUB_CACHE").is_some() {
+    cache_dir_in(|name| std::env::var_os(name))
+}
+
+/// `cache_dir`, reading the environment through `var`, so the fallback
+/// order can be tested without touching the real environment.
+fn cache_dir_in(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if var("PHPSTAN_RS_NO_STUB_CACHE").is_some() {
         return None;
     }
-    if let Some(dir) = std::env::var_os("PHPSTAN_RS_CACHE_DIR") {
+    if let Some(dir) = var("PHPSTAN_RS_CACHE_DIR") {
         return Some(PathBuf::from(dir));
     }
-    let base = std::env::var_os("XDG_CACHE_HOME")
+    let base = var("XDG_CACHE_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
+        .or_else(|| var("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .or_else(|| platform_cache_base(&var))?;
     Some(base.join("phpstan-rs"))
+}
+
+/// The local app-data directory on Windows, where a server launched by an
+/// editor may have neither `HOME` nor `XDG_CACHE_HOME` set. Elsewhere the
+/// `HOME` fallback above is the only one.
+fn platform_cache_base(var: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if cfg!(windows) {
+        var("LOCALAPPDATA").map(PathBuf::from).or_else(|| {
+            var("USERPROFILE").map(|home| PathBuf::from(home).join("AppData").join("Local"))
+        })
+    } else {
+        None
+    }
 }
 
 fn path(name: &str) -> Option<PathBuf> {
@@ -180,5 +202,76 @@ fn prune(dir: &std::path::Path, name: &str, keep: &std::path::Path) {
         .skip(KEPT_BUILDS - 1)
     {
         let _ = fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod cache_dir_tests {
+    use super::*;
+    use rustc_hash::FxHashMap;
+
+    fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
+        let map: FxHashMap<String, OsString> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), OsString::from(v)))
+            .collect();
+        move |name| map.get(name).cloned()
+    }
+
+    #[test]
+    fn the_cache_is_off_when_disabled() {
+        let var = env(&[("PHPSTAN_RS_NO_STUB_CACHE", "1"), ("HOME", "/home/u")]);
+        assert_eq!(cache_dir_in(var), None);
+    }
+
+    #[test]
+    fn an_explicit_directory_wins_over_everything() {
+        let var = env(&[("PHPSTAN_RS_CACHE_DIR", "/tmp/x"), ("HOME", "/home/u")]);
+        assert_eq!(cache_dir_in(var), Some(PathBuf::from("/tmp/x")));
+    }
+
+    #[test]
+    fn xdg_then_home_then_the_platform_directory() {
+        let xdg = env(&[("XDG_CACHE_HOME", "/xdg"), ("HOME", "/home/u")]);
+        assert_eq!(cache_dir_in(xdg), Some(PathBuf::from("/xdg/phpstan-rs")));
+
+        let home = env(&[("HOME", "/home/u")]);
+        assert_eq!(
+            cache_dir_in(home),
+            Some(PathBuf::from("/home/u/.cache/phpstan-rs"))
+        );
+    }
+
+    #[test]
+    fn a_windows_server_without_home_uses_local_app_data() {
+        let local = env(&[("LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local")]);
+        let found = cache_dir_in(local);
+        if cfg!(windows) {
+            assert_eq!(
+                found,
+                Some(PathBuf::from("C:\\Users\\u\\AppData\\Local").join("phpstan-rs"))
+            );
+        } else {
+            assert_eq!(found, None);
+        }
+    }
+
+    #[test]
+    fn user_profile_is_the_last_windows_fallback() {
+        let profile = env(&[("USERPROFILE", "C:\\Users\\u")]);
+        let found = cache_dir_in(profile);
+        if cfg!(windows) {
+            assert_eq!(
+                found,
+                Some(
+                    PathBuf::from("C:\\Users\\u")
+                        .join("AppData")
+                        .join("Local")
+                        .join("phpstan-rs")
+                )
+            );
+        } else {
+            assert_eq!(found, None);
+        }
     }
 }
