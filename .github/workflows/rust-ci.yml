@@ -104,6 +104,11 @@ jobs:
     # The unit and integration tests in the default feature set, then the
     # test-name manifest, which records this run for the next one.
     runs-on: ubuntu-26.04
+    env:
+      # Experiment: line tables instead of full debug info for the test
+      # profile. Backtraces keep file and line; only variable inspection in
+      # a debugger is lost. Kept only if the "Finished" time drops.
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       # The test-name manifest searches the whole history for its base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -193,6 +198,11 @@ jobs:
   test-no-default-features:
     # The same tests with no default features, which are a separate build.
     runs-on: ubuntu-26.04
+    env:
+      # Experiment: line tables instead of full debug info for the test
+      # profile. Backtraces keep file and line; only variable inspection in
+      # a debugger is lost. Kept only if the "Finished" time drops.
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
