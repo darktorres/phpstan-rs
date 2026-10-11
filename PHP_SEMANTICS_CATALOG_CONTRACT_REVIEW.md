@@ -1195,3 +1195,39 @@ RV-27, RV-28, RV-30, RV-31 and RV-22 are accepted for the claims stated. RV-29 r
 open (Medium) and needs the two checker fixtures. The review gate for F00.5
 still depends on the earlier findings' dispositions; this pass closes only the
 fourth-pass items.
+
+## RV-29 remediation (2026-10-11)
+
+RV-29 has four checker-level fixtures beside
+`strlen_catalog_stringable_conversion_preserves_callback_effects`:
+
+- `strlen_catalog_stringable_throw_catch_narrowing`: `is_string`, `!== null` and an
+  int-range narrowing survive into a `catch`; a result variable keeps its pre-call value
+  in the catch; the catch sees the union of the invoked and `TypeError` routes, and a
+  callback write to a property is visible there.
+- `strlen_catalog_stringable_normal_path_keeps_narrowing`: on the normal path after a
+  non-throwing `strlen`, narrowing is kept, the result is `int<0, max>`, and the callback
+  write is visible.
+- `strlen_catalog_stringable_throw_invalidates_string_arguments`: on the throw path a
+  property narrowed before the call is widened in `catch`, after `finally`, through a
+  non-matching inner `try`, after a temporary whose destructor throws, and through a
+  dynamic `'strlen'` name.
+
+The `assertType` expectations were checked against a runtime twin under PHP 8.5.4 (each
+observed value lies in the asserted type). The fixtures pass under `gate`.
+
+Mutation check on `checker/expr.rs`:
+
+- Disabling the invoked-route `record_throw_state` fails two of the new fixtures.
+- Disabling string-argument invalidation on the throw path fails one.
+- Disabling the without-invocation `record_throw_state` fails none. For every catalog
+  input the fixtures reach, the invoked route's state already contains the
+  without-invocation state: invalidation only widens a property, and both routes start
+  from the same pre-call state. The catch's type came out the same with and without the
+  record (`string|null`). A fixture cannot distinguish the two, so this record is not
+  claimed as covered by a fixture. Making it observable would change the checker's
+  semantics, which this item does not do.
+
+With the record disabled, a `string|array` argument and an `object` argument (both able to
+throw a `TypeError` without invoking a callback) still reached the `catch` with the state
+that was asserted, so neither isolates a catch reached only by the without-invocation route.
