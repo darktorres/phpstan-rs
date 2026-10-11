@@ -1,10 +1,10 @@
 name: Extension CI
 
-# Not yet exercised by a real CI run (this repo has no GitHub remote at
-# the time this workflow was authored - same caveat as release.yml).
-# Path filters cover all Rust source, not just editors/vscode/: the LSP
-# the extension drives depends on the whole analyzer, so a Rust-side
-# regression anywhere should fail this job as loudly as a TypeScript one.
+# Runs on every push that touches the extension or the Rust crates, on
+# Linux, macOS and Windows. Path filters cover all Rust source, not just
+# editors/vscode/: the LSP the extension drives depends on the whole
+# analyzer, so a Rust-side regression anywhere should fail this job as
+# loudly as a TypeScript one.
 on:
   push:
     paths:
