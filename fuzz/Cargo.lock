@@ -1265,7 +1265,6 @@ dependencies = [
  "libmimalloc-sys",
  "lsp-server",
  "lsp-types",
- "memchr",
  "pcre2-sys",
  "phpstan-rs-composer",
  "phpstan-rs-config",
