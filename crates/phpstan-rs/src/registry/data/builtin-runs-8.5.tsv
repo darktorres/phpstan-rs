@@ -10288,7 +10288,6 @@ stripos		probed
 stripslashes		probed	
 stristr		probed	
 strlen		probed	
-strlen	0	method	__tostring
 strnatcasecmp		probed	
 strnatcmp		probed	
 strncasecmp		probed	
