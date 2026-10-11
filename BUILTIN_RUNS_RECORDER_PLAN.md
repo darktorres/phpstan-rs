@@ -1,5 +1,44 @@
 # record.php: sandboxed, resumable, observable, and no fork that cannot record
 
+## Status
+
+Steps 1–11 are committed, step 12 waits for the user's go (it regenerates the
+table, which changes checker input). Commits, in order: step 1 harness and
+this plan; 2 lib split (`d7ae4d33`); 3 instrumentation (`0565f6dd`); 4 workers
+by `proc_open` and per-child directories (`6cd8c495`); 5 survey and
+`--skip=dead` (`1d45c273`); 6 two-phase scheduling and `--skip=released`
+(`79a9ddc3`); 7 table, sidecar, cache, coverage, verify, tests (`d9004161`); 8
+bwrap sandbox, limits, canary, quiet retry, network names probed (`68ef1902`);
+9 tests in cargo (`c59e4815`); 10b constructor recipes (`edc09994`); 10 and 11
+(docs, this status).
+
+**Step 10, full table, measured (under a load of 7–15 from other processes):**
+the three modes wrote 10,615 rows each, byte-identical to each other and to the
+saved reference (`full-who.tsv`, sha256 prefix 047936d8). The committed table
+has 9,836 rows; 9,834 reproduce, and the two absent are `fopen` and
+`xmlwriter_open_uri` with `0 wrapper stream_close`, which PHP 8.5.4 does not
+record. 781 rows are new. Children actually run, skipped by reason, wall:
+`off` 944,410, none, 27.8 min; `dead` 686,342, `dead` 264,368, 16.9 min;
+`released` 307,353, `released` 378,989 and `dead` 264,368, 7.6 min. The
+planned count (`--list`, progress) is 801,562 in all three; it is not the
+number of children run.
+
+**Deviations from the design, stated where they are measured:**
+- The quiet retry reruns whole units whose child timed out or died, not the
+  failed children alone. It costs about 143 K extra children under `off`
+  (the Imagick units that crash), and `--stats` counts both passes, so the
+  deaths and timeouts are doubled (5,684 died, 18 timeouts under `off`; the
+  rows are unaffected). A child-level retry is the design's and is not built.
+- Under `off` the families equal the old recorder except for the rows of the
+  network names now measured (`curl_exec`, `pg_connect` and the rest, each
+  `probed`), `proc_open`'s two `__tostring` rows and the four openssl rows.
+- `bwrap` does not start inside another `bwrap`: `compare.sh` runs the
+  recorder with `--sandbox=none`; the sandboxed path is checked outside it.
+- Constructor recipes cover six classes; RedisCluster, Phar, PharData, the DOM
+  and Intl classes and the database classes stay without recipes (they need a
+  live server, a phar file or a factory). Their unreached methods remain in the
+  coverage report, with the reason.
+
 ## Context
 
 `tools/builtin-runs/record.php` regenerates `crates/phpstan-rs/src/registry/data/builtin-runs-8.5.tsv` by calling every function and public method PHP defines, one forked child per probe. With the newly installed extensions (decimal, ds, redis, memcached, msgpack, ...) the user stopped a full run at `500 / 11202` (units are cost-sorted, so that count says little). Branch `master2`, worktree `/home/torres/projects/phpstan-rs-master2`. No agents.

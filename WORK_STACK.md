@@ -1084,9 +1084,12 @@ record, and regenerates the table. Level 8's E2.V is paused behind it only
 because the recorder work started from it; the plan measured that the table
 does not change E2.V's Piwigo findings, so neither blocks the other.
 
-- **State: step 1 in progress** (this entry, the plan at the repository root,
-  `tools/builtin-runs/tests/compare.sh`). Steps 2-11 change only
-  `tools/builtin-runs`; step 12 regenerates the table and needs its own go.
+- **State: steps 1-11 done, step 12 waits for the user's go.** Steps 1-11
+  are committed in `git log -- tools/builtin-runs` (the plan's status section
+  lists them and the step 10 numbers). Step 12 regenerates
+  `builtin-runs-8.5.tsv` with `--out` and `--verify`, reviews the diff whole,
+  adds the first sidecar and the integrity and drift tests, and changes checker
+  input; it does not start without the user's go.
 - The working tree holds uncommitted E2.V files
   (`registry/effects.rs`, `registry/effects/classification_tests.rs`); every
   commit of this level names its paths and never stages them.
