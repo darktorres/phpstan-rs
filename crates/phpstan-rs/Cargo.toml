@@ -34,7 +34,6 @@ la-arena.workspace = true
 lsp-server = "=0.10.0"
 lsp-types = "=0.97.0"
 libmimalloc-sys.workspace = true
-memchr.workspace = true
 pcre2-sys = { version = "=0.2.10", optional = true }
 rayon = "=1.12.0"
 regex = "=1.13.1"
@@ -53,7 +52,7 @@ default = ["pcre-validate"]
 # Leaves the allocator to the system's: for comparing it with mimalloc.
 system-allocator = []
 hotpath = ["hotpath/hotpath"]
-hotpath-alloc = ["hotpath/hotpath-alloc"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 # Counts memo and cache hit rates, printed at the end of a run with
 # `PHPSTAN_RS_MEMO_STATS=1` (see `syntax::stats`).
 memo-stats = ["syntax/memo-stats"]
