@@ -136,10 +136,11 @@ check('manifest is equal on a second call', manifest() === $manifest);
 // The selection: by regex, by extension, or both.
 $byRegex = selector('#^decimal\\\\#', null);
 check('a regex selects by lowercased name', $byRegex('decimal\\decimal::__tostring') && !$byRegex('ds\\deque::push'));
-$byExtension = selector(null, ['decimal']);
-check('an extension selects its functions and methods', $byExtension('decimal\\decimal::__tostring') && !$byExtension('ds\\deque::push'));
-$both = selector('#^decimal\\\\decimal::#', ['ds']);
-check('a regex and an extension select the intersection', !$both('decimal\\decimal::__tostring') && !$both('ds\\deque::push'));
+// `standard` is compiled into every PHP, so these hold whichever extensions the build loads.
+$byExtension = selector(null, ['standard']);
+check('an extension selects its functions', $byExtension('str_repeat') && !$byExtension('ds\\deque::push'));
+$both = selector('#^str_#', ['standard']);
+check('a regex and an extension select the intersection', $both('str_repeat') && !$both('str_no_such_function') && !$both('array_map'));
 check('no selection selects everything', selector(null, null)('anything::at_all'));
 
 // The stub index: its declarations are read, with the extension they belong to.
