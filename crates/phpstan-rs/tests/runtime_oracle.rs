@@ -10,6 +10,12 @@
 //! version runs in that version's `php:<v>-cli` Docker image when it is
 //! present.
 //!
+//! `PHPSTAN_RS_ORACLE_IMAGE` (an image reference, digest-pinned) and
+//! `PHPSTAN_RS_ORACLE_PHP` (the exact `PHP_VERSION` it must report) pin the
+//! run: every fixture runs in that image, a fixture whose versions don't
+//! include the pinned one is not executed, and anything the run needs that is
+//! missing fails it instead of skipping. CI sets both.
+//!
 //! A fixture that reaches no `assertType()` is `not executed`, and one
 //! that can't be run here is `skipped`; neither fails. The counts, and
 //! each fixture in the two lists, are printed at the end.
@@ -42,15 +48,28 @@ struct Outcomes {
 
 fn main() {
     let args = Arguments::from_args();
-    let Some(local) = local_php_version() else {
-        println!("runtime oracle: no `php` on PATH, nothing run");
-        return;
+    let pin = Pin::from_env().map(Arc::new);
+    let local = match &pin {
+        Some(pin) => {
+            if let Err(why) = pin.verify() {
+                eprintln!("runtime oracle: {why}");
+                std::process::exit(1);
+            }
+            String::new()
+        }
+        None => {
+            let Some(local) = local_php_version() else {
+                println!("runtime oracle: no `php` on PATH, nothing run");
+                return;
+            };
+            local
+        }
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let pool = worker_pool();
     let outcomes = Arc::new(Mutex::new(Outcomes::default()));
     let mut trials = Vec::new();
-    collect(&root, &root, &pool, &local, &outcomes, &mut trials);
+    collect(&root, &root, &pool, &local, &pin, &outcomes, &mut trials);
     trials.sort_by(|a, b| a.name().cmp(b.name()));
     let conclusion = libtest_mimic::run(&args, trials);
     let outcomes = outcomes.lock().unwrap();
@@ -74,6 +93,7 @@ fn collect(
     dir: &Path,
     pool: &Arc<rayon::ThreadPool>,
     local: &str,
+    pin: &Option<Arc<Pin>>,
     outcomes: &Arc<Mutex<Outcomes>>,
     trials: &mut Vec<Trial>,
 ) {
@@ -84,7 +104,7 @@ fn collect(
         let path = entry.path();
         if path.is_dir() {
             if !path.with_extension("expect").is_file() {
-                collect(root, &path, pool, local, outcomes, trials);
+                collect(root, &path, pool, local, pin, outcomes, trials);
             }
         } else if path.extension().is_some_and(|e| e == "expect") {
             let name = path
@@ -95,9 +115,16 @@ fn collect(
                 .to_string();
             let pool = Arc::clone(pool);
             let local = local.to_string();
+            let pin = pin.clone();
             let outcomes = Arc::clone(outcomes);
             trials.push(Trial::test(name.clone(), move || {
-                let outcome = run(&name, &path.with_extension(""), pool, &local);
+                let outcome = run(
+                    &name,
+                    &path.with_extension(""),
+                    pool,
+                    &local,
+                    pin.as_deref(),
+                );
                 let mut outcomes = outcomes.lock().unwrap();
                 match outcome {
                     Ok(Outcome::Executed) => outcomes.executed.push(name),
@@ -141,6 +168,7 @@ fn run(
     stem: &Path,
     pool: Arc<rayon::ThreadPool>,
     local: &str,
+    pin: Option<&Pin>,
 ) -> Result<Outcome, Failed> {
     let config = gate::fixture_config(&stem.with_extension("toml"))?;
     if config
@@ -152,9 +180,27 @@ fn run(
     }
     // A fixture analysed for a range of versions runs at each end of it.
     let mut runners = Vec::new();
-    match config.php_versions()? {
-        None => runners.push(Runner::Local),
-        Some(versions) => {
+    match (pin, config.php_versions()?) {
+        (Some(pin), None) => runners.push(Runner::Docker(pin.image.clone())),
+        (Some(pin), Some(versions)) => {
+            if [versions.min, versions.max]
+                .iter()
+                .any(|end| pin.is_minor(end.major, end.minor))
+            {
+                runners.push(Runner::Docker(pin.image.clone()));
+            } else {
+                return Ok(Outcome::NotExecuted(format!(
+                    "targets PHP {}.{} to {}.{}; this run is pinned to PHP {}",
+                    versions.min.major,
+                    versions.min.minor,
+                    versions.max.major,
+                    versions.max.minor,
+                    pin.version
+                )));
+            }
+        }
+        (None, None) => runners.push(Runner::Local),
+        (None, Some(versions)) => {
             let mut ends = vec![versions.min, versions.max];
             ends.dedup();
             for end in ends {
@@ -178,6 +224,7 @@ fn run(
     } else {
         match runtime_packages() {
             Ok(autoload) => Some(autoload),
+            Err(why) if pin.is_some() => return Err(why.into()),
             Err(why) => return Ok(Outcome::Skipped(why)),
         }
     };
@@ -574,6 +621,61 @@ fn hex(text: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
         .collect()
+}
+
+/// The PHP a run is pinned to: an image whose digest fixes its build, and the
+/// exact `PHP_VERSION` that image must report.
+struct Pin {
+    image: String,
+    version: String,
+    major: u8,
+    minor: u8,
+}
+
+impl Pin {
+    fn from_env() -> Option<Pin> {
+        let image = std::env::var("PHPSTAN_RS_ORACLE_IMAGE").ok()?;
+        let version = std::env::var("PHPSTAN_RS_ORACLE_PHP")
+            .expect("PHPSTAN_RS_ORACLE_PHP names the PHP_VERSION the pinned image reports");
+        let mut parts = version.split('.').map(str::parse::<u8>);
+        let (Some(Ok(major)), Some(Ok(minor))) = (parts.next(), parts.next()) else {
+            panic!("PHPSTAN_RS_ORACLE_PHP `{version}` is not a PHP version");
+        };
+        Some(Pin {
+            image,
+            version,
+            major,
+            minor,
+        })
+    }
+
+    fn is_minor(&self, major: u8, minor: u8) -> bool {
+        self.major == major && self.minor == minor
+    }
+
+    /// Fails unless the pinned image runs and reports exactly the pinned version.
+    fn verify(&self) -> Result<(), String> {
+        let output = Command::new("docker")
+            .args(["run", "--rm", "--network", "none", &self.image])
+            .args(["php", "-r", "echo PHP_VERSION;"])
+            .output()
+            .map_err(|e| format!("docker: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "`{}` did not run: {}",
+                self.image,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let reported = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if reported != self.version {
+            return Err(format!(
+                "`{}` reports PHP {reported}, expected {}",
+                self.image, self.version
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// `8.0` of `8.0`, `8.0.30` or `8.0 - 8.3`'s lower end.

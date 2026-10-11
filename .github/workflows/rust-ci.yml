@@ -109,3 +109,39 @@ jobs:
         run: cargo machete crates tools xtask fuzz
       - name: Licenses, advisories, duplicate versions
         run: cargo deny check
+
+  # The runtime oracle on the pinned PHP 8.5.4 runtime: the image built from
+  # crates/phpstan-rs/tests/runtime_oracle/Dockerfile, whose base is pinned by
+  # digest. The oracle fails, rather than skipping, when that runtime, its
+  # packages or its version is wrong.
+  runtime-oracle:
+    runs-on: ubuntu-26.04
+    env:
+      PHPSTAN_RS_ORACLE_IMAGE: phpstan-rs-oracle:8.5.4
+      PHPSTAN_RS_ORACLE_PHP: "8.5.4"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+      - name: Install the pinned toolchain
+        run: rustup install --no-self-update
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            . -> target
+
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
+        with:
+          mold-version: 2.42.1
+
+      - name: Build the pinned PHP runtime image
+        run: docker build -t "$PHPSTAN_RS_ORACLE_IMAGE" crates/phpstan-rs/tests/runtime_oracle
+
+      - name: Run the runtime oracle on PHP 8.5.4
+        run: cargo test --locked -p phpstan-rs --test runtime_oracle
