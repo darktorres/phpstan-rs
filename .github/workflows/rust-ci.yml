@@ -276,8 +276,10 @@ jobs:
         run: cargo test --profile gate --no-default-features --test fixtures
 
   benches:
-    # Benchmarks are built with the bench profile, which is release-like and
-    # compiles its own dependency set.
+    # The benchmark target is type-checked in the release profile the
+    # benchmarks run under. The executable is not linked here: `cargo bench`
+    # does that locally, and the test job runs each bench once in criterion's
+    # test mode.
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -309,8 +311,8 @@ jobs:
         with:
           mold-version: 2.42.1
 
-      - name: Benches compile
-        run: cargo bench --no-run
+      - name: Benches type-check in the release profile
+        run: cargo check --release --benches
 
   # The runtime oracle on the pinned PHP 8.5.4 runtime: the image built from
   # crates/phpstan-rs/tests/runtime_oracle/Dockerfile, whose base is pinned by

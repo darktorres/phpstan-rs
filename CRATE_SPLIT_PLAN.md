@@ -876,14 +876,19 @@ progress, feature work touching that stage's modules waits for it.
   - everything in quick;
   - the unscoped run;
   - levels 0–10 for scoped and all-on;
-  - `cargo hack`, `machete`, `deny` and `cargo bench --no-run`;
+  - `cargo hack`, `machete`, `deny` and `cargo bench --workspace --no-run`;
   - performance and build time;
   - the corpus oracle (gate 12, from Stage D);
   - the public API snapshots (gate 14, from G1).
 
-CI (`.github/workflows/rust-ci.yml`) runs the build and test half. The
-corpus, type, baseline, performance and build-time gates run locally
-(frozen Piwigo checkout, stable machine).
+CI (`.github/workflows/rust-ci.yml`) runs the build and test half: every
+lint step (each reported even after one fails), `test`,
+`test-no-default-features`, `fixtures`, the benches type-check, the runtime
+oracle (in the `oracle` profile, with its debug assertions) and the Windows
+startup tests. It does not link the bench executable; `gates --full` does
+(`cargo bench --workspace --no-run`). The corpus, type, baseline,
+performance and build-time gates run locally (frozen Piwigo checkout, stable
+machine).
 
 1. **Build and lint:**
    - fmt;
@@ -898,7 +903,9 @@ corpus, type, baseline, performance and build-time gates run locally
    - `cargo machete`;
    - `cargo deny check`;
    - fuzz compile (`--manifest-path fuzz/Cargo.toml`);
-   - `cargo bench --no-run`.
+   - the benches type-checked in the release profile
+     (`cargo check --release --benches`; `gates --full` links them with
+     `cargo bench --workspace --no-run`).
 2. **Module graph.** Every module is assigned a target crate (Appendix A).
    No module imports a module assigned to a higher crate or a sibling it may
    not depend on, except edges listed in `gates/module-graph.txt`, each with
@@ -1090,7 +1097,8 @@ before a condensing pass, kept to check that nothing was dropped.
 - Record every baseline in §4: corpus (all configs and levels), type
   snapshot, Stage-A baseline file, performance, build-time scenarios, the
   test-name manifest.
-- The Rust CI workflow runs exactly the §4 gates. Every workflow runs
+- The Rust CI workflow runs the build and test half of the §4 gates (see
+  §4's CI paragraph). Every workflow runs
   `git submodule update --init --depth 1 vendor/phpstan-src` and only that.
 - The corpus snapshot format and commands are written into
   `.corpus-runs/README.md`.
@@ -1225,10 +1233,11 @@ Follow-ups:
   deltas are approved in `aa08c24f`, `40e45bdc` and `0d105e30`.
   `method_exists()` on a property not narrowing it (Symfony's `Router`) is
   D's `HasMethod` narrowing.
-- **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
-  no-default-features tests, so the docs, machete and deny steps never ran,
-  and 162 commits since are unpushed. Every step passes locally; a passing
-  run is recorded.
+- **CI green.** The latest recorded Rust CI run (`38110770211`, on
+  `27471478`) fails at `lint` (the module-graph gate, now fixed locally) and
+  at `fixtures` (one strlen fixture, now fixed locally); the other jobs pass,
+  and the Windows startup job is new. Every step passes locally; a passing
+  run is recorded when it lands.
 
 ### Stage B: workspace and leaf layers
 
