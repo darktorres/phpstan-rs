@@ -13,6 +13,9 @@ pub(crate) struct NamedCallable<'r> {
     /// `(owner, method)` for a method, `None` for a plain function.
     pub(crate) method: Option<(String, String)>,
     pub(crate) defining_class: Option<String>,
+    /// The catalog's name for the builtin, for a plain function that the
+    /// catalog covers.
+    pub(crate) catalog_function: Option<&'static str>,
 }
 
 impl<'a> Checker<'a> {
@@ -29,7 +32,7 @@ impl<'a> Checker<'a> {
             if let Some((class, method)) = s.split_once("::") {
                 return self.resolve_callable_method(class, method, format!("callable '{s}'"));
             }
-            let (_, sig) = self
+            let (name, sig) = self
                 .registry
                 .lookup_function_with_name(s.trim_start_matches('\\'))?;
             return Some(NamedCallable {
@@ -37,6 +40,7 @@ impl<'a> Checker<'a> {
                 sig,
                 method: None,
                 defining_class: None,
+                catalog_function: crate::semantics::catalog_function(name, sig),
             });
         }
         if let [shape] = ty.constant_arrays()[..] {
@@ -68,6 +72,7 @@ impl<'a> Checker<'a> {
             sig,
             method: Some((owner.to_string(), "__invoke".to_string())),
             defining_class: Some(class.to_string()),
+            catalog_function: None,
         })
     }
 
@@ -88,6 +93,7 @@ impl<'a> Checker<'a> {
             sig,
             method: Some((owner.to_string(), method.to_string())),
             defining_class: Some(canonical.to_string()),
+            catalog_function: None,
         })
     }
 }

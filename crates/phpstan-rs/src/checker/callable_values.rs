@@ -49,6 +49,7 @@ impl<'a> Checker<'a> {
             locals,
             defining_class: named.defining_class.as_deref(),
             is_builtin: false,
+            catalog_function: named.catalog_function,
             span,
         });
     }

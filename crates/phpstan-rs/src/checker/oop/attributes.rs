@@ -131,6 +131,7 @@ impl<'a> Checker<'a> {
                 locals: &mut locals,
                 defining_class: Some(&canonical),
                 is_builtin: self.registry.is_builtin_class(&canonical),
+                catalog_function: None,
                 span: attr.span,
             });
         }

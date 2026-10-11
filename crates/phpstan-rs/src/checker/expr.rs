@@ -948,6 +948,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: None,
                             is_builtin: self.registry.is_builtin_function(name),
+                            catalog_function: crate::semantics::catalog_function(&declared, sig),
                             span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
@@ -1074,16 +1075,8 @@ impl<'a> Checker<'a> {
                     // reference, before the `if let` below consumes
                     // `callee_ty` by value) for every dynamic-callee
                     // shape this branch covers.
-                    let callable_names = callee_ty.constant_strings_text();
-                    let exact_strlen_callable = matches!(
-                        callable_names.as_slice(),
-                        [name] if self.registry.lookup_function(name).is_some_and(|signature| {
-                            crate::semantics::catalog_function(name, signature).is_some()
-                        })
-                    );
-                    if !exact_strlen_callable
-                        && let Some(level) = self
-                            .failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
+                    if let Some(level) =
+                        self.failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
                     {
                         let verdict = if self.relation().is_callable(&callee_ty).no() {
                             "it's not a callable"
@@ -1098,20 +1091,7 @@ impl<'a> Checker<'a> {
                             "callable.nonCallable",
                         );
                     }
-                    if exact_strlen_callable
-                        && let Some(signature) = self.registry.lookup_function("strlen")
-                    {
-                        self.check_args(CheckArgsCall {
-                            callee_label: CalleeLabel::Text("strlen"),
-                            callee: Callee::Function("strlen"),
-                            sig: signature,
-                            args,
-                            locals,
-                            defining_class: None,
-                            is_builtin: true,
-                            span: self.expr_span(e.id),
-                        });
-                    } else if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
+                    if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
                         self.check_dynamic_callable_args(
                             arenas,
                             &callable_sig,
@@ -1615,6 +1595,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(owner),
+                            catalog_function: None,
                             span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
@@ -2189,6 +2170,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: None,
                             is_builtin: true,
+                            catalog_function: crate::semantics::catalog_function(name, sig),
                             span: self.expr_span(e.id),
                         });
                     }
@@ -3118,6 +3100,7 @@ impl<'a> Checker<'a> {
                                 locals,
                                 defining_class: Some(class),
                                 is_builtin: self.registry.is_builtin_class(class),
+                                catalog_function: None,
                                 span: self.expr_span(e.id),
                             });
                             self.apply_param_out_types(sig, args, locals);
@@ -3460,6 +3443,7 @@ impl<'a> Checker<'a> {
                             locals,
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(&owner),
+                            catalog_function: None,
                             span: self.expr_span(e.id),
                         });
                         self.apply_param_out_types(sig, args, locals);
@@ -6026,15 +6010,12 @@ impl<'a> Checker<'a> {
                         // function name. Do not apply a catalog graph to
                         // unions, arbitrary callables, or unresolved names.
                         let callee_type = self.infer_expr(callee, locals);
-                        let names = callee_type.constant_strings_text();
-                        if let [name] = names.as_slice()
-                            && let Some(signature) = self.registry.lookup_function(name)
-                            && let Some(function) =
-                                crate::semantics::catalog_function(name, signature)
+                        if let Some(named) = self.resolve_named_callable(&callee_type)
+                            && let Some(function) = named.catalog_function
                         {
                             self.infer_builtin_call_return_type(
                                 function,
-                                signature,
+                                named.sig,
                                 args,
                                 locals,
                                 self.expr_span(e.id),

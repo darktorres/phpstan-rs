@@ -49,7 +49,15 @@ fn exact_dynamic_strlen_preserves_argument_diagnostics_once() {
         1,
         "exact-name dynamic call: {dynamic:#?}"
     );
-    assert_eq!(dynamic_errors, direct_errors);
+    // The dynamic call is described as PHPStan describes a callable
+    // (`CallCallablesRule`), not as the direct function call.
+    assert_eq!(
+        dynamic_errors,
+        vec![
+            "Parameter #1 $string of callable 'strlen' expects string, array{} given.".to_string()
+        ]
+    );
+    assert_eq!(direct_errors.len(), dynamic_errors.len());
 }
 
 #[test]

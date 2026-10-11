@@ -26,6 +26,9 @@ pub(crate) struct CheckArgsCall<'a> {
     pub(crate) defining_class: Option<&'a str>,
     /// A PHP builtin (whose variadic takes no unknown named argument).
     pub(crate) is_builtin: bool,
+    /// The catalog's name for the builtin whose semantic catalog applies to
+    /// this call, from `semantics::catalog_function`; `None` otherwise.
+    pub(crate) catalog_function: Option<&'a str>,
     pub(crate) span: Span,
 }
 
@@ -446,6 +449,7 @@ impl<'a> Checker<'a> {
             locals,
             defining_class,
             is_builtin,
+            catalog_function,
             span,
         } = call;
         let syntax_owner = self
@@ -466,6 +470,7 @@ impl<'a> Checker<'a> {
             locals,
             defining_class,
             is_builtin,
+            catalog_function,
             span,
         });
     }
@@ -889,6 +894,7 @@ impl<'a> Checker<'a> {
                 locals,
                 defining_class: None,
                 is_builtin: false,
+                catalog_function: None,
                 span,
             });
         } else if name.eq_ignore_ascii_case("call_user_func_array") {
@@ -930,6 +936,7 @@ impl<'a> Checker<'a> {
                 locals,
                 defining_class: None,
                 is_builtin: false,
+                catalog_function: None,
                 span,
             });
         }

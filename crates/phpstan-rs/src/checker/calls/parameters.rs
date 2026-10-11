@@ -164,6 +164,8 @@ pub(crate) struct ParametersCheck<'a> {
     /// Whether the callee is a PHP builtin: a builtin's variadic takes no
     /// unknown named argument.
     pub is_builtin: bool,
+    /// The catalog's name for the builtin, when its semantic catalog applies.
+    pub catalog_function: Option<&'a str>,
     pub span: Span,
 }
 
@@ -178,6 +180,7 @@ impl<'a> Checker<'a> {
             locals,
             defining_class,
             is_builtin,
+            catalog_function,
             span,
         } = check;
         let params = sig.params();
@@ -193,9 +196,7 @@ impl<'a> Checker<'a> {
         // own weak parser has accepted the value. Weak mode accepts scalar
         // string coercions and Stringable; strict mode exits before either
         // conversion, so keep the ordinary string-only type check there.
-        let weak_strlen_string_coercion = is_builtin
-            && sig.is_stub()
-            && matches!(callee, Callee::Function(name) if crate::semantics::catalog_function(name, sig).is_some())
+        let weak_strlen_string_coercion = catalog_function == Some("strlen")
             && self.syntax_tree_owner().and_then(|owner| {
                 syntax::strict_types::strict_types_mode(arenas, owner.statements())
             }) == Some(false);
@@ -304,14 +305,9 @@ impl<'a> Checker<'a> {
         }
 
         let bound = self.bind_arguments(callee, sig, &arguments, has_named, is_builtin, span);
-        let catalog_call = match callee {
-            Callee::Function(name)
-                if is_builtin && crate::semantics::catalog_function(name, sig).is_some() =>
-            {
-                self.catalog_builtin_return_type(name, sig, args, locals, span)
-            }
-            _ => None,
-        };
+        let catalog_call = catalog_function.and_then(|function| {
+            self.catalog_builtin_return_type(function, sig, args, locals, span)
+        });
 
         for (i, (argument, param)) in arguments.iter().zip(bound).enumerate() {
             let Some(param) = param else { continue };
@@ -372,9 +368,10 @@ impl<'a> Checker<'a> {
             if should_emit_null_deprecation {
                 self.report(
                     format!(
-                        "Passing null to parameter #{} (${}) of function strlen is deprecated.",
+                        "Passing null to parameter #{} (${}) of {} is deprecated.",
                         i + 1,
-                        param.name()
+                        param.name(),
+                        callee.of()
                     ),
                     argument.span,
                     0,
