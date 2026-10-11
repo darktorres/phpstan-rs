@@ -5,8 +5,8 @@ Nothing was rebuilt or rerun and no source was edited.
 
 ## 0. How the numbers were obtained
 
-- `nice -n 19 callgrind_annotate --inclusive=yes --tree=calling cg.out > /tmp/lib-drill/calling.txt` and `--tree=caller` > `/tmp/lib-drill/caller.txt` were generated, but the 6 MB files are too large to read by eye, and `incl.txt` (tree=none) does not list per-test functions.
-- The drill-down uses my own parser of the raw `cg.out` (`/tmp/lib-drill/parse.py`, `lib.py`, `tree.py`, `tree2.py`). It reads every `fn=`, `cfn=`, `calls=` record and keeps, per function, the self cost and, per (caller, callee) edge, the call count and the inclusive cost of the edge.
+- `nice -n 19 callgrind_annotate --inclusive=yes --tree=calling cg.out > <scratch>/lib-drill/calling.txt` and `--tree=caller` > `<scratch>/lib-drill/caller.txt` were generated, but the 6 MB files are too large to read by eye, and `incl.txt` (tree=none) does not list per-test functions.
+- The drill-down uses my own parser of the raw `cg.out` (`<scratch>/lib-drill/parse.py`, `lib.py`, `tree.py`, `tree2.py`). It reads every `fn=`, `cfn=`, `calls=` record and keeps, per function, the self cost and, per (caller, callee) edge, the call count and the inclusive cost of the edge.
   Check: the sum of all self costs it parsed is exactly `31,422,503,223`, equal to the PROGRAM TOTALS line.
 - "Inclusive" of a function = sum of the edge costs into it. This is exact for non-recursive functions. Names ending in `'2` are callgrind's second recursion level; rayon `join_context`/`wait_until_cold'2` chains are recursive and inflate (the profile shows `bridge_producer_consumer::helper` at 490 % of the total). Whenever I quote a number from a recursive or rayon-generic frame I say so. Numbers for leaf functions and for the pass functions of `Registry` are not recursive and are exact.
 - Shared nodes (`mi_malloc_aligned`, `hash_one`, `Once::call`, `OnceLock::initialize`) have one inclusive cost summed over all callers; in the trees I do not expand below them.
@@ -14,7 +14,7 @@ Nothing was rebuilt or rerun and no source was edited.
 
 ## 1. Where the 31.4 G runs: threads and pools
 
-Command: edges out of `std::sys::thread::unix::Thread::new::thread_start` (`/tmp/lib-drill/lib.py: callees()`).
+Command: edges out of `std::sys::thread::unix::Thread::new::thread_start` (`<scratch>/lib-drill/lib.py: callees()`).
 
 | thread kind | Ir | share | detail |
 |---|---|---|---|

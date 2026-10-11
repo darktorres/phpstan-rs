@@ -1,8 +1,8 @@
 <?php
-// The command that starts a worker, and the size of the /tmp each gets. Under
-// `bwrap` a worker sees the host's files read-only, a private /tmp of its own
-// that is capped, no home directory, and no network; it is the head of its
-// own pid, uts and ipc namespaces.
+// The command that starts a worker, and the size of the scratch space each
+// gets. Under `bwrap` a worker sees the host's files read-only, a private home
+// directory of its own that is a capped tmpfs, and no network; it is the head
+// of its own pid, uts and ipc namespaces.
 
 /** The memory available to the machine, in bytes (`MemAvailable` in /proc/meminfo). */
 function memory_available(): int
@@ -16,7 +16,7 @@ function memory_available(): int
 }
 
 /**
- * The size of each worker's /tmp, in bytes: 256 MiB, or less when the memory
+ * The size of each worker's scratch space, in bytes: 256 MiB, or less when the memory
  * available cannot hold every worker's at twice that. A worker's children
  * write at most 64 MiB each, so less than 256 MiB is refused by the run.
  */
@@ -40,7 +40,9 @@ function sandbox_cap(int $jobs): int
 function worker_command(string $php, bool $zendMm, array $sandbox): array
 {
     $interpreter = [$php, '-d', 'ffi.enable=1', '-d', 'display_errors=0', '-d', 'memory_limit=512M', dirname(__DIR__) . '/worker.php'];
-    $variables = ['PATH' => (string) getenv('PATH'), 'HOME' => '/tmp', 'LC_ALL' => 'C', 'TZ' => 'UTC'];
+    // A `bwrap` worker's home is its scratch space; the other modes keep the caller's.
+    $home = $sandbox['mode'] === 'bwrap' ? '/home/worker' : (string) getenv('HOME');
+    $variables = ['PATH' => (string) getenv('PATH'), 'HOME' => $home, 'LC_ALL' => 'C', 'TZ' => 'UTC'];
     if (!$zendMm) {
         $variables['USE_ZEND_ALLOC'] = '0';
     }
@@ -56,7 +58,7 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         if (str_starts_with($phpDir, '/home/')) {
             array_push($command, '--ro-bind', $phpDir, $phpDir);
         }
-        array_push($command, '--size', (string) $sandbox['cap'], '--tmpfs', '/tmp', '--chdir', '/tmp');
+        array_push($command, '--size', (string) $sandbox['cap'], '--tmpfs', '/home/worker', '--chdir', '/home/worker');
         return [...$command, ...$interpreter];
     }
     if ($sandbox['mode'] === 'sudo-unshare') {

@@ -23,7 +23,7 @@ function arraysOfScalars(): void
     json_encode([1, 'a', ['b' => 2.5]]);
     implode(',', ['a', 'b']);
     serialize([1, 2]);
-    file_put_contents('/tmp/a-file', 'data');
+    file_put_contents('/work/a-file', 'data');
     assertType('null', Holder::$value);
 }
 

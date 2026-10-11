@@ -848,7 +848,7 @@ how nearly-universal PSR-3 logging is in any DI-framework-based PHP
 app.
 
 ```sh
-cd /tmp/claude-1000/-home-torres-projects-phpstan-rs/2c47181b-0480-4b7e-8676-db42b8807004/scratchpad/repos
+cd <scratchpad>/repos
 git clone --depth 1 "https://github.com/canvural/larastan-strict-rules.git" larastan-strict-rules 2>&1 | tail -2
 find larastan-strict-rules/src -name "*.php" | xargs -I{} basename {}
 ```

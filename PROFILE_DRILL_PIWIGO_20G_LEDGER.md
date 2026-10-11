@@ -25,7 +25,7 @@ Building started on 2026-10-03 (`WORK_STACK.md`, level 8).
 - **A design that turns out wrong** is fixed in the plan first, in its own commit, and then built.
 - **A new dependency** is added in the row that first uses it (§13's table). `twox-hash` leaves in row 17.2.
 - **Heavy jobs** (builds of other profiles, the corpus, profilers) run one at a time, under `nice -n 19`, with no `timeout`.
-- **Nothing kept in `target/` or `/tmp`.** `cargo clean` empties `target/` and a reboot empties `/tmp`. Every binary a later row or validation compares against is copied to `.corpus-runs/gate/bin/<commit>/<profile>/` as soon as it is built; runs and dumps go to `.corpus-runs/gate/<artifact>/<commit>.<ext>`; profiles to `~/.cache/prs-profile/<run>/` with their binary and a `README` (`.corpus-runs/README.md`). A worktree of another commit builds into a target directory of its own: two checkouts of one workspace in one target directory share the workspace crates' artifacts.
+- **Nothing kept in `target/` or the temporary directory.** `cargo clean` empties `target/` and a reboot empties the temporary directory. Every binary a later row or validation compares against is copied to `.corpus-runs/gate/bin/<commit>/<profile>/` as soon as it is built; runs and dumps go to `.corpus-runs/gate/<artifact>/<commit>.<ext>`; profiles to `~/.cache/prs-profile/<run>/` with their binary and a `README` (`.corpus-runs/README.md`). A worktree of another commit builds into a target directory of its own: two checkouts of one workspace in one target directory share the workspace crates' artifacts.
 
 ## Tasks
 

@@ -23,6 +23,19 @@ function wipe_directory(string $dir): void
     @rmdir($dir);
 }
 
+/**
+ * The directory the workers make their own directories in: under the home
+ * directory, which a `bwrap` worker has as a capped tmpfs of its own.
+ */
+function work_root(): string
+{
+    $home = getenv('HOME');
+    if ($home === false || $home === '') {
+        $home = posix_getpwuid(posix_geteuid())['dir'];
+    }
+    return $home . '/.cache/builtin-runs/work';
+}
+
 final class Workdir
 {
     private static string $base = '';
@@ -31,13 +44,14 @@ final class Workdir
     /** The name of the directory a worker with this process id works in. */
     public static function of(int $pid): string
     {
-        return sys_get_temp_dir() . '/builtin-runs-' . $pid;
+        return work_root() . '/builtin-runs-' . $pid;
     }
 
     /** Makes the worker's directory and works in it. */
     public static function create(): void
     {
         self::$base = self::of((int) getmypid());
+        @mkdir(dirname(self::$base), 0777, true);
         wipe_directory(self::$base);
         if (!@mkdir(self::$base) || !@chdir(self::$base)) {
             fwrite(STDERR, 'cannot make ' . self::$base . "\n");
@@ -79,7 +93,7 @@ final class Workdir
 function sweep_stale_directories(): int
 {
     $removed = 0;
-    foreach (glob(sys_get_temp_dir() . '/builtin-runs-*', GLOB_ONLYDIR) ?: [] as $dir) {
+    foreach (glob(work_root() . '/builtin-runs-*', GLOB_ONLYDIR) ?: [] as $dir) {
         $pid = substr($dir, strrpos($dir, '-') + 1);
         if (ctype_digit($pid) && !is_dir('/proc/' . $pid)) {
             wipe_directory($dir);

@@ -161,7 +161,7 @@ failures, and how it ended, or that its process is gone.
 
 ## Binaries and profiles kept beside the runs
 
-`cargo clean` empties `target/`, and `/tmp` is a tmpfs a reboot empties,
+`cargo clean` empties `target/`, and the system temporary directory is a tmpfs a reboot empties,
 so nothing a later comparison needs stays in either:
 
 - `gate/bin/<commit>/<profile>/phpstan-rs`: a binary built from a

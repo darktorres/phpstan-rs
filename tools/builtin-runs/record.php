@@ -124,7 +124,7 @@ if ($out !== null && $update !== null) {
     exit(2);
 }
 $verify = in_array('--verify', $argv, true);
-$cacheDir = in_array('--no-cache', $argv, true) || $verify ? null : (option($argv, 'cache') ?? (getenv('HOME') ?: '/tmp') . '/.cache/builtin-runs');
+$cacheDir = in_array('--no-cache', $argv, true) || $verify ? null : (option($argv, 'cache') ?? (getenv('HOME') ?: posix_getpwuid(posix_geteuid())['dir']) . '/.cache/builtin-runs');
 
 sweep_stale_directories();
 pcntl_async_signals(true);
@@ -137,10 +137,10 @@ pcntl_signal(SIGTERM, $stop);
 
 $jobs = jobs($argv);
 // A worker's children write at most 64 MiB each, four of them at once in the
-// worst case of the measured limits, so a /tmp smaller than 256 MiB is refused.
+// worst case of the measured limits, so scratch space smaller than 256 MiB is refused.
 $sandbox = ['mode' => $sandboxMode, 'cap' => $sandboxMode === 'bwrap' ? sandbox_cap($jobs) : 0];
 if ($sandboxMode === 'bwrap' && $sandbox['cap'] < 256 * 1024 ** 2) {
-    fwrite(STDERR, 'only ' . intdiv($sandbox['cap'], 1024 ** 2) . " MiB of /tmp per worker: free memory or use fewer --jobs\n");
+    fwrite(STDERR, 'only ' . intdiv($sandbox['cap'], 1024 ** 2) . " MiB of scratch space per worker: free memory or use fewer --jobs\n");
     exit(1);
 }
 $plan = plan_run($php, $only, $extensions, $zendMm, $sandbox);

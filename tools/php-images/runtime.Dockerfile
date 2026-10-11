@@ -4,12 +4,12 @@
 # export's runtime-packages.txt and dist.tar.
 ARG VERSION
 FROM php:${VERSION}-cli
-COPY apt-sources.sh runtime-packages.txt dist.tar /tmp/php-images/
-RUN sh /tmp/php-images/apt-sources.sh \
-    && DEBIAN_FRONTEND=noninteractive xargs -a /tmp/php-images/runtime-packages.txt \
+COPY apt-sources.sh runtime-packages.txt dist.tar /opt/php-images/
+RUN sh /opt/php-images/apt-sources.sh \
+    && DEBIAN_FRONTEND=noninteractive xargs -a /opt/php-images/runtime-packages.txt \
         apt-get install -y -qq --no-install-recommends > /dev/null \
     && rm -rf "$(php-config --extension-dir)" \
     && rm -f /usr/local/etc/php/conf.d/docker-php-ext-*.ini \
-    && tar -C / -xf /tmp/php-images/dist.tar \
-    && rm -rf /tmp/php-images /var/lib/apt/lists/* \
+    && tar -C / -xf /opt/php-images/dist.tar \
+    && rm -rf /opt/php-images /var/lib/apt/lists/* \
     && php -v > /dev/null

@@ -6,7 +6,7 @@
                     $this->open();
                 }
                 private function open(): void {
-                    $handle = fopen('/tmp/x', 'a');
+                    $handle = fopen('/work/x', 'a');
                     if ($handle !== false) {
                         $this->fileHandle = $handle;
                     }

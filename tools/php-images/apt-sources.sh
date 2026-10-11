@@ -5,7 +5,7 @@ set -eu
 
 codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
 
-if apt-get update -qq 2>/tmp/apt-update.err && ! grep -q '^[EW]:' /tmp/apt-update.err; then
+if apt-get update -qq 2>/var/cache/apt-update.err && ! grep -q '^[EW]:' /var/cache/apt-update.err; then
     exit 0
 fi
 

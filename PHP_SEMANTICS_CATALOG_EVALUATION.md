@@ -765,7 +765,7 @@ those files can be matched to the checked-in hashes.
 
 Complete raw artifacts, linked bitcode, configured source trees, binaries, and
 build caches are in **`/home/torres/.cache/php-catalog-evaluation`**. The original
-Clang PHP/SVF build inputs still reside in `/tmp/php-catalog-comparison`; restore
+Clang PHP/SVF build inputs still reside in `<scratch root>`; restore
 them using the first experiment's README if that directory disappears. Exact
 identities and package digests are in `results/evaluation/lock.json`.
 

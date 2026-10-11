@@ -6,9 +6,9 @@
 #
 # REGEX is the recorder's first argument (PCRE with delimiters, matched on
 # the lowercased builtin name). Both scripts run in one `bwrap` with no
-# network, a fresh capped `/tmp` and a fixed environment; NEW-ARGS go to the
-# second script only. The outputs are kept in $COMPARE_DIR (default
-# ${TMPDIR:-/tmp}/builtin-runs-compare) as old.tsv and new.tsv, sorted with
+# network, a fresh capped scratch directory as home and a fixed environment;
+# NEW-ARGS go to the second script only. The outputs are kept in $COMPARE_DIR
+# (default $HOME/.cache/builtin-runs-compare) as old.tsv and new.tsv, sorted with
 # LC_ALL=C. $COMPARE_BIND (space-separated directories) are bound writable
 # in both runs, for a file a recorder is asked to write (`--stats=`).
 # Exit status: 0 equal, 1 different, 2 a recorder failed.
@@ -32,27 +32,26 @@ if [ $# -gt 0 ] && [ "$1" = "--" ]; then
 fi
 new_args=("$@")
 
-dir=${COMPARE_DIR:-${TMPDIR:-/tmp}/builtin-runs-compare}
+dir=${COMPARE_DIR:-$HOME/.cache/builtin-runs-compare}
 mkdir -p "$dir"
+home="$dir/sandbox"
+mkdir -p "$home"
 
 run() { # script output error [extra args...]
     local script=$1 out=$2 err=$3
     shift 3
     local binds=()
-    case "$(dirname "$script")" in
-        /tmp/*) binds=(--bind "$(dirname "$script")" "$(dirname "$script")") ;;
-    esac
     for extra in ${COMPARE_BIND:-}; do
         binds+=(--bind "$extra" "$extra")
     done
     nice -n 19 bwrap \
         --unshare-net --unshare-pid --unshare-uts --unshare-ipc \
         --die-with-parent --new-session \
-        --clearenv --setenv PATH "$PATH" --setenv HOME /tmp --setenv LC_ALL C \
+        --clearenv --setenv PATH "$PATH" --setenv HOME "$home" --setenv LC_ALL C \
         --setenv TZ UTC --setenv USE_ZEND_ALLOC 0 \
         --ro-bind / / --dev /dev --proc /proc \
-        --size 268435456 --tmpfs /tmp "${binds[@]}" \
-        --chdir /tmp \
+        --size 268435456 --tmpfs "$home" "${binds[@]}" \
+        --chdir "$home" \
         php "$script" "--jobs=$jobs" "$regex" "$@" >"$out" 2>"$err"
     local status=$?
     LC_ALL=C sort -o "$out" "$out"

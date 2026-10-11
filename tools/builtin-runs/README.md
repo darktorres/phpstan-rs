@@ -53,10 +53,11 @@ children done, the time, the rate and the timeouts and deaths so far.
 
 ## The sandbox
 
-A worker under `bwrap` sees the host's files read-only, a private `/tmp`
-capped at 256 MiB (less when the memory available cannot hold every
-worker's at twice that; the run refuses below 256 MiB), no home directory,
-no network, and its own pid, uts and ipc namespaces. Each child runs under
+A worker under `bwrap` sees the host's files read-only, a private home
+directory at `/home/worker` that is a tmpfs capped at 256 MiB (less when the
+memory available cannot hold every worker's at twice that; the run refuses
+below 256 MiB), where its directories are made; no network; and its own pid,
+uts and ipc namespaces. Each child runs under
 `RLIMIT_AS` 2 GiB, `RLIMIT_FSIZE` 64 MiB, `RLIMIT_NOFILE` 1024, `RLIMIT_CORE`
 0 and `RLIMIT_CPU` 60 s, with `SIGXFSZ` ignored, so a write over the limit
 fails rather than killing the child. Before a worker takes a unit it runs a

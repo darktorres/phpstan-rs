@@ -1,6 +1,6 @@
 # Adversarial validation of pass 2 (`PIWIGO_OPTIMIZATION_PLAN_PASS2.md`)
 
-Each item was checked against the source and the callgrind data in `/tmp/p2/`. Verdicts: HOLDS, HOLDS WITH CORRECTION, WEAKER THAN CLAIMED, WRONG PREMISE. Savings are instructions of the 45.13 G run. One throwaway instrumented run (reverted, not committed) settled S1(a).
+Each item was checked against the source and the callgrind data in `<scratch>/p2/`. Verdicts: HOLDS, HOLDS WITH CORRECTION, WEAKER THAN CLAIMED, WRONG PREMISE. Savings are instructions of the 45.13 G run. One throwaway instrumented run (reverted, not committed) settled S1(a).
 
 ## S1. Lazy context loading: PARTLY SETTLED, still not startable
 - Measured (name-table lookups, `get`/`get_with_name`/`contains_key`, Piwigo scoped run): during the check phase **435 of 10,504 vendor classes (4.1 %)** are looked up, against 2,005/2,005 project classes. The condition the plan set ("well under 20 %") holds.

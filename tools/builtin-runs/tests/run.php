@@ -40,8 +40,8 @@ function check(string $name, bool $holds, string $detail = ''): void
     }
 }
 
-$scratch = sys_get_temp_dir() . '/builtin-runs-tests-' . getmypid();
-@mkdir($scratch);
+$scratch = work_root() . '/builtin-runs-tests-' . getmypid();
+@mkdir($scratch, 0777, true);
 
 // The table: sorted as bytes, one row to a line, with the trailing newline.
 check('table_text sorts as bytes', table_text(["b\t\tprobed\t", "a\t\tprobed\t", "A\t\tprobed\t"]) === "A\t\tprobed\t\na\t\tprobed\t\nb\t\tprobed\t\n");
@@ -173,7 +173,7 @@ if (!class_exists('FFI') || ini_get('ffi.enable') !== '1') {
 } else {
     Limits::init();
     Workdir::create();
-    $pidFile = sys_get_temp_dir() . '/builtin-runs-stubborn-' . getmypid();
+    $pidFile = work_root() . '/builtin-runs-stubborn-' . getmypid();
     define('FIXTURE_PIDFILE', $pidFile);
     $all = static fn (string $builtin): bool => str_starts_with($builtin, 'fixture');
     $rowsOf = static fn (array $lines): array => array_keys($lines);
@@ -277,9 +277,11 @@ if (!is_file($sidecarPath)) {
     check('every stub declaration of a recorded extension has a row or a recorded gap', $drift === [], implode(', ', array_slice($drift, 0, 5)));
 }
 
-// The sandbox: the command that starts a worker in each mode, and the /tmp of each.
+// The sandbox: the command that starts a worker in each mode, and the scratch space of each.
 $bwrap = worker_command('/usr/bin/php', false, ['mode' => 'bwrap', 'cap' => 268435456]);
-check('bwrap starts the worker with no network and a capped /tmp', $bwrap[0] === 'bwrap' && in_array('--unshare-net', $bwrap, true) && in_array('268435456', $bwrap, true) && str_ends_with((string) end($bwrap), '/worker.php'));
+check('bwrap starts the worker with no network and a capped scratch space', $bwrap[0] === 'bwrap' && in_array('--unshare-net', $bwrap, true) && in_array('268435456', $bwrap, true) && str_ends_with((string) end($bwrap), '/worker.php'));
+check('bwrap never mounts or names the temporary directory',array_filter($bwrap, static fn (string $argument): bool => str_contains($argument, '/tmp')) === []);
+check('bwrap makes the worker home its capped scratch tmpfs', in_array('/home/worker', $bwrap, true) && in_array('HOME', $bwrap, true) && in_array('--tmpfs', $bwrap, true));
 check('bwrap sets the allocator off unless --zend-mm', in_array('USE_ZEND_ALLOC', $bwrap, true) && in_array('0', $bwrap, true));
 check('bwrap with --zend-mm leaves the allocator alone', !in_array('USE_ZEND_ALLOC', worker_command('/usr/bin/php', true, ['mode' => 'bwrap', 'cap' => 1]), true));
 // A worker started under bwrap, with no input, ends with status 0. When bwrap
@@ -298,7 +300,7 @@ if ($status === 0) {
 $plain = worker_command('/usr/bin/php', false, ['mode' => 'none', 'cap' => 0]);
 check('none is the PHP itself', $plain[0] === '/usr/bin/php' && !in_array('bwrap', $plain, true));
 check('sudo-unshare is chosen by name only', worker_command('/usr/bin/php', false, ['mode' => 'sudo-unshare', 'cap' => 0])[0] === 'sudo');
-check('the /tmp of a worker is at most 256 MiB', sandbox_cap(8) <= 256 * 1024 ** 2 && sandbox_cap(1) <= 256 * 1024 ** 2);
+check('the scratch space of a worker is at most 256 MiB', sandbox_cap(8) <= 256 * 1024 ** 2 && sandbox_cap(1) <= 256 * 1024 ** 2);
 
 @array_map('unlink', glob("$scratch/*") ?: []);
 @rmdir($scratch);

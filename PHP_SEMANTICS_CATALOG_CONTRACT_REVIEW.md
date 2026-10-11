@@ -521,7 +521,7 @@ here was committed.
   from `checks.py` on `cleanup-ast-0.out`. The `may_throw` exceptional edge reaches
   `event(4)` without passing the `Guard` destructor block. The LLVM export does not show
   this, and the native trace `[1,2,4]` runs the destructor. So the loss is in the Clang CFG
-  export, not in program behaviour. The inputs are under `/tmp/php-catalog-comparison`,
+  export, not in program behaviour. The inputs were under `<scratch root>`,
   outside the repository.
 - **F03.2 (Partial stands).** In `strlen-native-demand-svf.json`, the Stringable target at
   `zend_API.c:769` is empty in the default, blackhole and expanded runs with no
@@ -573,7 +573,7 @@ here was committed.
   valid negative control. Every property is C-model-only.
 - **campaign.py (RV-18).** Pointer-query runs at lines 74, 81 and 82 are unasserted, and
   line 103 writes `completed.json` unconditionally. `finish_campaign.py` waits for that
-  marker, runs its own unasserted layout runs, writes its own marker, and hard-codes `/tmp`
+  marker, runs its own unasserted layout runs, writes its own marker, and hard-codes scratch
   paths for the PHP binary and stock `dvf`.
 - **Test quality (semantics crate).** All 68 tests contain an assertion. Scanning for
   presence-only checks flagged one test, my `manifest_rejects_unresolved_evidence_assumptions`,
@@ -652,7 +652,7 @@ The `instanceof Stringable` answer for trait classes was not separately probed. 
 
 **RV-18 — Active, Medium. The comparison campaign fails open.**
 `campaign.py` runs the pointer queries without checking results and writes `completed.json`
-unconditionally. `finish_campaign.py` waits on that marker and hard-codes `/tmp` binaries.
+unconditionally. `finish_campaign.py` waits on that marker and hard-codes scratch-root binaries.
 A completed marker therefore means every step ran, not that every step succeeded.
 *Ledger:* R06.4.
 
@@ -951,7 +951,7 @@ working tree is not part of this pass.
 - **Correspondence builder** (`f307c252`, `7617797e`, `94bce99a`). Each commit's builder,
   run on the same recorded inputs, reproduces that commit's committed
   `strlen-representation-correspondence.json` byte for byte. The `HEAD` builder reproduces
-  the `HEAD` artifact. The Clang AST campaign records the `/tmp` copy of the locked PHP
+  the `HEAD` artifact. The Clang AST campaign records the scratch copy of the locked PHP
   source, and the builder requires that path. Passing the repository copy is refused, as
   intended. The `HEAD` rebuild that failed earlier was caused by this path choice.
 - **Callback throw model** (`9f895cff`). At that commit, the semantics library tests pass
@@ -1092,7 +1092,7 @@ and full resource campaign were unavailable in this pass.
   fails closed on missing completion data. Pointer/build steps are checked;
   completion manifests bind unique steps, expected exits, and measurement
   digests. CIR rejections are explicit unsupported outcomes. PHP and stock-DVF
-  paths are supplied by the caller rather than fixed `/tmp` paths. All 21
+  paths are supplied by the caller rather than fixed scratch paths. All 21
   focused Python tests pass; the resource-limited end-to-end campaign was not
   rerun.
 - **RV-20 / RV-28 / RV-30 / RV-31:** the ledger scopes R02.3 as Partial,
@@ -1167,8 +1167,8 @@ fourth pass asked for. *Required:* add the two fixtures.
 named. Two limits remain. The measurement records are trusted, so a forged record with a
 matching digest would pass; that is a recorder-integrity question, not a builder one. And
 the artifact could not be regenerated here: the cleanup dumps named by the records
-(`/tmp/php-catalog-comparison/final/cleanup.cpp.007t.gimple` and
-`.016t.cfg`) are absent, as is the `/tmp/php-catalog-comparison` tree, and the cache under
+(`<scratch root>/final/cleanup.cpp.007t.gimple` and
+`.016t.cfg`) are absent, as is the `<scratch root>` tree, and the cache under
 `~/.cache/php-catalog-evaluation` holds no cleanup dumps. The byte-for-byte regeneration
 claimed for `strlen-representation-correspondence.json` is therefore not re-checked by
 this pass.

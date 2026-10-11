@@ -8,6 +8,6 @@ per comparator major (4 for PHPUnit 9, 5 for 10, 6 for 11, 7 for 12).
 Install a major into a scratch directory and run the harness with its
 autoloader:
 
-    mkdir /tmp/c7 && cd /tmp/c7 && echo '{}' > composer.json
+    mkdir -p ~/.cache/phpunit-comparator-matrix/c7 && cd ~/.cache/phpunit-comparator-matrix/c7 && echo '{}' > composer.json
     composer require --ignore-platform-reqs 'sebastian/comparator:^7'
-    cd - && php tools/phpunit-comparator-matrix/matrix.php /tmp/c7/vendor/autoload.php > crates/types/src/tests/data/comparator-7.json
+    cd - && php tools/phpunit-comparator-matrix/matrix.php ~/.cache/phpunit-comparator-matrix/c7/vendor/autoload.php > crates/types/src/tests/data/comparator-7.json

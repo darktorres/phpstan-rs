@@ -836,9 +836,9 @@ fn log_message_notification_has_the_expected_wire_shape() {
 
 #[test]
 fn uri_to_path_and_path_to_uri_round_trip() {
-    let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
+    let uri: Uri = "file:///work/foo.php".parse().unwrap();
     let path = uri_to_path(&uri).unwrap();
-    assert_eq!(path, PathBuf::from("/tmp/foo.php"));
+    assert_eq!(path, PathBuf::from("/work/foo.php"));
     assert_eq!(path_to_uri(&path).to_string(), uri.to_string());
     let not_a_uri: Uri = "not-a-uri".parse().unwrap();
     assert_eq!(uri_to_path(&not_a_uri), None);
@@ -878,8 +878,8 @@ fn uri_to_path_decodes_a_percent_encoded_drive_letter_colon() {
 
 #[test]
 fn uri_to_path_leaves_an_ordinary_unix_path_alone() {
-    let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
-    assert_eq!(uri_to_path(&uri).unwrap(), PathBuf::from("/tmp/foo.php"));
+    let uri: Uri = "file:///work/foo.php".parse().unwrap();
+    assert_eq!(uri_to_path(&uri).unwrap(), PathBuf::from("/work/foo.php"));
 }
 
 #[test]
@@ -888,9 +888,9 @@ fn path_to_uri_preserves_a_literal_backslash_in_a_real_unix_filename() {
     // Linux, this project's only build target), with no drive-letter
     // prefix, must round-trip byte-for-byte - not get silently rewritten
     // to '/' by a blind `Path::display()` string replace.
-    let path = PathBuf::from("/tmp/foo\\bar.php");
+    let path = PathBuf::from("/work/foo\\bar.php");
     let uri = path_to_uri(&path);
-    assert_eq!(uri.to_string(), "file:///tmp/foo%5Cbar.php");
+    assert_eq!(uri.to_string(), "file:///work/foo%5Cbar.php");
     assert_eq!(uri_to_path(&uri).unwrap(), path);
 }
 

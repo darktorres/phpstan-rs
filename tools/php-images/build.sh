@@ -24,7 +24,8 @@ set -euo pipefail
 here=/usr/local/share/php-images
 out=/out
 records=/var/lib/compile-commands
-mkdir -p "$out/root" "$records"
+work=/var/lib/php-images
+mkdir -p "$out/root" "$records" "$work"
 
 version=$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')
 report="$out/report.txt"
@@ -59,14 +60,14 @@ docker-php-source extract
 cd /usr/src/php
 # The VM with each opcode handler a function of its own: the hybrid VM,
 # the default, writes some handlers only as code inside its executor.
-php Zend/zend_vm_gen.php --with-vm-kind=CALL > /tmp/vm-gen.log
-./configure --help > /tmp/configure-help.txt
+php Zend/zend_vm_gen.php --with-vm-kind=CALL > "$work/vm-gen.log"
+./configure --help > "$work/configure-help.txt"
 
 flags=()
 left_out=
 for flag in $(entries "$here/configure-flags"); do
     option=${flag%%=*}
-    if ! grep -Eq -- "(^|[[:space:]])$option(\[|=|[[:space:]]|$)" /tmp/configure-help.txt; then
+    if ! grep -Eq -- "(^|[[:space:]])$option(\[|=|[[:space:]]|$)" "$work/configure-help.txt"; then
         continue
     fi
     why=
@@ -96,12 +97,12 @@ CC="$here/cc-record" CXX="$here/c++-record" ./configure \
     --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
     --enable-option-checking=fatal \
     --without-pear \
-    "${flags[@]}" > /tmp/configure.log 2>&1 || {
-    tail -40 /tmp/configure.log
+    "${flags[@]}" > "$work/configure.log" 2>&1 || {
+    tail -40 "$work/configure.log"
     exit 1
 }
-nice -n 19 make -j"$(nproc)" > /tmp/make.log 2>&1 || {
-    grep -B5 -A5 -m5 'error' /tmp/make.log || tail -40 /tmp/make.log
+nice -n 19 make -j"$(nproc)" > "$work/make.log" 2>&1 || {
+    grep -B5 -A5 -m5 'error' "$work/make.log" || tail -40 "$work/make.log"
     exit 1
 }
 # The official build's shared extensions and their ini files go: this
@@ -110,8 +111,8 @@ rm -rf "$(php-config --extension-dir)"
 rm -f /usr/local/etc/php/conf.d/docker-php-ext-*.ini
 # Apache's module is built for its sources only: installing it would
 # enable it in an Apache configuration the image does not have.
-make INSTALL_IT=: install > /tmp/make-install.log 2>&1 || {
-    tail -40 /tmp/make-install.log
+make INSTALL_IT=: install > "$work/make-install.log" 2>&1 || {
+    tail -40 "$work/make-install.log"
     exit 1
 }
 find /usr/local -type f -perm '/0111' -exec sh -c 'strip --strip-all "$@" 2> /dev/null || :' -- '{}' +
@@ -122,9 +123,9 @@ php "$here/compile-commands.php" "$records" > "$out/compile_commands.json"
 
 find /usr/src/php \( -name '*.o' -o -name '*.lo' -o -name '*.a' -o -name '*.la' \
     -o -name '*.so' -o -name '.libs' \) -prune -exec rm -rf {} +
-php "$here/compile-commands.php" --include-dirs "$records" > /tmp/include-dirs.txt
-printf '%s\n' /usr/include /usr/local/include /usr/src/php >> /tmp/include-dirs.txt
-sort -u /tmp/include-dirs.txt | while read -r dir; do
+php "$here/compile-commands.php" --include-dirs "$records" > "$work/include-dirs.txt"
+printf '%s\n' /usr/include /usr/local/include /usr/src/php >> "$work/include-dirs.txt"
+sort -u "$work/include-dirs.txt" | while read -r dir; do
     case "$dir" in
         /usr/include/* | /usr/local/include/* | /usr/src/php/*) continue ;;
     esac

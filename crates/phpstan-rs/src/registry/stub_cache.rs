@@ -226,8 +226,8 @@ mod cache_dir_tests {
 
     #[test]
     fn an_explicit_directory_wins_over_everything() {
-        let var = env(&[("PHPSTAN_RS_CACHE_DIR", "/tmp/x"), ("HOME", "/home/u")]);
-        assert_eq!(cache_dir_in(var), Some(PathBuf::from("/tmp/x")));
+        let var = env(&[("PHPSTAN_RS_CACHE_DIR", "/work/x"), ("HOME", "/home/u")]);
+        assert_eq!(cache_dir_in(var), Some(PathBuf::from("/work/x")));
     }
 
     #[test]

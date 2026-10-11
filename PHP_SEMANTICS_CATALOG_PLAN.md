@@ -193,7 +193,7 @@ Use compatible configure groups rather than forcing all SAPIs into one configure
 
 Generate CALL VM handlers for analysis and construct mapping. Also build the profile's normal execution VM. Treat the generated representation as an analysis transform whose behavior must be checked against the normal VM; do not label the normal build covered merely because CALL mode parsed successfully.
 
-Build an instrumented runtime from the same locked source and configuration. Keep native binaries and logs under `.corpus-runs/catalog/<run-id>/`, and reusable inputs under `~/.cache/phpstan-rs/catalog/`. Nothing needed by a later gate lives only in `target/` or `/tmp`.
+Build an instrumented runtime from the same locked source and configuration. Keep native binaries and logs under `.corpus-runs/catalog/<run-id>/`, and reusable inputs under `~/.cache/phpstan-rs/catalog/`. Nothing needed by a later gate lives only in `target/` or the temporary directory.
 
 ### 3.3 Exact linkage and compiler coverage
 

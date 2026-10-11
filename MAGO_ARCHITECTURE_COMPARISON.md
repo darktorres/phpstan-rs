@@ -8956,7 +8956,7 @@ drift, the "Verification" note gives the corrected position.
 - **Refined proposal:**
 
 > The false positive is real and I reproduced it. Probe
-> /tmp/claude-1000/-home-torres-projects-phpstan-rs/0e257987-9fa7-45dc-8123-0c082c088f66/scratchpad/probes/traitpriv/t.php:
+> <scratchpad>/probes/traitpriv/t.php:
 > trait T's run() writes \$this->hostProp and calls \$this->hostHelper(), and
 > final class C { use T; private \$hostProp; private function hostHelper() }.
 > Running check-project reports

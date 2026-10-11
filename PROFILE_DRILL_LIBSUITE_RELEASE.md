@@ -8,14 +8,14 @@ Comparison profile: `/home/torres/.cache/prs-profile/cllib7/cg.out` (opt-level 1
 Commands (all on the existing files, nothing rebuilt or rerun):
 
 ```
-callgrind_annotate --threshold=100 --inclusive=yes --tree=none    cl-rel/cg.out > /tmp/rel-drill/incl.txt
-callgrind_annotate --threshold=100 --inclusive=no  --tree=none    cl-rel/cg.out > /tmp/rel-drill/self.txt   (includes per-line annotated sources)
-callgrind_annotate --threshold=100 --inclusive=yes --tree=calling cl-rel/cg.out > /tmp/rel-drill/calling.txt
-callgrind_annotate --threshold=100 --inclusive=yes --tree=caller  cl-rel/cg.out > /tmp/rel-drill/caller.txt
-(same --tree=none pair on cllib7/cg.out -> /tmp/rel-drill/o1_incl.txt, o1_self.txt)
+callgrind_annotate --threshold=100 --inclusive=yes --tree=none    cl-rel/cg.out > <scratch>/rel-drill/incl.txt
+callgrind_annotate --threshold=100 --inclusive=no  --tree=none    cl-rel/cg.out > <scratch>/rel-drill/self.txt   (includes per-line annotated sources)
+callgrind_annotate --threshold=100 --inclusive=yes --tree=calling cl-rel/cg.out > <scratch>/rel-drill/calling.txt
+callgrind_annotate --threshold=100 --inclusive=yes --tree=caller  cl-rel/cg.out > <scratch>/rel-drill/caller.txt
+(same --tree=none pair on cllib7/cg.out -> <scratch>/rel-drill/o1_incl.txt, o1_self.txt)
 ```
 
-`--threshold=100` was needed: at the default 99 the callee lists were truncated. Small python helpers in `/tmp/rel-drill` (`g.py`, `qc.py`, `tree.py`, `ann.py`, `groups.py`, `cmp*.py`) only parse those outputs: they merge the per-file entries of one function, and list callees/callers. The "self" table summed over merged function names equals the 20,628,507,592 total exactly, so the merge loses nothing.
+`--threshold=100` was needed: at the default 99 the callee lists were truncated. Small python helpers in `<scratch>/rel-drill` (`g.py`, `qc.py`, `tree.py`, `ann.py`, `groups.py`, `cmp*.py`) only parse those outputs: they merge the per-file entries of one function, and list callees/callers. The "self" table summed over merged function names equals the 20,628,507,592 total exactly, so the merge loses nothing.
 
 Things to keep in mind when reading numbers:
 

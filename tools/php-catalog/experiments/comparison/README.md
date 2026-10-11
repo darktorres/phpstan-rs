@@ -7,7 +7,9 @@ generate a production catalog, certify semantic closure, or complete Phase F.
 The `results` directory contains measured inputs/dependency hashes, counters,
 framework output, runtime traces, and counterexamples. Large source trees,
 bitcode, binaries, and complete dumps stay outside the repository. Original
-scratch artifacts are in `/tmp/php-catalog-comparison`.
+scratch artifacts were written to a scratch root that is no longer used; the
+recorded paths are kept in `results/` as evidence. New runs use `$ROOT`,
+which is set in the next section.
 
 ## Inputs and builds
 
@@ -19,8 +21,9 @@ Experimental Z3 is an SVF dependency, not the future production SMT lock.
 Bison, re2c, and Z3 packages were extracted locally without system installation:
 
 ```bash
-mkdir -p /tmp/php-catalog-comparison
-cd /tmp/php-catalog-comparison
+export ROOT=$HOME/.cache/php-catalog-evaluation/root
+mkdir -p "$ROOT"
+cd "$ROOT"
 apt-get download bison re2c libz3-dev libz3-4
 for package in ./*.deb; do dpkg-deb -x "$package" deps; done
 ```
@@ -31,26 +34,26 @@ Run source/build commands from scratch: the evaluated SVF CMake creates a
 compilation-database link relative to its working directory.
 
 ```bash
-cd /tmp/php-catalog-comparison
+cd $ROOT
 git clone --depth 1 --branch php-8.5.4 https://github.com/php/php-src.git php-src
 git -C php-src rev-parse HEAD
 # Expected: e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03
 git clone https://github.com/SVF-tools/SVF.git SVF
 git -C SVF checkout --detach e889a5139dbca132142b07d90192efab9a16c614
-export PATH=/tmp/php-catalog-comparison/deps/usr/bin:$PATH
-export BISON_PKGDATADIR=/tmp/php-catalog-comparison/deps/usr/share/bison
+export PATH=$ROOT/deps/usr/bin:$PATH
+export BISON_PKGDATADIR=$ROOT/deps/usr/share/bison
 cd php-src
 ./buildconf --force
 CC=clang-21 CXX=clang++-21 CFLAGS='-O0 -g' ./configure \
   --disable-all --disable-cgi --disable-phpdbg --without-pear \
   --enable-cli --enable-session
 make -j2
-cd /tmp/php-catalog-comparison
+cd $ROOT
 cmake -S SVF -B svf-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=clang++-21 \
   -DLLVM_DIR=/usr/lib/llvm-21/lib/cmake/llvm \
-  -DZ3_DIR=/tmp/php-catalog-comparison/deps/usr \
-  -DZ3_LIBRARY_DIR=/tmp/php-catalog-comparison/deps/usr/lib/x86_64-linux-gnu/libz3.so \
+  -DZ3_DIR=$ROOT/deps/usr \
+  -DZ3_LIBRARY_DIR=$ROOT/deps/usr/lib/x86_64-linux-gnu/libz3.so \
   -DSVF_WARN_AS_ERROR=OFF
 cmake --build svf-build --target wpa dvf --parallel 2
 ```
@@ -58,9 +61,9 @@ cmake --build svf-build --target wpa dvf --parallel 2
 Build CALL in a separate source worktree with an explicit capability setting:
 
 ```bash
-git -C /tmp/php-catalog-comparison/php-src worktree add --detach \
-  /tmp/php-catalog-comparison/php-src-call e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03
-cd /tmp/php-catalog-comparison/php-src-call
+git -C $ROOT/php-src worktree add --detach \
+  $ROOT/php-src-call e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03
+cd $ROOT/php-src-call
 ./buildconf --force
 CC=clang-21 CXX=clang++-21 CFLAGS='-O0 -g' php_cv_preserve_none=no \
   ./configure --disable-all --disable-cgi --disable-phpdbg --without-pear \
@@ -83,25 +86,25 @@ clang++-21 -std=c++17 -O1 -I/usr/lib/llvm-21/include \
   tools/php-catalog/experiments/comparison/native_probe.cpp \
   /usr/lib/llvm-21/lib/libclang-cpp.so.21.1 \
   -L/usr/lib/llvm-21/lib -lLLVM-21 \
-  -o /tmp/php-catalog-comparison/native-probe
+  -o $ROOT/native-probe
 python3 tools/php-catalog/experiments/comparison/run.py \
-  --php /tmp/php-catalog-comparison/php-src \
-  --probe /tmp/php-catalog-comparison/native-probe \
-  --svf /tmp/php-catalog-comparison/svf-build/bin \
-  --call-php /tmp/php-catalog-comparison/php-src-call/sapi/cli/php \
-  --output /tmp/php-catalog-comparison/rerun
+  --php $ROOT/php-src \
+  --probe $ROOT/native-probe \
+  --svf $ROOT/svf-build/bin \
+  --call-php $ROOT/php-src-call/sapi/cli/php \
+  --output $ROOT/rerun
 python3 tools/php-catalog/experiments/comparison/auxiliary.py \
-  --results /tmp/php-catalog-comparison/rerun \
-  --output /tmp/php-catalog-comparison/rerun-auxiliary \
-  --php /tmp/php-catalog-comparison/php-src \
-  --probe /tmp/php-catalog-comparison/native-probe \
-  --svf /tmp/php-catalog-comparison/svf-build/bin \
+  --results $ROOT/rerun \
+  --output $ROOT/rerun-auxiliary \
+  --php $ROOT/php-src \
+  --probe $ROOT/native-probe \
+  --svf $ROOT/svf-build/bin \
   --historical /home/torres/.cache/php-catalog/8.4 --large-growth
 python3 tools/php-catalog/experiments/comparison/checks.py \
-  --results /tmp/php-catalog-comparison/rerun \
-  --aux /tmp/php-catalog-comparison/rerun-auxiliary/auxiliary \
-  --external /tmp/php-catalog-comparison/rerun-auxiliary/external-comparison \
-  --output /tmp/php-catalog-comparison/rerun-findings.json
+  --results $ROOT/rerun \
+  --aux $ROOT/rerun-auxiliary/auxiliary \
+  --external $ROOT/rerun-auxiliary/external-comparison \
+  --output $ROOT/rerun-findings.json
 ```
 
 Omit `--historical` if the preserved export is unavailable. `--large-growth`
@@ -123,14 +126,14 @@ python3 -m unittest tools/php-catalog/experiments/comparison/test_extract_strlen
 python3 tools/php-catalog/experiments/comparison/extract_strlen_llvm_witness.py \
   /home/torres/.cache/php-catalog-evaluation/php-src-gcc/Zend/zend_builtin_functions.c \
   /home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc \
-  --output /tmp/php-catalog-comparison/strlen-llvm-operation-inventory.json
+  --output $ROOT/strlen-llvm-operation-inventory.json
 cargo run -p phpstan-rs-semantics --example build_strlen_catalog -- \
   /home/torres/.cache/php-catalog-evaluation/php-src-gcc/Zend/zend_builtin_functions.c \
-  /tmp/php-catalog-comparison/strlen-llvm-operation-inventory.json \
+  $ROOT/strlen-llvm-operation-inventory.json \
   tools/php-catalog/experiments/comparison/results/runtime/strlen-weak-scalars-8.5.4.json \
-  > /tmp/php-catalog-comparison/php-8.5.4-strlen.json
+  > $ROOT/php-8.5.4-strlen.json
 cmp crates/php-semantics/data/php-8.5.4-strlen.json \
-  /tmp/php-catalog-comparison/php-8.5.4-strlen.json
+  $ROOT/php-8.5.4-strlen.json
 ```
 
 The inventory accounts for each instruction opcode in `zif_strlen` and fails
@@ -150,7 +153,7 @@ Replay the bounded indirect-call query against the linked PHP 8.5.4 module:
 python3 -m unittest tools/php-catalog/experiments/comparison/test_evaluate_strlen_svf_demand.py
 python3 tools/php-catalog/experiments/comparison/evaluate_strlen_svf_demand.py \
   --linked-bitcode /home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli.bc \
-  --svf-bin /tmp/php-catalog-comparison/svf-build/bin \
+  --svf-bin $ROOT/svf-build/bin \
   --output tools/php-catalog/experiments/comparison/results/evaluation/strlen-native-demand-svf
 ```
 

@@ -2,7 +2,7 @@
 
 Builds on `PIWIGO_OPTIMIZATION_PLAN.md` and `PIWIGO_OPTIMIZATION_VALIDATION.md`. New data for this pass (all from the same 45.13 G callgrind run of `target/gate/phpstan-rs`, which is HEAD with my earlier changes in it):
 
-- Self cost of every function with no threshold, summed over the nine threads (the first drill cut the tail at 99 %). Files in `/tmp/p2/`.
+- Self cost of every function with no threshold, summed over the nine threads (the first drill cut the tail at 99 %). Files in `<scratch>/p2/`.
 - Caller trees for threads 01, 03 and 04 with no threshold (the largest main, check and parse threads); other threads are not in the caller sums, so caller figures are lower bounds.
 - Corpus facts counted directly from `/home/torres/piwigo17-frozen`.
 

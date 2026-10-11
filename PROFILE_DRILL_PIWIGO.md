@@ -5,11 +5,11 @@ Command profiled (from the callgrind header): `target/gate/phpstan-rs check-proj
 ## 0. Method and caveats
 
 - Files: `/home/torres/.cache/prs-profile/cl-piwigo/cg.out-01 .. cg.out-09`. All nine threads were read (main = 01, workers = 02..09), not just the largest, because the per-thread numbers had to be summed.
-- Commands (run once per thread, output in `/tmp/pw-drill/`):
+- Commands (run once per thread, output in `<scratch>/pw-drill/`):
   - `nice -n 19 callgrind_annotate --inclusive=yes --tree=none cg.out-NN` -> `inc-NN.txt`
   - `... --inclusive=no --tree=none` -> `self-NN.txt`
   - `... --inclusive=yes --tree=calling` -> `calling-NN.txt`, and `--tree=caller` -> `caller-NN.txt`
-- Small helper scripts I wrote to sum across threads: `/tmp/pw-drill/agg.py` (sum of self or inclusive per function), `ac.py` (callees of a function summed over threads), `acl.py` (callers), `cyc.py` (callees of a whole recursive family), `t.py` (one thread's tree block).
+- Small helper scripts I wrote to sum across threads: `<scratch>/pw-drill/agg.py` (sum of self or inclusive per function), `ac.py` (callees of a function summed over threads), `acl.py` (callers), `cyc.py` (callees of a whole recursive family), `t.py` (one thread's tree block).
 - Percentages are of 45,129,557,009. Per-thread totals: th01 2.630 G, th02 8.494 G, th03 6.050 G, th04 5.792 G, th05 3.775 G, th06 4.615 G, th07 3.416 G, th08 4.755 G, th09 5.602 G.
 - Self-cost sums are exact for the functions callgrind_annotate lists (it cuts the tail at 99%: the listed self costs sum to 44.68 G of 45.13 G).
 - Inclusive numbers: exact for non-recursive functions. Names ending in `'2` and the checker/parser families are recursive, so their inclusive numbers are upper bounds and are marked "(UB)". The `--tree=calling/caller` files also only list functions above the threshold in each thread, so a cross-thread sum of a small function's callers/callees is a lower bound; where I rely on such a sum I say so.
