@@ -2,8 +2,8 @@
 
 ## Status
 
-Steps 1–11 are committed, step 12 waits for the user's go (it regenerates the
-table, which changes checker input). Commits, in order: step 1 harness and
+Steps 1–12 are committed. Step 12 (`bc9ab94f`) regenerated the table with the finished
+recorder: 10,725 rows, verified twice, with its sidecar and three engine fixtures. Commits, in order: step 1 harness and
 this plan; 2 lib split (`d7ae4d33`); 3 instrumentation (`0565f6dd`); 4 workers
 by `proc_open` and per-child directories (`6cd8c495`); 5 survey and
 `--skip=dead` (`1d45c273`); 6 two-phase scheduling and `--skip=released`
