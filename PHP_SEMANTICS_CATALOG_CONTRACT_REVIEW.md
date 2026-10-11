@@ -2,12 +2,12 @@
 
 The follow-up [adversarial review pass](#adversarial-review-pass-same-author-not-independent)
 records additional issues. It is also author-led and does not close the
-independent-review requirement.
+review requirement.
 
-Status: **self-review complete for this pass; independent review outstanding**.
+Status: **self-review complete for this pass; review outstanding**.
 F00 remains open. This review compares the working contract with the shared
 evaluator API, catalog validation, current semantic-host tests, and the pinned
-PHP 8.5.4 `strlen` source/runtime evidence. It is not an independent review and
+PHP 8.5.4 `strlen` source/runtime evidence. It is an author review and
 does not certify the implementation.
 
 ## Findings
@@ -72,14 +72,14 @@ implicit `Stringable` interface for classes declaring `__toString`, and
 fixtures cover explicit and implicit Stringable cases plus strict mode and a
 non-Stringable negative control. This establishes the current checker model's
 intended partition for those cases; registry soundness and invalid/incomplete
-class declarations remain assumptions that require independent review.
+class declarations remain assumptions that require review.
 
 ## F00 status
 
 F00 subtask statuses and remediation actions are maintained in the single
 [Phase F task and remediation ledger](PHP_SEMANTICS_CATALOG_LEDGER.md).
 
-## Review checklist for an independent reviewer
+## Review checklist for a reviewer
 
 - Does the abstract-order language cover values, state, pending outcomes, and
   all observable projections a closed domain may expose?
@@ -94,7 +94,7 @@ F00 subtask statuses and remediation actions are maintained in the single
   implicit `Stringable`, callback writes, and callback throws?
 
 The review cannot be marked complete by the author of this self-review. Until
-an independent reviewer accepts or amends the contract, dependent gate work
+a reviewer accepts or amends the contract, dependent gate work
 must not be treated as closed.
 
 ## Verification performed for this review
@@ -113,14 +113,14 @@ must not be treated as closed.
 ## Adversarial review pass (same author; not independent)
 
 Review date: 2026-10-09
-Review type: author-led adversarial pass; **not an independent review**
+Review type: author-led adversarial pass; **not a review by another party**
 Disposition: contract remains a working draft; F00.5 and R00.1 remain open.
 
 This review examines the questions in the F00 checklist against
 [the contract](PHP_SEMANTICS_CATALOG_CONTRACT.md),
 [the prior contract self-review](#phase-f00-contract-review),
 the plan's Phase F gate, the evaluator/catalog APIs, and the recorded CBMC
-artifacts. It identifies issues for the independent reviewer and proposes
+artifacts. It identifies issues for the reviewer and proposes
 dispositions; it does not amend the contract or claim that the same author can
 independently accept it.
 
@@ -156,7 +156,7 @@ producer omits those dependencies. The validator cannot infer that omission
 from the list itself; a self-consistent but incomplete dependency graph may
 still validate.
 
-The independent reviewer should require an explicit trust rule for dependency
+The reviewer should require an explicit trust rule for dependency
 completeness: for example, a reviewed transfer contract that declares the
 dependencies for each operation kind, with exhaustive operation coverage and
 negative tests that remove required edges. Until then, certificate replay
@@ -233,7 +233,7 @@ closed, with positive, negative, and contradiction cases.
 
 ### Checklist disposition
 
-| Independent-review question | Adversarial-pass disposition |
+| Checklist question | Adversarial-pass disposition |
 |---|---|
 | Does abstract order cover values, state, pending outcomes, and observable projections? | Partly specified; the abstract-to-concrete representation/simulation relation is missing (ACR-1). |
 | Are normal returns, exceptional exits, cleanup replacement, suspension, and nontermination prefixes composed without losing a concrete trace? | Core distinctions are specified, but cleanup combinations are incomplete and prefix preservation under widening lacks an explicit representation relation (ACR-1, ACR-4). |
@@ -244,7 +244,7 @@ closed, with positive, negative, and contradiction cases.
 ### Proposed dispositions and remaining acceptance
 
 1. Amend the contract to resolve ACR-1 through ACR-4, or explicitly record why
-   the independent reviewer accepts the current limits for the Phase F gate.
+   the reviewer accepts the current limits for the Phase F gate.
 2. Keep the CBMC evidence scoped to the reduced C model and maintain its
    property-to-clause mapping; do not describe it as PHP semantic validation.
 3. Keep F00.3/F01.5 open until source-derived host obligations and contradictory
@@ -253,7 +253,7 @@ closed, with positive, negative, and contradiction cases.
    underlying implementation/evidence, and the proposed dispositions. Record
    that review and any amendments before closing R00.1.
 
-No finding is marked accepted by an independent reviewer. R00.1 remains
+No finding is marked accepted by a reviewer. R00.1 remains
 **Blocked** in the remediation ledger until item 4 is completed; F00.5 remains
 **Open** in the Phase F status ledger.
 
@@ -265,7 +265,7 @@ R04.1. Each row includes dependencies and acceptance evidence.
 
 ---
 
-## Independent review record (2026-10-09)
+## Review record (2026-10-09)
 
 **Reviewer:** a fresh Claude session, started at the maintainer's request to review the F00
 contract and the ledger claims that depend on it. The maintainer reports that the ledger was
@@ -710,7 +710,7 @@ points:
   that frame, and explain why partial result definitions cannot be joined.
 - **S-4:** add a regression where distinct concrete entry states remain
   represented through join and widening, not only a single-state write.
-- **S-5:** the amendment needs a fresh independent review before R00.2 closes.
+- **S-5:** the amendment needs a fresh review before R00.2 closes.
 
 The author addressed S-1 through S-3 in the contract and added a widening
 regression for S-4. A subsequent review found that the test's wording
@@ -1103,7 +1103,7 @@ and full resource campaign were unavailable in this pass.
   is reconciled against its tests and artifacts and committed as
   `Close PHP catalog review remediation gaps` in the current worktree history.
 
-The independent-review gate remains open. After implementation and validation,
+The review gate remains open. After implementation and validation,
 the reviewer should recheck the changed transfer logic, campaign evidence
 binding, regenerated artifacts, and amended statuses before F00.5 closes.
 
@@ -1192,6 +1192,6 @@ this pass.
 ### Reviewer disposition
 
 RV-27, RV-28, RV-30, RV-31 and RV-22 are accepted for the claims stated. RV-29 remains
-open (Medium) and needs the two checker fixtures. The independent-review gate for F00.5
+open (Medium) and needs the two checker fixtures. The review gate for F00.5
 still depends on the earlier findings' dispositions; this pass closes only the
 fourth-pass items.

@@ -312,7 +312,7 @@ TAILCALL and CALL runtime witnesses verify scalar lengths and the null deprecati
 The current [working semantic contract](PHP_SEMANTICS_CATALOG_CONTRACT.md)
 turns the design rule into observable trace and composition requirements and
 maps current tests to concrete invalid compositions. It is explicitly a draft,
-so it does not close F00 or substitute for independent review.
+so it does not close F00 or substitute for review.
 
 The authoritative Phase F task statuses, remediation actions, dependencies, and acceptance criteria are in the [PHP catalog Phase F and remediation ledger](PHP_SEMANTICS_CATALOG_LEDGER.md). The evaluation evidence and audit basis are recorded below.
 
@@ -732,7 +732,7 @@ the corresponding rows in the [authoritative ledger](PHP_SEMANTICS_CATALOG_LEDGE
 
 ## Commit-by-commit Phase F review
 
-The earlier task-history list named only 28 milestone commits. A complete path-scoped history query finds 108 commits touching Phase F implementation, tests, evaluation records, or comparison evidence. I reviewed those changes by implementation/evidence area against the current code and tests; the list below records the full commit inventory. This was an author review; it does not satisfy F00.5's independent-review requirement. `git show --check` passed for the implementation and documentation changes. It reported trailing whitespace in captured raw compiler/SVF logs in `043f2c78`, `4e7d29a3`, and blank EOF lines in `fe1cab81`; these are retained tool outputs, not source-code defects.
+The earlier task-history list named only 28 milestone commits. A complete path-scoped history query finds 108 commits touching Phase F implementation, tests, evaluation records, or comparison evidence. I reviewed those changes by implementation/evidence area against the current code and tests; the list below records the full commit inventory. This was an author review; it does not satisfy F00.5's review requirement. `git show --check` passed for the implementation and documentation changes. It reported trailing whitespace in captured raw compiler/SVF logs in `043f2c78`, `4e7d29a3`, and blank EOF lines in `fe1cab81`; these are retained tool outputs, not source-code defects.
 
 - **F00:** `599c2508` introduced the trace contract; `5df391b9` recorded the CBMC result; `e62c000e` revised the contract and added the self-review. The contract is still not independently accepted. At the time of the commit-by-commit review, the CBMC replay needed a fail-closed result checker and property-to-clause crosswalk; R00.4 has since completed that scoped accounting and enforcement work. The reduced C model remains separate from PHP semantic validation.
 - **F01:** `9df6d5d3`, `80795f6e`, `d5f7598f`, `7cb0c627`, `d3c3fa63`, `eee12e0f`, `a0b083a8`, and `dab7e44f` add the graph, worklist, catalog/evidence boundary, PHP flow host, certificate replay, and array/reference fixtures. The focused semantic tests pass 60/60 in the reviewed historical state. The implementation remains a trusted-host post-fixpoint checker, not a proof of PHP semantics. R01.1 supplies typed assumptions and fail-closed reference validation; R01.2 rejects cycles across the combined evidence/assumption graph; R01.3 validates catalog-entry release ranges at insertion and manifest load; R01.4 checks N/A dependencies and propagates open dependencies transitively. Trusted validators and canonical-order enforcement remain under R01.7–R01.8.

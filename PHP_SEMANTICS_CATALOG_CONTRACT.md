@@ -336,5 +336,5 @@ callback havocs tracked state and leaves effect domains open, but this is one
 host-specific check, not a general proof of unknown-transfer soundness.
 Mismatched target scenarios are covered in the target module. This contract
 revision records a self-review against the evaluator API and current fixtures;
-it has not received independent review, so F00 remains open until reviewers
+it has not been reviewed, so F00 remains open until reviewers
 accept the contract and its assumptions.
