@@ -1,6 +1,23 @@
 <?php
 // The values a parameter is probed with, and the lines a probe's call yields.
 
+require_once __DIR__ . '/stubdocs.php';
+
+/**
+ * Whether the stubs document an untyped parameter as a resource. PHP's
+ * reflection shows no type for it, so the stubs' docblocks say what it takes.
+ */
+function documented_resource(ReflectionParameter $param): bool
+{
+    static $map = null;
+    $map ??= untyped_resource_params(phpstorm_stubs_dir());
+    $function = $param->getDeclaringFunction();
+    $key = $function instanceof ReflectionMethod
+        ? strtolower($function->getDeclaringClass()->getName() . '::' . $function->getName())
+        : strtolower($function->getName());
+    return isset($map[$key][$param->getName()]);
+}
+
 /** Whether `$type` admits a value of the named type. */
 function admits(?ReflectionType $type, string $name): bool
 {
@@ -113,6 +130,8 @@ function valid_value(?ReflectionType $type): ?Closure
     $values ??= [
         'xmlwriter' => static fn (): XMLWriter => xmlwriter_open_memory(),
         'xmlparser' => static fn (): XMLParser => xml_parser_create(),
+        // Made in the worker's own IPC namespace, which the sandbox gives it; without one the queue is the host's.
+        'sysvmessagequeue' => static fn (): SysvMessageQueue => msg_get_queue(0x5150),
         'datetimeinterface' => static fn (): DateTimeImmutable => new DateTimeImmutable('2000-01-01 00:00:00', new DateTimeZone('UTC')),
         'datetime' => static fn (): DateTime => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC')),
         'dateinterval' => static fn (): DateInterval => new DateInterval('P1D'),
@@ -141,7 +160,10 @@ function plain_value(ReflectionParameter $param): mixed
 {
     $type = $param->getType();
     if ($type === null) {
-        return 1;
+        // A memory stream serves every resource kind the stubs name: PHP takes
+        // a stream where it takes a stream context, and a function that needs
+        // another kind throws, which the table records.
+        return documented_resource($param) ? fopen('php://memory', 'r+') : 1;
     }
     if ($type->allowsNull() && !admits($type, 'int') && !admits($type, 'string')) {
         return null;

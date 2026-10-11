@@ -54,6 +54,8 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         array_push($command, '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/home');
         $tools = dirname(__DIR__);
         array_push($command, '--ro-bind', $tools, $tools);
+        $stubs = phpstorm_stubs_dir();
+        array_push($command, '--ro-bind', $stubs, $stubs);
         $phpDir = dirname((string) realpath($php));
         if (str_starts_with($phpDir, '/home/')) {
             array_push($command, '--ro-bind', $phpDir, $phpDir);
