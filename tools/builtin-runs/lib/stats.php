@@ -101,6 +101,9 @@ final class Stats
             'timeouts' => $payload['timeouts'],
             'died' => $payload['died'],
         ];
+        if (self::$file === null) {
+            return;
+        }
         foreach ($payload['lines'] as $line) {
             self::write($line);
         }

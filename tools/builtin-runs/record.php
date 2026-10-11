@@ -25,9 +25,11 @@
 // output is one this PHP does not define, or one no call reached (an
 // abstract class's method, a constructor that would not take the values).
 //
-// Each call runs in a child process of its own, in an empty directory, with
-// an alarm, so that a call that ends the process, changes its state or
-// blocks affects no other. Run it with the PHP whose behaviour is wanted:
+// The calls run in worker processes, which this script starts with
+// `proc_open` as fresh PHP processes (worker.php). Each call runs in a child
+// of its worker, in an empty directory, with an alarm, so that a call that
+// ends the process, changes its state or blocks affects no other. Run it with
+// the PHP whose behaviour is wanted:
 //
 //   php tools/builtin-runs/record.php > crates/phpstan-rs/src/registry/data/builtin-runs-8.5.tsv
 //
@@ -35,7 +37,14 @@
 // whose lowercased name it matches. `--jobs=N` sets the number of workers
 // (one for each processor by default): each takes the next function or
 // method from a queue as it finishes its last, so the machine stays busy
-// to the end.
+// to the end. `--php=BIN` records the PHP BIN instead of this one, and the
+// workers are its processes. `--zend-mm` leaves the workers on PHP's own
+// allocator; by default they run with `USE_ZEND_ALLOC=0`, which gives the same
+// output about twice as fast.
+//
+// A worker that dies has its unit run once more on another worker. A unit
+// that dies twice is reported on standard error, its rows are missing from
+// the output, and the exit status is 1.
 //
 // `--list` prints the units and the children a run would make, by kind and
 // for the classes with the most, and stops. `--stats=FILE` writes a JSON
@@ -56,38 +65,33 @@ if (!function_exists('pcntl_fork')) {
     exit(1);
 }
 
-// A probe that aborts (a failed assertion in an extension, a fault) must not
-// start the system's crash handler, which costs seconds for each: processes
-// that are not dumpable never start it, and the setting is inherited by every
-// worker and probe. It needs FFI, which PHP allows only when asked.
-if (extension_loaded('ffi')) {
-    if (ini_get('ffi.enable') !== '1' && getenv('BUILTIN_RUNS_REEXEC') === false) {
-        putenv('BUILTIN_RUNS_REEXEC=1');
-        pcntl_exec(PHP_BINARY, ['-d', 'ffi.enable=1', ...$argv]);
-    }
-    try {
-        FFI::cdef('int prctl(int option, unsigned long a, unsigned long b, unsigned long c, unsigned long d);', 'libc.so.6')
-            ->prctl(4, 0, 0, 0, 0);
-    } catch (Throwable) {
-    }
-}
-
 require_once __DIR__ . '/lib/seen.php';
 require_once __DIR__ . '/lib/probes.php';
 require_once __DIR__ . '/lib/child.php';
 require_once __DIR__ . '/lib/plan.php';
 require_once __DIR__ . '/lib/unit.php';
+require_once __DIR__ . '/lib/protocol.php';
+require_once __DIR__ . '/lib/workdir.php';
 require_once __DIR__ . '/lib/pool.php';
 require_once __DIR__ . '/lib/stats.php';
 
 $arguments = array_values(array_filter(array_slice($argv, 1), static fn (string $argument): bool => !str_starts_with($argument, '--')));
 $only = $arguments[0] ?? null;
-$wanted = static fn (string $builtin): bool => $only === null || preg_match($only, $builtin) === 1;
+$php = option($argv, 'php') ?? PHP_BINARY;
+$zendMm = in_array('--zend-mm', $argv, true);
 
-$units = units($wanted);
-$weights = unit_weights($units, $wanted);
+sweep_stale_directories();
+pcntl_async_signals(true);
+$stop = static function (int $signal): void {
+    Pool::abandon();
+    exit(128 + $signal);
+};
+pcntl_signal(SIGINT, $stop);
+pcntl_signal(SIGTERM, $stop);
+
+$plan = plan_run($php, $only, $zendMm);
 if (in_array('--list', $argv, true)) {
-    echo plan_summary($units, $weights);
+    echo plan_summary($plan['units'], $plan['weights']);
     exit(0);
 }
 $statsFile = option($argv, 'stats');
@@ -95,15 +99,17 @@ if ($statsFile !== null) {
     Stats::open($statsFile);
 }
 
-$out = run_units($units, jobs($argv), $wanted, $weights);
-Stats::close((int) array_sum($weights));
+[$out, $failed] = run_units($plan['units'], $plan['weights'], jobs($argv), $php, $only, $zendMm, $plan['manifest']);
+Stats::close((int) array_sum($plan['weights']));
 
-foreach (RUNS_NOTHING as $function) {
-    if (function_exists($function) && $wanted($function)) {
-        $out["$function\t\tprobed\t"] = true;
-    }
+foreach ($plan['nothing'] as $function) {
+    $out["$function\t\tprobed\t"] = true;
+}
+foreach ($failed as $unit) {
+    fwrite(STDERR, 'lost twice, its rows are missing: ' . implode(' ', $unit) . "\n");
 }
 
 $lines = array_keys($out);
 sort($lines, SORT_STRING);
 echo implode("\n", $lines), "\n";
+exit($failed === [] ? 0 : 1);
