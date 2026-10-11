@@ -75,6 +75,21 @@ enum Command {
 
 #[hotpath::main]
 fn main() {
+    // The whole program runs on a thread with the checking threads' stack
+    // size, not on the main thread: Windows gives the main thread 1 MiB, and
+    // a stack that small makes every guarded deep walk grow a fresh segment
+    // (`syntax::stack`), which made `phpstan-rs lsp` take ~40 s to start.
+    let worker = std::thread::Builder::new()
+        .name("phpstan-rs-main".to_string())
+        .stack_size(phpstan_rs::project::WORKER_STACK_SIZE)
+        .spawn(run)
+        .expect("spawning the main thread");
+    if let Err(panic) = worker.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+fn run() {
     // Stopped at the end of the run, which writes `dhat-heap.json` in the
     // `dhat-heap` build (every `check-project` error path below that
     // matters for a profiling run falls through to a normal return, not

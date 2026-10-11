@@ -2861,6 +2861,7 @@ pub fn run(version: &str, config_schema: config::Schema) -> i32 {
     let (tx, rx) = crossbeam_channel::bounded(64);
     std::thread::Builder::new()
         .name("phpstan-rs-lsp-reader".to_string())
+        .stack_size(crate::project::WORKER_STACK_SIZE)
         .spawn(move || {
             let stdin = io::stdin();
             let mut reader = stdin.lock();
@@ -3082,6 +3083,7 @@ fn spawn_debounce_worker<W: Write + Send + 'static>(
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
         .name("phpstan-rs-lsp-debounce".to_string())
+        .stack_size(crate::project::WORKER_STACK_SIZE)
         .spawn(move || {
             loop {
                 let guard = debounce.queue.lock().unwrap();
