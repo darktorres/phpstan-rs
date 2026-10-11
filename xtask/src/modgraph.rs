@@ -89,7 +89,7 @@ pub(crate) fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
 
     let mut problems = Vec::new();
     for module in &known {
-        if spec.row(module).is_none() {
+        if is_unassigned(&spec, module) {
             problems.push(format!("module {} has no assignment", join(module)));
         }
     }
@@ -230,6 +230,67 @@ impl Spec {
             .iter()
             .filter(|(m, _)| path.starts_with(m))
             .max_by_key(|(m, _)| m.len())
+    }
+}
+
+/// Whether `module` has no row of its own. The root row is the empty path,
+/// a prefix of everything, so a top-level module without its own row would
+/// otherwise be assigned the root silently; only the root itself may take it.
+fn is_unassigned(spec: &Spec, module: &[String]) -> bool {
+    match spec.row(module) {
+        None => true,
+        Some((row, _)) => row.is_empty() && !module.is_empty(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(rows: &[(&str, &str)]) -> Spec {
+        Spec {
+            deps: BTreeMap::new(),
+            modules: rows
+                .iter()
+                .map(|(m, c)| (split(m), c.to_string()))
+                .collect(),
+            allowed: BTreeMap::new(),
+            externs: BTreeSet::new(),
+            finished: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn a_top_level_module_without_a_row_is_unassigned() {
+        let spec = spec(&[("", "root")]);
+        assert!(is_unassigned(&spec, &split("file_id")));
+    }
+
+    #[test]
+    fn a_module_under_its_own_row_is_assigned() {
+        let spec = spec(&[("", "root"), ("file_id", "reflection")]);
+        assert!(!is_unassigned(&spec, &split("file_id")));
+        assert!(!is_unassigned(&spec, &split("file_id::inner")));
+    }
+
+    #[test]
+    fn a_module_under_a_nested_row_is_assigned_by_the_nested_row() {
+        let spec = spec(&[("", "root"), ("checker", "analyser")]);
+        assert!(!is_unassigned(&spec, &split("checker::calls")));
+        assert!(is_unassigned(&spec, &split("registry")));
+    }
+
+    #[test]
+    fn the_root_itself_is_assigned() {
+        let spec = spec(&[("", "root")]);
+        assert!(!is_unassigned(&spec, &split("")));
+    }
+
+    #[test]
+    fn a_module_with_no_rows_at_all_is_unassigned() {
+        let spec = spec(&[]);
+        assert!(is_unassigned(&spec, &split("file_id")));
+        assert!(is_unassigned(&spec, &split("")));
     }
 }
 

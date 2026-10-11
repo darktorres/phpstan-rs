@@ -21,9 +21,9 @@ once its API is final. So:
 - nothing is widened to `pub` and then narrowed again;
 - no test is stranded behind a dev-dependency cycle.
 
-Lower layers (syntax, types, phpdoc, stub-sources, sql, diagnostics,
-composer, config, reflection, php-regex) are extracted as soon as they're
-finished.
+Lower layers (syntax, types, phpdoc (syntax, types), dumps, semantics,
+stub-sources, sql, diagnostics, composer, config, reflection, php-regex) are
+extracted as soon as they're finished.
 The engine and everything above it is redesigned in the package and
 extracted in one final wave.
 
@@ -76,7 +76,8 @@ L0  syntax        typed AST with NodeIds, lexer (returns warnings), parser,
                   the Reporter trait                              (backtrace)
     pcre          PCRE2 behind a safe API, knowing nothing of PHP (pcre2-sys)
     crash-sys     the crash reporter's process FFI                (no deps)
-L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
+L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock;
+                  the `@var` tag selection  (syntax, types)
     sql           standalone SQL reflection with its own column-type model:
                   config section, DDL schema, live reflector (DB drivers,
                   sqlparser), drift, SqlContext service           (no deps)
@@ -97,7 +98,7 @@ L3  reflection    ReflectionProvider snapshots, locator chain, stub layer
                   ReflectionAttribute, provenance, ConstantResolver,
                   implements ClassHierarchy
                                     (syntax, types, phpdoc, stub-sources,
-                                    composer, config)
+                                    composer, config, semantics)
 L4  analyser      engine: holder scope, ExprHandlers, results, TypeSpecifier,
                   NodeCallback sink, Scope API, Rule/Collector/Observer,
                   derived nodes, extension-trait registry, RuleLevelHelper,
@@ -7493,8 +7494,8 @@ held to the previous commit's:
 Stage G starts when F is done. What it starts from:
 
 - **Crates already:** `syntax`, `types`, `phpdoc`, `stub-sources`, `sql`,
-  `diagnostics`, `composer`, `config`, `reflection` and `php-regex` (B, C10,
-  E2), the sibling plans' `crash-context`, `pcre` and `crash-sys`, and `neon`
+  `diagnostics`, `composer`, `config`, `reflection`, `dumps`, `semantics` and
+  `php-regex` (B, C10, E2, and the gate's `dumps` and `semantics` rows), the sibling plans' `crash-context`, `pcre` and `crash-sys`, and `neon`
   once Phase 183 lands.
 - **The package:** everything from `analyser` up is still modules of the one
   `phpstan-rs` package (`crates/phpstan-rs/src`), each assigned its crate by
@@ -7961,7 +7962,16 @@ moves in the phase named.
 | regex_groups, pcre_validate | pattern syntax and compiling → php-regex; group typing and validation → builtins::regex | E2 |
 | checker/preg_pattern_validity | rules (`RegularExpressionPatternRule`, over builtins::regex) | E3c |
 | php_stubs + build.rs | stub-sources (sources, index) + reflection::stubs (layer) | B9/C5 |
-| stub_attributes | reflection::stubs (the version layer applies them per `PhpVersions` range) | C5 |
+| file_mentions | reflection (the `FileFacts::mentions` bits and their spellings, one owner for all five; replaces `stub_attributes`'s own bit) | modgraph |
+| file_id | reflection | modgraph |
+| semantics | reflection (its `php_semantics` re-export; the crate itself is `semantics`) | modgraph |
+| heap | project | modgraph |
+| allocator | bin | modgraph |
+| gate | app | modgraph |
+| registry::completion | reflection (`Completion`, `Reach`, `BlockCompletion`, `is_truthy_literal`; moved out of `checker::completion`) | modgraph |
+| checker::named_callable | analyser (`NamedCallable` and its resolvers; `checker::callable_values` keeps the rule) | modgraph |
+| strict_types_mode | syntax (`syntax::strict_types`; moved out of `checker::keywords`) | modgraph |
+| var_tag_nodes | phpdoc (`phpdoc::var_tags`; moved out of `checker::phpdoc_unresolvable`) | modgraph |
 | registry/* (index, resolve, hierarchy, generics, relation, name_context, class_info, function_sig, function_table, provenance, reflection_attribute, type_node, settings, stubs, anonymous_class; C4 adds the builder, the memo levels and the snapshot) | reflection | C3–C10 |
 | registry/bodies (`BodySource`) | analyser (`AnalysisContext`'s body source; project implements it on the VFS) | C9/F1 |
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
