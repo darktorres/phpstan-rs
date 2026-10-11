@@ -20,8 +20,9 @@
 //! that can't be run here is `skipped`; neither fails. The counts, and
 //! each fixture in the two lists, are printed at the end.
 //!
-//! `cargo test -p phpstan-rs --test runtime_oracle`, or
-//! `--profile gate`, like the fixture suite.
+//! `cargo test -p phpstan-rs --profile oracle --test runtime_oracle`: the
+//! `oracle` profile is the `gate` profile with the debug assertions and
+//! overflow checks that the checker's own assertions need.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

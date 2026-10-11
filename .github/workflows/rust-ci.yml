@@ -336,5 +336,8 @@ jobs:
       - name: Build the pinned PHP runtime image
         run: docker build -t "$PHPSTAN_RS_ORACLE_IMAGE" crates/phpstan-rs/tests/runtime_oracle
 
+      # The oracle profile keeps the debug assertions and overflow checks
+      # the fixtures' own assertions depend on, and compiles only the
+      # `gate` profile's dependencies plus those two switches.
       - name: Run the runtime oracle on PHP 8.5.4
-        run: cargo test --locked -p phpstan-rs --test runtime_oracle
+        run: cargo test --locked -p phpstan-rs --profile oracle --test runtime_oracle
