@@ -25,6 +25,12 @@ on:
       - ".cargo/**"
       - ".github/workflows/extension-ci.yml"
 
+# A newer pull-request run cancels the one it supersedes. Push runs are
+# never cancelled: each pushed commit keeps its full result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit:
     # Node-only - no Rust build needed for the pure/settings/download
