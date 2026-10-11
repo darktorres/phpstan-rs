@@ -18,10 +18,11 @@
 //! which would otherwise dominate the measurement and mask the actual
 //! parse/index/check throughput this benchmark exists to track.
 //!
-//! Criterion's headline feature - comparing a run against its last
-//! recorded baseline (stored under `target/criterion/`) and flagging a
-//! statistically meaningful regression - is the mechanism that catches
-//! a real slowdown via CI rather than by chance.
+//! Criterion's baseline comparison - against the last recorded run under
+//! `target/criterion/`, flagging a statistically meaningful regression - is
+//! not run by CI, which has no quiet machine to time on. CI compiles this
+//! bench and runs it once in criterion's test mode; the regression check is
+//! the local perf gate (`cargo xtask perf`, and `cargo xtask gates`).
 
 use std::path::{Path, PathBuf};
 
