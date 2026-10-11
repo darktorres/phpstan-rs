@@ -240,6 +240,14 @@ fn run(
         })
         .collect();
     let asserts_anywhere = sources.iter().any(|(_, source)| source.contains("assert"));
+    // Without an assertion in the source there is no record to check, so PHP
+    // is not run for it. The exception is a fixture whose warnings must match
+    // its diagnostics, which PHP has to run for.
+    if !asserts_anywhere && !config.runtime_warnings_exact {
+        return Ok(Outcome::NotExecuted(
+            "no assertType() in the source".to_string(),
+        ));
+    }
     // The analysis: what the calls are made of, and what each assertion
     // is judged against.
     let loaded = if asserts_anywhere {
