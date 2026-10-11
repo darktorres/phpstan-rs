@@ -97,6 +97,45 @@ function probes_for(ReflectionParameter $param): array
     return $probes;
 }
 
+/**
+ * A valid value of a class or resource type that no plain value stands for,
+ * made fresh by the child that calls with it: a stream, an XML writer, an
+ * Intl formatter. Keyed by the lowercased name of the type. Only the types a
+ * plain value cannot satisfy are here; each value needs no server, file or
+ * network. A union has no entry: its scalar members are plain values.
+ */
+function valid_value(?ReflectionType $type): ?Closure
+{
+    static $values = null;
+    if (!$type instanceof ReflectionNamedType) {
+        return null;
+    }
+    $values ??= [
+        'xmlwriter' => static fn (): XMLWriter => xmlwriter_open_memory(),
+        'xmlparser' => static fn (): XMLParser => xml_parser_create(),
+        'datetimeinterface' => static fn (): DateTimeImmutable => new DateTimeImmutable('2000-01-01 00:00:00', new DateTimeZone('UTC')),
+        'datetime' => static fn (): DateTime => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC')),
+        'dateinterval' => static fn (): DateInterval => new DateInterval('P1D'),
+        'gdimage' => static fn (): mixed => imagecreatetruecolor(1, 1),
+        'finfo' => static fn (): finfo => new finfo(FILEINFO_MIME_TYPE),
+        'hashcontext' => static fn (): HashContext => hash_init('md5'),
+        'curlhandle' => static fn (): CurlHandle => curl_init(),
+        'curlmultihandle' => static fn (): CurlMultiHandle => curl_multi_init(),
+        'numberformatter' => static fn (): NumberFormatter => numfmt_create('en', NumberFormatter::DECIMAL),
+        'intldateformatter' => static fn (): IntlDateFormatter => datefmt_create('en', IntlDateFormatter::FULL, IntlDateFormatter::FULL, 'UTC'),
+        'collator' => static fn (): Collator => collator_create('en'),
+        'intltimezone' => static fn (): IntlTimeZone => intltz_create_default(),
+        'intlcalendar' => static fn (): IntlCalendar => intlcal_create_instance('UTC', 'en'),
+        'messageformatter' => static fn (): MessageFormatter => msgfmt_create('en', 'x'),
+        'deflatecontext' => static fn (): DeflateContext => deflate_init(ZLIB_ENCODING_RAW),
+        'inflatecontext' => static fn (): InflateContext => inflate_init(ZLIB_ENCODING_RAW),
+        'imagick' => static fn (): Imagick => new Imagick(),
+        'imagickdraw' => static fn (): ImagickDraw => new ImagickDraw(),
+        'imagickpixel' => static fn (): ImagickPixel => new ImagickPixel('white'),
+    ];
+    return $values[strtolower($type->getName())] ?? null;
+}
+
 /** A plain value for a parameter a probe is not at. */
 function plain_value(ReflectionParameter $param): mixed
 {
@@ -106,6 +145,10 @@ function plain_value(ReflectionParameter $param): mixed
     }
     if ($type->allowsNull() && !admits($type, 'int') && !admits($type, 'string')) {
         return null;
+    }
+    $valid = valid_value($type);
+    if ($valid !== null) {
+        return $valid();
     }
     foreach (['int' => 1, 'string' => 'x', 'float' => 1.0, 'bool' => false, 'array' => [1, 2]] as $name => $value) {
         if (admits($type, $name)) {
