@@ -138,8 +138,10 @@ jobs:
           path: .corpus-runs/gate/tests
           key: test-manifest-${{ github.sha }}
           restore-keys: test-manifest-
+      # Lists the names under the profile the step above just built, so no
+      # dependency or the crate is compiled a second time.
       - name: Test-name manifest
-        run: cargo xtask tests
+        run: cargo xtask tests --profile test
       - name: Keep only this run's manifest
         run: >
           find .corpus-runs/gate/tests -name '*.txt'
