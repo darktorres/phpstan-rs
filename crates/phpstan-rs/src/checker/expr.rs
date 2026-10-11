@@ -247,13 +247,15 @@ impl<'a> Checker<'a> {
             let catalog_throw_invocations = (!self.try_throw_states.is_empty())
                 .then(|| self.catalog_php_throw_invocation_at(span))
                 .flatten()
-                .filter(|(without_invocation, invoked)| *without_invocation || !invoked.is_empty());
+                .filter(|(_, without_invocation, invoked)| {
+                    *without_invocation || !invoked.is_empty()
+                });
             let before_call_effect = catalog_throw_invocations.as_ref().map(|_| locals.clone());
             self.forget_what_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
                 && let Some(thrown) = self.thrown_by(e, locals)
             {
-                if let Some((without_invocation, invoked)) = catalog_throw_invocations {
+                if let Some((function, without_invocation, invoked)) = catalog_throw_invocations {
                     if without_invocation
                         && let Some(before_call_effect) = before_call_effect.as_ref()
                     {
@@ -266,6 +268,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or_else(|| locals.clone());
                         self.forget_catalog_string_arguments_may_change(
                             e,
+                            function,
                             &invoked,
                             true,
                             &mut throw_locals,
@@ -1072,7 +1075,12 @@ impl<'a> Checker<'a> {
                     // `callee_ty` by value) for every dynamic-callee
                     // shape this branch covers.
                     let callable_names = callee_ty.constant_strings_text();
-                    let exact_strlen_callable = matches!(callable_names.as_slice(), [name] if name.eq_ignore_ascii_case("strlen"));
+                    let exact_strlen_callable = matches!(
+                        callable_names.as_slice(),
+                        [name] if self.registry.lookup_function(name).is_some_and(|signature| {
+                            crate::semantics::catalog_function(name, signature).is_some()
+                        })
+                    );
                     if !exact_strlen_callable
                         && let Some(level) = self
                             .failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
@@ -6020,11 +6028,12 @@ impl<'a> Checker<'a> {
                         let callee_type = self.infer_expr(callee, locals);
                         let names = callee_type.constant_strings_text();
                         if let [name] = names.as_slice()
-                            && name.eq_ignore_ascii_case("strlen")
-                            && let Some(signature) = self.registry.lookup_function("strlen")
+                            && let Some(signature) = self.registry.lookup_function(name)
+                            && let Some(function) =
+                                crate::semantics::catalog_function(name, signature)
                         {
                             self.infer_builtin_call_return_type(
-                                "strlen",
+                                function,
                                 signature,
                                 args,
                                 locals,

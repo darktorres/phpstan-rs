@@ -898,6 +898,16 @@ impl Catalog {
         })
     }
 
+    /// Whether the catalog has an entry for the function `name` of
+    /// `extension`, whatever the targets it covers.
+    pub fn has_function(&self, extension: &str, name: &str) -> bool {
+        let key = EntryKey::Function {
+            extension: crate::Bytes(extension.as_bytes().to_vec()),
+            name: crate::Bytes(name.as_bytes().to_vec()),
+        };
+        self.entries.contains_key(&key.normalized())
+    }
+
     pub fn select_for_targets(
         &self,
         key: &EntryKey,
@@ -2761,5 +2771,20 @@ mod tests {
             Catalog::from_manifest(manifest),
             Err(actual) if actual == error
         ));
+    }
+}
+
+#[cfg(test)]
+mod has_function_tests {
+    use super::Catalog;
+
+    #[test]
+    fn the_embedded_strlen_entry_is_found_by_any_spelling_of_its_name() {
+        let catalog = Catalog::from_json(include_str!("../data/php-8.5.4-strlen.json"))
+            .expect("the embedded catalog validates");
+        assert!(catalog.has_function("standard", "strlen"));
+        assert!(catalog.has_function("STANDARD", "STRLEN"));
+        assert!(!catalog.has_function("standard", "strtolower"));
+        assert!(!catalog.has_function("core", "strlen"));
     }
 }

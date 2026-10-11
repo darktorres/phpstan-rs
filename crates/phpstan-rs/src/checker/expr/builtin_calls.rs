@@ -2788,12 +2788,13 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         call_span: Span,
     ) -> Option<CatalogCallEvaluation> {
-        if name != "strlen" || !sig.is_stub() || !supports_catalog_strlen_binding(sig, args) {
+        let function = crate::semantics::catalog_function(name, sig)?;
+        if !supports_catalog_strlen_binding(sig, args) {
             return None;
         }
         let key = php_semantics::EntryKey::Function {
             extension: php_semantics::Bytes(b"standard".to_vec()),
-            name: php_semantics::Bytes(name.as_bytes().to_vec()),
+            name: php_semantics::Bytes(function.as_bytes().to_vec()),
         };
         let targets = self.registry.semantic_target_set();
         let selected = self.semantic_catalog.select_for_targets(&key, &targets);
@@ -2949,6 +2950,7 @@ impl<'a> Checker<'a> {
             self.relation().union_of(returns)
         };
         let evaluation = CatalogCallEvaluation {
+            function,
             return_type,
             diagnostics: if diagnostics_closed {
                 diagnostics.into_iter().collect()

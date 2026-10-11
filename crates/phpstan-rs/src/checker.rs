@@ -961,6 +961,8 @@ pub struct Checker<'a> {
 
 #[derive(Clone)]
 pub(crate) struct CatalogCallEvaluation {
+    /// The catalog's name for the function this evaluation transfers.
+    pub function: &'static str,
     pub return_type: Type,
     pub diagnostics: Vec<(php_semantics::DiagnosticKind, u32)>,
     pub diagnostics_closed: bool,
@@ -2554,19 +2556,32 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn catalog_string_arguments_at(&self, span: Span) -> Option<Vec<u32>> {
+    /// The catalog function evaluated at `span` and the string arguments
+    /// its normal exit invokes.
+    pub(crate) fn catalog_string_arguments_at(
+        &self,
+        span: Span,
+    ) -> Option<(&'static str, Vec<u32>)> {
         let memo = self.catalog_return_type_memo.borrow();
         let entries = memo.get(&span)?;
+        let function = entries.first()?.1.function;
         let mut arguments = std::collections::BTreeSet::new();
         for (_, evaluation) in entries {
             arguments.extend(evaluation.invoked_string_arguments.iter().copied());
         }
-        Some(arguments.into_iter().collect())
+        Some((function, arguments.into_iter().collect()))
     }
 
-    pub(crate) fn catalog_php_throw_invocation_at(&self, span: Span) -> Option<(bool, Vec<u32>)> {
+    /// The catalog function evaluated at `span`, whether a PHP-throw exit
+    /// exists before any string callback, and the string callbacks its
+    /// PHP-throw exits invoke.
+    pub(crate) fn catalog_php_throw_invocation_at(
+        &self,
+        span: Span,
+    ) -> Option<(&'static str, bool, Vec<u32>)> {
         let memo = self.catalog_return_type_memo.borrow();
         let entries = memo.get(&span)?;
+        let function = entries.first()?.1.function;
         let mut without_invocation = false;
         let mut arguments = std::collections::BTreeSet::new();
         for (_, evaluation) in entries {
@@ -2578,7 +2593,11 @@ impl<'a> Checker<'a> {
                     .copied(),
             );
         }
-        Some((without_invocation, arguments.into_iter().collect()))
+        Some((
+            function,
+            without_invocation,
+            arguments.into_iter().collect(),
+        ))
     }
 }
 

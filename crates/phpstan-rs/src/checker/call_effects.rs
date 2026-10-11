@@ -457,8 +457,15 @@ impl Checker<'_> {
             })
             .cloned()
             .collect();
-        if let Some(string_arguments) = self.catalog_string_arguments_at(self.expr_span(e.id))
-            && self.forget_catalog_string_arguments_may_change(e, &string_arguments, false, locals)
+        if let Some((function, string_arguments)) =
+            self.catalog_string_arguments_at(self.expr_span(e.id))
+            && self.forget_catalog_string_arguments_may_change(
+                e,
+                function,
+                &string_arguments,
+                false,
+                locals,
+            )
         {
             return;
         }
@@ -488,11 +495,12 @@ impl Checker<'_> {
     pub(crate) fn forget_catalog_string_arguments_may_change(
         &self,
         e: &ExprNode,
+        function: &str,
         string_arguments: &[u32],
         php_throw_path: bool,
         locals: &mut Locals,
     ) -> bool {
-        let Some(signature) = self.registry.lookup_function("strlen") else {
+        let Some(signature) = self.registry.lookup_function(function) else {
             return false;
         };
         let Some(syntax_owner) = self.syntax_tree_owner() else {

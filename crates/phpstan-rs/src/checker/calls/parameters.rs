@@ -195,7 +195,7 @@ impl<'a> Checker<'a> {
         // conversion, so keep the ordinary string-only type check there.
         let weak_strlen_string_coercion = is_builtin
             && sig.is_stub()
-            && matches!(callee, Callee::Function(name) if name.eq_ignore_ascii_case("strlen"))
+            && matches!(callee, Callee::Function(name) if crate::semantics::catalog_function(name, sig).is_some())
             && self.syntax_tree_owner().and_then(|owner| {
                 syntax::strict_types::strict_types_mode(arenas, owner.statements())
             }) == Some(false);
@@ -305,7 +305,9 @@ impl<'a> Checker<'a> {
 
         let bound = self.bind_arguments(callee, sig, &arguments, has_named, is_builtin, span);
         let catalog_call = match callee {
-            Callee::Function(name) if is_builtin && name.eq_ignore_ascii_case("strlen") => {
+            Callee::Function(name)
+                if is_builtin && crate::semantics::catalog_function(name, sig).is_some() =>
+            {
                 self.catalog_builtin_return_type(name, sig, args, locals, span)
             }
             _ => None,

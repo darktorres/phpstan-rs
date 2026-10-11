@@ -16,6 +16,26 @@ pub(crate) fn embedded_catalog() -> &'static Catalog {
     &CATALOG
 }
 
+/// The functions the embedded catalog holds entries for, by the name the
+/// catalog gives them. A name is catalogued only when this list and the
+/// catalog both have it.
+const CATALOG_FUNCTIONS: &[&str] = &["strlen"];
+
+/// The catalog's name for the builtin `name` when `sig` is its stub and the
+/// embedded catalog covers it; `None` otherwise, so a user function of the
+/// same name is never catalogued.
+pub(crate) fn catalog_function(
+    name: &str,
+    sig: &crate::registry::FunctionReflection,
+) -> Option<&'static str> {
+    if !sig.is_stub() {
+        return None;
+    }
+    CATALOG_FUNCTIONS.iter().copied().find(|function| {
+        function.eq_ignore_ascii_case(name) && embedded_catalog().has_function("standard", function)
+    })
+}
+
 /// Convert the existing major/minor language range into correlated full-minor
 /// scenarios. The current checker setting has no patch/platform fields, so
 /// this adapter deliberately leaves those target properties unknown.
