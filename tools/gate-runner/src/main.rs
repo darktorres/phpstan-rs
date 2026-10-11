@@ -2,11 +2,15 @@
 //! analysis of a gate configuration, finalized into every view the gate
 //! snapshots, through the same library calls `check-project` makes.
 //!
-//! `gate-runner [--config <file>] [--set <key=value>]... [--no-composer]
-//! [--level <n>] [--levels] [--baseline <file>] [--dump-types]
-//! [--dump-front-end] [--dump-registry] [--dump-stub-bases]
-//! [--dump-expr-types] [--dump-doc-resolutions] [--reference <dir>] --out
-//! <dir> [<path>...]` loads once, checks once and writes to `<dir>`:
+//! ```text
+//! gate-runner [--config <file>] [--set <key=value>]... [--no-composer]
+//!             [--level <n>] [--levels] [--baseline <file>] [--dump-types]
+//!             [--dump-front-end] [--dump-registry] [--dump-stub-bases]
+//!             [--dump-expr-types] [--dump-doc-resolutions]
+//!             [--reference <dir>] --out <dir> [<path>...]
+//! ```
+//!
+//! loads once, checks once and writes to the `--out` directory:
 //! - `report.json`/`report.err`: `check-project --format json`'s stdout
 //!   and stderr;
 //! - `levels/<n>/` with `--levels`, for each level `n`: `report.json`,
@@ -32,9 +36,13 @@
 //! entities that differ from the dump of the same name there, when there
 //! is one.
 //!
-//! `gate-runner --type-drift <old> <new> [--fixture-root <dir>] [<config
-//! arguments>] --out <dir>` relates two recorded type dumps instead of
-//! analysing, and writes `type-drift.txt`: with configuration arguments
+//! ```text
+//! gate-runner --type-drift <old> <new> [--fixture-root <dir>]
+//!             [<config arguments>] --out <dir>
+//! ```
+//!
+//! relates two recorded type dumps instead of analysing, and writes
+//! `type-drift.txt`: with configuration arguments
 //! within that project's loaded class hierarchy, with `--fixture-root`
 //! each fixture within its own, and with neither by name only.
 
