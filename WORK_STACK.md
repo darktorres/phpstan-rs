@@ -23,6 +23,13 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    check, a parallel fixtures job. Commits go in the plan's order, one per
    sub-item. Recorded CI runs: `38110770211` (Rust) and `38110770179`
    (Extension, green on all three OS).
+   Done locally, not pushed: Part 1 (modgraph gate fixed; strlen callables
+   routed through the named-callable check; Windows start failures recorded
+   by the extension; the full fixture suite passes, 3966), and Part 2 items
+   4, 5, 6, 7, 8 (experiment), 9, 9b. Still open: item 10 (split the
+   no-default-features fixtures into their own job, once a run is green),
+   item 12 (re-measure after CI runs), and the pending push, which needs the
+   user's go-ahead.
 1. **Level 9**, the recorder of the builtin-runs table
    (`tools/builtin-runs/record.php`, plan `BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12): a fix started on 2026-10-11 because a full run of the
