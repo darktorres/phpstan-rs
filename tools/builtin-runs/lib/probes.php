@@ -21,6 +21,30 @@ function admits(?ReflectionType $type, string $name): bool
     return false;
 }
 
+/**
+ * Whether `$type` admits a value of the class `$class`: `mixed` and no type do,
+ * `object` does, a type the class is an instance of does (an interface it
+ * implements, or its own class), and `iterable` does for a `Traversable`.
+ */
+function accepts_value(?ReflectionType $type, string $class): bool
+{
+    if ($type === null) {
+        return true;
+    }
+    if ($type instanceof ReflectionNamedType) {
+        $t = strtolower($type->getName());
+        return $t === 'mixed' || $t === 'object'
+            || ($t === 'iterable' && is_a($class, Traversable::class, true))
+            || is_a($class, $type->getName(), true);
+    }
+    foreach ($type->getTypes() as $member) {
+        if (accepts_value($member, $class)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Whether `$type` names a callable, not merely admits one as `mixed` does. */
 function names_callable(?ReflectionType $type): bool
 {
@@ -50,9 +74,13 @@ function probes_for(ReflectionParameter $param): array
     if (admits($type, 'callable') || admits($type, 'closure')) {
         $probes[] = ['callable', static fn () => recording_callable()];
     }
-    if (admits($type, 'object') || admits($type, 'iterable')) {
+    if (accepts_value($type, RecordingObject::class)) {
         $probes[] = ['object', static fn () => new RecordingObject()];
+    }
+    if (accepts_value($type, RecordingIterator::class)) {
         $probes[] = ['iterator', static fn () => new RecordingIterator()];
+    }
+    if (accepts_value($type, RecordingSleeper::class)) {
         $probes[] = ['sleeper', static fn () => new RecordingSleeper()];
     }
     if (admits($type, 'string')) {
