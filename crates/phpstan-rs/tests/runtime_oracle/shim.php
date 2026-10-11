@@ -30,6 +30,15 @@ namespace {
         const MAX_ELEMENTS = 256;
         /** The deepest nesting that is recorded. */
         const MAX_DEPTH = 8;
+        /**
+         * The most records one run writes. A program that asserts without
+         * end is cut off here, with one `truncated` record, rather than
+         * filling the file; the harness fails the run for it.
+         */
+        const MAX_RECORDS = 10000;
+
+        /** @var int */
+        private static $written = 0;
 
         public static function recordAssert(string $expected, $value)
         {
@@ -116,9 +125,13 @@ namespace {
         private static function write(array $record)
         {
             $out = getenv('PHPSTAN_RS_ORACLE_OUT');
-            if ($out === false) {
+            if ($out === false || self::$written > self::MAX_RECORDS) {
                 return;
             }
+            if (self::$written === self::MAX_RECORDS) {
+                $record = ['kind' => 'truncated', 'limit' => self::MAX_RECORDS];
+            }
+            self::$written++;
             // Before PHP 7.2, a string that is not UTF-8 is written as null
             // instead of with its bad bytes substituted.
             $flags = JSON_UNESCAPED_SLASHES | (\defined('JSON_INVALID_UTF8_SUBSTITUTE')

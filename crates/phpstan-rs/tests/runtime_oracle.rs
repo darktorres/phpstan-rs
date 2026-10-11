@@ -17,8 +17,11 @@
 //! missing fails it instead of skipping. CI sets both.
 //!
 //! A fixture that reaches no `assertType()` is `not executed`, and one
-//! that can't be run here is `skipped`; neither fails. The counts, and
-//! each fixture in the two lists, are printed at the end.
+//! that can't be run here is `skipped`; neither fails. A run that does not
+//! finish within `TIMEOUT` fails, whatever it asserted before then, and so
+//! does one that the shim cut off at its record limit: such a program
+//! loops, and its container is removed when the run is given up. The
+//! counts, and each fixture in the two lists, are printed at the end.
 //!
 //! `cargo test -p phpstan-rs --profile oracle --test runtime_oracle`: the
 //! `oracle` profile is the `gate` profile with the debug assertions and
@@ -27,6 +30,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -307,16 +311,26 @@ fn run(
         if config.runtime_warnings_exact {
             failures.extend(unexpected_warnings(stem, &records, &work, runner));
         }
+        if !finished {
+            failures.push(format!(
+                "{}: did not finish within {}s; the program loops",
+                runner.label(),
+                TIMEOUT.as_secs()
+            ));
+        }
+        if let Some(cut) = records.iter().find(|r| r["kind"] == "truncated") {
+            failures.push(format!(
+                "{}: wrote more than {} records; the program loops",
+                runner.label(),
+                cut["limit"]
+            ));
+        }
         let asserts: Vec<Value> = records
             .into_iter()
             .filter(|r| r["kind"] == "assert")
             .collect();
-        if asserts.is_empty() {
-            not_executed.push(if finished {
-                format!("{}: no assertType() ran", runner.label())
-            } else {
-                format!("{}: timed out after {}s", runner.label(), TIMEOUT.as_secs())
-            });
+        if asserts.is_empty() && finished {
+            not_executed.push(format!("{}: no assertType() ran", runner.label()));
         }
         runs.push((runner, work, asserts));
     }
@@ -425,8 +439,19 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Runs the entry script in `work`; whether it finished before the
 /// timeout.
+/// A container name no other run of this process, or another one, has.
+fn container_name() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "phpstan-rs-oracle-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 fn execute(runner: &Runner, work: &Path, autoload: Option<&Path>) -> Result<bool, Failed> {
     let shim_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/runtime_oracle");
+    let container = container_name();
     let ini = |shim: &str| {
         vec![
             "-d".to_string(),
@@ -461,7 +486,16 @@ fn execute(runner: &Runner, work: &Path, autoload: Option<&Path>) -> Result<bool
         Runner::Docker(image) => {
             let mut command = Command::new("docker");
             command
-                .args(["run", "--rm", "--network", "none", "-w", "/work"])
+                .args([
+                    "run",
+                    "--rm",
+                    "--name",
+                    &container,
+                    "--network",
+                    "none",
+                    "-w",
+                    "/work",
+                ])
                 .arg("-v")
                 .arg(format!("{}:/work", work.display()))
                 .arg("-v")
@@ -493,6 +527,15 @@ fn execute(runner: &Runner, work: &Path, autoload: Option<&Path>) -> Result<bool
             return Ok(true);
         }
         if started.elapsed() > TIMEOUT {
+            // Killing the `docker` client leaves its container running, so the
+            // container is removed by name; the client is then reaped.
+            if matches!(runner, Runner::Docker(_)) {
+                let _ = Command::new("docker")
+                    .args(["rm", "-f", &container])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
             let _ = child.kill();
             let _ = child.wait();
             return Ok(false);
