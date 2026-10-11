@@ -1399,8 +1399,12 @@ struct Scope {
     computed: bool,
     anything: bool,
     calls: Vec<CallWrites>,
-    // The positions in `calls` of the implicit operations listed there,
-    // found by structure.
+    // The implicit operations listed in `calls`, each with the key it was
+    // recorded under. A later rewrite of a listed call's `on` leaves the key
+    // as it was, which is what the table and the printed set both hold.
+    implicit_keys: Vec<(Option<Arc<[Origin]>>, Operation)>,
+    // The positions in `implicit_keys` of the implicit operations, found by
+    // their structure.
     implicit: hashbrown::HashTable<u32>,
     #[cfg(debug_assertions)]
     implicit_printed: FxHashSet<String>,
@@ -2390,39 +2394,43 @@ impl Summarizer<'_> {
             return;
         }
         let hash = hash_of(&(on.as_deref(), &operation));
-        let calls = &self.scope.calls;
-        let implicit = |at: u32| match calls.get(at as usize).map(|call| &call.callee) {
-            Some(Callee::Implicit {
-                on: held,
-                operation: held_operation,
-            }) => held.as_deref() == on.as_deref() && *held_operation == operation,
-            _ => false,
-        };
-        let new = self.scope.implicit.find(hash, |&at| implicit(at)).is_none();
-        let callee = Callee::Implicit {
-            on: on.map(Arc::from),
-            operation,
-        };
+        let keys = &self.scope.implicit_keys;
+        let new = self
+            .scope
+            .implicit
+            .find(hash, |&at| {
+                let (held, held_operation) = &keys[at as usize];
+                held.as_deref() == on.as_deref() && *held_operation == operation
+            })
+            .is_none();
         #[cfg(debug_assertions)]
-        assert_eq!(
-            new,
-            self.scope
-                .implicit_printed
-                .insert(syntax::canonical::print(&callee))
-        );
+        {
+            let callee = Callee::Implicit {
+                on: on.clone().map(Arc::from),
+                operation: operation.clone(),
+            };
+            assert_eq!(
+                new,
+                self.scope
+                    .implicit_printed
+                    .insert(syntax::canonical::print(&callee))
+            );
+        }
         if !new {
             return;
         }
-        let at = self.scope.calls.len() as u32;
-        let calls = &self.scope.calls;
+        let on: Option<Arc<[Origin]>> = on.map(Arc::from);
+        let at = self.scope.implicit_keys.len() as u32;
+        self.scope
+            .implicit_keys
+            .push((on.clone(), operation.clone()));
+        let keys = &self.scope.implicit_keys;
         self.scope.implicit.insert_unique(hash, at, |&at| {
-            match calls.get(at as usize).map(|call| &call.callee) {
-                Some(Callee::Implicit { on, operation }) => hash_of(&(on.as_deref(), operation)),
-                _ => 0,
-            }
+            let (held, held_operation) = &keys[at as usize];
+            hash_of(&(held.as_deref(), held_operation))
         });
         self.scope.calls.push(CallWrites {
-            callee,
+            callee: Callee::Implicit { on, operation },
             arguments: Box::new([]),
             places: Box::new([]),
             objectless: Box::new([]),
