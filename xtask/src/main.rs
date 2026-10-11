@@ -1387,7 +1387,6 @@ fn list_tests(profile: &str) -> Result<BTreeSet<String>, String> {
         "--lib",
         "--bins",
         "--tests",
-        "--quiet",
         "--",
         "--list",
         "--format",
@@ -1400,7 +1399,6 @@ fn list_tests(profile: &str) -> Result<BTreeSet<String>, String> {
         "--workspace",
         "--bench",
         "*",
-        "--quiet",
         "--",
         "--list",
     ]))?;
@@ -1411,7 +1409,6 @@ fn list_tests(profile: &str) -> Result<BTreeSet<String>, String> {
         "--workspace",
         "--test",
         "fixtures",
-        "--quiet",
         "--",
         "--list",
     ]))?;
