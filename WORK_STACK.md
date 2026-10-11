@@ -32,6 +32,16 @@ State as of 2026-10-11, `master` at `2783a866`.
    no-default-features fixtures into their own `fixtures-no-default-features`
    job; its precondition, a green default-features run, now holds) and item 12
    (re-measure after CI runs).
+1. **Builtin-runs gaps: in progress.** Make the builtin-runs table sound, then
+   close its gaps. The table's `probed` row means only that a call was reached
+   in the default configuration, so some rows are wrong: a connected or
+   configured Redis or Memcached call runs user code the table does not record
+   (`Redis::set` reads `0` where its serializer runs), and an autoloader or a
+   user class's constructor can run user code the table's grammar cannot name.
+   Plan: `/home/torres/.claude/plans/1-in-this-plan-woolly-dragon.md`, steps 0-10.
+   Step 0 added the passing controls `redis_get_precise` and
+   `memcached_getdelayed_callback`; each failing fixture comes with the step
+   that makes it pass. Resume at the first step the plan does not mark done.
 1. **Level 8, the builtin-runs recorder: done** (`BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12 committed; table regenerated at `bc9ab94f`, 10,725 rows). The
    uncommitted E2.V edits to `registry/effects.rs` are not in any checkout; they
