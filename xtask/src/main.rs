@@ -49,7 +49,7 @@ fn main() -> ExitCode {
         Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
-        Some("tests") => test_manifest(),
+        Some("tests") => test_manifest(&args[1..]),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("arch") => arch::arch(&root()),
         Some("stub-index") => write_stub_index(),
@@ -1374,9 +1374,15 @@ fn rebuilt_workspace_crates(cmd: &mut Command) -> Result<BTreeSet<String>, Strin
 
 // --- test-name manifest ----------------------------------------------------
 
-fn list_tests() -> Result<BTreeSet<String>, String> {
+/// The test names, listed under `profile`. The names do not depend on the
+/// profile, so the caller picks the one whose artifacts it has already built;
+/// the fixture target is `test = false`, and is listed from the workspace so
+/// its dependencies unify as they do in the workspace build.
+fn list_tests(profile: &str) -> Result<BTreeSet<String>, String> {
     let out = capture(cargo().args([
         "test",
+        "--profile",
+        profile,
         "--workspace",
         "--lib",
         "--bins",
@@ -1387,12 +1393,10 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
         "--format",
         "terse",
     ]))?;
-    // The benches run in the gate profile, and the fixture target is
-    // `test = false`; list both from there.
     let benches = capture(cargo().args([
         "test",
         "--profile",
-        "gate",
+        profile,
         "--workspace",
         "--bench",
         "*",
@@ -1403,7 +1407,8 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
     let fixtures = capture(cargo().args([
         "test",
         "--profile",
-        "gate",
+        profile,
+        "--workspace",
         "--test",
         "fixtures",
         "--quiet",
@@ -1425,10 +1430,18 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
 /// Every test of the nearest ancestor with a recorded manifest must still
 /// exist, or be listed in a `gates/test-renames/*.txt` file a commit since
 /// then added or changed, as `old -> new` or `old -> REMOVED: reason`.
-fn test_manifest() -> Result<(), String> {
+///
+/// `--profile <name>` lists under that profile; the default is `gate`, the
+/// profile the local gates build.
+fn test_manifest(args: &[String]) -> Result<(), String> {
+    let profile = match args {
+        [] => "gate",
+        [flag, name] if flag == "--profile" => name.as_str(),
+        _ => return Err("usage: cargo xtask tests [--profile <name>]".to_string()),
+    };
     require_clean_tree()?;
     let hash = head_hash()?;
-    let tests = list_tests()?;
+    let tests = list_tests(profile)?;
     let listing: String = tests.iter().map(|t| format!("{t}\n")).collect();
     let dir = gate_dir().join("tests");
     write(&dir.join(format!("{hash}.txt")), listing.as_bytes())?;
@@ -1551,7 +1564,7 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
         )
     })?;
     record_fixture_types(hash, timings)?;
-    timings.time("test manifest", |_| test_manifest())?;
+    timings.time("test manifest", |_| test_manifest(&[]))?;
     timings.time("module graph", |_| modgraph::modgraph(&root(), &[]))?;
     timings.time("arch", |_| arch::arch(&root()))?;
     timings.time("doc", |_| {
