@@ -1107,6 +1107,7 @@ mod impossible_instanceof;
 pub(crate) mod includes;
 mod ini_directives;
 mod instantiation;
+mod named_callable;
 pub mod rule_level_helper;
 pub mod settings;
 mod strict_idioms;
