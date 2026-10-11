@@ -14,7 +14,15 @@ State as of 2026-10-07, worktree based on `39f0b029`.
 
 ## Where to resume
 
-1. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
+1. **Level 9**, the recorder of the builtin-runs table
+   (`tools/builtin-runs/record.php`, plan `BUILTIN_RUNS_RECORDER_PLAN.md`,
+   steps 1-12): a fix started on 2026-10-11 because a full run of the
+   committed script no longer finishes in a tolerable time with the newly
+   installed extensions, and because its output depends on the order the
+   probes ran in. Resume at the first step of the plan with no commit
+   in `git log -- tools/builtin-runs`. When level 9 is done, return to level 8's item E at E2.V (its
+   paused list is in the plan's appendix and in the ledger).
+2. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
    `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`. Item 9 is complete and its 9.V
    tests-only gate passes; profile item 9 before resuming item 10, at 10.1.
    Use the profiling procedure in `CLAUDE.md` and preserve the baseline/current
@@ -85,14 +93,14 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    9071f48f callgrind profile. Status: in progress; the Baseline step
    is done (off 54.13 G, warm 42.14 G, cold-with-store 56.24 G; `strace` says
    no `memmap2`), items 0, 0b, 1, 2, 3, 4, 5, 7a, 7b, 7c, 7d, 7e, 7f, 7g, 7h, 9, 10, 11, 12a-12f, 13 and 14 are committed, each with open pieces (item 9: E2.12.29-E2.12.30; checked with `cargo check` and its `walk_gates` tests, the rest waits for E2.V). E1.1.5 with EG.17 is committed (checked with the call_effects and duplicates fixtures; the full fixtures run passed but for the three duplicates fixtures the cache round trip exposed, now fixed), E2.V follows, then E2.V, and E1.2.4 with EG.2. Every open piece is a row E2.12.1-E2.12.21 of `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`; an item counts as done only when its rows are closed. 7g is committed (its open piece is E2.12.19). The correctness bugs found on the way (E1.1.6, E1.2.17-19, E1.3.6-7, EG.21, EG.24-EG.28, E2.12.22) are fixed and committed; EG.29-EG.31 (by-reference builtins, the destroy of a by-reference parameter) are done, EG.32-EG.33 and the EG.31 remainder are open precision rows, and EG.23 (corpus check of the new holder paths, with their cost) runs at E2.V. Resume with the E2.12 remainders (E2.12.6, .15, .16, .18-.20), the reopened rows (E1.1.5 with EG.17, E1.2.4 with EG.2, E2.6, E2.10, E2.12.14), then E2.12.1-E2.12.2 (D and the builtin bit) and item 7h. Verification runs once, after item 14.
-2. Then **level 8's deferred rows**, as a plan of their own: the PHP
+3. Then **level 8's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
    finds beyond what the optimization needs, validated together (the
    ledger's row D.V).
-3. Then **level 6**: recreate master's 87 commits on `master2`, one row
+4. Then **level 6**: recreate master's 87 commits on `master2`, one row
    at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
    done).
-4. Then pop back, in this order: **level 3** (the 140 open review tasks, and
+5. Then pop back, in this order: **level 3** (the 140 open review tasks, and
    the A/B ledger's open steps 19 and 21 on `master`), then **level 2** (the
    crate split from Stage C on), then **level 1** (the lanes).
 
@@ -286,7 +294,7 @@ docblock is inherited across case-different names; union member order).
   - pull parsing for the tag lexer: item 14, step 5 (a token slice read by
     index instead).
 
-### 8. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  ← current
+### 8. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  (paused at E2.V for level 9)
 
 The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
 state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
@@ -1063,6 +1071,25 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   never reach an assertion under the runtime oracle: assertions in closures
   nothing invokes, code that throws first with the values sampled,
   parameters no value can be made for, methods of traits.
+
+### 9. The builtin-runs recorder — `BUILTIN_RUNS_RECORDER_PLAN.md`  ← current
+
+`tools/builtin-runs/record.php` builds `builtin-runs-8.5.tsv`, which the
+effect resolver reads (`build.rs`, `registry/effects.rs`). With the new
+extensions (decimal, ds, redis, memcached, msgpack) a full run is 801 K
+forked probes, the committed script's rows depend on what ran before in the
+same worker, and a killed run leaves directories and orphans behind. The plan
+makes it sandboxed, resumable and observable, skips the forks that cannot
+record, and regenerates the table. Level 8's E2.V is paused behind it only
+because the recorder work started from it; the plan measured that the table
+does not change E2.V's Piwigo findings, so neither blocks the other.
+
+- **State: step 1 in progress** (this entry, the plan at the repository root,
+  `tools/builtin-runs/tests/compare.sh`). Steps 2-11 change only
+  `tools/builtin-runs`; step 12 regenerates the table and needs its own go.
+- The working tree holds uncommitted E2.V files
+  (`registry/effects.rs`, `registry/effects/classification_tests.rs`); every
+  commit of this level names its paths and never stages them.
 
 ## Documents with no place in the stack
 
