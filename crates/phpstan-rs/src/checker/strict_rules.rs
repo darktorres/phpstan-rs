@@ -979,6 +979,8 @@ pub(crate) struct LazyAssigned {
 
 impl LazyAssigned {
     pub(crate) fn new(arenas: &NodeArenas, body: &[StmtId]) -> Self {
+        #[cfg(not(debug_assertions))]
+        let _ = arenas;
         Self {
             body: body.to_vec(),
             sites: std::cell::OnceCell::new(),

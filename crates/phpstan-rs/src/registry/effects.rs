@@ -1520,6 +1520,7 @@ impl TargetSet {
         }
     }
 
+    #[cfg(any(test, debug_assertions))]
     pub(super) fn into_list(self) -> RunList {
         self.list
     }
