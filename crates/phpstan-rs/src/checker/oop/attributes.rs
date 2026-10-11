@@ -385,7 +385,7 @@ impl<'a> Checker<'a> {
                         .php_supports_everywhere(PhpFeature::DeprecatedAttributeOnTraits)
                         == Some(false)
                     {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new("Attribute class Deprecated can be used with traits only on PHP 8.5 and later."
                                     .to_string(),
                                 attr.span,
@@ -396,7 +396,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                 } else {
-                    report_builder!(self, 
+                    report_builder!(self,
                         DiagnosticBuilder::new(format!(
                                 "Attribute class Deprecated cannot be used with {type_word} {label}."
                             ),

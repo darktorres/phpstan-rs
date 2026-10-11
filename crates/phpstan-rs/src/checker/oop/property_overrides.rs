@@ -110,7 +110,7 @@ impl<'a> Checker<'a> {
             .php_supports_everywhere(PhpFeature::OverrideAttributeOnProperty)
             == Some(false)
         {
-            report_builder!(self, 
+            report_builder!(self,
                 DiagnosticBuilder::new("Attribute class Override can be used with properties only on PHP 8.5 and later."
                         .to_string(),
                     span,
@@ -128,7 +128,7 @@ impl<'a> Checker<'a> {
             .lookup_ancestor_property_with_owner(fqn, name)
             .is_some_and(|(_, sig)| sig.visibility() != Visibility::Private);
         if !has_real_ancestor {
-            report_builder!(self, 
+            report_builder!(self,
                 DiagnosticBuilder::new(format!(
                         "Property {fqn}::${name} has #[\\Override] attribute, but no matching parent property exists"
                     ),
@@ -288,7 +288,7 @@ impl<'a> Checker<'a> {
         if !ancestor_sig.has_native_type() {
             if own_sig.has_native_type() {
                 let own_ty = self.resolve_pseudo(own_sig.ty_native(), fqn);
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Property {fqn}::${name} ({own_ty}) overriding property {ancestor_owner}::${name} should not have a native type."
                         ),
@@ -303,7 +303,7 @@ impl<'a> Checker<'a> {
         }
         let ancestor_ty = self.resolve_pseudo(ancestor_sig.ty_native(), ancestor_owner);
         if !own_sig.has_native_type() {
-            report_builder!(self, 
+            report_builder!(self,
                 DiagnosticBuilder::new(format!(
                         "Property {fqn}::${name} overriding property {ancestor_owner}::${name} ({ancestor_ty}) should also have native type {ancestor_ty}."
                     ),
@@ -319,7 +319,7 @@ impl<'a> Checker<'a> {
         if self.accepts(&ancestor_ty, &own_ty).yes() && self.accepts(&own_ty, &ancestor_ty).yes() {
             return;
         }
-        report_builder!(self, 
+        report_builder!(self,
             DiagnosticBuilder::new(format!(
                     "Type {own_ty} of property {fqn}::${name} is not the same as type {ancestor_ty} of overridden property {ancestor_owner}::${name}."
                 ),

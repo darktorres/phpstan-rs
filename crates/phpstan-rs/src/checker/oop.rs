@@ -501,7 +501,7 @@ impl<'a> Checker<'a> {
                 };
                 match info.kind() {
                     ClassKind::Interface => {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "PHPDoc tag @phpstan-require-extends cannot contain an interface {name}, expected a class."
                                 ),
@@ -771,7 +771,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_reserved_class_constant_name(&mut self, consts: &[ClassConst]) {
         for c in consts {
             if c.name.eq_ignore_ascii_case("class") {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new("a class constant must not be called 'class'; it is reserved for class name fetching".to_string(),
                         c.span,
                         0,
@@ -1223,7 +1223,7 @@ impl<'a> Checker<'a> {
             if let Some(proto_native) = &proto.native_ty() {
                 match &own.native_ty() {
                     Some(own_native) if !self.accepts(proto_native, own_native).yes() => {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "Native type {own_native} of constant {fqn}::{name} is not covariant with native type {proto_native} of constant {proto_owner}::{name}."
                                 ),
@@ -1236,7 +1236,7 @@ impl<'a> Checker<'a> {
                     }
                     Some(_) => {}
                     None => {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "Constant {fqn}::{name} overriding constant {proto_owner}::{name} ({proto_native}) should also have native type {proto_native}."
                                 ),
@@ -1333,7 +1333,7 @@ impl<'a> Checker<'a> {
                         .map(|value| self.infer_expr(value, &self.new_locals()))
                         .expect("trait-constant value belongs to its parsed file owner");
                     if !own_value.is_mixed() && own_value != *trait_const.value_ty() {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "Constant {fqn}::{name} with value {own_value} overriding constant {trait_fqn}::{name} with different value {} should have the same value.",
                                     trait_const.value_ty()
@@ -1455,7 +1455,7 @@ impl<'a> Checker<'a> {
             if declared {
                 continue;
             }
-            report_builder!(self, 
+            report_builder!(self,
                 DiagnosticBuilder::new(format!(
                         "non-abstract class {display} implements the Serializable interface, but does not implement {method}()"
                     ),
@@ -1539,7 +1539,7 @@ impl<'a> Checker<'a> {
                     .php_supports_everywhere(types::php_version::PhpFeature::ConstantsInTraits)
                     == Some(false)
             {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new("Constant is declared inside a trait but is only supported on PHP 8.2 and later.".to_string(),
                         c.span,
                         0,
@@ -1567,7 +1567,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if c.is_final && c.visibility == Visibility::Private {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Private constant {fqn}::{} cannot be final as it is never overridden by other classes.",
                             c.name
@@ -1584,7 +1584,7 @@ impl<'a> Checker<'a> {
                     types::php_version::PhpFeature::NativeTypedClassConstants,
                 ) == Some(false)
             {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new("Class constants with native types are supported only on PHP 8.3 and later.".to_string(),
                         c.span,
                         0,
@@ -1947,7 +1947,7 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        report_builder!(self, 
+        report_builder!(self,
             DiagnosticBuilder::new(format!(
                     "{fqn}::__construct() only forwards its parameters into matching properties - consider constructor property promotion instead"
                 ),

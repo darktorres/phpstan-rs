@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 (Some(_), None) => {
-                    report_builder!(self, 
+                    report_builder!(self,
                         DiagnosticBuilder::new(format!(
                                 "Enum case {fqn}::{} does not have a value but the enum is backed with the \"{}\" type.",
                                 case.name,
@@ -309,7 +309,7 @@ impl<'a> Checker<'a> {
                         ty.is_mixed()
                     };
                     if !matches_backing {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "Enum case {fqn}::{} value {ty} does not match the \"{}\" type.",
                                     case.name,

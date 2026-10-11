@@ -459,7 +459,7 @@ impl<'a> Checker<'a> {
         match (prop_has_native, param_has_native) {
             _ if param.is_none() => {}
             (false, true) => {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Parameter ${} of set hook has a native type but the property {fqn}::${name} does not.",
                             param.map(|p| p.name.as_ref()).unwrap_or("value"),
@@ -472,7 +472,7 @@ impl<'a> Checker<'a> {
                 );
             }
             (true, false) => {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Parameter ${} of set hook does not have a native type but the property {fqn}::${name} does.",
                             param.map(|p| p.name.as_ref()).unwrap_or("value"),
@@ -488,7 +488,7 @@ impl<'a> Checker<'a> {
                 let param_ty = self.resolve_type_hint(param.and_then(|p| p.type_hint.as_ref()));
                 let prop_native_ty = self.resolve_type_hint(type_hint);
                 if !self.accepts(&param_ty, &prop_native_ty).yes() {
-                    report_builder!(self, 
+                    report_builder!(self,
                         DiagnosticBuilder::new(format!(
                                 "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${name}.",
                                 param.map(|p| p.name.as_ref()).unwrap_or("value"),

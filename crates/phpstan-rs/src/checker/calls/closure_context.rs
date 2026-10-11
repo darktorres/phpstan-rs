@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
                             .non_ignorable(),
                         );
                     } else if params.iter().any(|p| p.name.name == u.name.name) {
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "Cannot use lexical variable ${} since a parameter with the same name already exists.",
                                     u.name

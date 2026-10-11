@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
                 return false;
             }
             ClassKind::Class if is_abstract && !is_static => {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!("cannot instantiate abstract class {class}"),
                         span,
                         0,
@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
             .lookup_method_with_owner(&class, &method)
             .is_some_and(|(owner, _)| self.registry.method_is_static(&owner, &method));
         if is_abstract && in_static_method {
-            report_builder!(self, 
+            report_builder!(self,
                 DiagnosticBuilder::new(format!(
                         "unsafe usage of new static() in abstract class {class} in static method {method}()"
                     ),

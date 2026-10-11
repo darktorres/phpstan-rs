@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
                             .entry(current_namespace_lower.clone())
                             .or_default();
                         if !scope.insert(alias.to_ascii_lowercase()) {
-                            report_builder!(self, 
+                            report_builder!(self,
                                 DiagnosticBuilder::new(format!(
                                         "Cannot use {path} as {alias} because the name is already in use."
                                     ),
@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
                         } else {
                             format!("{current_namespace}\\{}", c.name)
                         };
-                        report_builder!(self, 
+                        report_builder!(self,
                             DiagnosticBuilder::new(format!(
                                     "Cannot declare {kind} {qualified} because the name is already in use."
                                 ),

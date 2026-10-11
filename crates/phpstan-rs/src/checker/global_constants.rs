@@ -278,7 +278,7 @@ impl<'a> Checker<'a> {
             .php_supports_everywhere(types::php_version::PhpFeature::DynamicClassConstantFetch)
             == Some(false)
         {
-            report_builder!(self, 
+            report_builder!(self,
                 DiagnosticBuilder::new("Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
                         .to_string(),
                     span,

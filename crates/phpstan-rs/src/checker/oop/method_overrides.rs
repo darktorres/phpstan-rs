@@ -341,7 +341,7 @@ impl<'a> Checker<'a> {
             let own_is_static = self.registry.method_is_static(fqn, method_name);
             let ancestor_is_static = self.registry.method_is_static(ancestor_owner, method_name);
             if ancestor_is_static && !own_is_static {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Non-static method {fqn}::{method_name}() overrides static method {ancestor_owner}::{method_name}()"
                         ),
@@ -352,7 +352,7 @@ impl<'a> Checker<'a> {
                     .non_ignorable(),
                 );
             } else if !ancestor_is_static && own_is_static {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Static method {fqn}::{method_name}() overrides non-static method {ancestor_owner}::{method_name}()"
                         ),
@@ -383,7 +383,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .method_is_abstract(ancestor_owner, method_name);
             if own_is_abstract && !ancestor_is_abstract {
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Cannot make non-abstract method {ancestor_owner}::{method_name}() abstract in class {fqn}"
                         ),
@@ -680,7 +680,7 @@ impl<'a> Checker<'a> {
                 } else {
                     own_ty.to_string()
                 };
-                report_builder!(self, 
+                report_builder!(self,
                     DiagnosticBuilder::new(format!(
                             "Return type {own_display} of method {fqn}::{method_name}() is not covariant with tentative return type {ancestor_ty} of method {ancestor_owner}::{method_name}()."
                         ),
