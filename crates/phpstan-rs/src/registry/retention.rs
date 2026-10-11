@@ -110,6 +110,7 @@ impl Uses {
                 })
                 .collect(),
             reads_all: yields,
+            passing: FxHashMap::default(),
         };
         for (at, param) in params.iter().enumerate() {
             uses.index.insert(param.name.name.clone(), at);
@@ -136,6 +137,13 @@ impl Uses {
     }
 }
 
+/// An argument that passes a parameter, or `$this`, to a function, and the
+/// entry it adds to the parameter's or `$this`'s list.
+enum Passing {
+    This(QualifiedName, u32),
+    Param(usize, QualifiedName, u32),
+}
+
 pub(crate) struct Uses {
     index: FxHashMap<Name, usize>,
     uses: Vec<ParamUse>,
@@ -148,6 +156,9 @@ pub(crate) struct Uses {
     /// The body reads its variables or its arguments some way a use of the
     /// name does not show, or its frame outlives the call.
     reads_all: bool,
+    /// The arguments found to pass a parameter or `$this`, each until the
+    /// walk reaches it and adds its entry.
+    passing: FxHashMap<ExprId, Passing>,
 }
 
 impl Uses {
@@ -310,6 +321,9 @@ impl Uses {
                 if reads_variables_by_name(&name.written) {
                     self.reads_all = true;
                 }
+                // Every argument is visited, in order, so that an entry for a
+                // parameter lands where the reading of the arguments puts it,
+                // among the entries of the calls nested in the ones before it.
                 let mut wanted = SmallVec::new();
                 let mut positional = true;
                 for (at, arg) in args.iter().enumerate() {
@@ -318,7 +332,8 @@ impl Uses {
                         Some(variable)
                             if positional && arg.name.is_none() && variable.as_str() == "this" =>
                         {
-                            self.this.passed.push((name.clone(), at as u32));
+                            self.passing
+                                .insert(arg.value, Passing::This(name.clone(), at as u32));
                         }
                         Some(variable)
                             if positional
@@ -326,10 +341,12 @@ impl Uses {
                                 && self.index.contains_key(variable) =>
                         {
                             let param = self.index[variable];
-                            self.uses[param].passed.push((name.clone(), at as u32));
+                            self.passing
+                                .insert(arg.value, Passing::Param(param, name.clone(), at as u32));
                         }
-                        _ => wanted.push(arg.value),
+                        _ => {}
                     }
+                    wanted.push(arg.value);
                 }
                 Wants::Exprs(wanted)
             }
@@ -365,6 +382,13 @@ impl Pass for Uses {
     }
 
     fn expr(&mut self, arenas: &NodeArenas, id: ExprId) -> Wants {
+        if let Some(passing) = self.passing.remove(&id) {
+            match passing {
+                Passing::This(name, at) => self.this.passed.push((name, at)),
+                Passing::Param(param, name, at) => self.uses[param].passed.push((name, at)),
+            }
+            return Wants::None;
+        }
         let Some(e) = arenas.expr(id) else {
             return Wants::None;
         };
