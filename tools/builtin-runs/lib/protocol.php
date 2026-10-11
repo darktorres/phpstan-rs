@@ -26,10 +26,10 @@ function receive(mixed $stream): mixed
 /** The worker's end of the protocol. */
 final class Protocol
 {
-    /** @var resource */
-    public static $in;
-    /** @var resource */
-    public static $out;
+    /** @var resource|null */
+    public static $in = null;
+    /** @var resource|null */
+    public static $out = null;
 
     /**
      * Takes descriptors 3 and 4 as streams. `php://fd` copies a descriptor,
@@ -57,8 +57,12 @@ final class Protocol
     /** In a child: the protocol is not the child's to write to. */
     public static function release(): void
     {
-        fclose(self::$in);
-        fclose(self::$out);
+        if (self::$in !== null) {
+            fclose(self::$in);
+        }
+        if (self::$out !== null) {
+            fclose(self::$out);
+        }
     }
 }
 

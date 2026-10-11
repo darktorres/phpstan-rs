@@ -6,11 +6,12 @@
  * The sidecar's text for a table.
  *
  * @param list<string> $rows the table's rows
+ * @param string $sandbox the sandbox the workers ran in
  * @param array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool} $manifest what the run's workers were
  * @param array<string, mixed> $run the flags, selection and totals of this run
  * @param list<array<string, mixed>> $earlier the runs that wrote the table before
  */
-function sidecar_text(array $rows, array $manifest, string $recorder, string $skip, array $run, array $earlier): string
+function sidecar_text(array $rows, array $manifest, string $recorder, string $skip, string $sandbox, array $run, array $earlier): string
 {
     $text = table_text($rows);
     $run = $run + [
@@ -29,7 +30,7 @@ function sidecar_text(array $rows, array $manifest, string $recorder, string $sk
             'ffi' => $manifest['ffi'],
         ],
         'recorder' => $recorder,
-        'sandbox' => 'none',
+        'sandbox' => $sandbox,
         'skip' => $skip,
         'runs' => [...$earlier, $run],
     ];

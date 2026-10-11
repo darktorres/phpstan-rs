@@ -18,6 +18,8 @@ final class Stats
     public static int $died = 0;
     /** @var array<string, int> children not run, by the reason */
     public static array $skipped = [];
+    /** Children that timed out or died since the unit was last reported. */
+    public static int $failedInUnit = 0;
 
     /** Upper bounds, in milliseconds, of the buckets of the wall-time histogram. */
     private const BUCKETS = [1, 2, 5, 10, 20, 50, 100, 500, 1000, 3000];
@@ -41,12 +43,27 @@ final class Stats
     {
         self::$last = ['ms' => $ms, 'outcome' => $outcome];
         self::$children++;
+        if ($outcome !== 'ok') {
+            self::$failedInUnit++;
+        }
         self::$ms += $ms;
         if ($outcome === 'timeout') {
             self::$timeouts++;
         } elseif ($outcome === 'died') {
             self::$died++;
         }
+    }
+
+    /** Forgets everything noted so far (the canary's children are no part of the run). */
+    public static function reset(): void
+    {
+        self::$lines = [];
+        self::$children = 0;
+        self::$ms = 0.0;
+        self::$timeouts = 0;
+        self::$died = 0;
+        self::$failedInUnit = 0;
+        self::$skipped = [];
     }
 
     /** Notes children that were not run, and the reason. */
@@ -67,7 +84,7 @@ final class Stats
      * What a worker tells the parent after a unit: the children since the
      * last time, and its totals so far.
      *
-     * @return array{lines: list<array{string, string, string, float, string}>, peak: int, rss: int, children: int, ms: float, timeouts: int, died: int, skipped: array<string, int>}
+     * @return array{lines: list<array{string, string, string, float, string}>, peak: int, rss: int, children: int, ms: float, timeouts: int, died: int, skipped: array<string, int>, failed: int}
      */
     public static function payload(): array
     {
@@ -80,8 +97,10 @@ final class Stats
             'timeouts' => self::$timeouts,
             'died' => self::$died,
             'skipped' => self::$skipped,
+            'failed' => self::$failedInUnit,
         ];
         self::$lines = [];
+        self::$failedInUnit = 0;
         return $payload;
     }
 

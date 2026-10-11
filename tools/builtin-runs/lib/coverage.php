@@ -10,11 +10,16 @@
  * @param array<string, true> $probed the builtins with a `probed` row
  * @param array<string, true> $failed the builtins whose unit was lost twice
  * @param Closure(string): bool $selected the selection of the run
+ * @param list<string> $asserted the functions whose `runs nothing` row is asserted, not measured
  * @return list<string>
  */
-function coverage_lines(array $probed, array $failed, Closure $selected): array
+function coverage_lines(array $probed, array $failed, Closure $selected, array $asserted): array
 {
     $lines = [];
+    foreach ($asserted as $function) {
+        $reflection = new ReflectionFunction($function);
+        $lines[] = "builtin\t" . ($reflection->getExtensionName() ?: 'none') . "\t$function\tasserted, not measured";
+    }
     foreach (get_defined_functions()['internal'] as $function) {
         $builtin = strtolower($function);
         if (isset($probed[$builtin])) {

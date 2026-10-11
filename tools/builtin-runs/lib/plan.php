@@ -1,23 +1,18 @@
 <?php
 // What is probed: the skipped names, the classes, and the units of work.
 
-// Calls that would stop the probing itself or reach outside the child.
+// Calls that would stop the probing itself, or read the terminal. The
+// network, process, delay and mail functions are probed, in the sandbox.
 const SKIPPED = [
     'pcntl_fork', 'pcntl_rfork', 'pcntl_exec', 'pcntl_alarm', 'pcntl_signal', 'pcntl_wait', 'pcntl_waitpid',
     'posix_kill', 'posix_setsid', 'posix_setuid', 'posix_setgid', 'posix_seteuid', 'posix_setegid',
-    'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
-    'sleep', 'usleep', 'time_nanosleep', 'time_sleep_until',
-    'readline', 'readline_callback_handler_install',
-    'mail', 'dl', 'stream_socket_server', 'socket_create_listen', 'fsockopen', 'pfsockopen',
-    'stream_socket_client', 'socket_connect', 'curl_exec', 'curl_multi_exec', 'ftp_connect', 'ftp_ssl_connect',
-    'mysqli_connect', 'mysqli_real_connect', 'pg_connect', 'pg_pconnect', 'gethostbyname', 'gethostbynamel',
-    'dns_get_record', 'checkdnsrr', 'getmxrr', 'gethostbyaddr', 'get_headers', 'stream_wrapper_unregister',
-    'stream_wrapper_restore', 'excimer_set_timeout',
+    'readline', 'readline_callback_handler_install', 'dl',
+    'stream_wrapper_unregister', 'stream_wrapper_restore', 'excimer_set_timeout',
 ];
 
-// Functions the probing skips because they reach outside the child (a
-// program, the network, a delay) but take no callable and no object whose
-// methods PHP calls: they run no user code, as a call of them is taken.
+// Functions asserted to run no user code (a program, the network, a delay, a
+// mail) where no call of them was measured: a row is added only for a name
+// with no `probed` row.
 const RUNS_NOTHING = [
     'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
     'sleep', 'usleep', 'time_nanosleep', 'time_sleep_until',

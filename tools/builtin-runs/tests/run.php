@@ -22,6 +22,8 @@ require_once dirname(__DIR__) . '/lib/table.php';
 require_once dirname(__DIR__) . '/lib/cache.php';
 require_once dirname(__DIR__) . '/lib/sidecar.php';
 require_once dirname(__DIR__) . '/lib/coverage.php';
+require_once dirname(__DIR__) . '/lib/sandbox.php';
+require_once dirname(__DIR__) . '/lib/limits.php';
 
 $failures = [];
 $checks = 0;
@@ -143,10 +145,20 @@ $stubs = stub_declarations();
 check('the stub index has functions and classes', count($stubs) > 1000 && in_array('class', array_column($stubs, 0), true));
 
 // The sidecar: the table's hash, and each run that wrote it.
-$sidecar = json_decode(sidecar_text(["a\t\tprobed\t"], $manifest, 'rec', 'off', ['selection' => [], 'flags' => [], 'totals' => []], []), true);
+$sidecar = json_decode(sidecar_text(["a\t\tprobed\t"], $manifest, 'rec', 'off', 'bwrap', ['selection' => [], 'flags' => [], 'totals' => []], []), true);
 check('the sidecar hashes the table it describes', $sidecar['table']['sha256'] === hash('sha256', "a\t\tprobed\t\n"));
 check('the sidecar records one run', count($sidecar['runs']) === 1);
 check('the sidecar path drops .tsv', sidecar_path('/x/builtin-runs-8.5.tsv') === '/x/builtin-runs-8.5.meta.json');
+
+// The sandbox: the command that starts a worker in each mode, and the /tmp of each.
+$bwrap = worker_command('/usr/bin/php', false, ['mode' => 'bwrap', 'cap' => 268435456]);
+check('bwrap starts the worker with no network and a capped /tmp', $bwrap[0] === 'bwrap' && in_array('--unshare-net', $bwrap, true) && in_array('268435456', $bwrap, true) && str_ends_with((string) end($bwrap), '/worker.php'));
+check('bwrap sets the allocator off unless --zend-mm', in_array('USE_ZEND_ALLOC', $bwrap, true) && in_array('0', $bwrap, true));
+check('bwrap with --zend-mm leaves the allocator alone', !in_array('USE_ZEND_ALLOC', worker_command('/usr/bin/php', true, ['mode' => 'bwrap', 'cap' => 1]), true));
+$plain = worker_command('/usr/bin/php', false, ['mode' => 'none', 'cap' => 0]);
+check('none is the PHP itself', $plain[0] === '/usr/bin/php' && !in_array('bwrap', $plain, true));
+check('sudo-unshare is chosen by name only', worker_command('/usr/bin/php', false, ['mode' => 'sudo-unshare', 'cap' => 0])[0] === 'sudo');
+check('the /tmp of a worker is at most 256 MiB', sandbox_cap(8) <= 256 * 1024 ** 2 && sandbox_cap(1) <= 256 * 1024 ** 2);
 
 @array_map('unlink', glob("$scratch/*") ?: []);
 @rmdir($scratch);

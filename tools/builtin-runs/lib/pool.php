@@ -45,16 +45,21 @@ function fail(string $message): never
 }
 
 /**
- * Starts a worker: a fresh PHP, with nothing on its standard streams and the
- * protocol on descriptors 3 and 4.
+ * Starts a worker: a fresh PHP, in the sandbox, with nothing on its standard
+ * streams and the protocol on descriptors 3 and 4.
+ *
+ * @param array{mode: string, cap: int} $sandbox
  */
-function start_worker(string $php, bool $zendMm): Worker
+function start_worker(string $php, bool $zendMm, array $sandbox): Worker
 {
-    $env = getenv();
-    if (!$zendMm) {
-        $env['USE_ZEND_ALLOC'] = '0';
+    $env = null;
+    if ($sandbox['mode'] === 'none') {
+        $env = getenv();
+        if (!$zendMm) {
+            $env['USE_ZEND_ALLOC'] = '0';
+        }
     }
-    $command = [$php, '-d', 'ffi.enable=1', '-d', 'display_errors=0', '-d', 'memory_limit=512M', dirname(__DIR__) . '/worker.php'];
+    $command = worker_command($php, $zendMm, $sandbox);
     $descriptors = [
         0 => ['file', '/dev/null', 'r'],
         1 => ['file', '/dev/null', 'w'],
@@ -64,7 +69,7 @@ function start_worker(string $php, bool $zendMm): Worker
     ];
     $process = proc_open($command, $descriptors, $pipes, null, $env);
     if (!is_resource($process)) {
-        fail("cannot start $php");
+        fail("cannot start $php in the {$sandbox['mode']} sandbox");
     }
     $worker = new Worker($process, $pipes[3], $pipes[4]);
     Pool::$workers[$worker->pid] = $worker;
@@ -86,17 +91,19 @@ function release_worker(Worker $worker): void
  * signatures of the units, and what that PHP is.
  *
  * @param list<string>|null $extensions
+ * @param array{mode: string, cap: int} $sandbox
  * @return array{manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, units: list<array{string, string, string, int, int}>, weights: list<int>, nothing: list<string>, signatures: list<string>}
  */
-function plan_run(string $php, ?string $only, ?array $extensions, bool $zendMm): array
+function plan_run(string $php, ?string $only, ?array $extensions, bool $zendMm, array $sandbox): array
 {
-    $worker = start_worker($php, $zendMm);
+    $worker = start_worker($php, $zendMm, $sandbox);
     try {
         send($worker->in, ['init', $only, false, 'off', $extensions]);
         $ready = receive($worker->out);
         if (!is_array($ready) || $ready[0] !== 'ready') {
             fail("$php did not start a worker");
         }
+        canary_check($ready, $php);
         send($worker->in, ['plan']);
         $plan = receive($worker->out);
         if (!is_array($plan) || $plan[0] !== 'plan') {
@@ -109,6 +116,18 @@ function plan_run(string $php, ?string $only, ?array $extensions, bool $zendMm):
     /** @var array{manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, units: list<array{string, string, string, int, int}>, weights: list<int>, nothing: list<string>, signatures: list<string>} $result */
     $result = ['manifest' => $ready[1], 'units' => $plan[1], 'weights' => $plan[2], 'nothing' => $plan[3], 'signatures' => $plan[4]];
     return $result;
+}
+
+/**
+ * Stops the run when a worker's canary answered differently from what it must.
+ *
+ * @param array<int, mixed> $ready
+ */
+function canary_check(array $ready, string $php): void
+{
+    if (($ready[2] ?? []) !== []) {
+        fail("the canary of $php answers wrongly: " . implode('; ', $ready[2]));
+    }
 }
 
 /**
@@ -146,7 +165,7 @@ function probed_by_class(array $unitLines): array
  *
  * @param list<array{string, string, string, int, int}> $units
  * @param list<int> $weights the forks each unit makes, for the progress line
- * @param array{jobs: int, php: string, only: ?string, extensions: ?list<string>, zendMm: bool, manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, skip: string, cache: ?string, recorder: string, binary: string, signatures: list<string>} $run
+ * @param array{jobs: int, php: string, only: ?string, extensions: ?list<string>, zendMm: bool, manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, skip: string, cache: ?string, recorder: string, binary: string, signatures: list<string>, sandbox: array{mode: string, cap: int}} $run
  * @return array{array<int, array<string, true>>, list<array{string, string, string, int, int}>} the lines of each unit by its index, and the units lost twice
  */
 function run_units(array $units, array $weights, array $run): array
@@ -185,7 +204,7 @@ function run_units(array $units, array $weights, array $run): array
             'unit' => $unit,
             'signature' => $run['signatures'][$index],
             'skip' => $run['skip'],
-            'sandbox' => 'none',
+            'sandbox' => $run['sandbox']['mode'],
             'known' => $unit[0] === 'held' ? ($known[strtolower($unit[1])] ?? []) : null,
         ]);
     };
@@ -199,13 +218,15 @@ function run_units(array $units, array $weights, array $run): array
         $done += $weights[$index];
     };
     $spawn = static function () use ($run): void {
-        $worker = start_worker($run['php'], $run['zendMm']);
+        $worker = start_worker($run['php'], $run['zendMm'], $run['sandbox']);
         try {
             send($worker->in, ['init', $run['only'], Stats::$enabled, $run['skip'], $run['extensions']]);
         } catch (RuntimeException) {
         }
     };
     $open = 0;
+    $quiet = [];
+    $quietMode = false;
     // Gives a ready worker its next unit, or keeps it idle while a held unit
     // waits for the others, or releases it when there is nothing left.
     $assign = static function (Worker $worker) use (&$next, &$again, &$open, &$known, &$idle, &$order, &$total, $units): void {
@@ -273,76 +294,105 @@ function run_units(array $units, array $weights, array $run): array
     for ($i = 0; $i < min($jobs, max(1, $total)); $i++) {
         $spawn();
     }
-    while (Pool::$workers !== []) {
-        $read = array_map(static fn (Worker $worker) => $worker->out, Pool::$workers);
-        $write = $except = null;
-        if (stream_select($read, $write, $except, 5) === false) {
-            fail('select failed');
-        }
-        foreach ($read as $stream) {
-            $worker = null;
-            foreach (Pool::$workers as $candidate) {
-                if ($candidate->out === $stream) {
-                    $worker = $candidate;
-                }
+    while (true) {
+        while (Pool::$workers !== []) {
+            $read = array_map(static fn (Worker $worker) => $worker->out, Pool::$workers);
+            $write = $except = null;
+            if (stream_select($read, $write, $except, 5) === false) {
+                fail('select failed');
             }
-            if ($worker === null) {
-                continue;
-            }
-            $message = receive($stream);
-            if (!is_array($message)) {
-                // The worker died. A unit it was running is run again once.
-                if (!$worker->ready) {
-                    fail("a worker of {$run['php']} did not start");
+            foreach ($read as $stream) {
+                $worker = null;
+                foreach (Pool::$workers as $candidate) {
+                    if ($candidate->out === $stream) {
+                        $worker = $candidate;
+                    }
                 }
-                $index = $worker->unit;
-                wipe_directory(Workdir::of($worker->pid));
-                release_worker($worker);
-                unset($idle[$worker->pid]);
-                if ($index !== null) {
-                    $tries[$index] = ($tries[$index] ?? 0) + 1;
-                    if ($tries[$index] < 2) {
-                        $again[] = $index;
-                    } else {
-                        $failed[] = $units[$index];
-                        $done += $weights[$index];
-                        if ($units[$index][0] !== 'held' && --$open === 0) {
-                            $lift();
+                if ($worker === null) {
+                    continue;
+                }
+                $message = receive($stream);
+                if (!is_array($message)) {
+                    // The worker died. A unit it was running is run again once.
+                    if (!$worker->ready) {
+                        fail("a worker of {$run['php']} did not start");
+                    }
+                    $index = $worker->unit;
+                    wipe_directory(Workdir::of($worker->pid));
+                    release_worker($worker);
+                    unset($idle[$worker->pid]);
+                    if ($index !== null) {
+                        $tries[$index] = ($tries[$index] ?? 0) + 1;
+                        if ($tries[$index] < 2) {
+                            $again[] = $index;
+                        } else {
+                            $failed[] = $units[$index];
+                            $done += $weights[$index];
+                            if ($units[$index][0] !== 'held' && --$open === 0) {
+                                $lift();
+                            }
                         }
                     }
-                }
-                if ($again !== [] || $next < $total) {
-                    if (++$respawns > 3 * $jobs + 20) {
-                        fail('workers keep dying');
+                    if ($again !== [] || $next < $total) {
+                        if (++$respawns > 3 * $jobs + 20) {
+                            fail('workers keep dying');
+                        }
+                        $spawn();
                     }
-                    $spawn();
+                    continue;
                 }
-                continue;
+                if ($message[0] === 'ready') {
+                    if ($message[1] !== $run['manifest']) {
+                        fail('a worker is not the PHP that was planned with: ' . json_encode([$message[1], $run['manifest']]));
+                    }
+                    canary_check($message, $run['php']);
+                    $worker->ready = true;
+                } elseif ($message[0] === 'done') {
+                    $index = $worker->unit ?? 0;
+                    // A unit whose child timed out or died is run again once the others are done,
+                    // on fewer workers; the rows of both runs are kept, and only the second run's
+                    // result is stored.
+                    $failedHere = is_array($message[2] ?? null) ? (int) ($message[2]['failed'] ?? 0) : 0;
+                    $unitLines[$index] = $quietMode && isset($unitLines[$index]) ? $unitLines[$index] + $message[1] : $message[1];
+                    if ($failedHere > 0 && !$quietMode) {
+                        $quiet[] = $index;
+                    } else {
+                        $key = $keyOf($index);
+                        if ($key !== null && $run['cache'] !== null) {
+                            cache_write($run['cache'], $key, array_values(array_map(strval(...), array_keys($unitLines[$index]))));
+                        }
+                    }
+                    Stats::absorb($worker->pid, $message[2] ?? null);
+                    if (!$quietMode) {
+                        $done += $weights[$index] ?? 0;
+                    }
+                    $worker->unit = null;
+                    if (!$quietMode && $units[$index][0] !== 'held' && --$open === 0) {
+                        $lift();
+                    }
+                }
+                $assign($worker);
             }
-            if ($message[0] === 'ready') {
-                if ($message[1] !== $run['manifest']) {
-                    fail('a worker is not the PHP that was planned with: ' . json_encode([$message[1], $run['manifest']]));
-                }
-                $worker->ready = true;
-            } elseif ($message[0] === 'done') {
-                $index = $worker->unit ?? 0;
-                $unitLines[$index] = $message[1];
-                $key = $keyOf($index);
-                if ($key !== null && $run['cache'] !== null) {
-                    cache_write($run['cache'], $key, array_values(array_map(strval(...), array_keys($message[1]))));
-                }
-                Stats::absorb($worker->pid, $message[2] ?? null);
-                $done += $weights[$index] ?? 0;
-                $worker->unit = null;
-                if ($units[$index][0] !== 'held' && --$open === 0) {
-                    $lift();
-                }
+            if (microtime(true) - $shown >= 5) {
+                fwrite(STDERR, progress_line($done, $planned, $started) . "\n");
+                $shown = microtime(true);
             }
-            $assign($worker);
         }
-        if (microtime(true) - $shown >= 5) {
-            fwrite(STDERR, progress_line($done, $planned, $started) . "\n");
-            $shown = microtime(true);
+        if ($quietMode || $quiet === []) {
+            break;
+        }
+        // The quiet phase: the units with a child that timed out or died, on a
+        // quarter of the workers, with the held units as they were.
+        $quietMode = true;
+        $order = $quiet;
+        $quiet = [];
+        $next = 0;
+        $total = count($order);
+        $again = [];
+        $open = 0;
+        $jobs = max(1, intdiv($jobs, 4));
+        for ($i = 0; $i < min($jobs, $total); $i++) {
+            $spawn();
         }
     }
     /** @var array{array<int, array<string, true>>, list<array{string, string, string, int, int}>} $result */

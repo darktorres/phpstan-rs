@@ -92,6 +92,7 @@ require_once __DIR__ . '/lib/plan.php';
 require_once __DIR__ . '/lib/unit.php';
 require_once __DIR__ . '/lib/protocol.php';
 require_once __DIR__ . '/lib/workdir.php';
+require_once __DIR__ . '/lib/sandbox.php';
 require_once __DIR__ . '/lib/pool.php';
 require_once __DIR__ . '/lib/stats.php';
 require_once __DIR__ . '/lib/select.php';
@@ -104,6 +105,11 @@ $arguments = array_values(array_filter(array_slice($argv, 1), static fn (string 
 $only = isset($arguments[0]) ? (string) $arguments[0] : null;
 $php = option($argv, 'php') ?? PHP_BINARY;
 $zendMm = in_array('--zend-mm', $argv, true);
+$sandboxMode = option($argv, 'sandbox') ?? 'bwrap';
+if (!in_array($sandboxMode, ['bwrap', 'sudo-unshare', 'none'], true)) {
+    fwrite(STDERR, "--sandbox is bwrap, sudo-unshare or none\n");
+    exit(2);
+}
 $skip = option($argv, 'skip') ?? 'off';
 if (!in_array($skip, ['off', 'dead', 'released'], true)) {
     fwrite(STDERR, "--skip is off, dead or released\n");
@@ -129,7 +135,15 @@ $stop = static function (int $signal): void {
 pcntl_signal(SIGINT, $stop);
 pcntl_signal(SIGTERM, $stop);
 
-$plan = plan_run($php, $only, $extensions, $zendMm);
+$jobs = jobs($argv);
+// A worker's children write at most 64 MiB each, four of them at once in the
+// worst case of the measured limits, so a /tmp smaller than 256 MiB is refused.
+$sandbox = ['mode' => $sandboxMode, 'cap' => $sandboxMode === 'bwrap' ? sandbox_cap($jobs) : 0];
+if ($sandboxMode === 'bwrap' && $sandbox['cap'] < 256 * 1024 ** 2) {
+    fwrite(STDERR, 'only ' . intdiv($sandbox['cap'], 1024 ** 2) . " MiB of /tmp per worker: free memory or use fewer --jobs\n");
+    exit(1);
+}
+$plan = plan_run($php, $only, $extensions, $zendMm, $sandbox);
 if (in_array('--list', $argv, true)) {
     echo plan_summary($plan['units'], $plan['weights']);
     exit(0);
@@ -146,11 +160,12 @@ if ($statsFile !== null) {
 }
 
 $run = [
-    'jobs' => jobs($argv),
+    'jobs' => $jobs,
     'php' => $php,
     'only' => $only,
     'extensions' => $extensions,
     'zendMm' => $zendMm,
+    'sandbox' => $sandbox,
     'manifest' => $plan['manifest'],
     'skip' => $skip,
     'cache' => $cacheDir,
@@ -187,8 +202,19 @@ foreach ($unitLines as $lines) {
         $rows[$line] = true;
     }
 }
+$measured = [];
+foreach (array_keys($rows) as $row) {
+    [$builtin, , $kind] = explode("\t", $row);
+    if ($kind === 'probed') {
+        $measured[$builtin] = true;
+    }
+}
+$asserted = [];
 foreach ($plan['nothing'] as $function) {
-    $rows["$function\t\tprobed\t"] = true;
+    if (!isset($measured[$function])) {
+        $rows["$function\t\tprobed\t"] = true;
+        $asserted[] = $function;
+    }
 }
 $rows = array_keys($rows);
 foreach ($failed as $unit) {
@@ -214,7 +240,7 @@ if ($failed === [] && ($out !== null || $update !== null)) {
         'totals' => $counts,
     ];
     write_atomic($target, table_text($final));
-    write_atomic(sidecar_path($target), sidecar_text($final, $plan['manifest'], $run['recorder'], $skip, $runInfo, earlier_runs($target)));
+    write_atomic(sidecar_path($target), sidecar_text($final, $plan['manifest'], $run['recorder'], $skip, $sandboxMode, $runInfo, earlier_runs($target)));
 } elseif ($failed === [] && $out === null && $update === null) {
     echo table_text($rows);
 }
@@ -227,7 +253,7 @@ if ($coverage !== null && $failed === []) {
             $probed[$builtin] = true;
         }
     }
-    write_atomic($coverage, implode("\n", coverage_lines($probed, [], $wanted)) . "\n");
+    write_atomic($coverage, implode("\n", coverage_lines($probed, [], $wanted, $asserted)) . "\n");
 }
 
 exit($failed === [] ? 0 : 1);

@@ -17,6 +17,8 @@ require_once __DIR__ . '/lib/protocol.php';
 require_once __DIR__ . '/lib/workdir.php';
 require_once __DIR__ . '/lib/stats.php';
 require_once __DIR__ . '/lib/select.php';
+require_once __DIR__ . '/lib/limits.php';
+require_once __DIR__ . '/lib/canary.php';
 
 // Processes that are not dumpable never start the system's crash handler,
 // which costs seconds for each abort. The setting is inherited by the children.
@@ -28,6 +30,7 @@ if (extension_loaded('ffi')) {
     }
 }
 
+Limits::init();
 Protocol::open();
 Workdir::create();
 
@@ -40,7 +43,10 @@ try {
                 Stats::$enabled = $message[2];
                 $skip = $message[3];
                 $wanted = selector($message[1], $message[4]);
-                send(Protocol::$out, ['ready', manifest()]);
+                // The canary's units are not part of the table, nor of the statistics.
+                $problems = canary_problems();
+                Stats::reset();
+                send(Protocol::$out, ['ready', manifest(), $problems]);
                 break;
             case 'plan':
                 $units = units($wanted);
