@@ -30,15 +30,15 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    no-default-features fixtures into their own job, once a run is green),
    item 12 (re-measure after CI runs), and the pending push, which needs the
    user's go-ahead.
-1. **Level 9**, the recorder of the builtin-runs table
+1. **Level 8**, the recorder of the builtin-runs table
    (`tools/builtin-runs/record.php`, plan `BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12): a fix started on 2026-10-11 because a full run of the
    committed script no longer finishes in a tolerable time with the newly
    installed extensions, and because its output depends on the order the
    probes ran in. Resume at the first step of the plan with no commit
-   in `git log -- tools/builtin-runs`. When level 9 is done, return to level 8's item E at E2.V (its
+   in `git log -- tools/builtin-runs`. When level 8 is done, return to level 7's item E at E2.V (its
    paused list is in the plan's appendix and in the ledger).
-2. **Level 8**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
+2. **Level 7**: building `PROFILE_DRILL_PIWIGO_20G.md` row by row from
    `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`. Item 9 is complete and its 9.V
    tests-only gate passes; profile item 9 before resuming item 10, at 10.1.
    Use the profiling procedure in `CLAUDE.md` and preserve the baseline/current
@@ -79,7 +79,7 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    resolves, and each item gate separates workspace tests from item-specific
    tests. Follow-up review added focused test selections for uncovered item
    oracles and explicit final-only rows for PHP, platform, server-session,
-   cache and dump checks. Those rows remain OPEN pending level 8's ordered work. Item 9.8's
+   cache and dump checks. Those rows remain OPEN pending level 7's ordered work. Item 9.8's
    statement and parameter doc fields are now removed; parser-owned doc sites
    retain normalized text and comment line by node offset, with checker,
    registry, dependency, promoted-property and canonical readers migrated.
@@ -109,14 +109,11 @@ State as of 2026-10-07, worktree based on `39f0b029`.
    9071f48f callgrind profile. Status: in progress; the Baseline step
    is done (off 54.13 G, warm 42.14 G, cold-with-store 56.24 G; `strace` says
    no `memmap2`), items 0, 0b, 1, 2, 3, 4, 5, 7a, 7b, 7c, 7d, 7e, 7f, 7g, 7h, 9, 10, 11, 12a-12f, 13 and 14 are committed, each with open pieces (item 9: E2.12.29-E2.12.30; checked with `cargo check` and its `walk_gates` tests, the rest waits for E2.V). E1.1.5 with EG.17 is committed (checked with the call_effects and duplicates fixtures; the full fixtures run passed but for the three duplicates fixtures the cache round trip exposed, now fixed), E2.V follows, then E2.V, and E1.2.4 with EG.2. Every open piece is a row E2.12.1-E2.12.21 of `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`; an item counts as done only when its rows are closed. 7g is committed (its open piece is E2.12.19). The correctness bugs found on the way (E1.1.6, E1.2.17-19, E1.3.6-7, EG.21, EG.24-EG.28, E2.12.22) are fixed and committed; EG.29-EG.31 (by-reference builtins, the destroy of a by-reference parameter) are done, EG.32-EG.33 and the EG.31 remainder are open precision rows, and EG.23 (corpus check of the new holder paths, with their cost) runs at E2.V. Resume with the E2.12 remainders (E2.12.6, .15, .16, .18-.20), the reopened rows (E1.1.5 with EG.17, E1.2.4 with EG.2, E2.6, E2.10, E2.12.14), then E2.12.1-E2.12.2 (D and the builtin bit) and item 7h. Verification runs once, after item 14.
-3. Then **level 8's deferred rows**, as a plan of their own: the PHP
+3. Then **level 7's deferred rows**, as a plan of their own: the PHP
    catalog, and every row of the 20 G plan that changes what the analysis
    finds beyond what the optimization needs, validated together (the
    ledger's row D.V).
-4. Then **level 6**: recreate master's 87 commits on `master2`, one row
-   at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
-   done).
-5. Then pop back, in this order: **level 3** (the 140 open review tasks, and
+4. Then pop back, in this order: **level 3** (the 140 open review tasks, and
    the A/B ledger's open steps 19 and 21 on `master`), then **level 2** (the
    crate split from Stage C on), then **level 1** (the lanes).
 
@@ -124,12 +121,10 @@ State as of 2026-10-07, worktree based on `39f0b029`.
 
 | | branch | directory | holds |
 |---|---|---|---|
-| main | `master` | `/home/torres/projects/phpstan-rs` | the fixes to the stage A/B review findings: 87 commits `master2` lacks, and their ledger, `AB_LEDGER.md` |
+| main | `master` | `/home/torres/projects/phpstan-rs` | the fixes to the stage A/B review findings and their ledger, `AB_LEDGER.md` |
 | second | `master2` | `/home/torres/projects/phpstan-rs-master2` | the crate split, the stage reviews, the gate speed-up, the start-up and build cost work |
 
-Merge base `5d86aac1`. A rebase or a cherry-pick of master's commits onto
-`master2` conflicts with the registry rework, so they are written again
-(level 6).
+Merge base `5d86aac1`.
 
 ## The stack, oldest first
 
@@ -166,7 +161,7 @@ reported "paused with a clean tree" at `47ca5bb`; the branches converged at
   `~/.claude/projects/-home-torres-projects-phpstan-rs/5b4ed89e-44f2-40ee-b852-a4162eb0bae8.jsonl`
   (message at 2026-09-23T03:15); the lane sessions' exchanges are in that file
   and in `-home-torres-projects-phpstan-rs-master2/ddf6301a-50ab-484b-9119-41a790c6f310.jsonl`.
-- Resume: when levels 2-6 are done. Edits `GATE_SPEED_PLAN.md` §5 lists for
+- Resume: when levels 2-5 are done. Edits `GATE_SPEED_PLAN.md` §5 lists for
   `ROADMAP.md` are recorded there.
 
 ### 2. The crate split — `CRATE_SPLIT_PLAN.md` and its companions
@@ -195,7 +190,7 @@ Reading every commit of the stages against the code, with findings as tasks.
 
 - `AB_LEDGER.md` (on `master` only) tracks the plan that fixes the stage A/B
   review findings, at `~/.claude/plans/peppy-drifting-coral.md` (outside the
-  repo): the 87 commits of level 6 are that work. At the last look: steps 1-18
+  repo). At the last look: steps 1-18
   and 20 (the test pass) done; step 19 (summary-mode tuning) and step 21
   (finishing the second version of the plan) open, 16 unticked boxes.
 - Resume: work the open tasks in each file; tick them there; finish the A/B
@@ -219,20 +214,7 @@ resolved stub base, scoped incremental finishing, a stored stub cache,
 precise rechecks and more. **Done**; the measurements and what was decided
 against are in §12. The profiling method is in `CLAUDE.md` and the README.
 
-- Two things to carry into level 6: the 23 renames mapped in
-  `gates/test-renames/build-cost.txt` overlap master's `0ad9589b` (which
-  records 22 of them), so drop one set when that commit is recreated; and
-  the module-graph edges added here (`gates/module-graph.txt`) may meet
-  master's own edits to that file.
-
-### 6. Recreate master's commits here — `MASTER_REIMPLEMENTATION_LEDGER.md`
-
-The 87 commits `master` has that `master2` lacks, each written again against
-this branch with master's subject line, one row each. 86 open, 1 skipped.
-The ledger also lists what `master2` changed that those commits meet (stored
-types need serde and `PartialEq`, passes must run in scope, `project.rs`).
-
-### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (done; validated at `1892b477`, its later work read by level 8's item 0)
+### 6. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (done; validated at `1892b477`, its later work read by level 7's item 0)
 
 Validated: `cargo test --workspace` and the fixtures (3,818) pass; the Piwigo
 O2 checksum equals the baseline's (`6e5fa444…`, from `7a3f3f99`); both binaries
@@ -289,11 +271,11 @@ docblock is inherited across case-different names; union member order).
   a docblock being no class name, declarations ruled out by the configured PHP
   versions not being indexed, and UTF-16/UTF-8 columns in the language server.
 - Two tests of `syntax::span` were wrong and are fixed; expect a few more.
-- **Carried into level 8.** The later work above, never validated together,
-  is read first by level 8's item 0 (step 1: the vendor-tree, all-on and
+- **Carried into level 7.** The later work above, never validated together,
+  is read first by level 7's item 0 (step 1: the vendor-tree, all-on and
   unscoped reports against `1892b477`, each difference read), before
   anything is built on it. Each item not built here is designed or ruled on
-  in level 8's plan:
+  in level 7's plan:
   - P7's lowering and the text grammar's retirement: item 14, now for
     correctness as much as cost (one parse per doc, where today two parses
     split a doc two ways; a lowering oracle with its differences listed),
@@ -310,9 +292,9 @@ docblock is inherited across case-different names; union member order).
   - pull parsing for the tag lexer: item 14, step 5 (a token slice read by
     index instead).
 
-### 8. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  (paused at E2.V for level 9)
+### 7. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  (paused at E2.V for level 8)
 
-The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 7's end
+The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 6's end
 state), the dhat heap profile of the same run (`target/dhat-heap.json`; its
 2.67 GB and 19.4 M allocations each given to an item, §8), and the plan built
 from both: items 0-19, each ending with a tests-only gate (§11), with full
@@ -1088,7 +1070,7 @@ O3 (2026-10-05; the plan's §9, "Only what optimizes").
   nothing invokes, code that throws first with the values sampled,
   parameters no value can be made for, methods of traits.
 
-### 9. The builtin-runs recorder — `BUILTIN_RUNS_RECORDER_PLAN.md`  ← current
+### 8. The builtin-runs recorder — `BUILTIN_RUNS_RECORDER_PLAN.md`  ← current
 
 `tools/builtin-runs/record.php` builds `builtin-runs-8.5.tsv`, which the
 effect resolver reads (`build.rs`, `registry/effects.rs`). With the new
@@ -1096,7 +1078,7 @@ extensions (decimal, ds, redis, memcached, msgpack) a full run is 801 K
 forked probes, the committed script's rows depend on what ran before in the
 same worker, and a killed run leaves directories and orphans behind. The plan
 makes it sandboxed, resumable and observable, skips the forks that cannot
-record, and regenerates the table. Level 8's E2.V is paused behind it only
+record, and regenerates the table. Level 7's E2.V is paused behind it only
 because the recorder work started from it; the plan measured that the table
 does not change E2.V's Piwigo findings, so neither blocks the other.
 
