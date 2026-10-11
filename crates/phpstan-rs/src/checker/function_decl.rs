@@ -1772,3 +1772,37 @@ impl std::fmt::Display for ReturnSubject<'_> {
         write!(f, "return type of {}()", self.label)
     }
 }
+
+impl<'a> Checker<'a> {
+    /// Snapshots every currently-in-scope by-ref parameter (plus every
+    /// closure `use (&$x)` capture - see `current_function_byref_
+    /// snapshot_names`'s own doc comment) own `locals`-tracked type into
+    /// `current_function_by_ref_exit_snapshots` - called at each real
+    /// execution-end point (`StmtKind::Return`, both arms, and the
+    /// falls-off-the-end path in `check_function_impl`). A parameter
+    /// missing from `locals` entirely (shouldn't happen - every
+    /// parameter is declared into `locals` up front - but this project's
+    /// own "don't guess" precedent prefers a `Mixed` fallback over a
+    /// panic here) falls back to `mixed`, matching
+    /// `check_by_ref_value`'s own "never flag a `Mixed` value" leniency.
+    pub(crate) fn record_by_ref_exit_snapshot(&mut self, locals: &crate::checker::Locals) {
+        if self.current_function_by_ref_params.is_empty()
+            && self.current_function_byref_snapshot_names.is_empty()
+        {
+            return;
+        }
+        let names: Vec<Name> = self
+            .current_function_by_ref_params
+            .keys()
+            .cloned()
+            .chain(self.current_function_byref_snapshot_names.iter().cloned())
+            .collect();
+        for name in names {
+            let ty = locals.get_var(&name).cloned().unwrap_or(Type::mixed());
+            self.current_function_by_ref_exit_snapshots
+                .entry(name)
+                .or_default()
+                .push(ty);
+        }
+    }
+}
