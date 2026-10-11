@@ -37,6 +37,7 @@ pub mod checker;
 pub mod deps;
 pub mod doctrine_functions;
 pub(crate) mod file_id;
+pub(crate) mod file_mentions;
 
 pub mod ext;
 pub mod gate;
@@ -60,7 +61,6 @@ pub mod restricted_symbols;
 pub mod rule;
 pub mod rules_settings;
 pub mod semantics;
-pub(crate) mod stub_attributes;
 
 pub use checker::Checker;
 pub use diagnostics::{Diagnostic, DiagnosticBuilder, DiagnosticFix};

@@ -72,14 +72,6 @@ use syntax::name_resolution::for_each_in_context_ids;
 use syntax::span::{LineIndex, Span};
 use syntax::visit::arena::{self, Visitor};
 
-/// The bit of `FileFacts::mentions` a file that names `PHPStan` has: a
-/// name that resolves into the `PHPStan\` namespace starts with a segment
-/// the file spells, so a file without it holds none.
-pub(crate) const MENTIONS_PHPSTAN: u32 = 1 << 6;
-
-/// The spellings that set `MENTIONS_PHPSTAN`.
-pub(crate) const WATCH: &[(&str, u32)] = &[("phpstan", MENTIONS_PHPSTAN)];
-
 /// `file_package` is the checked file's composer package name: `None`
 /// when there's no file (`Walker::tests`' own `diagnostics_for`), and
 /// `Some(None)` for a file no named package owns. Only

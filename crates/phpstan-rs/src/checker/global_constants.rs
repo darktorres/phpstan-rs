@@ -27,16 +27,6 @@ const MAGIC_CONSTANTS: [&str; 10] = [
     "__COMPILER_HALT_OFFSET__",
 ];
 
-/// The bit of `FileFacts::mentions` a file that names `__FUNCTION__` or
-/// `__METHOD__` has: only such a file has one to find in a closure.
-pub(crate) const MENTIONS_MAGIC: u32 = 1 << 5;
-
-/// The spellings that set `MENTIONS_MAGIC`.
-pub(crate) const WATCH: &[(&str, u32)] = &[
-    ("__function__", MENTIONS_MAGIC),
-    ("__method__", MENTIONS_MAGIC),
-];
-
 /// Per-file facts the bare-constant checks need, gathered once.
 #[derive(Default)]
 pub(crate) struct ConstantFacts {

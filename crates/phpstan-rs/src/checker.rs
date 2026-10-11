@@ -824,15 +824,8 @@ pub struct Checker<'a> {
     // false "unused" report on a member a rebound closure actually
     // reaches.
     pub(crate) rebind_target_classes: NameSet,
-    // Whether the file names anything a closure rebind needs (`bind`,
-    // `bindTo`, `call`); when it does not, no walk of it finds one.
-    pub(crate) closure_rebind_possible: bool,
-    // Whether the file names a function that tests a path or sets the
-    // include path, which is what its include guards are found by; true
-    // until said otherwise.
-    pub(crate) include_guards_possible: bool,
-    /// The bits of `FileFacts::mentions` of the file being checked; every
-    /// bit is set until said otherwise.
+    // The `FileFacts::mentions` bits of the file being checked (see
+    // `file_mentions`); every bit set until said otherwise.
     pub(crate) file_mentions: u32,
     // Whether the file builds a function-like or class-like inside a body;
     // when it does not, no walk into a body can find one.
@@ -1515,8 +1508,6 @@ impl<'a> Checker<'a> {
             capture_widening: Default::default(),
             capture_seen: Default::default(),
             rebind_target_classes: NameSet::default(),
-            closure_rebind_possible: true,
-            include_guards_possible: true,
             file_mentions: u32::MAX,
             file_has_nested_function_like: true,
             #[cfg(debug_assertions)]
@@ -2195,19 +2186,6 @@ impl<'a> Checker<'a> {
         self.diagnostics
     }
 
-    /// Whether the file being checked names what a closure rebind needs
-    /// (`unused::WATCH`'s bit in `syntax::FileFacts::mentions`); true until said
-    /// otherwise.
-    pub fn set_closure_rebind_possible(&mut self, possible: bool) {
-        self.closure_rebind_possible = possible;
-    }
-
-    /// Whether the file being checked names what its include guards are
-    /// found by (`includes::WATCH`); true until said otherwise.
-    pub fn set_include_guards_possible(&mut self, possible: bool) {
-        self.include_guards_possible = possible;
-    }
-
     /// The spellings the file being checked names, as `FileFacts::mentions`
     /// has them.
     pub fn set_file_mentions(&mut self, mentions: u32) {
@@ -2249,7 +2227,7 @@ impl<'a> Checker<'a> {
             } else {
                 strict_rules::LazyAssigned::default()
             };
-        self.constant_facts = if self.file_mentions & global_constants::MENTIONS_MAGIC != 0 {
+        self.constant_facts = if self.file_mentions & crate::file_mentions::MAGIC_CONSTANT != 0 {
             global_constants::constant_facts(arenas, stmts)
         } else {
             debug_assert!(
@@ -2263,11 +2241,12 @@ impl<'a> Checker<'a> {
         if self.current_file.is_some() {
             self.include_constant_initializers =
                 includes::file_constant_initializers(arenas, stmts);
-            (self.include_guarded_paths, self.include_path_dirs) = if self.include_guards_possible {
-                self.collect_include_guards(arenas, stmts)
-            } else {
-                (FxHashSet::default(), includes::default_include_dirs())
-            };
+            (self.include_guarded_paths, self.include_path_dirs) =
+                if self.file_mentions & crate::file_mentions::INCLUDE_GUARD != 0 {
+                    self.collect_include_guards(arenas, stmts)
+                } else {
+                    (FxHashSet::default(), includes::default_include_dirs())
+                };
         }
         self.check_declare_directives(arenas, stmts);
         self.check_file_whitespace(arenas, program);
@@ -2278,11 +2257,12 @@ impl<'a> Checker<'a> {
         self.check_use_const_imports(arenas, program);
         self.check_use_class_imports(arenas, program);
         self.check_used_names(arenas, program);
-        let (rebind_targets, rebind_escape_all) = if self.closure_rebind_possible {
-            unused::scan_program_for_rebind_targets(arenas, stmts)
-        } else {
-            (NameSet::default(), false)
-        };
+        let (rebind_targets, rebind_escape_all) =
+            if self.file_mentions & crate::file_mentions::CLOSURE_REBIND != 0 {
+                unused::scan_program_for_rebind_targets(arenas, stmts)
+            } else {
+                (NameSet::default(), false)
+            };
         self.rebind_target_classes = rebind_targets;
         self.rebind_escape_all = rebind_escape_all;
         // A file-local `uses(...)` call (no `->in(...)`) wins over

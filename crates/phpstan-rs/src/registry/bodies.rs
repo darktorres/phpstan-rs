@@ -38,7 +38,7 @@ pub trait BodySource: Sync {
     fn stream_wrappers(&self, out: &mut StreamWrappers);
 
     /// Whether any file at hand names something that writes a property
-    /// without a write in its code (`MENTIONS_PROPERTY_WRITER`); a source
+    /// without a write in its code (`file_mentions::PROPERTY_WRITER`); a source
     /// that cannot say answers yes.
     fn names_property_writer(&self) -> bool;
 
@@ -168,56 +168,6 @@ impl syntax::canonical::Canonical for UnsetProperties {
         );
     }
 }
-
-/// The bit of a file's `FileFacts::mentions` that notes it names
-/// `stream_wrapper_register`.
-pub(crate) const MENTIONS_STREAM_WRAPPER: u32 = 1 << 4;
-
-/// The spellings that set `MENTIONS_STREAM_WRAPPER`.
-pub(crate) const WATCH: &[(&str, u32)] = &[("stream_wrapper_register", MENTIONS_STREAM_WRAPPER)];
-
-/// The bit of a file's `FileFacts::mentions` that notes it names something
-/// that writes a property without a write in the code: reflection, the
-/// fetch modes that fill an object, unserialisation, or a wrapper that
-/// exposes an object's properties as array elements. Names are also noted
-/// when a string is one, as a callable is.
-pub(crate) const MENTIONS_PROPERTY_WRITER: u32 = 1 << 7;
-
-/// The spellings that set `MENTIONS_PROPERTY_WRITER`.
-pub(crate) const PROPERTY_WRITER_WATCH: &[(&str, u32)] = &[
-    ("setvalue", MENTIONS_PROPERTY_WRITER),
-    (
-        "setrawvaluewithoutlazyinitialization",
-        MENTIONS_PROPERTY_WRITER,
-    ),
-    ("unserialize", MENTIONS_PROPERTY_WRITER),
-    ("igbinary_unserialize", MENTIONS_PROPERTY_WRITER),
-    ("msgpack_unserialize", MENTIONS_PROPERTY_WRITER),
-    ("_unserialize", MENTIONS_PROPERTY_WRITER),
-    ("fetchobject", MENTIONS_PROPERTY_WRITER),
-    ("fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("mysqli_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("cubrid_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("db2_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("fbird_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("ibase_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("mssql_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("mysql_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("oci_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("odbc_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("pg_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("sqlite_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("sqlsrv_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("swoole_substr_unserialize", MENTIONS_PROPERTY_WRITER),
-    ("sybase_fetch_object", MENTIONS_PROPERTY_WRITER),
-    ("fetch_class", MENTIONS_PROPERTY_WRITER),
-    ("fetch_into", MENTIONS_PROPERTY_WRITER),
-    ("fetch_props_late", MENTIONS_PROPERTY_WRITER),
-    ("setfetchmode", MENTIONS_PROPERTY_WRITER),
-    ("arrayobject", MENTIONS_PROPERTY_WRITER),
-    ("arrayiterator", MENTIONS_PROPERTY_WRITER),
-    ("recursivearrayiterator", MENTIONS_PROPERTY_WRITER),
-];
 
 /// The classes code registers as stream wrappers with
 /// `stream_wrapper_register()`: only such a class has its methods run by a
@@ -461,7 +411,7 @@ impl FileBodies {
             stmts,
             facts.has_anonymous_class || facts.has_nested_declaration,
             facts.unsets_property,
-            facts.mentions & MENTIONS_STREAM_WRAPPER != 0,
+            facts.mentions & crate::file_mentions::STREAM_WRAPPER != 0,
         )
     }
 

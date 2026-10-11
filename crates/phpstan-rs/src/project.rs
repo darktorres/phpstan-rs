@@ -360,9 +360,8 @@ impl BodySource for file_table::FileTable<FileState> {
     }
 
     fn names_property_writer(&self) -> bool {
-        self.values().any(|file| {
-            file.facts.mentions & crate::registry::bodies::MENTIONS_PROPERTY_WRITER != 0
-        })
+        self.values()
+            .any(|file| file.facts.mentions & crate::file_mentions::PROPERTY_WRITER != 0)
     }
 
     fn files(&self) -> Vec<crate::registry::bodies::LoadedFile<'_>> {
@@ -3070,12 +3069,7 @@ impl Project {
         }
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
-        checker.set_closure_rebind_possible(
-            file.facts.mentions & checker::unused::MENTIONS_REBIND != 0,
-        );
-        checker.set_include_guards_possible(
-            file.facts.mentions & checker::includes::MENTIONS_GUARD != 0,
-        );
+        checker.set_file_mentions(file.facts.mentions);
         checker.set_syntax_marks(file.facts.syntax);
         checker.set_file_mentions(file.facts.mentions);
         checker.set_file_has_nested_function_like(file.facts.has_nested_function_like);
@@ -3211,7 +3205,7 @@ impl Project {
     /// file declares or refers to has; or a static call whose method a
     /// PHPStan class declares, whose receiver the file refers to.
     fn phpstan_api_pass_needed(&self, file: &FileState) -> bool {
-        if file.facts.mentions & checker::phpstan_api::MENTIONS_PHPSTAN != 0 {
+        if file.facts.mentions & crate::file_mentions::PHPSTAN_API != 0 {
             return true;
         }
         if !self.registry.has_phpstan_ancestry() {
@@ -3790,19 +3784,6 @@ static PHPSTAN_BASE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
 const PLAIN_BASE_NAME: &str = "stub-base";
 const PHPSTAN_BASE_NAME: &str = "stub-base-phpstan";
 
-/// The spellings a file's facts note, each list with the bits of the walk
-/// it gates.
-static WATCHED: syntax::WatchList = syntax::WatchList(&[
-    crate::stub_attributes::WATCH,
-    file_declarations::WATCH,
-    checker::unused::REBIND_WATCH,
-    checker::includes::WATCH,
-    crate::registry::bodies::WATCH,
-    checker::global_constants::WATCH,
-    checker::phpstan_api::WATCH,
-    crate::registry::bodies::PROPERTY_WRITER_WATCH,
-]);
-
 /// What the tree `ast` refers to, and what its declarations do: from the
 /// parser's records, or by walking the final tree when parse-time rules
 /// invalidate those records.
@@ -3862,10 +3843,13 @@ fn parse_recording<'a>(
         // source, so even a scratch parse retains those bytes until
         // `file_declarations::collect` has copied their resolved types and
         // tags into registry-owned values.
-        Some(scratch) => {
-            syntax::parse_watching_with_worker_scratch(source, names, Some(&WATCHED), scratch)?
-        }
-        None => syntax::parse_watching(source, names, Some(&WATCHED))?,
+        Some(scratch) => syntax::parse_watching_with_worker_scratch(
+            source,
+            names,
+            Some(&crate::file_mentions::WATCHED),
+            scratch,
+        )?,
+        None => syntax::parse_watching(source, names, Some(&crate::file_mentions::WATCHED))?,
     };
     let ignores = ignore_comments::scan_parsed(&parsed);
     let ast = parsed.stmts;

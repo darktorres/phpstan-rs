@@ -1,10 +1,10 @@
 //! The facts a file's parse notes, which let a pass skip a file it cannot
 //! find anything in.
-use crate::checker::global_constants::MENTIONS_MAGIC;
-use crate::checker::phpstan_api::MENTIONS_PHPSTAN;
+use crate::file_mentions::MAGIC_CONSTANT as MENTIONS_MAGIC;
+use crate::file_mentions::PHPSTAN_API as MENTIONS_PHPSTAN;
 
 fn facts_of(source: &str) -> syntax::FileFacts {
-    syntax::parse_watching(source, None, Some(&super::super::WATCHED))
+    syntax::parse_watching(source, None, Some(&crate::file_mentions::WATCHED))
         .expect("the file parses")
         .facts
 }
@@ -44,7 +44,7 @@ fn a_file_naming_phpstan_has_its_bit_wherever_the_name_is_spelled() {
     );
 }
 
-use crate::registry::bodies::MENTIONS_PROPERTY_WRITER;
+use crate::file_mentions::PROPERTY_WRITER as MENTIONS_PROPERTY_WRITER;
 
 #[test]
 fn a_file_naming_a_property_writer_has_its_bit_as_a_name_or_as_a_string() {
@@ -78,7 +78,7 @@ fn a_file_naming_a_property_writer_has_its_bit_as_a_name_or_as_a_string() {
 #[test]
 fn every_property_writer_spelling_names_something_the_stubs_declare() {
     let base = super::super::Project::plain_base();
-    for &(spelling, _) in crate::registry::bodies::PROPERTY_WRITER_WATCH {
+    for &(spelling, _) in crate::file_mentions::PROPERTY_WRITER_SPELLINGS {
         let known = base.lookup_function(spelling).is_some()
             || base.classes_by_id().any(|(_, class, reflection)| {
                 class.as_str().eq_ignore_ascii_case(spelling)
@@ -95,7 +95,7 @@ fn every_property_writer_spelling_names_something_the_stubs_declare() {
 #[test]
 fn every_stub_function_that_fills_an_object_from_data_is_a_property_writer_spelling() {
     let base = super::super::Project::plain_base();
-    let spelled: Vec<&str> = crate::registry::bodies::PROPERTY_WRITER_WATCH
+    let spelled: Vec<&str> = crate::file_mentions::PROPERTY_WRITER_SPELLINGS
         .iter()
         .map(|(spelling, _)| *spelling)
         .collect();
@@ -120,7 +120,7 @@ fn every_stub_function_that_fills_an_object_from_data_is_a_property_writer_spell
 #[test]
 fn every_stub_method_that_fills_an_object_from_data_is_a_property_writer_spelling() {
     let base = super::super::Project::plain_base();
-    let spelled: Vec<&str> = crate::registry::bodies::PROPERTY_WRITER_WATCH
+    let spelled: Vec<&str> = crate::file_mentions::PROPERTY_WRITER_SPELLINGS
         .iter()
         .map(|(spelling, _)| *spelling)
         .collect();

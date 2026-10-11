@@ -41,19 +41,12 @@ pub(super) struct FileDeclarations {
     pub(super) declared_classes: Vec<DeclaredClass>,
 }
 
-/// The bit of `FileFacts::mentions` a file naming `define`, in any case,
-/// however it imports it, has: the only call that declares a constant.
-pub(crate) const MENTIONS_DEFINE: u32 = 1 << 3;
-
-/// The spellings that set `MENTIONS_DEFINE`.
-pub(crate) const WATCH: &[(&str, u32)] = &[("define", MENTIONS_DEFINE)];
-
 /// Whether the declarations of a file can be inside its expressions: a
 /// `define()` call, or a declaration in the body of a closure or an
 /// anonymous class. If not, the walk for them leaves its expressions
 /// alone.
 pub(crate) fn declares_in_expressions(facts: &FileFacts) -> bool {
-    facts.mentions & MENTIONS_DEFINE != 0 || facts.has_nested_declaration
+    facts.mentions & crate::file_mentions::DEFINE != 0 || facts.has_nested_declaration
 }
 
 /// The declarations of `ast`, the file at `path`. `is_stub` is whether the

@@ -17,23 +17,6 @@ use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::arena::{self, Visitor};
 
-/// The bit of `FileFacts::mentions` a file that names a function that
-/// tests a path, or sets the include path, has: only such a file has a
-/// guard to find.
-pub(crate) const MENTIONS_GUARD: u32 = 1 << 2;
-
-/// The spellings that set `MENTIONS_GUARD`.
-pub(crate) const WATCH: &[(&str, u32)] = &[
-    ("file_exists", MENTIONS_GUARD),
-    ("is_file", MENTIONS_GUARD),
-    ("is_readable", MENTIONS_GUARD),
-    ("is_writable", MENTIONS_GUARD),
-    ("is_writeable", MENTIONS_GUARD),
-    ("is_executable", MENTIONS_GUARD),
-    ("set_include_path", MENTIONS_GUARD),
-    ("ini_set", MENTIONS_GUARD),
-];
-
 const GUARD_FUNCTIONS: [&str; 6] = [
     "file_exists",
     "is_file",
