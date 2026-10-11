@@ -1,0 +1,8 @@
+php_version = "8.5.4"
+
+[php_target_profile]
+os = "linux"
+arch = "x86_64"
+sapi = "cli"
+zts = false
+debug = false
