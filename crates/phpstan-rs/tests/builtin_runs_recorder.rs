@@ -14,7 +14,8 @@ use std::process::Command;
 
 #[test]
 fn builtin_runs_recorder() {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/builtin-runs/tests/run.php");
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/builtin-runs/tests/run.php");
     match Command::new("php")
         .args(["-r", "exit(function_exists('pcntl_fork') ? 0 : 3);"])
         .status()
