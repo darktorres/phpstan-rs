@@ -1106,3 +1106,92 @@ and full resource campaign were unavailable in this pass.
 The independent-review gate remains open. After implementation and validation,
 the reviewer should recheck the changed transfer logic, campaign evidence
 binding, regenerated artifacts, and amended statuses before F00.5 closes.
+
+## Fifth review pass: author remediation pass and later catalog commits (2026-10-11)
+
+Scope: the remediation commits after the fourth pass (`a00c6426` and the commits
+between `c513c52e` and `8ad93491` (HEAD `8053863c` only deletes `MASTER_REIMPLEMENTATION_LEDGER.md`) that touch the catalog, its builder or its
+checker routing), checked against the RV findings they claim to close. Each claim
+was checked in the code, in a test run, or against the recorded measurements at
+`8ad93491` (HEAD `8053863c` only deletes `MASTER_REIMPLEMENTATION_LEDGER.md`). This is not a line-by-line read of the 3,133-line transfer change in
+`bc4b7524`.
+
+### What was checked
+
+- **Provenance (RV-27).** The builder's `validate_measurement_output` requires each
+  sidecar input to match a successful command record's `output_artifacts` digest and
+  the output path derived from that command's `-o`/`-c`. The cleanup GIMPLE and CFG
+  dumps are bound this way (`results/main/measurements.json`, record `cleanup-gimple`).
+  The fabricated-file reproduction from the fourth pass is therefore refused, since its
+  digest is in no record. The Python suites (36 tests, including
+  `test_gcc_sidecar_must_match_compiler_dump_path_and_digest` and
+  `test_every_bound_output_requires_exact_path_and_digest`) pass.
+- **Routing refactors (`4580fe5c`, `5e363624`).** `catalog_function` still requires a stub
+  signature and a case-insensitive match against the constant name, so a user function of
+  the same name is not catalogued. The named-callable resolver is only used for a string
+  literal or a constant array callable. Ambiguous callables fall to the generic path.
+  The 20 strlen fixtures pass at `8ad93491` (HEAD `8053863c` only deletes `MASTER_REIMPLEMENTATION_LEDGER.md`).
+- **Cleanup replacement (RV-22).** `replacement_allowed` (`php-semantics/src/lib.rs`
+  around line 405) allows only a normal return or a PHP throw to replace a pending PHP
+  throw. Every other pending kind fails with `UnsupportedCleanupReplacement`, and the
+  matrix test asserts it. The 113 semantics tests pass.
+- **Trait `__toString` (RV-17) and the Stringable predicate (RV-9).** The predicate in
+  `checker/expr/builtin_calls.rs` keeps a `Maybe` branch for object types without an
+  exact class identity. `trait_provided_tostring_is_accepted_by_strlen` and the
+  object-shape/intersection/template regressions in `catalog_object_argument.rs` cover
+  it. The 32 catalog unit tests pass at `8ad93491` (HEAD `8053863c` only deletes `MASTER_REIMPLEMENTATION_LEDGER.md`).
+- **Documentation (RV-28, RV-30).** The F05.4 row now names the throw-state string
+  invalidation the checker consumes, and the pre-R02.2 sentence in F02 is gone.
+- **Heuristic note (RV-31).** The correspondence artifact labels the GCC CFG result as
+  "structural match using heuristic CFG reconstruction".
+- **R05.5 (ledger).** The eight ledger-named PHPDoc fixtures pass at `8ad93491` (HEAD `8053863c` only deletes `MASTER_REIMPLEMENTATION_LEDGER.md`) in the
+  gate profile: `own_templates_are_inferred_and_validated`, the `a_method_tag_*` group,
+  `a_method_with_no_return_type_defaults_to_mixed`, `a_mixin_makes_the_target_s_public_methods_callable`,
+  and both `a_method_tag_*_referencing_an_unknown_class_is_flagged` fixtures. The row is
+  updated to Complete.
+
+### Findings
+
+**RV-29 — still open, Medium, coverage.** The only `try`-wrapped `strlen` fixture,
+`strlen_catalog_stringable_conversion_preserves_callback_effects`, covers only
+write-before-throw. No fixture narrows a variable inside a `catch` after a throwing
+`strlen`, and none checks a variable's type after a non-throwing call on the same path.
+The remediation pass does not list RV-29 among its fixes. The fixture file
+`builtin_range_narrowing/strlen_catalog_stringable_conversion_preserves_callback_effects.php`
+is unchanged since `fb0b72bd`. The matching unit tests in `catalog_object_argument.rs`
+(`stringable_throw_preserves_catch_narrowing_and_normal_path_narrowing`) cover
+the catch narrowing at the host level, so the gap is the checker-level fixture the
+fourth pass asked for. *Required:* add the two fixtures.
+
+**RV-27 — accepted with a note.** The binding is now real for the cases the fourth pass
+named. Two limits remain. The measurement records are trusted, so a forged record with a
+matching digest would pass; that is a recorder-integrity question, not a builder one. And
+the artifact could not be regenerated here: the cleanup dumps named by the records
+(`/tmp/php-catalog-comparison/final/cleanup.cpp.007t.gimple` and
+`.016t.cfg`) are absent, as is the `/tmp/php-catalog-comparison` tree, and the cache under
+`~/.cache/php-catalog-evaluation` holds no cleanup dumps. The byte-for-byte regeneration
+claimed for `strlen-representation-correspondence.json` is therefore not re-checked by
+this pass.
+
+### Commit verdicts
+
+| Commit | Subject | Verdict | Basis |
+|---|---|---|---|
+| `a00c6426` | Close PHP catalog review remediation gaps | Accept with notes | RV-27, RV-28, RV-30, RV-31 and RV-22 verified in code. RV-29 not addressed. |
+| `4580fe5c`, `5e363624` | Named-callable and catalog-function refactors | Accept | Read; no route change found; strlen fixtures pass. |
+| uncommitted ledger update (R05.5) | Record R05.5 | Accept | Eight fixtures run and pass in the gate profile. |
+
+### Not verified in this pass
+
+- The full fixture suite and the full library suite at `HEAD` (R05.7 is still open; it
+  depends on R05.4).
+- The byte-for-byte regeneration of the correspondence and catalog artifacts (inputs
+  absent, see RV-27).
+- The line-by-line transfer logic of `bc4b7524`.
+
+### Reviewer disposition
+
+RV-27, RV-28, RV-30, RV-31 and RV-22 are accepted for the claims stated. RV-29 remains
+open (Medium) and needs the two checker fixtures. The independent-review gate for F00.5
+still depends on the earlier findings' dispositions; this pass closes only the
+fourth-pass items.
