@@ -118,31 +118,66 @@ function probe_method(string $class, string $name, array &$out): void
  * object is `null` when `$maker` gives none. The probe comes back with the
  * object, so that it lives as long as the object does in the child.
  *
+ * The weak references to the probe's objects are taken before the call, for
+ * `released_probe`.
+ *
  * @param list<ReflectionParameter> $firstParams
- * @return array{?object, mixed}
+ * @return array{?object, mixed, list<WeakReference<object>>}
  */
 function held_first(callable $maker, string $firstName, array $firstParams, int $at, callable $make): array
 {
     $object = $maker();
     if (!is_object($object)) {
-        return [null, null];
+        return [null, null, []];
     }
     $value = $make();
+    $witness = array_map(
+        static fn (object $element): WeakReference => WeakReference::create($element),
+        array_values(array_filter(is_array($value) ? $value : [$value], 'is_object')),
+    );
     try {
         $object->$firstName(...arguments($firstParams, $at, $value));
     } catch (Throwable) {
     }
-    return [$object, $value];
+    return [$object, $value, $witness];
+}
+
+/**
+ * Whether no reference to a probe is left, once the child dropped its own:
+ * the probe's objects are gone, or its stream is closed. A `url` or `urls`
+ * probe is never released, since a string copied by a builtin cannot be seen.
+ *
+ * @param list<WeakReference<object>> $witness
+ */
+function released_probe(string $probe, array $witness): bool
+{
+    if ($probe === 'stream') {
+        return Seen::$closed > 0;
+    }
+    if ($witness === [] || !in_array($probe, ['callable', 'object', 'iterator', 'sleeper', 'objects', 'callables'], true)) {
+        return false;
+    }
+    foreach ($witness as $weak) {
+        if ($weak->get() !== null) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
  * The lines for the methods of a class called after `$firstName` was given
  * the probe `$probeAt` of its parameter `$paramAt`: what each runs of what
- * the first kept. With `$skip` `dead`, a survey child first makes the object
- * and calls the first method: when that yields no object, the methods are
- * not run (each would stop at the same point and record nothing).
+ * the first kept. With `$skip` `dead` or `released`, a survey child first makes
+ * the object and calls the first method: when that yields no object, the
+ * methods are not run (each would stop at the same point and record nothing).
+ * With `released`, when the survey finds the probe released, a method whose
+ * builtin already has a `probed` row in `$known` is not run: the probe can
+ * reach nothing it holds.
+ *
+ * @param array<string, int> $known the builtins of the class that have a `probed` row
  */
-function probe_held(string $class, string $firstName, int $paramAt, int $probeAt, callable $wanted, string $skip, array &$out): void
+function probe_held(string $class, string $firstName, int $paramAt, int $probeAt, callable $wanted, string $skip, array $known, array &$out): void
 {
     $reflection = new ReflectionClass($class);
     if (!$reflection->isInstantiable()) {
@@ -171,11 +206,18 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
             }
             $where = 'by:' . strtolower($firstName) . ':' . where('', $at, $probe);
             $maker = $makers[0][1];
-            if ($skip === 'dead') {
-                $survey = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make): void {
-                    [$object, $value] = held_first($maker, $firstName, $firstParams, $at, $make);
-                    if ($object !== null) {
-                        Seen::$entries["\tsurvey\t"] = true;
+            $survey = null;
+            if ($skip !== 'off') {
+                $survey = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $probe): void {
+                    [$object, $value, $witness] = held_first($maker, $firstName, $firstParams, $at, $make);
+                    if (!is_object($object)) {
+                        return;
+                    }
+                    Seen::$entries["\tsurvey\t"] = true;
+                    unset($value);
+                    gc_collect_cycles();
+                    if (released_probe($probe, $witness)) {
+                        Seen::$entries["\treleased\t"] = true;
                     }
                 });
                 Stats::child(strtolower($class . '::' . $firstName), 'survey:' . $where);
@@ -184,8 +226,13 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
                     return;
                 }
             }
+            $released = $skip === 'released' && isset($survey["\treleased\t"]);
             foreach ($targets as $then) {
                 $builtin = strtolower($class . '::' . $then->getName());
+                if ($released && isset($known[$builtin])) {
+                    Stats::skipped('released', 1);
+                    continue;
+                }
                 $thenName = $then->getName();
                 $thenParams = $then->getParameters();
                 $seen = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
@@ -205,8 +252,12 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
     }
 }
 
-/** Runs one unit, giving back the lines it found. */
-function run_unit(array $unit, callable $wanted, string $skip): array
+/**
+ * Runs one unit, giving back the lines it found.
+ *
+ * @param array<string, int> $known the builtins of the unit's class that have a `probed` row
+ */
+function run_unit(array $unit, callable $wanted, string $skip, array $known): array
 {
     $out = [];
     [$kind, $name, $method, $paramAt, $probeAt] = $unit;
@@ -214,7 +265,7 @@ function run_unit(array $unit, callable $wanted, string $skip): array
     match ($kind) {
         'function' => probe_function($name, $out),
         'method' => probe_method($name, $method, $out),
-        'held' => probe_held($name, $method, $paramAt, $probeAt, $wanted, $skip, $out),
+        'held' => probe_held($name, $method, $paramAt, $probeAt, $wanted, $skip, $known, $out),
     };
     return $out;
 }

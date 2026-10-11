@@ -7,6 +7,8 @@ final class Seen
     /** @var array<string, true> */
     public static array $entries = [];
     public static string $where = '';
+    /** The streams of the recording wrapper closed in this process. */
+    public static int $closed = 0;
     /** What callables passed as plain values were called with. */
     public static array $given = [];
     // Set once the call returns: what runs after it (a destructor, a stream
@@ -59,7 +61,7 @@ final class RecordingWrapper
     public function rmdir(string $path, int $options): bool { Seen::add('wrapper', 'rmdir'); return true; }
     /** @return resource|false */
     public function stream_cast(int $as) { Seen::add('wrapper', 'stream_cast'); return false; }
-    public function stream_close(): void { Seen::add('wrapper', 'stream_close'); }
+    public function stream_close(): void { Seen::$closed++; Seen::add('wrapper', 'stream_close'); }
     public function stream_eof(): bool { Seen::add('wrapper', 'stream_eof'); return $this->read > 0; }
     public function stream_flush(): bool { Seen::add('wrapper', 'stream_flush'); return true; }
     public function stream_lock(int $operation): bool { Seen::add('wrapper', 'stream_lock'); return true; }

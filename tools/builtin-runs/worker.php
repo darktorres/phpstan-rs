@@ -53,7 +53,7 @@ try {
                 send(Protocol::$out, ['plan', $units, unit_weights($units, $wanted), $nothing]);
                 break;
             case 'unit':
-                $lines = run_unit($message[1], $wanted, $skip);
+                $lines = run_unit($message[1], $wanted, $skip, $message[2]);
                 send(Protocol::$out, ['done', $lines, Stats::payload()]);
                 break;
         }

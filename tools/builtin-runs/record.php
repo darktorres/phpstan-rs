@@ -42,7 +42,9 @@
 // allocator; by default they run with `USE_ZEND_ALLOC=0`, which gives the same
 // output about twice as fast. `--skip=dead` first runs one child per held unit
 // that makes the object and calls the method it is given the probe for; when
-// that yields no object, none of the unit's children runs.
+// that yields no object, none of the unit's children runs. `--skip=released`
+// does the same and also skips a child whose probe the object released, for a
+// method that already has a `probed` row: the held units run after the others.
 //
 // A worker that dies has its unit run once more on another worker. A unit
 // that dies twice is reported on standard error, its rows are missing from
@@ -78,12 +80,12 @@ require_once __DIR__ . '/lib/pool.php';
 require_once __DIR__ . '/lib/stats.php';
 
 $arguments = array_values(array_filter(array_slice($argv, 1), static fn (string $argument): bool => !str_starts_with($argument, '--')));
-$only = $arguments[0] ?? null;
+$only = isset($arguments[0]) ? (string) $arguments[0] : null;
 $php = option($argv, 'php') ?? PHP_BINARY;
 $zendMm = in_array('--zend-mm', $argv, true);
 $skip = option($argv, 'skip') ?? 'off';
-if (!in_array($skip, ['off', 'dead'], true)) {
-    fwrite(STDERR, "--skip is off or dead\n");
+if (!in_array($skip, ['off', 'dead', 'released'], true)) {
+    fwrite(STDERR, "--skip is off, dead or released\n");
     exit(2);
 }
 
@@ -106,7 +108,14 @@ if ($statsFile !== null) {
     Stats::open($statsFile);
 }
 
-[$out, $failed] = run_units($plan['units'], $plan['weights'], jobs($argv), $php, $only, $zendMm, $plan['manifest'], $skip);
+[$out, $failed] = run_units($plan['units'], $plan['weights'], [
+    'jobs' => jobs($argv),
+    'php' => $php,
+    'only' => $only,
+    'zendMm' => $zendMm,
+    'manifest' => $plan['manifest'],
+    'skip' => $skip,
+]);
 Stats::close((int) array_sum($plan['weights']));
 
 foreach ($plan['nothing'] as $function) {
