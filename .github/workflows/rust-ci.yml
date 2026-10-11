@@ -14,13 +14,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  gates:
+  lint:
+    # Formatting, clippy, the static gates, docs, each feature on its own,
+    # the fuzz crate, unused dependencies and licenses. Checks only: nothing
+    # here compiles tests or benches.
     runs-on: ubuntu-26.04
     steps:
-      # The test-name manifest searches the whole history for its base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
       # test corpora the build never reads.
       - name: Fetch the phpstan-src submodule
@@ -36,8 +36,8 @@ jobs:
       - name: Install the pinned toolchain
         run: rustup install --no-self-update
 
-      # The cargo registry and the dependencies' build artifacts, keyed by
-      # the lockfiles and the toolchain; the workspace's own crates rebuild.
+      # Dependencies are compiled once per profile a job uses and cached per
+      # job; a failed job saves its cache too, so the next run starts warm.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
@@ -63,15 +63,67 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --workspace --all-targets
-      - name: Fixture suite
-        run: cargo test --profile gate --test fixtures
       - name: Module graph
         run: cargo xtask modgraph
       - name: Architecture rules
         run: cargo xtask arch
-      # The last run's manifest is the base when that run was an ancestor.
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Fuzz targets compile
+        run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
+      # --each-feature also builds --all-features unless excluded, and the
+      # allocator features refuse to build together. Resolver 3 keeps
+      # dev-dependency features out of a check without test targets.
+      - name: Each feature on its own
+        run: >
+          cargo hack check --workspace --each-feature --exclude-all-features
+      # Our crates only: vendor/ holds other projects' checkouts.
+      - name: Unused dependencies
+        run: cargo machete crates tools xtask fuzz
+      - name: Licenses, advisories, duplicate versions
+        run: cargo deny check
+
+  test:
+    # The unit and integration tests in the default feature set, then the
+    # test-name manifest, which records this run for the next one.
+    runs-on: ubuntu-26.04
+    steps:
+      # The test-name manifest searches the whole history for its base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
+
+      # The pinned toolchain, keyed by the file that pins it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+      # rust-toolchain.toml pins the nightly (and its components);
+      # `rustup install` installs it without updating rustup itself.
+      - name: Install the pinned toolchain
+        run: rustup install --no-self-update
+
+      # Dependencies are compiled once per profile a job uses and cached per
+      # job; a failed job saves its cache too, so the next run starts warm.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
+        with:
+          mold-version: 2.42.1
+
+      - name: Tests
+        run: cargo test --workspace --all-targets
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .corpus-runs/gate/tests
@@ -87,29 +139,118 @@ jobs:
         with:
           path: .corpus-runs/gate/tests
           key: test-manifest-${{ github.sha }}
+
+  test-no-default-features:
+    # The same tests with no default features, which are a separate build.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
+
+      # The pinned toolchain, keyed by the file that pins it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+      # rust-toolchain.toml pins the nightly (and its components);
+      # `rustup install` installs it without updating rustup itself.
+      - name: Install the pinned toolchain
+        run: rustup install --no-self-update
+
+      # Dependencies are compiled once per profile a job uses and cached per
+      # job; a failed job saves its cache too, so the next run starts warm.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
+        with:
+          mold-version: 2.42.1
+
       - name: Tests without default features
         run: cargo test --workspace --no-default-features
+
+  fixtures:
+    # The fixture suites run under the gate profile, which builds every dependency
+    # at release optimization; the gate profile has its own dependency build.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
+
+      # The pinned toolchain, keyed by the file that pins it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+      # rust-toolchain.toml pins the nightly (and its components);
+      # `rustup install` installs it without updating rustup itself.
+      - name: Install the pinned toolchain
+        run: rustup install --no-self-update
+
+      # Dependencies are compiled once per profile a job uses and cached per
+      # job; a failed job saves its cache too, so the next run starts warm.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
+        with:
+          mold-version: 2.42.1
+
+      - name: Fixture suite
+        run: cargo test --profile gate --test fixtures
       - name: Fixture suite without default features
         run: cargo test --profile gate --no-default-features --test fixtures
-      - name: Docs
-        run: cargo doc --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
+
+  benches:
+    # Benchmarks are built with the bench profile, which is release-like and
+    # compiles its own dependency set.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
+
+      # The pinned toolchain, keyed by the file that pins it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+      # rust-toolchain.toml pins the nightly (and its components);
+      # `rustup install` installs it without updating rustup itself.
+      - name: Install the pinned toolchain
+        run: rustup install --no-self-update
+
+      # Dependencies are compiled once per profile a job uses and cached per
+      # job; a failed job saves its cache too, so the next run starts warm.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
+        with:
+          mold-version: 2.42.1
+
       - name: Benches compile
         run: cargo bench --no-run
-      - name: Fuzz targets compile
-        run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
-      # --each-feature also builds --all-features unless excluded, and the
-      # allocator features refuse to build together. Resolver 3 keeps
-      # dev-dependency features out of a check without test targets.
-      - name: Each feature on its own
-        run: >
-          cargo hack check --workspace --each-feature --exclude-all-features
-      # Our crates only: vendor/ holds other projects' checkouts.
-      - name: Unused dependencies
-        run: cargo machete crates tools xtask fuzz
-      - name: Licenses, advisories, duplicate versions
-        run: cargo deny check
 
   # The runtime oracle on the pinned PHP 8.5.4 runtime: the image built from
   # crates/phpstan-rs/tests/runtime_oracle/Dockerfile, whose base is pinned by
