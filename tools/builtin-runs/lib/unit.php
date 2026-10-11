@@ -1,22 +1,35 @@
 <?php
 // The lines for one unit: a function, a method, or a method after another.
 
+/**
+ * One child of a unit: run it, and record what it gave, unless a retry asks
+ * for other children.
+ *
+ * @param array<string, true> $out
+ */
+function probe_child(string $builtin, string $where, Closure $call, array &$out): void
+{
+    if (Stats::wants($builtin, $where)) {
+        record($builtin, $where, in_child($call), $out);
+    }
+}
+
 /** The lines for a function. */
 function probe_function(string $function, array &$out): void
 {
+    $builtin = strtolower($function);
     $reflection = new ReflectionFunction($function);
     $params = $reflection->getParameters();
-    $seen = in_child(static function () use ($function, $params): void {
+    probe_child($builtin, 'plain', static function () use ($function, $params): void {
         Seen::$where = 'plain';
         Seen::add('reached');
         $function(...arguments($params, -1, null));
         Seen::returned();
-    });
-    record(strtolower($function), 'plain', $seen, $out);
+    }, $out);
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $where = where('', $at, $probe);
-            $seen = in_child(static function () use ($function, $params, $at, $make, $where, $probe): void {
+            probe_child($builtin, $where, static function () use ($function, $params, $at, $make, $where, $probe): void {
                 $weak = null;
                 // What the call gave back and the other arguments, which a
                 // caller still holds once it returned.
@@ -46,8 +59,7 @@ function probe_function(string $function, array &$out): void
                     }
                 }
                 unset($kept);
-            });
-            record(strtolower($function), $where, $seen, $out);
+            }, $out);
         }
     }
 }
@@ -62,7 +74,7 @@ function probe_method(string $class, string $name, array &$out): void
     $params = $method->getParameters();
     $static = $method->isStatic();
     // The method, plainly, on a plain object.
-    $seen = in_child(static function () use ($makers, $static, $class, $name, $params): void {
+    probe_child($builtin, 'plain', static function () use ($makers, $static, $class, $name, $params): void {
         $object = $static ? null : ($makers[0][1])();
         if (!$static && $object === null) {
             return;
@@ -73,13 +85,12 @@ function probe_method(string $class, string $name, array &$out): void
         $args = arguments($params, -1, null);
         $static ? $class::$name(...$args) : $object->$name(...$args);
         Seen::returned();
-    });
-    record($builtin, 'plain', $seen, $out);
+    }, $out);
     // A probe at each of the method's parameters, on a plain object.
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $where = where('', $at, $probe);
-            $seen = in_child(static function () use ($makers, $static, $class, $name, $params, $at, $make, $where): void {
+            probe_child($builtin, $where, static function () use ($makers, $static, $class, $name, $params, $at, $make, $where): void {
                 $object = $static ? null : ($makers[0][1])();
                 if (!$static && $object === null) {
                     return;
@@ -91,8 +102,7 @@ function probe_method(string $class, string $name, array &$out): void
                 Seen::add('reached');
                 $static ? $class::$name(...$args) : $object->$name(...$args);
                 Seen::returned();
-            });
-            record($builtin, $where, $seen, $out);
+            }, $out);
         }
     }
     if ($static) {
@@ -100,15 +110,14 @@ function probe_method(string $class, string $name, array &$out): void
     }
     // The method, plainly, on an object made with a probe.
     foreach (array_slice($makers, 1) as [$where, $make]) {
-        $seen = in_child(static function () use ($make, $where, $name, $params): void {
+        probe_child($builtin, $where, static function () use ($make, $where, $name, $params): void {
             Seen::$where = $where;
             $object = $make();
             Seen::$entries = [];
             Seen::add('reached');
             $object->$name(...arguments($params, -1, null));
             Seen::returned();
-        });
-        record($builtin, $where, $seen, $out);
+        }, $out);
     }
 }
 
@@ -206,6 +215,8 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
             }
             $where = 'by:' . strtolower($firstName) . ':' . where('', $at, $probe);
             $maker = $makers[0][1];
+            $surveyBuiltin = strtolower($class . '::' . $firstName);
+            $surveyWhere = 'survey:' . $where;
             $survey = null;
             if ($skip !== 'off') {
                 $survey = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $probe): void {
@@ -220,12 +231,17 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
                         Seen::$entries["\treleased\t"] = true;
                     }
                 });
-                Stats::child(strtolower($class . '::' . $firstName), 'survey:' . $where);
+                Stats::child($surveyBuiltin, $surveyWhere);
+                if ($survey === null) {
+                    Stats::failed($surveyBuiltin, $surveyWhere);
+                }
                 if ($survey === null || !isset($survey["\tsurvey\t"])) {
                     Stats::skipped('dead', count($targets));
                     return;
                 }
             }
+            // A retry that found the survey failed runs every method of the unit.
+            $surveyRetried = Stats::wants($surveyBuiltin, $surveyWhere);
             $released = $skip === 'released' && isset($survey["\treleased\t"]);
             foreach ($targets as $then) {
                 $builtin = strtolower($class . '::' . $then->getName());
@@ -233,9 +249,12 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
                     Stats::skipped('released', 1);
                     continue;
                 }
+                if (!$surveyRetried && !Stats::wants($builtin, $where)) {
+                    continue;
+                }
                 $thenName = $then->getName();
                 $thenParams = $then->getParameters();
-                $seen = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
+                probe_child($builtin, $where, static function () use ($maker, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
                     [$object, $value] = held_first($maker, $firstName, $firstParams, $at, $make);
                     if ($object === null) {
                         return;
@@ -245,8 +264,7 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
                     Seen::add('reached');
                     $object->$thenName(...arguments($thenParams, -1, null));
                     Seen::returned();
-                });
-                record($builtin, $where, $seen, $out);
+                }, $out);
             }
         }
     }

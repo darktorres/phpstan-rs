@@ -7,11 +7,12 @@
  *
  * @param list<string> $rows the table's rows
  * @param string $sandbox the sandbox the workers ran in
+ * @param list<string> $gaps the stub declarations of the recorded extensions with no row, as `extension<TAB>name`
  * @param array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool} $manifest what the run's workers were
  * @param array<string, mixed> $run the flags, selection and totals of this run
  * @param list<array<string, mixed>> $earlier the runs that wrote the table before
  */
-function sidecar_text(array $rows, array $manifest, string $recorder, string $skip, string $sandbox, array $run, array $earlier): string
+function sidecar_text(array $rows, array $manifest, string $recorder, string $skip, string $sandbox, array $gaps, array $run, array $earlier): string
 {
     $text = table_text($rows);
     $run = $run + [
@@ -32,6 +33,7 @@ function sidecar_text(array $rows, array $manifest, string $recorder, string $sk
         'recorder' => $recorder,
         'sandbox' => $sandbox,
         'skip' => $skip,
+        'gaps' => $gaps,
         'runs' => [...$earlier, $run],
     ];
     return (string) json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";

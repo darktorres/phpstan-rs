@@ -129,6 +129,7 @@ function record(string $builtin, string $where, ?array $seen, array &$out): void
 {
     Stats::child($builtin, $where);
     if ($seen === null) {
+        Stats::failed($builtin, $where);
         return;
     }
     foreach (array_keys($seen) as $entry) {

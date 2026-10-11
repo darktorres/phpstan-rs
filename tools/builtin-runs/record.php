@@ -240,7 +240,22 @@ if ($failed === [] && ($out !== null || $update !== null)) {
         'totals' => $counts,
     ];
     write_atomic($target, table_text($final));
-    write_atomic(sidecar_path($target), sidecar_text($final, $plan['manifest'], $run['recorder'], $skip, $sandboxMode, $runInfo, earlier_runs($target)));
+    $probedNames = [];
+    foreach ($final as $row) {
+        [$builtin, , $kind] = explode("\t", $row);
+        if ($kind === 'probed') {
+            $probedNames[$builtin] = true;
+        }
+    }
+    // The stub declarations of the recorded extensions that have no row: the drift test reads them.
+    $gaps = [];
+    foreach (coverage_lines($probedNames, [], $wanted, $asserted) as $line) {
+        [$section, $extension, $name, $reason] = explode("\t", $line);
+        if ($section === 'stub' && $reason === 'loaded, no row') {
+            $gaps[] = "$extension\t$name";
+        }
+    }
+    write_atomic(sidecar_path($target), sidecar_text($final, $plan['manifest'], $run['recorder'], $skip, $sandboxMode, $gaps, $runInfo, earlier_runs($target)));
 } elseif ($failed === [] && $out === null && $update === null) {
     echo table_text($rows);
 }

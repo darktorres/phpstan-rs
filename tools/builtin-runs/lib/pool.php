@@ -227,9 +227,10 @@ function run_units(array $units, array $weights, array $run): array
     $open = 0;
     $quiet = [];
     $quietMode = false;
+    $keysByUnit = [];
     // Gives a ready worker its next unit, or keeps it idle while a held unit
     // waits for the others, or releases it when there is nothing left.
-    $assign = static function (Worker $worker) use (&$next, &$again, &$open, &$known, &$idle, &$order, &$total, $units): void {
+    $assign = static function (Worker $worker) use (&$next, &$again, &$open, &$known, &$idle, &$order, &$total, &$quietMode, &$keysByUnit, $units): void {
         if ($again === [] && $next < $total && $units[$order[$next]][0] === 'held' && $open > 0) {
             $idle[$worker->pid] = $worker;
             return;
@@ -245,7 +246,7 @@ function run_units(array $units, array $weights, array $run): array
         $unit = $units[$index];
         $worker->unit = $index;
         try {
-            send($worker->in, ['unit', $unit, $unit[0] === 'held' ? ($known[strtolower($unit[1])] ?? []) : []]);
+            send($worker->in, ['unit', $unit, $unit[0] === 'held' ? ($known[strtolower($unit[1])] ?? []) : [], $quietMode ? ($keysByUnit[$index] ?? []) : null]);
         } catch (RuntimeException) {
             // Seen as a death on the next read.
         }
@@ -356,6 +357,7 @@ function run_units(array $units, array $weights, array $run): array
                     $unitLines[$index] = $quietMode && isset($unitLines[$index]) ? $unitLines[$index] + $message[1] : $message[1];
                     if ($failedHere > 0 && !$quietMode) {
                         $quiet[] = $index;
+                        $keysByUnit[$index] = is_array($message[2]) ? ($message[2]['keys'] ?? []) : [];
                     } else {
                         $key = $keyOf($index);
                         if ($key !== null && $run['cache'] !== null) {

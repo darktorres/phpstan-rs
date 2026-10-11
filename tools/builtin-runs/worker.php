@@ -63,7 +63,10 @@ try {
                 send(Protocol::$out, ['plan', $units, unit_weights($units, $wanted), $nothing, $signatures]);
                 break;
             case 'unit':
+                // A retry names the children to run; `null` runs the whole unit.
+                Stats::$retry = is_array($message[3]) ? array_fill_keys($message[3], true) : null;
                 $lines = run_unit($message[1], $wanted, $skip, $message[2]);
+                Stats::$retry = null;
                 send(Protocol::$out, ['done', $lines, Stats::payload()]);
                 break;
         }

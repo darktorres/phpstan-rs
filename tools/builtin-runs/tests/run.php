@@ -147,7 +147,7 @@ $stubs = stub_declarations();
 check('the stub index has functions and classes', count($stubs) > 1000 && in_array('class', array_column($stubs, 0), true));
 
 // The sidecar: the table's hash, and each run that wrote it.
-$sidecar = json_decode(sidecar_text(["a\t\tprobed\t"], $manifest, 'rec', 'off', 'bwrap', ['selection' => [], 'flags' => [], 'totals' => []], []), true);
+$sidecar = json_decode(sidecar_text(["a\t\tprobed\t"], $manifest, 'rec', 'off', 'bwrap', [], ['selection' => [], 'flags' => [], 'totals' => []], []), true);
 check('the sidecar hashes the table it describes', $sidecar['table']['sha256'] === hash('sha256', "a\t\tprobed\t\n"));
 check('the sidecar records one run', count($sidecar['runs']) === 1);
 check('the sidecar path drops .tsv', sidecar_path('/x/builtin-runs-8.5.tsv') === '/x/builtin-runs-8.5.meta.json');
@@ -218,6 +218,62 @@ if (!class_exists('FFI') || ini_get('ffi.enable') !== '1') {
     @unlink($pidFile);
 
     Workdir::remove();
+}
+
+// The integrity and drift checks of the committed table, against its sidecar:
+// the table is the one the sidecar hashes; every probed builtin belongs to an
+// extension that a recorded run loaded; and every stub declaration of a recorded
+// extension has a row, or is a gap the sidecar records.
+$tablePath = dirname(__DIR__, 3) . '/crates/phpstan-rs/src/registry/data/builtin-runs-8.5.tsv';
+$sidecarPath = sidecar_path($tablePath);
+if (!is_file($sidecarPath)) {
+    echo "skipped the integrity and drift checks: no sidecar beside the table\n";
+} else {
+    $recorded = json_decode((string) file_get_contents($sidecarPath), true);
+    $tableRows = read_rows($tablePath);
+    check('the sidecar hashes the committed table', ($recorded['table']['sha256'] ?? '') === hash_file('sha256', $tablePath));
+    $provided = [];
+    $loaded = [];
+    foreach ($recorded['runs'] as $run) {
+        foreach ($run['extensions'] as $extension => $info) {
+            $loaded[strtolower((string) $extension)] = true;
+            foreach ($info['provides'] as $name) {
+                $provided[strtolower($name)] = true;
+            }
+        }
+    }
+    $probed = [];
+    foreach ($tableRows as $row) {
+        [$builtin, , $kind] = explode("\t", $row);
+        if ($kind === 'probed') {
+            $probed[$builtin] = true;
+        }
+    }
+    $unprovided = [];
+    foreach (array_keys($probed) as $builtin) {
+        if (!isset($provided[explode('::', $builtin, 2)[0]])) {
+            $unprovided[] = $builtin;
+        }
+    }
+    check('every probed builtin is provided by a recorded extension', $unprovided === [], implode(', ', array_slice($unprovided, 0, 5)));
+    $gaps = array_flip($recorded['gaps'] ?? []);
+    $classesWithRows = [];
+    foreach (array_keys($probed) as $builtin) {
+        if (str_contains($builtin, '::')) {
+            $classesWithRows[explode('::', $builtin, 2)[0]] = true;
+        }
+    }
+    $drift = [];
+    foreach (stub_declarations() as [$kind, $key, $name, $extension]) {
+        if (!isset($loaded[strtolower($extension)])) {
+            continue;
+        }
+        $hasRow = $kind === 'function' ? isset($probed[$key]) : isset($classesWithRows[$key]);
+        if (!$hasRow && !isset($gaps["$extension\t$name"])) {
+            $drift[] = "$extension $name";
+        }
+    }
+    check('every stub declaration of a recorded extension has a row or a recorded gap', $drift === [], implode(', ', array_slice($drift, 0, 5)));
 }
 
 // The sandbox: the command that starts a worker in each mode, and the /tmp of each.

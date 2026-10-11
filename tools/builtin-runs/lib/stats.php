@@ -20,6 +20,10 @@ final class Stats
     public static array $skipped = [];
     /** Children that timed out or died since the unit was last reported. */
     public static int $failedInUnit = 0;
+    /** @var array<string, true>|null the children a retry runs, by `builtin` and `where`; null runs them all */
+    public static ?array $retry = null;
+    /** @var list<string> the children that timed out or died since the unit was last reported, by `builtin` and `where` */
+    private static array $failedKeys = [];
 
     /** Upper bounds, in milliseconds, of the buckets of the wall-time histogram. */
     private const BUCKETS = [1, 2, 5, 10, 20, 50, 100, 500, 1000, 3000];
@@ -54,6 +58,18 @@ final class Stats
         }
     }
 
+    /** Whether the child of `$builtin` at `$where` runs in this unit (a retry runs only the children it names). */
+    public static function wants(string $builtin, string $where): bool
+    {
+        return self::$retry === null || isset(self::$retry["$builtin\t$where"]);
+    }
+
+    /** Notes a child that timed out or died, for the retry. */
+    public static function failed(string $builtin, string $where): void
+    {
+        self::$failedKeys[] = "$builtin\t$where";
+    }
+
     /** Forgets everything noted so far (the canary's children are no part of the run). */
     public static function reset(): void
     {
@@ -63,6 +79,7 @@ final class Stats
         self::$timeouts = 0;
         self::$died = 0;
         self::$failedInUnit = 0;
+        self::$failedKeys = [];
         self::$skipped = [];
     }
 
@@ -84,7 +101,7 @@ final class Stats
      * What a worker tells the parent after a unit: the children since the
      * last time, and its totals so far.
      *
-     * @return array{lines: list<array{string, string, string, float, string}>, peak: int, rss: int, children: int, ms: float, timeouts: int, died: int, skipped: array<string, int>, failed: int}
+     * @return array{lines: list<array{string, string, string, float, string}>, peak: int, rss: int, children: int, ms: float, timeouts: int, died: int, skipped: array<string, int>, failed: int, keys: list<string>}
      */
     public static function payload(): array
     {
@@ -98,9 +115,11 @@ final class Stats
             'died' => self::$died,
             'skipped' => self::$skipped,
             'failed' => self::$failedInUnit,
+            'keys' => self::$failedKeys,
         ];
         self::$lines = [];
         self::$failedInUnit = 0;
+        self::$failedKeys = [];
         return $payload;
     }
 
