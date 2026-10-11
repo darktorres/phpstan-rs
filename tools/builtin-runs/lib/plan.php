@@ -34,6 +34,26 @@ function probed_classes(): array
 }
 
 /**
+ * A maker for a class whose constructor refuses every generated value, from
+ * valid arguments: the reflection classes name a class or a function of the
+ * recorder's own (or of PHP), and SplFileObject opens the seeded file `x`, which
+ * a child's directory holds. A class without a recipe is made from the generated
+ * values, as before.
+ */
+function recipe(string $class): ?Closure
+{
+    return match (strtolower($class)) {
+        'reflectionproperty' => static fn (): object => new ReflectionProperty(RecordingObject::class, 'declared'),
+        'reflectionmethod' => static fn (): object => new ReflectionMethod(RecordingObject::class, 'count'),
+        'reflectionparameter' => static fn (): object => new ReflectionParameter([RecordingObject::class, 'offsetGet'], 0),
+        'reflectionclassconstant' => static fn (): object => new ReflectionClassConstant(Attribute::class, 'TARGET_CLASS'),
+        'reflectionextension' => static fn (): object => new ReflectionExtension('standard'),
+        'splfileobject' => static fn (): object => new SplFileObject('x'),
+        default => null,
+    };
+}
+
+/**
  * How to make an object of `$reflection` to call a method on: plainly, and
  * with a probe at each constructor parameter.
  *
@@ -43,9 +63,10 @@ function makers(ReflectionClass $reflection): array
 {
     $constructor = $reflection->getConstructor();
     $ctorParams = $constructor?->getParameters() ?? [];
-    $makers = [['', static fn () => $reflection->isInstantiable()
+    $plain = recipe($reflection->getName()) ?? static fn () => $reflection->isInstantiable()
         ? ($constructor === null ? $reflection->newInstance() : $reflection->newInstanceArgs(arguments($ctorParams, -1, null)))
-        : null]];
+        : null;
+    $makers = [['', $plain]];
     foreach ($ctorParams as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $makers[] = [where('new:', $at, $probe), static fn () => $reflection->newInstanceArgs(arguments($ctorParams, $at, $make()))];
