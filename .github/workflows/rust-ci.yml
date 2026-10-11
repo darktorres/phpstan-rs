@@ -189,14 +189,10 @@ jobs:
           workspaces: |
             . -> target
 
-      # The library's unit tests need their own build of the crate, which is
-      # about as slow as the release one. The cache-directory tests do not
-      # depend on the optimization level, so they use the test profile, and
-      # only the startup test, which has the 10 s budget, builds release.
       - name: LSP startup and stack tests
         run: |
           cargo test --release --locked -p phpstan-rs --test lsp_startup
-          cargo test --profile test --locked -p phpstan-rs --lib cache_dir_tests
+          cargo test --release --locked -p phpstan-rs --lib cache_dir_tests
           cargo test --release --locked -p phpstan-rs-syntax --lib stack
 
   test-no-default-features:
