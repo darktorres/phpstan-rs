@@ -24,6 +24,8 @@ require_once dirname(__DIR__) . '/lib/sidecar.php';
 require_once dirname(__DIR__) . '/lib/coverage.php';
 require_once dirname(__DIR__) . '/lib/sandbox.php';
 require_once dirname(__DIR__) . '/lib/limits.php';
+require_once dirname(__DIR__) . '/lib/canary.php';
+require_once __DIR__ . '/fixtures.php';
 
 $failures = [];
 $checks = 0;
@@ -150,11 +152,92 @@ check('the sidecar hashes the table it describes', $sidecar['table']['sha256'] =
 check('the sidecar records one run', count($sidecar['runs']) === 1);
 check('the sidecar path drops .tsv', sidecar_path('/x/builtin-runs-8.5.tsv') === '/x/builtin-runs-8.5.meta.json');
 
+// The pinned rows: every `by:` row of the committed table, and a sample of the
+// others, must be in it. The recorder's equality with the old script is what
+// the families show; this keeps those rows from being dropped by an edit.
+$pinned = dirname(__DIR__, 3) . '/crates/phpstan-rs/src/registry/data/builtin-runs-8.5.tsv';
+$committedRows = array_flip(file($pinned, FILE_IGNORE_NEW_LINES) ?: []);
+$missing = [];
+foreach ((file(__DIR__ . '/known.tsv', FILE_IGNORE_NEW_LINES) ?: []) as $row) {
+    if (!isset($committedRows[$row])) {
+        $missing[] = $row;
+    }
+}
+check('the pinned rows are in the committed table', $missing === [], implode('; ', array_slice($missing, 0, 3)));
+
+// The fixtures: units of user classes, run as the recorder runs them. They need
+// FFI for the limits and the stream of the children; without it they are skipped.
+if (!class_exists('FFI') || ini_get('ffi.enable') !== '1') {
+    echo "skipped the fixtures: run with -d ffi.enable=1\n";
+} else {
+    Limits::init();
+    Workdir::create();
+    $pidFile = sys_get_temp_dir() . '/builtin-runs-stubborn-' . getmypid();
+    define('FIXTURE_PIDFILE', $pidFile);
+    $all = static fn (string $builtin): bool => str_starts_with($builtin, 'fixture');
+    $rowsOf = static fn (array $lines): array => array_keys($lines);
+
+    // A held unit: the store keeps the callable, and the call runs it.
+    $stored = $rowsOf(run_unit(['held', 'FixtureStore', 'store', 0, 0], $all, 'off', []));
+    check('a kept callable is called from the other method', in_array("fixturestore::call\tby:store:0\tcalls\t", $stored, true), (string) json_encode($stored));
+    check('the method it is called from is recorded as reached', in_array("fixturestore::call\t\tprobed\t", $stored, true));
+
+    // The released rule: a method that drops the callable is not run, when the
+    // builtin already has a row (the phase-A rows), and is run when it has none.
+    $without = $rowsOf(run_unit(['held', 'FixtureStore', 'drop', 0, 0], $all, 'released', []));
+    check('a dropped callable runs the method with no phase-A row', in_array("fixturestore::drop\t\tprobed\t", $without, true), (string) json_encode($without));
+    $with = $rowsOf(run_unit(['held', 'FixtureStore', 'drop', 0, 0], $all, 'released', ['fixturestore::drop' => 1]));
+    check('a released probe skips a method with a phase-A row', !in_array("fixturestore::drop\t\tprobed\t", $with, true), (string) json_encode($with));
+
+    // A throwing constructor: no object, so no child of the unit runs.
+    $before = Stats::$children;
+    $broken = run_unit(['held', 'FixtureBroken', 'store', 0, 0], $all, 'dead', []);
+    check('a constructor that throws records nothing', $broken === [], (string) json_encode(array_keys($broken)));
+
+    // A method that never returns: one timeout, from the survey, and no rows.
+    $timeouts = Stats::$timeouts;
+    $hung = run_unit(['held', 'FixtureHang', 'hang', 0, 0], $all, 'dead', []);
+    check('a hanging method records nothing and costs one timeout', $hung === [] && Stats::$timeouts === $timeouts + 1, (string) json_encode(array_keys($hung)) . ' timeouts ' . (Stats::$timeouts - $timeouts));
+
+    // A method that exits the process: nothing comes back.
+    $exited = run_unit(['method', 'FixtureExit', 'exits', 0, 0], $all, 'off', []);
+    check('a method that exits records nothing', $exited === [], (string) json_encode(array_keys($exited)));
+
+    // A process that ignores the alarm is killed, with the process it left behind.
+    @unlink($pidFile);
+    run_unit(['method', 'FixtureStubborn', 'stubborn', 0, 0], $all, 'off', []);
+    $leftover = is_file($pidFile) ? (int) trim((string) file_get_contents($pidFile)) : 0;
+    $alive = true;
+    for ($i = 0; $i < 40 && $alive && $leftover > 0; $i++) {
+        $alive = posix_kill($leftover, 0) && !str_contains((string) @file_get_contents("/proc/$leftover/stat"), ') Z');
+        if ($alive) {
+            usleep(100000);
+        }
+    }
+    check('a process that ignores the alarm leaves no process behind', $leftover > 0 && !$alive, "pid $leftover");
+    @unlink($pidFile);
+
+    Workdir::remove();
+}
+
 // The sandbox: the command that starts a worker in each mode, and the /tmp of each.
 $bwrap = worker_command('/usr/bin/php', false, ['mode' => 'bwrap', 'cap' => 268435456]);
 check('bwrap starts the worker with no network and a capped /tmp', $bwrap[0] === 'bwrap' && in_array('--unshare-net', $bwrap, true) && in_array('268435456', $bwrap, true) && str_ends_with((string) end($bwrap), '/worker.php'));
 check('bwrap sets the allocator off unless --zend-mm', in_array('USE_ZEND_ALLOC', $bwrap, true) && in_array('0', $bwrap, true));
 check('bwrap with --zend-mm leaves the allocator alone', !in_array('USE_ZEND_ALLOC', worker_command('/usr/bin/php', true, ['mode' => 'bwrap', 'cap' => 1]), true));
+// A worker started under bwrap, with no input, ends with status 0. When bwrap
+// cannot start here (an AppArmor rule, no user namespaces), the case is skipped.
+$started = proc_open(
+    worker_command(PHP_BINARY, false, ['mode' => 'bwrap', 'cap' => 268435456]),
+    [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+    $pipes,
+);
+$status = is_resource($started) ? proc_close($started) : -1;
+if ($status === 0) {
+    check('a worker starts under bwrap', true);
+} else {
+    echo "skipped the bwrap start: bwrap did not start a worker here (status $status)\n";
+}
 $plain = worker_command('/usr/bin/php', false, ['mode' => 'none', 'cap' => 0]);
 check('none is the PHP itself', $plain[0] === '/usr/bin/php' && !in_array('bwrap', $plain, true));
 check('sudo-unshare is chosen by name only', worker_command('/usr/bin/php', false, ['mode' => 'sudo-unshare', 'cap' => 0])[0] === 'sudo');
