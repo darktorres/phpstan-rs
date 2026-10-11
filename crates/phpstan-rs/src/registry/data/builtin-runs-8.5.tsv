@@ -399,12 +399,14 @@ curl_copy_handle		probed
 curl_errno		probed	
 curl_error		probed	
 curl_escape		probed	
+curl_exec		probed	
 curl_file_create		probed	
 curl_getinfo		probed	
 curl_init		probed	
 curl_multi_add_handle		probed	
 curl_multi_close		probed	
 curl_multi_errno		probed	
+curl_multi_exec		probed	
 curl_multi_get_handles		probed	
 curl_multi_getcontent		probed	
 curl_multi_info_read		probed	
@@ -568,6 +570,57 @@ debug_zval_dump	1	method	__debuginfo
 debug_zval_dump	1[]	method	__debuginfo
 decbin		probed	
 dechex		probed	
+decimal\decimal::__construct		probed	
+decimal\decimal::__tostring		probed	
+decimal\decimal::abs		probed	
+decimal\decimal::add		probed	
+decimal\decimal::avg		probed	
+decimal\decimal::avg	0	method	current
+decimal\decimal::avg	0	method	getiterator
+decimal\decimal::avg	0	method	rewind
+decimal\decimal::avg	0	method	valid
+decimal\decimal::between		probed	
+decimal\decimal::ceil		probed	
+decimal\decimal::compareto		probed	
+decimal\decimal::copy		probed	
+decimal\decimal::div		probed	
+decimal\decimal::equals		probed	
+decimal\decimal::exp		probed	
+decimal\decimal::floor		probed	
+decimal\decimal::iseven		probed	
+decimal\decimal::isinf		probed	
+decimal\decimal::isinteger		probed	
+decimal\decimal::isnan		probed	
+decimal\decimal::isnegative		probed	
+decimal\decimal::isodd		probed	
+decimal\decimal::ispositive		probed	
+decimal\decimal::iszero		probed	
+decimal\decimal::jsonserialize		probed	
+decimal\decimal::ln		probed	
+decimal\decimal::log10		probed	
+decimal\decimal::mod		probed	
+decimal\decimal::mul		probed	
+decimal\decimal::negate		probed	
+decimal\decimal::parity		probed	
+decimal\decimal::pow		probed	
+decimal\decimal::precision		probed	
+decimal\decimal::rem		probed	
+decimal\decimal::round		probed	
+decimal\decimal::shift		probed	
+decimal\decimal::signum		probed	
+decimal\decimal::sqrt		probed	
+decimal\decimal::sub		probed	
+decimal\decimal::sum		probed	
+decimal\decimal::sum	0	method	current
+decimal\decimal::sum	0	method	getiterator
+decimal\decimal::sum	0	method	rewind
+decimal\decimal::sum	0	method	valid
+decimal\decimal::tofixed		probed	
+decimal\decimal::tofloat		probed	
+decimal\decimal::toint		probed	
+decimal\decimal::tostring		probed	
+decimal\decimal::trim		probed	
+decimal\decimal::truncate		probed	
 decoct		probed	
 define		probed	
 defined		probed	
@@ -798,6 +851,291 @@ domtext::iswhitespaceinelementcontent		probed
 domtext::splittext		probed	
 domxpath::quote		probed	
 doubleval		probed	
+ds\deque::__construct		probed	
+ds\deque::__construct	0	method	current
+ds\deque::__construct	0	method	getiterator
+ds\deque::__construct	0	method	next
+ds\deque::__construct	0	method	rewind
+ds\deque::__construct	0	method	valid
+ds\deque::allocate		probed	
+ds\deque::apply		probed	
+ds\deque::capacity		probed	
+ds\deque::clear		probed	
+ds\deque::contains		probed	
+ds\deque::copy		probed	
+ds\deque::count		probed	
+ds\deque::filter		probed	
+ds\deque::find		probed	
+ds\deque::first		probed	
+ds\deque::get		probed	
+ds\deque::getiterator		probed	
+ds\deque::insert		probed	
+ds\deque::isempty		probed	
+ds\deque::join		probed	
+ds\deque::join	by:push:0	method	__tostring
+ds\deque::join	by:unshift:0	method	__tostring
+ds\deque::join	new:0[]	method	__tostring
+ds\deque::jsonserialize		probed	
+ds\deque::last		probed	
+ds\deque::map		probed	
+ds\deque::merge		probed	
+ds\deque::merge	0	method	current
+ds\deque::merge	0	method	getiterator
+ds\deque::merge	0	method	next
+ds\deque::merge	0	method	rewind
+ds\deque::merge	0	method	valid
+ds\deque::offsetexists		probed	
+ds\deque::offsetget		probed	
+ds\deque::offsetset		probed	
+ds\deque::offsetunset		probed	
+ds\deque::pop		probed	
+ds\deque::push		probed	
+ds\deque::reduce		probed	
+ds\deque::remove		probed	
+ds\deque::reverse		probed	
+ds\deque::reversed		probed	
+ds\deque::rotate		probed	
+ds\deque::set		probed	
+ds\deque::shift		probed	
+ds\deque::slice		probed	
+ds\deque::sort		probed	
+ds\deque::sorted		probed	
+ds\deque::sum		probed	
+ds\deque::toarray		probed	
+ds\deque::unshift		probed	
+ds\map::__construct		probed	
+ds\map::__construct	0	method	current
+ds\map::__construct	0	method	getiterator
+ds\map::__construct	0	method	key
+ds\map::__construct	0	method	next
+ds\map::__construct	0	method	rewind
+ds\map::__construct	0	method	valid
+ds\map::allocate		probed	
+ds\map::apply		probed	
+ds\map::capacity		probed	
+ds\map::clear		probed	
+ds\map::copy		probed	
+ds\map::count		probed	
+ds\map::diff		probed	
+ds\map::filter		probed	
+ds\map::first		probed	
+ds\map::get		probed	
+ds\map::get	0[]	method	__serialize
+ds\map::getiterator		probed	
+ds\map::haskey		probed	
+ds\map::haskey	0[]	method	__serialize
+ds\map::hasvalue		probed	
+ds\map::intersect		probed	
+ds\map::isempty		probed	
+ds\map::jsonserialize		probed	
+ds\map::keys		probed	
+ds\map::ksort		probed	
+ds\map::ksorted		probed	
+ds\map::last		probed	
+ds\map::map		probed	
+ds\map::merge		probed	
+ds\map::merge	0	method	current
+ds\map::merge	0	method	getiterator
+ds\map::merge	0	method	key
+ds\map::merge	0	method	next
+ds\map::merge	0	method	rewind
+ds\map::merge	0	method	valid
+ds\map::offsetexists		probed	
+ds\map::offsetexists	0[]	method	__serialize
+ds\map::offsetget		probed	
+ds\map::offsetget	0[]	method	__serialize
+ds\map::offsetset		probed	
+ds\map::offsetset	0[]	method	__serialize
+ds\map::offsetunset		probed	
+ds\map::offsetunset	0[]	method	__serialize
+ds\map::pairs		probed	
+ds\map::put		probed	
+ds\map::put	0[]	method	__serialize
+ds\map::putall		probed	
+ds\map::putall	0	method	current
+ds\map::putall	0	method	getiterator
+ds\map::putall	0	method	key
+ds\map::putall	0	method	next
+ds\map::putall	0	method	rewind
+ds\map::putall	0	method	valid
+ds\map::reduce		probed	
+ds\map::remove		probed	
+ds\map::remove	0[]	method	__serialize
+ds\map::reverse		probed	
+ds\map::reversed		probed	
+ds\map::skip		probed	
+ds\map::slice		probed	
+ds\map::sort		probed	
+ds\map::sorted		probed	
+ds\map::sum		probed	
+ds\map::toarray		probed	
+ds\map::union		probed	
+ds\map::values		probed	
+ds\map::xor		probed	
+ds\pair::__construct		probed	
+ds\pair::copy		probed	
+ds\pair::jsonserialize		probed	
+ds\pair::toarray		probed	
+ds\priorityqueue::__construct		probed	
+ds\priorityqueue::allocate		probed	
+ds\priorityqueue::capacity		probed	
+ds\priorityqueue::clear		probed	
+ds\priorityqueue::copy		probed	
+ds\priorityqueue::count		probed	
+ds\priorityqueue::getiterator		probed	
+ds\priorityqueue::isempty		probed	
+ds\priorityqueue::jsonserialize		probed	
+ds\priorityqueue::peek		probed	
+ds\priorityqueue::pop		probed	
+ds\priorityqueue::push		probed	
+ds\priorityqueue::toarray		probed	
+ds\queue::__construct		probed	
+ds\queue::__construct	0	method	current
+ds\queue::__construct	0	method	getiterator
+ds\queue::__construct	0	method	next
+ds\queue::__construct	0	method	rewind
+ds\queue::__construct	0	method	valid
+ds\queue::allocate		probed	
+ds\queue::capacity		probed	
+ds\queue::clear		probed	
+ds\queue::copy		probed	
+ds\queue::count		probed	
+ds\queue::getiterator		probed	
+ds\queue::isempty		probed	
+ds\queue::jsonserialize		probed	
+ds\queue::offsetexists		probed	
+ds\queue::offsetget		probed	
+ds\queue::offsetset		probed	
+ds\queue::offsetunset		probed	
+ds\queue::peek		probed	
+ds\queue::pop		probed	
+ds\queue::push		probed	
+ds\queue::toarray		probed	
+ds\set::__construct		probed	
+ds\set::__construct	0	method	current
+ds\set::__construct	0	method	getiterator
+ds\set::__construct	0	method	next
+ds\set::__construct	0	method	rewind
+ds\set::__construct	0	method	valid
+ds\set::add		probed	
+ds\set::add	0[]	method	__serialize
+ds\set::allocate		probed	
+ds\set::capacity		probed	
+ds\set::clear		probed	
+ds\set::contains		probed	
+ds\set::contains	0[]	method	__serialize
+ds\set::copy		probed	
+ds\set::count		probed	
+ds\set::diff		probed	
+ds\set::filter		probed	
+ds\set::filter	by:add:0[]	method	__serialize
+ds\set::first		probed	
+ds\set::get		probed	
+ds\set::getiterator		probed	
+ds\set::intersect		probed	
+ds\set::isempty		probed	
+ds\set::join		probed	
+ds\set::join	by:add:0	method	__tostring
+ds\set::join	new:0[]	method	__tostring
+ds\set::jsonserialize		probed	
+ds\set::last		probed	
+ds\set::map		probed	
+ds\set::merge		probed	
+ds\set::merge	0	method	current
+ds\set::merge	0	method	getiterator
+ds\set::merge	0	method	next
+ds\set::merge	0	method	rewind
+ds\set::merge	0	method	valid
+ds\set::offsetexists		probed	
+ds\set::offsetget		probed	
+ds\set::offsetset		probed	
+ds\set::offsetunset		probed	
+ds\set::reduce		probed	
+ds\set::remove		probed	
+ds\set::remove	0[]	method	__serialize
+ds\set::reverse		probed	
+ds\set::reversed		probed	
+ds\set::slice		probed	
+ds\set::sort		probed	
+ds\set::sorted		probed	
+ds\set::sum		probed	
+ds\set::toarray		probed	
+ds\set::union		probed	
+ds\set::xor		probed	
+ds\stack::__construct		probed	
+ds\stack::__construct	0	method	current
+ds\stack::__construct	0	method	getiterator
+ds\stack::__construct	0	method	next
+ds\stack::__construct	0	method	rewind
+ds\stack::__construct	0	method	valid
+ds\stack::allocate		probed	
+ds\stack::capacity		probed	
+ds\stack::clear		probed	
+ds\stack::copy		probed	
+ds\stack::count		probed	
+ds\stack::getiterator		probed	
+ds\stack::isempty		probed	
+ds\stack::jsonserialize		probed	
+ds\stack::offsetexists		probed	
+ds\stack::offsetget		probed	
+ds\stack::offsetset		probed	
+ds\stack::offsetunset		probed	
+ds\stack::peek		probed	
+ds\stack::pop		probed	
+ds\stack::push		probed	
+ds\stack::toarray		probed	
+ds\vector::__construct		probed	
+ds\vector::__construct	0	method	current
+ds\vector::__construct	0	method	getiterator
+ds\vector::__construct	0	method	next
+ds\vector::__construct	0	method	rewind
+ds\vector::__construct	0	method	valid
+ds\vector::allocate		probed	
+ds\vector::apply		probed	
+ds\vector::capacity		probed	
+ds\vector::clear		probed	
+ds\vector::contains		probed	
+ds\vector::copy		probed	
+ds\vector::count		probed	
+ds\vector::filter		probed	
+ds\vector::find		probed	
+ds\vector::first		probed	
+ds\vector::get		probed	
+ds\vector::getiterator		probed	
+ds\vector::insert		probed	
+ds\vector::isempty		probed	
+ds\vector::join		probed	
+ds\vector::join	by:push:0	method	__tostring
+ds\vector::join	by:unshift:0	method	__tostring
+ds\vector::join	new:0[]	method	__tostring
+ds\vector::jsonserialize		probed	
+ds\vector::last		probed	
+ds\vector::map		probed	
+ds\vector::merge		probed	
+ds\vector::merge	0	method	current
+ds\vector::merge	0	method	getiterator
+ds\vector::merge	0	method	next
+ds\vector::merge	0	method	rewind
+ds\vector::merge	0	method	valid
+ds\vector::offsetexists		probed	
+ds\vector::offsetget		probed	
+ds\vector::offsetset		probed	
+ds\vector::offsetunset		probed	
+ds\vector::pop		probed	
+ds\vector::push		probed	
+ds\vector::reduce		probed	
+ds\vector::remove		probed	
+ds\vector::reverse		probed	
+ds\vector::reversed		probed	
+ds\vector::rotate		probed	
+ds\vector::set		probed	
+ds\vector::shift		probed	
+ds\vector::slice		probed	
+ds\vector::sort		probed	
+ds\vector::sorted		probed	
+ds\vector::sum		probed	
+ds\vector::toarray		probed	
+ds\vector::unshift		probed	
 easter_date		probed	
 easter_days		probed	
 emptyiterator::current		probed	
@@ -1011,7 +1349,6 @@ flush		probed
 fmod		probed	
 fnmatch		probed	
 fopen		probed	
-fopen	0	wrapper	stream_close
 fopen	0	wrapper	stream_open
 forward_static_call		probed	
 forward_static_call_array		probed	
@@ -1049,6 +1386,7 @@ ftp_cdup		probed
 ftp_chdir		probed	
 ftp_chmod		probed	
 ftp_close		probed	
+ftp_connect		probed	
 ftp_delete		probed	
 ftp_exec		probed	
 ftp_fget		probed	
@@ -1076,6 +1414,7 @@ ftp_rmdir		probed
 ftp_set_option		probed	
 ftp_site		probed	
 ftp_size		probed	
+ftp_ssl_connect		probed	
 ftp_systype		probed	
 ftruncate		probed	
 ftruncate	0	wrapper	stream_truncate
@@ -1109,6 +1448,7 @@ get_defined_vars		probed
 get_error_handler		probed	
 get_exception_handler		probed	
 get_extension_funcs		probed	
+get_headers		probed	
 get_html_translation_table		probed	
 get_include_path		probed	
 get_included_files		probed	
@@ -1276,6 +1616,12 @@ iconv_substr		probed
 idate		probed	
 idn_to_ascii		probed	
 idn_to_utf8		probed	
+igbinary_serialize		probed	
+igbinary_serialize	0	method	__serialize
+igbinary_serialize	0	method	__sleep
+igbinary_serialize	0[]	method	__serialize
+igbinary_unserialize		probed	
+igbinary_unserialize	0	method	__tostring
 ignore_user_abort		probed	
 image_type_to_extension		probed	
 image_type_to_mime_type		probed	
@@ -7809,6 +8155,98 @@ md5_file	0	wrapper	stream_close
 md5_file	0	wrapper	stream_eof
 md5_file	0	wrapper	stream_open
 md5_file	0	wrapper	stream_read
+memcached::__construct		probed	
+memcached::__construct	1	calls	
+memcached::add		probed	
+memcached::add	1	method	__serialize
+memcached::add	1	method	__sleep
+memcached::add	1[]	method	__serialize
+memcached::addbykey		probed	
+memcached::addbykey	2	method	__serialize
+memcached::addbykey	2	method	__sleep
+memcached::addbykey	2[]	method	__serialize
+memcached::addserver		probed	
+memcached::addservers		probed	
+memcached::append		probed	
+memcached::appendbykey		probed	
+memcached::cas		probed	
+memcached::cas	2	method	__serialize
+memcached::cas	2	method	__sleep
+memcached::cas	2[]	method	__serialize
+memcached::casbykey		probed	
+memcached::casbykey	3	method	__serialize
+memcached::casbykey	3	method	__sleep
+memcached::casbykey	3[]	method	__serialize
+memcached::checkkey		probed	
+memcached::decrement		probed	
+memcached::decrementbykey		probed	
+memcached::delete		probed	
+memcached::deletebykey		probed	
+memcached::deletemulti		probed	
+memcached::deletemulti	0[]	method	__tostring
+memcached::deletemultibykey		probed	
+memcached::deletemultibykey	1[]	method	__tostring
+memcached::fetch		probed	
+memcached::fetchall		probed	
+memcached::flush		probed	
+memcached::flushbuffers		probed	
+memcached::get		probed	
+memcached::getallkeys		probed	
+memcached::getbykey		probed	
+memcached::getdelayed		probed	
+memcached::getdelayed	0[]	method	__tostring
+memcached::getdelayedbykey		probed	
+memcached::getdelayedbykey	1[]	method	__tostring
+memcached::getlastdisconnectedserver		probed	
+memcached::getlasterrorcode		probed	
+memcached::getlasterrorerrno		probed	
+memcached::getlasterrormessage		probed	
+memcached::getmulti		probed	
+memcached::getmulti	0[]	method	__tostring
+memcached::getmultibykey		probed	
+memcached::getmultibykey	1[]	method	__tostring
+memcached::getoption		probed	
+memcached::getresultcode		probed	
+memcached::getresultmessage		probed	
+memcached::getserverbykey		probed	
+memcached::getserverlist		probed	
+memcached::getstats		probed	
+memcached::getversion		probed	
+memcached::increment		probed	
+memcached::incrementbykey		probed	
+memcached::ispersistent		probed	
+memcached::ispristine		probed	
+memcached::prepend		probed	
+memcached::prependbykey		probed	
+memcached::quit		probed	
+memcached::replace		probed	
+memcached::replace	1	method	__serialize
+memcached::replace	1	method	__sleep
+memcached::replace	1[]	method	__serialize
+memcached::replacebykey		probed	
+memcached::replacebykey	2	method	__serialize
+memcached::replacebykey	2	method	__sleep
+memcached::replacebykey	2[]	method	__serialize
+memcached::resetserverlist		probed	
+memcached::set		probed	
+memcached::set	1	method	__serialize
+memcached::set	1	method	__sleep
+memcached::set	1[]	method	__serialize
+memcached::setbucket		probed	
+memcached::setbykey		probed	
+memcached::setbykey	2	method	__serialize
+memcached::setbykey	2	method	__sleep
+memcached::setbykey	2[]	method	__serialize
+memcached::setencodingkey		probed	
+memcached::setmulti		probed	
+memcached::setmulti	0[]	method	__serialize
+memcached::setmultibykey		probed	
+memcached::setmultibykey	1[]	method	__serialize
+memcached::setoption		probed	
+memcached::setoptions		probed	
+memcached::setsaslauthdata		probed	
+memcached::touch		probed	
+memcached::touchbykey		probed	
 memory_get_peak_usage		probed	
 memory_get_usage		probed	
 memory_reset_peak_usage		probed	
@@ -7825,6 +8263,24 @@ messageformatter::getpattern		probed
 messageformatter::parse		probed	
 messageformatter::parsemessage		probed	
 messageformatter::setpattern		probed	
+messagepack::__construct		probed	
+messagepack::pack		probed	
+messagepack::pack	0	method	__serialize
+messagepack::pack	0	method	__sleep
+messagepack::pack	0[]	method	__serialize
+messagepack::setoption		probed	
+messagepack::unpack		probed	
+messagepack::unpack	0	method	__tostring
+messagepack::unpacker		probed	
+messagepackunpacker::__construct		probed	
+messagepackunpacker::__destruct		probed	
+messagepackunpacker::data		probed	
+messagepackunpacker::execute		probed	
+messagepackunpacker::execute	0	method	__tostring
+messagepackunpacker::feed		probed	
+messagepackunpacker::feed	0	method	__tostring
+messagepackunpacker::reset		probed	
+messagepackunpacker::setoption		probed	
 metaphone		probed	
 method_exists		probed	
 mhash		probed	
@@ -7866,6 +8322,18 @@ msgfmt_get_pattern		probed
 msgfmt_parse		probed	
 msgfmt_parse_message		probed	
 msgfmt_set_pattern		probed	
+msgpack_pack		probed	
+msgpack_pack	0	method	__serialize
+msgpack_pack	0	method	__sleep
+msgpack_pack	0[]	method	__serialize
+msgpack_serialize		probed	
+msgpack_serialize	0	method	__serialize
+msgpack_serialize	0	method	__sleep
+msgpack_serialize	0[]	method	__serialize
+msgpack_unpack		probed	
+msgpack_unpack	0	method	__tostring
+msgpack_unserialize		probed	
+msgpack_unserialize	0	method	__tostring
 mt_getrandmax		probed	
 mt_rand		probed	
 mt_srand		probed	
@@ -7940,6 +8408,7 @@ mysqli_change_user		probed
 mysqli_character_set_name		probed	
 mysqli_close		probed	
 mysqli_commit		probed	
+mysqli_connect		probed	
 mysqli_connect_errno		probed	
 mysqli_connect_error		probed	
 mysqli_data_seek		probed	
@@ -7990,6 +8459,7 @@ mysqli_ping		probed
 mysqli_poll		probed	
 mysqli_prepare		probed	
 mysqli_query		probed	
+mysqli_real_connect		probed	
 mysqli_real_escape_string		probed	
 mysqli_real_query		probed	
 mysqli_reap_async_query		probed	
@@ -8296,6 +8766,7 @@ pg_clientencoding		probed
 pg_close		probed	
 pg_close_stmt		probed	
 pg_cmdtuples		probed	
+pg_connect		probed	
 pg_connect_poll		probed	
 pg_connection_busy		probed	
 pg_connection_reset		probed	
@@ -8391,6 +8862,7 @@ pg_numrows		probed
 pg_options		probed	
 pg_parameter_status		probed	
 pg_parameter_status	0	method	__tostring
+pg_pconnect		probed	
 pg_ping		probed	
 pg_port		probed	
 pg_prepare		probed	
@@ -8518,6 +8990,8 @@ proc_close		probed
 proc_get_status		probed	
 proc_nice		probed	
 proc_open		probed	
+proc_open	0[]	method	__tostring
+proc_open	4[]	method	__tostring
 proc_terminate		probed	
 property_exists		probed	
 propertyhooktype::cases		probed	
@@ -8631,6 +9105,309 @@ recursivetreeiterator::getprefix	new:0	method	getiterator
 recursivetreeiterator::key	new:0	method	getiterator
 recursivetreeiterator::setpostfix	new:0	method	getiterator
 recursivetreeiterator::setprefixpart	new:0	method	getiterator
+redis::__construct		probed	
+redis::__destruct		probed	
+redis::_compress		probed	
+redis::_pack		probed	
+redis::_prefix		probed	
+redis::_serialize		probed	
+redis::_uncompress		probed	
+redis::_unpack		probed	
+redis::_unserialize		probed	
+redis::acl		probed	
+redis::append		probed	
+redis::auth		probed	
+redis::bgrewriteaof		probed	
+redis::bgsave		probed	
+redis::bitcount		probed	
+redis::bitop		probed	
+redis::bitpos		probed	
+redis::blmove		probed	
+redis::blmpop		probed	
+redis::blpop		probed	
+redis::brpop		probed	
+redis::brpoplpush		probed	
+redis::bzmpop		probed	
+redis::bzpopmax		probed	
+redis::bzpopmin		probed	
+redis::clearlasterror		probed	
+redis::cleartransferredbytes		probed	
+redis::client		probed	
+redis::close		probed	
+redis::command		probed	
+redis::config		probed	
+redis::connect		probed	
+redis::copy		probed	
+redis::dbsize		probed	
+redis::debug		probed	
+redis::decr		probed	
+redis::decrby		probed	
+redis::del		probed	
+redis::delete		probed	
+redis::discard		probed	
+redis::dump		probed	
+redis::echo		probed	
+redis::eval		probed	
+redis::eval_ro		probed	
+redis::evalsha		probed	
+redis::evalsha_ro		probed	
+redis::exec		probed	
+redis::exists		probed	
+redis::expire		probed	
+redis::expireat		probed	
+redis::expiremember		probed	
+redis::expirememberat		probed	
+redis::expiretime		probed	
+redis::failover		probed	
+redis::fcall		probed	
+redis::fcall_ro		probed	
+redis::flushall		probed	
+redis::flushdb		probed	
+redis::function		probed	
+redis::geoadd		probed	
+redis::geodist		probed	
+redis::geohash		probed	
+redis::geopos		probed	
+redis::georadius		probed	
+redis::georadius_ro		probed	
+redis::georadiusbymember		probed	
+redis::georadiusbymember_ro		probed	
+redis::geosearch		probed	
+redis::geosearchstore		probed	
+redis::get		probed	
+redis::getauth		probed	
+redis::getbit		probed	
+redis::getdbnum		probed	
+redis::getdel		probed	
+redis::getex		probed	
+redis::gethost		probed	
+redis::getlasterror		probed	
+redis::getmode		probed	
+redis::getoption		probed	
+redis::getpersistentid		probed	
+redis::getport		probed	
+redis::getrange		probed	
+redis::getreadtimeout		probed	
+redis::getset		probed	
+redis::gettimeout		probed	
+redis::gettransferredbytes		probed	
+redis::getwithmeta		probed	
+redis::hdel		probed	
+redis::hexists		probed	
+redis::hget		probed	
+redis::hgetall		probed	
+redis::hincrby		probed	
+redis::hincrbyfloat		probed	
+redis::hkeys		probed	
+redis::hlen		probed	
+redis::hmget		probed	
+redis::hmset		probed	
+redis::hrandfield		probed	
+redis::hscan		probed	
+redis::hset		probed	
+redis::hsetnx		probed	
+redis::hstrlen		probed	
+redis::hvals		probed	
+redis::incr		probed	
+redis::incrby		probed	
+redis::incrbyfloat		probed	
+redis::info		probed	
+redis::isconnected		probed	
+redis::keys		probed	
+redis::lastsave		probed	
+redis::lcs		probed	
+redis::lindex		probed	
+redis::linsert		probed	
+redis::llen		probed	
+redis::lmove		probed	
+redis::lmpop		probed	
+redis::lpop		probed	
+redis::lpos		probed	
+redis::lpush		probed	
+redis::lpushx		probed	
+redis::lrange		probed	
+redis::lrem		probed	
+redis::lset		probed	
+redis::ltrim		probed	
+redis::mget		probed	
+redis::migrate		probed	
+redis::move		probed	
+redis::mset		probed	
+redis::msetnx		probed	
+redis::multi		probed	
+redis::object		probed	
+redis::open		probed	
+redis::pconnect		probed	
+redis::persist		probed	
+redis::pexpire		probed	
+redis::pexpireat		probed	
+redis::pexpiretime		probed	
+redis::pfadd		probed	
+redis::pfcount		probed	
+redis::pfmerge		probed	
+redis::ping		probed	
+redis::pipeline		probed	
+redis::popen		probed	
+redis::psetex		probed	
+redis::psubscribe		probed	
+redis::pttl		probed	
+redis::publish		probed	
+redis::pubsub		probed	
+redis::punsubscribe		probed	
+redis::randomkey		probed	
+redis::rawcommand		probed	
+redis::rename		probed	
+redis::renamenx		probed	
+redis::replicaof		probed	
+redis::reset		probed	
+redis::restore		probed	
+redis::role		probed	
+redis::rpop		probed	
+redis::rpoplpush		probed	
+redis::rpush		probed	
+redis::rpushx		probed	
+redis::sadd		probed	
+redis::saddarray		probed	
+redis::save		probed	
+redis::scan		probed	
+redis::scard		probed	
+redis::script		probed	
+redis::sdiff		probed	
+redis::sdiffstore		probed	
+redis::select		probed	
+redis::servername		probed	
+redis::serverversion		probed	
+redis::set		probed	
+redis::setbit		probed	
+redis::setex		probed	
+redis::setnx		probed	
+redis::setoption		probed	
+redis::setrange		probed	
+redis::sinter		probed	
+redis::sintercard		probed	
+redis::sinterstore		probed	
+redis::sismember		probed	
+redis::slaveof		probed	
+redis::slowlog		probed	
+redis::smembers		probed	
+redis::smismember		probed	
+redis::smove		probed	
+redis::sort		probed	
+redis::sort_ro		probed	
+redis::sortasc		probed	
+redis::sortascalpha		probed	
+redis::sortdesc		probed	
+redis::sortdescalpha		probed	
+redis::spop		probed	
+redis::srandmember		probed	
+redis::srem		probed	
+redis::sscan		probed	
+redis::ssubscribe		probed	
+redis::strlen		probed	
+redis::subscribe		probed	
+redis::sunion		probed	
+redis::sunionstore		probed	
+redis::sunsubscribe		probed	
+redis::swapdb		probed	
+redis::time		probed	
+redis::touch		probed	
+redis::ttl		probed	
+redis::type		probed	
+redis::unlink		probed	
+redis::unsubscribe		probed	
+redis::unwatch		probed	
+redis::wait		probed	
+redis::waitaof		probed	
+redis::watch		probed	
+redis::xack		probed	
+redis::xadd		probed	
+redis::xautoclaim		probed	
+redis::xclaim		probed	
+redis::xdel		probed	
+redis::xgroup		probed	
+redis::xinfo		probed	
+redis::xlen		probed	
+redis::xpending		probed	
+redis::xrange		probed	
+redis::xread		probed	
+redis::xreadgroup		probed	
+redis::xrevrange		probed	
+redis::xtrim		probed	
+redis::zadd		probed	
+redis::zcard		probed	
+redis::zcount		probed	
+redis::zdiff		probed	
+redis::zdiffstore		probed	
+redis::zincrby		probed	
+redis::zinter		probed	
+redis::zintercard		probed	
+redis::zinterstore		probed	
+redis::zlexcount		probed	
+redis::zmpop		probed	
+redis::zmscore		probed	
+redis::zpopmax		probed	
+redis::zpopmin		probed	
+redis::zrandmember		probed	
+redis::zrange		probed	
+redis::zrangebylex		probed	
+redis::zrangebyscore		probed	
+redis::zrangestore		probed	
+redis::zrank		probed	
+redis::zrem		probed	
+redis::zremrangebylex		probed	
+redis::zremrangebyrank		probed	
+redis::zremrangebyscore		probed	
+redis::zrevrange		probed	
+redis::zrevrangebylex		probed	
+redis::zrevrangebyscore		probed	
+redis::zrevrank		probed	
+redis::zscan		probed	
+redis::zscore		probed	
+redis::zunion		probed	
+redis::zunionstore		probed	
+redisarray::__call		probed	
+redisarray::__construct		probed	
+redisarray::_continuum		probed	
+redisarray::_distributor		probed	
+redisarray::_function		probed	
+redisarray::_hosts		probed	
+redisarray::_instance		probed	
+redisarray::_rehash		probed	
+redisarray::_target		probed	
+redisarray::bgsave		probed	
+redisarray::del		probed	
+redisarray::discard		probed	
+redisarray::exec		probed	
+redisarray::flushall		probed	
+redisarray::flushdb		probed	
+redisarray::getoption		probed	
+redisarray::hscan		probed	
+redisarray::info		probed	
+redisarray::keys		probed	
+redisarray::mget		probed	
+redisarray::mset		probed	
+redisarray::multi		probed	
+redisarray::ping		probed	
+redisarray::save		probed	
+redisarray::scan		probed	
+redisarray::select		probed	
+redisarray::setoption		probed	
+redisarray::sscan		probed	
+redisarray::unlink		probed	
+redisarray::unwatch		probed	
+redisarray::zscan		probed	
+redissentinel::__construct		probed	
+redissentinel::ckquorum		probed	
+redissentinel::failover		probed	
+redissentinel::flushconfig		probed	
+redissentinel::getmasteraddrbyname		probed	
+redissentinel::master		probed	
+redissentinel::masters		probed	
+redissentinel::myid		probed	
+redissentinel::ping		probed	
+redissentinel::reset		probed	
+redissentinel::sentinels		probed	
+redissentinel::slaves		probed	
 reflection::getmodifiernames		probed	
 reflectionclass::__construct		probed	
 reflectionclass::__tostring		probed	
@@ -8695,6 +9472,35 @@ reflectionclass::newlazyproxy		probed
 reflectionclass::resetaslazyghost		probed	
 reflectionclass::resetaslazyproxy		probed	
 reflectionclass::setstaticpropertyvalue		probed	
+reflectionclassconstant::__construct		probed	
+reflectionclassconstant::__tostring		probed	
+reflectionclassconstant::getattributes		probed	
+reflectionclassconstant::getdeclaringclass		probed	
+reflectionclassconstant::getdoccomment		probed	
+reflectionclassconstant::getmodifiers		probed	
+reflectionclassconstant::getname		probed	
+reflectionclassconstant::gettype		probed	
+reflectionclassconstant::getvalue		probed	
+reflectionclassconstant::hastype		probed	
+reflectionclassconstant::isdeprecated		probed	
+reflectionclassconstant::isenumcase		probed	
+reflectionclassconstant::isfinal		probed	
+reflectionclassconstant::isprivate		probed	
+reflectionclassconstant::isprotected		probed	
+reflectionclassconstant::ispublic		probed	
+reflectionextension::__construct		probed	
+reflectionextension::__tostring		probed	
+reflectionextension::getclasses		probed	
+reflectionextension::getclassnames		probed	
+reflectionextension::getconstants		probed	
+reflectionextension::getdependencies		probed	
+reflectionextension::getfunctions		probed	
+reflectionextension::getinientries		probed	
+reflectionextension::getname		probed	
+reflectionextension::getversion		probed	
+reflectionextension::info		probed	
+reflectionextension::ispersistent		probed	
+reflectionextension::istemporary		probed	
 reflectionfunction::__construct		probed	
 reflectionfunction::__construct	new:0	method	__tostring
 reflectionfunction::__tostring		probed	
@@ -8712,32 +9518,113 @@ reflectionfunction::isanonymous	new:0	method	__tostring
 reflectionfunction::isdisabled		probed	
 reflectionfunction::isdisabled	new:0	method	__tostring
 reflectionintersectiontype::gettypes		probed	
+reflectionmethod::__construct		probed	
+reflectionmethod::__tostring		probed	
 reflectionmethod::createfrommethodname		probed	
+reflectionmethod::getclosure		probed	
+reflectionmethod::getdeclaringclass		probed	
+reflectionmethod::getmodifiers		probed	
+reflectionmethod::getprototype		probed	
+reflectionmethod::hasprototype		probed	
+reflectionmethod::invoke		probed	
+reflectionmethod::invoke	0	method	count
+reflectionmethod::invokeargs		probed	
+reflectionmethod::invokeargs	0	method	count
+reflectionmethod::isabstract		probed	
+reflectionmethod::isconstructor		probed	
+reflectionmethod::isdestructor		probed	
+reflectionmethod::isfinal		probed	
+reflectionmethod::isprivate		probed	
+reflectionmethod::isprotected		probed	
+reflectionmethod::ispublic		probed	
+reflectionmethod::setaccessible		probed	
 reflectionnamedtype::getname		probed	
 reflectionnamedtype::isbuiltin		probed	
 reflectionobject::__construct		probed	
+reflectionparameter::__construct		probed	
+reflectionparameter::__construct	0[]	method	__tostring
 reflectionparameter::__construct	new:0[]	method	__tostring
+reflectionparameter::__tostring		probed	
 reflectionparameter::__tostring	new:0[]	method	__tostring
+reflectionparameter::allowsnull		probed	
 reflectionparameter::allowsnull	new:0[]	method	__tostring
+reflectionparameter::canbepassedbyvalue		probed	
 reflectionparameter::canbepassedbyvalue	new:0[]	method	__tostring
+reflectionparameter::getattributes		probed	
 reflectionparameter::getattributes	new:0[]	method	__tostring
+reflectionparameter::getclass		probed	
 reflectionparameter::getclass	new:0[]	method	__tostring
+reflectionparameter::getdeclaringclass		probed	
 reflectionparameter::getdeclaringclass	new:0[]	method	__tostring
+reflectionparameter::getdeclaringfunction		probed	
 reflectionparameter::getdeclaringfunction	new:0[]	method	__tostring
+reflectionparameter::getdefaultvalue		probed	
 reflectionparameter::getdefaultvalue	new:0[]	method	__tostring
+reflectionparameter::getdefaultvalueconstantname		probed	
 reflectionparameter::getdefaultvalueconstantname	new:0[]	method	__tostring
+reflectionparameter::getname		probed	
 reflectionparameter::getname	new:0[]	method	__tostring
+reflectionparameter::getposition		probed	
 reflectionparameter::getposition	new:0[]	method	__tostring
+reflectionparameter::gettype		probed	
 reflectionparameter::gettype	new:0[]	method	__tostring
+reflectionparameter::hastype		probed	
 reflectionparameter::hastype	new:0[]	method	__tostring
+reflectionparameter::isarray		probed	
 reflectionparameter::isarray	new:0[]	method	__tostring
+reflectionparameter::iscallable		probed	
 reflectionparameter::iscallable	new:0[]	method	__tostring
+reflectionparameter::isdefaultvalueavailable		probed	
 reflectionparameter::isdefaultvalueavailable	new:0[]	method	__tostring
+reflectionparameter::isdefaultvalueconstant		probed	
 reflectionparameter::isdefaultvalueconstant	new:0[]	method	__tostring
+reflectionparameter::isoptional		probed	
 reflectionparameter::isoptional	new:0[]	method	__tostring
+reflectionparameter::ispassedbyreference		probed	
 reflectionparameter::ispassedbyreference	new:0[]	method	__tostring
+reflectionparameter::ispromoted		probed	
 reflectionparameter::ispromoted	new:0[]	method	__tostring
+reflectionparameter::isvariadic		probed	
 reflectionparameter::isvariadic	new:0[]	method	__tostring
+reflectionproperty::__construct		probed	
+reflectionproperty::__tostring		probed	
+reflectionproperty::getattributes		probed	
+reflectionproperty::getdeclaringclass		probed	
+reflectionproperty::getdefaultvalue		probed	
+reflectionproperty::getdoccomment		probed	
+reflectionproperty::gethook		probed	
+reflectionproperty::gethooks		probed	
+reflectionproperty::getmangledname		probed	
+reflectionproperty::getmodifiers		probed	
+reflectionproperty::getname		probed	
+reflectionproperty::getrawvalue		probed	
+reflectionproperty::getsettabletype		probed	
+reflectionproperty::gettype		probed	
+reflectionproperty::getvalue		probed	
+reflectionproperty::hasdefaultvalue		probed	
+reflectionproperty::hashook		probed	
+reflectionproperty::hashooks		probed	
+reflectionproperty::hastype		probed	
+reflectionproperty::isabstract		probed	
+reflectionproperty::isdefault		probed	
+reflectionproperty::isdynamic		probed	
+reflectionproperty::isfinal		probed	
+reflectionproperty::isinitialized		probed	
+reflectionproperty::islazy		probed	
+reflectionproperty::isprivate		probed	
+reflectionproperty::isprivateset		probed	
+reflectionproperty::ispromoted		probed	
+reflectionproperty::isprotected		probed	
+reflectionproperty::isprotectedset		probed	
+reflectionproperty::ispublic		probed	
+reflectionproperty::isreadonly		probed	
+reflectionproperty::isstatic		probed	
+reflectionproperty::isvirtual		probed	
+reflectionproperty::setaccessible		probed	
+reflectionproperty::setrawvalue		probed	
+reflectionproperty::setrawvaluewithoutlazyinitialization		probed	
+reflectionproperty::setvalue		probed	
+reflectionproperty::skiplazyinitialization		probed	
 reflectionreference::fromarrayelement		probed	
 reflectionuniontype::gettypes		probed	
 register_shutdown_function		probed	
@@ -8900,7 +9787,9 @@ socket_bind		probed
 socket_clear_error		probed	
 socket_close		probed	
 socket_cmsg_space		probed	
+socket_connect		probed	
 socket_create		probed	
+socket_create_listen		probed	
 socket_create_pair		probed	
 socket_export_stream		probed	
 socket_get_option		probed	
@@ -9380,6 +10269,7 @@ stream_set_timeout	0	wrapper	stream_set_option
 stream_set_write_buffer		probed	
 stream_set_write_buffer	0	wrapper	stream_set_option
 stream_socket_accept		probed	
+stream_socket_client		probed	
 stream_socket_enable_crypto		probed	
 stream_socket_get_name		probed	
 stream_socket_pair		probed	
@@ -9721,7 +10611,6 @@ xmlwriter_flush		probed
 xmlwriter_full_end_element		probed	
 xmlwriter_open_memory		probed	
 xmlwriter_open_uri		probed	
-xmlwriter_open_uri	0	wrapper	stream_close
 xmlwriter_open_uri	0	wrapper	stream_open
 xmlwriter_output_memory		probed	
 xmlwriter_set_indent		probed	
