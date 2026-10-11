@@ -63,13 +63,36 @@ final class Protocol
 }
 
 /**
- * What a worker runs, for the orchestrator to compare with the others.
+ * What a worker runs, for the orchestrator to compare with the others and for
+ * the sidecar: each extension with its version, a hash of its info text (none
+ * for Core and FFI, whose text differs between runs) and the functions and
+ * classes it provides.
  *
- * @return array{php: string, extensions: list<string>, ffi: bool}
+ * @return array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}
  */
 function manifest(): array
 {
-    $extensions = get_loaded_extensions();
-    sort($extensions);
-    return ['php' => PHP_VERSION, 'extensions' => $extensions, 'ffi' => class_exists('FFI')];
+    $names = get_loaded_extensions();
+    sort($names);
+    $extensions = [];
+    foreach ($names as $name) {
+        $reflection = new ReflectionExtension($name);
+        ob_start();
+        $reflection->info();
+        $text = (string) ob_get_clean();
+        $provides = array_keys($reflection->getFunctions());
+        foreach ($reflection->getClasses() as $class) {
+            $provides[] = $class->getName();
+        }
+        sort($provides);
+        $version = phpversion($name);
+        $extensions[$name] = [
+            'version' => $version === false ? null : $version,
+            'info' => in_array($name, ['Core', 'FFI'], true) ? null : sha1($text),
+            'provides' => $provides,
+        ];
+    }
+    /** @var array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool} $manifest */
+    $manifest = ['php' => PHP_VERSION, 'extensions' => $extensions, 'ffi' => class_exists('FFI')];
+    return $manifest;
 }

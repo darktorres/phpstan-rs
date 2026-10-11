@@ -16,6 +16,7 @@ require_once __DIR__ . '/lib/unit.php';
 require_once __DIR__ . '/lib/protocol.php';
 require_once __DIR__ . '/lib/workdir.php';
 require_once __DIR__ . '/lib/stats.php';
+require_once __DIR__ . '/lib/select.php';
 
 // Processes that are not dumpable never start the system's crash handler,
 // which costs seconds for each abort. The setting is inherited by the children.
@@ -30,16 +31,15 @@ if (extension_loaded('ffi')) {
 Protocol::open();
 Workdir::create();
 
-$wanted = static fn (string $builtin): bool => true;
+$wanted = selector(null, null);
 $skip = 'off';
 try {
     while (($message = receive(Protocol::$in)) !== null && is_array($message)) {
         switch ($message[0]) {
             case 'init':
-                $only = $message[1];
                 Stats::$enabled = $message[2];
                 $skip = $message[3];
-                $wanted = static fn (string $builtin): bool => $only === null || preg_match($only, $builtin) === 1;
+                $wanted = selector($message[1], $message[4]);
                 send(Protocol::$out, ['ready', manifest()]);
                 break;
             case 'plan':
@@ -50,7 +50,11 @@ try {
                         $nothing[] = $function;
                     }
                 }
-                send(Protocol::$out, ['plan', $units, unit_weights($units, $wanted), $nothing]);
+                $signatures = [];
+                foreach ($units as $unit) {
+                    $signatures[] = unit_signature($unit);
+                }
+                send(Protocol::$out, ['plan', $units, unit_weights($units, $wanted), $nothing, $signatures]);
                 break;
             case 'unit':
                 $lines = run_unit($message[1], $wanted, $skip, $message[2]);

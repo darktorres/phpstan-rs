@@ -158,6 +158,22 @@ function unit_weights(array $units, callable $wanted): array
 }
 
 /**
+ * A hash of the declarations a unit calls: its function, its method, or for a
+ * held unit the whole class, whose methods the held unit calls.
+ *
+ * @param array{string, string, string, int, int} $unit
+ */
+function unit_signature(array $unit): string
+{
+    [$kind, $name, $method] = $unit;
+    if ($kind === 'function') {
+        return sha1((string) new ReflectionFunction($name));
+    }
+    $reflection = new ReflectionClass($name);
+    return sha1($kind === 'method' ? (string) $reflection->getMethod($method) : (string) $reflection);
+}
+
+/**
  * What a run would do: the units and the children of each kind, and the
  * classes with the most children.
  *
