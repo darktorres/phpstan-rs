@@ -2831,9 +2831,9 @@ impl<'a> Checker<'a> {
         if let Some(cached) = self.cached_catalog_return_type(call_span, &arguments) {
             return Some(cached);
         }
-        let strict_types = self.syntax_tree_owner().and_then(|owner| {
-            crate::checker::keywords::strict_types_mode(arenas, owner.statements())
-        });
+        let strict_types = self
+            .syntax_tree_owner()
+            .and_then(|owner| syntax::strict_types::strict_types_mode(arenas, owner.statements()));
         let mut host = CatalogTypeHost {
             weak_scalar_coercions: strict_types == Some(false),
             registry: self.registry,

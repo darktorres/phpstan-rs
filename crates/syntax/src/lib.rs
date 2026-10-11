@@ -23,6 +23,7 @@ pub mod references;
 pub mod span;
 pub mod stack;
 pub mod stats;
+pub mod strict_types;
 pub mod token;
 pub mod visit;
 

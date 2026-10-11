@@ -197,7 +197,7 @@ impl<'a> Checker<'a> {
             && sig.is_stub()
             && matches!(callee, Callee::Function(name) if name.eq_ignore_ascii_case("strlen"))
             && self.syntax_tree_owner().and_then(|owner| {
-                crate::checker::keywords::strict_types_mode(arenas, owner.statements())
+                syntax::strict_types::strict_types_mode(arenas, owner.statements())
             }) == Some(false);
         let named_after_unpack = supports(PhpFeature::NamedArgumentAfterUnpackedArgument);
         let named_supported = supports(PhpFeature::NamedArguments);

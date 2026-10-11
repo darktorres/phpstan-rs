@@ -626,7 +626,7 @@ impl Checker<'_> {
         let arenas = syntax_owner.arenas();
         let body = find_method_body(arenas, syntax_owner.statements(), &owner, "__toString")?;
         let strict_types =
-            crate::checker::keywords::strict_types_mode(arenas, syntax_owner.statements())?;
+            syntax::strict_types::strict_types_mode(arenas, syntax_owner.statements())?;
         let (throw_writes, normal_writes, invalid_writes, all_writes) =
             callback_writes_by_outcome(arenas, &body, !owner.contains('\\'), strict_types)?;
         let mut branch_reads = Vec::new();
