@@ -394,6 +394,16 @@ function named_value(ReflectionParameter $param): ?Closure
         ['json_validate', 'flags'] => static fn (): int => 0,
         ['extract', 'prefix'] => static fn (): string => 'p',
         ['popen', 'mode'] => static fn (): string => 'r',
+        ['substr_count', 'offset'] => static fn (): int => 0,
+        ['resetaslazyghost', 'object'], ['resetaslazyproxy', 'object'] => static fn (): object => new stdClass(),
+        ['simplexml_import_dom', 'class_name'], ['simplexml_load_string', 'class_name'], ['simplexml_load_file', 'class_name'] => static fn (): string => 'SimpleXMLElement',
+        ['substr_count', 'length'] => static fn (): ?int => null,
+        ['newlazyghost', 'options'], ['newlazyproxy', 'options'], ['resetaslazyghost', 'options'], ['resetaslazyproxy', 'options'] => static fn (): int => 0,
+        ['simplexml_import_dom', 'node'] => static function (): DOMElement {
+            $document = new DOMDocument();
+            $document->loadXML('<a/>');
+            return $document->documentElement;
+        },
         ['php_uname', 'mode'] => static fn (): string => 'a',
         ['pack', 'format'] => static fn (): string => 'x',
         ['unpack', 'format'] => static fn (): string => 'C',
