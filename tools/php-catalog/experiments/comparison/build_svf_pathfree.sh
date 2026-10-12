@@ -17,6 +17,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 rm -rf "$ROOT"
 mkdir -p "$ROOT"
 cp -a "$SVF_CLONE" "$ROOT/SVF"
+# CMake writes compile_commands.json into the directory it runs from, so run it inside ROOT.
+cd "$ROOT"
 git -C "$ROOT/SVF" apply "$HERE/svf-relocatable-extapi.patch"
 cmake -S "$ROOT/SVF" -B "$ROOT/svf-build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=clang++-21 \
