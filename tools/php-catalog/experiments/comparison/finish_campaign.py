@@ -147,7 +147,7 @@ def gcc_profile(cache, runner):
     Each unit is compiled from the spelling make used, with the tree as the working
     directory, so the dumps name sources relative to the tree.
     """
-    php = cache / 'root/php-gcc'
+    php = cache / 'root/php-gcc/php-src'
     environment = dict(os.environ, PHP_CC='gcc', PHP_CXX='g++')
     environment['LD_LIBRARY_PATH'] = str(cache / 'root/deps/usr/lib/x86_64-linux-gnu')
     require_success(runner.run('gcc-tree', [HERE/'build_php_pathfree.sh', php, cache/'root/php-src',
