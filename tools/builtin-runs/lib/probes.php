@@ -156,16 +156,46 @@ function valid_value(?ReflectionType $type): ?Closure
         'messageformatter' => static fn (): MessageFormatter => msgfmt_create('en', 'x'),
         'deflatecontext' => static fn (): DeflateContext => deflate_init(ZLIB_ENCODING_RAW),
         'inflatecontext' => static fn (): InflateContext => inflate_init(ZLIB_ENCODING_RAW),
-        'imagick' => static fn (): Imagick => new Imagick(),
+        // With an image: most of Imagick's methods throw on an empty object.
+        'imagick' => static function (): Imagick {
+            $image = new Imagick();
+            $image->newImage(1, 1, new ImagickPixel('white'));
+            return $image;
+        },
         'imagickdraw' => static fn (): ImagickDraw => new ImagickDraw(),
         'imagickpixel' => static fn (): ImagickPixel => new ImagickPixel('white'),
     ];
     return $values[strtolower($type->getName())] ?? null;
 }
 
+/**
+ * A valid value for one parameter of one function, where its type is not
+ * enough: a string the function accepts only from a set of names. Keyed by the
+ * lowercased function or `class::method`, then by position.
+ */
+function valid_site(ReflectionParameter $param): ?Closure
+{
+    static $sites = [
+        'mb_convert_variables' => [
+            0 => 'UTF-8',
+            1 => 'UTF-8',
+        ],
+    ];
+    $function = $param->getDeclaringFunction();
+    $key = $function instanceof ReflectionMethod
+        ? strtolower($function->getDeclaringClass()->getName() . '::' . $function->getName())
+        : strtolower($function->getName());
+    $value = $sites[$key][$param->getPosition()] ?? null;
+    return $value === null ? null : static fn (): string => $value;
+}
+
 /** A plain value for a parameter a probe is not at. */
 function plain_value(ReflectionParameter $param): mixed
 {
+    $site = valid_site($param);
+    if ($site !== null) {
+        return $site();
+    }
     $type = $param->getType();
     // A memory stream serves every resource kind the stubs name: PHP takes a
     // stream where it takes a stream context, and a function that needs another
