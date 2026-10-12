@@ -117,6 +117,11 @@ function probes_for(ReflectionParameter $param): array
     } elseif (admits($type, 'string')) {
         $probes[] = ['url', static fn () => 'rec://probe'];
     }
+    // A class the parameter takes has a valid value (a DOM document, a SimpleXML element): that is a probe too.
+    $valid = $type instanceof ReflectionNamedType && !$type->isBuiltin() ? valid_value($type) : null;
+    if ($valid !== null) {
+        $probes[] = ['valid', $valid];
+    }
     // A scalar parameter takes a valid scalar, which the plain value of the parameter is.
     if (admits($type, 'int') || admits($type, 'float') || admits($type, 'bool')) {
         $probes[] = ['scalar', static fn () => plain_value($param)];
@@ -195,6 +200,17 @@ function valid_value(?ReflectionType $type): ?Closure
         'curlsharehandle' => static fn (): CurlShareHandle => curl_share_init(),
         'opensslasymmetrickey' => static fn (): OpenSSLAsymmetricKey => openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
+        'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
+        'domelement' => static function (): DOMElement {
+            $document = new DOMDocument();
+            $document->loadXML('<a/>');
+            return $document->documentElement;
+        },
+        'domnode' => static function (): DOMNode {
+            $document = new DOMDocument();
+            $document->loadXML('<a/>');
+            return $document->documentElement;
+        },
         'domdocument' => static function (): DOMDocument {
             $document = new DOMDocument();
             $document->loadXML('<a/>');
@@ -284,7 +300,7 @@ function zip_entry_sample(): mixed
  */
 function known_parameter_value(ReflectionParameter $param): ?Closure
 {
-    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param);
+    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param) ?? xml_value($param);
 }
 
 /** The valid value of a bcmath parameter: a number string, a modulus that is not zero, or a scale. */
@@ -304,16 +320,47 @@ function bcmath_value(ReflectionParameter $param): ?Closure
     };
 }
 
+/** The valid value of an XML name, or of a document that SimpleXML parses. */
+function xml_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    $class = $function instanceof ReflectionMethod ? strtolower($function->getDeclaringClass()->getName()) : '';
+    $name = $param->getName();
+    if ($name === 'data' && ($class === 'simplexmlelement' || $function->getName() === 'simplexml_load_string')) {
+        return static fn (): string => '<a><b/></a>';
+    }
+    $xml = str_starts_with($class, 'xmlwriter') || str_starts_with($function->getName(), 'xmlwriter_');
+    $dom = str_starts_with($class, 'dom') && !str_starts_with($class, 'domain');
+    if (!$xml && !$dom) {
+        return null;
+    }
+    if (in_array($name, ['name', 'localName', 'qualifiedName', 'target', 'namespace', 'content', 'prefix', 'value', 'isParam'], true)) {
+        return static fn (): string => 'a';
+    }
+    return null;
+}
+
 /** The valid value of an Imagick colour or a PDO fetch mode. */
 function imagick_value(ReflectionParameter $param): ?Closure
 {
     $function = $param->getDeclaringFunction();
     $class = $function instanceof ReflectionMethod ? strtolower($function->getDeclaringClass()->getName()) : '';
     $name = $param->getName();
-    if (!str_starts_with($class, 'imagick') || !(str_ends_with($name, 'color') || str_ends_with($name, 'colour'))) {
+    if (!str_starts_with($class, 'imagick')) {
         return null;
     }
-    return static fn (): string => 'white';
+    // A colour: named so, or typed as ImagickPixel or a string.
+    if (str_ends_with($name, 'color') || str_ends_with($name, 'colour') || str_contains((string) $param->getType(), 'ImagickPixel')) {
+        return static fn (): string => 'white';
+    }
+    if ($name === 'geometry') {
+        return static fn (): string => '1x1';
+    }
+    // A file the image is written to, named with a format the image writers know.
+    if ($name === 'filename' || $name === 'file') {
+        return static fn (): string => sys_get_temp_dir() . '/rec-' . getmypid() . '.png';
+    }
+    return null;
 }
 
 /** The valid value of a PDO statement's fetch mode: an associative array. */
