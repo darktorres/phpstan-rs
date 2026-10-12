@@ -449,7 +449,9 @@ function arguments(array $params, int $at, mixed $probe): array
                 }
             }
         } elseif ($i > $at && $param->isOptional()) {
-            $args[$i] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : plain_value($param, $at);
+            // The optional parameters after the probe are left out: a default passed in their place changes
+            // what the call runs.
+            break;
         } else {
             $args[$i] = plain_value($param, $at);
         }
