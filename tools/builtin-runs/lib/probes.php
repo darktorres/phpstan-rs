@@ -217,6 +217,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         'imageconvolution' => [1 => static fn (): array => [[1, 1, 1], [1, 1, 1], [1, 1, 1]]],
         'imagecrop' => [1 => static fn (): array => ['x' => 0, 'y' => 0, 'width' => 1, 'height' => 1]],
         'imagefilledpolygon' => [1 => static fn (): array => [0, 0, 1, 0, 0, 1], 2 => 3],
+        'imageopenpolygon' => [1 => static fn (): array => [0, 0, 1, 0, 0, 1], 2 => 3],
         'curl_setopt_array' => [1 => static fn (): array => [CURLOPT_FOLLOWLOCATION => true]],
         'datefmt_set_timezone' => [1 => 'UTC'],
         'intlcal_set_time_zone' => [1 => 'UTC'],
