@@ -40,6 +40,17 @@ function probed_classes(): array
  * a child's directory holds. A class without a recipe is made from the generated
  * values, as before.
  */
+/**
+ * The object a method is called on. A constructor is called on an object it has not yet constructed, so the
+ * object is made without one; any other method is called on the maker's object.
+ */
+function method_receiver(ReflectionClass $reflection, string $method, Closure $maker): ?object
+{
+    // SQLite3::open opens a database for an object that has none: it is the constructor's other half.
+    $unconstructed = $method === '__construct' || ($method === 'open' && strtolower($reflection->getName()) === 'sqlite3');
+    return $unconstructed ? $reflection->newInstanceWithoutConstructor() : $maker();
+}
+
 function recipe(string $class): ?Closure
 {
     return match (strtolower($class)) {
@@ -97,11 +108,18 @@ function recipe(string $class): ?Closure
         'recursivedirectoryiterator' => static fn (): object => new RecursiveDirectoryIterator(sys_get_temp_dir()),
         'globiterator' => static fn (): object => new GlobIterator(sys_get_temp_dir() . '/*'),
         // Their constructors cannot run twice, so a method unit gets an object made without one.
-        'intlgregoriancalendar' => static fn (): object => (new ReflectionClass(IntlGregorianCalendar::class))->newInstanceWithoutConstructor(),
-        'intldatepatterngenerator' => static fn (): object => (new ReflectionClass(IntlDatePatternGenerator::class))->newInstanceWithoutConstructor(),
+        'intlgregoriancalendar' => static fn (): object => IntlGregorianCalendar::createInstance('UTC', 'en'),
+        'intldatepatterngenerator' => static fn (): object => IntlDatePatternGenerator::create('en'),
+        'arrayiterator' => static fn (): object => new ArrayIterator([1, 2]),
+        'ds\\map' => static fn (): object => new Ds\Map(['a' => 1, 'b' => 2]),
         'finfo' => static fn (): object => new finfo(FILEINFO_MIME_TYPE),
         'fiber' => static fn (): object => new Fiber(static fn (): int => 1),
-        'splobjectstorage' => static fn (): object => new SplObjectStorage(),
+        'splobjectstorage' => static function (): object {
+            $storage = new SplObjectStorage();
+            $storage->attach(new stdClass());
+            $storage->attach(new stdClass());
+            return $storage;
+        },
         'imagickkernel' => static fn (): object => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         default => null,
     };

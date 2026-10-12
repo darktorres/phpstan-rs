@@ -77,7 +77,7 @@ function probe_method(string $class, string $name, array &$out): void
     $static = $method->isStatic();
     // The method, plainly, on a plain object.
     probe_child($builtin, 'plain', static function () use ($makers, $static, $class, $name, $params): void {
-        $object = $static ? null : ($makers[0][1])();
+        $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
         if (!$static && $object === null) {
             return;
         }
@@ -92,7 +92,7 @@ function probe_method(string $class, string $name, array &$out): void
         foreach (probes_for($param) as [$probe, $make]) {
             $where = where('', $at, $probe);
             probe_child($builtin, $where, static function () use ($makers, $static, $class, $name, $params, $at, $make, $where): void {
-                $object = $static ? null : ($makers[0][1])();
+                $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
                 if (!$static && $object === null) {
                     return;
                 }
