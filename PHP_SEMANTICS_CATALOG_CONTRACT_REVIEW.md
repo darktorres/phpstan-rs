@@ -1377,3 +1377,9 @@ manifest and checks their digests. The correspondence's CIR outcome for the zend
 the digest of the pinned source, and the builder rejects an outcome for any other source.
 Reruns are compared as text, with timestamps normalized; only crash diagnostics, whose order
 depends on buffering, are compared by outcome.
+
+**Two-root SVF reproduction (2026-10-12).** The CI job that was meant to repeat the SVF
+build at two roots has been removed: the project has no self-hosted runners, and hosted runners
+do not provide the lock's pinned bison and re2c. The check remains a local procedure:
+`restore_environment.py` builds the tools, and `build_svf_pathfree.sh` builds them again at a
+second root; the digests must match the lock.
