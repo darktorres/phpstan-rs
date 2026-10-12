@@ -1329,8 +1329,9 @@ acceptance remains OPEN: that is a review judgement, not a computed check.
 Acceptance of catalog work is by the author's review of the cited evidence. An independent
 review is not required. Rows that were pending only an acceptance are recorded in the ledger
 as author-accepted (2026-10-12). Semantic acceptance is closed only when every ledger heading is Complete and every R row
-is accepted. Each R row states its acceptance on the line under its title: `Acceptance:
-accepted` or `Acceptance: not accepted`. A row that closes for a narrower scope than its
+is accepted. Each F heading and R row states its acceptance on the line under its title: `Acceptance:
+accepted` or `Acceptance: not accepted`. A heading's status word must agree with its
+acceptance: `Complete` is accepted, and no other status is. A row that closes for a narrower scope than its
 topic is accepted with a `Scope:` line and a `Remainder:` line naming the row or heading
 that owns the rest (R00.2 closes as a definition, with conformance under R01.5, as the
 review records). A row without such a line is not accepted. `validate_checkpoint.py` reads
@@ -1383,3 +1384,26 @@ build at two roots has been removed: the project has no self-hosted runners, and
 do not provide the lock's pinned bison and re2c. The check remains a local procedure:
 `restore_environment.py` builds the tools, and `build_svf_pathfree.sh` builds them again at a
 second root; the digests must match the lock.
+
+## Dispositions for RV-25 and contract points C-3 to C-6 (2026-10-12)
+
+The contract review's 2026-10-09 record left these points without a recorded disposition.
+Each is dispositioned here from the current text and code.
+
+- **RV-25 (loading does not establish assumptions).** The contract now states that loading a
+  manifest or a table of assumption records does not establish any assumption; only the
+  validator check in the applicability paragraph does.
+- **C-3 (the closed-domain cycle row).** The row now states that circular dependency metadata
+  alone gives no basis for either negative claim. The reading the finding objected to no longer
+  applies.
+- **C-4 ("according to PHP control flow").** The phrase is gone. The contract enumerates the
+  completions (normal, PHP throw, native unwind, fatal, suspension) and rejects unsupported
+  cleanup compositions with `UnsupportedCleanupReplacement`.
+- **C-5 (the closed-return trust rule).** The contract requires a trusted validator identified by
+  an immutable root, which is the rule RV-3 decided was defensible.
+- **C-6 (the assumption-applicability rule).** Typed assumption records (R01.1) and
+  `validate_with_assumptions` (RV-4) implement the rule.
+
+These dispositions are the author's review of the current text. The contract points C-1 and C-2
+were addressed by the amendments recorded above.
+

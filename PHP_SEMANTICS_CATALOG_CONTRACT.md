@@ -271,7 +271,8 @@ context. An assumption is established only when its scope matches, all
 prerequisite assumptions are established, and its validator accepts the
 referenced evidence for that context. Missing records, missing or unverified
 evidence, unknown validators, and unknown context facts do not establish the
-assumption. Conclusions that depend on an unestablished assumption become open
+assumption. Loading a manifest or a table of
+assumption records does not establish any assumption; only the validator check above does. Conclusions that depend on an unestablished assumption become open
 or are recomputed. Runtime observations can contradict a closed result and
 force investigation; failure to observe an event cannot prove its absence.
 
