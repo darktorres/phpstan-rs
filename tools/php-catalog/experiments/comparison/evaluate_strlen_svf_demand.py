@@ -18,7 +18,8 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
 sys.path.insert(0, str(HERE))
-from run import Runner, svf_command  # noqa: E402
+from evaluation import EnforcedRunner  # noqa: E402
+from run import record_text, svf_command  # noqa: E402
 
 
 FUNCTIONS = [
@@ -216,7 +217,7 @@ def main() -> None:
         run_checked([args.opt, "-passes=verify", str(capsule_path), "-o", "/dev/null"])
         run_checked([args.opt, "-passes=verify", str(expanded_path), "-o", "/dev/null"])
 
-        runner = Runner(args.output)
+        runner = EnforcedRunner(args.output)
         dvf = args.svf_bin / "dvf"
         modes = {
             "dda": [],
@@ -255,14 +256,19 @@ def main() -> None:
         "schema": 1,
         "php_source_commit": source_commit,
         "linked_module": {
-            "path": str(args.linked_bitcode),
+            "path": record_text(args.linked_bitcode),
             "sha256": digest(args.linked_bitcode),
         },
         "capsules": [capsule, expanded_capsule],
         "llvm_verification": "both extracted capsules passed opt -passes=verify",
         "svf": {
-            "source_commit": "e889a5139dbca132142b07d90192efab9a16c614",
-            "binary": {"path": str(dvf), "sha256": digest(dvf)},
+            "source_commit": source_lock["svf_commit"],
+            "llvm_version": source_lock["compiler_versions"]["llvm-config-21"],
+            "build_identity": {
+                "relocatable_patch_sha256": digest(HERE / "svf-relocatable-extapi.patch"),
+                "extapi_sha256": digest(dvf.parent.parent / "lib" / "extapi.bc"),
+            },
+            "binary": {"path": record_text(dvf), "sha256": digest(dvf)},
             "measurements": measurements,
             "queries": summaries,
         },

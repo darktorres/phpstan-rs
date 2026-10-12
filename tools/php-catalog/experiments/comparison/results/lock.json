@@ -35,7 +35,7 @@
   "resource_acceptance": "Observed peaks; kernel-enforced aggregate 10 GiB acceptance remains OPEN",
   "coverage": "Native representation and pointer prerequisites; no closed PHP BehaviorGraph or full Phase F completion",
   "runtime_fixture_scope": "hybrid-call-8.5.4.json uses runtime-hybrid-call-13.php; runtime.php current 16-sentinel evidence is separately pinned by tailcall-call-reference-8.5.4.json",
-  "link_manifest_sha256": "42cce39683efc9854bf0708fcf741689e29d2b2858152f3475ceea2dd2402324",
+  "link_manifest_sha256": "ceabcef099fc9189b2a61061a85687961aa0670ff70ad06627d6da4b9e225d77",
   "recorded_root": "/tmp/php-catalog-comparison",
   "representation_correspondence_inputs": {
     "campaign_inputs": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f",
@@ -69,6 +69,10 @@
     "compiler_versions.php": {
       "value": "PHP 8.5.4 (cli) (built: Sep  2 2026 14:42:18) (NTS)",
       "reason": "built with the build root in __FILE__ and the build time in the binary"
+    },
+    "link_manifest_sha256": {
+      "value": "42cce39683efc9854bf0708fcf741689e29d2b2858152f3475ceea2dd2402324",
+      "reason": "the manifest of the link made from the absolute-path php tree, before the relative-source and prefix-map link"
     }
   },
   "php_call_cli_sha256": "c09cc82f1c22783888d65ec513d8d7c0541d988c33796d045a41fc67a3268129"
