@@ -139,7 +139,12 @@ function valid_value(?ReflectionType $type): ?Closure
         'mysqli' => static fn (): mysqli => new mysqli(),
         'socket' => static fn (): Socket => socket_create(AF_UNIX, SOCK_STREAM, 0),
         // Made in the worker's own IPC namespace, which the sandbox gives it; without one the queue is the host's.
-        'sysvmessagequeue' => static fn (): SysvMessageQueue => msg_get_queue(0x5150),
+        // One message is queued, so a receive returns instead of waiting on the empty queue.
+        'sysvmessagequeue' => static function (): SysvMessageQueue {
+            $queue = msg_get_queue(0x5150);
+            msg_send($queue, 1, 'x');
+            return $queue;
+        },
         'datetimeinterface' => static fn (): DateTimeImmutable => new DateTimeImmutable('2000-01-01 00:00:00', new DateTimeZone('UTC')),
         'datetime' => static fn (): DateTime => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC')),
         'dateinterval' => static fn (): DateInterval => new DateInterval('P1D'),
