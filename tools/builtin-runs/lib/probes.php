@@ -197,6 +197,19 @@ function valid_value(?ReflectionType $type): ?Closure
     return $values[strtolower($type->getName())] ?? null;
 }
 
+/** A stream holding a 1x1 PNG, for the functions that read an image from a file handle. */
+function png_stream_sample(): mixed
+{
+    $image = imagecreatetruecolor(1, 1);
+    ob_start();
+    imagepng($image);
+    $png = ob_get_clean();
+    $stream = fopen('php://memory', 'r+');
+    fwrite($stream, $png);
+    rewind($stream);
+    return $stream;
+}
+
 /** A directory of a zip archive with one entry, made in the worker's temporary directory. */
 function zip_dir_sample(): mixed
 {
@@ -259,6 +272,8 @@ function valid_site(ReflectionParameter $param): ?Closure
         'spldoublylinkedlist::add' => [0 => 0],
         'splobjectstorage::offsetset' => [0 => static fn (): stdClass => new stdClass()],
         'weakmap::offsetset' => [0 => static fn (): stdClass => new stdClass()],
+        'imagick::readimagefile' => [0 => static fn (): mixed => png_stream_sample()],
+        'imagick::pingimagefile' => [0 => static fn (): mixed => png_stream_sample()],
         'copy' => [2 => static fn (): mixed => stream_context_create()],
         'dir' => [1 => static fn (): mixed => stream_context_create()],
         'file' => [2 => static fn (): mixed => stream_context_create()],
