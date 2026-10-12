@@ -32,7 +32,7 @@
     "libz3-4_4.13.3-1build1_amd64.deb": "40390573227a6965210a477554d6c9aa0ab51edcc0daad51db9352a6b9bfdeb4",
     "re2c_4.4-1_amd64.deb": "4f4ec5f0ae2b6aa6edfb03ce3c85f1e8de4f5835dc45299e77ed61e26a917c00"
   },
-  "resource_acceptance": "Observed peaks; kernel-enforced aggregate 10 GiB acceptance remains OPEN",
+  "resource_acceptance": "kernel-enforced 10 GiB aggregate cap observed on the path-free build: whole-svf-dda and whole-compact-dda exit 247 in enforcing cgroups with kernel OOM proof (oom_kill >= 1, peak at the cap); the reviewed outcomes are in expected_outcomes",
   "coverage": "Native representation and pointer prerequisites; no closed PHP BehaviorGraph or full Phase F completion",
   "runtime_fixture_scope": "hybrid-call-8.5.4.json uses runtime-hybrid-call-13.php; runtime.php current 16-sentinel evidence is separately pinned by tailcall-call-reference-8.5.4.json",
   "link_manifest_sha256": "589c9a3318f5f8adaa800829ba60bac2eebe5d8a3a77c34c38cbc40081f86bb6",
@@ -115,6 +115,10 @@
         "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
       },
       "reason": "the correspondence inputs were the earlier campaign and producer archives"
+    },
+    "resource_acceptance": {
+      "value": "Observed peaks; kernel-enforced aggregate 10 GiB acceptance remains OPEN",
+      "reason": "written before the path-free campaign observed the kernel cap"
     }
   },
   "php_call_cli_sha256": "bb4aabfef575d223db59cc6dc75c3d8138debb2324702df016d9465a75adbf57",

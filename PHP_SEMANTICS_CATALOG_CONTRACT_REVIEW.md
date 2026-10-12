@@ -1308,3 +1308,19 @@ twice. Two things remain open:
 - A crashing CIR frontend (exit 139) prints its diagnostics in a buffering-dependent order.
   Its stderr is not byte-reproducible, so stderr is compared by outcome, not by bytes.
 - Analysis timings and measured memory vary between identical runs and are excluded by name.
+
+**RV-13 and RV-18: closed, except the regenerated checkpoint validation.** The
+remaining items are now observed:
+- Admission: a campaign started together with the enforcing evaluation admitted nothing.
+  Its first CBMC output appeared about one second after the evaluation published
+  `exit_code` for `whole-svf-dda`; the campaign had started about 300 seconds earlier.
+- Fault injection: a campaign killed mid-build (in the compact SVF compile) wrote no
+  `completed.json`, and no process from that run was left. Unit tests cover an unexpected
+  exit and a missing outcome-table entry.
+- Records: the campaign and finish measurements, completion markers, the compact lock and
+  the enforcing report are checked in and pinned under `campaign_checkpoint_sha256`.
+- The lock's `resource_acceptance` no longer says the cap is open; the earlier wording is
+  kept under `superseded_pins`.
+
+Not regenerated: `results/evaluation/checkpoint-validation.json`. It still describes the
+earlier campaign, and no tool in this repository writes it yet.
