@@ -208,6 +208,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
         'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
         'ds\\map' => static fn (): Ds\Map => new Ds\Map(),
+        'sqlite3' => static fn (): SQLite3 => new SQLite3(':memory:'),
         'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'domelement' => static function (): DOMElement {
@@ -332,7 +333,7 @@ function bcmath_value(ReflectionParameter $param): ?Closure
 /** The valid value of a parameter that a function checks by name: a CSV character, an option array, a mode, a process. */
 function named_value(ReflectionParameter $param): ?Closure
 {
-    $function = $param->getDeclaringFunction()->getName();
+    $function = strtolower($param->getDeclaringFunction()->getName());
     $name = $param->getName();
     if (in_array($name, ['separator', 'enclosure', 'escape'], true) && in_array($function, ['str_getcsv', 'fgetcsv', 'fputcsv', 'setcsvcontrol', 'splfileobject::fgetcsv', 'splfileobject::fputcsv', 'splfileobject::setcsvcontrol'], true)) {
         return match ($name) {
@@ -343,6 +344,9 @@ function named_value(ReflectionParameter $param): ?Closure
     }
     // Methods of a class, by the class and the name.
     $class = $param->getDeclaringFunction() instanceof ReflectionMethod ? strtolower($param->getDeclaringFunction()->getDeclaringClass()->getName()) : '';
+    if (str_starts_with($class, 'reflection') && $name === 'flags' && $function === 'getattributes') {
+        return static fn (): int => 0;
+    }
     if ($class === 'random\\randomizer' && in_array($name, ['min', 'max'], true)) {
         return $name === 'min' ? static fn (): float => 0.0 : static fn (): float => 1.0;
     }
@@ -379,6 +383,11 @@ function named_value(ReflectionParameter $param): ?Closure
         ['json_validate', 'flags'] => static fn (): int => 0,
         ['extract', 'prefix'] => static fn (): string => 'p',
         ['popen', 'mode'] => static fn (): string => 'r',
+        ['class_implements', 'autoload'], ['class_parents', 'autoload'], ['class_uses', 'autoload'] => static fn (): bool => false,
+        ['normalizer_normalize', 'form'], ['normalizer_is_normalized', 'form'] => static fn (): int => Normalizer::FORM_C,
+        ['setfontweight', 'weight'] => static fn (): int => 400,
+        ['bezier', 'coordinates'], ['polygon', 'coordinates'], ['polyline', 'coordinates'] => static fn (): array => [['x' => 0, 'y' => 0], ['x' => 1, 'y' => 0], ['x' => 0, 'y' => 1]],
+        ['fetchcolumn', 'column'] => static fn (): int => 0,
         ['zlib_encode', 'encoding'] => static fn (): int => ZLIB_ENCODING_RAW,
         ['base_convert', 'from_base'] => static fn (): int => 16,
         ['base_convert', 'to_base'] => static fn (): int => 2,
@@ -454,6 +463,10 @@ function imagick_value(ReflectionParameter $param): ?Closure
     if (!str_starts_with($class, 'imagick')) {
         return null;
     }
+    // A channel of an ImagickPixel is an int, not a colour.
+    if ($class === 'imagickpixel' && $name === 'color' && admits($param->getType(), 'int')) {
+        return static fn (): int => Imagick::COLOR_RED;
+    }
     // A colour: named so, or typed as ImagickPixel or a string.
     if (str_ends_with($name, 'color') || str_ends_with($name, 'colour') || str_contains((string) $param->getType(), 'ImagickPixel')) {
         return static fn (): string => 'white';
@@ -471,7 +484,7 @@ function imagick_value(ReflectionParameter $param): ?Closure
     if ($class === 'imagick' && $name === 'pseudo_format') {
         return static fn (): string => 'xc:white';
     }
-    if ($class === 'imagick' && $name === 'image' && $function->getName() === 'readimageblob' || $class === 'imagick' && $function->getName() === 'pingimageblob') {
+    if ($class === 'imagick' && $name === 'image' && in_array(strtolower($function->getName()), ['readimageblob', 'pingimageblob'], true)) {
         return static fn (): string => imagick_blob_sample();
     }
     if ($class === 'imagick' && !admits($param->getType(), 'string')) {
