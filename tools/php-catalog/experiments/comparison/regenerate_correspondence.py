@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
 EVIDENCE = {
     "campaign_inputs": RESULTS / "main" / "inputs.json",
-    "cir_log": RESULTS / "evaluation" / "cir-campaign.json",
+    "cir_log": RESULTS / "evaluation" / "cir-imports.json",
     "clang_ast": RESULTS / "main" / "php-type-ast-0.out",
     "clang_llvm": RESULTS / "main" / "php-type-llvm-read-0.out",
     "clang_manifest": RESULTS / "main" / "representations.json",

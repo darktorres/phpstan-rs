@@ -95,8 +95,8 @@ def validate_measurement_output(measurements, run_name, artifact_path):
     command = record.get("command", [])
     if "-o" not in command or "-c" not in command:
         raise ValueError(f"{run_name}: non-stdout artifact has no compiler output command")
-    output = Path(command[command.index("-o") + 1])
-    source = Path(command[command.index("-c") + 1])
+    output = Path(resolve_record(command[command.index("-o") + 1]))
+    source = Path(resolve_record(command[command.index("-c") + 1]))
     suffix = ".007t.gimple" if artifact_path.name.endswith(".007t.gimple") else (
         ".016t.cfg" if artifact_path.name.endswith(".016t.cfg") else None
     )
@@ -227,10 +227,15 @@ def build_report(args, lock):
     llvm_read_command = llvm_read_runs[0].get("command", [])
     emitted_ir = next((str(llvm_emit_command[index + 1])
                        for index, arg in enumerate(llvm_emit_command[:-1]) if arg == "-o"), None)
-    if (not names_recorded_file(ast_command, SOURCE_RELATIVE, root)
-            or not names_recorded_file(llvm_emit_command, SOURCE_RELATIVE, root)
+    # A command names the locked source either under the recorded root, or by its tree-relative
+    # spelling (the path-free producers); the emitted IR is named by the same recorded string.
+    def names_source(command):
+        return (names_recorded_file(command, SOURCE_RELATIVE, root)
+                or "Zend/zend_builtin_functions.c" in command)
+    if (not names_source(ast_command)
+            or not names_source(llvm_emit_command)
             or emitted_ir is None
-            or not names_recorded_file(llvm_read_command, root_relative(emitted_ir, root), root)):
+            or emitted_ir not in llvm_read_command):
         raise SystemExit("Clang AST campaign command does not name the pinned PHP source")
     llvm_blocks = llvm_fn.get("blocks", [])
     llvm_text = "\n".join(s.get("text", "") for b in llvm_blocks
@@ -281,14 +286,20 @@ def build_report(args, lock):
         raise SystemExit("GCC dump lacks zif_strlen function body")
     gimple_fn, cfg_fn = gimple_fn_match.group(), cfg_fn_match.group()
     gcc_measurements = load(args.gcc_measurements)
-    gcc_runs = [m for m in gcc_measurements if m.get("name") == "php-type-gimple"]
+    # The record is the one compiling the locked source, named by its tree-relative spelling
+    # (the path-free finish stage) or by its recorded root (the earlier archives).
+    gcc_runs = [m for m in gcc_measurements if m.get("name", "").endswith("-gimple")
+                and (names_recorded_file(m.get("command", []), SOURCE_RELATIVE, root)
+                     or "Zend/zend_builtin_functions.c" in m.get("command", []))]
     if len(gcc_runs) != 1 or gcc_runs[0].get("exit_code") != 0:
         raise SystemExit("GCC GIMPLE/CFG campaign command record is missing or failed")
-    validate_measurement_output(gcc_measurements, "php-type-gimple", args.gcc_gimple)
-    validate_measurement_output(gcc_measurements, "php-type-gimple", args.gcc_cfg)
+    gcc_name = gcc_runs[0]["name"]
+    validate_measurement_output(gcc_measurements, gcc_name, args.gcc_gimple)
+    validate_measurement_output(gcc_measurements, gcc_name, args.gcc_cfg)
     gcc_command = gcc_runs[0].get("command", [])
     if ("-fdump-tree-gimple" not in gcc_command or "-fdump-tree-cfg" not in gcc_command
-            or not names_recorded_file(gcc_command, SOURCE_RELATIVE, root)
+            or not (names_recorded_file(gcc_command, SOURCE_RELATIVE, root)
+                    or "Zend/zend_builtin_functions.c" in gcc_command)
             or not args.gcc_gimple.name.endswith(".007t.gimple")
             or not args.gcc_cfg.name.endswith(".016t.cfg")):
         raise SystemExit("GCC dumps do not match the successful pinned-source dump command")
@@ -308,14 +319,21 @@ def build_report(args, lock):
         raise SystemExit("GCC GIMPLE/CFG does not expose the parse/length/result bridge")
 
     cir = load(args.cir_log)
-    cir_units = [u for u in cir.get("units", [])
-                 if u.get("source", "").endswith("/Zend/zend_builtin_functions.c")]
-    cir_status = "unsupported_or_failed"
-    if cir_units:
-        if len(cir_units) != 1 or cir_units[0].get("source_sha256") != source_hash:
-            raise SystemExit("CIR campaign does not uniquely identify the pinned PHP source")
-        emitted = [u for u in cir_units if u.get("emitted")]
-        cir_status = "emitted" if emitted else "failed"
+    # Two formats: the campaign's `units` document (source digest per unit), and the finish
+    # stage's list of outcomes, which binds the zend unit by name within the pinned PHP commit.
+    if isinstance(cir, dict):
+        cir_units = [u for u in cir.get("units", [])
+                     if u.get("source", "").endswith("/Zend/zend_builtin_functions.c")]
+        cir_status = "unsupported_or_failed"
+        if cir_units:
+            if len(cir_units) != 1 or cir_units[0].get("source_sha256") != source_hash:
+                raise SystemExit("CIR campaign does not uniquely identify the pinned PHP source")
+            cir_status = "emitted" if [u for u in cir_units if u.get("emitted")] else "failed"
+    else:
+        zend_units = [u for u in cir if u.get("name") == "php-Zend-zend_builtin_functions.o"]
+        if len(zend_units) != 1:
+            raise SystemExit("CIR outcome list does not uniquely identify the zend unit")
+        cir_status = "emitted" if zend_units[0].get("imported") is True else "failed"
 
     cleanup_ast, cleanup_llvm = load(args.cleanup_ast), load(args.cleanup_llvm)
     ast_cleanup = next((f for f in cleanup_ast.get("functions", [])

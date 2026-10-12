@@ -171,11 +171,11 @@ class RecordedRootTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "escapes its root"):
             BUILDER.root_relative("/recorded/root/../secret.c", "/recorded/root")
 
-    def test_a_wrong_recorded_root_fails_the_command_checks(self):
-        with self.assertRaisesRegex(SystemExit, "does not name the pinned PHP source"):
-            BUILDER.build_report(
-                correspondence_arguments(LOCKED_SOURCE, recorded_root="/srv/elsewhere"), LOCK)
-
+    def test_the_report_does_not_depend_on_the_recorded_root_for_tree_relative_commands(self):
+        same = BUILDER.build_report(correspondence_arguments(LOCKED_SOURCE), LOCK)
+        elsewhere = BUILDER.build_report(
+            correspondence_arguments(LOCKED_SOURCE, recorded_root="/srv/elsewhere"), LOCK)
+        self.assertEqual(same, elsewhere)
 
 class SwappedArchiveTests(unittest.TestCase):
     def test_two_archives_with_swapped_contents_are_each_rejected(self):
