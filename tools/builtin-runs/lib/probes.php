@@ -333,7 +333,12 @@ function valid_site(ReflectionParameter $param): ?Closure
         'unlink' => [1 => static fn (): mixed => stream_context_create()],
         'stream_context_set_options' => [0 => static fn (): mixed => stream_context_create(), 1 => static fn (): array => ['http' => ['method' => 'GET']]],
         'mb_ereg_replace_callback' => [3 => static fn (): null => null],
-        'strtr' => [1 => static fn (): array => ['a' => 'b']],
+        // The array form when the probe is the array; the string form when the probe comes after it.
+        'strtr' => [1 => static fn (int $probe = -1): mixed => $probe >= 2 ? 'a' : ['a' => 'b']],
+        // Callables that record nothing: a recording one would be attributed to whichever probe is running.
+        'array_udiff_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
+        'array_uintersect_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
+        'session_set_save_handler' => [0 => static fn (): mixed => static fn (): int => 0],
         'stream_copy_to_stream' => [0 => static fn (): mixed => fopen('php://memory', 'r+'), 1 => static fn (): mixed => fopen('php://memory', 'r+')],
         'sodium_crypto_secretstream_xchacha20poly1305_push' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
         'array_multisort' => [0 => static fn (): array => [2, 1]],
@@ -370,15 +375,15 @@ function valid_site(ReflectionParameter $param): ?Closure
     if ($value === null) {
         return null;
     }
-    return $value instanceof Closure ? $value : static fn (): mixed => $value;
+    return $value instanceof Closure ? $value : static fn (int $probe = -1): mixed => $value;
 }
 
 /** A plain value for a parameter a probe is not at. */
-function plain_value(ReflectionParameter $param): mixed
+function plain_value(ReflectionParameter $param, int $probe = -1): mixed
 {
     $site = valid_site($param);
     if ($site !== null) {
-        return $site();
+        return $site($probe);
     }
     $type = $param->getType();
     // A memory stream serves every resource kind the stubs name: PHP takes a
@@ -431,16 +436,22 @@ function arguments(array $params, int $at, mixed $probe): array
     // The context probe's call reads the listener: its first string argument is the URL.
     $listen = Seen::$probeUrl !== null && $probe === Seen::$probeContext;
     foreach ($params as $i => $param) {
-        if ($i > $at && $param->isOptional()) {
-            break;
-        }
         if ($i === $at) {
             $args[$i] = $probe;
         } elseif ($listen && declares_string($param)) {
             $args[$i] = Seen::$probeUrl;
             $listen = false;
+        } elseif ($i > $at && $param->isVariadic()) {
+            // Only a site value that lists the variadic values adds any: otherwise it stays out, as before.
+            if (valid_site($param) !== null) {
+                foreach (plain_value($param, $at) as $value) {
+                    $args[] = $value;
+                }
+            }
+        } elseif ($i > $at && $param->isOptional()) {
+            $args[$i] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : plain_value($param, $at);
         } else {
-            $args[$i] = plain_value($param);
+            $args[$i] = plain_value($param, $at);
         }
     }
     return $args;
