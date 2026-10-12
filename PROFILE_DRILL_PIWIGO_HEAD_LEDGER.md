@@ -1,116 +1,119 @@
-# Piwigo profile drill at HEAD (`97b8f3f0`): measurements and one-at-a-time tasks
+# Piwigo profile drill at HEAD (`97b8f3f0`): open tasks, measurements, and protocol
 
-This ledger holds the measurements taken after the batch in `PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md`, the tasks that follow from them, and a generated drill of the instruction and allocation profiles. It replaces optimising the whole drill at once.
+This ledger holds the measurements of the batch in `PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md` at HEAD, the tasks still open from them, and what the drill resolved. Work runs one task at a time.
 
-## Ground rules
+## Measurement protocol
 
-- **One task at a time.** Each task is one hypothesis and one change, in one commit with a pathspec. Nothing else is in the working tree.
-- **Acceptance.** A change is kept only if it lowers the instruction count of the functions it targets, and wall time does not get worse under alternating timing. Otherwise it is reverted and the row says why.
-- **Output.** Piwigo's output must stay byte-identical to the previous commit's, unless the task says it changes findings. Findings are tracked by task F1 (the 613 against 611 gap).
-- **Correctness fixes stay.** A cost added by a correctness commit (EG.22, `d6d55292`) is traded off by changing its implementation, never by reverting it.
-- **Drill existing data.** New profile runs, builds, or timing series need a decision first.
-- **Labels.** Allocation sites are named by their project frames, not by the allocator's frame. Identical code is folded by the compiler, so one symbol can stand for several types.
+Instruction counts from callgrind move by 6 to 8 G between runs of the same binary. The protocol is what makes a number usable.
+
+- **Stub-cache state controls the total.** The stub cache keeps the three most recent builds per file kind (`stub_cache.rs`, `KEPT_BUILDS = 3`). A build whose stub files were pruned, or never written, pays to rebuild them, which costs about 5 to 8 G in callgrind. Every run records whether its stub files existed when it started. Cold and warm runs are not comparable.
+- **The file cache** is off for off-mode runs (`PHPSTAN_RS_NO_FILE_CACHE=1`). Warm and cold-with-store runs use it. The stub cache has its own switch, `PHPSTAN_RS_NO_STUB_CACHE`, which `PHPSTAN_RS_NO_FILE_CACHE` does not set.
+- **Comparisons are paired.** Two binaries are compared only when run back to back in one session, with the stub state of each recorded.
+- **Instruction counts are not wall time.** Callgrind serialises threads, so it counts work, not waiting.
+
+## Run register
+
+Each callgrind run is one process, `--separate-threads=yes`, on Piwigo with `check-project --config phpstan-rs.toml --format json`.
+
+| id | binary (commit) | mode | stub state at start | Ir | evidence for the stub state |
+|---|---|---|---|---|---|
+| C1 | `97b8f3f0` (HEAD) | off | warm, not verified | 49.358 G | written after a plain run of the same binary |
+| C2 | `97b8f3f0` | off, rerun | cold | 55.325 G | its stub files were rewritten at 22:28–22:31, during the run |
+| C3 | `9071f48f` (batch baseline) | off | not recorded | 54.126 G | none |
+| C4 | `9071f48f` | off, rerun | not recorded | 61.933 G | none |
+| C5 | `5fb858c9` (20G binary) | off, first run | cold, inferred | 25.669 G | C6 is 5 G lower |
+| C6 | `5fb858c9` | off, second run | warm | 20.576 G | matches the 20G plan's 20.57 G |
+| C7 | `97b8f3f0` | warm (file cache filled by two unprofiled runs) | not recorded | 39.370 G | none |
+| C8 | `97b8f3f0` | cold-with-store (file cache empty) | warm, by construction | 53.128 G | none |
+| C10 | `9071f48f` (batch baseline) | off, warm stub (Q2) | warm, restored by a plain warm-up at 07:11 and not rewritten during the run | 54.320 G | the stub files kept their 07:11 timestamps through the run; output identical to the warm-up's |
+| C9 | `97b8f3f0` | off, third run (Q1) | warm, restored by a plain warm-up at 23:08 and present at the start | 49.337 G | the stub files were present before the run; output identical to HEAD's |
 
 ## Measurements
 
-Baseline `9071f48f`, the commit the batch profiled. HEAD `97b8f3f0`, which holds the batch and the two oracle fixes (`5ddb4436`, `97b8f3f0`). Pre-fix `97df097c`.
-
-| id | measure | baseline | HEAD | change | source |
-|---|---|---|---|---|---|
-| M1 | callgrind off | 54.13 G | 49.36 G | −4.77 G (−8.8%) | `cl-9071f48f-off`, `cl-97b8f3f0-off` |
-| M2 | callgrind warm (two unprofiled fills) | 42.14 G | 39.37 G | −2.77 G (−6.6%) | `cl-9071f48f-warm`, `cl-97b8f3f0-warm` |
-| M3 | callgrind cold-with-store (stub cache warm, file cache empty) | 56.24 G | 53.13 G | −3.11 G (−5.5%) | `cl-9071f48f-cold`, `cl-97b8f3f0-cold2` |
-| M4 | hyperfine off, 5 runs | 4.22 s ± 0.11 (`97df097c`) | 4.12 s ± 0.39 | within noise | `~/.cache/prs-e2v/31-hyperfine-off.json` |
-| M5 | hyperfine warm, 5 runs | 3.56 s ± 0.04 (`97df097c`) | 3.77 s ± 0.29 | within noise, wider spread | `~/.cache/prs-e2v/32-hyperfine-warm.json` |
-| M6 | heap total allocated | 7.43 GB, 46.17 M blocks (`df603944`) | 7.41 GB, 43.00 M | flat bytes, −7% blocks | `heap-head`, `heap/dhat-heap.json` |
-| M7 | heap peak retained | 0.88 GB (`df603944`) | 1.48 GB | +68% | same |
-| M8 | heap retained at exit | 0.66 GB (`df603944`) | 1.13 GB | +71% | same |
-| M9 | heap, 2026-10-03 profile | 2.67 GB, 19.44 M (`5fb858c9`) | not a comparison: different commit and setting | | `dhat-20g` |
-| M10 | Piwigo findings | 611 (reference, not on disk) | 613 | +2, see F1 | `~/.cache/prs-e2v/18-piwigo-97df097c.json`, `19-piwigo-97b8f3f0.json` |
-| M11 | oracle corpus, debug assertions | 35 panics (`97df097c`) | 0 panics, exit 0 | fixed by fix A (`5ddb4436`) and fix T (`97b8f3f0`) | before: `~/.cache/prs-e2v/8-oracle-corpus.log`; after: `16-oracle-corpus.log` |
-| M12 | tests (at `97df097c`) | — | lib 1295, fixtures 3999, workspace 2403 | all pass | `~/.cache/prs-e2v/2-lib.log`, `3-fixtures.log`, `4-workspace.log` |
-
-Notes on the rows:
-- The callgrind totals equal each run's summary totals.
-- The M4 and M5 baseline is `97df097c`, the pre-fix binary. No `9071f48f` binary was built, so these two rows are not against the batch's starting commit.
-- The settings of the `df603944` and `5fb858c9` heap runs are not recorded here. M6 to M8 are therefore not confirmed as like-for-like with HEAD's run, and M9 compares only the totals.
-- The cold baseline (M3) had its stub cache present, checked by listing `cl-9071f48f-cold-cache`.
-- The 20G plan's callgrind baseline (20.57 G at `5fb858c9`) and the batch's `9071f48f` baseline (54.13 G) are not on the same basis. Reconciling them is task R1.
-
-## Tasks
-
-Every task is OPEN except T12, which the batch did. The order is the suggested one, from the largest measured cause. Each task names the measure that will show it worked. The validation of each row, and what it changed, is in "Adversarial validation" below.
-
-| id | cause (measured, validated) | hypothesis (validated status) | change | done when |
+| id | measure | baseline | HEAD | status |
 |---|---|---|---|---|
-| T1 | `NameMap::get` hashes the property name, which `lookup_property_with_owner` takes as `&str`. 5.19 M of its 5.6 M calls come from `destroy_held` (effects.rs:4160), where the property is a `&Name` coerced to `&str`, so the hashing is part of T2's loop. The class key already uses the stored folded hash. | Merged into T2, since it is the same loop. Partly confirmed in its own right: a `Name` stores the hash of its original text, which equals the lowercase table key only for lowercase names. | Take T2 first. Then pass the `Name` through at effects.rs:4160 so the stored hash is used, with `lowered()`'s hash for case-insensitive tables. | `key_hash` calls from `lookup_property_with_owner` fall; output unchanged. |
-| T2 | `destroy_held` runs for each Destroy operation and each class candidate: 1.52 M calls, 1.28 M from `implicit_targets'2` and 0.24 M from `implicit_targets`. Each call walks every property, and for each one calls the property lookup and `declared_holder`, which does two type bindings and a `class_references_by_name`. Its calls into the property lookups cost 3.99 G inclusive over 6.72 M calls. It has no memo of its own. | Unverified: a scalar property adds an empty holder, which is confirmed, but the cost is paid for each one. An unknown-typed property ends the walk early. A per-class memo is the simplest test. | Memoise `destroy_held` per class, keyed like the `implicit_methods` memo, and invalidate it with the same events. Keep EG.22. | The lookups from `destroy_held` fall; output and EG.22's fixture unchanged. |
-| T3 | `classify` reserves `calls` to `listed` (effects.rs:5473). The probe shows the reserve is too small, not too large: 3.17 M calls were pushed against 0.69 M reserved in total. Most classifications reserve exactly (median ratio 1.0), but the heavy ones grow by reallocation. The `Classification` values live until `resolve_effects` ends, because `settle` reads them all. | Refuted: over-reservation. The probe shows under-reservation on the heavy classifications, which costs reallocations and doubling slack. | Size the reservation from the pushes, or build the vector at its final size with a count pass. Measure the peak. | Peak retained for these sites falls; instruction count not worse. |
-| T4 | Only 736 implicit operations were rewritten, against 699,322 new implicit keys. Fix A's snapshot therefore retains almost nothing extra. The `Arc<[Origin]>` growth comes from the implicit operations themselves, each of which holds its own Arc. | Refuted: fix A's retention. The real lever is the number of implicit operations (699k per run). | Reduce the number of implicit operations recorded per body, which is T5's population. | The count of implicit operations per run falls; output unchanged. |
-| T5 | `implicit_on` pushes into `scope.calls` (summaries.rs:2432). There are 699,322 new implicit operations per run. At about 140 bytes per `CallWrites`, that is about 98 MB, against the measured 74 MB through `destroy_overwritten` and 24 MB through `dies`. | Confirmed in magnitude: the population matches. The size is still an estimate. | Reduce the implicit operations recorded, not their size. Measure `CallWrites` before choosing. | The count of recorded implicit operations falls; output unchanged. |
-| T6 | `Origin::Returned` held the `Callee` by value until `e9215833` (batch item 12d, 2026-10-10), which made each origin allocate an `Arc<Callee>` in `origins_of` (summaries.rs:609, 620, 626). `ffb3b177`, which an earlier version of this ledger named, changed only a serde attribute. | Attributed to `e9215833`, confirmed by the `Returned` lines at `df603944` and `9071f48f`. Whether one shared `Arc` per distinct callee helps is unverified. | Share one `Arc` per distinct callee within a body. | Peak retained falls; output unchanged. |
-| T7 | `Memo<DocBlock>::get` (`tag_block`), 57.8 MB at peak. The probe's memo stats: 211,804 requests, 115,886 misses (distinct texts lexed), 95,918 hits (45%). The memo's bound is 16,384 entries, so it runs at that bound for most of the run. At `df603944` it held 8 MB. | Mechanism confirmed: the memo is at its entry bound. Candidate `a01036ec` refuted (same semantics and bounds). Unverified: why it was nearly empty at `df603944`. | Reduce the bound or the entry size, measuring the parse cost against the 45% hit rate. | Peak retained falls; the hit rate and the parse count are known. |
-| T8 | `Parser::token_ref` (parser.rs:567) has no `#[inline]`, and it has 7.76 M calls from `parse_expr_bp_inner`. | Precondition holds. Release is thin LTO and dhat is not, but both use `codegen-units = 1`, and the caller is in the same crate, so LTO is not the reason it is out of line. The cost has to be measured in release. | Add `#[inline]`, then measure in the release build, not the dhat profile. | `token_ref` self falls in release; output unchanged. |
-| T9 | `TargetSet::push` scans a list up to `SCANNED` (12) entries and uses `seen` only beyond that. The probe found 6,801 target sets that reached the set path, each at exactly 12 entries. They receive about 7.5 M pushes in total, about 1,100 per set. | Refuted as stated: the set does not replace a list. The cost is the volume of pushes into large sets, not the switch. | Dedupe the pushes before they reach the set, or cut the size of the sets. | The pushes into the set path fall; output unchanged. |
-| T10 | `Registry::class_references(id)` exists (registry.rs:694). `class_references_by_name` (registry.rs:707) is called from `declared_holder`, once per property of each destroy in T2's loop: 4.7 M of its 9.7 M calls. | Refuted as stated: the id path exists. The fix needs the `ClassId` at the call site. Shared cause with T2: removing T2's per-property work removes most of these calls. | Subsumed by T2's memo. If T2 is not taken, thread the `ClassId` to `declared_holder`'s callers. | The calls to `class_references_by_name` fall; output unchanged. |
-| T11 | `FilterMap` over `Chain<Map>`: 18.85 M calls, all from `callees_of` in `settle` (effects.rs:2692 to 2699). `callees_of` runs twice for each live classification: once to count callers (effects.rs:2712) and once to fill them (effects.rs:2727). The count pass sizes the caller lists exactly, so the twin pass is a memory trade, not a bug. `Resolve::run` self is 0.63 G, with 65k calls from `classify`. | Named: the two passes. Not yet measured: how much of the 18.85 M is the count pass, since each pass visits the same elements. | Choose between: one pass with growing lists (fewer instructions, more memory), or a per-classification cache of `callees_of` results (memory for the cache). Measure the peak with either before choosing. | The chain's cost falls, and the peak is no higher than the current one. |
-| T12 | The lexer and parser group falls by 2.6 G in the name comparison. | Refuted as worded: `payload_at` and `token_at` still exist (token.rs:461, 503) with 10 call sites. They no longer show as separate functions, because they are inlined. The −2.8 G is attribution, not removed work. | None. | — |
-| T13 | Peak retention with no task in this ledger: the expression arena (`NodeArenas::alloc_expr`, 78.5 MB at peak), `FileTable::with_paths` (27.2 MB), `ReferenceIndex::from_file_refs` (19.3 MB), and the effect table's buckets (15.7 MB). The arena and the file table hold the trees of analysed files, kept by `keeps_tree` (project.rs:1670). | Tracked elsewhere: the 20G ledger's row 19.2 (a batch frees each tree when its check ends) is OPEN, and it is the planned fix for the arena. | Take row 19.2 from the 20G plan rather than a new task here. Measure entry sizes for the rest. | Each site has an attribution row and a task, or a pointer to row 19.2. |
-| R1 | The 20G plan's 20.57 G is a dhat-profile run with a warm stub cache and the file cache off, at `5fb858c9`. The batch's 54.13 G is a dhat-profile run with the cache off, at `9071f48f`. | Not reconciled. The 20G plan itself says that the 25.14 → 20.57 G comparison mixes code and codegen changes of about ±1 G, and that no gate run settled it. No run on one binary exists for both. | Run one commit's binary under both setups. Needs approval, since it is a profile run. | Both figures explained, or the target restated. |
-| R2 | Wall time did not improve while instructions fell. | Refuted as an Ir explanation: rayon's own self cost is 0.07 G of 49.36 G, so spinning does not appear in the instruction counts. The earlier claim of 40.9 G spinning in `wait_until` came from a faulty aggregation, and is withdrawn. Unexplained: the gap itself. | Measure per-phase wall time, with alternating runs and more repeats. Needs approval. | A cause for the gap, or a decision that instruction counts cannot guide wall-time work. |
-| F1 | Piwigo output: two findings not in the 611 reference. | The builtin-runs table (`bc9ab94f`) is refuted for `array_intersect`: its rows did not change. Neither finding is traced to a commit. | Find the commit between `9071f48f` and `97df097c` that adds them, and check each for being a true positive. | Both findings explained; the gate closed. |
+| M1 | callgrind off, both warm | 54.320 G (C10) | 49.337 G (C9) | paired, both stub caches warm: −4.98 G (−9.2%). This replaces the unpaired −4.77 G, and the earlier rerun pair (C4 → C2, −6.6 G), whose stub states were not recorded. |
+| M2 | callgrind warm | 42.14 G | 39.37 G (C7) | unpaired |
+| M3 | callgrind cold-with-store | 56.24 G | 53.13 G (C8) | unpaired |
+| M4 | hyperfine off, 5 runs | 4.22 s ± 0.11 (`97df097c`) | 4.12 s ± 0.39 | unpaired; baseline is pre-fix, not `9071f48f` |
+| M5 | hyperfine warm, 5 runs | 3.56 s ± 0.04 (`97df097c`) | 3.77 s ± 0.29 | unpaired; baseline is pre-fix |
+| M6 | heap total allocated | 7.43 GB, 46.17 M blocks (`df603944`) | 7.41 GB, 43.00 M | stub state and settings not recorded for either |
+| M7 | heap peak retained | 0.88 GB (`df603944`) | 1.48 GB | as M6 |
+| M8 | heap retained at exit | 0.66 GB (`df603944`) | 1.13 GB | as M6 |
+| M9 | heap, 2026-10-03 | 2.67 GB, 19.44 M (`5fb858c9`) | not comparable | different commit and settings |
+| M10 | Piwigo findings | 611 (reference, not on disk) | 613 | `97df097c` and `97b8f3f0` outputs are byte-identical; see F1 |
+| M11 | oracle corpus, debug assertions | 35 panics (`97df097c`) | 0 panics, exit 0 | fixed by fix A (`5ddb4436`) and fix T (`97b8f3f0`) |
+| M12 | tests (at `97df097c`) | — | lib 1295, fixtures 3999, workspace 2403 | all pass |
 
-## Adversarial validation
+The 20G plan's 20.57 G (C6) and the batch's 54.13 G (C3) are both dhat-profile runs with the file cache off. They differ by code, and C3's stub state is not recorded.
 
-Method: each task's cause was checked against the code at HEAD, the callgrind and dhat data, and the git history. Each hypothesis was tested for something that would refute it. No build, run or profile was made, because the ground rules need a decision first for those. Where a check needs one, the row says so.
+## Wall-time scaling (Q3)
 
-| task | verdict | evidence |
-|---|---|---|
-| T1 | partly confirmed; merged into T2 | 5.19 M of 5.6 M calls to `lookup_property_with_owner::<Name>` come from `destroy_held` (effects.rs:4160). The coercion of a `&Name` to `&str` is at effects.rs:4160. |
-| T2 | cause confirmed; hypothesis open | Call counts from `implicit_targets`. No memo for `destroy_held` (effects.rs:4152). `element_classes` returns an empty set for scalars (effects.rs:3001), so scalars add no holder, but they still cost the lookups. An unknown-typed property returns `Holder::Unknown` at once (effects.rs:4167). |
-| T3 | refuted by probe | Probe: 3.17 M pushed against 0.69 M reserved. |
-| T4 | refuted by probe | Probe: 736 rewrites against 699,322 new keys. |
-| T5 | confirmed in magnitude by probe | Probe: 699,322 implicit operations, about 98 MB at 140 bytes each. |
-| T6 | corrected | `git show ffb3b177` changes only a serde attribute. The `Returned` lines at `df603944` and `9071f48f` hold `Callee` by value. `e9215833` is after the baseline. |
-| T7 | mechanism confirmed by probe | Probe: 115,886 distinct doc texts lexed; the memo's 16,384-entry bound. |
-| T8 | precondition confirmed; release needed | The release profile is `lto = "thin"` and `codegen-units = 1` (Cargo.toml:60 to 62). The dhat profile inherits `codegen-units = 1` and sets `lto = false`. |
-| T9 | refuted by probe | Probe: 6,801 sets, each entering the set path at 12 entries. |
-| T10 | refuted as stated; shared cause with T2 | `declared_holder` (effects.rs:3166) calls `class_references_by_name(owner)`, once per property in T2's loop. |
-| T11 | callers named; cause named | `callees_of` runs in both passes (effects.rs:2712 and 2727). |
-| T12 | refuted as worded | `payload_at` and `token_at` still defined and called (token.rs:461, 503, 10 call sites). |
-| T13 | tracked by 20G row 19.2 | `keeps_tree` (project.rs:1670) keeps the trees of analysed files. The 20G ledger's row 19.2 is OPEN and is the planned change. |
-| R1 | open | The 20G plan's own note on the ±1 G codegen difference. |
-| R2 | Ir explanation refuted | Rayon self cost 0.07 G of 49.36 G. |
-| F1 | builtin table refuted for `array_intersect` | `bc9ab94f` leaves the `array_intersect` rows unchanged. |
+Native timings with `hyperfine -N`, one warm-up and three runs each, output discarded, `PHPSTAN_RS_THREADS` set per run, the file cache off, and both stub caches warm. The two binaries ran in one block per thread count. Their stub files were checked before and after. HEAD's `stub-base` files were rebuilt during the `t=1` block's warm-up, before its timed runs. The timed runs have a tight spread (0.08 s), which is consistent with that.
 
-Claims withdrawn from earlier in the review, and why:
-- **Spinning in rayon's `wait_until` (40.9 G at HEAD, 10.8 G at baseline).** It came from an aggregation that double-counted. The parsed self costs contain no such cost; rayon's self total is 0.07 G.
-- **`payload_at` and `token_at` removed by the parser change.** They are inlined, not removed.
-- **T2's inclusive cost of 2.5 G.** The measured figure is 3.99 G.
-- **T6 attributed to `ffb3b177`.** That commit changed only a serde attribute. The `Arc` came in `e9215833`.
-- **T7 candidate `a01036ec`.** It keeps the same entry semantics and bounds.
-- **T13 "retention by design".** The arena's retention is the planned change in 20G row 19.2, which is still open.
+| threads | `9071f48f` | `97b8f3f0` | HEAD faster by |
+|---|---|---|---|
+| 1 | 14.03 s ± 0.13 | 12.48 s ± 0.08 | 1.55 s (11%) |
+| 2 | 8.41 s ± 0.24 | 7.29 s ± 0.06 | 1.12 s (13%) |
+| 4 | 5.86 s ± 0.36 | 4.95 s ± 0.12 | 0.91 s (16%) |
+| 8 | 5.11 s ± 0.07 | 4.98 s ± 0.48 | 0.13 s (3%) |
 
-## Instrumented probe (2026-10-11)
+Fitting wall = serial + parallel ÷ threads to the 1, 2 and 4 thread points gives:
+- HEAD: serial ≈ 2.1 s, parallel ≈ 10.4 s at one thread.
+- `9071f48f`: serial ≈ 2.8 s, parallel ≈ 11.2 s at one thread.
 
-A probe build of `97b8f3f0` with three `eprintln!` lines (T3, T4 and T9) and `memo-stats` was run on Piwigo with the file cache off. Its output is byte-identical to HEAD's. The patch is at `~/.cache/prs-e2v/probe-T3-T4-T9.patch`, and the worktree was removed. The probe lines are not in the repo.
+Both binaries stop scaling after four threads. The eight-thread points are about 5 s for both, which the fit does not predict. The load average was not logged for these runs, so I can't yet say whether the other sessions on this machine caused the flattening.
 
-| task | probe measure | result |
-|---|---|---|
-| T3 | `classify` calls | 80,789 |
-| T3 | reserved (`listed`) and pushed (`calls`) | 687,701 reserved, 3,169,253 pushed (ratio 4.6) |
-| T3 | classifications that reserved more than they pushed | 13,324 |
-| T3 | median pushed/reserved, where reserved is above 0 | 1.0 |
-| T4 | implicit operations rewritten | 736 |
-| T4 | new implicit keys | 699,322 |
-| T5 | implicit operations recorded | 699,322, about 98 MB at 140 bytes each |
-| T7 | doc-comment memo requests / misses / hits | 211,804 / 115,886 / 95,918 (45% hit rate) |
-| T7 | doc-comment bytes lexed / asked | 18.8 MB / 55.8 MB |
-| T9 | sets entering the set path | 6,801, each at exactly 12 entries |
+## Open tasks
+
+The order is the suggested one. Each row gives the cause with its measured evidence, the status, the change, and what shows it worked. Tasks marked "needs approval" are runs or builds that the ground rules hold until approved.
+
+| id | target and evidence | status | change | done when |
+|---|---|---|---|---|
+| O1 | `destroy_held` (effects.rs:4152) runs for each Destroy operation and class candidate: 1.52 M calls, 1.28 M from `implicit_targets'2` and 0.24 M from `implicit_targets`. Each call walks every property. For each one it calls the property lookup (`lookup_property_with_owner`, 5.19 M of 5.6 M calls) and `declared_holder` (effects.rs:3166). Those lookups cost 3.99 G inclusive over 6.72 M calls. Inside the lookups, 11.0 M `key_hash` calls hash the property name, which arrives as a `&Name` coerced to `&str` at effects.rs:4160. `declared_holder` calls `class_references_by_name` once per property (4.7 M of 9.7 M calls). Scalar properties yield an empty holder, but their lookups are still paid. An unknown-typed property ends the walk early (effects.rs:4167). | open, ready | Memoise `destroy_held` per class, keyed like the `implicit_methods` memo, invalidated by the same events. Keep EG.22. Pass the `Name` through at effects.rs:4160, with `lowered()`'s hash for case-insensitive tables. | The lookups and `class_references_by_name` calls from `destroy_held` fall; output and EG.22's fixture unchanged. |
+| O2 | 699,322 implicit operations are recorded per run (`scope.calls`, summaries.rs:2432). Their retained size is about 98 MB at about 140 bytes per `CallWrites`, against 74 MB through `destroy_overwritten` and 24 MB through `dies` at peak. | open, needs approval for the instrumented run that counts operations never used | Reduce the operations recorded, not their size. Measure `CallWrites` before choosing. | The count of recorded operations falls; output unchanged. |
+| O3 | `classify` reserves `calls` to `listed` (effects.rs:5473). Probe: 3.17 M calls pushed against 0.69 M reserved, so the heavy classifications reallocate. Most reserve exactly (median ratio 1.0). | open, ready | Size the reservation from the pushes, or build the vector at its final size with a count pass. | Peak retained for these sites falls; instruction count not worse. |
+| O4 | `Origin::Returned` holds an `Arc<Callee>` allocated per origin in `origins_of` (summaries.rs:609, 620, 626), since `e9215833` (batch item 12d). 38 MB retained at peak. | open, ready | Share one `Arc` per distinct callee within a body. | Peak retained falls; output unchanged. |
+| O5 | `Memo<DocBlock>::get` (`tag_block`), 57.8 MB at peak. Probe: 211,804 requests, 115,886 misses (distinct texts), 95,918 hits (45%). The memo's bound is 16,384 entries, so it runs at that bound for most of the run. It held 8 MB at `df603944`. | open, needs approval for the parse-cost measurement | Reduce the bound or the entry size, measuring the parse cost against the 45% hit rate. Why it was nearly empty at `df603944` is not known. | Peak retained falls; parse cost measured against hit rate. |
+| O6 | `Parser::token_ref` (parser.rs:567) has no `#[inline]`, with 7.76 M calls from `parse_expr_bp_inner` and 0.48 G self cost in the dhat profile. The release profile is thin LTO with `codegen-units = 1`; dhat sets `lto = false`. | open, needs approval for the release measurement | Add `#[inline]`, then measure in the release build, not dhat. | `token_ref` self falls in release; output unchanged. |
+| O7 | 6,801 target sets reach the set path, each at exactly 12 entries (`SCANNED`, effects.rs:1505), receiving about 7.5 M pushes (about 1,100 per set). | open, needs approval to count duplicate pushes | Dedupe pushes before they reach the set, or reduce set sizes. | Pushes into the set path fall; output unchanged. |
+| O8 | `callees_of` (effects.rs:2692 to 2699) runs twice for each live classification: a count pass (effects.rs:2712) that sizes the caller lists exactly, then a fill pass (2727). The chain is 18.85 M calls, 0.81 G self. | built: the single-pass variant is in the throwaway worktree `~/.cache/prs-e2v/t11`, binary at `~/.cache/prs-e2v/t11-target/dhat/phpstan-rs`. Needs approval for the paired heap runs. | Measure the peak and instruction count of HEAD and the single-pass variant back to back, under the protocol. | Both heap runs recorded as a pair, and the trade chosen from them. |
+| O9 | Depends on 20G plan row 19.2 (a batch frees each analysed tree when its check ends), which is OPEN. It covers the expression arena (78.5 MB at peak), `FileTable::with_paths` (27.2 MB), `ReferenceIndex::from_file_refs` (19.3 MB), and the effect table's buckets (15.7 MB). | depends on 20G row 19.2 | None here. | Row 19.2 closed in the 20G ledger. |
+
+Measurement and question tasks:
+
+| id | question | status | change | done when |
+|---|---|---|---|---|
+| Q1 | Does the third HEAD run reproduce C1 (49.36 G) with its stub files warm? This tests the stub-cache explanation for the drift. | answered: C9 gives 49.337 G with the stub files warm, against C1's 49.358 G (0.04% apart), and C2's cold 55.325 G. The stub state explains the drift between C1 and C2. | None. | — |
+| Q2 | Why do the 20G figure and the batch baseline differ? | answered: C6 reproduces 20.57 G warm; C5 is 5 G higher cold. C3 and C4 had no recorded stub state, so they are dropped. The paired batch comparison is C10 against C9, both warm: 54.320 → 49.337 G, −4.98 G (−9.2%). | None. | — |
+| Q3 | Why does wall time not improve while instructions fell? | answered in part. The batch cuts wall time by 11% to 16% at one to four threads, which matches its instruction saving. At eight threads the gain is 3%, and neither binary scales past four threads. | Log the load average for the eight-thread runs, then repeat them. Decide whether the flattening is the machine or the code. | The eight-thread flattening has a cause. |
+| Q4 | Which commit between `9071f48f` and `97df097c` adds the two Piwigo findings not in the 611 reference, `src/Piwigo/Search/SearchFilterRenderer.php:442` and `tools/openapi/ResponseBodyCallSiteVisitor.php:79`? | open, not started | Bisect the range by output. The builtin-runs table (`bc9ab94f`) is excluded for `array_intersect`, since its rows did not change. | Commit found; each finding judged a true or false positive. |
+
+## Resolved findings
+
+These need no task. They are kept so the reasons are on record.
+
+| finding | resolution |
+|---|---|
+| The property-name hashing (formerly T1) | Part of O1, the same loop in `destroy_held`. |
+| `class_references_by_name` calls (formerly T10) | Part of O1. The id path `class_references(id)` exists (registry.rs:694), so the fix is the memo. |
+| Over-reservation in `classify` (formerly T3) | Refuted by probe: the reserve is too small. Replaced by O3. |
+| Fix A's retention of replaced `Arc`s (formerly T4) | Refuted by probe: 736 rewrites against 699,322 new keys. |
+| The list-to-set switch in `TargetSet` (formerly T9) | Refuted: the set path starts at 12 entries. The cost is the push volume, O7. |
+| `payload_at` and `token_at` removed (formerly T12) | Refuted: inlined, still defined and called (token.rs:461, 503). The −2.8 G is attribution. |
+| Rayon spinning in `wait_until` (40.9 G at HEAD) | Withdrawn: an aggregation that double-counted. Rayon's self cost is 0.07 G. |
+| T2's 2.5 G inclusive figure | Withdrawn: measured figure is 3.99 G. |
+| `ffb3b177` as the origin of the `Arc` (formerly T6) | Withdrawn: that commit changed only a serde attribute. The `Arc` came in `e9215833`. |
+| `a01036ec` as the cause of the memo growth (formerly T7) | Withdrawn: it keeps the same entry semantics and bounds. |
+| "Expression arena retention is by design" (formerly T13) | Withdrawn: it is 20G row 19.2, OPEN. |
+
+## Probe
+
+A probe of `97b8f3f0` with three `eprintln!` lines (O3, O2, O7) and `memo-stats` ran on Piwigo with the file cache off. Its output was byte-identical to HEAD's. The patch is `~/.cache/prs-e2v/probe-T3-T4-T9.patch`; the worktree is removed; the probe lines are not in the repo.
 
 ## Appendices
 
-Generated from `~/.cache/prs-profile/cl-9071f48f-off`, `cl-97b8f3f0-off`, and `~/.cache/prs-e2v/heap/dhat-heap.json`. Regenerate rather than edit.
+Generated from the original, unpaired runs: `~/.cache/prs-profile/cl-9071f48f-off` (`9071f48f`), `cl-97b8f3f0-off` (`97b8f3f0`), and the heap run `~/.cache/prs-e2v/heap/dhat-heap.json` (`97b8f3f0`). The stub-cache state of the `9071f48f` run is not recorded. These tables are a drill of one run each, not a paired comparison. Regenerate after the protocol below is applied.
 
 ### Appendix A: instruction drill (off mode, self cost)
 
