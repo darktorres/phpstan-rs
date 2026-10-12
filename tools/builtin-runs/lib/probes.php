@@ -231,6 +231,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         'simplexml_load_string' => [1 => static fn (): null => null],
         'spldoublylinkedlist::add' => [0 => 0],
         'splobjectstorage::offsetset' => [0 => static fn (): stdClass => new stdClass()],
+        'weakmap::offsetset' => [0 => static fn (): stdClass => new stdClass()],
         'stream_context_set_option' => [1 => 'http', 2 => 'method', 3 => 'GET'],
     ];
     $function = $param->getDeclaringFunction();
