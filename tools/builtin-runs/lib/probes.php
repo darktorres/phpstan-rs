@@ -109,7 +109,12 @@ function probes_for(ReflectionParameter $param): array
     if (accepts_value($type, RecordingSleeper::class)) {
         $probes[] = ['sleeper', static fn () => new RecordingSleeper()];
     }
-    if (admits($type, 'string')) {
+    // The length or int a sodium function checks the parameter against: the valid value of the parameter.
+    // A string probe is refused by the length check of a sized parameter, so it is offered only where no sized value is known.
+    $sized = sodium_length_value($param);
+    if ($sized !== null) {
+        $probes[] = ['sized', $sized];
+    } elseif (admits($type, 'string')) {
         $probes[] = ['url', static fn () => 'rec://probe'];
     }
     if (admits($type, 'array')) {
@@ -269,8 +274,152 @@ function zip_entry_sample(): mixed
  * enough: a string the function accepts only from a set of names. Keyed by the
  * lowercased function or `class::method`, then by position.
  */
+/**
+ * The valid values of a sodium function's parameters that a probe of the parameter's own type gets wrong: a
+ * string of the length the function checks, an int, or a state or key that the function's other calls make.
+ * Lengths are keyed by function and parameter name, and each constant is named as the scan's messages write
+ * it, with each run of digits as N; it is found by that name, so no constant's value is written out here.
+ */
+function sodium_length_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction()->getName();
+    $name = $param->getName();
+    // Values the function's own family makes: a state from an init call, an encoded string, a sign key.
+    static $values = [
+        'sodium_add' => ['string1' => 'SAME', 'string2' => 'SAME'],
+        'sodium_compare' => ['string1' => 'SAME', 'string2' => 'SAME'],
+        'sodium_memcmp' => ['string1' => 'SAME', 'string2' => 'SAME'],
+        'sodium_base642bin' => ['string' => 'BASE64'],
+        'sodium_hex2bin' => ['string' => 'HEX'],
+        'sodium_crypto_generichash_final' => ['state' => 'GENERICHASH_STATE'],
+        'sodium_crypto_generichash_update' => ['state' => 'GENERICHASH_STATE'],
+        'sodium_crypto_secretstream_xchacha20poly1305_pull' => ['state' => 'SECRETSTREAM_STATE'],
+        'sodium_crypto_secretstream_xchacha20poly1305_rekey' => ['state' => 'SECRETSTREAM_STATE'],
+        'sodium_crypto_secretstream_xchacha20poly1305_push' => ['state' => 'SECRETSTREAM_STATE'],
+        'sodium_crypto_sign_ed25519_pk_to_curve25519' => ['public_key' => 'SIGN_PUBLIC'],
+        'sodium_unpad' => ['string' => 'PADDED'],
+    ];
+    // Integers: a literal, or a constant named after `SODIUM_CRYPTO_`.
+    static $integers = [
+        'sodium_crypto_kdf_derive_from_key' => ['subkey_length' => 'KDF_BYTES_MIN'],
+        'sodium_crypto_stream_xchacha20_xor_ic' => ['counter' => 0],
+        'sodium_crypto_pwhash' => ['length' => 32, 'algo' => 'PWHASH_ALG_DEFAULT', 'opslimit' => 'PWHASH_OPSLIMIT_INTERACTIVE', 'memlimit' => 'PWHASH_MEMLIMIT_INTERACTIVE'],
+        'sodium_crypto_pwhash_scryptsalsa208sha256' => ['length' => 32, 'opslimit' => 'PWHASH_SCRYPTSALSA208SHA256_OPSLIMIT_INTERACTIVE', 'memlimit' => 'PWHASH_SCRYPTSALSA208SHA256_MEMLIMIT_INTERACTIVE'],
+        'sodium_unpad' => ['block_size' => 16],
+        'sodium_crypto_pwhash_str' => ['opslimit' => 'PWHASH_OPSLIMIT_INTERACTIVE', 'memlimit' => 'PWHASH_MEMLIMIT_INTERACTIVE'],
+        'sodium_crypto_pwhash_scryptsalsa208sha256_str' => ['opslimit' => 'PWHASH_SCRYPTSALSA208SHA256_OPSLIMIT_INTERACTIVE', 'memlimit' => 'PWHASH_SCRYPTSALSA208SHA256_MEMLIMIT_INTERACTIVE'],
+    ];
+    // Byte strings of the length a constant names.
+    static $lengths = [
+        'sodium_crypto_aead_aes256gcm_decrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_AESNGCM_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_AESNGCM_NPUBBYTES'],
+        'sodium_crypto_aead_aes256gcm_encrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_AESNGCM_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_AESNGCM_NPUBBYTES'],
+        'sodium_crypto_aead_chacha20poly1305_decrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_NPUBBYTES'],
+        'sodium_crypto_aead_chacha20poly1305_encrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_NPUBBYTES'],
+        'sodium_crypto_aead_chacha20poly1305_ietf_decrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_IETF_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_IETF_NPUBBYTES'],
+        'sodium_crypto_aead_chacha20poly1305_ietf_encrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_IETF_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_CHACHANPOLYN_IETF_NPUBBYTES'],
+        'sodium_crypto_aead_xchacha20poly1305_ietf_decrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_XCHACHANPOLYN_IETF_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_XCHACHANPOLYN_IETF_NPUBBYTES'],
+        'sodium_crypto_aead_xchacha20poly1305_ietf_encrypt' => ['key' => 'SODIUM_CRYPTO_AEAD_XCHACHANPOLYN_IETF_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_AEAD_XCHACHANPOLYN_IETF_NPUBBYTES'],
+        'sodium_crypto_auth' => ['key' => 'SODIUM_CRYPTO_AUTH_KEYBYTES'],
+        'sodium_crypto_auth_verify' => ['key' => 'SODIUM_CRYPTO_AUTH_KEYBYTES', 'mac' => 'SODIUM_CRYPTO_AUTH_BYTES'],
+        'sodium_crypto_box' => ['key_pair' => 'SODIUM_CRYPTO_BOX_KEYPAIRBYTES', 'nonce' => 'SODIUM_CRYPTO_BOX_NONCEBYTES'],
+        'sodium_crypto_box_keypair_from_secretkey_and_publickey' => ['public_key' => 'SODIUM_CRYPTO_BOX_PUBLICKEYBYTES', 'secret_key' => 'SODIUM_CRYPTO_BOX_SECRETKEYBYTES'],
+        'sodium_crypto_box_open' => ['key_pair' => 'SODIUM_CRYPTO_BOX_KEYPAIRBYTES', 'nonce' => 'SODIUM_CRYPTO_BOX_NONCEBYTES'],
+        'sodium_crypto_box_publickey' => ['key_pair' => 'SODIUM_CRYPTO_BOX_KEYPAIRBYTES'],
+        'sodium_crypto_box_publickey_from_secretkey' => ['secret_key' => 'SODIUM_CRYPTO_BOX_SECRETKEYBYTES'],
+        'sodium_crypto_box_seal' => ['public_key' => 'SODIUM_CRYPTO_BOX_PUBLICKEYBYTES'],
+        'sodium_crypto_box_seal_open' => ['key_pair' => 'SODIUM_CRYPTO_BOX_KEYPAIRBYTES'],
+        'sodium_crypto_box_secretkey' => ['key_pair' => 'SODIUM_CRYPTO_BOX_KEYPAIRBYTES'],
+        'sodium_crypto_box_seed_keypair' => ['seed' => 'SODIUM_CRYPTO_BOX_SEEDBYTES'],
+        'sodium_crypto_core_ristretto255_add' => ['p' => 'SODIUM_CRYPTO_CORE_RISTRETTON_BYTES', 'q' => 'SODIUM_CRYPTO_CORE_RISTRETTON_BYTES'],
+        'sodium_crypto_core_ristretto255_from_hash' => ['s' => 'SODIUM_CRYPTO_CORE_RISTRETTON_HASHBYTES'],
+        'sodium_crypto_core_ristretto255_is_valid_point' => ['s' => 'SODIUM_CRYPTO_CORE_RISTRETTON_BYTES'],
+        'sodium_crypto_core_ristretto255_scalar_add' => ['x' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES', 'y' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_core_ristretto255_scalar_complement' => ['s' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_core_ristretto255_scalar_invert' => ['s' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_core_ristretto255_scalar_mul' => ['x' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES', 'y' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_core_ristretto255_scalar_negate' => ['s' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_core_ristretto255_scalar_reduce' => ['s' => 'SODIUM_CRYPTO_CORE_RISTRETTON_NONREDUCEDSCALARBYTES'],
+        'sodium_crypto_core_ristretto255_scalar_sub' => ['x' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES', 'y' => 'SODIUM_CRYPTO_CORE_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_core_ristretto255_sub' => ['p' => 'SODIUM_CRYPTO_CORE_RISTRETTON_BYTES', 'q' => 'SODIUM_CRYPTO_CORE_RISTRETTON_BYTES'],
+        'sodium_crypto_generichash' => ['key' => 'SODIUM_CRYPTO_GENERICHASH_KEYBYTES'],
+        'sodium_crypto_generichash_init' => ['key' => 'SODIUM_CRYPTO_GENERICHASH_KEYBYTES'],
+        'sodium_crypto_kdf_derive_from_key' => ['context' => 'SODIUM_CRYPTO_KDF_CONTEXTBYTES', 'key' => 'SODIUM_CRYPTO_KDF_KEYBYTES'],
+        'sodium_crypto_kx_client_session_keys' => ['client_key_pair' => 'SODIUM_CRYPTO_KX_KEYPAIRBYTES', 'server_key' => 'SODIUM_CRYPTO_KX_PUBLICKEYBYTES'],
+        'sodium_crypto_kx_publickey' => ['key_pair' => 'SODIUM_CRYPTO_KX_KEYPAIRBYTES'],
+        'sodium_crypto_kx_secretkey' => ['key_pair' => 'SODIUM_CRYPTO_KX_KEYPAIRBYTES'],
+        'sodium_crypto_kx_seed_keypair' => ['seed' => 'SODIUM_CRYPTO_KX_SEEDBYTES'],
+        'sodium_crypto_kx_server_session_keys' => ['client_key' => 'SODIUM_CRYPTO_KX_PUBLICKEYBYTES', 'server_key_pair' => 'SODIUM_CRYPTO_KX_KEYPAIRBYTES'],
+        'sodium_crypto_pwhash' => ['salt' => 'SODIUM_CRYPTO_PWHASH_SALTBYTES'],
+        'sodium_crypto_pwhash_scryptsalsa208sha256' => ['salt' => 'SODIUM_CRYPTO_PWHASH_SCRYPTSALSANSHAN_SALTBYTES'],
+        'sodium_crypto_scalarmult' => ['n' => 'SODIUM_CRYPTO_SCALARMULT_SCALARBYTES', 'p' => 'SODIUM_CRYPTO_SCALARMULT_BYTES'],
+        'sodium_crypto_scalarmult_base' => ['secret_key' => 'SODIUM_CRYPTO_BOX_SECRETKEYBYTES'],
+        'sodium_crypto_scalarmult_ristretto255' => ['n' => 'SODIUM_CRYPTO_SCALARMULT_RISTRETTON_SCALARBYTES', 'p' => 'SODIUM_CRYPTO_SCALARMULT_RISTRETTON_BYTES'],
+        'sodium_crypto_scalarmult_ristretto255_base' => ['n' => 'SODIUM_CRYPTO_SCALARMULT_RISTRETTON_SCALARBYTES'],
+        'sodium_crypto_secretbox' => ['key' => 'SODIUM_CRYPTO_SECRETBOX_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_SECRETBOX_NONCEBYTES'],
+        'sodium_crypto_secretbox_open' => ['key' => 'SODIUM_CRYPTO_SECRETBOX_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_SECRETBOX_NONCEBYTES'],
+        'sodium_crypto_secretstream_xchacha20poly1305_init_pull' => ['header' => 'SODIUM_CRYPTO_SECRETSTREAM_XCHACHANPOLYN_HEADERBYTES', 'key' => 'SODIUM_CRYPTO_SECRETSTREAM_XCHACHANPOLYN_KEYBYTES'],
+        'sodium_crypto_secretstream_xchacha20poly1305_init_push' => ['key' => 'SODIUM_CRYPTO_SECRETSTREAM_XCHACHANPOLYN_KEYBYTES'],
+        'sodium_crypto_shorthash' => ['key' => 'SODIUM_CRYPTO_SHORTHASH_KEYBYTES'],
+        'sodium_crypto_sign' => ['secret_key' => 'SODIUM_CRYPTO_SIGN_SECRETKEYBYTES'],
+        'sodium_crypto_sign_detached' => ['secret_key' => 'SODIUM_CRYPTO_SIGN_SECRETKEYBYTES'],
+        'sodium_crypto_sign_ed25519_pk_to_curve25519' => ['public_key' => 'SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES'],
+        'sodium_crypto_sign_ed25519_sk_to_curve25519' => ['secret_key' => 'SODIUM_CRYPTO_SIGN_SECRETKEYBYTES'],
+        'sodium_crypto_sign_keypair_from_secretkey_and_publickey' => ['public_key' => 'SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES', 'secret_key' => 'SODIUM_CRYPTO_SIGN_SECRETKEYBYTES'],
+        'sodium_crypto_sign_open' => ['public_key' => 'SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES'],
+        'sodium_crypto_sign_publickey' => ['key_pair' => 'SODIUM_CRYPTO_SIGN_KEYPAIRBYTES'],
+        'sodium_crypto_sign_publickey_from_secretkey' => ['secret_key' => 'SODIUM_CRYPTO_SIGN_SECRETKEYBYTES'],
+        'sodium_crypto_sign_secretkey' => ['key_pair' => 'SODIUM_CRYPTO_SIGN_KEYPAIRBYTES'],
+        'sodium_crypto_sign_seed_keypair' => ['seed' => 'SODIUM_CRYPTO_SIGN_SEEDBYTES'],
+        'sodium_crypto_sign_verify_detached' => ['public_key' => 'SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES', 'signature' => 'SODIUM_CRYPTO_SIGN_BYTES'],
+        'sodium_crypto_stream' => ['key' => 'SODIUM_CRYPTO_STREAM_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_STREAM_NONCEBYTES'],
+        'sodium_crypto_stream_xchacha20' => ['key' => 'SODIUM_CRYPTO_STREAM_XCHACHAN_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_STREAM_XCHACHAN_NONCEBYTES'],
+        'sodium_crypto_stream_xchacha20_xor' => ['key' => 'SODIUM_CRYPTO_STREAM_XCHACHAN_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_STREAM_XCHACHAN_NONCEBYTES'],
+        'sodium_crypto_stream_xchacha20_xor_ic' => ['key' => 'SODIUM_CRYPTO_STREAM_XCHACHAN_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_STREAM_XCHACHAN_NONCEBYTES'],
+        'sodium_crypto_stream_xor' => ['key' => 'SODIUM_CRYPTO_STREAM_KEYBYTES', 'nonce' => 'SODIUM_CRYPTO_STREAM_NONCEBYTES'],
+    ];
+    $value = $values[$function][$name] ?? null;
+    if ($value !== null) {
+        return match ($value) {
+            'SAME' => static fn (): string => str_repeat('x', strlen('rec://probe')),
+            'BASE64' => static fn (): string => base64_encode('xx'),
+            'HEX' => static fn (): string => bin2hex('xx'),
+            'GENERICHASH_STATE' => static fn (): string => sodium_crypto_generichash_init(),
+            'SECRETSTREAM_STATE' => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0],
+            'SIGN_PUBLIC' => static fn (): string => sodium_crypto_sign_publickey(sodium_crypto_sign_keypair()),
+            'PADDED' => static fn (): string => sodium_pad('x', 16),
+        };
+    }
+    $integer = $integers[$function][$name] ?? null;
+    if ($integer !== null) {
+        return static fn (): int => is_int($integer) ? $integer : (int) constant('SODIUM_CRYPTO_' . $integer);
+    }
+    $constant = $lengths[$function][$name] ?? null;
+    if ($constant === null) {
+        return null;
+    }
+    return static function () use ($constant): string {
+        foreach (get_defined_constants(true)['sodium'] ?? [] as $named => $length) {
+            if (preg_replace('/\\d+/', 'N', $named) !== $constant) {
+                continue;
+            }
+            // A Ristretto point or scalar is valid only when made from a hash or reduced, not from random bytes.
+            if (str_ends_with($constant, 'RISTRETTON_BYTES')) {
+                return sodium_crypto_core_ristretto255_from_hash(random_bytes(64));
+            }
+            if (str_ends_with($constant, 'RISTRETTON_SCALARBYTES')) {
+                return sodium_crypto_core_ristretto255_scalar_reduce(random_bytes(64));
+            }
+            return random_bytes($length);
+        }
+        throw new RuntimeException("no sodium constant $constant");
+    };
+}
+
 function valid_site(ReflectionParameter $param): ?Closure
 {
+    if ($length = sodium_length_value($param)) {
+        return $length;
+    }
     // Each value is a closure, so a constant of an extension that is not loaded is read only when its function is probed.
     static $sites = [
         'mb_convert_variables' => [
