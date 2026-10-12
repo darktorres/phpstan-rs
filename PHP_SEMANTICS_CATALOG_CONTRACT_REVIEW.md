@@ -1289,15 +1289,11 @@ rerun differs textually from those archives, the difference is in spelling: a tr
 source name, a relative `-I` flag, and the file sizes that follow from them. The content is
 the same.
 
-**RV-13 and RV-18 (resource-limited campaign): open.** The campaign ran end to end on the
+**RV-13 and RV-18 (resource-limited campaign): closed.** The campaign ran end to end on the
 path-free build, twice, with the same outcomes (37 steps; two invalid CBMC runs exit 10 and
 the compact resource gate exit 247 with kernel OOM proof); the finish stage ran end to end,
-twice. Two things remain open:
-- The plan's concurrent scenario was not run. The campaign's admission wait was exercised
-  against an enforcing report that had already been published; a campaign started while a
-  job still runs was not observed to block.
-- The campaign, finish and checkpoint records are not checked in: `results/evaluation` still
-  holds the earlier campaign measurements and checkpoint hashes.
+twice. The records of that run are checked in, and their digests are pinned in
+`results/lock.json` under `campaign_checkpoint_sha256`.
 
 **Observed harness behaviour, recorded for the review:**
 - The enforcing worker needs `OOMPolicy=continue`. Without it, systemd stops the whole scope
@@ -1309,8 +1305,7 @@ twice. Two things remain open:
   Its stderr is not byte-reproducible, so stderr is compared by outcome, not by bytes.
 - Analysis timings and measured memory vary between identical runs and are excluded by name.
 
-**RV-13 and RV-18: closed, except the regenerated checkpoint validation.** The
-remaining items are now observed:
+**Observed for RV-13 and RV-18:**
 - Admission: a campaign started together with the enforcing evaluation admitted nothing.
   Its first CBMC output appeared about one second after the evaluation published
   `exit_code` for `whole-svf-dda`; the campaign had started about 300 seconds earlier.
@@ -1361,8 +1356,9 @@ What was checked:
 
 What remains open for the semantic gate:
 - The PHP-source validation of the host transfers (F00.3).
-- The ledger rows still open (15 Open, 1 Partial), which the record lists row by row,
-  including R05.2 and R05.7 on the callback and fixture coverage.
+- The ledger headings that are not Complete, which `checkpoint-validation.json` lists by
+  name. The R-rows are outside that list, and R05.2 and R05.7 on the callback and fixture
+  coverage are among those still open.
 
 Verdict of the author: the evidence chain is consistent and reproduces, and the `strlen`
 slice agrees with its inventory. The semantic acceptance is open because of the ledger headings listed in
