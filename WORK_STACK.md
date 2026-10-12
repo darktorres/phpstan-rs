@@ -12,7 +12,7 @@ say which level to resume.
 The full version of this file, with the per-item progress that was dropped
 here, is `git show 2783a866^:WORK_STACK.md`.
 
-State as of 2026-10-11, `master` at `2783a866`.
+State as of 2026-10-12, `master` at `e32fd95d`.
 
 ## Where to resume
 
@@ -71,9 +71,19 @@ State as of 2026-10-11, `master` at `2783a866`.
    which leave the output byte-identical. To do: find the commit that adds
    them, and check whether each is a true positive. Until then the output gate
    is open.
-3. **Level 7's deferred rows:** the PHP catalog, and every row of the 20 G plan
-   that changes what the analysis finds beyond what the optimization needs,
-   validated together (ledger row D.V). Both wait until after O3.
+3. **Level 7's deferred rows:** every row of the 20 G plan that changes what the
+   analysis finds beyond what the optimization needs, validated together (ledger
+   row D.V). They wait until after O3. The PHP catalog is item 3a.
+3a. **PHP semantics catalog (Phase F): resume here.** Ledger:
+   `PHP_SEMANTICS_CATALOG_LEDGER.md`; review: `PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md`.
+   RV-13, RV-18, RV-26, RV-27 and RV-29 are closed. Step 0 (the review's
+   contradictions and the ledger's stale paths) is done. Order for the rest:
+   (1) F00.3, the host transfers against PHP source; (2) F00.1, F00.2, F00.4,
+   F01.1, F01.2, F01.4; (3) R05.2 and R05.7, then F05.7's fixture failures;
+   (4) the native work, F02.1, F02.3-F02.5, F03.2-F03.4; (5) F01.5 and F05.6;
+   (6) the solver decision, F06.1, F06.3-F06.5. F04.2 is deferred to C22.
+   Open: the semantic gate reads only the F headings; the R rows, which carry
+   their own dependencies, are not checked (`validate_checkpoint.py`).
 4. **Then pop back, in this order:** level 3 (140 open review tasks, and steps
    19 and 21 of the stage A/B fix plan, `~/.claude/plans/peppy-drifting-coral.md`),
    then level 2 (the crate split from Stage C on), then level 1 (the lanes).
@@ -82,9 +92,9 @@ State as of 2026-10-11, `master` at `2783a866`.
 
 | | branch | directory | commit |
 |---|---|---|---|
-| main | `master` | `/home/torres/projects/phpstan-rs` | `2783a866` |
-| second | `master2` | `/home/torres/projects/phpstan-rs-master2` | `8053863c`, one commit behind `master` |
-| third | `master3` | `/home/torres/projects/phpstan-rs-master3` | `92c046ec`, a newer commit I did not make, on top of `8053863c` |
+| main | `master` | `/home/torres/projects/phpstan-rs` | `e32fd95d` |
+| second | `master2` | `/home/torres/projects/phpstan-rs-master2` | `e32fd95d` |
+| third | `master3` | `/home/torres/projects/phpstan-rs-master3` | `e32fd95d` |
 
 ## The stack, oldest first
 
