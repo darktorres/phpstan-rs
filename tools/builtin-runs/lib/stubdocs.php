@@ -109,10 +109,19 @@ function untyped_resource_params(string $root): array
                 if (!isset($documented[$param])) {
                     continue;
                 }
-                // Untyped when the token before it, past `&` and `...`, is the list's `(` or a `,`.
+                // Untyped when the token before it, past `&`, `...` and attributes, is the list's `(` or a `,`.
                 $k = $j - 1;
-                while (isset($tokens[$k]) && (is_string($tokens[$k]) && $tokens[$k] === '&' || is_array($tokens[$k]) && $tokens[$k][0] === T_ELLIPSIS)) {
-                    $k--;
+                while (isset($tokens[$k])) {
+                    if (is_string($tokens[$k]) && $tokens[$k] === ']') {
+                        while (!(is_array($tokens[$k]) && $tokens[$k][0] === T_ATTRIBUTE)) {
+                            $k--;
+                        }
+                        $k--;
+                    } elseif (is_string($tokens[$k]) && $tokens[$k] === '&' || is_array($tokens[$k]) && $tokens[$k][0] === T_ELLIPSIS) {
+                        $k--;
+                    } else {
+                        break;
+                    }
                 }
                 $before = $tokens[$k] ?? null;
                 if ($before === '(' || $before === ',') {
